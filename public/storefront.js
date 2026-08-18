@@ -1,6 +1,6 @@
 (function () {
   // Reemplazar por la URL real donde deployaste el backend (server.js)
-  var APP_URL = 'https://TU-APP-DEPLOYADA.onrender.com';
+  var APP_URL = 'https://https://metroscuadrados.onrender.com';
 
   var QTY_INPUT_SELECTORS = [
     'input[name="quantity"]',
