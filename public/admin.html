@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Calculadora m2 - Panel admin</title>
+<style>
+  body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
+  input[type="number"] { width: 100px; padding: 4px; }
+  button { padding: 6px 12px; cursor: pointer; }
+  .ok { color: #27632a; font-size: 13px; }
+  .sku { color: #888; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Unidades por bulto</h1>
+  <p>Cargá cuántas unidades trae cada bulto/caja/rollo de cada producto. Esto queda guardado como atributo propio del producto (metafield), sin tocar el SKU.</p>
+  <table id="tabla">
+    <thead>
+      <tr><th>Producto</th><th>SKU</th><th>Unidades por bulto</th><th></th></tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <script>
+    async function cargar() {
+      const res = await fetch('/api/products');
+      const productos = await res.json();
+      const tbody = document.getElementById('tbody');
+      tbody.innerHTML = '';
+      productos.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + p.name + '</td>' +
+          '<td class="sku">' + (p.sku || '-') + '</td>' +
+          '<td><input type="number" min="1" step="1" value="' + (p.bulto ? p.bulto.value : '') + '" id="input-' + p.id + '" /></td>' +
+          '<td><button onclick="guardar(' + p.id + ')">Guardar</button> <span class="ok" id="ok-' + p.id + '"></span></td>';
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function guardar(id) {
+      const valor = document.getElementById('input-' + id).value;
+      const okEl = document.getElementById('ok-' + id);
+      okEl.textContent = 'Guardando...';
+      const res = await fetch('/api/bulto/' + id, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: valor })
+      });
+      if (res.ok) {
+        okEl.textContent = 'Guardado ✓';
+      } else {
+        okEl.textContent = 'Error';
+      }
+      setTimeout(() => okEl.textContent = '', 2000);
+    }
+
+    cargar();
+  </script>
+</body>
+</html>
