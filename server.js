@@ -15,42 +15,19 @@ let mongoClient;
 async function getConfigCollection() {
   if (!mongoClient) {
     mongoClient = new MongoClient(process.env.MONGODB_URI);
-    try {
-      await mongoClient.connect();
-    } catch (err) {
-      mongoClient = null; // permite reintentar en la proxima llamada
-      throw err;
-    }
+    await mongoClient.connect();
   }
-  try {
-    return mongoClient.db('calculadora_m2').collection('config');
-  } catch (err) {
-    mongoClient = null;
-    throw err;
-  }
+  return mongoClient.db('calculadora_m2').collection('config');
 }
 
 async function readDb() {
-  try {
-    const col = await getConfigCollection();
-    const doc = await col.findOne({ _id: 'main' });
-    return doc || {};
-  } catch (err) {
-    mongoClient = null; // fuerza reconexion
-    const col = await getConfigCollection();
-    const doc = await col.findOne({ _id: 'main' });
-    return doc || {};
-  }
+  const col = await getConfigCollection();
+  const doc = await col.findOne({ _id: 'main' });
+  return doc || {};
 }
 async function writeDb(data) {
-  try {
-    const col = await getConfigCollection();
-    await col.updateOne({ _id: 'main' }, { $set: data }, { upsert: true });
-  } catch (err) {
-    mongoClient = null; // fuerza reconexion
-    const col = await getConfigCollection();
-    await col.updateOne({ _id: 'main' }, { $set: data }, { upsert: true });
-  }
+  const col = await getConfigCollection();
+  await col.updateOne({ _id: 'main' }, { $set: data }, { upsert: true });
 }
 
 function apiHeaders(token) {
