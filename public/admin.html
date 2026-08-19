@@ -14,16 +14,29 @@
 </style>
 </head>
 <body>
-  <h1>Unidades por bulto</h1>
-  <p>Cargá cuántas unidades trae cada bulto/caja/rollo de cada producto. Esto queda guardado como atributo propio del producto (metafield), sin tocar el SKU.</p>
+  <h1>Rendimiento por producto</h1>
+  <p>Para cada producto que se vende por caja/bulto, elegí la unidad de medida y cuánto rinde una caja en esa unidad. Esto queda guardado como atributo propio del producto (metafield), sin tocar el SKU.</p>
   <table id="tabla">
     <thead>
-      <tr><th>Producto</th><th>SKU</th><th>Rendimiento (m² por caja)</th><th></th></tr>
+      <tr><th>Producto</th><th>SKU</th><th>Unidad</th><th>Rinde por caja</th><th></th></tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
 
   <script>
+    var UNIDADES = {
+      m2: 'Metros cuadrados (m²)',
+      ml: 'Metros lineales (ml)',
+      litro: 'Litros (L)'
+    };
+
+    function opcionesUnidad(seleccionada) {
+      return Object.keys(UNIDADES).map(function (key) {
+        var sel = key === seleccionada ? 'selected' : '';
+        return '<option value="' + key + '" ' + sel + '>' + UNIDADES[key] + '</option>';
+      }).join('');
+    }
+
     async function cargar() {
       const res = await fetch('/api/products');
       const productos = await res.json();
@@ -31,9 +44,11 @@
       tbody.innerHTML = '';
       productos.forEach(p => {
         const tr = document.createElement('tr');
+        const tipoActual = p.tipo ? p.tipo.value : 'm2';
         tr.innerHTML =
           '<td>' + p.name + '</td>' +
           '<td class="sku">' + (p.sku || '-') + '</td>' +
+          '<td><select id="select-tipo-' + p.id + '">' + opcionesUnidad(tipoActual) + '</select></td>' +
           '<td><input type="number" min="0.01" step="0.01" value="' + (p.cobertura ? p.cobertura.value : '') + '" id="input-cobertura-' + p.id + '" /></td>' +
           '<td><button onclick="guardar(' + p.id + ')">Guardar</button> <span class="ok" id="ok-' + p.id + '"></span></td>';
         tbody.appendChild(tr);
@@ -42,12 +57,13 @@
 
     async function guardar(id) {
       const cobertura = document.getElementById('input-cobertura-' + id).value;
+      const tipo = document.getElementById('select-tipo-' + id).value;
       const okEl = document.getElementById('ok-' + id);
       okEl.textContent = 'Guardando...';
       const res = await fetch('/api/bulto/' + id, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cobertura })
+        body: JSON.stringify({ cobertura, tipo })
       });
       if (res.ok) {
         okEl.textContent = 'Guardado ✓';
