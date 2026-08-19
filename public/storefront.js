@@ -1,5 +1,4 @@
 (function () {
-  // Reemplazar por la URL real donde deployaste el backend (server.js)
   var APP_URL = 'https://metroscuadrados.onrender.com';
 
   var QTY_INPUT_SELECTORS = [
@@ -9,30 +8,67 @@
     'input.quantity-input'
   ];
 
-  function findQtyInput() {
-    for (var i = 0; i < QTY_INPUT_SELECTORS.length; i++) {
-      var el = document.querySelector(QTY_INPUT_SELECTORS[i]);
+  var TITLE_INSERT_SELECTORS = [
+    '#single-product h1',
+    '.product-name h1',
+    'h1.js-product-name',
+    'h1'
+  ];
+
+  var PRICE_SELECTORS = [
+    '.js-price-display',
+    '#product-price',
+    '.product-prices .price',
+    '.price ins',
+    '.price'
+  ];
+
+  function query(selectors) {
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
       if (el) return el;
     }
     return null;
   }
 
-  function buildWidget(bultoUnidades) {
+  function findQtyInput() {
+    return query(QTY_INPUT_SELECTORS);
+  }
+
+  function parsePrice(text) {
+    if (!text) return null;
+    var cleaned = text.replace(/[^0-9.,]/g, '');
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+    var value = parseFloat(cleaned);
+    return isNaN(value) ? null : value;
+  }
+
+  function formatPrice(value) {
+    return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function buildWidget(precioCaja, coberturaCaja) {
+    var precioM2 = precioCaja && coberturaCaja ? precioCaja / coberturaCaja : null;
+
     var wrapper = document.createElement('div');
     wrapper.style.cssText = 'margin:16px 0;padding:14px;border:1px solid #ddd;border-radius:8px;';
-    wrapper.innerHTML =
-      '<div style="font-size:13px;color:#666;margin-bottom:8px;">' +
-      'Este bulto trae <strong>' + bultoUnidades + ' unidades</strong></div>' +
+
+    var html = '';
+    if (precioM2) {
+      html += '<div style="font-size:20px;font-weight:600;margin-bottom:2px;">Precio por m²: ' + formatPrice(precioM2) + '</div>';
+      html += '<div style="font-size:14px;color:#666;margin-bottom:8px;">Precio por caja: ' + formatPrice(precioCaja) + '</div>';
+    }
+    html += '<div style="font-size:13px;color:#666;margin-bottom:8px;">Rendimiento: <strong>' + coberturaCaja.toFixed(2) + ' m² por caja</strong></div>';
+    html +=
       '<label style="display:block;font-size:13px;margin-bottom:4px;">Metros cuadrados a cubrir</label>' +
-      '<input type="number" id="calc-m2-input" min="0.01" step="0.5" ' +
-      'style="width:100%;padding:8px;margin-bottom:6px;box-sizing:border-box;" />' +
-      '<label style="display:block;font-size:13px;margin-bottom:4px;">Cobertura de cada unidad (m²)</label>' +
-      '<input type="number" id="calc-cobertura-input" min="0.01" step="0.01" ' +
+      '<input type="number" id="calc-m2-input" min="0.01" step="0.5" placeholder="m² a cubrir" ' +
       'style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box;" />' +
       '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px;">' +
-      '<input type="checkbox" id="calc-m2-desperdicio" checked /> Incluir 10% de desperdicio</label>' +
+      '<input type="checkbox" id="calc-m2-desperdicio" checked /> Incluir 10% de desperdicio (recomendado)</label>' +
       '<button type="button" id="calc-m2-btn" style="padding:8px 16px;cursor:pointer;">Calcular</button>' +
       '<div id="calc-m2-resultado" style="margin-top:10px;font-size:14px;"></div>';
+
+    wrapper.innerHTML = html;
     return wrapper;
   }
 
@@ -42,40 +78,48 @@
     fetch(APP_URL + '/public/bulto/' + LS.product.id)
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        if (!data || !data.value) return;
-        var bultoUnidades = parseFloat(data.value);
+        if (!data || !data.coberturaCaja) return;
+
+        var coberturaCaja = data.coberturaCaja;
 
         var qtyInput = findQtyInput();
         if (!qtyInput) return;
 
-        var widget = buildWidget(bultoUnidades);
-        var container = qtyInput.closest('form') || qtyInput.parentElement;
-        container.appendChild(widget);
+        var priceEl = query(PRICE_SELECTORS);
+        var precioCaja = priceEl ? parsePrice(priceEl.textContent) : null;
+
+        var titleEl = query(TITLE_INSERT_SELECTORS);
+        if (!titleEl) return;
+
+        var widget = buildWidget(precioCaja, coberturaCaja);
+        titleEl.parentElement.insertBefore(widget, titleEl.nextSibling);
 
         document.getElementById('calc-m2-btn').addEventListener('click', function () {
           var m2 = parseFloat(document.getElementById('calc-m2-input').value);
-          var coberturaUnidad = parseFloat(document.getElementById('calc-cobertura-input').value);
           var desperdicio = document.getElementById('calc-m2-desperdicio').checked;
           var resultado = document.getElementById('calc-m2-resultado');
 
-          if (!m2 || m2 <= 0 || !coberturaUnidad || coberturaUnidad <= 0) {
+          if (!m2 || m2 <= 0) {
             resultado.style.color = '#c0392b';
-            resultado.textContent = 'Completá los metros cuadrados y la cobertura por unidad.';
+            resultado.textContent = 'Ingresá los metros cuadrados a cubrir.';
             return;
           }
 
           var m2Ajustado = desperdicio ? m2 * 1.1 : m2;
-          var unidadesNecesarias = Math.ceil(m2Ajustado / coberturaUnidad);
-          var bultosNecesarios = Math.ceil(unidadesNecesarias / bultoUnidades);
-          var cubierto = (unidadesNecesarias * coberturaUnidad).toFixed(2);
+          var bultosNecesarios = Math.ceil(m2Ajustado / coberturaCaja);
+          var cubiertoReal = (bultosNecesarios * coberturaCaja).toFixed(2);
 
           qtyInput.value = bultosNecesarios;
           qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
 
           resultado.style.color = '#27632a';
-          resultado.textContent =
-            'Necesitás ' + unidadesNecesarias + ' unidad(es) (' + cubierto + ' m²) = ' +
-            bultosNecesarios + ' bulto(s). Cantidad actualizada arriba.';
+          var texto = 'Para cubrir ' + m2 + ' m²' + (desperdicio ? ' (+10% desperdicio)' : '') +
+            ' necesitás <strong>' + bultosNecesarios + ' caja(s)</strong> (rinden ' + cubiertoReal + ' m²).';
+          if (precioCaja) {
+            texto += '<br>Total estimado: <strong>' + formatPrice(bultosNecesarios * precioCaja) + '</strong>.';
+          }
+          texto += '<br>La cantidad ya se actualizó arriba.';
+          resultado.innerHTML = texto;
         });
       })
       .catch(function () {});
