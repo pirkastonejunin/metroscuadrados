@@ -35,6 +35,7 @@
     return query(QTY_INPUT_SELECTORS);
   }
 
+  // Convierte "$ 47.811,24" en 47811.24 (formato AR: punto de miles, coma decimal)
   function parsePrice(text) {
     if (!text) return null;
     var cleaned = text.replace(/[^0-9.,]/g, '');
