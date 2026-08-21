@@ -5,25 +5,38 @@
 <title>Calculadora m2 - Panel admin</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-  body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 16px; }
+  body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 0 16px; }
   table { width: 100%; border-collapse: collapse; margin-top: 20px; }
   th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
   input[type="number"] { width: 100px; padding: 4px; }
+  input[type="text"] { padding: 4px; }
+  select { padding: 4px; }
   button { padding: 6px 12px; cursor: pointer; }
   .ok { color: #27632a; font-size: 13px; }
   .sku { color: #888; font-size: 12px; }
+  .caja { margin:20px 0;padding:14px;border:1px solid #ddd;border-radius:8px;background:#fafafa; }
+  .tag { display:inline-flex; align-items:center; gap:6px; background:#eee; border-radius:14px; padding:4px 10px; margin:4px 6px 0 0; font-size:13px; }
+  .tag button { background:none; border:none; cursor:pointer; color:#c0392b; padding:0; font-size:13px; }
 </style>
 </head>
 <body>
-  <h1>Rendimiento por producto</h1>
-  <p>Para cada producto que se vende por caja/bulto, elegí la unidad de medida y cuánto rinde una caja en esa unidad. Esto queda guardado como atributo propio del producto (metafield), sin tocar el SKU.</p>
+  <h1>Rendimiento y clasificación por producto</h1>
+  <p>Para cada producto que se vende por caja/bulto, elegí la unidad de medida y cuánto rinde una caja. Opcionalmente, clasificalo por material/textura. Todo queda guardado como atributo propio del producto, sin tocar el SKU.</p>
 
-  <div style="margin:20px 0;padding:14px;border:1px solid #ddd;border-radius:8px;background:#fafafa;">
+  <div class="caja">
+    <h3 style="margin-top:0;">Materiales y texturas disponibles</h3>
+    <p style="font-size:13px;color:#555;">Cargá acá una sola vez los valores que después vas a poder elegir por producto (ej. Madera, Cemento, Mármol).</p>
+    <input type="text" id="nueva-etiqueta" placeholder="Ej: Mármol" />
+    <button onclick="agregarEtiqueta()">Agregar</button>
+    <div id="lista-etiquetas" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="caja">
     <h3 style="margin-top:0;">Carga masiva por Excel</h3>
     <p style="font-size:13px;color:#555;">
       1) Descargá la plantilla con tus productos actuales.
-      2) Completá las columnas <strong>Unidad</strong> (m2 / ml / litro / unidad) y <strong>RindePorCaja</strong> en Excel.
-      3) Volvé a subir el mismo archivo para aplicar los cambios masivamente. No cambies la columna ID.
+      2) Completá Unidad (m2/ml/litro/unidad), RindePorCaja, y Material (debe ser uno de los valores ya cargados arriba).
+      3) Volvé a subir el mismo archivo. No cambies la columna ID.
     </p>
     <button onclick="descargarPlantilla()">Descargar plantilla (.xlsx)</button>
     <br /><br />
@@ -34,25 +47,10 @@
 
   <table id="tabla">
     <thead>
-      <tr><th>Producto</th><th>SKU</th><th>Unidad</th><th>Rinde por caja</th><th></th></tr>
+      <tr><th>Producto</th><th>SKU</th><th>Unidad</th><th>Rinde por caja</th><th>Material/Textura</th><th></th></tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
-
-  <div style="margin:30px 0;padding:14px;border:1px solid #ddd;border-radius:8px;">
-    <h3 style="margin-top:0;">Clasificación por atributos (textura, material, etc.)</h3>
-    <p style="font-size:13px;color:#555;">
-      Escribí los atributos separados por "|", cada uno como Nombre:Valor.
-      Ejemplo: <code>Textura:Madera|Material:Cemento</code>. Estos filtros
-      aparecen en la página de categoría de tu tienda.
-    </p>
-    <table>
-      <thead>
-        <tr><th>Producto</th><th>Atributos</th><th></th></tr>
-      </thead>
-      <tbody id="tbody-atributos"></tbody>
-    </table>
-  </div>
 
   <script>
     var UNIDADES = {
@@ -62,11 +60,23 @@
       unidad: 'Unidad (venta directa, sin cálculo)'
     };
 
+    let productosActuales = [];
+    let etiquetasActuales = [];
+
     function opcionesUnidad(seleccionada) {
       return Object.keys(UNIDADES).map(function (key) {
         var sel = key === seleccionada ? 'selected' : '';
         return '<option value="' + key + '" ' + sel + '>' + UNIDADES[key] + '</option>';
       }).join('');
+    }
+
+    function opcionesEtiquetas(seleccionada) {
+      var opciones = '<option value="">Sin clasificar</option>';
+      etiquetasActuales.forEach(function (e) {
+        var sel = e === seleccionada ? 'selected' : '';
+        opciones += '<option value="' + e + '" ' + sel + '>' + e + '</option>';
+      });
+      return opciones;
     }
 
     function actualizarCampoRendimiento(id) {
@@ -80,50 +90,81 @@
       }
     }
 
-    let productosActuales = [];
+    async function cargarEtiquetas() {
+      const res = await fetch('/api/etiquetas');
+      etiquetasActuales = await res.json();
+      renderEtiquetas();
+    }
+
+    function renderEtiquetas() {
+      const cont = document.getElementById('lista-etiquetas');
+      cont.innerHTML = etiquetasActuales.map(function (e) {
+        return '<span class="tag">' + e + ' <button onclick="borrarEtiqueta(\'' + e.replace(/'/g, "\\'") + '\')">✕</button></span>';
+      }).join('');
+    }
+
+    async function agregarEtiqueta() {
+      const input = document.getElementById('nueva-etiqueta');
+      const valor = input.value.trim();
+      if (!valor) return;
+      const res = await fetch('/api/etiquetas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valor })
+      });
+      etiquetasActuales = await res.json();
+      input.value = '';
+      renderEtiquetas();
+      cargar(); // refresca los desplegables de la tabla con la nueva opcion
+    }
+
+    async function borrarEtiqueta(valor) {
+      const res = await fetch('/api/etiquetas/' + encodeURIComponent(valor), { method: 'DELETE' });
+      etiquetasActuales = await res.json();
+      renderEtiquetas();
+      cargar();
+    }
 
     async function cargar() {
       const res = await fetch('/api/products');
       productosActuales = await res.json();
       const tbody = document.getElementById('tbody');
-      const tbodyAtrib = document.getElementById('tbody-atributos');
       tbody.innerHTML = '';
-      tbodyAtrib.innerHTML = '';
       productosActuales.forEach(p => {
         const tr = document.createElement('tr');
         const tipoActual = p.tipo ? p.tipo.value : 'm2';
+        const atributoActual = p.atributos ? p.atributos.value : '';
         tr.innerHTML =
           '<td>' + p.name + '</td>' +
           '<td class="sku">' + (p.sku || '-') + '</td>' +
           '<td><select id="select-tipo-' + p.id + '" onchange="actualizarCampoRendimiento(' + p.id + ')">' + opcionesUnidad(tipoActual) + '</select></td>' +
           '<td><input type="number" min="0.01" step="0.01" value="' + (p.cobertura ? p.cobertura.value : '') + '" id="input-cobertura-' + p.id + '" /></td>' +
+          '<td><select id="select-atributo-' + p.id + '">' + opcionesEtiquetas(atributoActual) + '</select></td>' +
           '<td><button onclick="guardar(' + p.id + ')">Guardar</button> <span class="ok" id="ok-' + p.id + '"></span></td>';
         tbody.appendChild(tr);
         actualizarCampoRendimiento(p.id);
-
-        const trA = document.createElement('tr');
-        trA.innerHTML =
-          '<td>' + p.name + '</td>' +
-          '<td><input type="text" style="width:100%;" placeholder="Textura:Madera|Material:Cemento" value="' + (p.atributos ? p.atributos.value.replace(/"/g, '&quot;') : '') + '" id="input-atributos-' + p.id + '" /></td>' +
-          '<td><button onclick="guardarAtributos(' + p.id + ')">Guardar</button> <span class="ok" id="ok-atrib-' + p.id + '"></span></td>';
-        tbodyAtrib.appendChild(trA);
       });
     }
 
-    async function guardarAtributos(id) {
-      const atributos = document.getElementById('input-atributos-' + id).value;
-      const okEl = document.getElementById('ok-atrib-' + id);
+    async function guardar(id) {
+      const cobertura = document.getElementById('input-cobertura-' + id).value;
+      const tipo = document.getElementById('select-tipo-' + id).value;
+      const atributo = document.getElementById('select-atributo-' + id).value;
+      const okEl = document.getElementById('ok-' + id);
       okEl.textContent = 'Guardando...';
-      const res = await fetch('/api/atributos/' + id, {
+
+      const res1 = await fetch('/api/bulto/' + id, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ atributos })
+        body: JSON.stringify({ cobertura, tipo })
       });
-      if (res.ok) {
-        okEl.textContent = 'Guardado ✓';
-      } else {
-        okEl.textContent = 'Error';
-      }
+      const res2 = await fetch('/api/atributos/' + id, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ atributos: atributo })
+      });
+
+      okEl.textContent = (res1.ok && res2.ok) ? 'Guardado ✓' : 'Error';
       setTimeout(() => okEl.textContent = '', 2000);
     }
 
@@ -134,7 +175,7 @@
         SKU: p.sku || '',
         Unidad: p.tipo ? p.tipo.value : 'm2',
         RindePorCaja: p.cobertura ? p.cobertura.value : '',
-        Atributos: p.atributos ? p.atributos.value : ''
+        Material: p.atributos ? p.atributos.value : ''
       }));
       const hoja = XLSX.utils.json_to_sheet(filas);
       const libro = XLSX.utils.book_new();
@@ -166,24 +207,23 @@
         const id = fila.ID;
         if (!id) { continue; }
 
-        // Atributos se guarda siempre que venga en la fila, independiente
-        // de si el producto tambien se vende por m2/ml/litro.
-        if (fila.Atributos) {
-          try {
+        if (fila.Material) {
+          const materialTexto = fila.Material.toString().trim();
+          if (materialTexto && etiquetasActuales.indexOf(materialTexto) === -1) {
+            errores.push('Fila ID ' + id + ': material "' + materialTexto + '" no esta en la lista cargada arriba.');
+          } else if (materialTexto) {
             await fetch('/api/atributos/' + id, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ atributos: fila.Atributos })
+              body: JSON.stringify({ atributos: materialTexto })
             });
-          } catch (e) {
-            errores.push('Fila ID ' + id + ': error de red al guardar atributos.');
           }
         }
 
         const tipo = (fila.Unidad || '').toString().trim();
         const cobertura = fila.RindePorCaja;
 
-        if (!tipo) { ok++; continue; } // fila solo con atributos, sin unidad: valido
+        if (!tipo) { ok++; continue; }
         if (tiposValidos.indexOf(tipo) === -1) {
           errores.push('Fila ID ' + id + ': unidad "' + tipo + '" invalida (usar m2/ml/litro/unidad).');
           continue;
@@ -218,25 +258,10 @@
       await cargar();
     }
 
-    async function guardar(id) {
-      const cobertura = document.getElementById('input-cobertura-' + id).value;
-      const tipo = document.getElementById('select-tipo-' + id).value;
-      const okEl = document.getElementById('ok-' + id);
-      okEl.textContent = 'Guardando...';
-      const res = await fetch('/api/bulto/' + id, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cobertura, tipo })
-      });
-      if (res.ok) {
-        okEl.textContent = 'Guardado ✓';
-      } else {
-        okEl.textContent = 'Error';
-      }
-      setTimeout(() => okEl.textContent = '', 2000);
-    }
-
-    cargar();
+    (async function iniciar() {
+      await cargarEtiquetas();
+      await cargar();
+    })();
   </script>
 </body>
 </html>
