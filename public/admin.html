@@ -9,33 +9,29 @@
   table { width: 100%; border-collapse: collapse; margin-top: 20px; }
   th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
   input[type="number"] { width: 100px; padding: 4px; }
-  input[type="text"] { padding: 4px; }
   select { padding: 4px; }
   button { padding: 6px 12px; cursor: pointer; }
   .ok { color: #27632a; font-size: 13px; }
   .sku { color: #888; font-size: 12px; }
   .caja { margin:20px 0;padding:14px;border:1px solid #ddd;border-radius:8px;background:#fafafa; }
-  .tag { display:inline-flex; align-items:center; gap:6px; background:#eee; border-radius:14px; padding:4px 10px; margin:4px 6px 0 0; font-size:13px; }
-  .tag button { background:none; border:none; cursor:pointer; color:#c0392b; padding:0; font-size:13px; }
 </style>
 </head>
 <body>
-  <h1>Rendimiento y clasificación por producto</h1>
-  <p>Para cada producto que se vende por caja/bulto, elegí la unidad de medida y cuánto rinde una caja. Opcionalmente, clasificalo por material/textura. Todo queda guardado como atributo propio del producto, sin tocar el SKU.</p>
+  <h1>Rendimiento por producto</h1>
 
   <div class="caja">
-    <h3 style="margin-top:0;">Materiales y texturas disponibles</h3>
-    <p style="font-size:13px;color:#555;">Cargá acá una sola vez los valores que después vas a poder elegir por producto (ej. Madera, Cemento, Mármol).</p>
-    <input type="text" id="nueva-etiqueta" placeholder="Ej: Mármol" />
-    <button onclick="agregarEtiqueta()">Agregar</button>
-    <div id="lista-etiquetas" style="margin-top:10px;"></div>
+    <label style="font-size:13px;color:#555;">Tienda:</label>
+    <select id="select-tienda" onchange="cambiarTienda()"></select>
+    <span id="tienda-vacio" style="font-size:13px;color:#888;"></span>
   </div>
+
+  <p>Para cada producto que se vende por caja/bulto, elegí la unidad de medida y cuánto rinde una caja en esa unidad. Esto queda guardado como atributo propio del producto (metafield), sin tocar el SKU.</p>
 
   <div class="caja">
     <h3 style="margin-top:0;">Carga masiva por Excel</h3>
     <p style="font-size:13px;color:#555;">
       1) Descargá la plantilla con tus productos actuales.
-      2) Completá Unidad (m2/ml/litro/unidad), RindePorCaja, y Material (debe ser uno de los valores ya cargados arriba).
+      2) Completá Unidad (m2/ml/litro/unidad) y RindePorCaja en Excel.
       3) Volvé a subir el mismo archivo. No cambies la columna ID.
     </p>
     <button onclick="descargarPlantilla()">Descargar plantilla (.xlsx)</button>
@@ -47,7 +43,7 @@
 
   <table id="tabla">
     <thead>
-      <tr><th>Producto</th><th>SKU</th><th>Unidad</th><th>Rinde por caja</th><th>Material/Textura</th><th></th></tr>
+      <tr><th>Producto</th><th>SKU</th><th>Unidad</th><th>Rinde por caja</th><th></th></tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
@@ -61,22 +57,13 @@
     };
 
     let productosActuales = [];
-    let etiquetasActuales = [];
+    let storeIdActual = new URLSearchParams(window.location.search).get('store_id') || '';
 
     function opcionesUnidad(seleccionada) {
       return Object.keys(UNIDADES).map(function (key) {
         var sel = key === seleccionada ? 'selected' : '';
         return '<option value="' + key + '" ' + sel + '>' + UNIDADES[key] + '</option>';
       }).join('');
-    }
-
-    function opcionesEtiquetas(seleccionada) {
-      var opciones = '<option value="">Sin clasificar</option>';
-      etiquetasActuales.forEach(function (e) {
-        var sel = e === seleccionada ? 'selected' : '';
-        opciones += '<option value="' + e + '" ' + sel + '>' + e + '</option>';
-      });
-      return opciones;
     }
 
     function actualizarCampoRendimiento(id) {
@@ -90,56 +77,47 @@
       }
     }
 
-    async function cargarEtiquetas() {
-      const res = await fetch('/api/etiquetas');
-      etiquetasActuales = await res.json();
-      renderEtiquetas();
+    function cambiarTienda() {
+      var val = document.getElementById('select-tienda').value;
+      window.location.href = '/admin.html?store_id=' + val;
     }
 
-    function renderEtiquetas() {
-      const cont = document.getElementById('lista-etiquetas');
-      cont.innerHTML = etiquetasActuales.map(function (e) {
-        return '<span class="tag">' + e + ' <button onclick="borrarEtiqueta(\'' + e.replace(/'/g, "\\'") + '\')">✕</button></span>';
+    async function cargarTiendas() {
+      const res = await fetch('/api/stores');
+      const tiendas = await res.json();
+      const select = document.getElementById('select-tienda');
+      const vacioEl = document.getElementById('tienda-vacio');
+
+      if (!tiendas.length) {
+        vacioEl.textContent = 'Todavia no hay ninguna tienda instalada. Anda a /install primero.';
+        return;
+      }
+
+      select.innerHTML = tiendas.map(function (t) {
+        var sel = String(t.store_id) === String(storeIdActual) ? 'selected' : '';
+        return '<option value="' + t.store_id + '" ' + sel + '>' + t.domain + ' (ID ' + t.store_id + ')</option>';
       }).join('');
-    }
 
-    async function agregarEtiqueta() {
-      const input = document.getElementById('nueva-etiqueta');
-      const valor = input.value.trim();
-      if (!valor) return;
-      const res = await fetch('/api/etiquetas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ valor })
-      });
-      etiquetasActuales = await res.json();
-      input.value = '';
-      renderEtiquetas();
-      cargar(); // refresca los desplegables de la tabla con la nueva opcion
-    }
-
-    async function borrarEtiqueta(valor) {
-      const res = await fetch('/api/etiquetas/' + encodeURIComponent(valor), { method: 'DELETE' });
-      etiquetasActuales = await res.json();
-      renderEtiquetas();
-      cargar();
+      if (!storeIdActual && tiendas.length) {
+        storeIdActual = tiendas[0].store_id;
+        select.value = storeIdActual;
+      }
     }
 
     async function cargar() {
-      const res = await fetch('/api/products');
+      if (!storeIdActual) return;
+      const res = await fetch('/api/products?store_id=' + storeIdActual);
       productosActuales = await res.json();
       const tbody = document.getElementById('tbody');
       tbody.innerHTML = '';
       productosActuales.forEach(p => {
         const tr = document.createElement('tr');
         const tipoActual = p.tipo ? p.tipo.value : 'm2';
-        const atributoActual = p.atributos ? p.atributos.value : '';
         tr.innerHTML =
           '<td>' + p.name + '</td>' +
           '<td class="sku">' + (p.sku || '-') + '</td>' +
           '<td><select id="select-tipo-' + p.id + '" onchange="actualizarCampoRendimiento(' + p.id + ')">' + opcionesUnidad(tipoActual) + '</select></td>' +
           '<td><input type="number" min="0.01" step="0.01" value="' + (p.cobertura ? p.cobertura.value : '') + '" id="input-cobertura-' + p.id + '" /></td>' +
-          '<td><select id="select-atributo-' + p.id + '">' + opcionesEtiquetas(atributoActual) + '</select></td>' +
           '<td><button onclick="guardar(' + p.id + ')">Guardar</button> <span class="ok" id="ok-' + p.id + '"></span></td>';
         tbody.appendChild(tr);
         actualizarCampoRendimiento(p.id);
@@ -149,22 +127,14 @@
     async function guardar(id) {
       const cobertura = document.getElementById('input-cobertura-' + id).value;
       const tipo = document.getElementById('select-tipo-' + id).value;
-      const atributo = document.getElementById('select-atributo-' + id).value;
       const okEl = document.getElementById('ok-' + id);
       okEl.textContent = 'Guardando...';
-
-      const res1 = await fetch('/api/bulto/' + id, {
+      const res = await fetch('/api/bulto/' + id + '?store_id=' + storeIdActual, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cobertura, tipo })
       });
-      const res2 = await fetch('/api/atributos/' + id, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ atributos: atributo })
-      });
-
-      okEl.textContent = (res1.ok && res2.ok) ? 'Guardado ✓' : 'Error';
+      okEl.textContent = res.ok ? 'Guardado ✓' : 'Error';
       setTimeout(() => okEl.textContent = '', 2000);
     }
 
@@ -174,8 +144,7 @@
         Producto: p.name,
         SKU: p.sku || '',
         Unidad: p.tipo ? p.tipo.value : 'm2',
-        RindePorCaja: p.cobertura ? p.cobertura.value : '',
-        Material: p.atributos ? p.atributos.value : ''
+        RindePorCaja: p.cobertura ? p.cobertura.value : ''
       }));
       const hoja = XLSX.utils.json_to_sheet(filas);
       const libro = XLSX.utils.book_new();
@@ -205,25 +174,10 @@
 
       for (const fila of filas) {
         const id = fila.ID;
-        if (!id) { continue; }
-
-        if (fila.Material) {
-          const materialTexto = fila.Material.toString().trim();
-          if (materialTexto && etiquetasActuales.indexOf(materialTexto) === -1) {
-            errores.push('Fila ID ' + id + ': material "' + materialTexto + '" no esta en la lista cargada arriba.');
-          } else if (materialTexto) {
-            await fetch('/api/atributos/' + id, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ atributos: materialTexto })
-            });
-          }
-        }
-
         const tipo = (fila.Unidad || '').toString().trim();
         const cobertura = fila.RindePorCaja;
 
-        if (!tipo) { ok++; continue; }
+        if (!id) { continue; }
         if (tiposValidos.indexOf(tipo) === -1) {
           errores.push('Fila ID ' + id + ': unidad "' + tipo + '" invalida (usar m2/ml/litro/unidad).');
           continue;
@@ -235,7 +189,7 @@
         }
 
         try {
-          const res = await fetch('/api/bulto/' + id, {
+          const res = await fetch('/api/bulto/' + id + '?store_id=' + storeIdActual, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ cobertura: coberturaFinal, tipo })
@@ -259,7 +213,7 @@
     }
 
     (async function iniciar() {
-      await cargarEtiquetas();
+      await cargarTiendas();
       await cargar();
     })();
   </script>

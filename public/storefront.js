@@ -41,7 +41,6 @@
     return query(QTY_INPUT_SELECTORS);
   }
 
-  // Convierte "$ 47.811,24" en 47811.24 (formato AR: punto de miles, coma decimal)
   function parsePrice(text) {
     if (!text) return null;
     var cleaned = text.replace(/[^0-9.,]/g, '');
@@ -82,7 +81,9 @@
   function init() {
     if (!window.LS || !LS.product || !LS.product.id) return;
 
-    fetch(APP_URL + '/public/bulto/' + LS.product.id)
+    var url = APP_URL + '/public/bulto/' + LS.product.id + '?domain=' + encodeURIComponent(window.location.hostname);
+
+    fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data || !data.coberturaCaja || !data.tipoUnidad || data.tipoUnidad === 'unidad') return;
