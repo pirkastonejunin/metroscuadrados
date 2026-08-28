@@ -147,7 +147,8 @@ app.get('/auth/callback', async (req, res) => {
       headers: apiHeaders(accessToken)
     });
     const storeInfo = await storeInfoResp.json();
-    const domain = storeInfo.url || '';
+    console.log('Respuesta de /store:', JSON.stringify(storeInfo));
+    const domain = storeInfo.url || storeInfo.original_domain || storeInfo.domain || '';
 
     await upsertStore(storeId, domain, accessToken);
 
@@ -201,6 +202,21 @@ app.get('/api/stores', async (req, res) => {
   try {
     const stores = await listStores();
     res.json(stores);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Diagnostico: permite corregir a mano el dominio de una tienda si
+// la deteccion automatica fallo al instalar.
+app.post('/admin/set-domain', async (req, res) => {
+  try {
+    const { store_id, domain } = req.body;
+    if (!store_id || !domain) {
+      return res.status(400).json({ error: 'Falta store_id o domain' });
+    }
+    await upsertStore(parseInt(store_id, 10), domain, (await getStoreById(store_id)).access_token);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
