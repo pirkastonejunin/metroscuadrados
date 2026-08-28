@@ -359,6 +359,34 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// Version rapida para carga masiva: guarda SOLO en el cache de Mongo,
+// sin sincronizar con Tiendanube (evita miles de llamadas a su API
+// cuando se importan catalogos grandes por Excel). El boton "Guardar"
+// individual de la tabla si sincroniza ambos lados.
+app.post('/api/bulto-cache/:productId', async (req, res) => {
+  try {
+    const storeId = req.query.store_id;
+    if (!storeId) return res.status(400).json({ error: 'Falta store_id' });
+
+    const productId = req.params.productId;
+    const { cobertura, tipo } = req.body;
+
+    const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
+    if (!tipo || tiposValidos.indexOf(tipo) === -1) {
+      return res.status(400).json({ error: 'Tipo de unidad invalido' });
+    }
+    const coberturaFinal = tipo === 'unidad' ? 1 : parseFloat(cobertura);
+    if (!coberturaFinal || coberturaFinal <= 0) {
+      return res.status(400).json({ error: 'Rendimiento invalido' });
+    }
+
+    await guardarRendimientoCache(parseInt(storeId, 10), productId, tipo, coberturaFinal);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/bulto/:productId', async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
