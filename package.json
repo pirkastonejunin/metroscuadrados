@@ -1,7 +1,7 @@
 {
   "name": "calculadora-m2-app",
-  "version": "1.0.0",
-  "description": "App privada para Piedra Negra: agrega 'unidades por bulto' a cada producto de Tiendanube y calcula cuantas unidades comprar segun m2 a cubrir.",
+  "version": "2.0.0",
+  "description": "App privada para Piedra Negra: calculadora de m2/ml/litro/unidad por producto en Tiendanube, con soporte multi-tienda (real + demo).",
   "main": "server.js",
   "engines": {
     "node": ">=18"

@@ -1,99 +1,109 @@
-# Calculadora de m² — app privada para Piedra Negra
+# Calculadora de m² — app privada para Piedra Negra (v2, multi-tienda)
 
-Reemplaza a "Metros Cuadrados": agrega "unidades por bulto" como atributo
-propio de cada producto (guardado vía metafield oficial de la API de
-Tiendanube, sin tocar el SKU) y calcula automáticamente cuántos bultos
-necesita comprar el cliente según los m² a cubrir.
+Reemplaza a "Metros Cuadrados": muestra precio por m²/ml/litro y calcula
+cuántas cajas necesita comprar el cliente según lo que quiera cubrir.
+Soporta tener la tienda real y la tienda demo instaladas al mismo
+tiempo, cada una con su propia configuración.
+
+## Qué cambió respecto a la v1
+
+- Se sacó toda la parte de etiquetas/materiales (quedó en pausa para
+  retomar más adelante con un enfoque distinto).
+- Ahora la app funciona con **varias tiendas a la vez** (por ejemplo,
+  tu tienda real y la demo). Cada tienda se identifica por su
+  `store_id` y su dominio, guardados en MongoDB. `/admin.html` tiene
+  un selector arriba de todo para elegir con cuál tienda estás
+  trabajando en ese momento.
 
 ## Arquitectura
 
-- `server.js` — backend (Node + Express). Maneja el login OAuth con
-  Tiendanube, guarda/lee el "unidades por bulto" de cada producto vía
-  la API de Metafields, y expone un endpoint público para el storefront.
-- `public/admin.html` — panel simple donde vos cargás cuántas unidades
-  trae cada bulto, producto por producto.
-- `public/storefront.js` — el script que se instala en tu tienda online
-  (vía el Partner Portal) y muestra la calculadora en la ficha de
-  producto.
+- `server.js` — backend (Node + Express). OAuth con Tiendanube,
+  guarda/lee "unidades por bulto" vía Metafields, y expone un
+  endpoint público para el storefront. Ahora todo queda separado por
+  tienda en MongoDB (colección `stores`, un documento por tienda).
+- `public/admin.html` — panel de carga, con selector de tienda arriba.
+- `public/storefront.js` — script que se instala en cada tienda vía
+  el Partner Portal.
 
-## Paso 1 — Crear la app en el Partner Portal (gratis)
+## Paso 1 — Crear la app en el Partner Portal (si no la tenés ya)
 
-1. Entrá a https://partners.tiendanube.com y creá una cuenta si no
-   tenés.
-2. "Mis apps" → "Crear app". Ponele nombre, ej. "Calculadora m² Piedra
-   Negra".
-3. En "Scopes/Permisos" tildá como mínimo:
-   - `read_products`
-   - `write_products`
-   - permiso de `scripts`
-4. En "Redirect URL" poné la URL de tu backend + `/auth/callback`
-   (la vas a tener después del paso 2 — podés volver a editar esto
-   luego).
-5. Guardá el `Client ID` y `Client Secret` que te da la plataforma.
+1. https://partners.tiendanube.com → "Mis apps" → "Crear app".
+2. Scopes: `read_products`, `write_products`, `scripts`.
+3. Guardá `Client ID` y `Client Secret`.
 
 ## Paso 2 — Deployar el backend
 
-Necesitás un hosting simple donde corra Node (esto es un backend real,
-no un archivo estático). Opciones gratuitas/baratas: Render, Railway,
-Fly.io.
+1. Subí esta carpeta a GitHub.
+2. Render (u otro hosting con Node) → New Web Service → conectá el repo.
+3. Build command: `npm install`. Start command: `npm start`.
+4. Variables de entorno (ver `.env.example`): `CLIENT_ID`,
+   `CLIENT_SECRET`, `USER_AGENT`, `MONGODB_URI`, `SCRIPT_ID`.
+5. Una vez deployado, agregá `REDIRECT_URI` = `https://tu-app.onrender.com/auth/callback`.
+6. En Render, **desactivá Auto-Deploy** (Settings) para no perder la
+   conexión a Mongo en cada push accidental — no hace falta, ya que
+   ahora todo el estado vive en MongoDB, pero igual es buena práctica
+   controlar cuándo se redeploya.
 
-1. Subí esta carpeta a un repo de GitHub (o subila directo si tu
-   hosting lo permite).
-2. Configurá las variables de entorno del `.env.example`:
-   - `CLIENT_ID` y `CLIENT_SECRET` (del paso 1)
-   - `REDIRECT_URI` = `https://tu-app.onrender.com/auth/callback`
-   - `USER_AGENT` = algo como `CalculadoraM2 (tu-email@dominio.com)`
-3. Deploy. Confirmá que `https://tu-app.onrender.com/install` responde
-   (te va a redirigir a Tiendanube).
-4. Volvé al Partner Portal y actualizá la "Redirect URL" con la URL
-   real ya deployada.
+## Paso 3 — MongoDB Atlas (base de datos gratis)
 
-## Paso 3 — Instalar la app en tu tienda
+1. https://mongodb.com/cloud/atlas/register → cluster gratis M0.
+2. Database Access → crear usuario con contraseña.
+3. Network Access → Add IP Address → **Allow Access from Anywhere**
+   (0.0.0.0/0), para que Render se pueda conectar.
+4. Connect → Drivers → copiar el connection string, reemplazar
+   `<password>`, y pegarlo en `MONGODB_URI` en Render.
 
-1. Como estás en modo desarrollo, desde el Partner Portal instalá la
-   app en tu propia tienda (opción "Probar en mi tienda" o similar).
-   Esto dispara el flujo OAuth: te lleva a `/install`, aceptás
-   permisos, y Tiendanube te redirige a `/auth/callback`, que guarda
-   el token.
-2. Si todo salió bien, terminás en `/admin.html`.
+## Paso 4 — Completar la Redirect URL en el Partner Portal
 
-## Paso 4 — Cargar "unidades por bulto"
+En el Partner Portal, pestaña "Configuración" de tu app, sección
+"URLs": el campo **"URL para redirigir después de la instalación"**
+(no el de "Página de la aplicación") debe ser exactamente:
 
-En `/admin.html` vas a ver la lista de tus productos. Para cada uno
-que se vende por m², completá cuántas unidades trae el bulto/caja/rollo
-y tocá "Guardar". Eso queda guardado como metafield del producto — no
-toca el SKU ni tu sistema de gestión.
+```
+https://tu-app.onrender.com/auth/callback
+```
 
-## Paso 5 — Subir el script al storefront
+## Paso 5 — Instalar en cada tienda
 
-1. Antes, editá `public/storefront.js`: reemplazá
-   `TU-APP-DEPLOYADA.onrender.com` por la URL real de tu backend.
-2. Volvé a deployar (para que `/public/bulto/:id` esté disponible;
-   el archivo storefront.js en sí se sube aparte, ver paso siguiente).
-3. En el Partner Portal, en el detalle de tu app, sección "Scripts" →
-   "Create script":
-   - `location`: store
-   - `event`: onfirstinteraction (más simple, no requiere aprobación
-     de Tiendanube; "onload" sí la requiere)
-   - `auto installed`: sí
-   - Subí el archivo `public/storefront.js` como versión del script.
-4. Deployá esa versión a producción desde el mismo panel.
+Para cada tienda que quieras usar (demo y/o real):
 
-Listo — el script va a cargar solo en las fichas de producto de tu
-tienda. Si el producto tiene "unidades por bulto" cargado, aparece la
-calculadora; si no, no aparece nada (no rompe nada en el resto del
-catálogo).
+1. Anda a `https://tu-app.onrender.com/install`.
+2. Iniciá sesión en esa tienda y aceptá los permisos.
+3. Vas a terminar en `/admin.html?store_id=XXXX` ya con esa tienda
+   seleccionada en el desplegable de arriba.
+
+Podés repetir esto para varias tiendas — cada una queda guardada por
+separado, y el desplegable de `/admin.html` te deja cambiar entre
+ellas sin perder nada.
+
+## Paso 6 — Cargar el rendimiento de los productos
+
+Con la tienda correcta seleccionada en el desplegable, cargá para
+cada producto la unidad (m²/ml/litro/unidad) y cuánto rinde una caja.
+También podés usar la carga masiva por Excel (botones arriba de la
+tabla).
+
+## Paso 7 — Subir el script al storefront
+
+1. En `public/storefront.js`, la variable `APP_URL` ya apunta a tu
+   backend — no hace falta tocarla si es la misma URL para todas las
+   tiendas (el script manda su propio dominio en cada pedido, así el
+   backend sabe de qué tienda es).
+2. Partner Portal → tu app → Scripts → Create script: `location: store`,
+   `event: onfirstinteraction`. Subí `storefront.js`.
+3. Si "Instalación automática" aparece bloqueada, desplegá igual la
+   versión a testing/producción, y activala manualmente por tienda
+   visitando: `https://tu-app.onrender.com/admin/activar-script?store_id=XXXX`
+   (una vez por cada tienda instalada).
 
 ## Notas importantes
 
-- El selector del input de cantidad (`QTY_INPUT_SELECTORS` en
-  `storefront.js`) está pensado para el theme Base y derivados. Si tu
-  tienda usa otro theme, inspeccioná el input de cantidad en la ficha
-  de producto y agregá su selector a la lista.
-- El endpoint `/public/bulto/:id` es de solo lectura y no expone tu
-  access_token — es seguro que sea público.
-- `db.json` guarda tu `access_token` — no lo subas a un repo público.
-- Esta app es de uso privado (para tu propia tienda). Si en el futuro
-  quisieras publicarla en el marketplace para otros comercios, hay un
-  proceso de revisión aparte de Tiendanube — pero para uso interno no
-  hace falta.
+- El selector del input de cantidad y el del precio nativo en
+  `storefront.js` (`QTY_INPUT_SELECTORS`, `PRICE_SELECTORS`) están
+  adivinados para temas comunes — si tu theme no coincide, inspeccioná
+  esos elementos en la ficha del producto y agregá el selector real.
+- El endpoint `/public/bulto/:id` es de solo lectura, no expone ningún
+  `access_token` — es seguro que sea público.
+- Si en algún momento necesitás correr **la misma tienda** en dos
+  ambientes con el mismo dominio (poco común), avisá — el sistema
+  identifica tiendas por dominio único.
