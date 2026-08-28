@@ -33,6 +33,9 @@
       1) Descargá la plantilla con tus productos actuales.
       2) Completá Unidad (m2/ml/litro/unidad) y RindePorCaja en Excel.
       3) Volvé a subir el mismo archivo. No cambies la columna ID.
+      Para catálogos grandes, esto guarda directo en la base de la app
+      (rápido); no queda reflejado como metafield en Tiendanube, pero
+      no afecta el funcionamiento de la calculadora ni del precio por m².
     </p>
     <button onclick="descargarPlantilla()">Descargar plantilla (.xlsx)</button>
     <br /><br />
@@ -172,7 +175,8 @@
       const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
       let ok = 0, errores = [];
 
-      for (const fila of filas) {
+      for (let i = 0; i < filas.length; i++) {
+        const fila = filas[i];
         const id = fila.ID;
         const tipo = (fila.Unidad || '').toString().trim();
         const cobertura = fila.RindePorCaja;
@@ -189,7 +193,7 @@
         }
 
         try {
-          const res = await fetch('/api/bulto/' + id + '?store_id=' + storeIdActual, {
+          const res = await fetch('/api/bulto-cache/' + id + '?store_id=' + storeIdActual, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ cobertura: coberturaFinal, tipo })
@@ -201,6 +205,10 @@
           }
         } catch (e) {
           errores.push('Fila ID ' + id + ': error de red.');
+        }
+
+        if (i % 20 === 0 || i === filas.length - 1) {
+          resultadoEl.textContent = 'Procesando ' + (i + 1) + ' de ' + filas.length + '...';
         }
       }
 
