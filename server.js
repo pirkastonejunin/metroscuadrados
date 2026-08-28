@@ -90,6 +90,62 @@ async function listStores() {
   }
 }
 
+async function getRendimientosCollection() {
+  if (!mongoClient) {
+    mongoClient = new MongoClient(process.env.MONGODB_URI);
+    try {
+      await mongoClient.connect();
+    } catch (err) {
+      mongoClient = null;
+      throw err;
+    }
+  }
+  return mongoClient.db('calculadora_m2').collection('rendimientos');
+}
+
+async function guardarRendimientoCache(storeId, productId, tipo, cobertura) {
+  const intentar = async () => {
+    const col = await getRendimientosCollection();
+    await col.updateOne(
+      { _id: storeId + '_' + productId },
+      { $set: { store_id: storeId, product_id: parseInt(productId, 10), tipo, cobertura } },
+      { upsert: true }
+    );
+  };
+  try {
+    await intentar();
+  } catch (err) {
+    mongoClient = null;
+    await intentar();
+  }
+}
+
+async function getRendimientosDeTienda(storeId) {
+  const intentar = async () => {
+    const col = await getRendimientosCollection();
+    return col.find({ store_id: storeId }).toArray();
+  };
+  try {
+    return await intentar();
+  } catch (err) {
+    mongoClient = null;
+    return await intentar();
+  }
+}
+
+async function getRendimientoUno(storeId, productId) {
+  const intentar = async () => {
+    const col = await getRendimientosCollection();
+    return col.findOne({ _id: storeId + '_' + productId });
+  };
+  try {
+    return await intentar();
+  } catch (err) {
+    mongoClient = null;
+    return await intentar();
+  }
+}
+
 function apiHeaders(token) {
   return {
     Authorization: 'Bearer ' + token,
@@ -259,30 +315,43 @@ async function saveMetafieldValue(storeId, token, productId, key, value) {
   }).then((r) => r.json());
 }
 
+async function fetchAllProducts(storeId, accessToken) {
+  let todos = [];
+  let page = 1;
+  while (true) {
+    const response = await fetch(
+      API_BASE + '/' + storeId + '/products?per_page=200&page=' + page + '&fields=id,name,variants',
+      { headers: apiHeaders(accessToken) }
+    );
+    const pagina = await response.json();
+    if (!Array.isArray(pagina) || pagina.length === 0) break;
+    todos = todos.concat(pagina);
+    if (pagina.length < 200) break; // ultima pagina
+    page++;
+  }
+  return todos;
+}
+
 // ---------- Productos ----------
 
 app.get('/api/products', async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
-    const response = await fetch(
-      API_BASE + '/' + store_id + '/products?per_page=200&fields=id,name,variants',
-      { headers: apiHeaders(access_token) }
-    );
-    const products = await response.json();
+    const products = await fetchAllProducts(store_id, access_token);
+    const rendimientos = await getRendimientosDeTienda(store_id);
+    const porProductId = {};
+    rendimientos.forEach((r) => { porProductId[r.product_id] = r; });
 
-    const conCobertura = await Promise.all(
-      products.map(async (p) => {
-        const cobertura = await getMetafieldValue(store_id, access_token, p.id, KEY_COBERTURA);
-        const tipo = await getMetafieldValue(store_id, access_token, p.id, KEY_TIPO);
-        return {
-          id: p.id,
-          name: p.name && (p.name.es || Object.values(p.name)[0]),
-          sku: p.variants && p.variants[0] ? p.variants[0].sku : '',
-          cobertura,
-          tipo
-        };
-      })
-    );
+    const conCobertura = products.map((p) => {
+      const cache = porProductId[p.id];
+      return {
+        id: p.id,
+        name: p.name && (p.name.es || Object.values(p.name)[0]),
+        sku: p.variants && p.variants[0] ? p.variants[0].sku : '',
+        cobertura: cache ? { value: cache.cobertura } : null,
+        tipo: cache ? { value: cache.tipo } : null
+      };
+    });
 
     res.json(conCobertura);
   } catch (err) {
@@ -307,6 +376,7 @@ app.post('/api/bulto/:productId', async (req, res) => {
 
     await saveMetafieldValue(store_id, access_token, productId, KEY_COBERTURA, coberturaFinal);
     await saveMetafieldValue(store_id, access_token, productId, KEY_TIPO, tipo);
+    await guardarRendimientoCache(store_id, productId, tipo, coberturaFinal);
 
     res.json({ ok: true });
   } catch (err) {
@@ -327,11 +397,10 @@ app.get('/public/bulto/:productId', async (req, res) => {
     const store = await getStoreByDomain(domain);
     if (!store) throw new Error('Dominio no reconocido: ' + domain);
 
-    const cobertura = await getMetafieldValue(store.store_id, store.access_token, req.params.productId, KEY_COBERTURA);
-    const tipo = await getMetafieldValue(store.store_id, store.access_token, req.params.productId, KEY_TIPO);
+    const cache = await getRendimientoUno(store.store_id, req.params.productId);
     res.json({
-      coberturaCaja: cobertura ? parseFloat(cobertura.value) : null,
-      tipoUnidad: tipo ? tipo.value : null
+      coberturaCaja: cache ? parseFloat(cache.cobertura) : null,
+      tipoUnidad: cache ? cache.tipo : null
     });
   } catch (err) {
     res.status(500).json({ coberturaCaja: null, tipoUnidad: null, error: err.message });
