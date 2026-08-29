@@ -103,12 +103,14 @@ async function getRendimientosCollection() {
   return mongoClient.db('calculadora_m2').collection('rendimientos');
 }
 
-async function guardarRendimientoCache(storeId, productId, tipo, cobertura) {
+async function guardarRendimientoCache(storeId, productId, tipo, cobertura, handle) {
   const intentar = async () => {
     const col = await getRendimientosCollection();
+    const datos = { store_id: storeId, product_id: parseInt(productId, 10), tipo, cobertura };
+    if (handle) datos.handle = handle;
     await col.updateOne(
       { _id: storeId + '_' + productId },
-      { $set: { store_id: storeId, product_id: parseInt(productId, 10), tipo, cobertura } },
+      { $set: datos },
       { upsert: true }
     );
   };
@@ -320,7 +322,7 @@ async function fetchAllProducts(storeId, accessToken) {
   let page = 1;
   while (true) {
     const response = await fetch(
-      API_BASE + '/' + storeId + '/products?per_page=200&page=' + page + '&fields=id,name,variants',
+      API_BASE + '/' + storeId + '/products?per_page=200&page=' + page + '&fields=id,name,variants,handle',
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
@@ -348,6 +350,7 @@ app.get('/api/products', async (req, res) => {
         id: p.id,
         name: p.name && (p.name.es || Object.values(p.name)[0]),
         sku: p.variants && p.variants[0] ? p.variants[0].sku : '',
+        handle: p.handle && (p.handle.es || Object.values(p.handle)[0]),
         cobertura: cache ? { value: cache.cobertura } : null,
         tipo: cache ? { value: cache.tipo } : null
       };
@@ -369,7 +372,7 @@ app.post('/api/bulto-cache/:productId', async (req, res) => {
     if (!storeId) return res.status(400).json({ error: 'Falta store_id' });
 
     const productId = req.params.productId;
-    const { cobertura, tipo } = req.body;
+    const { cobertura, tipo, handle } = req.body;
 
     const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
     if (!tipo || tiposValidos.indexOf(tipo) === -1) {
@@ -380,7 +383,7 @@ app.post('/api/bulto-cache/:productId', async (req, res) => {
       return res.status(400).json({ error: 'Rendimiento invalido' });
     }
 
-    await guardarRendimientoCache(parseInt(storeId, 10), productId, tipo, coberturaFinal);
+    await guardarRendimientoCache(parseInt(storeId, 10), productId, tipo, coberturaFinal, handle);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -391,7 +394,7 @@ app.post('/api/bulto/:productId', async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
     const productId = req.params.productId;
-    const { cobertura, tipo } = req.body;
+    const { cobertura, tipo, handle } = req.body;
 
     const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
     if (!tipo || tiposValidos.indexOf(tipo) === -1) {
@@ -404,11 +407,34 @@ app.post('/api/bulto/:productId', async (req, res) => {
 
     await saveMetafieldValue(store_id, access_token, productId, KEY_COBERTURA, coberturaFinal);
     await saveMetafieldValue(store_id, access_token, productId, KEY_TIPO, tipo);
-    await guardarRendimientoCache(store_id, productId, tipo, coberturaFinal);
+    await guardarRendimientoCache(store_id, productId, tipo, coberturaFinal, handle);
 
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint PUBLICO liviano para la grilla de categoria: devuelve
+// handle + rendimiento de todos los productos configurados de la
+// tienda, sin golpear la API de Tiendanube (todo sale del cache).
+app.get('/public/catalogo-precios', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const domain = req.query.domain;
+    if (!domain) throw new Error('Falta el parametro domain.');
+
+    const store = await getStoreByDomain(domain);
+    if (!store) throw new Error('Dominio no reconocido: ' + domain);
+
+    const rendimientos = await getRendimientosDeTienda(store.store_id);
+    const productos = rendimientos
+      .filter((r) => r.handle && r.tipo !== 'unidad')
+      .map((r) => ({ handle: r.handle, coberturaCaja: parseFloat(r.cobertura), tipoUnidad: r.tipo }));
+
+    res.json({ productos });
+  } catch (err) {
+    res.status(500).json({ productos: [], error: err.message });
   }
 });
 
