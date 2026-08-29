@@ -130,12 +130,13 @@
     async function guardar(id) {
       const cobertura = document.getElementById('input-cobertura-' + id).value;
       const tipo = document.getElementById('select-tipo-' + id).value;
+      const producto = productosActuales.find(p => p.id === id);
       const okEl = document.getElementById('ok-' + id);
       okEl.textContent = 'Guardando...';
       const res = await fetch('/api/bulto/' + id + '?store_id=' + storeIdActual, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cobertura, tipo })
+        body: JSON.stringify({ cobertura, tipo, handle: producto ? producto.handle : null })
       });
       okEl.textContent = res.ok ? 'Guardado ✓' : 'Error';
       setTimeout(() => okEl.textContent = '', 2000);
@@ -193,10 +194,11 @@
         }
 
         try {
+          const producto = productosActuales.find(p => String(p.id) === String(id));
           const res = await fetch('/api/bulto-cache/' + id + '?store_id=' + storeIdActual, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cobertura: coberturaFinal, tipo })
+            body: JSON.stringify({ cobertura: coberturaFinal, tipo, handle: producto ? producto.handle : null })
           });
           if (res.ok) {
             ok++;
