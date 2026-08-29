@@ -3,6 +3,7 @@
 
   var PRICE_SELECTORS = [
     '.js-price-display',
+    '.item-price',
     '.product-prices .price',
     '.price ins',
     '.price'
@@ -44,6 +45,15 @@
     return isNaN(value) ? null : value;
   }
 
+  function getPriceFromElement(el) {
+    var raw = el.getAttribute('data-product-price');
+    if (raw) {
+      var value = parseInt(raw, 10);
+      if (!isNaN(value)) return value / 100;
+    }
+    return parsePrice(el.textContent);
+  }
+
   function formatPrice(value) {
     return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -83,7 +93,7 @@
           var priceEl = findPriceEl(card);
           if (!priceEl) return;
 
-          var precioCaja = parsePrice(priceEl.textContent);
+          var precioCaja = getPriceFromElement(priceEl);
           if (!precioCaja || !p.coberturaCaja) return;
 
           var precioM2 = precioCaja / p.coberturaCaja;

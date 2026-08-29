@@ -49,6 +49,17 @@
     return isNaN(value) ? null : value;
   }
 
+  // Preferimos el atributo data-product-price (valor exacto en
+  // centavos) si el theme lo trae; si no, parseamos el texto mostrado.
+  function getPriceFromElement(el) {
+    var raw = el.getAttribute('data-product-price');
+    if (raw) {
+      var value = parseInt(raw, 10);
+      if (!isNaN(value)) return value / 100;
+    }
+    return parsePrice(el.textContent);
+  }
+
   function formatPrice(value) {
     return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -96,7 +107,7 @@
         if (!qtyInput) return;
 
         var priceEl = query(PRICE_SELECTORS);
-        var precioCaja = priceEl ? parsePrice(priceEl.textContent) : null;
+        var precioCaja = priceEl ? getPriceFromElement(priceEl) : null;
 
         var titleEl = query(TITLE_INSERT_SELECTORS);
         if (!titleEl) return;
