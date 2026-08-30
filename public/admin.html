@@ -30,14 +30,14 @@
   <div class="caja">
     <h3 style="margin-top:0;">Carga masiva por Excel</h3>
     <p style="font-size:13px;color:#555;">
-      1) Descargá la plantilla con tus productos actuales.
-      2) Completá Unidad (m2/ml/litro/unidad) y RindePorCaja en Excel.
-      3) Volvé a subir el mismo archivo. No cambies la columna ID.
-      Para catálogos grandes, esto guarda directo en la base de la app
-      (rápido); no queda reflejado como metafield en Tiendanube, pero
-      no afecta el funcionamiento de la calculadora ni del precio por m².
+      Este mismo botón sirve como <strong>backup</strong>: descarga todo lo
+      que tenés cargado ahora mismo (unidad, rendimiento) para esta
+      tienda. Guardalo de vez en cuando por las dudas.
+      Para editar en bloque: 1) descargá, 2) completá/corregí Unidad
+      (m2/ml/litro/unidad) y RindePorCaja en Excel, 3) volvé a subir el
+      mismo archivo con Importar. No cambies la columna ID.
     </p>
-    <button onclick="descargarPlantilla()">Descargar plantilla (.xlsx)</button>
+    <button onclick="descargarPlantilla()">Descargar backup / plantilla actual (.xlsx)</button>
     <br /><br />
     <input type="file" id="archivoExcel" accept=".xlsx,.xls" />
     <button onclick="importarExcel()">Importar</button>
@@ -147,13 +147,15 @@
         ID: p.id,
         Producto: p.name,
         SKU: p.sku || '',
+        Handle: p.handle || '',
         Unidad: p.tipo ? p.tipo.value : 'm2',
         RindePorCaja: p.cobertura ? p.cobertura.value : ''
       }));
       const hoja = XLSX.utils.json_to_sheet(filas);
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, hoja, 'Productos');
-      XLSX.writeFile(libro, 'plantilla-calculadora-m2.xlsx');
+      const fecha = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(libro, 'backup-calculadora-m2-' + fecha + '.xlsx');
     }
 
     async function importarExcel() {
