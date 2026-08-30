@@ -68,6 +68,7 @@
     var precioM2 = precioCaja && coberturaCaja ? precioCaja / coberturaCaja : null;
 
     var wrapper = document.createElement('div');
+    wrapper.id = 'calc-m2-widget-marca';
     wrapper.style.cssText = 'margin:16px 0;padding:14px;border:1px solid #ddd;border-radius:8px;';
 
     var html = '';
@@ -81,7 +82,8 @@
       '<input type="number" id="calc-m2-input" min="0.01" step="0.5" placeholder="' + unidad.input + '" ' +
       'style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box;" />' +
       '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px;">' +
-      '<input type="checkbox" id="calc-m2-desperdicio" checked /> Incluir 10% de desperdicio (recomendado)</label>' +
+      '<input type="checkbox" id="calc-m2-desperdicio" checked ' +
+      'style="width:16px;height:16px;margin:0;opacity:1;-webkit-appearance:checkbox;appearance:checkbox;position:static;display:inline-block;flex-shrink:0;" /> Incluir 10% de desperdicio (recomendado)</label>' +
       '<button type="button" id="calc-m2-btn" style="padding:8px 16px;cursor:pointer;">Calcular</button>' +
       '<div id="calc-m2-resultado" style="margin-top:10px;font-size:14px;"></div>';
 
@@ -90,6 +92,7 @@
   }
 
   function init() {
+    if (document.getElementById('calc-m2-widget-marca')) return; // ya insertado, no duplicar
     if (!window.LS || !LS.product || !LS.product.id) return;
 
     var url = APP_URL + '/public/bulto/' + LS.product.id + '?domain=' + encodeURIComponent(window.location.hostname);
@@ -115,10 +118,14 @@
         var widget = buildWidget(precioCaja, coberturaCaja, unidad);
         titleEl.parentElement.insertBefore(widget, titleEl.nextSibling);
 
-        document.getElementById('calc-m2-btn').addEventListener('click', function () {
-          var m2 = parseFloat(document.getElementById('calc-m2-input').value);
-          var desperdicio = document.getElementById('calc-m2-desperdicio').checked;
-          var resultado = document.getElementById('calc-m2-resultado');
+        var inputM2 = widget.querySelector('#calc-m2-input');
+        var checkDesperdicio = widget.querySelector('#calc-m2-desperdicio');
+        var resultado = widget.querySelector('#calc-m2-resultado');
+        var boton = widget.querySelector('#calc-m2-btn');
+
+        boton.addEventListener('click', function () {
+          var m2 = parseFloat(inputM2.value);
+          var desperdicio = checkDesperdicio.checked;
 
           if (!m2 || m2 <= 0) {
             resultado.style.color = '#c0392b';
