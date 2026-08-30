@@ -1,4 +1,4 @@
-(function () {
+ (function () {
   var APP_URL = 'https://metroscuadrados.onrender.com';
 
   var QTY_INPUT_SELECTORS = [
@@ -81,9 +81,9 @@
       '<label style="display:block;font-size:13px;margin-bottom:4px;">' + unidad.input + '</label>' +
       '<input type="number" id="calc-m2-input" min="0.01" step="0.5" placeholder="' + unidad.input + '" ' +
       'style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box;" />' +
-      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px;">' +
-      '<input type="checkbox" id="calc-m2-desperdicio" checked ' +
-      'style="width:16px;height:16px;margin:0;opacity:1;-webkit-appearance:checkbox;appearance:checkbox;position:static;display:inline-block;flex-shrink:0;" /> Incluir 10% de desperdicio (recomendado)</label>' +
+      '<label id="calc-m2-desperdicio-label" style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;cursor:pointer;">' +
+      '<span id="calc-m2-desperdicio" data-checked="true" style="width:18px;height:18px;border:2px solid #333;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;background:#333;color:#fff;font-size:13px;line-height:1;flex-shrink:0;box-sizing:border-box;">✓</span>' +
+      'Incluir 10% de desperdicio (recomendado)</label>' +
       '<button type="button" id="calc-m2-btn" style="padding:8px 16px;cursor:pointer;">Calcular</button>' +
       '<div id="calc-m2-resultado" style="margin-top:10px;font-size:14px;"></div>';
 
@@ -120,12 +120,22 @@
 
         var inputM2 = widget.querySelector('#calc-m2-input');
         var checkDesperdicio = widget.querySelector('#calc-m2-desperdicio');
+        var labelDesperdicio = widget.querySelector('#calc-m2-desperdicio-label');
         var resultado = widget.querySelector('#calc-m2-resultado');
         var boton = widget.querySelector('#calc-m2-btn');
 
+        labelDesperdicio.addEventListener('click', function (e) {
+          e.preventDefault();
+          var checked = checkDesperdicio.getAttribute('data-checked') === 'true';
+          checked = !checked;
+          checkDesperdicio.setAttribute('data-checked', String(checked));
+          checkDesperdicio.style.background = checked ? '#333' : '#fff';
+          checkDesperdicio.textContent = checked ? '✓' : '';
+        });
+
         boton.addEventListener('click', function () {
           var m2 = parseFloat(inputM2.value);
-          var desperdicio = checkDesperdicio.checked;
+          var desperdicio = checkDesperdicio.getAttribute('data-checked') === 'true';
 
           if (!m2 || m2 <= 0) {
             resultado.style.color = '#c0392b';
@@ -158,4 +168,4 @@
   } else {
     init();
   }
-})();
+})();    
