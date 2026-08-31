@@ -26,7 +26,8 @@
   var UNIDADES = {
     m2: { nombre: 'm²', input: 'Metros cuadrados a cubrir', precioLabel: 'Precio por m²', rindeLabel: 'Rendimiento' },
     ml: { nombre: 'ml', input: 'Metros lineales a cubrir', precioLabel: 'Precio por metro lineal', rindeLabel: 'Rendimiento' },
-    litro: { nombre: 'L', input: 'Litros a cubrir', precioLabel: 'Precio por litro', rindeLabel: 'Rendimiento' }
+    litro: { nombre: 'L', input: 'Litros a cubrir', precioLabel: 'Precio por litro', rindeLabel: 'Rendimiento' },
+    unidad: { nombre: 'unidad(es)', input: 'Cantidad a comprar', precioLabel: 'Precio por unidad', rindeLabel: 'Rendimiento' }
   };
 
   function query(selectors) {
@@ -62,7 +63,7 @@
     return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function buildWidget(precioCaja, coberturaCaja, unidad) {
+  function buildWidget(precioCaja, coberturaCaja, unidad, esUnidadSimple) {
     var precioM2 = precioCaja && coberturaCaja ? precioCaja / coberturaCaja : null;
 
     var wrapper = document.createElement('div');
@@ -72,16 +73,21 @@
     var html = '';
     if (precioM2) {
       html += '<div style="font-size:20px;font-weight:600;margin-bottom:2px;">' + unidad.precioLabel + ': ' + formatPrice(precioM2) + '</div>';
-      html += '<div style="font-size:14px;color:#666;margin-bottom:8px;">Precio por caja: ' + formatPrice(precioCaja) + '</div>';
+      if (!esUnidadSimple) {
+        html += '<div style="font-size:14px;color:#666;margin-bottom:8px;">Precio por caja: ' + formatPrice(precioCaja) + '</div>';
+      }
     }
-    html += '<div style="font-size:13px;color:#666;margin-bottom:8px;">' + unidad.rindeLabel + ': <strong>' + coberturaCaja.toFixed(2) + ' ' + unidad.nombre + ' por caja</strong></div>';
+    if (!esUnidadSimple) {
+      html += '<div style="font-size:13px;color:#666;margin-bottom:8px;">' + unidad.rindeLabel + ': <strong>' + coberturaCaja.toFixed(2) + ' ' + unidad.nombre + ' por caja</strong></div>';
+    }
     html +=
       '<label style="display:block;font-size:13px;margin-bottom:4px;">' + unidad.input + '</label>' +
       '<input type="number" id="calc-m2-input" min="0.01" step="0.5" placeholder="' + unidad.input + '" ' +
       'style="width:100%;padding:8px;margin-bottom:8px;box-sizing:border-box;" />' +
+      (esUnidadSimple ? '' :
       '<label id="calc-m2-desperdicio-label" style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;cursor:pointer;">' +
       '<span id="calc-m2-desperdicio" data-checked="true" style="width:18px;height:18px;border:2px solid #333;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;background:#333;color:#fff;font-size:13px;line-height:1;flex-shrink:0;box-sizing:border-box;">✓</span>' +
-      'Incluir 10% de desperdicio (recomendado)</label>' +
+      'Incluir 10% de desperdicio (recomendado)</label>') +
       '<button type="button" id="calc-m2-btn" style="padding:8px 16px;cursor:pointer;">Calcular</button>' +
       '<div id="calc-m2-resultado" style="margin-top:10px;font-size:14px;"></div>';
 
@@ -111,7 +117,7 @@
     fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        if (!data || !data.coberturaCaja || !data.tipoUnidad || data.tipoUnidad === 'unidad') return;
+        if (!data || !data.coberturaCaja || !data.tipoUnidad) return;
         var unidad = UNIDADES[data.tipoUnidad];
         if (!unidad) return;
 
@@ -126,7 +132,8 @@
         var titleEl = query(TITLE_INSERT_SELECTORS);
         if (!titleEl) return;
 
-        var widget = buildWidget(precioCaja, coberturaCaja, unidad);
+        var esUnidadSimple = data.tipoUnidad === 'unidad';
+        var widget = buildWidget(precioCaja, coberturaCaja, unidad, esUnidadSimple);
         titleEl.parentElement.insertBefore(widget, titleEl.nextSibling);
 
         var inputM2 = widget.querySelector('#calc-m2-input');
@@ -135,22 +142,38 @@
         var resultado = widget.querySelector('#calc-m2-resultado');
         var boton = widget.querySelector('#calc-m2-btn');
 
-        labelDesperdicio.addEventListener('click', function (e) {
-          e.preventDefault();
-          var checked = checkDesperdicio.getAttribute('data-checked') === 'true';
-          checked = !checked;
-          checkDesperdicio.setAttribute('data-checked', String(checked));
-          checkDesperdicio.style.background = checked ? '#333' : '#fff';
-          checkDesperdicio.textContent = checked ? '✓' : '';
-        });
+        if (labelDesperdicio) {
+          labelDesperdicio.addEventListener('click', function (e) {
+            e.preventDefault();
+            var checked = checkDesperdicio.getAttribute('data-checked') === 'true';
+            checked = !checked;
+            checkDesperdicio.setAttribute('data-checked', String(checked));
+            checkDesperdicio.style.background = checked ? '#333' : '#fff';
+            checkDesperdicio.textContent = checked ? '✓' : '';
+          });
+        }
 
         boton.addEventListener('click', function () {
           var m2 = parseFloat(inputM2.value);
-          var desperdicio = checkDesperdicio.getAttribute('data-checked') === 'true';
+          var desperdicio = checkDesperdicio ? checkDesperdicio.getAttribute('data-checked') === 'true' : false;
 
           if (!m2 || m2 <= 0) {
             resultado.style.color = '#c0392b';
-            resultado.textContent = 'Ingresá los metros cuadrados a cubrir.';
+            resultado.textContent = 'Ingresá una cantidad valida.';
+            return;
+          }
+
+          if (esUnidadSimple) {
+            var cantidad = Math.ceil(m2);
+            qtyInput.value = cantidad;
+            qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+            resultado.style.color = '#27632a';
+            var textoUnidad = 'Cantidad actualizada: <strong>' + cantidad + ' unidad(es)</strong>.';
+            if (precioCaja) {
+              textoUnidad += '<br>Total estimado: <strong>' + formatPrice(cantidad * precioCaja) + '</strong>.';
+            }
+            resultado.innerHTML = textoUnidad;
             return;
           }
 
