@@ -60,7 +60,19 @@
     return null;
   }
 
+  function esFichaDeProducto(pathname) {
+    var partes = pathname.split('/').filter(Boolean);
+    return partes.length >= 2 && partes[0] === 'productos';
+  }
+
   function init() {
+    // Nunca correr dentro de la ficha de un producto individual (aunque
+    // tenga varias tarjetas de "productos relacionados" abajo, que
+    // podrian confundirse con una grilla de categoria). Se detecta por
+    // la URL en vez de LS, que no esta disponible de forma confiable
+    // en todas las fichas de esta tienda.
+    if (esFichaDeProducto(window.location.pathname)) return;
+
     var selectorCombinado = PRICE_SELECTORS.join(',');
     var priceEls = document.querySelectorAll(selectorCombinado);
     if (priceEls.length < 2) return; // pagina de producto individual, no listado
