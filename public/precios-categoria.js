@@ -42,11 +42,6 @@
     return '$' + value.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  // Sube desde el precio (unico por producto) buscando, nivel por
-  // nivel, el ancestro mas cercano que contenga ALGUN link a
-  // /productos/. Como puede haber varios <a> por tarjeta (imagen,
-  // titulo, etc.), buscamos el primero que aparezca al subir de a
-  // poco, para no terminar agarrando un link de otro producto vecino.
   function findHandleParaPrecio(priceEl) {
     var el = priceEl;
     for (var i = 0; i < 10; i++) {
@@ -66,16 +61,11 @@
   }
 
   function init() {
-    // Nunca correr dentro de la ficha de un producto individual (aunque
-    // tenga varias tarjetas de "productos relacionados" abajo, que
-    // podrian confundirse con una grilla de categoria). Se detecta por
-    // la URL en vez de LS, que no esta disponible de forma confiable
-    // en todas las fichas de esta tienda.
     if (esFichaDeProducto(window.location.pathname)) return;
 
     var selectorCombinado = PRICE_SELECTORS.join(',');
     var priceEls = document.querySelectorAll(selectorCombinado);
-    if (priceEls.length < 2) return; // pagina de producto individual, no listado
+    if (priceEls.length < 2) return;
 
     var handleToPriceEl = {};
     priceEls.forEach(function (priceEl) {
