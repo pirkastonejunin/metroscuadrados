@@ -49,8 +49,6 @@
     return isNaN(value) ? null : value;
   }
 
-  // Preferimos el atributo data-product-price (valor exacto en
-  // centavos) si el theme lo trae; si no, parseamos el texto mostrado.
   function getPriceFromElement(el) {
     var raw = el.getAttribute('data-product-price');
     if (raw) {
@@ -102,7 +100,7 @@
   }
 
   function init() {
-    if (document.getElementById('calc-m2-widget-marca')) return; // ya insertado, no duplicar
+    if (document.getElementById('calc-m2-widget-marca')) return;
     if (!esFichaDeProducto(window.location.pathname)) return;
 
     var handle = handleFromUrl(window.location.pathname);
