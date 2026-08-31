@@ -311,4 +311,157 @@ async function fetchAllProducts(storeId, accessToken) {
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
-    if (!Array.isArray(pagina) || pagina.length
+    if (!Array.isArray(pagina) || pagina.length === 0) break;
+    todos = todos.concat(pagina);
+    if (pagina.length < 200) break;
+    page++;
+  }
+  return todos;
+}
+
+app.get('/api/products', async (req, res) => {
+  try {
+    const { store_id, access_token } = await getStoreFromRequest(req);
+    const products = await fetchAllProducts(store_id, access_token);
+    const rendimientos = await getRendimientosDeTienda(store_id);
+    const porProductId = {};
+    rendimientos.forEach((r) => { porProductId[r.product_id] = r; });
+
+    const conCobertura = products.map((p) => {
+      const cache = porProductId[p.id];
+      return {
+        id: p.id,
+        name: p.name && (p.name.es || Object.values(p.name)[0]),
+        sku: p.variants && p.variants[0] ? p.variants[0].sku : '',
+        handle: p.handle && (p.handle.es || Object.values(p.handle)[0]),
+        cobertura: cache ? { value: cache.cobertura } : null,
+        tipo: cache ? { value: cache.tipo } : null
+      };
+    });
+
+    res.json(conCobertura);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bulto-cache/:productId', async (req, res) => {
+  try {
+    const storeId = req.query.store_id;
+    if (!storeId) return res.status(400).json({ error: 'Falta store_id' });
+
+    const productId = req.params.productId;
+    const { cobertura, tipo, handle } = req.body;
+
+    const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
+    if (!tipo || tiposValidos.indexOf(tipo) === -1) {
+      return res.status(400).json({ error: 'Tipo de unidad invalido' });
+    }
+    const coberturaFinal = tipo === 'unidad' ? 1 : parseFloat(cobertura);
+    if (!coberturaFinal || coberturaFinal <= 0) {
+      return res.status(400).json({ error: 'Rendimiento invalido' });
+    }
+
+    await guardarRendimientoCache(parseInt(storeId, 10), productId, tipo, coberturaFinal, handle);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/bulto/:productId', async (req, res) => {
+  try {
+    const { store_id, access_token } = await getStoreFromRequest(req);
+    const productId = req.params.productId;
+    const { cobertura, tipo, handle } = req.body;
+
+    const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
+    if (!tipo || tiposValidos.indexOf(tipo) === -1) {
+      return res.status(400).json({ error: 'Tipo de unidad invalido' });
+    }
+    const coberturaFinal = tipo === 'unidad' ? 1 : parseFloat(cobertura);
+    if (!coberturaFinal || coberturaFinal <= 0) {
+      return res.status(400).json({ error: 'Rendimiento invalido' });
+    }
+
+    await saveMetafieldValue(store_id, access_token, productId, KEY_COBERTURA, coberturaFinal);
+    await saveMetafieldValue(store_id, access_token, productId, KEY_TIPO, tipo);
+    await guardarRendimientoCache(store_id, productId, tipo, coberturaFinal, handle);
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/public/catalogo-precios', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const domain = req.query.domain;
+    if (!domain) throw new Error('Falta el parametro domain.');
+
+    const store = await getStoreByDomain(domain);
+    if (!store) throw new Error('Dominio no reconocido: ' + domain);
+
+    const rendimientos = await getRendimientosDeTienda(store.store_id);
+    const productos = rendimientos
+      .filter((r) => r.handle && r.tipo !== 'unidad')
+      .map((r) => ({ handle: r.handle, coberturaCaja: parseFloat(r.cobertura), tipoUnidad: r.tipo }));
+
+    res.json({ productos });
+  } catch (err) {
+    res.status(500).json({ productos: [], error: err.message });
+  }
+});
+
+app.get('/public/bulto-handle/:handle', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const domain = req.query.domain;
+    if (!domain) throw new Error('Falta el parametro domain.');
+
+    const store = await getStoreByDomain(domain);
+    if (!store) throw new Error('Dominio no reconocido: ' + domain);
+
+    const intentar = async () => {
+      const col = await getRendimientosCollection();
+      return col.findOne({ store_id: store.store_id, handle: req.params.handle });
+    };
+    let cache;
+    try {
+      cache = await intentar();
+    } catch (err) {
+      mongoClient = null;
+      cache = await intentar();
+    }
+
+    res.json({
+      coberturaCaja: cache ? parseFloat(cache.cobertura) : null,
+      tipoUnidad: cache ? cache.tipo : null
+    });
+  } catch (err) {
+    res.status(500).json({ coberturaCaja: null, tipoUnidad: null, error: err.message });
+  }
+});
+
+app.get('/public/bulto/:productId', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  try {
+    const domain = req.query.domain;
+    if (!domain) throw new Error('Falta el parametro domain.');
+
+    const store = await getStoreByDomain(domain);
+    if (!store) throw new Error('Dominio no reconocido: ' + domain);
+
+    const cache = await getRendimientoUno(store.store_id, req.params.productId);
+    res.json({
+      coberturaCaja: cache ? parseFloat(cache.cobertura) : null,
+      tipoUnidad: cache ? cache.tipo : null
+    });
+  } catch (err) {
+    res.status(500).json({ coberturaCaja: null, tipoUnidad: null, error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || 8000;
+app.listen(PORT, () => console.log('Corriendo en puerto ' + PORT));
