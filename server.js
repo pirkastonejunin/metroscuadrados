@@ -12,8 +12,6 @@ const NAMESPACE = process.env.METAFIELD_NAMESPACE || 'calculadora_m2';
 const KEY_COBERTURA = 'cobertura_m2_caja';
 const KEY_TIPO = 'tipo_unidad';
 
-// ---------- Mongo: una tienda por documento (store_id como _id) ----------
-
 let mongoClient;
 async function getStoresCollection() {
   if (!mongoClient) {
@@ -45,7 +43,7 @@ async function upsertStore(storeId, domain, accessToken) {
   try {
     await intentar();
   } catch (err) {
-    mongoClient = null; // fuerza reconexion
+    mongoClient = null;
     await intentar();
   }
 }
@@ -156,7 +154,6 @@ function apiHeaders(token) {
   };
 }
 
-// Toma el store_id de la query (?store_id=123) y busca sus credenciales.
 async function getStoreFromRequest(req) {
   const storeId = req.query.store_id;
   if (!storeId) {
@@ -168,8 +165,6 @@ async function getStoreFromRequest(req) {
   }
   return store;
 }
-
-// ---------- OAuth ----------
 
 app.get('/install', (req, res) => {
   const url = 'https://www.tiendanube.com/apps/' + process.env.CLIENT_ID + '/authorize';
@@ -199,8 +194,6 @@ app.get('/auth/callback', async (req, res) => {
     const storeId = data.user_id;
     const accessToken = data.access_token;
 
-    // Trae el dominio de la tienda para poder identificarla despues
-    // desde el script del storefront (que solo conoce su propio dominio).
     const storeInfoResp = await fetch(API_BASE + '/' + storeId + '/store', {
       headers: apiHeaders(accessToken)
     });
@@ -210,7 +203,6 @@ app.get('/auth/callback', async (req, res) => {
 
     await upsertStore(storeId, domain, accessToken);
 
-    // Activa el script en esta tienda (instalacion automatica no disponible)
     if (process.env.SCRIPT_ID) {
       try {
         await fetch(API_BASE + '/' + storeId + '/scripts', {
@@ -232,7 +224,6 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-// Por si una tienda ya se instalo antes de tener SCRIPT_ID configurado
 app.get('/admin/activar-script', async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
@@ -254,8 +245,6 @@ app.get('/admin/activar-script', async (req, res) => {
   }
 });
 
-// ---------- Lista de tiendas instaladas (para el selector en admin.html) ----------
-
 app.get('/api/stores', async (req, res) => {
   try {
     const stores = await listStores();
@@ -265,8 +254,6 @@ app.get('/api/stores', async (req, res) => {
   }
 });
 
-// Diagnostico: permite corregir a mano el dominio de una tienda si
-// la deteccion automatica fallo al instalar.
 app.post('/admin/set-domain', async (req, res) => {
   try {
     const { store_id, domain } = req.body;
@@ -279,8 +266,6 @@ app.post('/admin/set-domain', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ---------- Metafields ----------
 
 async function getMetafieldValue(storeId, token, productId, key) {
   const response = await fetch(
@@ -326,174 +311,4 @@ async function fetchAllProducts(storeId, accessToken) {
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
-    if (!Array.isArray(pagina) || pagina.length === 0) break;
-    todos = todos.concat(pagina);
-    if (pagina.length < 200) break; // ultima pagina
-    page++;
-  }
-  return todos;
-}
-
-// ---------- Productos ----------
-
-app.get('/api/products', async (req, res) => {
-  try {
-    const { store_id, access_token } = await getStoreFromRequest(req);
-    const products = await fetchAllProducts(store_id, access_token);
-    const rendimientos = await getRendimientosDeTienda(store_id);
-    const porProductId = {};
-    rendimientos.forEach((r) => { porProductId[r.product_id] = r; });
-
-    const conCobertura = products.map((p) => {
-      const cache = porProductId[p.id];
-      return {
-        id: p.id,
-        name: p.name && (p.name.es || Object.values(p.name)[0]),
-        sku: p.variants && p.variants[0] ? p.variants[0].sku : '',
-        handle: p.handle && (p.handle.es || Object.values(p.handle)[0]),
-        cobertura: cache ? { value: cache.cobertura } : null,
-        tipo: cache ? { value: cache.tipo } : null
-      };
-    });
-
-    res.json(conCobertura);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Version rapida para carga masiva: guarda SOLO en el cache de Mongo,
-// sin sincronizar con Tiendanube (evita miles de llamadas a su API
-// cuando se importan catalogos grandes por Excel). El boton "Guardar"
-// individual de la tabla si sincroniza ambos lados.
-app.post('/api/bulto-cache/:productId', async (req, res) => {
-  try {
-    const storeId = req.query.store_id;
-    if (!storeId) return res.status(400).json({ error: 'Falta store_id' });
-
-    const productId = req.params.productId;
-    const { cobertura, tipo, handle } = req.body;
-
-    const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
-    if (!tipo || tiposValidos.indexOf(tipo) === -1) {
-      return res.status(400).json({ error: 'Tipo de unidad invalido' });
-    }
-    const coberturaFinal = tipo === 'unidad' ? 1 : parseFloat(cobertura);
-    if (!coberturaFinal || coberturaFinal <= 0) {
-      return res.status(400).json({ error: 'Rendimiento invalido' });
-    }
-
-    await guardarRendimientoCache(parseInt(storeId, 10), productId, tipo, coberturaFinal, handle);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/bulto/:productId', async (req, res) => {
-  try {
-    const { store_id, access_token } = await getStoreFromRequest(req);
-    const productId = req.params.productId;
-    const { cobertura, tipo, handle } = req.body;
-
-    const tiposValidos = ['m2', 'ml', 'litro', 'unidad'];
-    if (!tipo || tiposValidos.indexOf(tipo) === -1) {
-      return res.status(400).json({ error: 'Tipo de unidad invalido' });
-    }
-    const coberturaFinal = tipo === 'unidad' ? 1 : parseFloat(cobertura);
-    if (!coberturaFinal || coberturaFinal <= 0) {
-      return res.status(400).json({ error: 'Rendimiento invalido' });
-    }
-
-    await saveMetafieldValue(store_id, access_token, productId, KEY_COBERTURA, coberturaFinal);
-    await saveMetafieldValue(store_id, access_token, productId, KEY_TIPO, tipo);
-    await guardarRendimientoCache(store_id, productId, tipo, coberturaFinal, handle);
-
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Endpoint PUBLICO liviano para la grilla de categoria: devuelve
-// handle + rendimiento de todos los productos configurados de la
-// tienda, sin golpear la API de Tiendanube (todo sale del cache).
-app.get('/public/catalogo-precios', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  try {
-    const domain = req.query.domain;
-    if (!domain) throw new Error('Falta el parametro domain.');
-
-    const store = await getStoreByDomain(domain);
-    if (!store) throw new Error('Dominio no reconocido: ' + domain);
-
-    const rendimientos = await getRendimientosDeTienda(store.store_id);
-    const productos = rendimientos
-      .filter((r) => r.handle && r.tipo !== 'unidad')
-      .map((r) => ({ handle: r.handle, coberturaCaja: parseFloat(r.cobertura), tipoUnidad: r.tipo }));
-
-    res.json({ productos });
-  } catch (err) {
-    res.status(500).json({ productos: [], error: err.message });
-  }
-});
-
-// ---------- Endpoint publico consultado por storefront.js ----------
-// El script no sabe su store_id, pero si su propio dominio
-// (window.location.hostname), asi que buscamos la tienda por dominio.
-
-// Igual que /public/bulto/:productId, pero busca por handle (la parte
-// de la URL) en vez de por ID de producto. Usado por storefront.js
-// porque el objeto LS.product no esta disponible de forma confiable
-// en todas las fichas de esta tienda.
-app.get('/public/bulto-handle/:handle', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  try {
-    const domain = req.query.domain;
-    if (!domain) throw new Error('Falta el parametro domain.');
-
-    const store = await getStoreByDomain(domain);
-    if (!store) throw new Error('Dominio no reconocido: ' + domain);
-
-    const intentar = async () => {
-      const col = await getRendimientosCollection();
-      return col.findOne({ store_id: store.store_id, handle: req.params.handle });
-    };
-    let cache;
-    try {
-      cache = await intentar();
-    } catch (err) {
-      mongoClient = null;
-      cache = await intentar();
-    }
-
-    res.json({
-      coberturaCaja: cache ? parseFloat(cache.cobertura) : null,
-      tipoUnidad: cache ? cache.tipo : null
-    });
-  } catch (err) {
-    res.status(500).json({ coberturaCaja: null, tipoUnidad: null, error: err.message });
-  }
-});
-
-app.get('/public/bulto/:productId', async (req, res) => {
-  res.set('Access-Control-Allow-Origin', '*');
-  try {
-    const domain = req.query.domain;
-    if (!domain) throw new Error('Falta el parametro domain.');
-
-    const store = await getStoreByDomain(domain);
-    if (!store) throw new Error('Dominio no reconocido: ' + domain);
-
-    const cache = await getRendimientoUno(store.store_id, req.params.productId);
-    res.json({
-      coberturaCaja: cache ? parseFloat(cache.cobertura) : null,
-      tipoUnidad: cache ? cache.tipo : null
-    });
-  } catch (err) {
-    res.status(500).json({ coberturaCaja: null, tipoUnidad: null, error: err.message });
-  }
-});
-
-const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => console.log('Corriendo en puerto ' + PORT));
+    if (!Array.isArray(pagina) || pagina.length
