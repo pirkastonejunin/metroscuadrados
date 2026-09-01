@@ -94,7 +94,7 @@
 
   function handleFromUrl(pathname) {
     var match = pathname.match(/\/productos\/([^\/\?#]+)/);
-    return match ? match[1] : null;
+    return match ? match[1].toLowerCase() : null;
   }
 
   function esFichaDeProducto(pathname) {
