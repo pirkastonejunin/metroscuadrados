@@ -37,6 +37,14 @@
       (m2/ml/litro/unidad) y RindePorCaja en Excel, 3) volvé a subir el
       mismo archivo con Importar. No cambies la columna ID.
     </p>
+    <p style="font-size:13px;color:#555;">
+      <strong>Columna Asociados:</strong> productos que se sugieren junto
+      con este (pegamento, pastina, etc). Formato
+      <code>SKU:rinde|SKU:rinde</code> — el número es cuántos m² (o la
+      unidad que corresponda) rinde una unidad de ese asociado.
+      Ejemplo: <code>MAPESET-30:5|PASTINA-2:8</code> = una bolsa de
+      Mapeset cada 5 m² y una pastina cada 8 m².
+    </p>
     <button onclick="descargarPlantilla()">Descargar backup / plantilla actual (.xlsx)</button>
     <br /><br />
     <input type="file" id="archivoExcel" accept=".xlsx,.xls" />
@@ -46,7 +54,7 @@
 
   <table id="tabla">
     <thead>
-      <tr><th>Producto</th><th>SKU</th><th>Unidad</th><th>Rinde por</th><th>Nombre del envase</th><th></th></tr>
+      <tr><th>Producto</th><th>Categoría</th><th>SKU</th><th>Unidad</th><th>Rinde por</th><th>Envase</th><th>Asociados (SKU:rinde|SKU:rinde)</th><th></th></tr>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
@@ -126,12 +134,15 @@
         const tr = document.createElement('tr');
         const tipoActual = p.tipo ? p.tipo.value : 'm2';
         const envaseActual = p.envase ? p.envase.value : 'caja';
+        const asociadosActual = p.asociados ? p.asociados.value : '';
         tr.innerHTML =
           '<td>' + p.name + '</td>' +
+          '<td class="sku">' + (p.categoria || '-') + '</td>' +
           '<td class="sku">' + (p.sku || '-') + '</td>' +
           '<td><select id="select-tipo-' + p.id + '" onchange="actualizarCampoRendimiento(' + p.id + ')">' + opcionesUnidad(tipoActual) + '</select></td>' +
           '<td><input type="number" min="0.01" step="0.01" value="' + (p.cobertura ? p.cobertura.value : '') + '" id="input-cobertura-' + p.id + '" /></td>' +
-          '<td><input type="text" list="lista-envases" placeholder="caja" value="' + envaseActual + '" style="width:100px;" id="input-envase-' + p.id + '" /></td>' +
+          '<td><input type="text" list="lista-envases" placeholder="caja" value="' + envaseActual + '" style="width:90px;" id="input-envase-' + p.id + '" /></td>' +
+          '<td><input type="text" placeholder="MAPESET-30:5|PASTINA-2:8" value="' + asociadosActual.replace(/"/g, '&quot;') + '" style="width:220px;" id="input-asociados-' + p.id + '" /></td>' +
           '<td><button onclick="guardar(' + p.id + ')">Guardar</button> <span class="ok" id="ok-' + p.id + '"></span></td>';
         tbody.appendChild(tr);
         actualizarCampoRendimiento(p.id);
@@ -142,13 +153,14 @@
       const cobertura = document.getElementById('input-cobertura-' + id).value;
       const tipo = document.getElementById('select-tipo-' + id).value;
       const envase = document.getElementById('input-envase-' + id).value.trim() || 'caja';
+      const asociados = document.getElementById('input-asociados-' + id).value.trim();
       const producto = productosActuales.find(p => p.id === id);
       const okEl = document.getElementById('ok-' + id);
       okEl.textContent = 'Guardando...';
       const res = await fetch('/api/bulto/' + id + '?store_id=' + storeIdActual, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cobertura, tipo, handle: producto ? producto.handle : null, envase })
+        body: JSON.stringify({ cobertura, tipo, handle: producto ? producto.handle : null, envase, asociados })
       });
       okEl.textContent = res.ok ? 'Guardado ✓' : 'Error';
       setTimeout(() => okEl.textContent = '', 2000);
@@ -158,11 +170,13 @@
       const filas = productosActuales.map(p => ({
         ID: p.id,
         Producto: p.name,
+        Categoria: p.categoria || '',
         SKU: p.sku || '',
         Handle: p.handle || '',
         Unidad: p.tipo ? p.tipo.value : 'm2',
         RindePorCaja: p.cobertura ? p.cobertura.value : '',
-        Envase: p.envase ? p.envase.value : 'caja'
+        Envase: p.envase ? p.envase.value : 'caja',
+        Asociados: p.asociados ? p.asociados.value : ''
       }));
       const hoja = XLSX.utils.json_to_sheet(filas);
       const libro = XLSX.utils.book_new();
@@ -197,6 +211,7 @@
         const tipo = (fila.Unidad || '').toString().trim();
         const cobertura = fila.RindePorCaja;
         const envase = (fila.Envase || 'caja').toString().trim() || 'caja';
+        const asociados = (fila.Asociados || '').toString().trim();
 
         if (!id) { continue; }
         if (tiposValidos.indexOf(tipo) === -1) {
@@ -214,7 +229,7 @@
           const res = await fetch('/api/bulto-cache/' + id + '?store_id=' + storeIdActual, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cobertura: coberturaFinal, tipo, handle: producto ? producto.handle : null, envase })
+            body: JSON.stringify({ cobertura: coberturaFinal, tipo, handle: producto ? producto.handle : null, envase, asociados })
           });
           if (res.ok) {
             ok++;

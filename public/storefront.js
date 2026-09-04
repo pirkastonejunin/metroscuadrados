@@ -86,7 +86,8 @@
       '<span id="calc-m2-desperdicio" data-checked="true" style="width:18px;height:18px;border:2px solid #333;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;background:#333;color:#fff;font-size:13px;line-height:1;flex-shrink:0;box-sizing:border-box;">✓</span>' +
       'Incluir 10% de desperdicio (recomendado)</label>' +
       '<button type="button" id="calc-m2-btn" style="padding:8px 16px;cursor:pointer;">Calcular</button>' +
-      '<div id="calc-m2-resultado" style="margin-top:10px;font-size:14px;"></div>';
+      '<div id="calc-m2-resultado" style="margin-top:10px;font-size:14px;"></div>' +
+      '<div id="calc-m2-asociados" style="margin-top:14px;font-size:14px;"></div>';
 
     wrapper.innerHTML = html;
     return wrapper;
@@ -120,6 +121,7 @@
 
         var coberturaEnvase = data.coberturaCaja;
         var envase = data.envase || 'caja';
+        var asociados = data.asociados || [];
 
         var qtyInput = findQtyInput();
         if (!qtyInput) return;
@@ -173,7 +175,58 @@
           }
           texto += '<br>La cantidad ya se actualizó arriba.';
           resultado.innerHTML = texto;
+
+          renderAsociados(cantidadAjustada);
         });
+
+        function renderAsociados(cantidadNecesaria) {
+          var cont = widget.querySelector('#calc-m2-asociados');
+          if (!asociados.length) { cont.innerHTML = ''; return; }
+
+          var html = '<div style="border-top:1px solid #ddd;padding-top:12px;">' +
+            '<div style="font-weight:600;margin-bottom:8px;">También vas a necesitar</div>';
+
+          asociados.forEach(function (a, i) {
+            var cantidad = Math.ceil(cantidadNecesaria / a.rinde);
+            html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">';
+            if (a.imagen) {
+              html += '<img src="' + a.imagen + '" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:4px;flex-shrink:0;" />';
+            }
+            html += '<div style="flex:1;min-width:0;">' +
+              (a.url
+                ? '<a href="' + a.url + '" style="font-weight:600;text-decoration:underline;">' + a.nombre + '</a>'
+                : '<span style="font-weight:600;">' + a.nombre + '</span>') +
+              '<div style="font-size:13px;color:#666;">' + cantidad + ' x' +
+              (a.precio ? ' — ' + formatPrice(cantidad * a.precio) : '') + '</div>' +
+              '</div>';
+            if (a.variant_id) {
+              html += '<button type="button" class="calc-m2-add" data-variant="' + a.variant_id +
+                '" data-cantidad="' + cantidad + '" style="padding:6px 12px;cursor:pointer;flex-shrink:0;">Agregar</button>';
+            }
+            html += '</div>';
+          });
+
+          html += '</div>';
+          cont.innerHTML = html;
+
+          cont.querySelectorAll('.calc-m2-add').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var variantId = btn.getAttribute('data-variant');
+              var cant = btn.getAttribute('data-cantidad');
+              btn.textContent = 'Agregando...';
+              btn.disabled = true;
+
+              fetch('/comprar/' + variantId + '?quantity=' + cant, { method: 'GET' })
+                .then(function () {
+                  btn.textContent = 'Agregado ✓';
+                })
+                .catch(function () {
+                  btn.textContent = 'Error';
+                  btn.disabled = false;
+                });
+            });
+          });
+        }
       })
       .catch(function () {});
   }
