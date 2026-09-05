@@ -13,7 +13,9 @@
 //                         precargados una vez y reutilizados en cada
 //                         cotización de ESE tipo de obra puntual
 //   - formas_pago       : formas de pago con % de descuento o recargo
-//   - tarifas_mano_obra : tarifa configurable por tienda (store_id)
+//   - tarifas_mano_obra : tarifa de mano de obra, propia de cada tipo de obra
+//                         (store_id + tipoObraId) — cada tipo de obra cotiza
+//                         su propia mano de obra
 //   - cotizaciones      : historial de presupuestos armados
 //
 // Integración (ver INTEGRACION.md): en server.js
@@ -107,15 +109,18 @@ const TARIFA_DEFAULT = {
   nivelacion_m2: 0
 };
 
-async function getTarifas(storeId) {
+// Las tarifas de mano de obra son propias de cada tipo de obra (cada obra
+// tiene su propia cotización de mano de obra), por eso se buscan/guardan por
+// store_id + tipoObraId en vez de una única tarifa por tienda.
+async function getTarifas(storeId, tipoObraId) {
   return conReintento(async () => {
     const col = await getTarifasCollection();
-    const doc = await col.findOne({ _id: storeId });
+    const doc = await col.findOne({ store_id: storeId, tipoObraId: String(tipoObraId) });
     return Object.assign({}, TARIFA_DEFAULT, doc || {});
   });
 }
 
-async function setTarifas(storeId, tarifas) {
+async function setTarifas(storeId, tipoObraId, tarifas) {
   const datos = {
     pisos_m2: Number(tarifas.pisos_m2) || 0,
     zocalos_ml: Number(tarifas.zocalos_ml) || 0,
@@ -124,7 +129,11 @@ async function setTarifas(storeId, tarifas) {
   };
   await conReintento(async () => {
     const col = await getTarifasCollection();
-    await col.updateOne({ _id: storeId }, { $set: datos }, { upsert: true });
+    await col.updateOne(
+      { store_id: storeId, tipoObraId: String(tipoObraId) },
+      { $set: Object.assign({ store_id: storeId, tipoObraId: String(tipoObraId) }, datos) },
+      { upsert: true }
+    );
   });
   return datos;
 }
@@ -490,9 +499,12 @@ router.delete('/tipos-obra/:id', async (req, res) => {
     const store = await getStoreFromQuery(req);
     const col = await getTiposObraCollection();
     await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
-    // Se borran en cascada los catálogos por SKU propios de este tipo de obra.
+    // Se borran en cascada los catálogos por SKU y la tarifa de mano de obra
+    // propios de este tipo de obra.
     const itemsCol = await getTipoObraItemsCollection();
     await itemsCol.deleteMany({ store_id: store.store_id, tipoObraId: String(req.params.id) });
+    const tarifasCol = await getTarifasCollection();
+    await tarifasCol.deleteMany({ store_id: store.store_id, tipoObraId: String(req.params.id) });
     res.json({ ok: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -626,23 +638,23 @@ router.delete('/formas-pago/:id', async (req, res) => {
 });
 
 // =====================================================================
-// Rutas: tarifas de mano de obra
+// Rutas: tarifas de mano de obra (propias de cada tipo de obra)
 // =====================================================================
 
-router.get('/tarifas', async (req, res) => {
+router.get('/tipos-obra/:tipoObraId/tarifas', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const tarifas = await getTarifas(store.store_id);
+    const tarifas = await getTarifas(store.store_id, req.params.tipoObraId);
     res.json(tarifas);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-router.post('/tarifas', async (req, res) => {
+router.post('/tipos-obra/:tipoObraId/tarifas', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const tarifas = await setTarifas(store.store_id, req.body || {});
+    const tarifas = await setTarifas(store.store_id, req.params.tipoObraId, req.body || {});
     res.json(tarifas);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -662,7 +674,7 @@ router.post('/calcular', async (req, res) => {
 
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, productos, tipoObraId),
-      getTarifas(store.store_id),
+      getTarifas(store.store_id, tipoObraId),
       (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
 
@@ -682,7 +694,7 @@ router.post('/guardar', async (req, res) => {
 
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, productos, tipoObraId),
-      getTarifas(store.store_id),
+      getTarifas(store.store_id, tipoObraId),
       (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
 
