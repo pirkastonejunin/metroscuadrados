@@ -3,10 +3,15 @@
 //
 // Se monta como router Express dentro del server.js existente. Lee la MISMA
 // base Mongo Atlas (db "calculadora_m2") y las mismas colecciones "stores" y
-// "rendimientos" que ya usa la app (no las toca, solo lee), y agrega dos
+// "rendimientos" que ya usa la app (no las toca, solo lee), y agrega
 // colecciones nuevas propias de este módulo:
-//   - tarifas_mano_obra : una tarifa configurable por tienda (store_id)
-//   - cotizaciones      : historial de presupuestos armados
+//   - tipos_obra         : tipos de obra configurados (Piso flotante, Deck...)
+//                          con el rubro real de Tiendanube para cada material
+//   - niveladores_puerta : niveladores de puerta precargados por SKU (no
+//                          tienen rubro propio en Tiendanube)
+//   - formas_pago        : formas de pago con % de descuento o recargo
+//   - tarifas_mano_obra  : tarifa configurable por tienda (store_id)
+//   - cotizaciones       : historial de presupuestos armados
 //
 // Integración (ver INTEGRACION.md): en server.js
 //   const cotizadorRouter = require('./cotizador');
@@ -14,7 +19,7 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
 
 const router = express.Router();
@@ -50,6 +55,9 @@ async function getStoresCollection() { return (await getDb()).collection('stores
 async function getRendimientosCollection() { return (await getDb()).collection('rendimientos'); }
 async function getTarifasCollection() { return (await getDb()).collection('tarifas_mano_obra'); }
 async function getCotizacionesCollection() { return (await getDb()).collection('cotizaciones'); }
+async function getTiposObraCollection() { return (await getDb()).collection('tipos_obra'); }
+async function getNiveladoresPuertaCollection() { return (await getDb()).collection('niveladores_puerta'); }
+async function getFormasPagoCollection() { return (await getDb()).collection('formas_pago'); }
 
 async function getStoreById(storeId) {
   return conReintento(async () => {
@@ -148,7 +156,7 @@ async function fetchAllProducts(storeId, accessToken) {
 // Devuelve solo los productos que Mato ya configuro con rendimiento (misma
 // info que carga en el admin de la calculadora m2), sumando precio actual e
 // imagen desde Tiendanube para poder armar el presupuesto.
-async function productosConfigurados(store, { rubro, q } = {}) {
+async function productosConfigurados(store) {
   const [productos, rendimientos] = await Promise.all([
     fetchAllProducts(store.store_id, store.access_token),
     getRendimientosDeTienda(store.store_id)
@@ -157,7 +165,7 @@ async function productosConfigurados(store, { rubro, q } = {}) {
   const porProductId = {};
   rendimientos.forEach((r) => { porProductId[r.product_id] = r; });
 
-  let resultado = productos
+  return productos
     .filter((p) => porProductId[p.id])
     .map((p) => {
       const cache = porProductId[p.id];
@@ -177,26 +185,44 @@ async function productosConfigurados(store, { rubro, q } = {}) {
       };
     })
     .filter((p) => p.cobertura > 0 && p.precio !== null);
+}
 
-  if (rubro) {
-    const rubroLower = String(rubro).toLowerCase();
-    resultado = resultado.filter((p) => p.categoria.toLowerCase().includes(rubroLower));
+// Busca UN producto puntual por SKU exacto en Tiendanube (para los
+// niveladores de puerta, que no tienen rubro propio). No usa cache: el
+// precio que trae siempre es el vigente.
+async function productoPorSku(store, sku) {
+  const response = await fetch(
+    API_BASE + '/' + store.store_id + '/products?q=' + encodeURIComponent(sku) +
+      '&fields=id,name,handle,variants,images&per_page=10',
+    { headers: apiHeaders(store.access_token) }
+  );
+  const productos = await response.json();
+  if (!Array.isArray(productos)) return null;
+
+  for (const p of productos) {
+    if (!p.variants) continue;
+    for (const v of p.variants) {
+      if (v.sku && String(v.sku).toLowerCase() === String(sku).toLowerCase()) {
+        return {
+          nombre: nombreLocalizado(p.name),
+          precio: v.price ? parseFloat(v.price) : null,
+          imagen: p.images && p.images[0] ? p.images[0].src : null,
+          variant_id: v.id
+        };
+      }
+    }
   }
-  if (q) {
-    const qLower = String(q).toLowerCase();
-    resultado = resultado.filter((p) => p.nombre.toLowerCase().includes(qLower));
-  }
-  return resultado;
+  return null;
 }
 
 // ---------- Calculo de la cotizacion (funcion pura, sin red ni DB) ----------
 
-// productos: { piso, zocalo, puerta, nivelacion } -> cada uno (si aplica)
-//   { id, nombre, tipo, cobertura, envase, precio, categoria }
-// obra: { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, manoObra }
-// tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2 }
-function calcularItem({ rubro, unidadObra, cantidadObra, producto }) {
-  const necesarios = cantidadObra / producto.cobertura;
+// producto: { id, nombre, tipo, cobertura, envase, precio, categoria }
+function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPct }) {
+  const pct = Number(desperdicioPct) || 0;
+  const factor = 1 + pct / 100;
+  const cantidadConDesperdicio = cantidadObra * factor;
+  const necesarios = cantidadConDesperdicio / producto.cobertura;
   const paquetes = Math.ceil(necesarios - 1e-9); // tolerancia de redondeo
   const subtotal = round2(paquetes * producto.precio);
   return {
@@ -206,6 +232,8 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto }) {
     categoria: producto.categoria || '',
     unidadObra,
     cantidadObra: round2(cantidadObra),
+    desperdicioPct: pct,
+    cantidadConDesperdicio: round2(cantidadConDesperdicio),
     rendimiento: producto.cobertura,
     envase: producto.envase,
     paquetesNecesarios: paquetes,
@@ -216,7 +244,11 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto }) {
 
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
-function calcularCotizacion({ obra, productos, tarifas }) {
+// productos: { piso, zocalo, puerta, nivelacion } -> cada uno (si aplica)
+// obra: { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, manoObra, desperdicioPctPiso }
+// tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2 }
+// formasPago: [{ nombre, tipo: 'descuento'|'recargo', porcentaje }]
+function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
   const items = [];
   const faltantes = [];
   let totalProductos = 0;
@@ -228,11 +260,15 @@ function calcularCotizacion({ obra, productos, tarifas }) {
   const cantidadPuertas = Number(obra.cantidadPuertas) || 0;
   const requiereNivelacion = !!obra.requiereNivelacion;
   const manoObra = !!obra.manoObra;
+  const desperdicioPctPiso = Number(obra.desperdicioPctPiso) || 0;
 
   if (m2Pisos > 0) {
     if (!productos.piso) faltantes.push('piso');
     else {
-      const it = calcularItem({ rubro: 'Piso', unidadObra: 'm2', cantidadObra: m2Pisos, producto: productos.piso });
+      const it = calcularItem({
+        rubro: 'Piso', unidadObra: 'm2', cantidadObra: m2Pisos,
+        producto: productos.piso, desperdicioPct: desperdicioPctPiso
+      });
       items.push(it);
       totalProductos += it.subtotal;
       if (manoObra) totalManoObra += round2(m2Pisos * t.pisos_m2);
@@ -252,7 +288,7 @@ function calcularCotizacion({ obra, productos, tarifas }) {
   if (cantidadPuertas > 0) {
     if (!productos.puerta) faltantes.push('puerta');
     else {
-      const it = calcularItem({ rubro: 'Puerta', unidadObra: 'unidad', cantidadObra: cantidadPuertas, producto: productos.puerta });
+      const it = calcularItem({ rubro: 'Nivelador de puerta', unidadObra: 'unidad', cantidadObra: cantidadPuertas, producto: productos.puerta });
       items.push(it);
       totalProductos += it.subtotal;
       if (manoObra) totalManoObra += round2(cantidadPuertas * t.puertas_unidad);
@@ -262,7 +298,7 @@ function calcularCotizacion({ obra, productos, tarifas }) {
   if (requiereNivelacion) {
     if (!productos.nivelacion) faltantes.push('nivelacion');
     else if (m2Pisos > 0) {
-      const it = calcularItem({ rubro: 'Nivelación', unidadObra: 'm2', cantidadObra: m2Pisos, producto: productos.nivelacion });
+      const it = calcularItem({ rubro: 'Nivelación de piso', unidadObra: 'm2', cantidadObra: m2Pisos, producto: productos.nivelacion });
       items.push(it);
       totalProductos += it.subtotal;
       if (manoObra) totalManoObra += round2(m2Pisos * t.nivelacion_m2);
@@ -273,48 +309,267 @@ function calcularCotizacion({ obra, productos, tarifas }) {
   totalManoObra = round2(totalManoObra);
   const total = round2(totalProductos + totalManoObra);
 
-  return { items, faltantes, totalProductos, totalManoObra, total };
+  const formasPagoCalculadas = (formasPago || []).map((fp) => {
+    const pct = Number(fp.porcentaje) || 0;
+    const factor = fp.tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
+    return {
+      nombre: fp.nombre,
+      tipo: fp.tipo,
+      porcentaje: pct,
+      total: round2(total * factor)
+    };
+  });
+
+  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas };
 }
 
 // ---------- Helper: arma el detalle de "productos" para calcularCotizacion
-// a partir de los ids elegidos en el front, buscando cobertura/precio real ----------
+// a partir de los ids elegidos en el front ----------
 
 async function resolverProductosElegidos(store, seleccion) {
-  const ids = Object.values(seleccion || {}).filter(Boolean);
-  if (ids.length === 0) return {};
-
-  const catalogo = await productosConfigurados(store);
-  const porId = {};
-  catalogo.forEach((p) => { porId[p.id] = p; });
-
+  seleccion = seleccion || {};
   const resultado = {};
-  for (const clave of Object.keys(seleccion || {})) {
-    const id = seleccion[clave];
-    if (!id) continue;
-    const prod = porId[parseInt(id, 10)] || porId[id];
-    if (prod) resultado[clave] = prod;
+
+  const necesitaCatalogo = ['piso', 'zocalo', 'nivelacion'].some((k) => seleccion[k]);
+  if (necesitaCatalogo) {
+    const catalogo = await productosConfigurados(store);
+    ['piso', 'zocalo', 'nivelacion'].forEach((clave) => {
+      const id = seleccion[clave];
+      if (!id) return;
+      const prod = catalogo.find((p) => p.id === parseInt(id, 10) || p.id === id);
+      if (prod) resultado[clave] = prod;
+    });
   }
+
+  if (seleccion.puerta) {
+    const col = await getNiveladoresPuertaCollection();
+    let item = null;
+    try {
+      item = await col.findOne({ _id: new ObjectId(seleccion.puerta), store_id: store.store_id });
+    } catch (e) { item = null; }
+    if (item) {
+      const info = await productoPorSku(store, item.sku);
+      if (info && info.precio !== null) {
+        resultado.puerta = {
+          id: item._id,
+          nombre: info.nombre,
+          categoria: 'Niveladores de puerta',
+          tipo: 'unidad',
+          cobertura: Number(item.cobertura) || 1,
+          envase: 'unidad',
+          precio: info.precio
+        };
+      }
+    }
+  }
+
   return resultado;
 }
 
 // =====================================================================
-// Rutas
+// Rutas: catálogo / rubros
 // =====================================================================
 
-// Catalogo de productos ya configurados (con rendimiento), filtrable por
-// rubro (categoria de Tiendanube) y/o texto libre. Usado por el selector
-// de productos del cotizador.
+// Catalogo completo de productos ya configurados (con rendimiento y precio).
 router.get('/productos', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const productos = await productosConfigurados(store, { rubro: req.query.rubro, q: req.query.q });
+    const productos = await productosConfigurados(store);
     res.json(productos);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-// Tarifas de mano de obra por tienda
+// Rubros (categorías reales de Tiendanube) agrupados por tipo de unidad,
+// para usar como ayuda al configurar un tipo de obra.
+router.get('/rubros-disponibles', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const productos = await productosConfigurados(store);
+    const grupos = { m2: new Set(), ml: new Set(), unidad: new Set(), litro: new Set() };
+    productos.forEach((p) => {
+      if (p.categoria && grupos[p.tipo]) grupos[p.tipo].add(p.categoria);
+    });
+    const ordenar = (set) => Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+    res.json({ m2: ordenar(grupos.m2), ml: ordenar(grupos.ml), unidad: ordenar(grupos.unidad), litro: ordenar(grupos.litro) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// =====================================================================
+// Rutas: tipos de obra
+// =====================================================================
+
+function normalizarTipoObra(doc) {
+  return {
+    id: doc._id,
+    nombre: doc.nombre,
+    rubroPiso: doc.rubroPiso || '',
+    rubroZocalo: doc.rubroZocalo || '',
+    rubroNivelacion: doc.rubroNivelacion || '',
+    desperdicioDefaultPct: doc.desperdicioDefaultPct || 0
+  };
+}
+
+router.get('/tipos-obra', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getTiposObraCollection();
+    const items = await col.find({ store_id: store.store_id }).sort({ nombre: 1 }).toArray();
+    res.json(items.map(normalizarTipoObra));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/tipos-obra', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const { id, nombre, rubroPiso, rubroZocalo, rubroNivelacion, desperdicioDefaultPct } = req.body || {};
+    if (!nombre || !rubroPiso) {
+      return res.status(400).json({ error: 'Falta el nombre o el rubro de piso.' });
+    }
+    const datos = {
+      store_id: store.store_id,
+      nombre: String(nombre).trim(),
+      rubroPiso: String(rubroPiso).trim(),
+      rubroZocalo: rubroZocalo ? String(rubroZocalo).trim() : '',
+      rubroNivelacion: rubroNivelacion ? String(rubroNivelacion).trim() : '',
+      desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
+    };
+    const col = await getTiposObraCollection();
+    if (id) {
+      await col.updateOne({ _id: new ObjectId(id), store_id: store.store_id }, { $set: datos });
+      res.json(Object.assign({ id }, datos));
+    } else {
+      const { insertedId } = await col.insertOne(datos);
+      res.json(Object.assign({ id: insertedId }, datos));
+    }
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.delete('/tipos-obra/:id', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getTiposObraCollection();
+    await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// =====================================================================
+// Rutas: niveladores de puerta (precargados por SKU, sin rubro propio)
+// =====================================================================
+
+router.get('/niveladores-puerta', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getNiveladoresPuertaCollection();
+    const items = await col.find({ store_id: store.store_id }).toArray();
+    const resultado = [];
+    for (const it of items) {
+      const info = await productoPorSku(store, it.sku);
+      resultado.push({
+        id: it._id,
+        sku: it.sku,
+        cobertura: Number(it.cobertura) || 1,
+        nombre: info ? info.nombre : ('SKU ' + it.sku + ' (no encontrado en Tiendanube)'),
+        precio: info ? info.precio : null,
+        imagen: info ? info.imagen : null
+      });
+    }
+    res.json(resultado);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/niveladores-puerta', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const { sku, cobertura } = req.body || {};
+    if (!sku) return res.status(400).json({ error: 'Falta el SKU.' });
+
+    const info = await productoPorSku(store, sku);
+    if (!info) return res.status(404).json({ error: 'No se encontro ningun producto con ese SKU en Tiendanube.' });
+
+    const datos = { store_id: store.store_id, sku: String(sku).trim(), cobertura: Number(cobertura) || 1 };
+    const col = await getNiveladoresPuertaCollection();
+    const { insertedId } = await col.insertOne(datos);
+    res.json(Object.assign({ id: insertedId }, datos, info));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.delete('/niveladores-puerta/:id', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getNiveladoresPuertaCollection();
+    await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// =====================================================================
+// Rutas: formas de pago
+// =====================================================================
+
+router.get('/formas-pago', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getFormasPagoCollection();
+    const items = await col.find({ store_id: store.store_id }).toArray();
+    res.json(items.map((d) => ({ id: d._id, nombre: d.nombre, tipo: d.tipo, porcentaje: d.porcentaje })));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/formas-pago', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const { id, nombre, tipo, porcentaje } = req.body || {};
+    if (!nombre || !tipo) return res.status(400).json({ error: 'Falta el nombre o el tipo.' });
+    if (['descuento', 'recargo'].indexOf(tipo) === -1) return res.status(400).json({ error: 'Tipo invalido.' });
+
+    const datos = { store_id: store.store_id, nombre: String(nombre).trim(), tipo, porcentaje: Number(porcentaje) || 0 };
+    const col = await getFormasPagoCollection();
+    if (id) {
+      await col.updateOne({ _id: new ObjectId(id), store_id: store.store_id }, { $set: datos });
+      res.json(Object.assign({ id }, datos));
+    } else {
+      const { insertedId } = await col.insertOne(datos);
+      res.json(Object.assign({ id: insertedId }, datos));
+    }
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.delete('/formas-pago/:id', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getFormasPagoCollection();
+    await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// =====================================================================
+// Rutas: tarifas de mano de obra
+// =====================================================================
+
 router.get('/tarifas', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
@@ -335,38 +590,42 @@ router.post('/tarifas', async (req, res) => {
   }
 });
 
-// Calcula (sin guardar) — vista previa
+// =====================================================================
+// Rutas: calcular / guardar / historial / pdf
+// =====================================================================
+
 router.post('/calcular', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
     const { obra, productos } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
 
-    const [productosElegidos, tarifas] = await Promise.all([
+    const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, productos),
-      getTarifas(store.store_id)
+      getTarifas(store.store_id),
+      (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
 
-    const resultado = calcularCotizacion({ obra, productos: productosElegidos, tarifas });
+    const resultado = calcularCotizacion({ obra, productos: productosElegidos, tarifas, formasPago });
     res.json(resultado);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-// Calcula y guarda en el historial
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { obra, productos, cliente, direccion } = req.body || {};
+    const { obra, productos, cliente, direccion, tipoObraNombre } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
 
-    const [productosElegidos, tarifas] = await Promise.all([
+    const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, productos),
-      getTarifas(store.store_id)
+      getTarifas(store.store_id),
+      (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
 
-    const resultado = calcularCotizacion({ obra, productos: productosElegidos, tarifas });
+    const resultado = calcularCotizacion({ obra, productos: productosElegidos, tarifas, formasPago });
     if (resultado.faltantes.length > 0) {
       return res.status(400).json({ error: 'Falta elegir producto para: ' + resultado.faltantes.join(', ') });
     }
@@ -376,11 +635,13 @@ router.post('/guardar', async (req, res) => {
       fecha: new Date(),
       cliente: cliente || '',
       direccion: direccion || '',
+      tipoObraNombre: tipoObraNombre || '',
       obra,
       items: resultado.items,
       totalProductos: resultado.totalProductos,
       totalManoObra: resultado.totalManoObra,
-      total: resultado.total
+      total: resultado.total,
+      formasPago: resultado.formasPago
     };
 
     const col = await getCotizacionesCollection();
@@ -391,14 +652,13 @@ router.post('/guardar', async (req, res) => {
   }
 });
 
-// Historial: listado resumido
 router.get('/historial', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
     const col = await getCotizacionesCollection();
     const lista = await col
       .find({ store_id: store.store_id })
-      .project({ cliente: 1, direccion: 1, fecha: 1, total: 1 })
+      .project({ cliente: 1, direccion: 1, fecha: 1, total: 1, tipoObraNombre: 1 })
       .sort({ fecha: -1 })
       .limit(200)
       .toArray();
@@ -408,11 +668,9 @@ router.get('/historial', async (req, res) => {
   }
 });
 
-// Historial: una cotizacion completa
 router.get('/historial/:id', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { ObjectId } = require('mongodb');
     const col = await getCotizacionesCollection();
     const doc = await col.findOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
     if (!doc) return res.status(404).json({ error: 'No encontrada.' });
@@ -422,11 +680,9 @@ router.get('/historial/:id', async (req, res) => {
   }
 });
 
-// PDF de una cotizacion guardada
 router.get('/pdf/:id', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { ObjectId } = require('mongodb');
     const col = await getCotizacionesCollection();
     const doc = await col.findOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
     if (!doc) return res.status(404).json({ error: 'No encontrada.' });
@@ -440,7 +696,7 @@ router.get('/pdf/:id', async (req, res) => {
     pdf.fontSize(18).text('Presupuesto de obra', { align: 'left' });
     pdf.moveDown(0.3);
     pdf.fontSize(10).fillColor('#555')
-      .text('Fecha: ' + new Date(doc.fecha).toLocaleDateString('es-AR'));
+      .text('Fecha: ' + new Date(doc.fecha).toLocaleDateString('es-AR') + (doc.tipoObraNombre ? '  ·  Tipo de obra: ' + doc.tipoObraNombre : ''));
     pdf.fillColor('#000');
     pdf.moveDown(0.8);
 
@@ -476,7 +732,10 @@ router.get('/pdf/:id', async (req, res) => {
     (doc.items || []).forEach((it) => {
       const y0 = pdf.y;
       pdf.fontSize(9);
-      pdf.text(it.rubro + ' — ' + it.producto, colX[0], y0, { width: 145 });
+      const nombreConDesperdicio = it.desperdicioPct
+        ? it.rubro + ' — ' + it.producto + ' (+' + it.desperdicioPct + '% desp.)'
+        : it.rubro + ' — ' + it.producto;
+      pdf.text(nombreConDesperdicio, colX[0], y0, { width: 145 });
       pdf.text(it.cantidadObra + ' ' + it.unidadObra, colX[1], y0, { width: 110 });
       pdf.text(String(it.rendimiento) + '/' + it.envase, colX[2], y0, { width: 65 });
       pdf.text(it.paquetesNecesarios + ' ' + it.envase + '(s)', colX[3], y0, { width: 65 });
@@ -492,6 +751,19 @@ router.get('/pdf/:id', async (req, res) => {
     pdf.text('Subtotal productos: $ ' + doc.totalProductos.toFixed(2), { align: 'right' });
     if (doc.totalManoObra) pdf.text('Mano de obra: $ ' + doc.totalManoObra.toFixed(2), { align: 'right' });
     pdf.fontSize(13).text('Total: $ ' + doc.total.toFixed(2), { align: 'right' });
+
+    if (doc.formasPago && doc.formasPago.length) {
+      pdf.moveDown(0.8);
+      pdf.fontSize(10).fillColor('#555').text('Formas de pago', { align: 'right' });
+      pdf.fillColor('#000');
+      doc.formasPago.forEach((fp) => {
+        const signo = fp.tipo === 'recargo' ? '+' : '-';
+        pdf.fontSize(10).text(
+          fp.nombre + (fp.porcentaje ? ' (' + signo + fp.porcentaje + '%)' : '') + ': $ ' + fp.total.toFixed(2),
+          { align: 'right' }
+        );
+      });
+    }
 
     pdf.end();
   } catch (err) {
