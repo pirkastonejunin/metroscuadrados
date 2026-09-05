@@ -135,8 +135,8 @@
         <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
       </div>
       <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
-      <label class="check"><input type="checkbox" id="utilizaManta"> Utiliza manta</label>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
+      <p class="hint">El check de manta aparece más adelante, junto con la elección del piso (no todos los pisos la necesitan).</p>
       <div class="actions">
         <button class="secondary" id="btnVolverTipoObra">← Volver</button>
         <button class="primary" id="btnContinuarProductos">Elegir productos →</button>
@@ -184,13 +184,12 @@
     <div class="subtabs">
       <button class="subtab-btn active" data-subtab="tipos">Tipos de obra</button>
       <button class="subtab-btn" data-subtab="pagos">Formas de pago</button>
-      <button class="subtab-btn" data-subtab="tarifas">Tarifas de mano de obra</button>
     </div>
 
     <!-- Tipos de obra -->
     <div id="cfg-tipos" class="card">
       <h2>Tipos de obra</h2>
-      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) tiene su propio rubro de piso/zócalo en Tiendanube, y sus propios catálogos de niveladores de puerta, nivelantes de piso y manta (cargados por SKU, en "Catálogos").</p>
+      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) tiene su propio rubro de piso/zócalo en Tiendanube, y su propia configuración de niveladores de puerta, nivelantes de piso, manta y mano de obra (en "Catálogos") — cada tipo de obra cotiza su mano de obra por separado.</p>
       <div id="cfg-tipos-lista"></div>
       <div class="cfg-form">
         <h3 id="cfg-tipos-form-titulo">Agregar tipo de obra</h3>
@@ -208,24 +207,45 @@
         </div>
       </div>
 
-      <!-- Catálogos por SKU del tipo de obra que se esté gestionando -->
+      <!-- Catálogos y mano de obra del tipo de obra que se esté gestionando -->
       <div class="cfg-form hidden" id="cfg-catalogos-panel">
         <h3 id="cfg-catalogos-titulo">Catálogos de: —</h3>
-        <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación) y manta no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
 
         <div class="subtabs">
           <button class="catsub-btn active" data-cat="puerta">Niveladores de puerta</button>
           <button class="catsub-btn" data-cat="nivelacion">Nivelantes de piso</button>
           <button class="catsub-btn" data-cat="manta">Manta</button>
+          <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
         </div>
 
-        <div id="cfg-catalogo-lista"></div>
-        <div class="grid" style="margin-top:10px;">
-          <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
-          <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="1" step="1" value="1"></div>
+        <!-- Vista: catálogo por SKU (niveladores de puerta / nivelantes de piso / manta) -->
+        <div id="cfg-catalogo-sku">
+          <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación) y manta no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
+          <div id="cfg-catalogo-lista"></div>
+          <div class="grid" style="margin-top:10px;">
+            <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
+            <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="1" step="1" value="1"></div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="btnAgregarCatalogoItem">Buscar y agregar</button>
+          </div>
         </div>
+
+        <!-- Vista: tarifas de mano de obra de este tipo de obra -->
+        <div id="cfg-catalogo-tarifas" class="hidden">
+          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta no tiene tarifa propia: su colocación se considera incluida en la tarifa de piso.</p>
+          <div class="grid">
+            <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
+            <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
+            <div class="field"><label>Por puerta ($)</label><input type="number" id="t_puertas_unidad" min="0" step="0.01"></div>
+            <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="btnGuardarTarifasTipoObra">Guardar tarifas</button>
+          </div>
+        </div>
+
         <div class="actions">
-          <button class="primary" id="btnAgregarCatalogoItem">Buscar y agregar</button>
           <button class="secondary" id="btnCerrarCatalogos">Cerrar</button>
         </div>
       </div>
@@ -250,19 +270,6 @@
         </div>
         <div class="actions"><button class="primary" id="btnAgregarFormaPago">Guardar</button></div>
       </div>
-    </div>
-
-    <!-- Tarifas de mano de obra -->
-    <div id="cfg-tarifas" class="card hidden">
-      <h2>Tarifas de mano de obra</h2>
-      <p class="hint">Se aplican solo cuando la cotización tiene tildado "Incluir mano de obra". La manta no tiene tarifa propia: su colocación se considera incluida en la tarifa de piso.</p>
-      <div class="grid">
-        <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
-        <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
-        <div class="field"><label>Por puerta ($)</label><input type="number" id="t_puertas_unidad" min="0" step="0.01"></div>
-        <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
-      </div>
-      <div class="actions"><button class="primary" id="btnGuardarTarifas">Guardar tarifas</button></div>
     </div>
 
   </div>
@@ -317,12 +324,11 @@ $$('.tab-btn').forEach(b => b.addEventListener('click', () => cambiarTab(b.datas
 
 function cambiarSubtab(nombre){
   $$('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === nombre));
-  ['tipos','pagos','tarifas'].forEach(t => {
+  ['tipos','pagos'].forEach(t => {
     $('#cfg-' + t).classList.toggle('hidden', t !== nombre);
   });
   if (nombre === 'tipos') cargarConfigTipos();
   if (nombre === 'pagos') cargarConfigPagos();
-  if (nombre === 'tarifas') cargarTarifas();
 }
 $$('.subtab-btn').forEach(b => b.addEventListener('click', () => cambiarSubtab(b.dataset.subtab)));
 
@@ -395,7 +401,6 @@ function leerObra(){
     mlZocalos: parseFloat($('#mlZocalos').value) || 0,
     cantidadPuertas: parseInt($('#cantidadPuertas').value, 10) || 0,
     requiereNivelacion: $('#requiereNivelacion').checked,
-    utilizaManta: $('#utilizaManta').checked,
     manoObra: $('#manoObra').checked,
     desperdicioPctPiso: parseFloat($('#desperdicioPctPiso').value) || 0
   };
@@ -425,13 +430,13 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   mostrarMsg(null);
   if (!storeId){ mostrarMsg('Elegí una tienda primero.'); return; }
   const obra = leerObra();
-  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion && !obra.utilizaManta){
-    mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas, nivelación o manta).');
+  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion){
+    mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas o nivelación).');
     return;
   }
   try{
     await asegurarCatalogo();
-    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.utilizaManta){
+    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0){
       await asegurarCatalogosTipoObra();
     }
   }catch(e){
@@ -489,6 +494,29 @@ function renderPasoProductos(obra){
     const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase());
     inputNombre.addEventListener('input', pintar);
     pintar();
+
+    // El check de manta va justo después del piso: muchos pisos ya la traen
+    // incorporada y otros no, así que la decisión depende del piso elegido.
+    if (r.clave === 'piso'){
+      const bloqueManta = document.createElement('div');
+      bloqueManta.className = 'rubro-block';
+      bloqueManta.innerHTML =
+        '<label class="check"><input type="checkbox" id="chkUtilizaManta"> ¿Utiliza manta? (algunos pisos ya la traen incorporada, otros no)</label>' +
+        '<div id="bloque-manta-detalle" class="hidden">' +
+          '<div class="rubro-tag">' + obra.m2Pisos + ' m² a cubrir</div>' +
+          '<div class="prod-list" data-lista="manta"></div>' +
+        '</div>';
+      cont.appendChild(bloqueManta);
+      const chkManta = bloqueManta.querySelector('#chkUtilizaManta');
+      const detalleManta = bloqueManta.querySelector('#bloque-manta-detalle');
+      const listaManta = bloqueManta.querySelector('[data-lista="manta"]');
+      chkManta.addEventListener('change', () => {
+        detalleManta.classList.toggle('hidden', !chkManta.checked);
+        if (chkManta.checked){
+          pintarListaCatalogo(listaManta, 'manta', catalogosTipoObraCache.manta, obra.m2Pisos);
+        }
+      });
+    }
   });
 
   if (obra.cantidadPuertas > 0){
@@ -511,17 +539,6 @@ function renderPasoProductos(obra){
       '<div class="prod-list" data-lista="nivelacion"></div>';
     cont.appendChild(bloque);
     pintarListaCatalogo(bloque.querySelector('.prod-list'), 'nivelacion', catalogosTipoObraCache.nivelacion, obra.m2Pisos);
-  }
-
-  if (obra.utilizaManta && obra.m2Pisos > 0){
-    const bloque = document.createElement('div');
-    bloque.className = 'rubro-block';
-    bloque.innerHTML =
-      '<h4>Manta</h4>' +
-      '<div class="rubro-tag">' + obra.m2Pisos + ' m² a cubrir</div>' +
-      '<div class="prod-list" data-lista="manta"></div>';
-    cont.appendChild(bloque);
-    pintarListaCatalogo(bloque.querySelector('.prod-list'), 'manta', catalogosTipoObraCache.manta, obra.m2Pisos);
   }
 }
 
@@ -589,6 +606,8 @@ function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
 $('#btnCalcular').addEventListener('click', async () => {
   mostrarMsg(null);
   const obra = leerObra();
+  const chkManta = document.getElementById('chkUtilizaManta');
+  obra.utilizaManta = chkManta ? chkManta.checked : false;
   const seleccionIds = {};
   Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
 
@@ -652,6 +671,8 @@ function renderResumen(data){
 $('#btnGuardar').addEventListener('click', async () => {
   mostrarMsg(null);
   const obra = leerObra();
+  const chkManta = document.getElementById('chkUtilizaManta');
+  obra.utilizaManta = chkManta ? chkManta.checked : false;
   const seleccionIds = {};
   Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
   try{
@@ -685,7 +706,6 @@ $('#btnNueva').addEventListener('click', () => {
   $('#cliente').value=''; $('#direccion').value='';
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
   $('#requiereNivelacion').checked=false;
-  $('#utilizaManta').checked=false;
   $('#manoObra').checked=false;
   mostrarMsg(null);
   $('#paso-resumen').classList.add('hidden');
@@ -841,13 +861,15 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
   }
 });
 
-// ---------- Configuración: catálogos por SKU de un tipo de obra ----------
+// ---------- Configuración: catálogos por SKU / mano de obra de un tipo de obra ----------
 function abrirCatalogos(tipoObra){
   gestionandoTipoObraId = String(tipoObra.id);
   categoriaActivaCatalogo = 'puerta';
   $('#cfg-catalogos-titulo').textContent = 'Catálogos de: ' + tipoObra.nombre;
   $('#cfg-catalogos-panel').classList.remove('hidden');
   $$('.catsub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'puerta'));
+  $('#cfg-catalogo-sku').classList.remove('hidden');
+  $('#cfg-catalogo-tarifas').classList.add('hidden');
   $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT.puerta;
   $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
   cargarCatalogoActivo();
@@ -862,9 +884,17 @@ $$('.catsub-btn').forEach(b => {
   b.addEventListener('click', () => {
     categoriaActivaCatalogo = b.dataset.cat;
     $$('.catsub-btn').forEach(x => x.classList.toggle('active', x === b));
-    $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
-    $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
-    cargarCatalogoActivo();
+    if (categoriaActivaCatalogo === 'tarifas'){
+      $('#cfg-catalogo-sku').classList.add('hidden');
+      $('#cfg-catalogo-tarifas').classList.remove('hidden');
+      cargarTarifasTipoObra();
+    } else {
+      $('#cfg-catalogo-tarifas').classList.add('hidden');
+      $('#cfg-catalogo-sku').classList.remove('hidden');
+      $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
+      $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+      cargarCatalogoActivo();
+    }
   });
 });
 
@@ -956,9 +986,10 @@ $('#btnAgregarFormaPago').addEventListener('click', async () => {
   cargarConfigPagos();
 });
 
-// ---------- Configuración: tarifas de mano de obra ----------
-async function cargarTarifas(){
-  const res = await fetch('/api/cotizador/tarifas?store_id=' + storeId);
+// ---------- Configuración: tarifas de mano de obra (propias de cada tipo de obra) ----------
+async function cargarTarifasTipoObra(){
+  if (!gestionandoTipoObraId) return;
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId);
   const t = await res.json();
   if (!res.ok) return;
   $('#t_pisos_m2').value = t.pisos_m2;
@@ -966,15 +997,16 @@ async function cargarTarifas(){
   $('#t_puertas_unidad').value = t.puertas_unidad;
   $('#t_nivelacion_m2').value = t.nivelacion_m2;
 }
-$('#btnGuardarTarifas').addEventListener('click', async () => {
+$('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
   mostrarMsg(null);
+  if (!gestionandoTipoObraId) return;
   const body = {
     pisos_m2: parseFloat($('#t_pisos_m2').value) || 0,
     zocalos_ml: parseFloat($('#t_zocalos_ml').value) || 0,
     puertas_unidad: parseFloat($('#t_puertas_unidad').value) || 0,
     nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0
   };
-  const res = await fetch('/api/cotizador/tarifas?store_id=' + storeId, {
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
   if (res.ok) mostrarMsg('Tarifas guardadas.', 'ok'); else mostrarMsg('Error al guardar tarifas.');
