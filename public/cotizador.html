@@ -21,6 +21,8 @@
   .subtabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
   .subtab-btn{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
   .subtab-btn.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+  .catsub-btn{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
+  .catsub-btn.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
   .card h2{margin:0 0 14px;font-size:15px;font-weight:600;}
   .card h3{margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
@@ -31,7 +33,6 @@
   .field{margin-bottom:2px;}
   .check{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:14px;}
   .check input{width:auto;}
-  .check.disabled{opacity:.5;}
   button.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;}
   button.primary:disabled{opacity:.45;cursor:not-allowed;}
   button.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;}
@@ -133,7 +134,8 @@
         <div class="field"><label>ml de zócalo</label><input type="number" id="mlZocalos" min="0" step="0.01" value="0"></div>
         <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
       </div>
-      <label class="check" id="checkNivelacionWrap"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
+      <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
+      <label class="check"><input type="checkbox" id="utilizaManta"> Utiliza manta</label>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
       <div class="actions">
         <button class="secondary" id="btnVolverTipoObra">← Volver</button>
@@ -181,7 +183,6 @@
 
     <div class="subtabs">
       <button class="subtab-btn active" data-subtab="tipos">Tipos de obra</button>
-      <button class="subtab-btn" data-subtab="niveladores">Niveladores de puerta</button>
       <button class="subtab-btn" data-subtab="pagos">Formas de pago</button>
       <button class="subtab-btn" data-subtab="tarifas">Tarifas de mano de obra</button>
     </div>
@@ -189,7 +190,7 @@
     <!-- Tipos de obra -->
     <div id="cfg-tipos" class="card">
       <h2>Tipos de obra</h2>
-      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) se conecta con el rubro real de tu catálogo en Tiendanube. El cotizador va a mostrar solo los productos de ese rubro.</p>
+      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) tiene su propio rubro de piso/zócalo en Tiendanube, y sus propios catálogos de niveladores de puerta, nivelantes de piso y manta (cargados por SKU, en "Catálogos").</p>
       <div id="cfg-tipos-lista"></div>
       <div class="cfg-form">
         <h3 id="cfg-tipos-form-titulo">Agregar tipo de obra</h3>
@@ -200,27 +201,33 @@
         <div class="grid">
           <div class="field"><label>Rubro de piso (obligatorio)</label><select id="to_rubroPiso"></select></div>
           <div class="field"><label>Rubro de zócalo (opcional)</label><select id="to_rubroZocalo"><option value="">— No aplica —</option></select></div>
-          <div class="field"><label>Rubro de nivelación de piso (opcional)</label><select id="to_rubroNivelacion"><option value="">— No aplica —</option></select></div>
         </div>
         <div class="actions">
           <button class="primary" id="btnGuardarTipoObra">Guardar</button>
           <button class="secondary hidden" id="btnCancelarEdicionTipo">Cancelar edición</button>
         </div>
       </div>
-    </div>
 
-    <!-- Niveladores de puerta -->
-    <div id="cfg-niveladores" class="card hidden">
-      <h2>Niveladores de puerta</h2>
-      <p class="hint">Los niveladores/perfiles de transición no tienen un rubro propio en Tiendanube. Cargalos una vez por SKU y van a quedar disponibles para elegir en cada cotización, con precio siempre actualizado.</p>
-      <div id="cfg-niveladores-lista"></div>
-      <div class="cfg-form">
-        <h3>Agregar nivelador</h3>
-        <div class="grid">
-          <div class="field"><label>SKU en Tiendanube</label><input type="text" id="nv_sku" placeholder="Ej: NIV-ALU-01"></div>
-          <div class="field"><label>Cuántas puertas cubre 1 unidad</label><input type="number" id="nv_cobertura" min="1" step="1" value="1"></div>
+      <!-- Catálogos por SKU del tipo de obra que se esté gestionando -->
+      <div class="cfg-form hidden" id="cfg-catalogos-panel">
+        <h3 id="cfg-catalogos-titulo">Catálogos de: —</h3>
+        <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación) y manta no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
+
+        <div class="subtabs">
+          <button class="catsub-btn active" data-cat="puerta">Niveladores de puerta</button>
+          <button class="catsub-btn" data-cat="nivelacion">Nivelantes de piso</button>
+          <button class="catsub-btn" data-cat="manta">Manta</button>
         </div>
-        <div class="actions"><button class="primary" id="btnAgregarNivelador">Buscar y agregar</button></div>
+
+        <div id="cfg-catalogo-lista"></div>
+        <div class="grid" style="margin-top:10px;">
+          <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
+          <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="1" step="1" value="1"></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnAgregarCatalogoItem">Buscar y agregar</button>
+          <button class="secondary" id="btnCerrarCatalogos">Cerrar</button>
+        </div>
       </div>
     </div>
 
@@ -248,7 +255,7 @@
     <!-- Tarifas de mano de obra -->
     <div id="cfg-tarifas" class="card hidden">
       <h2>Tarifas de mano de obra</h2>
-      <p class="hint">Se aplican solo cuando la cotización tiene tildado "Incluir mano de obra".</p>
+      <p class="hint">Se aplican solo cuando la cotización tiene tildado "Incluir mano de obra". La manta no tiene tarifa propia: su colocación se considera incluida en la tarifa de piso.</p>
       <div class="grid">
         <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
         <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
@@ -267,13 +274,22 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 let storeId = null;
-let catalogoCache = null;       // catalogo completo de la tienda actual (con rendimiento+precio)
-let tiposObraCache = null;      // tipos de obra configurados
-let tipoObraElegido = null;     // tipo de obra elegido para la cotizacion actual
-let niveladoresCache = null;    // niveladores de puerta precargados
-let seleccion = {};             // { piso: producto, zocalo: producto, puerta: nivelador, nivelacion: producto }
+let catalogoCache = null;          // catalogo completo de la tienda actual (con rendimiento+precio, para piso/zocalo)
+let tiposObraCache = null;         // tipos de obra configurados
+let tipoObraElegido = null;        // tipo de obra elegido para la cotizacion actual
+let catalogosTipoObraCache = null; // { puerta: [...], nivelacion: [...], manta: [...] } del tipo de obra elegido
+let seleccion = {};                // { piso, zocalo, puerta, nivelacion, manta } (producto/item elegido)
 let ultimaCotizacionGuardadaId = null;
 let editandoTipoObraId = null;
+let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
+let categoriaActivaCatalogo = 'puerta';
+
+const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²' };
+const LABEL_COBERTURA_INPUT = {
+  puerta: 'Cuántas puertas cubre 1 unidad',
+  nivelacion: 'Cuántos m² cubre 1 unidad',
+  manta: 'Cuántos m² cubre 1 unidad'
+};
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
@@ -301,11 +317,10 @@ $$('.tab-btn').forEach(b => b.addEventListener('click', () => cambiarTab(b.datas
 
 function cambiarSubtab(nombre){
   $$('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === nombre));
-  ['tipos','niveladores','pagos','tarifas'].forEach(t => {
+  ['tipos','pagos','tarifas'].forEach(t => {
     $('#cfg-' + t).classList.toggle('hidden', t !== nombre);
   });
   if (nombre === 'tipos') cargarConfigTipos();
-  if (nombre === 'niveladores') cargarConfigNiveladores();
   if (nombre === 'pagos') cargarConfigPagos();
   if (nombre === 'tarifas') cargarTarifas();
 }
@@ -326,7 +341,7 @@ async function cargarTiendas(){
     storeId = sel.value;
     catalogoCache = null;
     tiposObraCache = null;
-    niveladoresCache = null;
+    catalogosTipoObraCache = null;
     tipoObraElegido = null;
     seleccion = {};
     cargarPasoTipoObra();
@@ -361,19 +376,7 @@ $('#btnContinuarDatos').addEventListener('click', () => {
   if (!tipoObraElegido){ mostrarMsg('Elegí un tipo de obra.'); return; }
 
   $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
-
-  const wrapNivelacion = $('#checkNivelacionWrap');
-  const checkNivelacion = $('#requiereNivelacion');
-  if (!tipoObraElegido.rubroNivelacion){
-    checkNivelacion.checked = false;
-    checkNivelacion.disabled = true;
-    wrapNivelacion.classList.add('disabled');
-    wrapNivelacion.title = 'Este tipo de obra no tiene configurado un rubro de nivelación.';
-  } else {
-    checkNivelacion.disabled = false;
-    wrapNivelacion.classList.remove('disabled');
-    wrapNivelacion.title = '';
-  }
+  catalogosTipoObraCache = null;
 
   mostrarMsg(null);
   $('#paso-tipo-obra').classList.add('hidden');
@@ -392,6 +395,7 @@ function leerObra(){
     mlZocalos: parseFloat($('#mlZocalos').value) || 0,
     cantidadPuertas: parseInt($('#cantidadPuertas').value, 10) || 0,
     requiereNivelacion: $('#requiereNivelacion').checked,
+    utilizaManta: $('#utilizaManta').checked,
     manoObra: $('#manoObra').checked,
     desperdicioPctPiso: parseFloat($('#desperdicioPctPiso').value) || 0
   };
@@ -405,25 +409,31 @@ async function asegurarCatalogo(){
   return catalogoCache;
 }
 
-async function asegurarNiveladores(){
-  if (niveladoresCache) return niveladoresCache;
-  const res = await fetch('/api/cotizador/niveladores-puerta?store_id=' + storeId);
-  if (!res.ok) throw new Error((await res.json()).error || 'Error al traer niveladores de puerta');
-  niveladoresCache = await res.json();
-  return niveladoresCache;
+async function asegurarCatalogosTipoObra(){
+  if (catalogosTipoObraCache) return catalogosTipoObraCache;
+  const categorias = ['puerta', 'nivelacion', 'manta'];
+  const listas = await Promise.all(categorias.map((cat) =>
+    fetch('/api/cotizador/tipos-obra/' + tipoObraElegido.id + '/items?store_id=' + storeId + '&categoria=' + cat)
+      .then((r) => r.ok ? r.json() : [])
+  ));
+  catalogosTipoObraCache = {};
+  categorias.forEach((cat, i) => { catalogosTipoObraCache[cat] = listas[i]; });
+  return catalogosTipoObraCache;
 }
 
 $('#btnContinuarProductos').addEventListener('click', async () => {
   mostrarMsg(null);
   if (!storeId){ mostrarMsg('Elegí una tienda primero.'); return; }
   const obra = leerObra();
-  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion){
-    mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas o nivelación).');
+  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion && !obra.utilizaManta){
+    mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas, nivelación o manta).');
     return;
   }
   try{
     await asegurarCatalogo();
-    if (obra.cantidadPuertas > 0) await asegurarNiveladores();
+    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.utilizaManta){
+      await asegurarCatalogosTipoObra();
+    }
   }catch(e){
     mostrarMsg(e.message);
     return;
@@ -439,8 +449,7 @@ $('#btnVolverObra').addEventListener('click', () => {
 });
 
 // ---------- Paso 3: elegir productos ----------
-// Cada bloque queda directamente atado al rubro que el tipo de obra tiene
-// configurado — ya no hay que elegirlo a mano en cada cotización.
+// Piso y zócalo siguen atados al rubro que el tipo de obra tiene configurado.
 function bloquesRubro(obra){
   const bloques = [];
   if (obra.m2Pisos > 0){
@@ -448,9 +457,6 @@ function bloquesRubro(obra){
   }
   if (obra.mlZocalos > 0){
     bloques.push({ clave: 'zocalo', titulo: 'Zócalo', tipoEsperado: 'ml', rubro: tipoObraElegido.rubroZocalo });
-  }
-  if (obra.requiereNivelacion && tipoObraElegido.rubroNivelacion){
-    bloques.push({ clave: 'nivelacion', titulo: 'Nivelación de piso', tipoEsperado: 'm2', rubro: tipoObraElegido.rubroNivelacion });
   }
   return bloques;
 }
@@ -493,7 +499,29 @@ function renderPasoProductos(obra){
       '<div class="rubro-tag">' + obra.cantidadPuertas + ' puerta(s) a cubrir</div>' +
       '<div class="prod-list" data-lista="puerta"></div>';
     cont.appendChild(bloque);
-    pintarListaNiveladores(bloque.querySelector('.prod-list'), obra.cantidadPuertas);
+    pintarListaCatalogo(bloque.querySelector('.prod-list'), 'puerta', catalogosTipoObraCache.puerta, obra.cantidadPuertas);
+  }
+
+  if (obra.requiereNivelacion && obra.m2Pisos > 0){
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML =
+      '<h4>Nivelación de piso</h4>' +
+      '<div class="rubro-tag">' + obra.m2Pisos + ' m² a nivelar</div>' +
+      '<div class="prod-list" data-lista="nivelacion"></div>';
+    cont.appendChild(bloque);
+    pintarListaCatalogo(bloque.querySelector('.prod-list'), 'nivelacion', catalogosTipoObraCache.nivelacion, obra.m2Pisos);
+  }
+
+  if (obra.utilizaManta && obra.m2Pisos > 0){
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML =
+      '<h4>Manta</h4>' +
+      '<div class="rubro-tag">' + obra.m2Pisos + ' m² a cubrir</div>' +
+      '<div class="prod-list" data-lista="manta"></div>';
+    cont.appendChild(bloque);
+    pintarListaCatalogo(bloque.querySelector('.prod-list'), 'manta', catalogosTipoObraCache.manta, obra.m2Pisos);
   }
 }
 
@@ -527,19 +555,22 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
   });
 }
 
-function pintarListaNiveladores(listaEl, cantidadPuertas){
-  if (!niveladoresCache || !niveladoresCache.length){
-    listaEl.innerHTML = '<div class="empty">No hay niveladores de puerta configurados. Andá a Configuración → Niveladores de puerta.</div>';
+// Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
+// de piso y manta), todos con la misma forma: { id, sku, cobertura, nombre, precio, imagen }.
+function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
+  if (!lista || !lista.length){
+    listaEl.innerHTML = '<div class="empty">No hay productos cargados en esta categoría para este tipo de obra. Andá a Configuración → Tipos de obra → Catálogos.</div>';
     return;
   }
-  listaEl.innerHTML = niveladoresCache.map(n => {
-    const sel = seleccion.puerta && String(seleccion.puerta.id) === String(n.id);
-    const necesarios = Math.ceil((cantidadPuertas / (n.cobertura || 1)) - 1e-9);
+  const etiqueta = ETIQUETA_COBERTURA[clave] || 'unidad(es)';
+  listaEl.innerHTML = lista.map(n => {
+    const sel = seleccion[clave] && String(seleccion[clave].id) === String(n.id);
+    const necesarios = Math.ceil((cantidadNecesariaBase / (n.cobertura || 1)) - 1e-9);
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + n.id + '">' +
         (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div>' +
-        '<div class="sub">cubre ' + n.cobertura + ' puerta(s) por unidad · necesita ' + necesarios + '</div></div>' +
+        '<div class="sub">cubre ' + n.cobertura + ' ' + etiqueta + ' por unidad · necesita ' + necesarios + '</div></div>' +
         '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div>' +
       '</div>'
     );
@@ -547,9 +578,9 @@ function pintarListaNiveladores(listaEl, cantidadPuertas){
   listaEl.querySelectorAll('.prod-item').forEach(el => {
     el.addEventListener('click', () => {
       const id = el.dataset.id;
-      const item = niveladoresCache.find(n => String(n.id) === String(id));
-      seleccion.puerta = item;
-      pintarListaNiveladores(listaEl, cantidadPuertas);
+      const item = lista.find(n => String(n.id) === String(id));
+      seleccion[clave] = item;
+      pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase);
     });
   });
 }
@@ -565,7 +596,7 @@ $('#btnCalcular').addEventListener('click', async () => {
     const res = await fetch('/api/cotizador/calcular?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ obra, productos: seleccionIds })
+      body: JSON.stringify({ obra, productos: seleccionIds, tipoObraId: tipoObraElegido.id })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al calcular');
@@ -628,7 +659,7 @@ $('#btnGuardar').addEventListener('click', async () => {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        obra, productos: seleccionIds,
+        obra, productos: seleccionIds, tipoObraId: tipoObraElegido.id,
         cliente: $('#cliente').value, direccion: $('#direccion').value,
         tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : ''
       })
@@ -653,8 +684,8 @@ $('#btnNueva').addEventListener('click', () => {
   ultimaCotizacionGuardadaId = null;
   $('#cliente').value=''; $('#direccion').value='';
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
-  $('#requiereNivelacion').checked=false; $('#requiereNivelacion').disabled=false;
-  $('#checkNivelacionWrap').classList.remove('disabled');
+  $('#requiereNivelacion').checked=false;
+  $('#utilizaManta').checked=false;
   $('#manoObra').checked=false;
   mostrarMsg(null);
   $('#paso-resumen').classList.add('hidden');
@@ -714,16 +745,18 @@ function llenarSelectRubros(sel, opciones, permitirVacio){
   if (actual) sel.value = actual;
 }
 
+let tiposObraConfigCache = [];
+
 async function cargarConfigTipos(){
   if (!storeId) return;
   rubrosDisponiblesCache = null;
   const rubros = await asegurarRubrosDisponibles();
   llenarSelectRubros($('#to_rubroPiso'), rubros.m2, false);
   llenarSelectRubros($('#to_rubroZocalo'), rubros.ml, true);
-  llenarSelectRubros($('#to_rubroNivelacion'), rubros.m2, true);
 
   const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId);
   const lista = await res.json();
+  tiposObraConfigCache = lista;
   const cont = $('#cfg-tipos-lista');
   if (!lista.length){
     cont.innerHTML = '<div class="empty">Todavía no hay tipos de obra configurados.</div>';
@@ -734,9 +767,9 @@ async function cargarConfigTipos(){
       '<div><strong>' + escapeHtml(t.nombre) + '</strong><div class="cfg-meta">' +
         'Piso: ' + escapeHtml(t.rubroPiso) +
         (t.rubroZocalo ? ' · Zócalo: ' + escapeHtml(t.rubroZocalo) : '') +
-        (t.rubroNivelacion ? ' · Nivelación: ' + escapeHtml(t.rubroNivelacion) : '') +
         ' · Desperdicio: ' + t.desperdicioDefaultPct + '%</div></div>' +
       '<div style="display:flex;gap:8px;">' +
+        '<button class="secondary small" data-catalogos="' + t.id + '">Catálogos</button>' +
         '<button class="secondary small" data-editar="' + t.id + '">Editar</button>' +
         '<button class="secondary small" data-borrar="' + t.id + '">Borrar</button>' +
       '</div>' +
@@ -752,15 +785,24 @@ async function cargarConfigTipos(){
       $('#to_desperdicio').value = t.desperdicioDefaultPct;
       $('#to_rubroPiso').value = t.rubroPiso;
       $('#to_rubroZocalo').value = t.rubroZocalo || '';
-      $('#to_rubroNivelacion').value = t.rubroNivelacion || '';
       $('#cfg-tipos-form-titulo').textContent = 'Editando: ' + t.nombre;
       $('#btnCancelarEdicionTipo').classList.remove('hidden');
     });
   });
+  cont.querySelectorAll('[data-catalogos]').forEach(b => {
+    b.addEventListener('click', () => {
+      const t = lista.find(x => String(x.id) === b.dataset.catalogos);
+      if (t) abrirCatalogos(t);
+    });
+  });
   cont.querySelectorAll('[data-borrar]').forEach(b => {
     b.addEventListener('click', async () => {
-      if (!confirm('¿Borrar este tipo de obra?')) return;
+      if (!confirm('¿Borrar este tipo de obra? También se van a borrar sus catálogos de niveladores, nivelantes y manta.')) return;
       await fetch('/api/cotizador/tipos-obra/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      if (gestionandoTipoObraId === b.dataset.borrar){
+        gestionandoTipoObraId = null;
+        $('#cfg-catalogos-panel').classList.add('hidden');
+      }
       cargarConfigTipos();
     });
   });
@@ -769,19 +811,19 @@ async function cargarConfigTipos(){
 $('#btnCancelarEdicionTipo').addEventListener('click', () => {
   editandoTipoObraId = null;
   $('#to_nombre').value = ''; $('#to_desperdicio').value = 0;
-  $('#to_rubroPiso').value = ''; $('#to_rubroZocalo').value = ''; $('#to_rubroNivelacion').value = '';
+  $('#to_rubroPiso').value = ''; $('#to_rubroZocalo').value = '';
   $('#cfg-tipos-form-titulo').textContent = 'Agregar tipo de obra';
   $('#btnCancelarEdicionTipo').classList.add('hidden');
 });
 
 $('#btnGuardarTipoObra').addEventListener('click', async () => {
   mostrarMsg(null);
+  const eraNuevo = !editandoTipoObraId;
   const body = {
     id: editandoTipoObraId || undefined,
     nombre: $('#to_nombre').value.trim(),
     rubroPiso: $('#to_rubroPiso').value,
     rubroZocalo: $('#to_rubroZocalo').value,
-    rubroNivelacion: $('#to_rubroNivelacion').value,
     desperdicioDefaultPct: parseFloat($('#to_desperdicio').value) || 0
   };
   if (!body.nombre || !body.rubroPiso){ mostrarMsg('Falta el nombre o el rubro de piso.'); return; }
@@ -792,50 +834,81 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
   if (!res.ok){ mostrarMsg(data.error || 'Error al guardar.'); return; }
   mostrarMsg('Tipo de obra guardado.', 'ok');
   $('#btnCancelarEdicionTipo').click();
-  cargarConfigTipos();
+  await cargarConfigTipos();
+  if (eraNuevo){
+    // Recién creado: abrimos directo sus catálogos para que cargue los SKU.
+    abrirCatalogos({ id: data.id, nombre: data.nombre });
+  }
 });
 
-// ---------- Configuración: niveladores de puerta ----------
-async function cargarConfigNiveladores(){
-  if (!storeId) return;
-  const cont = $('#cfg-niveladores-lista');
+// ---------- Configuración: catálogos por SKU de un tipo de obra ----------
+function abrirCatalogos(tipoObra){
+  gestionandoTipoObraId = String(tipoObra.id);
+  categoriaActivaCatalogo = 'puerta';
+  $('#cfg-catalogos-titulo').textContent = 'Catálogos de: ' + tipoObra.nombre;
+  $('#cfg-catalogos-panel').classList.remove('hidden');
+  $$('.catsub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'puerta'));
+  $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT.puerta;
+  $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  cargarCatalogoActivo();
+}
+
+$('#btnCerrarCatalogos').addEventListener('click', () => {
+  gestionandoTipoObraId = null;
+  $('#cfg-catalogos-panel').classList.add('hidden');
+});
+
+$$('.catsub-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    categoriaActivaCatalogo = b.dataset.cat;
+    $$('.catsub-btn').forEach(x => x.classList.toggle('active', x === b));
+    $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
+    $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+    cargarCatalogoActivo();
+  });
+});
+
+async function cargarCatalogoActivo(){
+  if (!gestionandoTipoObraId) return;
+  const cont = $('#cfg-catalogo-lista');
   cont.innerHTML = '<div class="empty">Cargando...</div>';
-  const res = await fetch('/api/cotizador/niveladores-puerta?store_id=' + storeId);
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items?store_id=' + storeId + '&categoria=' + categoriaActivaCatalogo);
   const lista = await res.json();
-  if (!lista.length){
-    cont.innerHTML = '<div class="empty">Todavía no hay niveladores de puerta cargados.</div>';
-    return;
-  }
-  cont.innerHTML = lista.map(n =>
+  if (!res.ok){ cont.innerHTML = '<div class="empty">' + (lista.error || 'Error al traer el catálogo.') + '</div>'; return; }
+  if (!lista.length){ cont.innerHTML = '<div class="empty">Todavía no hay productos cargados en esta categoría.</div>'; return; }
+  const etiqueta = ETIQUETA_COBERTURA[categoriaActivaCatalogo] || 'unidad(es)';
+  cont.innerHTML = lista.map(it =>
     '<div class="cfg-row">' +
-      '<div><strong>' + escapeHtml(n.nombre) + '</strong><div class="cfg-meta">SKU ' + escapeHtml(n.sku) +
-        ' · cubre ' + n.cobertura + ' puerta(s) · ' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div></div>' +
-      '<button class="secondary small" data-borrar="' + n.id + '">Borrar</button>' +
+      '<div><strong>' + escapeHtml(it.nombre) + '</strong><div class="cfg-meta">SKU ' + escapeHtml(it.sku) +
+        ' · cubre ' + it.cobertura + ' ' + etiqueta + ' · ' + (it.precio !== null ? money(it.precio) : 'sin precio') + '</div></div>' +
+      '<button class="secondary small" data-borrar="' + it.id + '">Borrar</button>' +
     '</div>'
   ).join('');
   cont.querySelectorAll('[data-borrar]').forEach(b => {
     b.addEventListener('click', async () => {
-      if (!confirm('¿Borrar este nivelador?')) return;
-      await fetch('/api/cotizador/niveladores-puerta/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
-      cargarConfigNiveladores();
+      if (!confirm('¿Borrar este producto del catálogo?')) return;
+      await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      cargarCatalogoActivo();
     });
   });
 }
 
-$('#btnAgregarNivelador').addEventListener('click', async () => {
+$('#btnAgregarCatalogoItem').addEventListener('click', async () => {
   mostrarMsg(null);
-  const sku = $('#nv_sku').value.trim();
-  const cobertura = parseInt($('#nv_cobertura').value, 10) || 1;
+  if (!gestionandoTipoObraId) return;
+  const sku = $('#cat_sku').value.trim();
+  const cobertura = parseInt($('#cat_cobertura').value, 10) || 1;
   if (!sku){ mostrarMsg('Cargá un SKU.'); return; }
-  const res = await fetch('/api/cotizador/niveladores-puerta?store_id=' + storeId, {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ sku, cobertura })
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ categoria: categoriaActivaCatalogo, sku, cobertura })
   });
   const data = await res.json();
   if (!res.ok){ mostrarMsg(data.error || 'Error al agregar.'); return; }
-  mostrarMsg('Nivelador agregado: ' + data.nombre, 'ok');
-  $('#nv_sku').value = ''; $('#nv_cobertura').value = 1;
-  niveladoresCache = null;
-  cargarConfigNiveladores();
+  mostrarMsg('Producto agregado: ' + data.nombre, 'ok');
+  $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  catalogosTipoObraCache = null; // invalida cache del paso 3 de "Nueva cotización"
+  cargarCatalogoActivo();
 });
 
 // ---------- Configuración: formas de pago ----------
