@@ -192,7 +192,7 @@ async function productosConfigurados(store, { rubro, q } = {}) {
 // ---------- Calculo de la cotizacion (funcion pura, sin red ni DB) ----------
 
 // productos: { piso, zocalo, puerta, nivelacion } -> cada uno (si aplica)
-//   { id, nombre, tipo, cobertura, envase, precio }
+//   { id, nombre, tipo, cobertura, envase, precio, categoria }
 // obra: { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, manoObra }
 // tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2 }
 function calcularItem({ rubro, unidadObra, cantidadObra, producto }) {
@@ -203,6 +203,7 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto }) {
     rubro,
     productoId: producto.id,
     producto: producto.nombre,
+    categoria: producto.categoria || '',
     unidadObra,
     cantidadObra: round2(cantidadObra),
     rendimiento: producto.cobertura,
