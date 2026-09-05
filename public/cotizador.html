@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cotizador de obra — Piedra Negra</title>
+<style>
+  :root{
+    --bg:#f5f4f2; --panel:#fff; --border:#e2e0db; --text:#2b2a28; --muted:#75726c;
+    --accent:#1f2937; --accent2:#3a3632; --ok:#2f6b3a; --warn:#a3441c;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  header{background:var(--accent);color:#fff;padding:18px 24px;}
+  header h1{margin:0;font-size:19px;font-weight:600;letter-spacing:.2px;}
+  header p{margin:4px 0 0;font-size:13px;color:#c9ccd1;}
+  .wrap{max-width:980px;margin:0 auto;padding:20px;}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
+  .tab-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--panel);cursor:pointer;font-size:13px;color:var(--muted);}
+  .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
+  .card h2{margin:0 0 14px;font-size:15px;font-weight:600;}
+  .card h3{margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;}
+  input[type=text],input[type=number],select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;background:#fff;color:var(--text);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;}
+  .field{margin-bottom:2px;}
+  .check{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:14px;}
+  .check input{width:auto;}
+  button.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;}
+  button.primary:disabled{opacity:.45;cursor:not-allowed;}
+  button.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;}
+  button.link{background:none;border:none;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:13px;padding:0;}
+  .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  .rubro-block{border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;}
+  .rubro-block h4{margin:0 0 10px;font-size:14px;}
+  .search-row{display:flex;gap:8px;margin-bottom:10px;}
+  .prod-list{max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
+  .prod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13.5px;}
+  .prod-item:last-child{border-bottom:none;}
+  .prod-item:hover{background:#faf9f7;}
+  .prod-item.selected{background:#eef2ff;}
+  .prod-item img{width:32px;height:32px;object-fit:cover;border-radius:5px;background:#eee;flex-shrink:0;}
+  .prod-item .meta{flex:1;}
+  .prod-item .meta .name{font-weight:600;}
+  .prod-item .meta .sub{color:var(--muted);font-size:12px;}
+  .prod-item .precio{font-weight:600;white-space:nowrap;}
+  .empty{color:var(--muted);font-size:13px;padding:14px;text-align:center;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;}
+  tfoot td{border-bottom:none;font-weight:600;}
+  .totales{text-align:right;margin-top:10px;font-size:14px;}
+  .totales .grand{font-size:19px;font-weight:700;margin-top:4px;}
+  .msg{padding:10px 14px;border-radius:8px;font-size:13.5px;margin-bottom:14px;}
+  .msg.error{background:#fdecea;color:var(--warn);}
+  .msg.ok{background:#eaf5ec;color:var(--ok);}
+  .hidden{display:none !important;}
+  .hist-row{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
+  .hist-row:last-child{border-bottom:none;}
+  .hist-row .d{color:var(--muted);font-size:12px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Cotizador de obra</h1>
+  <p>Herramienta interna — Piedra Negra</p>
+</header>
+
+<div class="wrap">
+
+  <div class="grid" style="margin-bottom:14px;">
+    <div class="field">
+      <label for="selTienda">Tienda</label>
+      <select id="selTienda"></select>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="nueva">Nueva cotización</button>
+    <button class="tab-btn" data-tab="historial">Historial</button>
+    <button class="tab-btn" data-tab="tarifas">Tarifas de mano de obra</button>
+  </div>
+
+  <div id="msg"></div>
+
+  <!-- ====================== TAB: NUEVA COTIZACION ====================== -->
+  <div id="tab-nueva">
+
+    <div class="card" id="paso-obra">
+      <h2>1. Datos de la obra</h2>
+      <div class="grid">
+        <div class="field"><label>Cliente</label><input type="text" id="cliente" placeholder="Nombre y apellido"></div>
+        <div class="field"><label>Dirección</label><input type="text" id="direccion" placeholder="Opcional"></div>
+      </div>
+      <h3>Superficies y cantidades</h3>
+      <div class="grid">
+        <div class="field"><label>m² de piso</label><input type="number" id="m2Pisos" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>ml de zócalo</label><input type="number" id="mlZocalos" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación</label>
+      <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
+      <div class="actions">
+        <button class="primary" id="btnContinuarProductos">Elegir productos →</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="paso-productos">
+      <h2>2. Elegir productos (por rubro)</h2>
+      <div id="rubros-container"></div>
+      <div class="actions">
+        <button class="secondary" id="btnVolverObra">← Volver</button>
+        <button class="primary" id="btnCalcular">Calcular cotización</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="paso-resumen">
+      <h2>3. Resumen</h2>
+      <div id="resumen-tabla"></div>
+      <div class="actions">
+        <button class="secondary" id="btnVolverProductos">← Volver</button>
+        <button class="primary" id="btnGuardar">Guardar cotización</button>
+        <button class="secondary hidden" id="btnPdf">Descargar PDF</button>
+        <button class="secondary hidden" id="btnNueva">Nueva cotización</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ====================== TAB: HISTORIAL ====================== -->
+  <div id="tab-historial" class="hidden">
+    <div class="card">
+      <h2>Cotizaciones guardadas</h2>
+      <div id="historial-lista"></div>
+    </div>
+    <div class="card hidden" id="historial-detalle-card">
+      <h2>Detalle</h2>
+      <div id="historial-detalle"></div>
+      <div class="actions"><button class="secondary" id="btnPdfHistorial">Descargar PDF</button></div>
+    </div>
+  </div>
+
+  <!-- ====================== TAB: TARIFAS ====================== -->
+  <div id="tab-tarifas" class="hidden">
+    <div class="card">
+      <h2>Tarifas de mano de obra</h2>
+      <p style="color:var(--muted);font-size:13px;margin-top:-6px;">Se aplican solo cuando la cotización tiene tildado "Incluir mano de obra".</p>
+      <div class="grid">
+        <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
+        <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
+        <div class="field"><label>Por puerta ($)</label><input type="number" id="t_puertas_unidad" min="0" step="0.01"></div>
+        <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
+      </div>
+      <div class="actions"><button class="primary" id="btnGuardarTarifas">Guardar tarifas</button></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+let storeId = null;
+let catalogoCache = null; // catalogo completo de la tienda actual (con rendimiento+precio)
+let seleccion = {};       // { piso: producto, zocalo: producto, puerta: producto, nivelacion: producto }
+let ultimoCalculo = null;
+let ultimaCotizacionGuardadaId = null;
+
+function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function mostrarMsg(texto, tipo){
+  const el = $('#msg');
+  if (!texto){ el.innerHTML=''; return; }
+  el.innerHTML = '<div class="msg ' + (tipo||'error') + '">' + texto + '</div>';
+}
+
+function cambiarTab(nombre){
+  $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nombre));
+  ['nueva','historial','tarifas'].forEach(t => {
+    $('#tab-' + t).classList.toggle('hidden', t !== nombre);
+  });
+  if (nombre === 'historial') cargarHistorial();
+  if (nombre === 'tarifas') cargarTarifas();
+}
+$$('.tab-btn').forEach(b => b.addEventListener('click', () => cambiarTab(b.dataset.tab)));
+
+// ---------- Cargar tiendas ----------
+async function cargarTiendas(){
+  const res = await fetch('/api/stores');
+  const tiendas = await res.json();
+  const sel = $('#selTienda');
+  sel.innerHTML = tiendas.map(t => '<option value="' + t.store_id + '">' + (t.domain || t.store_id) + '</option>').join('');
+  if (tiendas.length){
+    storeId = String(tiendas[0].store_id);
+  }
+  sel.addEventListener('change', () => {
+    storeId = sel.value;
+    catalogoCache = null;
+    seleccion = {};
+  });
+}
+
+// ---------- Paso 1 -> 2 ----------
+function leerObra(){
+  return {
+    m2Pisos: parseFloat($('#m2Pisos').value) || 0,
+    mlZocalos: parseFloat($('#mlZocalos').value) || 0,
+    cantidadPuertas: parseInt($('#cantidadPuertas').value, 10) || 0,
+    requiereNivelacion: $('#requiereNivelacion').checked,
+    manoObra: $('#manoObra').checked
+  };
+}
+
+const RUBROS = [
+  { clave: 'piso', titulo: 'Piso', tipoEsperado: 'm2', condicion: (o) => o.m2Pisos > 0 },
+  { clave: 'zocalo', titulo: 'Zócalo', tipoEsperado: 'ml', condicion: (o) => o.mlZocalos > 0 },
+  { clave: 'puerta', titulo: 'Puerta', tipoEsperado: 'unidad', condicion: (o) => o.cantidadPuertas > 0 },
+  { clave: 'nivelacion', titulo: 'Nivelación', tipoEsperado: 'm2', condicion: (o) => o.requiereNivelacion }
+];
+
+async function asegurarCatalogo(){
+  if (catalogoCache) return catalogoCache;
+  const res = await fetch('/api/cotizador/productos?store_id=' + storeId);
+  if (!res.ok) throw new Error((await res.json()).error || 'Error al traer productos');
+  catalogoCache = await res.json();
+  return catalogoCache;
+}
+
+$('#btnContinuarProductos').addEventListener('click', async () => {
+  mostrarMsg(null);
+  if (!storeId){ mostrarMsg('Elegí una tienda primero.'); return; }
+  const obra = leerObra();
+  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion){
+    mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas o nivelación).');
+    return;
+  }
+  try{
+    await asegurarCatalogo();
+  }catch(e){
+    mostrarMsg(e.message);
+    return;
+  }
+  renderPasoProductos(obra);
+  $('#paso-obra').classList.add('hidden');
+  $('#paso-productos').classList.remove('hidden');
+});
+
+$('#btnVolverObra').addEventListener('click', () => {
+  $('#paso-productos').classList.add('hidden');
+  $('#paso-obra').classList.remove('hidden');
+});
+
+function renderPasoProductos(obra){
+  const cont = $('#rubros-container');
+  cont.innerHTML = '';
+  RUBROS.filter(r => r.condicion(obra)).forEach(r => {
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML =
+      '<h4>' + r.titulo + '</h4>' +
+      '<div class="search-row">' +
+        '<input type="text" placeholder="Buscar por rubro/categoría o nombre..." data-rubro="' + r.clave + '" class="buscador">' +
+      '</div>' +
+      '<div class="prod-list" data-lista="' + r.clave + '"></div>';
+    cont.appendChild(bloque);
+
+    const input = bloque.querySelector('.buscador');
+    const lista = bloque.querySelector('.prod-list');
+    const pintar = () => pintarLista(lista, r, input.value.trim().toLowerCase());
+    input.addEventListener('input', pintar);
+    pintar();
+  });
+}
+
+function pintarLista(listaEl, rubro, filtro){
+  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado);
+  if (filtro){
+    opciones = opciones.filter(p =>
+      p.nombre.toLowerCase().includes(filtro) || p.categoria.toLowerCase().includes(filtro)
+    );
+  }
+  if (!opciones.length){
+    listaEl.innerHTML = '<div class="empty">No hay productos configurados que coincidan.</div>';
+    return;
+  }
+  listaEl.innerHTML = opciones.map(p => {
+    const sel = seleccion[rubro.clave] && seleccion[rubro.clave].id === p.id;
+    return (
+      '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '" data-rubro="' + rubro.clave + '">' +
+        (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
+        '<div class="meta"><div class="name">' + p.nombre + '</div>' +
+        '<div class="sub">' + (p.categoria || 'sin categoría') + ' · rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
+        '<div class="precio">' + money(p.precio) + '</div>' +
+      '</div>'
+    );
+  }).join('');
+  listaEl.querySelectorAll('.prod-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = parseInt(el.dataset.id, 10);
+      const prod = catalogoCache.find(p => p.id === id);
+      seleccion[rubro.clave] = prod;
+      pintarLista(listaEl, rubro, filtro);
+    });
+  });
+}
+
+// ---------- Paso 2 -> 3 (calcular) ----------
+$('#btnCalcular').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const obra = leerObra();
+  const seleccionIds = {};
+  Object.keys(seleccion).forEach(k => { seleccionIds[k] = seleccion[k].id; });
+
+  try{
+    const res = await fetch('/api/cotizador/calcular?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ obra, productos: seleccionIds })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al calcular');
+    if (data.faltantes && data.faltantes.length){
+      mostrarMsg('Falta elegir producto para: ' + data.faltantes.join(', '));
+      return;
+    }
+    ultimoCalculo = data;
+    ultimaCotizacionGuardadaId = null;
+    renderResumen(data);
+    $('#paso-productos').classList.add('hidden');
+    $('#paso-resumen').classList.remove('hidden');
+    $('#btnPdf').classList.add('hidden');
+    $('#btnNueva').classList.add('hidden');
+  }catch(e){ mostrarMsg(e.message); }
+});
+
+$('#btnVolverProductos').addEventListener('click', () => {
+  $('#paso-resumen').classList.add('hidden');
+  $('#paso-productos').classList.remove('hidden');
+});
+
+function renderResumen(data){
+  let html = '<table><thead><tr><th>Rubro / producto</th><th>Cant. obra</th><th>Rendimiento</th><th>Necesita</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>';
+  data.items.forEach(it => {
+    html += '<tr><td>' + it.rubro + '<br><span style="color:var(--muted);font-size:12px;">' + it.producto + '</span></td>' +
+      '<td>' + it.cantidadObra + ' ' + it.unidadObra + '</td>' +
+      '<td>' + it.rendimiento + ' ' + it.unidadObra + '/' + it.envase + '</td>' +
+      '<td>' + it.paquetesNecesarios + ' ' + it.envase + '(s)</td>' +
+      '<td>' + money(it.precioUnitario) + '</td>' +
+      '<td>' + money(it.subtotal) + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div class="totales">' +
+    'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
+    (data.totalManoObra ? 'Mano de obra: ' + money(data.totalManoObra) + '<br>' : '') +
+    '<div class="grand">Total: ' + money(data.total) + '</div></div>';
+  $('#resumen-tabla').innerHTML = html;
+}
+
+$('#btnGuardar').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const obra = leerObra();
+  const seleccionIds = {};
+  Object.keys(seleccion).forEach(k => { seleccionIds[k] = seleccion[k].id; });
+  try{
+    const res = await fetch('/api/cotizador/guardar?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        obra, productos: seleccionIds,
+        cliente: $('#cliente').value, direccion: $('#direccion').value
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar');
+    ultimaCotizacionGuardadaId = data._id;
+    mostrarMsg('Cotización guardada.', 'ok');
+    $('#btnPdf').classList.remove('hidden');
+    $('#btnNueva').classList.remove('hidden');
+  }catch(e){ mostrarMsg(e.message); }
+});
+
+$('#btnPdf').addEventListener('click', () => {
+  if (!ultimaCotizacionGuardadaId) return;
+  window.open('/api/cotizador/pdf/' + ultimaCotizacionGuardadaId + '?store_id=' + storeId, '_blank');
+});
+
+$('#btnNueva').addEventListener('click', () => {
+  seleccion = {};
+  ultimoCalculo = null;
+  ultimaCotizacionGuardadaId = null;
+  $('#cliente').value=''; $('#direccion').value='';
+  $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0;
+  $('#requiereNivelacion').checked=false; $('#manoObra').checked=false;
+  mostrarMsg(null);
+  $('#paso-resumen').classList.add('hidden');
+  $('#paso-obra').classList.remove('hidden');
+});
+
+// ---------- Historial ----------
+async function cargarHistorial(){
+  const cont = $('#historial-lista');
+  cont.innerHTML = '<div class="empty">Cargando...</div>';
+  $('#historial-detalle-card').classList.add('hidden');
+  try{
+    const res = await fetch('/api/cotizador/historial?store_id=' + storeId);
+    const lista = await res.json();
+    if (!res.ok) throw new Error(lista.error || 'Error al traer el historial');
+    if (!lista.length){ cont.innerHTML = '<div class="empty">Todavía no hay cotizaciones guardadas.</div>'; return; }
+    cont.innerHTML = lista.map(c =>
+      '<div class="hist-row">' +
+        '<div><strong>' + (c.cliente || '(sin cliente)') + '</strong><div class="d">' + new Date(c.fecha).toLocaleDateString('es-AR') + (c.direccion ? ' · ' + c.direccion : '') + '</div></div>' +
+        '<div style="display:flex;align-items:center;gap:12px;">' + money(c.total) +
+        '<button class="link" data-id="' + c._id + '">ver</button></div>' +
+      '</div>'
+    ).join('');
+    cont.querySelectorAll('button.link').forEach(b => {
+      b.addEventListener('click', () => verDetalleHistorial(b.dataset.id));
+    });
+  }catch(e){ cont.innerHTML = '<div class="empty">' + e.message + '</div>'; }
+}
+
+async function verDetalleHistorial(id){
+  const res = await fetch('/api/cotizador/historial/' + id + '?store_id=' + storeId);
+  const doc = await res.json();
+  if (!res.ok){ mostrarMsg(doc.error); return; }
+  renderResumen(doc);
+  $('#historial-detalle').innerHTML = $('#resumen-tabla').innerHTML;
+  $('#historial-detalle-card').classList.remove('hidden');
+  $('#btnPdfHistorial').onclick = () => window.open('/api/cotizador/pdf/' + id + '?store_id=' + storeId, '_blank');
+}
+
+// ---------- Tarifas ----------
+async function cargarTarifas(){
+  const res = await fetch('/api/cotizador/tarifas?store_id=' + storeId);
+  const t = await res.json();
+  if (!res.ok) return;
+  $('#t_pisos_m2').value = t.pisos_m2;
+  $('#t_zocalos_ml').value = t.zocalos_ml;
+  $('#t_puertas_unidad').value = t.puertas_unidad;
+  $('#t_nivelacion_m2').value = t.nivelacion_m2;
+}
+$('#btnGuardarTarifas').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const body = {
+    pisos_m2: parseFloat($('#t_pisos_m2').value) || 0,
+    zocalos_ml: parseFloat($('#t_zocalos_ml').value) || 0,
+    puertas_unidad: parseFloat($('#t_puertas_unidad').value) || 0,
+    nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0
+  };
+  const res = await fetch('/api/cotizador/tarifas?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (res.ok) mostrarMsg('Tarifas guardadas.', 'ok'); else mostrarMsg('Error al guardar tarifas.');
+});
+
+cargarTiendas();
+</script>
+</body>
+</html>
