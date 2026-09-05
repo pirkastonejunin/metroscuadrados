@@ -18,22 +18,29 @@
   .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
   .tab-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--panel);cursor:pointer;font-size:13px;color:var(--muted);}
   .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .subtabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .subtab-btn{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
+  .subtab-btn.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
   .card h2{margin:0 0 14px;font-size:15px;font-weight:600;}
   .card h3{margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+  .card p.hint{color:var(--muted);font-size:13px;margin-top:-6px;}
   label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;}
   input[type=text],input[type=number],select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;background:#fff;color:var(--text);}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;}
   .field{margin-bottom:2px;}
   .check{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:14px;}
   .check input{width:auto;}
+  .check.disabled{opacity:.5;}
   button.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;}
   button.primary:disabled{opacity:.45;cursor:not-allowed;}
   button.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;}
   button.link{background:none;border:none;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:13px;padding:0;}
+  button.small{padding:6px 10px;font-size:12.5px;}
   .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
   .rubro-block{border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;}
-  .rubro-block h4{margin:0 0 10px;font-size:14px;}
+  .rubro-block h4{margin:0 0 4px;font-size:14px;}
+  .rubro-block .rubro-tag{color:var(--muted);font-size:12px;margin-bottom:10px;}
   .search-row{display:flex;gap:8px;margin-bottom:10px;}
   .prod-list{max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
   .prod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13.5px;}
@@ -52,6 +59,10 @@
   tfoot td{border-bottom:none;font-weight:600;}
   .totales{text-align:right;margin-top:10px;font-size:14px;}
   .totales .grand{font-size:19px;font-weight:700;margin-top:4px;}
+  .formas-pago{margin-top:14px;border-top:1px solid var(--border);padding-top:12px;}
+  .formas-pago .fp-row{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;}
+  .formas-pago .fp-row .fp-nombre{color:var(--text);}
+  .formas-pago .fp-row .fp-pct{color:var(--muted);font-size:12px;margin-left:6px;}
   .msg{padding:10px 14px;border-radius:8px;font-size:13.5px;margin-bottom:14px;}
   .msg.error{background:#fdecea;color:var(--warn);}
   .msg.ok{background:#eaf5ec;color:var(--ok);}
@@ -59,6 +70,10 @@
   .hist-row{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
   .hist-row:last-child{border-bottom:none;}
   .hist-row .d{color:var(--muted);font-size:12px;}
+  .cfg-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
+  .cfg-row:last-child{border-bottom:none;}
+  .cfg-row .cfg-meta{color:var(--muted);font-size:12px;}
+  .cfg-form{border-top:1px dashed var(--border);margin-top:12px;padding-top:14px;}
 </style>
 </head>
 <body>
@@ -80,7 +95,7 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="nueva">Nueva cotización</button>
     <button class="tab-btn" data-tab="historial">Historial</button>
-    <button class="tab-btn" data-tab="tarifas">Tarifas de mano de obra</button>
+    <button class="tab-btn" data-tab="config">Configuración</button>
   </div>
 
   <div id="msg"></div>
@@ -88,8 +103,25 @@
   <!-- ====================== TAB: NUEVA COTIZACION ====================== -->
   <div id="tab-nueva">
 
-    <div class="card" id="paso-obra">
-      <h2>1. Datos de la obra</h2>
+    <div class="card" id="paso-tipo-obra">
+      <h2>1. Tipo de obra</h2>
+      <div id="tipo-obra-vacio" class="hidden">
+        <p class="hint">Todavía no configuraste ningún tipo de obra para esta tienda.</p>
+        <div class="actions"><button class="primary" id="btnIrAConfigTipos">Configurar tipos de obra →</button></div>
+      </div>
+      <div id="tipo-obra-selector">
+        <div class="field">
+          <label for="selTipoObra">¿Qué tipo de obra vas a cotizar?</label>
+          <select id="selTipoObra"></select>
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnContinuarDatos">Continuar →</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card hidden" id="paso-obra">
+      <h2>2. Datos de la obra</h2>
       <div class="grid">
         <div class="field"><label>Cliente</label><input type="text" id="cliente" placeholder="Nombre y apellido"></div>
         <div class="field"><label>Dirección</label><input type="text" id="direccion" placeholder="Opcional"></div>
@@ -97,18 +129,20 @@
       <h3>Superficies y cantidades</h3>
       <div class="grid">
         <div class="field"><label>m² de piso</label><input type="number" id="m2Pisos" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>% desperdicio de piso</label><input type="number" id="desperdicioPctPiso" min="0" step="0.5" value="0"></div>
         <div class="field"><label>ml de zócalo</label><input type="number" id="mlZocalos" min="0" step="0.01" value="0"></div>
         <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
       </div>
-      <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación</label>
+      <label class="check" id="checkNivelacionWrap"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
       <div class="actions">
+        <button class="secondary" id="btnVolverTipoObra">← Volver</button>
         <button class="primary" id="btnContinuarProductos">Elegir productos →</button>
       </div>
     </div>
 
     <div class="card hidden" id="paso-productos">
-      <h2>2. Elegir productos (por rubro)</h2>
+      <h2>3. Elegir productos</h2>
       <div id="rubros-container"></div>
       <div class="actions">
         <button class="secondary" id="btnVolverObra">← Volver</button>
@@ -117,7 +151,7 @@
     </div>
 
     <div class="card hidden" id="paso-resumen">
-      <h2>3. Resumen</h2>
+      <h2>4. Resumen</h2>
       <div id="resumen-tabla"></div>
       <div class="actions">
         <button class="secondary" id="btnVolverProductos">← Volver</button>
@@ -142,11 +176,79 @@
     </div>
   </div>
 
-  <!-- ====================== TAB: TARIFAS ====================== -->
-  <div id="tab-tarifas" class="hidden">
-    <div class="card">
+  <!-- ====================== TAB: CONFIGURACION ====================== -->
+  <div id="tab-config" class="hidden">
+
+    <div class="subtabs">
+      <button class="subtab-btn active" data-subtab="tipos">Tipos de obra</button>
+      <button class="subtab-btn" data-subtab="niveladores">Niveladores de puerta</button>
+      <button class="subtab-btn" data-subtab="pagos">Formas de pago</button>
+      <button class="subtab-btn" data-subtab="tarifas">Tarifas de mano de obra</button>
+    </div>
+
+    <!-- Tipos de obra -->
+    <div id="cfg-tipos" class="card">
+      <h2>Tipos de obra</h2>
+      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) se conecta con el rubro real de tu catálogo en Tiendanube. El cotizador va a mostrar solo los productos de ese rubro.</p>
+      <div id="cfg-tipos-lista"></div>
+      <div class="cfg-form">
+        <h3 id="cfg-tipos-form-titulo">Agregar tipo de obra</h3>
+        <div class="grid">
+          <div class="field"><label>Nombre</label><input type="text" id="to_nombre" placeholder="Ej: Piso flotante"></div>
+          <div class="field"><label>% desperdicio por defecto</label><input type="number" id="to_desperdicio" min="0" step="0.5" value="0"></div>
+        </div>
+        <div class="grid">
+          <div class="field"><label>Rubro de piso (obligatorio)</label><select id="to_rubroPiso"></select></div>
+          <div class="field"><label>Rubro de zócalo (opcional)</label><select id="to_rubroZocalo"><option value="">— No aplica —</option></select></div>
+          <div class="field"><label>Rubro de nivelación de piso (opcional)</label><select id="to_rubroNivelacion"><option value="">— No aplica —</option></select></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnGuardarTipoObra">Guardar</button>
+          <button class="secondary hidden" id="btnCancelarEdicionTipo">Cancelar edición</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Niveladores de puerta -->
+    <div id="cfg-niveladores" class="card hidden">
+      <h2>Niveladores de puerta</h2>
+      <p class="hint">Los niveladores/perfiles de transición no tienen un rubro propio en Tiendanube. Cargalos una vez por SKU y van a quedar disponibles para elegir en cada cotización, con precio siempre actualizado.</p>
+      <div id="cfg-niveladores-lista"></div>
+      <div class="cfg-form">
+        <h3>Agregar nivelador</h3>
+        <div class="grid">
+          <div class="field"><label>SKU en Tiendanube</label><input type="text" id="nv_sku" placeholder="Ej: NIV-ALU-01"></div>
+          <div class="field"><label>Cuántas puertas cubre 1 unidad</label><input type="number" id="nv_cobertura" min="1" step="1" value="1"></div>
+        </div>
+        <div class="actions"><button class="primary" id="btnAgregarNivelador">Buscar y agregar</button></div>
+      </div>
+    </div>
+
+    <!-- Formas de pago -->
+    <div id="cfg-pagos" class="card hidden">
+      <h2>Formas de pago</h2>
+      <p class="hint">Se van a mostrar todas juntas en el resumen y el PDF de cada cotización, cada una con su total ya calculado.</p>
+      <div id="cfg-pagos-lista"></div>
+      <div class="cfg-form">
+        <h3>Agregar forma de pago</h3>
+        <div class="grid">
+          <div class="field"><label>Nombre</label><input type="text" id="fp_nombre" placeholder="Ej: Efectivo/Transferencia"></div>
+          <div class="field"><label>Tipo</label>
+            <select id="fp_tipo">
+              <option value="descuento">Descuento</option>
+              <option value="recargo">Recargo</option>
+            </select>
+          </div>
+          <div class="field"><label>Porcentaje (%)</label><input type="number" id="fp_porcentaje" min="0" step="0.5" value="0"></div>
+        </div>
+        <div class="actions"><button class="primary" id="btnAgregarFormaPago">Guardar</button></div>
+      </div>
+    </div>
+
+    <!-- Tarifas de mano de obra -->
+    <div id="cfg-tarifas" class="card hidden">
       <h2>Tarifas de mano de obra</h2>
-      <p style="color:var(--muted);font-size:13px;margin-top:-6px;">Se aplican solo cuando la cotización tiene tildado "Incluir mano de obra".</p>
+      <p class="hint">Se aplican solo cuando la cotización tiene tildado "Incluir mano de obra".</p>
       <div class="grid">
         <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
         <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
@@ -155,6 +257,7 @@
       </div>
       <div class="actions"><button class="primary" id="btnGuardarTarifas">Guardar tarifas</button></div>
     </div>
+
   </div>
 
 </div>
@@ -164,12 +267,21 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 let storeId = null;
-let catalogoCache = null; // catalogo completo de la tienda actual (con rendimiento+precio)
-let seleccion = {};       // { piso: producto, zocalo: producto, puerta: producto, nivelacion: producto }
-let ultimoCalculo = null;
+let catalogoCache = null;       // catalogo completo de la tienda actual (con rendimiento+precio)
+let tiposObraCache = null;      // tipos de obra configurados
+let tipoObraElegido = null;     // tipo de obra elegido para la cotizacion actual
+let niveladoresCache = null;    // niveladores de puerta precargados
+let seleccion = {};             // { piso: producto, zocalo: producto, puerta: nivelador, nivelacion: producto }
 let ultimaCotizacionGuardadaId = null;
+let editandoTipoObraId = null;
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
 
 function mostrarMsg(texto, tipo){
   const el = $('#msg');
@@ -179,13 +291,27 @@ function mostrarMsg(texto, tipo){
 
 function cambiarTab(nombre){
   $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nombre));
-  ['nueva','historial','tarifas'].forEach(t => {
+  ['nueva','historial','config'].forEach(t => {
     $('#tab-' + t).classList.toggle('hidden', t !== nombre);
   });
   if (nombre === 'historial') cargarHistorial();
-  if (nombre === 'tarifas') cargarTarifas();
+  if (nombre === 'config') cargarConfigTipos();
 }
 $$('.tab-btn').forEach(b => b.addEventListener('click', () => cambiarTab(b.dataset.tab)));
+
+function cambiarSubtab(nombre){
+  $$('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === nombre));
+  ['tipos','niveladores','pagos','tarifas'].forEach(t => {
+    $('#cfg-' + t).classList.toggle('hidden', t !== nombre);
+  });
+  if (nombre === 'tipos') cargarConfigTipos();
+  if (nombre === 'niveladores') cargarConfigNiveladores();
+  if (nombre === 'pagos') cargarConfigPagos();
+  if (nombre === 'tarifas') cargarTarifas();
+}
+$$('.subtab-btn').forEach(b => b.addEventListener('click', () => cambiarSubtab(b.dataset.subtab)));
+
+$('#btnIrAConfigTipos').addEventListener('click', () => { cambiarTab('config'); cambiarSubtab('tipos'); });
 
 // ---------- Cargar tiendas ----------
 async function cargarTiendas(){
@@ -199,27 +325,77 @@ async function cargarTiendas(){
   sel.addEventListener('change', () => {
     storeId = sel.value;
     catalogoCache = null;
+    tiposObraCache = null;
+    niveladoresCache = null;
+    tipoObraElegido = null;
     seleccion = {};
+    cargarPasoTipoObra();
   });
+  cargarPasoTipoObra();
 }
 
-// ---------- Paso 1 -> 2 ----------
+// ---------- Paso 1: tipo de obra ----------
+async function cargarPasoTipoObra(){
+  if (!storeId) return;
+  try{
+    const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId);
+    tiposObraCache = await res.json();
+  }catch(e){ tiposObraCache = []; }
+
+  const vacio = $('#tipo-obra-vacio');
+  const selector = $('#tipo-obra-selector');
+  if (!tiposObraCache.length){
+    vacio.classList.remove('hidden');
+    selector.classList.add('hidden');
+    return;
+  }
+  vacio.classList.add('hidden');
+  selector.classList.remove('hidden');
+  const sel = $('#selTipoObra');
+  sel.innerHTML = tiposObraCache.map(t => '<option value="' + t.id + '">' + escapeHtml(t.nombre) + '</option>').join('');
+}
+
+$('#btnContinuarDatos').addEventListener('click', () => {
+  const id = $('#selTipoObra').value;
+  tipoObraElegido = tiposObraCache.find(t => String(t.id) === String(id));
+  if (!tipoObraElegido){ mostrarMsg('Elegí un tipo de obra.'); return; }
+
+  $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
+
+  const wrapNivelacion = $('#checkNivelacionWrap');
+  const checkNivelacion = $('#requiereNivelacion');
+  if (!tipoObraElegido.rubroNivelacion){
+    checkNivelacion.checked = false;
+    checkNivelacion.disabled = true;
+    wrapNivelacion.classList.add('disabled');
+    wrapNivelacion.title = 'Este tipo de obra no tiene configurado un rubro de nivelación.';
+  } else {
+    checkNivelacion.disabled = false;
+    wrapNivelacion.classList.remove('disabled');
+    wrapNivelacion.title = '';
+  }
+
+  mostrarMsg(null);
+  $('#paso-tipo-obra').classList.add('hidden');
+  $('#paso-obra').classList.remove('hidden');
+});
+
+$('#btnVolverTipoObra').addEventListener('click', () => {
+  $('#paso-obra').classList.add('hidden');
+  $('#paso-tipo-obra').classList.remove('hidden');
+});
+
+// ---------- Paso 2: datos de obra ----------
 function leerObra(){
   return {
     m2Pisos: parseFloat($('#m2Pisos').value) || 0,
     mlZocalos: parseFloat($('#mlZocalos').value) || 0,
     cantidadPuertas: parseInt($('#cantidadPuertas').value, 10) || 0,
     requiereNivelacion: $('#requiereNivelacion').checked,
-    manoObra: $('#manoObra').checked
+    manoObra: $('#manoObra').checked,
+    desperdicioPctPiso: parseFloat($('#desperdicioPctPiso').value) || 0
   };
 }
-
-const RUBROS = [
-  { clave: 'piso', titulo: 'Piso', tipoEsperado: 'm2', condicion: (o) => o.m2Pisos > 0 },
-  { clave: 'zocalo', titulo: 'Zócalo', tipoEsperado: 'ml', condicion: (o) => o.mlZocalos > 0 },
-  { clave: 'puerta', titulo: 'Puerta', tipoEsperado: 'unidad', condicion: (o) => o.cantidadPuertas > 0 },
-  { clave: 'nivelacion', titulo: 'Nivelación', tipoEsperado: 'm2', condicion: (o) => o.requiereNivelacion }
-];
 
 async function asegurarCatalogo(){
   if (catalogoCache) return catalogoCache;
@@ -227,6 +403,14 @@ async function asegurarCatalogo(){
   if (!res.ok) throw new Error((await res.json()).error || 'Error al traer productos');
   catalogoCache = await res.json();
   return catalogoCache;
+}
+
+async function asegurarNiveladores(){
+  if (niveladoresCache) return niveladoresCache;
+  const res = await fetch('/api/cotizador/niveladores-puerta?store_id=' + storeId);
+  if (!res.ok) throw new Error((await res.json()).error || 'Error al traer niveladores de puerta');
+  niveladoresCache = await res.json();
+  return niveladoresCache;
 }
 
 $('#btnContinuarProductos').addEventListener('click', async () => {
@@ -239,6 +423,7 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   }
   try{
     await asegurarCatalogo();
+    if (obra.cantidadPuertas > 0) await asegurarNiveladores();
   }catch(e){
     mostrarMsg(e.message);
     return;
@@ -253,93 +438,80 @@ $('#btnVolverObra').addEventListener('click', () => {
   $('#paso-obra').classList.remove('hidden');
 });
 
-function escapeHtml(s){
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[c]));
-}
-
-// Categorías reales de Tiendanube que existen en el catálogo configurado,
-// para el tipo de unidad de este rubro (m2/ml/unidad). Es la lista de
-// "tipos de obra" posibles para ese material (ej: Piso flotante, Porcelanato,
-// Vinílico... todas categorías de m2 pero distintas entre sí).
-function categoriasDisponibles(tipoEsperado){
-  const set = new Set();
-  catalogoCache
-    .filter(p => p.tipo === tipoEsperado && p.categoria)
-    .forEach(p => set.add(p.categoria));
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+// ---------- Paso 3: elegir productos ----------
+// Cada bloque queda directamente atado al rubro que el tipo de obra tiene
+// configurado — ya no hay que elegirlo a mano en cada cotización.
+function bloquesRubro(obra){
+  const bloques = [];
+  if (obra.m2Pisos > 0){
+    bloques.push({ clave: 'piso', titulo: 'Piso', tipoEsperado: 'm2', rubro: tipoObraElegido.rubroPiso });
+  }
+  if (obra.mlZocalos > 0){
+    bloques.push({ clave: 'zocalo', titulo: 'Zócalo', tipoEsperado: 'ml', rubro: tipoObraElegido.rubroZocalo });
+  }
+  if (obra.requiereNivelacion && tipoObraElegido.rubroNivelacion){
+    bloques.push({ clave: 'nivelacion', titulo: 'Nivelación de piso', tipoEsperado: 'm2', rubro: tipoObraElegido.rubroNivelacion });
+  }
+  return bloques;
 }
 
 function renderPasoProductos(obra){
   const cont = $('#rubros-container');
   cont.innerHTML = '';
-  RUBROS.filter(r => r.condicion(obra)).forEach(r => {
-    const categorias = categoriasDisponibles(r.tipoEsperado);
-    const yaElegido = seleccion[r.clave];
 
+  bloquesRubro(obra).forEach(r => {
     const bloque = document.createElement('div');
     bloque.className = 'rubro-block';
-    bloque.innerHTML =
-      '<h4>' + r.titulo + '</h4>' +
-      '<div class="grid" style="margin-bottom:10px;">' +
-        '<div class="field">' +
-          '<label>Rubro (categoría de Tiendanube)</label>' +
-          '<select class="select-rubro" data-rubro="' + r.clave + '">' +
-            '<option value="">Elegí un rubro...</option>' +
-            categorias.map((c) => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('') +
-          '</select>' +
-        '</div>' +
-        '<div class="field">' +
-          '<label>Buscar por nombre (opcional)</label>' +
-          '<input type="text" placeholder="Filtrar dentro del rubro..." data-rubro="' + r.clave + '" class="buscador-nombre">' +
-        '</div>' +
-      '</div>' +
-      '<div class="prod-list" data-lista="' + r.clave + '"><div class="empty">Elegí un rubro para ver sus productos.</div></div>';
-    cont.appendChild(bloque);
 
-    const selectRubro = bloque.querySelector('.select-rubro');
-    const inputNombre = bloque.querySelector('.buscador-nombre');
-    const lista = bloque.querySelector('.prod-list');
-
-    // Si ya había un producto elegido antes para este rubro (ej. al volver
-    // del paso siguiente), reabrimos con su misma categoría seleccionada.
-    if (yaElegido && yaElegido.categoria){
-      selectRubro.value = yaElegido.categoria;
+    if (!r.rubro){
+      bloque.innerHTML =
+        '<h4>' + r.titulo + '</h4>' +
+        '<div class="empty">Este tipo de obra no tiene un rubro de ' + r.titulo.toLowerCase() + ' configurado. Andá a Configuración → Tipos de obra.</div>';
+      cont.appendChild(bloque);
+      return;
     }
 
-    const pintar = () => {
-      const categoriaElegida = selectRubro.value;
-      if (!categoriaElegida){
-        lista.innerHTML = '<div class="empty">Elegí un rubro para ver sus productos.</div>';
-        return;
-      }
-      pintarLista(lista, r, categoriaElegida, inputNombre.value.trim().toLowerCase());
-    };
-    selectRubro.addEventListener('change', pintar);
+    bloque.innerHTML =
+      '<h4>' + r.titulo + '</h4>' +
+      '<div class="rubro-tag">Rubro: ' + escapeHtml(r.rubro) + '</div>' +
+      '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '"></div>' +
+      '<div class="prod-list" data-lista="' + r.clave + '"></div>';
+    cont.appendChild(bloque);
+
+    const inputNombre = bloque.querySelector('.buscador-nombre');
+    const lista = bloque.querySelector('.prod-list');
+    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase());
     inputNombre.addEventListener('input', pintar);
     pintar();
   });
+
+  if (obra.cantidadPuertas > 0){
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML =
+      '<h4>Niveladores de puerta</h4>' +
+      '<div class="rubro-tag">' + obra.cantidadPuertas + ' puerta(s) a cubrir</div>' +
+      '<div class="prod-list" data-lista="puerta"></div>';
+    cont.appendChild(bloque);
+    pintarListaNiveladores(bloque.querySelector('.prod-list'), obra.cantidadPuertas);
+  }
 }
 
-function pintarLista(listaEl, rubro, categoriaElegida, filtroNombre){
-  // Match exacto de categoría: solo trae lo que está en ESE rubro puntual
-  // de Tiendanube (ej. "Pisos Flotantes"), no todo lo que tenga la misma
-  // unidad de medida mezclado con otros rubros.
-  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado && p.categoria === categoriaElegida);
+function pintarListaProductos(listaEl, rubro, filtroNombre){
+  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado && p.categoria === rubro.rubro);
   if (filtroNombre){
     opciones = opciones.filter(p => p.nombre.toLowerCase().includes(filtroNombre));
   }
   if (!opciones.length){
-    listaEl.innerHTML = '<div class="empty">No hay productos configurados en ese rubro.</div>';
+    listaEl.innerHTML = '<div class="empty">No hay productos configurados en ese rubro (revisá que tengan rendimiento cargado en el admin).</div>';
     return;
   }
   listaEl.innerHTML = opciones.map(p => {
     const sel = seleccion[rubro.clave] && seleccion[rubro.clave].id === p.id;
     return (
-      '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '" data-rubro="' + rubro.clave + '">' +
+      '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
         (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
-        '<div class="meta"><div class="name">' + p.nombre + '</div>' +
+        '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + '</div>' +
         '<div class="sub">rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
         '<div class="precio">' + money(p.precio) + '</div>' +
       '</div>'
@@ -350,17 +522,44 @@ function pintarLista(listaEl, rubro, categoriaElegida, filtroNombre){
       const id = parseInt(el.dataset.id, 10);
       const prod = catalogoCache.find(p => p.id === id);
       seleccion[rubro.clave] = prod;
-      pintarLista(listaEl, rubro, categoriaElegida, filtroNombre);
+      pintarListaProductos(listaEl, rubro, filtroNombre);
     });
   });
 }
 
-// ---------- Paso 2 -> 3 (calcular) ----------
+function pintarListaNiveladores(listaEl, cantidadPuertas){
+  if (!niveladoresCache || !niveladoresCache.length){
+    listaEl.innerHTML = '<div class="empty">No hay niveladores de puerta configurados. Andá a Configuración → Niveladores de puerta.</div>';
+    return;
+  }
+  listaEl.innerHTML = niveladoresCache.map(n => {
+    const sel = seleccion.puerta && String(seleccion.puerta.id) === String(n.id);
+    const necesarios = Math.ceil((cantidadPuertas / (n.cobertura || 1)) - 1e-9);
+    return (
+      '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + n.id + '">' +
+        (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
+        '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div>' +
+        '<div class="sub">cubre ' + n.cobertura + ' puerta(s) por unidad · necesita ' + necesarios + '</div></div>' +
+        '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div>' +
+      '</div>'
+    );
+  }).join('');
+  listaEl.querySelectorAll('.prod-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const item = niveladoresCache.find(n => String(n.id) === String(id));
+      seleccion.puerta = item;
+      pintarListaNiveladores(listaEl, cantidadPuertas);
+    });
+  });
+}
+
+// ---------- Paso 3 -> 4 (calcular) ----------
 $('#btnCalcular').addEventListener('click', async () => {
   mostrarMsg(null);
   const obra = leerObra();
   const seleccionIds = {};
-  Object.keys(seleccion).forEach(k => { seleccionIds[k] = seleccion[k].id; });
+  Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
 
   try{
     const res = await fetch('/api/cotizador/calcular?store_id=' + storeId, {
@@ -374,7 +573,6 @@ $('#btnCalcular').addEventListener('click', async () => {
       mostrarMsg('Falta elegir producto para: ' + data.faltantes.join(', '));
       return;
     }
-    ultimoCalculo = data;
     ultimaCotizacionGuardadaId = null;
     renderResumen(data);
     $('#paso-productos').classList.add('hidden');
@@ -392,9 +590,10 @@ $('#btnVolverProductos').addEventListener('click', () => {
 function renderResumen(data){
   let html = '<table><thead><tr><th>Rubro / producto</th><th>Cant. obra</th><th>Rendimiento</th><th>Necesita</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>';
   data.items.forEach(it => {
-    html += '<tr><td>' + it.rubro + '<br><span style="color:var(--muted);font-size:12px;">' + it.producto +
-      (it.categoria ? ' · ' + it.categoria : '') + '</span></td>' +
-      '<td>' + it.cantidadObra + ' ' + it.unidadObra + '</td>' +
+    const desp = it.desperdicioPct ? ' <span style="color:var(--muted);">(+' + it.desperdicioPct + '% desp. → ' + it.cantidadConDesperdicio + ' ' + it.unidadObra + ')</span>' : '';
+    html += '<tr><td>' + it.rubro + '<br><span style="color:var(--muted);font-size:12px;">' + escapeHtml(it.producto) +
+      (it.categoria ? ' · ' + escapeHtml(it.categoria) : '') + '</span></td>' +
+      '<td>' + it.cantidadObra + ' ' + it.unidadObra + desp + '</td>' +
       '<td>' + it.rendimiento + ' ' + it.unidadObra + '/' + it.envase + '</td>' +
       '<td>' + it.paquetesNecesarios + ' ' + it.envase + '(s)</td>' +
       '<td>' + money(it.precioUnitario) + '</td>' +
@@ -405,6 +604,17 @@ function renderResumen(data){
     'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
     (data.totalManoObra ? 'Mano de obra: ' + money(data.totalManoObra) + '<br>' : '') +
     '<div class="grand">Total: ' + money(data.total) + '</div></div>';
+
+  if (data.formasPago && data.formasPago.length){
+    html += '<div class="formas-pago">';
+    data.formasPago.forEach(fp => {
+      const signo = fp.tipo === 'recargo' ? '+' : '-';
+      html += '<div class="fp-row"><span class="fp-nombre">' + escapeHtml(fp.nombre) +
+        (fp.porcentaje ? '<span class="fp-pct">(' + signo + fp.porcentaje + '%)</span>' : '') +
+        '</span><strong>' + money(fp.total) + '</strong></div>';
+    });
+    html += '</div>';
+  }
   $('#resumen-tabla').innerHTML = html;
 }
 
@@ -412,14 +622,15 @@ $('#btnGuardar').addEventListener('click', async () => {
   mostrarMsg(null);
   const obra = leerObra();
   const seleccionIds = {};
-  Object.keys(seleccion).forEach(k => { seleccionIds[k] = seleccion[k].id; });
+  Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
   try{
     const res = await fetch('/api/cotizador/guardar?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         obra, productos: seleccionIds,
-        cliente: $('#cliente').value, direccion: $('#direccion').value
+        cliente: $('#cliente').value, direccion: $('#direccion').value,
+        tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : ''
       })
     });
     const data = await res.json();
@@ -438,14 +649,16 @@ $('#btnPdf').addEventListener('click', () => {
 
 $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
-  ultimoCalculo = null;
+  tipoObraElegido = null;
   ultimaCotizacionGuardadaId = null;
   $('#cliente').value=''; $('#direccion').value='';
-  $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0;
-  $('#requiereNivelacion').checked=false; $('#manoObra').checked=false;
+  $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
+  $('#requiereNivelacion').checked=false; $('#requiereNivelacion').disabled=false;
+  $('#checkNivelacionWrap').classList.remove('disabled');
+  $('#manoObra').checked=false;
   mostrarMsg(null);
   $('#paso-resumen').classList.add('hidden');
-  $('#paso-obra').classList.remove('hidden');
+  $('#paso-tipo-obra').classList.remove('hidden');
 });
 
 // ---------- Historial ----------
@@ -460,7 +673,10 @@ async function cargarHistorial(){
     if (!lista.length){ cont.innerHTML = '<div class="empty">Todavía no hay cotizaciones guardadas.</div>'; return; }
     cont.innerHTML = lista.map(c =>
       '<div class="hist-row">' +
-        '<div><strong>' + (c.cliente || '(sin cliente)') + '</strong><div class="d">' + new Date(c.fecha).toLocaleDateString('es-AR') + (c.direccion ? ' · ' + c.direccion : '') + '</div></div>' +
+        '<div><strong>' + escapeHtml(c.cliente || '(sin cliente)') + '</strong><div class="d">' +
+          new Date(c.fecha).toLocaleDateString('es-AR') +
+          (c.tipoObraNombre ? ' · ' + escapeHtml(c.tipoObraNombre) : '') +
+          (c.direccion ? ' · ' + escapeHtml(c.direccion) : '') + '</div></div>' +
         '<div style="display:flex;align-items:center;gap:12px;">' + money(c.total) +
         '<button class="link" data-id="' + c._id + '">ver</button></div>' +
       '</div>'
@@ -481,7 +697,193 @@ async function verDetalleHistorial(id){
   $('#btnPdfHistorial').onclick = () => window.open('/api/cotizador/pdf/' + id + '?store_id=' + storeId, '_blank');
 }
 
-// ---------- Tarifas ----------
+// ---------- Configuración: tipos de obra ----------
+let rubrosDisponiblesCache = null;
+
+async function asegurarRubrosDisponibles(){
+  if (rubrosDisponiblesCache) return rubrosDisponiblesCache;
+  const res = await fetch('/api/cotizador/rubros-disponibles?store_id=' + storeId);
+  rubrosDisponiblesCache = await res.json();
+  return rubrosDisponiblesCache;
+}
+
+function llenarSelectRubros(sel, opciones, permitirVacio){
+  const actual = sel.value;
+  sel.innerHTML = (permitirVacio ? '<option value="">— No aplica —</option>' : '<option value="">Elegí un rubro...</option>') +
+    opciones.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
+  if (actual) sel.value = actual;
+}
+
+async function cargarConfigTipos(){
+  if (!storeId) return;
+  rubrosDisponiblesCache = null;
+  const rubros = await asegurarRubrosDisponibles();
+  llenarSelectRubros($('#to_rubroPiso'), rubros.m2, false);
+  llenarSelectRubros($('#to_rubroZocalo'), rubros.ml, true);
+  llenarSelectRubros($('#to_rubroNivelacion'), rubros.m2, true);
+
+  const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId);
+  const lista = await res.json();
+  const cont = $('#cfg-tipos-lista');
+  if (!lista.length){
+    cont.innerHTML = '<div class="empty">Todavía no hay tipos de obra configurados.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(t =>
+    '<div class="cfg-row">' +
+      '<div><strong>' + escapeHtml(t.nombre) + '</strong><div class="cfg-meta">' +
+        'Piso: ' + escapeHtml(t.rubroPiso) +
+        (t.rubroZocalo ? ' · Zócalo: ' + escapeHtml(t.rubroZocalo) : '') +
+        (t.rubroNivelacion ? ' · Nivelación: ' + escapeHtml(t.rubroNivelacion) : '') +
+        ' · Desperdicio: ' + t.desperdicioDefaultPct + '%</div></div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button class="secondary small" data-editar="' + t.id + '">Editar</button>' +
+        '<button class="secondary small" data-borrar="' + t.id + '">Borrar</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+
+  cont.querySelectorAll('[data-editar]').forEach(b => {
+    b.addEventListener('click', () => {
+      const t = lista.find(x => String(x.id) === b.dataset.editar);
+      if (!t) return;
+      editandoTipoObraId = t.id;
+      $('#to_nombre').value = t.nombre;
+      $('#to_desperdicio').value = t.desperdicioDefaultPct;
+      $('#to_rubroPiso').value = t.rubroPiso;
+      $('#to_rubroZocalo').value = t.rubroZocalo || '';
+      $('#to_rubroNivelacion').value = t.rubroNivelacion || '';
+      $('#cfg-tipos-form-titulo').textContent = 'Editando: ' + t.nombre;
+      $('#btnCancelarEdicionTipo').classList.remove('hidden');
+    });
+  });
+  cont.querySelectorAll('[data-borrar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar este tipo de obra?')) return;
+      await fetch('/api/cotizador/tipos-obra/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      cargarConfigTipos();
+    });
+  });
+}
+
+$('#btnCancelarEdicionTipo').addEventListener('click', () => {
+  editandoTipoObraId = null;
+  $('#to_nombre').value = ''; $('#to_desperdicio').value = 0;
+  $('#to_rubroPiso').value = ''; $('#to_rubroZocalo').value = ''; $('#to_rubroNivelacion').value = '';
+  $('#cfg-tipos-form-titulo').textContent = 'Agregar tipo de obra';
+  $('#btnCancelarEdicionTipo').classList.add('hidden');
+});
+
+$('#btnGuardarTipoObra').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const body = {
+    id: editandoTipoObraId || undefined,
+    nombre: $('#to_nombre').value.trim(),
+    rubroPiso: $('#to_rubroPiso').value,
+    rubroZocalo: $('#to_rubroZocalo').value,
+    rubroNivelacion: $('#to_rubroNivelacion').value,
+    desperdicioDefaultPct: parseFloat($('#to_desperdicio').value) || 0
+  };
+  if (!body.nombre || !body.rubroPiso){ mostrarMsg('Falta el nombre o el rubro de piso.'); return; }
+  const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok){ mostrarMsg(data.error || 'Error al guardar.'); return; }
+  mostrarMsg('Tipo de obra guardado.', 'ok');
+  $('#btnCancelarEdicionTipo').click();
+  cargarConfigTipos();
+});
+
+// ---------- Configuración: niveladores de puerta ----------
+async function cargarConfigNiveladores(){
+  if (!storeId) return;
+  const cont = $('#cfg-niveladores-lista');
+  cont.innerHTML = '<div class="empty">Cargando...</div>';
+  const res = await fetch('/api/cotizador/niveladores-puerta?store_id=' + storeId);
+  const lista = await res.json();
+  if (!lista.length){
+    cont.innerHTML = '<div class="empty">Todavía no hay niveladores de puerta cargados.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(n =>
+    '<div class="cfg-row">' +
+      '<div><strong>' + escapeHtml(n.nombre) + '</strong><div class="cfg-meta">SKU ' + escapeHtml(n.sku) +
+        ' · cubre ' + n.cobertura + ' puerta(s) · ' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div></div>' +
+      '<button class="secondary small" data-borrar="' + n.id + '">Borrar</button>' +
+    '</div>'
+  ).join('');
+  cont.querySelectorAll('[data-borrar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar este nivelador?')) return;
+      await fetch('/api/cotizador/niveladores-puerta/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      cargarConfigNiveladores();
+    });
+  });
+}
+
+$('#btnAgregarNivelador').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const sku = $('#nv_sku').value.trim();
+  const cobertura = parseInt($('#nv_cobertura').value, 10) || 1;
+  if (!sku){ mostrarMsg('Cargá un SKU.'); return; }
+  const res = await fetch('/api/cotizador/niveladores-puerta?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ sku, cobertura })
+  });
+  const data = await res.json();
+  if (!res.ok){ mostrarMsg(data.error || 'Error al agregar.'); return; }
+  mostrarMsg('Nivelador agregado: ' + data.nombre, 'ok');
+  $('#nv_sku').value = ''; $('#nv_cobertura').value = 1;
+  niveladoresCache = null;
+  cargarConfigNiveladores();
+});
+
+// ---------- Configuración: formas de pago ----------
+async function cargarConfigPagos(){
+  if (!storeId) return;
+  const cont = $('#cfg-pagos-lista');
+  cont.innerHTML = '<div class="empty">Cargando...</div>';
+  const res = await fetch('/api/cotizador/formas-pago?store_id=' + storeId);
+  const lista = await res.json();
+  if (!lista.length){
+    cont.innerHTML = '<div class="empty">Todavía no hay formas de pago configuradas.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(fp => {
+    const signo = fp.tipo === 'recargo' ? '+' : '-';
+    return '<div class="cfg-row">' +
+      '<div><strong>' + escapeHtml(fp.nombre) + '</strong><div class="cfg-meta">' + fp.tipo + ' ' + signo + fp.porcentaje + '%</div></div>' +
+      '<button class="secondary small" data-borrar="' + fp.id + '">Borrar</button>' +
+    '</div>';
+  }).join('');
+  cont.querySelectorAll('[data-borrar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta forma de pago?')) return;
+      await fetch('/api/cotizador/formas-pago/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      cargarConfigPagos();
+    });
+  });
+}
+
+$('#btnAgregarFormaPago').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const body = {
+    nombre: $('#fp_nombre').value.trim(),
+    tipo: $('#fp_tipo').value,
+    porcentaje: parseFloat($('#fp_porcentaje').value) || 0
+  };
+  if (!body.nombre){ mostrarMsg('Falta el nombre.'); return; }
+  const res = await fetch('/api/cotizador/formas-pago?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok){ mostrarMsg(data.error || 'Error al guardar.'); return; }
+  mostrarMsg('Forma de pago guardada.', 'ok');
+  $('#fp_nombre').value=''; $('#fp_porcentaje').value=0;
+  cargarConfigPagos();
+});
+
+// ---------- Configuración: tarifas de mano de obra ----------
 async function cargarTarifas(){
   const res = await fetch('/api/cotizador/tarifas?store_id=' + storeId);
   const t = await res.json();
