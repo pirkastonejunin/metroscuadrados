@@ -253,37 +253,85 @@ $('#btnVolverObra').addEventListener('click', () => {
   $('#paso-obra').classList.remove('hidden');
 });
 
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// Categorías reales de Tiendanube que existen en el catálogo configurado,
+// para el tipo de unidad de este rubro (m2/ml/unidad). Es la lista de
+// "tipos de obra" posibles para ese material (ej: Piso flotante, Porcelanato,
+// Vinílico... todas categorías de m2 pero distintas entre sí).
+function categoriasDisponibles(tipoEsperado){
+  const set = new Set();
+  catalogoCache
+    .filter(p => p.tipo === tipoEsperado && p.categoria)
+    .forEach(p => set.add(p.categoria));
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 function renderPasoProductos(obra){
   const cont = $('#rubros-container');
   cont.innerHTML = '';
   RUBROS.filter(r => r.condicion(obra)).forEach(r => {
+    const categorias = categoriasDisponibles(r.tipoEsperado);
+    const yaElegido = seleccion[r.clave];
+
     const bloque = document.createElement('div');
     bloque.className = 'rubro-block';
     bloque.innerHTML =
       '<h4>' + r.titulo + '</h4>' +
-      '<div class="search-row">' +
-        '<input type="text" placeholder="Buscar por rubro/categoría o nombre..." data-rubro="' + r.clave + '" class="buscador">' +
+      '<div class="grid" style="margin-bottom:10px;">' +
+        '<div class="field">' +
+          '<label>Rubro (categoría de Tiendanube)</label>' +
+          '<select class="select-rubro" data-rubro="' + r.clave + '">' +
+            '<option value="">Elegí un rubro...</option>' +
+            categorias.map((c) => '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>').join('') +
+          '</select>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Buscar por nombre (opcional)</label>' +
+          '<input type="text" placeholder="Filtrar dentro del rubro..." data-rubro="' + r.clave + '" class="buscador-nombre">' +
+        '</div>' +
       '</div>' +
-      '<div class="prod-list" data-lista="' + r.clave + '"></div>';
+      '<div class="prod-list" data-lista="' + r.clave + '"><div class="empty">Elegí un rubro para ver sus productos.</div></div>';
     cont.appendChild(bloque);
 
-    const input = bloque.querySelector('.buscador');
+    const selectRubro = bloque.querySelector('.select-rubro');
+    const inputNombre = bloque.querySelector('.buscador-nombre');
     const lista = bloque.querySelector('.prod-list');
-    const pintar = () => pintarLista(lista, r, input.value.trim().toLowerCase());
-    input.addEventListener('input', pintar);
+
+    // Si ya había un producto elegido antes para este rubro (ej. al volver
+    // del paso siguiente), reabrimos con su misma categoría seleccionada.
+    if (yaElegido && yaElegido.categoria){
+      selectRubro.value = yaElegido.categoria;
+    }
+
+    const pintar = () => {
+      const categoriaElegida = selectRubro.value;
+      if (!categoriaElegida){
+        lista.innerHTML = '<div class="empty">Elegí un rubro para ver sus productos.</div>';
+        return;
+      }
+      pintarLista(lista, r, categoriaElegida, inputNombre.value.trim().toLowerCase());
+    };
+    selectRubro.addEventListener('change', pintar);
+    inputNombre.addEventListener('input', pintar);
     pintar();
   });
 }
 
-function pintarLista(listaEl, rubro, filtro){
-  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado);
-  if (filtro){
-    opciones = opciones.filter(p =>
-      p.nombre.toLowerCase().includes(filtro) || p.categoria.toLowerCase().includes(filtro)
-    );
+function pintarLista(listaEl, rubro, categoriaElegida, filtroNombre){
+  // Match exacto de categoría: solo trae lo que está en ESE rubro puntual
+  // de Tiendanube (ej. "Pisos Flotantes"), no todo lo que tenga la misma
+  // unidad de medida mezclado con otros rubros.
+  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado && p.categoria === categoriaElegida);
+  if (filtroNombre){
+    opciones = opciones.filter(p => p.nombre.toLowerCase().includes(filtroNombre));
   }
   if (!opciones.length){
-    listaEl.innerHTML = '<div class="empty">No hay productos configurados que coincidan.</div>';
+    listaEl.innerHTML = '<div class="empty">No hay productos configurados en ese rubro.</div>';
     return;
   }
   listaEl.innerHTML = opciones.map(p => {
@@ -292,7 +340,7 @@ function pintarLista(listaEl, rubro, filtro){
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '" data-rubro="' + rubro.clave + '">' +
         (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + p.nombre + '</div>' +
-        '<div class="sub">' + (p.categoria || 'sin categoría') + ' · rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
+        '<div class="sub">rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
         '<div class="precio">' + money(p.precio) + '</div>' +
       '</div>'
     );
@@ -302,7 +350,7 @@ function pintarLista(listaEl, rubro, filtro){
       const id = parseInt(el.dataset.id, 10);
       const prod = catalogoCache.find(p => p.id === id);
       seleccion[rubro.clave] = prod;
-      pintarLista(listaEl, rubro, filtro);
+      pintarLista(listaEl, rubro, categoriaElegida, filtroNombre);
     });
   });
 }
@@ -344,7 +392,8 @@ $('#btnVolverProductos').addEventListener('click', () => {
 function renderResumen(data){
   let html = '<table><thead><tr><th>Rubro / producto</th><th>Cant. obra</th><th>Rendimiento</th><th>Necesita</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>';
   data.items.forEach(it => {
-    html += '<tr><td>' + it.rubro + '<br><span style="color:var(--muted);font-size:12px;">' + it.producto + '</span></td>' +
+    html += '<tr><td>' + it.rubro + '<br><span style="color:var(--muted);font-size:12px;">' + it.producto +
+      (it.categoria ? ' · ' + it.categoria : '') + '</span></td>' +
       '<td>' + it.cantidadObra + ' ' + it.unidadObra + '</td>' +
       '<td>' + it.rendimiento + ' ' + it.unidadObra + '/' + it.envase + '</td>' +
       '<td>' + it.paquetesNecesarios + ' ' + it.envase + '(s)</td>' +
