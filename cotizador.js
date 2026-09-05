@@ -5,13 +5,16 @@
 // base Mongo Atlas (db "calculadora_m2") y las mismas colecciones "stores" y
 // "rendimientos" que ya usa la app (no las toca, solo lee), y agrega
 // colecciones nuevas propias de este módulo:
-//   - tipos_obra         : tipos de obra configurados (Piso flotante, Deck...)
-//                          con el rubro real de Tiendanube para cada material
-//   - niveladores_puerta : niveladores de puerta precargados por SKU (no
-//                          tienen rubro propio en Tiendanube)
-//   - formas_pago        : formas de pago con % de descuento o recargo
-//   - tarifas_mano_obra  : tarifa configurable por tienda (store_id)
-//   - cotizaciones       : historial de presupuestos armados
+//   - tipos_obra        : tipos de obra configurados (Piso flotante, Deck...)
+//                         con el rubro real de Tiendanube para piso y zócalo
+//   - tipo_obra_items   : catálogos por SKU propios de cada tipo de obra
+//                         (categoria: 'puerta' | 'nivelacion' | 'manta') —
+//                         productos que no tienen rubro propio en Tiendanube,
+//                         precargados una vez y reutilizados en cada
+//                         cotización de ESE tipo de obra puntual
+//   - formas_pago       : formas de pago con % de descuento o recargo
+//   - tarifas_mano_obra : tarifa configurable por tienda (store_id)
+//   - cotizaciones      : historial de presupuestos armados
 //
 // Integración (ver INTEGRACION.md): en server.js
 //   const cotizadorRouter = require('./cotizador');
@@ -25,6 +28,12 @@ const PDFDocument = require('pdfkit');
 const router = express.Router();
 
 const API_BASE = 'https://api.tiendanube.com/v1';
+const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta'];
+const ETIQUETA_CATEGORIA = {
+  puerta: 'Niveladores de puerta',
+  nivelacion: 'Nivelantes de piso',
+  manta: 'Manta'
+};
 
 // ---------- Mongo (misma base que server.js) ----------
 
@@ -56,7 +65,7 @@ async function getRendimientosCollection() { return (await getDb()).collection('
 async function getTarifasCollection() { return (await getDb()).collection('tarifas_mano_obra'); }
 async function getCotizacionesCollection() { return (await getDb()).collection('cotizaciones'); }
 async function getTiposObraCollection() { return (await getDb()).collection('tipos_obra'); }
-async function getNiveladoresPuertaCollection() { return (await getDb()).collection('niveladores_puerta'); }
+async function getTipoObraItemsCollection() { return (await getDb()).collection('tipo_obra_items'); }
 async function getFormasPagoCollection() { return (await getDb()).collection('formas_pago'); }
 
 async function getStoreById(storeId) {
@@ -187,9 +196,9 @@ async function productosConfigurados(store) {
     .filter((p) => p.cobertura > 0 && p.precio !== null);
 }
 
-// Busca UN producto puntual por SKU exacto en Tiendanube (para los
-// niveladores de puerta, que no tienen rubro propio). No usa cache: el
-// precio que trae siempre es el vigente.
+// Busca UN producto puntual por SKU exacto en Tiendanube (para niveladores de
+// puerta, nivelantes de piso y manta, que no tienen rubro propio). No usa
+// cache: el precio que trae siempre es el vigente.
 async function productoPorSku(store, sku) {
   const response = await fetch(
     API_BASE + '/' + store.store_id + '/products?q=' + encodeURIComponent(sku) +
@@ -244,8 +253,8 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPc
 
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
-// productos: { piso, zocalo, puerta, nivelacion } -> cada uno (si aplica)
-// obra: { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, manoObra, desperdicioPctPiso }
+// productos: { piso, zocalo, puerta, nivelacion, manta } -> cada uno (si aplica)
+// obra: { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, utilizaManta, manoObra, desperdicioPctPiso }
 // tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2 }
 // formasPago: [{ nombre, tipo: 'descuento'|'recargo', porcentaje }]
 function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
@@ -259,6 +268,7 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
   const mlZocalos = Number(obra.mlZocalos) || 0;
   const cantidadPuertas = Number(obra.cantidadPuertas) || 0;
   const requiereNivelacion = !!obra.requiereNivelacion;
+  const utilizaManta = !!obra.utilizaManta;
   const manoObra = !!obra.manoObra;
   const desperdicioPctPiso = Number(obra.desperdicioPctPiso) || 0;
 
@@ -305,6 +315,17 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
     }
   }
 
+  if (utilizaManta) {
+    if (!productos.manta) faltantes.push('manta');
+    else if (m2Pisos > 0) {
+      const it = calcularItem({ rubro: 'Manta', unidadObra: 'm2', cantidadObra: m2Pisos, producto: productos.manta });
+      items.push(it);
+      totalProductos += it.subtotal;
+      // Sin tarifa propia: la mano de obra de colocar la manta va incluida
+      // en la tarifa de piso (pisos_m2).
+    }
+  }
+
   totalProductos = round2(totalProductos);
   totalManoObra = round2(totalManoObra);
   const total = round2(totalProductos + totalManoObra);
@@ -323,17 +344,46 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
   return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas };
 }
 
+// ---------- Helper: resuelve un item de catálogo por SKU (puerta/nivelacion/manta) ----------
+
+async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
+  const col = await getTipoObraItemsCollection();
+  let item = null;
+  try {
+    item = await col.findOne({
+      _id: new ObjectId(itemId),
+      store_id: store.store_id,
+      tipoObraId: String(tipoObraId),
+      categoria
+    });
+  } catch (e) { item = null; }
+  if (!item) return null;
+
+  const info = await productoPorSku(store, item.sku);
+  if (!info || info.precio === null) return null;
+
+  return {
+    id: item._id,
+    nombre: info.nombre,
+    categoria: ETIQUETA_CATEGORIA[categoria] || categoria,
+    tipo: 'unidad',
+    cobertura: Number(item.cobertura) || 1,
+    envase: 'unidad',
+    precio: info.precio
+  };
+}
+
 // ---------- Helper: arma el detalle de "productos" para calcularCotizacion
 // a partir de los ids elegidos en el front ----------
 
-async function resolverProductosElegidos(store, seleccion) {
+async function resolverProductosElegidos(store, seleccion, tipoObraId) {
   seleccion = seleccion || {};
   const resultado = {};
 
-  const necesitaCatalogo = ['piso', 'zocalo', 'nivelacion'].some((k) => seleccion[k]);
+  const necesitaCatalogo = ['piso', 'zocalo'].some((k) => seleccion[k]);
   if (necesitaCatalogo) {
     const catalogo = await productosConfigurados(store);
-    ['piso', 'zocalo', 'nivelacion'].forEach((clave) => {
+    ['piso', 'zocalo'].forEach((clave) => {
       const id = seleccion[clave];
       if (!id) return;
       const prod = catalogo.find((p) => p.id === parseInt(id, 10) || p.id === id);
@@ -341,25 +391,10 @@ async function resolverProductosElegidos(store, seleccion) {
     });
   }
 
-  if (seleccion.puerta) {
-    const col = await getNiveladoresPuertaCollection();
-    let item = null;
-    try {
-      item = await col.findOne({ _id: new ObjectId(seleccion.puerta), store_id: store.store_id });
-    } catch (e) { item = null; }
-    if (item) {
-      const info = await productoPorSku(store, item.sku);
-      if (info && info.precio !== null) {
-        resultado.puerta = {
-          id: item._id,
-          nombre: info.nombre,
-          categoria: 'Niveladores de puerta',
-          tipo: 'unidad',
-          cobertura: Number(item.cobertura) || 1,
-          envase: 'unidad',
-          precio: info.precio
-        };
-      }
+  for (const categoria of CATEGORIAS_ITEM) {
+    if (seleccion[categoria]) {
+      const prod = await resolverItemCatalogo(store, tipoObraId, categoria, seleccion[categoria]);
+      if (prod) resultado[categoria] = prod;
     }
   }
 
@@ -382,7 +417,7 @@ router.get('/productos', async (req, res) => {
 });
 
 // Rubros (categorías reales de Tiendanube) agrupados por tipo de unidad,
-// para usar como ayuda al configurar un tipo de obra.
+// para usar como ayuda al configurar un tipo de obra (piso y zócalo).
 router.get('/rubros-disponibles', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
@@ -408,7 +443,6 @@ function normalizarTipoObra(doc) {
     nombre: doc.nombre,
     rubroPiso: doc.rubroPiso || '',
     rubroZocalo: doc.rubroZocalo || '',
-    rubroNivelacion: doc.rubroNivelacion || '',
     desperdicioDefaultPct: doc.desperdicioDefaultPct || 0
   };
 }
@@ -427,7 +461,7 @@ router.get('/tipos-obra', async (req, res) => {
 router.post('/tipos-obra', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { id, nombre, rubroPiso, rubroZocalo, rubroNivelacion, desperdicioDefaultPct } = req.body || {};
+    const { id, nombre, rubroPiso, rubroZocalo, desperdicioDefaultPct } = req.body || {};
     if (!nombre || !rubroPiso) {
       return res.status(400).json({ error: 'Falta el nombre o el rubro de piso.' });
     }
@@ -436,7 +470,6 @@ router.post('/tipos-obra', async (req, res) => {
       nombre: String(nombre).trim(),
       rubroPiso: String(rubroPiso).trim(),
       rubroZocalo: rubroZocalo ? String(rubroZocalo).trim() : '',
-      rubroNivelacion: rubroNivelacion ? String(rubroNivelacion).trim() : '',
       desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
     };
     const col = await getTiposObraCollection();
@@ -457,6 +490,9 @@ router.delete('/tipos-obra/:id', async (req, res) => {
     const store = await getStoreFromQuery(req);
     const col = await getTiposObraCollection();
     await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
+    // Se borran en cascada los catálogos por SKU propios de este tipo de obra.
+    const itemsCol = await getTipoObraItemsCollection();
+    await itemsCol.deleteMany({ store_id: store.store_id, tipoObraId: String(req.params.id) });
     res.json({ ok: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -464,14 +500,24 @@ router.delete('/tipos-obra/:id', async (req, res) => {
 });
 
 // =====================================================================
-// Rutas: niveladores de puerta (precargados por SKU, sin rubro propio)
+// Rutas: catálogos por SKU de un tipo de obra puntual
+// (categoria: 'puerta' | 'nivelacion' | 'manta')
 // =====================================================================
 
-router.get('/niveladores-puerta', async (req, res) => {
+router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const col = await getNiveladoresPuertaCollection();
-    const items = await col.find({ store_id: store.store_id }).toArray();
+    const categoria = req.query.categoria;
+    if (CATEGORIAS_ITEM.indexOf(categoria) === -1) {
+      return res.status(400).json({ error: 'Categoria invalida.' });
+    }
+    const col = await getTipoObraItemsCollection();
+    const items = await col.find({
+      store_id: store.store_id,
+      tipoObraId: String(req.params.tipoObraId),
+      categoria
+    }).toArray();
+
     const resultado = [];
     for (const it of items) {
       const info = await productoPorSku(store, it.sku);
@@ -490,17 +536,26 @@ router.get('/niveladores-puerta', async (req, res) => {
   }
 });
 
-router.post('/niveladores-puerta', async (req, res) => {
+router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { sku, cobertura } = req.body || {};
+    const { categoria, sku, cobertura } = req.body || {};
+    if (CATEGORIAS_ITEM.indexOf(categoria) === -1) {
+      return res.status(400).json({ error: 'Categoria invalida.' });
+    }
     if (!sku) return res.status(400).json({ error: 'Falta el SKU.' });
 
     const info = await productoPorSku(store, sku);
     if (!info) return res.status(404).json({ error: 'No se encontro ningun producto con ese SKU en Tiendanube.' });
 
-    const datos = { store_id: store.store_id, sku: String(sku).trim(), cobertura: Number(cobertura) || 1 };
-    const col = await getNiveladoresPuertaCollection();
+    const datos = {
+      store_id: store.store_id,
+      tipoObraId: String(req.params.tipoObraId),
+      categoria,
+      sku: String(sku).trim(),
+      cobertura: Number(cobertura) || 1
+    };
+    const col = await getTipoObraItemsCollection();
     const { insertedId } = await col.insertOne(datos);
     res.json(Object.assign({ id: insertedId }, datos, info));
   } catch (err) {
@@ -508,11 +563,15 @@ router.post('/niveladores-puerta', async (req, res) => {
   }
 });
 
-router.delete('/niveladores-puerta/:id', async (req, res) => {
+router.delete('/tipos-obra/:tipoObraId/items/:itemId', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const col = await getNiveladoresPuertaCollection();
-    await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
+    const col = await getTipoObraItemsCollection();
+    await col.deleteOne({
+      _id: new ObjectId(req.params.itemId),
+      store_id: store.store_id,
+      tipoObraId: String(req.params.tipoObraId)
+    });
     res.json({ ok: true });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -597,11 +656,12 @@ router.post('/tarifas', async (req, res) => {
 router.post('/calcular', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { obra, productos } = req.body || {};
+    const { obra, productos, tipoObraId } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
+    if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
 
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
-      resolverProductosElegidos(store, productos),
+      resolverProductosElegidos(store, productos, tipoObraId),
       getTarifas(store.store_id),
       (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
@@ -616,11 +676,12 @@ router.post('/calcular', async (req, res) => {
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { obra, productos, cliente, direccion, tipoObraNombre } = req.body || {};
+    const { obra, productos, tipoObraId, cliente, direccion, tipoObraNombre } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
+    if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
 
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
-      resolverProductosElegidos(store, productos),
+      resolverProductosElegidos(store, productos, tipoObraId),
       getTarifas(store.store_id),
       (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
@@ -635,6 +696,7 @@ router.post('/guardar', async (req, res) => {
       fecha: new Date(),
       cliente: cliente || '',
       direccion: direccion || '',
+      tipoObraId: String(tipoObraId),
       tipoObraNombre: tipoObraNombre || '',
       obra,
       items: resultado.items,
@@ -710,6 +772,7 @@ router.get('/pdf/:id', async (req, res) => {
     if (o.mlZocalos) datosObra.push(o.mlZocalos + ' ml de zócalo');
     if (o.cantidadPuertas) datosObra.push(o.cantidadPuertas + ' puerta(s)');
     if (o.requiereNivelacion) datosObra.push('con nivelación');
+    if (o.utilizaManta) datosObra.push('con manta');
     if (o.manoObra) datosObra.push('con mano de obra');
     if (datosObra.length) pdf.fontSize(10).fillColor('#555').text(datosObra.join(' · '));
     pdf.fillColor('#000');
