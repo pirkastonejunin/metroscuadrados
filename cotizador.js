@@ -254,6 +254,7 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPc
     productoId: producto.id,
     producto: producto.nombre,
     categoria: producto.categoria || '',
+    imagen: producto.imagen || null,
     unidadObra,
     cantidadObra: round2(cantidadObra),
     desperdicioPct: pct,
@@ -397,6 +398,7 @@ async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
     id: item._id,
     nombre: info.nombre,
     categoria: ETIQUETA_CATEGORIA[categoria] || categoria,
+    imagen: info.imagen || null,
     tipo: 'unidad',
     cobertura: Number(item.cobertura) || 1,
     envase: 'unidad',
@@ -707,23 +709,54 @@ router.post('/calcular', async (req, res) => {
   }
 });
 
+// Guardar recibe los items ya resueltos desde el resumen (paso 4), que Mato
+// puede haber ajustado a mano (cantidades editadas y/o items manuales de
+// "Otros") antes de guardar. No vuelve a resolver por SKU/rubro: solo
+// recalcula subtotales y totales a partir de lo que llega, para que la
+// cotización guardada sea siempre consistente con lo que se ve en pantalla.
+function finalizarItems(items) {
+  return (items || []).map((it) => {
+    const cantidad = Number(it.paquetesNecesarios) || 0;
+    const precioUnitario = Number(it.precioUnitario) || 0;
+    return {
+      rubro: String(it.rubro || 'Item').trim() || 'Item',
+      productoId: it.productoId != null ? it.productoId : null,
+      producto: String(it.producto || '').trim(),
+      categoria: it.categoria || '',
+      imagen: it.imagen || null,
+      unidadObra: it.unidadObra || '',
+      cantidadObra: it.cantidadObra != null ? Number(it.cantidadObra) || 0 : cantidad,
+      desperdicioPct: Number(it.desperdicioPct) || 0,
+      cantidadConDesperdicio: it.cantidadConDesperdicio != null ? Number(it.cantidadConDesperdicio) || 0 : cantidad,
+      rendimiento: it.rendimiento != null ? Number(it.rendimiento) : null,
+      envase: it.envase || 'unidad',
+      paquetesNecesarios: cantidad,
+      precioUnitario,
+      subtotal: round2(cantidad * precioUnitario),
+      manual: !!it.manual
+    };
+  });
+}
+
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { obra, productos, tipoObraId, cliente, direccion, tipoObraNombre } = req.body || {};
+    const { obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
     if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
-
-    const [productosElegidos, tarifas, formasPago] = await Promise.all([
-      resolverProductosElegidos(store, productos, tipoObraId),
-      getTarifas(store.store_id, tipoObraId),
-      (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
-    ]);
-
-    const resultado = calcularCotizacion({ obra, productos: productosElegidos, tarifas, formasPago });
-    if (resultado.faltantes.length > 0) {
-      return res.status(400).json({ error: 'Falta elegir producto para: ' + resultado.faltantes.join(', ') });
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({ error: 'No hay items para guardar.' });
     }
+
+    const itemsFinales = finalizarItems(items);
+    const totalProductos = round2(itemsFinales.reduce((s, it) => s + it.subtotal, 0));
+    const totalManoObraFinal = round2(Number(totalManoObra) || 0);
+    const total = round2(totalProductos + totalManoObraFinal);
+    const formasPagoFinales = (formasPago || []).map((fp) => {
+      const pct = Number(fp.porcentaje) || 0;
+      const factor = fp.tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
+      return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(total * factor) };
+    });
 
     const doc = {
       store_id: store.store_id,
@@ -733,11 +766,11 @@ router.post('/guardar', async (req, res) => {
       tipoObraId: String(tipoObraId),
       tipoObraNombre: tipoObraNombre || '',
       obra,
-      items: resultado.items,
-      totalProductos: resultado.totalProductos,
-      totalManoObra: resultado.totalManoObra,
-      total: resultado.total,
-      formasPago: resultado.formasPago
+      items: itemsFinales,
+      totalProductos,
+      totalManoObra: totalManoObraFinal,
+      total,
+      formasPago: formasPagoFinales
     };
 
     const col = await getCotizacionesCollection();
@@ -776,6 +809,45 @@ router.get('/historial/:id', async (req, res) => {
   }
 });
 
+// Trae la imagen del producto como Buffer para insertarla en el PDF. Si
+// falla (sin imagen, red, formato no soportado por pdfkit) devuelve null y
+// la fila se dibuja igual, con un recuadro vacío en vez de la foto.
+async function descargarImagenPdf(url) {
+  if (!url) return null;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return buf.length ? buf : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Layout de la tabla de items: foto + producto (nombre simple, sin la
+// categoría cruda de Tiendanube) + cantidad (con la nota de m²/ml y
+// desperdicio en chico, aparte) + precio unit. + subtotal.
+const PDF_IMG_X = 50, PDF_IMG_W = 34;
+const PDF_COL_PRODUCTO_X = 92, PDF_COL_PRODUCTO_W = 150;
+const PDF_COL_CANT_X = 250, PDF_COL_CANT_W = 100;
+const PDF_COL_PRECIO_X = 358, PDF_COL_PRECIO_W = 80;
+const PDF_COL_SUBTOTAL_X = 446, PDF_COL_SUBTOTAL_W = 110;
+const PDF_TABLE_RIGHT = 556;
+
+function dibujarEncabezadoTabla(pdf) {
+  const y0 = pdf.y;
+  pdf.fontSize(9).fillColor('#555');
+  pdf.text('Producto', PDF_COL_PRODUCTO_X, y0, { width: PDF_COL_PRODUCTO_W });
+  pdf.text('Cantidad', PDF_COL_CANT_X, y0, { width: PDF_COL_CANT_W });
+  pdf.text('Precio unit.', PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
+  pdf.text('Subtotal', PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+  pdf.fillColor('#000');
+  pdf.y = y0 + 14;
+  pdf.moveDown(0.4);
+  pdf.moveTo(50, pdf.y).lineTo(PDF_TABLE_RIGHT, pdf.y).strokeColor('#ddd').stroke();
+  pdf.moveDown(0.3);
+}
+
 router.get('/pdf/:id', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
@@ -812,36 +884,66 @@ router.get('/pdf/:id', async (req, res) => {
     pdf.fillColor('#000');
     pdf.moveDown(1);
 
-    // Tabla de items
-    const colX = [50, 200, 320, 390, 460];
-    pdf.fontSize(9).fillColor('#555');
-    pdf.text('Rubro / Producto', colX[0], pdf.y, { width: 145 });
-    pdf.text('Cant. obra', colX[1], pdf.y - pdf.currentLineHeight(), { width: 110 });
-    pdf.moveUp();
-    pdf.text('Rendim.', colX[2], pdf.y, { width: 65 });
-    pdf.text('Necesita', colX[3], pdf.y, { width: 65 });
-    pdf.text('Subtotal', colX[4], pdf.y, { width: 90 });
-    pdf.fillColor('#000');
-    pdf.moveDown(0.4);
-    pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#ddd').stroke();
-    pdf.moveDown(0.3);
+    dibujarEncabezadoTabla(pdf);
 
-    (doc.items || []).forEach((it) => {
+    const pageBottom = pdf.page.height - pdf.page.margins.bottom;
+
+    for (const it of (doc.items || [])) {
+      const imgBuffer = await descargarImagenPdf(it.imagen);
+
+      let notaCantidad = '';
+      if (it.unidadObra) {
+        notaCantidad = it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : '');
+      }
+      const envaseTxt = (it.envase || 'unidad') + (Number(it.paquetesNecesarios) === 1 ? '' : '(s)');
+      const cantTexto = it.paquetesNecesarios + ' ' + envaseTxt;
+
+      // Medir antes de dibujar, para saber cuánto ocupa la fila y si hace
+      // falta pasar de página.
+      pdf.fontSize(8.5);
+      const hRubro = pdf.heightOfString(it.rubro || '', { width: PDF_COL_PRODUCTO_W });
+      pdf.fontSize(10);
+      const hNombre = pdf.heightOfString(it.producto || '', { width: PDF_COL_PRODUCTO_W });
+      const hProductoCol = hRubro + hNombre + 2;
+
+      pdf.fontSize(10);
+      const hCant = pdf.heightOfString(cantTexto, { width: PDF_COL_CANT_W });
+      pdf.fontSize(8);
+      const hNota = notaCantidad ? pdf.heightOfString(notaCantidad, { width: PDF_COL_CANT_W }) : 0;
+      const hCantCol = hCant + (hNota ? hNota + 2 : 0);
+
+      const filaAlto = Math.max(PDF_IMG_W, hProductoCol, hCantCol, 14);
+
+      if (pdf.y + filaAlto > pageBottom) {
+        pdf.addPage();
+        dibujarEncabezadoTabla(pdf);
+      }
+
       const y0 = pdf.y;
-      pdf.fontSize(9);
-      const nombreConDesperdicio = it.desperdicioPct
-        ? it.rubro + ' — ' + it.producto + ' (+' + it.desperdicioPct + '% desp.)'
-        : it.rubro + ' — ' + it.producto;
-      pdf.text(nombreConDesperdicio, colX[0], y0, { width: 145 });
-      pdf.text(it.cantidadObra + ' ' + it.unidadObra, colX[1], y0, { width: 110 });
-      pdf.text(String(it.rendimiento) + '/' + it.envase, colX[2], y0, { width: 65 });
-      pdf.text(it.paquetesNecesarios + ' ' + it.envase + '(s)', colX[3], y0, { width: 65 });
-      pdf.text('$ ' + it.subtotal.toFixed(2), colX[4], y0, { width: 90 });
-      pdf.moveDown(0.6);
-    });
+
+      if (imgBuffer) {
+        try { pdf.image(imgBuffer, PDF_IMG_X, y0, { width: PDF_IMG_W, height: PDF_IMG_W }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+      } else {
+        pdf.rect(PDF_IMG_X, y0, PDF_IMG_W, PDF_IMG_W).strokeColor('#e2e0db').stroke();
+      }
+
+      pdf.fillColor('#888').fontSize(8.5).text(it.rubro || '', PDF_COL_PRODUCTO_X, y0, { width: PDF_COL_PRODUCTO_W });
+      pdf.fillColor('#000').fontSize(10).text(it.producto || '', PDF_COL_PRODUCTO_X, y0 + hRubro + 2, { width: PDF_COL_PRODUCTO_W });
+
+      pdf.fillColor('#000').fontSize(10).text(cantTexto, PDF_COL_CANT_X, y0, { width: PDF_COL_CANT_W });
+      if (notaCantidad) {
+        pdf.fillColor('#888').fontSize(8).text(notaCantidad, PDF_COL_CANT_X, y0 + hCant + 2, { width: PDF_COL_CANT_W });
+      }
+      pdf.fillColor('#000');
+
+      pdf.fontSize(10).text('$ ' + Number(it.precioUnitario).toFixed(2), PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
+      pdf.fontSize(10).text('$ ' + Number(it.subtotal).toFixed(2), PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+
+      pdf.y = y0 + filaAlto + 10;
+    }
 
     pdf.moveDown(0.4);
-    pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#ddd').stroke();
+    pdf.moveTo(50, pdf.y).lineTo(PDF_TABLE_RIGHT, pdf.y).strokeColor('#ddd').stroke();
     pdf.moveDown(0.5);
 
     pdf.fontSize(10);
