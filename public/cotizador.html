@@ -11,9 +11,11 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
-  header{background:var(--accent);color:#fff;padding:18px 24px;}
-  header h1{margin:0;font-size:19px;font-weight:600;letter-spacing:.2px;}
-  header p{margin:4px 0 0;font-size:13px;color:#c9ccd1;}
+  header.brand-header{background:#fff;border-bottom:1px solid var(--border);padding:14px 24px;}
+  .brand-header-inner{max-width:980px;margin:0 auto;display:flex;align-items:center;gap:14px;}
+  .brand-logo{height:32px;display:block;}
+  .brand-title h1{margin:0;font-size:15px;font-weight:600;letter-spacing:.2px;color:var(--text);}
+  .brand-title p{margin:2px 0 0;font-size:12px;color:var(--muted);}
   .wrap{max-width:980px;margin:0 auto;padding:20px;}
   .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
   .tab-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--panel);cursor:pointer;font-size:13px;color:var(--muted);}
@@ -86,13 +88,33 @@
   .cfg-row:last-child{border-bottom:none;}
   .cfg-row .cfg-meta{color:var(--muted);font-size:12px;}
   .cfg-form{border-top:1px dashed var(--border);margin-top:12px;padding-top:14px;}
+  .vista-toggle{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+  .vista-toggle-btn{padding:7px 13px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
+  .vista-toggle-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .desc-obra{color:var(--muted);font-size:13px;margin-bottom:14px;}
+  .llave-en-mano-total{text-align:right;margin-top:10px;}
+  .llave-en-mano-total .grand{font-size:24px;font-weight:700;}
+  button.whatsapp{background:#25D366;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;font-weight:600;}
+  .copiado{color:var(--ok);font-size:12px;margin-left:6px;}
+  @media print{
+    header.brand-header{border-bottom:2px solid #000;}
+    .tabs, .subtabs, #selTienda, .actions, .acciones-extra, .vista-toggle, .field label[for="selTienda"], .grid:has(#selTienda){display:none !important;}
+    body *{visibility:hidden;}
+    #paso-resumen, #paso-resumen *, #historial-detalle-card, #historial-detalle-card *{visibility:visible;}
+    #paso-resumen, #historial-detalle-card{position:absolute;left:0;top:0;width:100%;border:none;}
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Cotizador de obra</h1>
-  <p>Herramienta interna — Piedra Negra</p>
+<header class="brand-header">
+  <div class="brand-header-inner">
+    <img class="brand-logo" alt="Piedra Negra" src="/assets/logo-piedra-negra.png">
+    <div class="brand-title">
+      <h1>Cotizador de obra</h1>
+      <p>Herramienta interna</p>
+    </div>
+  </div>
 </header>
 
 <div class="wrap">
@@ -165,8 +187,17 @@
 
     <div class="card hidden" id="paso-resumen">
       <h2>4. Resumen</h2>
+      <div class="vista-toggle" id="vistaToggleResumen">
+        <button class="vista-toggle-btn active" data-vista="detalle">Ver desglose</button>
+        <button class="vista-toggle-btn" data-vista="simple">Vista llave en mano</button>
+      </div>
       <div id="resumen-tabla"></div>
-      <div class="cfg-form">
+      <div class="actions acciones-extra hidden" id="accionesExtraResumen">
+        <button class="secondary" id="btnImprimirResumen">Imprimir</button>
+        <button class="whatsapp" id="btnWhatsappResumen">Compartir por WhatsApp</button>
+        <button class="secondary" id="btnCopiarLinkResumen">Copiar link<span class="copiado hidden" id="copiadoResumen">¡Copiado!</span></button>
+      </div>
+      <div class="cfg-form" id="formOtroItem">
         <h3>Agregar otro ítem</h3>
         <p class="hint">Para algo que no sale del cálculo automático: traslado, un extra puntual, etc.</p>
         <div class="grid">
@@ -198,8 +229,17 @@
     </div>
     <div class="card hidden" id="historial-detalle-card">
       <h2>Detalle</h2>
+      <div class="vista-toggle" id="vistaToggleHistorial">
+        <button class="vista-toggle-btn active" data-vista="detalle">Ver desglose</button>
+        <button class="vista-toggle-btn" data-vista="simple">Vista llave en mano</button>
+      </div>
       <div id="historial-detalle"></div>
-      <div class="actions"><button class="secondary" id="btnPdfHistorial">Descargar PDF</button></div>
+      <div class="actions acciones-extra">
+        <button class="secondary" id="btnPdfHistorial">Descargar PDF</button>
+        <button class="secondary" id="btnImprimirHistorial">Imprimir</button>
+        <button class="whatsapp" id="btnWhatsappHistorial">Compartir por WhatsApp</button>
+        <button class="secondary" id="btnCopiarLinkHistorial">Copiar link<span class="copiado hidden" id="copiadoHistorial">¡Copiado!</span></button>
+      </div>
     </div>
   </div>
 
@@ -319,6 +359,10 @@ let catalogosTipoObraCache = null; // { puerta: [...], nivelacion: [...], manta:
 let seleccion = {};                // { piso, zocalo, puerta, nivelacion, manta } (producto/item elegido)
 let cotizacionActual = null;       // resultado de /calcular, editable en pantalla antes de guardar
 let ultimaCotizacionGuardadaId = null;
+let vistaSimpleResumen = false;    // toggle "ver desglose" / "llave en mano" del paso 4
+let vistaSimpleHistorial = false;  // idem para el detalle del historial
+let historialVistaId = null;       // id de la cotización que se está viendo en el detalle del historial
+let historialVistaDoc = null;      // documento completo de esa cotización (para poder re-renderizar al togglear vista)
 let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
 let categoriaActivaCatalogo = 'puerta';
@@ -334,6 +378,38 @@ const LABEL_COBERTURA_INPUT = {
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+// Espejo de descripcionObra() en cotizador.js: descripción del alcance de la
+// obra (sin precios ni productos puntuales), para la vista "llave en mano".
+function descripcionObra(o){
+  o = o || {};
+  const datos = [];
+  if (o.m2Pisos) datos.push(o.m2Pisos + ' m2 de piso');
+  if (o.mlZocalos) datos.push(o.mlZocalos + ' ml de zócalo');
+  if (o.cantidadPuertas) datos.push(o.cantidadPuertas + ' puerta(s)');
+  if (o.requiereNivelacion) datos.push('con nivelación');
+  if (o.utilizaManta) datos.push('con manta');
+  if (o.manoObra) datos.push('con mano de obra');
+  return datos.join(' · ');
+}
+
+function linkCotizacion(id){
+  return location.origin + '/ver-cotizacion.html?id=' + id + '&store_id=' + encodeURIComponent(storeId);
+}
+
+function compartirWhatsapp(id, data){
+  const texto = 'Hola' + (data.cliente ? ' ' + data.cliente : '') + ', te comparto el presupuesto' +
+    (data.tipoObraNombre ? ' de ' + data.tipoObraNombre : '') + ' — Total ' + money(data.total) + '. ' + linkCotizacion(id);
+  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+}
+
+async function copiarLink(id, btnCopiadoMsgEl){
+  try{
+    await navigator.clipboard.writeText(linkCotizacion(id));
+    btnCopiadoMsgEl.classList.remove('hidden');
+    setTimeout(() => btnCopiadoMsgEl.classList.add('hidden'), 2000);
+  }catch(e){ /* portapapeles no disponible */ }
+}
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -681,13 +757,27 @@ $('#btnCalcular').addEventListener('click', async () => {
     }
     ultimaCotizacionGuardadaId = null;
     cotizacionActual = JSON.parse(JSON.stringify(data));
-    renderResumen(cotizacionActual, true);
+    cotizacionActual.obra = obra;
+    vistaSimpleResumen = false;
+    $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+    $('#formOtroItem').classList.remove('hidden');
+    $('#accionesExtraResumen').classList.add('hidden');
+    renderResumen(cotizacionActual, true, vistaSimpleResumen);
     $('#clienteGuardar').value = $('#cliente').value;
     $('#paso-productos').classList.add('hidden');
     $('#paso-resumen').classList.remove('hidden');
     $('#btnPdf').classList.add('hidden');
     $('#btnNueva').classList.add('hidden');
   }catch(e){ mostrarMsg(e.message); }
+});
+
+$$('#vistaToggleResumen .vista-toggle-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    vistaSimpleResumen = b.dataset.vista === 'simple';
+    $$('#vistaToggleResumen .vista-toggle-btn').forEach(x => x.classList.toggle('active', x === b));
+    $('#formOtroItem').classList.toggle('hidden', vistaSimpleResumen);
+    if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
+  });
 });
 
 $('#btnVolverProductos').addEventListener('click', () => {
@@ -697,35 +787,47 @@ $('#btnVolverProductos').addEventListener('click', () => {
 
 // editable=true (paso 4, cotización en curso): cantidad editable a mano y
 // botón para quitar el ítem. editable=false (detalle de historial): tabla
-// de solo lectura, sin controles.
-function renderResumen(data, editable){
-  editable = editable !== false;
-  let html = '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Precio unit.</th><th>Subtotal</th>' +
-    (editable ? '<th></th>' : '') + '</tr></thead><tbody>';
-  data.items.forEach((it, idx) => {
-    const notaCantidad = it.unidadObra
-      ? (it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : ''))
-      : '';
-    const envaseTxt = (it.envase || 'unidad') + (Number(it.paquetesNecesarios) === 1 ? '' : '(s)');
-    html += '<tr>' +
-      '<td>' + (it.imagen ? '<img class="item-foto" src="' + it.imagen + '">' : '<div class="item-foto-vacia"></div>') + '</td>' +
-      '<td><div class="item-rubro">' + escapeHtml(it.rubro) + '</div><div class="item-nombre">' + escapeHtml(it.producto) + '</div></td>' +
-      '<td>' +
-        (editable
-          ? '<input type="number" class="cant-input" data-idx="' + idx + '" min="0" step="0.01" value="' + it.paquetesNecesarios + '"> ' + escapeHtml(it.envase || 'unidad')
-          : '<div class="cant-principal">' + it.paquetesNecesarios + ' ' + escapeHtml(envaseTxt) + '</div>') +
-        (notaCantidad ? '<div class="cant-nota">' + escapeHtml(notaCantidad) + '</div>' : '') +
-      '</td>' +
-      '<td>' + money(it.precioUnitario) + '</td>' +
-      '<td>' + money(it.subtotal) + '</td>' +
-      (editable ? '<td><button class="quitar-item" data-idx="' + idx + '" title="Quitar ítem">✕</button></td>' : '') +
-    '</tr>';
-  });
-  html += '</tbody></table>';
-  html += '<div class="totales">' +
-    'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
-    (data.totalManoObra ? 'Mano de obra: ' + money(data.totalManoObra) + '<br>' : '') +
-    '<div class="grand">Total: ' + money(data.total) + '</div></div>';
+// de solo lectura, sin controles. vistaSimple=true: sin desglose de ítems,
+// solo la descripción del alcance de la obra y el total ("llave en mano").
+function renderResumen(data, editable, vistaSimple){
+  editable = editable !== false && !vistaSimple;
+  let html = '';
+
+  const descTxt = descripcionObra(data.obra);
+
+  if (vistaSimple){
+    if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    html += '<p class="hint">Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.</p>';
+    html += '<div class="llave-en-mano-total"><div class="grand">' + money(data.total) + '</div></div>';
+  } else {
+    if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Precio unit.</th><th>Subtotal</th>' +
+      (editable ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.items.forEach((it, idx) => {
+      const notaCantidad = it.unidadObra
+        ? (it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : ''))
+        : '';
+      const envaseTxt = (it.envase || 'unidad') + (Number(it.paquetesNecesarios) === 1 ? '' : '(s)');
+      html += '<tr>' +
+        '<td>' + (it.imagen ? '<img class="item-foto" src="' + it.imagen + '">' : '<div class="item-foto-vacia"></div>') + '</td>' +
+        '<td><div class="item-rubro">' + escapeHtml(it.rubro) + '</div><div class="item-nombre">' + escapeHtml(it.producto) + '</div></td>' +
+        '<td>' +
+          (editable
+            ? '<input type="number" class="cant-input" data-idx="' + idx + '" min="0" step="0.01" value="' + it.paquetesNecesarios + '"> ' + escapeHtml(it.envase || 'unidad')
+            : '<div class="cant-principal">' + it.paquetesNecesarios + ' ' + escapeHtml(envaseTxt) + '</div>') +
+          (notaCantidad ? '<div class="cant-nota">' + escapeHtml(notaCantidad) + '</div>' : '') +
+        '</td>' +
+        '<td>' + money(it.precioUnitario) + '</td>' +
+        '<td>' + money(it.subtotal) + '</td>' +
+        (editable ? '<td><button class="quitar-item" data-idx="' + idx + '" title="Quitar ítem">✕</button></td>' : '') +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="totales">' +
+      'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
+      (data.totalManoObra ? 'Mano de obra: ' + money(data.totalManoObra) + '<br>' : '') +
+      '<div class="grand">Total: ' + money(data.total) + '</div></div>';
+  }
 
   if (data.formasPago && data.formasPago.length){
     html += '<div class="formas-pago">';
@@ -747,7 +849,7 @@ function renderResumen(data, editable){
         cotizacionActual.items[idx].paquetesNecesarios = nuevaCant;
         cotizacionActual.items[idx].subtotal = round2(nuevaCant * cotizacionActual.items[idx].precioUnitario);
         recalcularTotalesFront();
-        renderResumen(cotizacionActual, true);
+        renderResumen(cotizacionActual, true, vistaSimpleResumen);
       });
     });
     $$('#resumen-tabla .quitar-item').forEach(btn => {
@@ -755,7 +857,7 @@ function renderResumen(data, editable){
         const idx = parseInt(btn.dataset.idx, 10);
         cotizacionActual.items.splice(idx, 1);
         recalcularTotalesFront();
-        renderResumen(cotizacionActual, true);
+        renderResumen(cotizacionActual, true, vistaSimpleResumen);
       });
     });
   }
@@ -819,12 +921,27 @@ $('#btnGuardar').addEventListener('click', async () => {
     mostrarMsg('Cotización guardada.', 'ok');
     $('#btnPdf').classList.remove('hidden');
     $('#btnNueva').classList.remove('hidden');
+    $('#accionesExtraResumen').classList.remove('hidden');
   }catch(e){ mostrarMsg(e.message); }
 });
 
 $('#btnPdf').addEventListener('click', () => {
   if (!ultimaCotizacionGuardadaId) return;
-  window.open('/api/cotizador/pdf/' + ultimaCotizacionGuardadaId + '?store_id=' + storeId, '_blank');
+  window.open('/api/cotizador/pdf/' + ultimaCotizacionGuardadaId + '?store_id=' + storeId + (vistaSimpleResumen ? '&vista=simple' : ''), '_blank');
+});
+
+$('#btnImprimirResumen').addEventListener('click', () => window.print());
+$('#btnWhatsappResumen').addEventListener('click', () => {
+  if (!ultimaCotizacionGuardadaId || !cotizacionActual) return;
+  compartirWhatsapp(ultimaCotizacionGuardadaId, {
+    cliente: $('#clienteGuardar').value,
+    tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
+    total: cotizacionActual.total
+  });
+});
+$('#btnCopiarLinkResumen').addEventListener('click', () => {
+  if (!ultimaCotizacionGuardadaId) return;
+  copiarLink(ultimaCotizacionGuardadaId, $('#copiadoResumen'));
 });
 
 $('#btnNueva').addEventListener('click', () => {
@@ -832,6 +949,10 @@ $('#btnNueva').addEventListener('click', () => {
   tipoObraElegido = null;
   cotizacionActual = null;
   ultimaCotizacionGuardadaId = null;
+  vistaSimpleResumen = false;
+  $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+  $('#formOtroItem').classList.remove('hidden');
+  $('#accionesExtraResumen').classList.add('hidden');
   $('#cliente').value=''; $('#direccion').value=''; $('#clienteGuardar').value='';
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
   $('#requiereNivelacion').checked=false;
@@ -867,15 +988,44 @@ async function cargarHistorial(){
   }catch(e){ cont.innerHTML = '<div class="empty">' + e.message + '</div>'; }
 }
 
+function renderDetalleHistorial(doc){
+  renderResumen(doc, false, vistaSimpleHistorial);
+  $('#historial-detalle').innerHTML = $('#resumen-tabla').innerHTML;
+}
+
 async function verDetalleHistorial(id){
   const res = await fetch('/api/cotizador/historial/' + id + '?store_id=' + storeId);
   const doc = await res.json();
   if (!res.ok){ mostrarMsg(doc.error); return; }
-  renderResumen(doc, false);
-  $('#historial-detalle').innerHTML = $('#resumen-tabla').innerHTML;
+  historialVistaId = id;
+  historialVistaDoc = doc;
+  vistaSimpleHistorial = false;
+  $$('#vistaToggleHistorial .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+  renderDetalleHistorial(doc);
   $('#historial-detalle-card').classList.remove('hidden');
-  $('#btnPdfHistorial').onclick = () => window.open('/api/cotizador/pdf/' + id + '?store_id=' + storeId, '_blank');
 }
+
+$$('#vistaToggleHistorial .vista-toggle-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    vistaSimpleHistorial = b.dataset.vista === 'simple';
+    $$('#vistaToggleHistorial .vista-toggle-btn').forEach(x => x.classList.toggle('active', x === b));
+    if (historialVistaDoc) renderDetalleHistorial(historialVistaDoc);
+  });
+});
+
+$('#btnPdfHistorial').addEventListener('click', () => {
+  if (!historialVistaId) return;
+  window.open('/api/cotizador/pdf/' + historialVistaId + '?store_id=' + storeId + (vistaSimpleHistorial ? '&vista=simple' : ''), '_blank');
+});
+$('#btnImprimirHistorial').addEventListener('click', () => window.print());
+$('#btnWhatsappHistorial').addEventListener('click', () => {
+  if (!historialVistaId || !historialVistaDoc) return;
+  compartirWhatsapp(historialVistaId, historialVistaDoc);
+});
+$('#btnCopiarLinkHistorial').addEventListener('click', () => {
+  if (!historialVistaId) return;
+  copiarLink(historialVistaId, $('#copiadoHistorial'));
+});
 
 // ---------- Configuración: tipos de obra ----------
 let rubrosDisponiblesCache = null;
