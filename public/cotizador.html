@@ -53,6 +53,8 @@
   .prod-item .meta .name{font-weight:600;}
   .prod-item .meta .sub{color:var(--muted);font-size:12px;}
   .prod-item .precio{font-weight:600;white-space:nowrap;}
+  .prod-item .ver-ficha{font-size:11.5px;color:var(--muted);white-space:nowrap;text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:3px 7px;flex-shrink:0;}
+  .prod-item .ver-ficha:hover{background:#f2f1ee;color:var(--text);}
   .empty{color:var(--muted);font-size:13px;padding:14px;text-align:center;}
   table{width:100%;border-collapse:collapse;font-size:13.5px;}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
@@ -290,6 +292,7 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 let storeId = null;
+let tiendaDomain = null;      // dominio de la tienda actual, para armar el link "Ver ficha" a Tiendanube
 let catalogoCache = null;          // catalogo completo de la tienda actual (con rendimiento+precio, para piso/zocalo)
 let tiposObraCache = null;         // tipos de obra configurados
 let tipoObraElegido = null;        // tipo de obra elegido para la cotizacion actual
@@ -352,9 +355,12 @@ async function cargarTiendas(){
   sel.innerHTML = tiendas.map(t => '<option value="' + t.store_id + '">' + (t.domain || t.store_id) + '</option>').join('');
   if (tiendas.length){
     storeId = String(tiendas[0].store_id);
+    tiendaDomain = tiendas[0].domain || null;
   }
   sel.addEventListener('change', () => {
     storeId = sel.value;
+    const tienda = tiendas.find(t => String(t.store_id) === storeId);
+    tiendaDomain = tienda ? tienda.domain : null;
     catalogoCache = null;
     tiposObraCache = null;
     catalogosTipoObraCache = null;
@@ -576,11 +582,15 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
   }
   listaEl.innerHTML = opciones.map(p => {
     const sel = seleccion[rubro.clave] && seleccion[rubro.clave].id === p.id;
+    const linkFicha = (tiendaDomain && p.handle)
+      ? '<a class="ver-ficha" href="https://' + tiendaDomain + '/productos/' + p.handle + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Ver ficha ↗</a>'
+      : '';
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
         (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + '</div>' +
         '<div class="sub">rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
+        linkFicha +
         '<div class="precio">' + money(p.precio) + '</div>' +
       '</div>'
     );
