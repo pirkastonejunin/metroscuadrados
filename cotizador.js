@@ -8,14 +8,15 @@
 //   - tipos_obra        : tipos de obra configurados (Piso flotante, Deck...)
 //                         con el rubro real de Tiendanube para piso y zócalo
 //   - tipo_obra_items   : catálogos por SKU propios de cada tipo de obra
-//                         (categoria: 'puerta' | 'nivelacion' | 'manta') —
-//                         productos que no tienen rubro propio en Tiendanube,
-//                         precargados una vez y reutilizados en cada
-//                         cotización de ESE tipo de obra puntual
+//                         (categoria: 'puerta' | 'nivelacion' | 'manta' |
+//                         'pegamento') — productos que no tienen rubro propio
+//                         en Tiendanube, precargados una vez y reutilizados
+//                         en cada cotización de ESE tipo de obra puntual
 //   - formas_pago       : formas de pago con % de descuento o recargo
 //   - tarifas_mano_obra : tarifa de mano de obra, propia de cada tipo de obra
 //                         (store_id + tipoObraId) — cada tipo de obra cotiza
-//                         su propia mano de obra
+//                         su propia mano de obra, con un mínimo de m²
+//                         cotizables (minimoM2Cotizable)
 //   - cotizaciones      : historial de presupuestos armados
 //
 // Integración (ver INTEGRACION.md): en server.js
@@ -30,11 +31,12 @@ const PDFDocument = require('pdfkit');
 const router = express.Router();
 
 const API_BASE = 'https://api.tiendanube.com/v1';
-const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta'];
+const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta', 'pegamento'];
 const ETIQUETA_CATEGORIA = {
   puerta: 'Niveladores de puerta',
   nivelacion: 'Nivelantes de piso',
-  manta: 'Manta'
+  manta: 'Manta',
+  pegamento: 'Silicona/pegamento para zócalo'
 };
 
 // ---------- Mongo (misma base que server.js) ----------
@@ -106,12 +108,15 @@ const TARIFA_DEFAULT = {
   pisos_m2: 0,
   zocalos_ml: 0,
   puertas_unidad: 0,
-  nivelacion_m2: 0
+  nivelacion_m2: 0,
+  minimoM2Cotizable: 0
 };
 
 // Las tarifas de mano de obra son propias de cada tipo de obra (cada obra
 // tiene su propia cotización de mano de obra), por eso se buscan/guardan por
 // store_id + tipoObraId en vez de una única tarifa por tienda.
+// minimoM2Cotizable: aunque la obra tenga menos m2, la mano de obra ligada a
+// m2 (piso y nivelación) se cobra como mínimo sobre esta cantidad.
 async function getTarifas(storeId, tipoObraId) {
   return conReintento(async () => {
     const col = await getTarifasCollection();
@@ -125,7 +130,8 @@ async function setTarifas(storeId, tipoObraId, tarifas) {
     pisos_m2: Number(tarifas.pisos_m2) || 0,
     zocalos_ml: Number(tarifas.zocalos_ml) || 0,
     puertas_unidad: Number(tarifas.puertas_unidad) || 0,
-    nivelacion_m2: Number(tarifas.nivelacion_m2) || 0
+    nivelacion_m2: Number(tarifas.nivelacion_m2) || 0,
+    minimoM2Cotizable: Number(tarifas.minimoM2Cotizable) || 0
   };
   await conReintento(async () => {
     const col = await getTarifasCollection();
@@ -206,8 +212,8 @@ async function productosConfigurados(store) {
 }
 
 // Busca UN producto puntual por SKU exacto en Tiendanube (para niveladores de
-// puerta, nivelantes de piso y manta, que no tienen rubro propio). No usa
-// cache: el precio que trae siempre es el vigente.
+// puerta, nivelantes de piso, manta y silicona/pegamento, que no tienen rubro
+// propio). No usa cache: el precio que trae siempre es el vigente.
 async function productoPorSku(store, sku) {
   const response = await fetch(
     API_BASE + '/' + store.store_id + '/products?q=' + encodeURIComponent(sku) +
@@ -262,9 +268,9 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPc
 
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
-// productos: { piso, zocalo, puerta, nivelacion, manta } -> cada uno (si aplica)
+// productos: { piso, zocalo, puerta, nivelacion, manta, pegamento } -> cada uno (si aplica)
 // obra: { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, utilizaManta, manoObra, desperdicioPctPiso }
-// tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2 }
+// tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2, minimoM2Cotizable }
 // formasPago: [{ nombre, tipo: 'descuento'|'recargo', porcentaje }]
 function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
   const items = [];
@@ -281,6 +287,11 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
   const manoObra = !!obra.manoObra;
   const desperdicioPctPiso = Number(obra.desperdicioPctPiso) || 0;
 
+  // La mano de obra ligada a m2 (piso y nivelación) se cobra como mínimo
+  // sobre minimoM2Cotizable, aunque la obra real tenga menos metros.
+  const minimoM2 = Number(t.minimoM2Cotizable) || 0;
+  const m2CotizableManoObra = m2Pisos > 0 ? Math.max(m2Pisos, minimoM2) : 0;
+
   if (m2Pisos > 0) {
     if (!productos.piso) faltantes.push('piso');
     else {
@@ -290,7 +301,7 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
       });
       items.push(it);
       totalProductos += it.subtotal;
-      if (manoObra) totalManoObra += round2(m2Pisos * t.pisos_m2);
+      if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.pisos_m2);
     }
   }
 
@@ -301,6 +312,17 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
       items.push(it);
       totalProductos += it.subtotal;
       if (manoObra) totalManoObra += round2(mlZocalos * t.zocalos_ml);
+    }
+
+    // Silicona/pegamento para pegar el zócalo: catálogo por SKU propio del
+    // tipo de obra (como niveladores de puerta), sin check aparte porque se
+    // necesita siempre que se cotiza zócalo. Sin tarifa propia de mano de
+    // obra: su colocación va incluida en la tarifa de zócalo (zocalos_ml).
+    if (!productos.pegamento) faltantes.push('pegamento');
+    else {
+      const it = calcularItem({ rubro: 'Silicona/pegamento', unidadObra: 'ml', cantidadObra: mlZocalos, producto: productos.pegamento });
+      items.push(it);
+      totalProductos += it.subtotal;
     }
   }
 
@@ -320,7 +342,7 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
       const it = calcularItem({ rubro: 'Nivelación de piso', unidadObra: 'm2', cantidadObra: m2Pisos, producto: productos.nivelacion });
       items.push(it);
       totalProductos += it.subtotal;
-      if (manoObra) totalManoObra += round2(m2Pisos * t.nivelacion_m2);
+      if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.nivelacion_m2);
     }
   }
 
@@ -353,7 +375,7 @@ function calcularCotizacion({ obra, productos, tarifas, formasPago }) {
   return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas };
 }
 
-// ---------- Helper: resuelve un item de catálogo por SKU (puerta/nivelacion/manta) ----------
+// ---------- Helper: resuelve un item de catálogo por SKU (puerta/nivelacion/manta/pegamento) ----------
 
 async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
   const col = await getTipoObraItemsCollection();
@@ -513,7 +535,7 @@ router.delete('/tipos-obra/:id', async (req, res) => {
 
 // =====================================================================
 // Rutas: catálogos por SKU de un tipo de obra puntual
-// (categoria: 'puerta' | 'nivelacion' | 'manta')
+// (categoria: 'puerta' | 'nivelacion' | 'manta' | 'pegamento')
 // =====================================================================
 
 router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
