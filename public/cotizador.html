@@ -55,6 +55,15 @@
   .prod-item .precio{font-weight:600;white-space:nowrap;}
   .prod-item .ver-ficha{font-size:11.5px;color:var(--muted);white-space:nowrap;text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:3px 7px;flex-shrink:0;}
   .prod-item .ver-ficha:hover{background:#f2f1ee;color:var(--text);}
+  .item-foto{width:40px;height:40px;object-fit:cover;border-radius:6px;background:#eee;display:block;}
+  .item-foto-vacia{width:40px;height:40px;border-radius:6px;background:#eee;}
+  .item-rubro{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
+  .item-nombre{font-weight:600;font-size:13.5px;}
+  #resumen-tabla input.cant-input{width:80px;display:inline-block;}
+  .cant-principal{font-weight:600;}
+  .cant-nota{font-size:11px;color:var(--muted);margin-top:2px;}
+  .quitar-item{background:none;border:1px solid var(--border);border-radius:6px;color:var(--warn);cursor:pointer;font-size:12px;padding:3px 7px;}
+  .quitar-item:hover{background:#fdecea;}
   .empty{color:var(--muted);font-size:13px;padding:14px;text-align:center;}
   table{width:100%;border-collapse:collapse;font-size:13.5px;}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
@@ -157,6 +166,16 @@
     <div class="card hidden" id="paso-resumen">
       <h2>4. Resumen</h2>
       <div id="resumen-tabla"></div>
+      <div class="cfg-form">
+        <h3>Agregar otro ítem</h3>
+        <p class="hint">Para algo que no sale del cálculo automático: traslado, un extra puntual, etc.</p>
+        <div class="grid">
+          <div class="field"><label>Descripción</label><input type="text" id="otro_desc" placeholder="Ej: Traslado de materiales"></div>
+          <div class="field"><label>Cantidad</label><input type="number" id="otro_cant" min="0.01" step="0.01" value="1"></div>
+          <div class="field"><label>Valor unitario ($)</label><input type="number" id="otro_valor" min="0" step="0.01" value="0"></div>
+        </div>
+        <div class="actions"><button class="secondary small" id="btnAgregarOtro">+ Agregar ítem</button></div>
+      </div>
       <div class="field" style="margin-top:16px;max-width:320px;">
         <label>Nombre del cliente (para guardar el presupuesto)</label>
         <input type="text" id="clienteGuardar" placeholder="Nombre y apellido">
@@ -298,6 +317,7 @@ let tiposObraCache = null;         // tipos de obra configurados
 let tipoObraElegido = null;        // tipo de obra elegido para la cotizacion actual
 let catalogosTipoObraCache = null; // { puerta: [...], nivelacion: [...], manta: [...] } del tipo de obra elegido
 let seleccion = {};                // { piso, zocalo, puerta, nivelacion, manta } (producto/item elegido)
+let cotizacionActual = null;       // resultado de /calcular, editable en pantalla antes de guardar
 let ultimaCotizacionGuardadaId = null;
 let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
@@ -312,6 +332,8 @@ const LABEL_COBERTURA_INPUT = {
 };
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -658,7 +680,8 @@ $('#btnCalcular').addEventListener('click', async () => {
       return;
     }
     ultimaCotizacionGuardadaId = null;
-    renderResumen(data);
+    cotizacionActual = JSON.parse(JSON.stringify(data));
+    renderResumen(cotizacionActual, true);
     $('#clienteGuardar').value = $('#cliente').value;
     $('#paso-productos').classList.add('hidden');
     $('#paso-resumen').classList.remove('hidden');
@@ -672,17 +695,31 @@ $('#btnVolverProductos').addEventListener('click', () => {
   $('#paso-productos').classList.remove('hidden');
 });
 
-function renderResumen(data){
-  let html = '<table><thead><tr><th>Rubro / producto</th><th>Cant. obra</th><th>Rendimiento</th><th>Necesita</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>';
-  data.items.forEach(it => {
-    const desp = it.desperdicioPct ? ' <span style="color:var(--muted);">(+' + it.desperdicioPct + '% desp. → ' + it.cantidadConDesperdicio + ' ' + it.unidadObra + ')</span>' : '';
-    html += '<tr><td>' + it.rubro + '<br><span style="color:var(--muted);font-size:12px;">' + escapeHtml(it.producto) +
-      (it.categoria ? ' · ' + escapeHtml(it.categoria) : '') + '</span></td>' +
-      '<td>' + it.cantidadObra + ' ' + it.unidadObra + desp + '</td>' +
-      '<td>' + it.rendimiento + ' ' + it.unidadObra + '/' + it.envase + '</td>' +
-      '<td>' + it.paquetesNecesarios + ' ' + it.envase + '(s)</td>' +
+// editable=true (paso 4, cotización en curso): cantidad editable a mano y
+// botón para quitar el ítem. editable=false (detalle de historial): tabla
+// de solo lectura, sin controles.
+function renderResumen(data, editable){
+  editable = editable !== false;
+  let html = '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Precio unit.</th><th>Subtotal</th>' +
+    (editable ? '<th></th>' : '') + '</tr></thead><tbody>';
+  data.items.forEach((it, idx) => {
+    const notaCantidad = it.unidadObra
+      ? (it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : ''))
+      : '';
+    const envaseTxt = (it.envase || 'unidad') + (Number(it.paquetesNecesarios) === 1 ? '' : '(s)');
+    html += '<tr>' +
+      '<td>' + (it.imagen ? '<img class="item-foto" src="' + it.imagen + '">' : '<div class="item-foto-vacia"></div>') + '</td>' +
+      '<td><div class="item-rubro">' + escapeHtml(it.rubro) + '</div><div class="item-nombre">' + escapeHtml(it.producto) + '</div></td>' +
+      '<td>' +
+        (editable
+          ? '<input type="number" class="cant-input" data-idx="' + idx + '" min="0" step="0.01" value="' + it.paquetesNecesarios + '"> ' + escapeHtml(it.envase || 'unidad')
+          : '<div class="cant-principal">' + it.paquetesNecesarios + ' ' + escapeHtml(envaseTxt) + '</div>') +
+        (notaCantidad ? '<div class="cant-nota">' + escapeHtml(notaCantidad) + '</div>' : '') +
+      '</td>' +
       '<td>' + money(it.precioUnitario) + '</td>' +
-      '<td>' + money(it.subtotal) + '</td></tr>';
+      '<td>' + money(it.subtotal) + '</td>' +
+      (editable ? '<td><button class="quitar-item" data-idx="' + idx + '" title="Quitar ítem">✕</button></td>' : '') +
+    '</tr>';
   });
   html += '</tbody></table>';
   html += '<div class="totales">' +
@@ -701,23 +738,79 @@ function renderResumen(data){
     html += '</div>';
   }
   $('#resumen-tabla').innerHTML = html;
+
+  if (editable){
+    $$('#resumen-tabla .cant-input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const idx = parseInt(inp.dataset.idx, 10);
+        const nuevaCant = parseFloat(inp.value) || 0;
+        cotizacionActual.items[idx].paquetesNecesarios = nuevaCant;
+        cotizacionActual.items[idx].subtotal = round2(nuevaCant * cotizacionActual.items[idx].precioUnitario);
+        recalcularTotalesFront();
+        renderResumen(cotizacionActual, true);
+      });
+    });
+    $$('#resumen-tabla .quitar-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        cotizacionActual.items.splice(idx, 1);
+        recalcularTotalesFront();
+        renderResumen(cotizacionActual, true);
+      });
+    });
+  }
 }
+
+// Recalcula totalProductos, total y las formas de pago en el navegador,
+// a partir de los items actuales de cotizacionActual (después de editar una
+// cantidad, agregar un ítem manual o quitar uno). La mano de obra no
+// depende de los items, así que se deja como vino de /calcular.
+function recalcularTotalesFront(){
+  cotizacionActual.totalProductos = round2(cotizacionActual.items.reduce((s, it) => s + (Number(it.subtotal) || 0), 0));
+  cotizacionActual.total = round2(cotizacionActual.totalProductos + (Number(cotizacionActual.totalManoObra) || 0));
+  cotizacionActual.formasPago = (cotizacionActual.formasPago || []).map(fp => {
+    const pct = Number(fp.porcentaje) || 0;
+    const factor = fp.tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
+    return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(cotizacionActual.total * factor) };
+  });
+}
+
+$('#btnAgregarOtro').addEventListener('click', () => {
+  mostrarMsg(null);
+  if (!cotizacionActual){ mostrarMsg('Primero calculá la cotización.'); return; }
+  const desc = $('#otro_desc').value.trim();
+  const cant = parseFloat($('#otro_cant').value) || 0;
+  const valor = parseFloat($('#otro_valor').value) || 0;
+  if (!desc){ mostrarMsg('Cargá una descripción para el ítem.'); return; }
+  if (cant <= 0){ mostrarMsg('La cantidad tiene que ser mayor a 0.'); return; }
+  cotizacionActual.items.push({
+    rubro: 'Otros', productoId: null, producto: desc, categoria: '', imagen: null,
+    unidadObra: '', cantidadObra: cant, desperdicioPct: 0, cantidadConDesperdicio: cant,
+    rendimiento: null, envase: 'unidad', paquetesNecesarios: cant, precioUnitario: valor,
+    subtotal: round2(cant * valor), manual: true
+  });
+  recalcularTotalesFront();
+  renderResumen(cotizacionActual, true);
+  $('#otro_desc').value = ''; $('#otro_cant').value = 1; $('#otro_valor').value = 0;
+});
 
 $('#btnGuardar').addEventListener('click', async () => {
   mostrarMsg(null);
+  if (!cotizacionActual || !cotizacionActual.items.length){ mostrarMsg('No hay ítems para guardar.'); return; }
   const obra = leerObra();
   const chkManta = document.getElementById('chkUtilizaManta');
   obra.utilizaManta = chkManta ? chkManta.checked : false;
-  const seleccionIds = {};
-  Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
   try{
     const res = await fetch('/api/cotizador/guardar?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        obra, productos: seleccionIds, tipoObraId: tipoObraElegido.id,
+        obra, tipoObraId: tipoObraElegido.id,
         cliente: $('#clienteGuardar').value, direccion: $('#direccion').value,
-        tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : ''
+        tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
+        items: cotizacionActual.items,
+        totalManoObra: cotizacionActual.totalManoObra,
+        formasPago: cotizacionActual.formasPago
       })
     });
     const data = await res.json();
@@ -737,6 +830,7 @@ $('#btnPdf').addEventListener('click', () => {
 $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
   tipoObraElegido = null;
+  cotizacionActual = null;
   ultimaCotizacionGuardadaId = null;
   $('#cliente').value=''; $('#direccion').value=''; $('#clienteGuardar').value='';
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
@@ -777,7 +871,7 @@ async function verDetalleHistorial(id){
   const res = await fetch('/api/cotizador/historial/' + id + '?store_id=' + storeId);
   const doc = await res.json();
   if (!res.ok){ mostrarMsg(doc.error); return; }
-  renderResumen(doc);
+  renderResumen(doc, false);
   $('#historial-detalle').innerHTML = $('#resumen-tabla').innerHTML;
   $('#historial-detalle-card').classList.remove('hidden');
   $('#btnPdfHistorial').onclick = () => window.open('/api/cotizador/pdf/' + id + '?store_id=' + storeId, '_blank');
