@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Presupuesto — Piedra Negra</title>
+<style>
+  :root{
+    --bg:#f5f4f2; --panel:#fff; --border:#e2e0db; --text:#2b2a28; --muted:#75726c;
+    --accent:#1f2937; --accent2:#3a3632; --ok:#2f6b3a; --warn:#a3441c;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  .brand-header{background:#fff;border-bottom:1px solid var(--border);padding:18px 24px;}
+  .brand-header-inner{max-width:820px;margin:0 auto;display:flex;align-items:center;gap:14px;}
+  .brand-logo{height:34px;display:block;}
+  .brand-sub{color:var(--muted);font-size:12.5px;margin-left:auto;}
+  .wrap{max-width:820px;margin:0 auto;padding:24px 20px 60px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:26px;}
+  .titulo{font-size:20px;font-weight:700;margin:0 0 4px;}
+  .meta{color:var(--muted);font-size:13px;margin-bottom:18px;}
+  .datos-cliente{font-size:14px;margin-bottom:6px;}
+  .toggle-row{display:flex;gap:8px;margin:18px 0;flex-wrap:wrap;}
+  .toggle-btn{padding:8px 14px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:13px;color:var(--muted);}
+  .toggle-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .desc-obra{color:var(--muted);font-size:13px;margin-bottom:14px;}
+  .item-foto{width:40px;height:40px;object-fit:cover;border-radius:6px;background:#eee;display:block;}
+  .item-foto-vacia{width:40px;height:40px;border-radius:6px;background:#eee;}
+  .item-rubro{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
+  .item-nombre{font-weight:600;font-size:13.5px;}
+  .cant-principal{font-weight:600;}
+  .cant-nota{font-size:11px;color:var(--muted);margin-top:2px;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;}
+  .totales{text-align:right;margin-top:14px;font-size:14px;}
+  .totales .grand{font-size:20px;font-weight:700;margin-top:4px;}
+  .llave-en-mano-total{text-align:right;margin-top:10px;}
+  .llave-en-mano-total .grand{font-size:26px;font-weight:700;}
+  .formas-pago{margin-top:16px;border-top:1px solid var(--border);padding-top:12px;}
+  .formas-pago .fp-row{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;}
+  .formas-pago .fp-row .fp-pct{color:var(--muted);font-size:12px;margin-left:6px;}
+  .acciones{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap;}
+  button.primary{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;font-weight:600;}
+  button.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;}
+  button.whatsapp{background:#25D366;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;font-weight:600;}
+  .empty{color:var(--muted);font-size:14px;padding:30px;text-align:center;}
+  .copiado{color:var(--ok);font-size:12.5px;margin-left:4px;}
+  @media print{
+    body{background:#fff;}
+    .acciones, .toggle-row{display:none !important;}
+    .card{border:none;padding:0;}
+    .brand-header{border-bottom:2px solid #000;}
+  }
+</style>
+</head>
+<body>
+
+<header class="brand-header">
+  <div class="brand-header-inner">
+    <img class="brand-logo" alt="Piedra Negra" src="/assets/logo-piedra-negra.png">
+    <span class="brand-sub">Presupuesto de obra</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card" id="contenido">
+    <div class="empty">Cargando presupuesto...</div>
+  </div>
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const params = new URLSearchParams(location.search);
+const cotId = params.get('id');
+const storeId = params.get('store_id');
+
+let doc = null;
+let vistaSimple = false;
+
+function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// Espejo de descripcionObra() en cotizador.js: descripción del alcance de la
+// obra sin precios ni productos puntuales.
+function descripcionObra(o){
+  o = o || {};
+  const datos = [];
+  if (o.m2Pisos) datos.push(o.m2Pisos + ' m2 de piso');
+  if (o.mlZocalos) datos.push(o.mlZocalos + ' ml de zócalo');
+  if (o.cantidadPuertas) datos.push(o.cantidadPuertas + ' puerta(s)');
+  if (o.requiereNivelacion) datos.push('con nivelación');
+  if (o.utilizaManta) datos.push('con manta');
+  if (o.manoObra) datos.push('con mano de obra');
+  return datos.join(' · ');
+}
+
+function urlPdf(){
+  return '/api/cotizador/pdf/' + cotId + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : '');
+}
+
+function render(){
+  const cont = $('#contenido');
+  let html = '<div class="titulo">' + escapeHtml(doc.tipoObraNombre || 'Presupuesto de obra') + '</div>';
+  html += '<div class="meta">' + new Date(doc.fecha).toLocaleDateString('es-AR') + '</div>';
+  if (doc.cliente) html += '<div class="datos-cliente"><strong>Cliente:</strong> ' + escapeHtml(doc.cliente) + '</div>';
+  if (doc.direccion) html += '<div class="datos-cliente"><strong>Dirección:</strong> ' + escapeHtml(doc.direccion) + '</div>';
+
+  html += '<div class="toggle-row">' +
+    '<button class="toggle-btn' + (!vistaSimple ? ' active' : '') + '" id="btnDetalle">Ver desglose</button>' +
+    '<button class="toggle-btn' + (vistaSimple ? ' active' : '') + '" id="btnSimple">Vista llave en mano</button>' +
+    '</div>';
+
+  const descTxt = descripcionObra(doc.obra);
+
+  if (vistaSimple){
+    if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    html += '<p style="color:var(--muted);font-size:13.5px;">Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.</p>';
+    html += '<div class="llave-en-mano-total"><div class="grand">' + money(doc.total) + '</div></div>';
+  } else {
+    if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>';
+    (doc.items || []).forEach((it) => {
+      const notaCantidad = it.unidadObra
+        ? (it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : ''))
+        : '';
+      const envaseTxt = (it.envase || 'unidad') + (Number(it.paquetesNecesarios) === 1 ? '' : '(s)');
+      html += '<tr>' +
+        '<td>' + (it.imagen ? '<img class="item-foto" src="' + it.imagen + '">' : '<div class="item-foto-vacia"></div>') + '</td>' +
+        '<td><div class="item-rubro">' + escapeHtml(it.rubro) + '</div><div class="item-nombre">' + escapeHtml(it.producto) + '</div></td>' +
+        '<td><div class="cant-principal">' + it.paquetesNecesarios + ' ' + escapeHtml(envaseTxt) + '</div>' +
+          (notaCantidad ? '<div class="cant-nota">' + escapeHtml(notaCantidad) + '</div>' : '') + '</td>' +
+        '<td>' + money(it.precioUnitario) + '</td>' +
+        '<td>' + money(it.subtotal) + '</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="totales">Subtotal productos: ' + money(doc.totalProductos) + '<br>' +
+      (doc.totalManoObra ? 'Mano de obra: ' + money(doc.totalManoObra) + '<br>' : '') +
+      '<div class="grand">Total: ' + money(doc.total) + '</div></div>';
+  }
+
+  if (doc.formasPago && doc.formasPago.length){
+    html += '<div class="formas-pago">';
+    doc.formasPago.forEach((fp) => {
+      const signo = fp.tipo === 'recargo' ? '+' : '-';
+      html += '<div class="fp-row"><span>' + escapeHtml(fp.nombre) +
+        (fp.porcentaje ? '<span class="fp-pct">(' + signo + fp.porcentaje + '%)</span>' : '') +
+        '</span><strong>' + money(fp.total) + '</strong></div>';
+    });
+    html += '</div>';
+  }
+
+  html += '<div class="acciones">' +
+    '<button class="primary" id="btnImprimir">Imprimir</button>' +
+    '<button class="secondary" id="btnPdf">Descargar PDF</button>' +
+    '<button class="whatsapp" id="btnWhatsapp">Compartir por WhatsApp</button>' +
+    '<button class="secondary" id="btnCopiar">Copiar link<span class="copiado" id="copiadoMsg" style="display:none;">¡Copiado!</span></button>' +
+  '</div>';
+
+  cont.innerHTML = html;
+
+  $('#btnDetalle').addEventListener('click', () => { vistaSimple = false; render(); });
+  $('#btnSimple').addEventListener('click', () => { vistaSimple = true; render(); });
+  $('#btnImprimir').addEventListener('click', () => window.print());
+  $('#btnPdf').addEventListener('click', () => window.open(urlPdf(), '_blank'));
+  $('#btnWhatsapp').addEventListener('click', () => {
+    const texto = 'Hola' + (doc.cliente ? ' ' + doc.cliente : '') + ', te comparto el presupuesto' +
+      (doc.tipoObraNombre ? ' de ' + doc.tipoObraNombre : '') + ' — Total ' + money(doc.total) + '. ' + location.href;
+    window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+  });
+  $('#btnCopiar').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      const msg = $('#copiadoMsg');
+      msg.style.display = 'inline';
+      setTimeout(() => { msg.style.display = 'none'; }, 2000);
+    } catch (e) { /* portapapeles no disponible, no hacemos nada */ }
+  });
+}
+
+async function cargar(){
+  const cont = $('#contenido');
+  if (!cotId || !storeId){
+    cont.innerHTML = '<div class="empty">Falta el link completo del presupuesto.</div>';
+    return;
+  }
+  try{
+    const res = await fetch('/api/cotizador/historial/' + cotId + '?store_id=' + encodeURIComponent(storeId));
+    doc = await res.json();
+    if (!res.ok) throw new Error(doc.error || 'No se pudo cargar el presupuesto.');
+    render();
+  }catch(e){
+    cont.innerHTML = '<div class="empty">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+cargar();
+</script>
+</body>
+</html>
