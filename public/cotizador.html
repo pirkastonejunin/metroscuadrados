@@ -155,6 +155,10 @@
     <div class="card hidden" id="paso-resumen">
       <h2>4. Resumen</h2>
       <div id="resumen-tabla"></div>
+      <div class="field" style="margin-top:16px;max-width:320px;">
+        <label>Nombre del cliente (para guardar el presupuesto)</label>
+        <input type="text" id="clienteGuardar" placeholder="Nombre y apellido">
+      </div>
       <div class="actions">
         <button class="secondary" id="btnVolverProductos">← Volver</button>
         <button class="primary" id="btnGuardar">Guardar cotización</button>
@@ -189,7 +193,7 @@
     <!-- Tipos de obra -->
     <div id="cfg-tipos" class="card">
       <h2>Tipos de obra</h2>
-      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) tiene su propio rubro de piso/zócalo en Tiendanube, y su propia configuración de niveladores de puerta, nivelantes de piso, manta y mano de obra (en "Catálogos") — cada tipo de obra cotiza su mano de obra por separado.</p>
+      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) tiene su propio rubro de piso/zócalo en Tiendanube, y su propia configuración de niveladores de puerta, nivelantes de piso, manta, silicona/pegamento y mano de obra (en "Catálogos") — cada tipo de obra cotiza su mano de obra por separado.</p>
       <div id="cfg-tipos-lista"></div>
       <div class="cfg-form">
         <h3 id="cfg-tipos-form-titulo">Agregar tipo de obra</h3>
@@ -215,12 +219,13 @@
           <button class="catsub-btn active" data-cat="puerta">Niveladores de puerta</button>
           <button class="catsub-btn" data-cat="nivelacion">Nivelantes de piso</button>
           <button class="catsub-btn" data-cat="manta">Manta</button>
+          <button class="catsub-btn" data-cat="pegamento">Silicona/pegamento</button>
           <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
         </div>
 
-        <!-- Vista: catálogo por SKU (niveladores de puerta / nivelantes de piso / manta) -->
+        <!-- Vista: catálogo por SKU (niveladores de puerta / nivelantes de piso / manta / pegamento) -->
         <div id="cfg-catalogo-sku">
-          <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación) y manta no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
+          <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación), manta y silicona/pegamento para zócalo no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
           <div id="cfg-catalogo-lista"></div>
           <div class="grid" style="margin-top:10px;">
             <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
@@ -233,13 +238,17 @@
 
         <!-- Vista: tarifas de mano de obra de este tipo de obra -->
         <div id="cfg-catalogo-tarifas" class="hidden">
-          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta no tiene tarifa propia: su colocación se considera incluida en la tarifa de piso.</p>
+          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente.</p>
           <div class="grid">
             <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
             <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
             <div class="field"><label>Por puerta ($)</label><input type="number" id="t_puertas_unidad" min="0" step="0.01"></div>
             <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
           </div>
+          <div class="grid" style="margin-top:10px;">
+            <div class="field"><label>Mínimo de m² cotizables</label><input type="number" id="t_minimoM2Cotizable" min="0" step="0.01" value="0"></div>
+          </div>
+          <p class="hint">Si la obra tiene menos m² de piso que este mínimo, la mano de obra (piso y nivelación) se cobra igual como si tuviera este mínimo. No afecta la cantidad de producto a comprar, solo el cálculo de mano de obra. Dejalo en 0 para no aplicar mínimo.</p>
           <div class="actions">
             <button class="primary" id="btnGuardarTarifasTipoObra">Guardar tarifas</button>
           </div>
@@ -291,11 +300,12 @@ let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
 let categoriaActivaCatalogo = 'puerta';
 
-const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²' };
+const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml' };
 const LABEL_COBERTURA_INPUT = {
   puerta: 'Cuántas puertas cubre 1 unidad',
   nivelacion: 'Cuántos m² cubre 1 unidad',
-  manta: 'Cuántos m² cubre 1 unidad'
+  manta: 'Cuántos m² cubre 1 unidad',
+  pegamento: 'Cuántos ml de zócalo cubre 1 unidad'
 };
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -416,7 +426,7 @@ async function asegurarCatalogo(){
 
 async function asegurarCatalogosTipoObra(){
   if (catalogosTipoObraCache) return catalogosTipoObraCache;
-  const categorias = ['puerta', 'nivelacion', 'manta'];
+  const categorias = ['puerta', 'nivelacion', 'manta', 'pegamento'];
   const listas = await Promise.all(categorias.map((cat) =>
     fetch('/api/cotizador/tipos-obra/' + tipoObraElegido.id + '/items?store_id=' + storeId + '&categoria=' + cat)
       .then((r) => r.ok ? r.json() : [])
@@ -436,7 +446,7 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   }
   try{
     await asegurarCatalogo();
-    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0){
+    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0){
       await asegurarCatalogosTipoObra();
     }
   }catch(e){
@@ -517,6 +527,19 @@ function renderPasoProductos(obra){
         }
       });
     }
+
+    // La silicona/pegamento para pegar el zócalo va justo después del
+    // zócalo: se necesita siempre que se cotiza zócalo, sin check aparte.
+    if (r.clave === 'zocalo'){
+      const bloquePegamento = document.createElement('div');
+      bloquePegamento.className = 'rubro-block';
+      bloquePegamento.innerHTML =
+        '<h4>Silicona/pegamento para zócalo</h4>' +
+        '<div class="rubro-tag">' + obra.mlZocalos + ' ml a cubrir</div>' +
+        '<div class="prod-list" data-lista="pegamento"></div>';
+      cont.appendChild(bloquePegamento);
+      pintarListaCatalogo(bloquePegamento.querySelector('.prod-list'), 'pegamento', catalogosTipoObraCache.pegamento, obra.mlZocalos);
+    }
   });
 
   if (obra.cantidadPuertas > 0){
@@ -573,7 +596,8 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
 }
 
 // Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
-// de piso y manta), todos con la misma forma: { id, sku, cobertura, nombre, precio, imagen }.
+// de piso, manta y silicona/pegamento), todos con la misma forma:
+// { id, sku, cobertura, nombre, precio, imagen }.
 function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
   if (!lista || !lista.length){
     listaEl.innerHTML = '<div class="empty">No hay productos cargados en esta categoría para este tipo de obra. Andá a Configuración → Tipos de obra → Catálogos.</div>';
@@ -625,6 +649,7 @@ $('#btnCalcular').addEventListener('click', async () => {
     }
     ultimaCotizacionGuardadaId = null;
     renderResumen(data);
+    $('#clienteGuardar').value = $('#cliente').value;
     $('#paso-productos').classList.add('hidden');
     $('#paso-resumen').classList.remove('hidden');
     $('#btnPdf').classList.add('hidden');
@@ -681,7 +706,7 @@ $('#btnGuardar').addEventListener('click', async () => {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         obra, productos: seleccionIds, tipoObraId: tipoObraElegido.id,
-        cliente: $('#cliente').value, direccion: $('#direccion').value,
+        cliente: $('#clienteGuardar').value, direccion: $('#direccion').value,
         tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : ''
       })
     });
@@ -703,7 +728,7 @@ $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
   tipoObraElegido = null;
   ultimaCotizacionGuardadaId = null;
-  $('#cliente').value=''; $('#direccion').value='';
+  $('#cliente').value=''; $('#direccion').value=''; $('#clienteGuardar').value='';
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
   $('#requiereNivelacion').checked=false;
   $('#manoObra').checked=false;
@@ -817,7 +842,7 @@ async function cargarConfigTipos(){
   });
   cont.querySelectorAll('[data-borrar]').forEach(b => {
     b.addEventListener('click', async () => {
-      if (!confirm('¿Borrar este tipo de obra? También se van a borrar sus catálogos de niveladores, nivelantes y manta.')) return;
+      if (!confirm('¿Borrar este tipo de obra? También se van a borrar sus catálogos de niveladores, nivelantes, manta y pegamento.')) return;
       await fetch('/api/cotizador/tipos-obra/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
       if (gestionandoTipoObraId === b.dataset.borrar){
         gestionandoTipoObraId = null;
@@ -996,6 +1021,7 @@ async function cargarTarifasTipoObra(){
   $('#t_zocalos_ml').value = t.zocalos_ml;
   $('#t_puertas_unidad').value = t.puertas_unidad;
   $('#t_nivelacion_m2').value = t.nivelacion_m2;
+  $('#t_minimoM2Cotizable').value = t.minimoM2Cotizable || 0;
 }
 $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
   mostrarMsg(null);
@@ -1004,7 +1030,8 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
     pisos_m2: parseFloat($('#t_pisos_m2').value) || 0,
     zocalos_ml: parseFloat($('#t_zocalos_ml').value) || 0,
     puertas_unidad: parseFloat($('#t_puertas_unidad').value) || 0,
-    nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0
+    nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0,
+    minimoM2Cotizable: parseFloat($('#t_minimoM2Cotizable').value) || 0
   };
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
