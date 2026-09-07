@@ -10,6 +10,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 const cotizadorRouter = require('./cotizador');
 app.use('/api/cotizador', cotizadorRouter);
 
+const normalizadorRouter = require('./normalizador');
+app.use('/api/normalizador', normalizadorRouter);
+
 const API_BASE = 'https://api.tiendanube.com/v1';
 const NAMESPACE = process.env.METAFIELD_NAMESPACE || 'calculadora_m2';
 const KEY_COBERTURA = 'cobertura_m2_caja';
