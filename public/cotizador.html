@@ -245,6 +245,7 @@
         <button class="secondary" id="btnImprimirHistorial">Imprimir</button>
         <button class="whatsapp" id="btnWhatsappHistorial">Compartir por WhatsApp</button>
         <button class="secondary" id="btnCopiarLinkHistorial">Copiar link<span class="copiado hidden" id="copiadoHistorial">¡Copiado!</span></button>
+        <button class="secondary" id="btnBorrarHistorial" style="color:var(--warn);border-color:var(--warn);">Borrar cotización</button>
       </div>
     </div>
   </div>
@@ -1024,13 +1025,35 @@ async function cargarHistorial(){
           (c.tipoObraNombre ? ' · ' + escapeHtml(c.tipoObraNombre) : '') +
           (c.direccion ? ' · ' + escapeHtml(c.direccion) : '') + '</div></div>' +
         '<div style="display:flex;align-items:center;gap:12px;">' + money(c.total) +
-        '<button class="link" data-id="' + c._id + '">ver</button></div>' +
+        '<button class="link" data-action="ver" data-id="' + c._id + '">ver</button>' +
+        '<button class="link" data-action="borrar" data-id="' + c._id + '" style="color:var(--warn);">borrar</button></div>' +
       '</div>'
     ).join('');
     cont.querySelectorAll('button.link').forEach(b => {
-      b.addEventListener('click', () => verDetalleHistorial(b.dataset.id));
+      b.addEventListener('click', () => {
+        if (b.dataset.action === 'borrar') borrarCotizacion(b.dataset.id);
+        else verDetalleHistorial(b.dataset.id);
+      });
     });
   }catch(e){ cont.innerHTML = '<div class="empty">' + e.message + '</div>'; }
+}
+
+// Borra una cotización guardada (desde la fila del listado o desde el botón
+// del detalle). Pide confirmación porque no se puede deshacer, y si la
+// cotización borrada era la que estaba abierta en el detalle, lo cierra.
+async function borrarCotizacion(id){
+  if (!confirm('¿Borrar esta cotización guardada? No se puede deshacer.')) return;
+  try{
+    const res = await fetch('/api/cotizador/historial/' + id + '?store_id=' + storeId, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al borrar');
+    if (historialVistaId === id){
+      historialVistaId = null;
+      historialVistaDoc = null;
+      $('#historial-detalle-card').classList.add('hidden');
+    }
+    cargarHistorial();
+  }catch(e){ mostrarMsg(e.message); }
 }
 
 function renderDetalleHistorial(doc){
@@ -1070,6 +1093,10 @@ $('#btnWhatsappHistorial').addEventListener('click', () => {
 $('#btnCopiarLinkHistorial').addEventListener('click', () => {
   if (!historialVistaId) return;
   copiarLink(historialVistaId, $('#copiadoHistorial'));
+});
+$('#btnBorrarHistorial').addEventListener('click', () => {
+  if (!historialVistaId) return;
+  borrarCotizacion(historialVistaId);
 });
 
 // ---------- Configuración: tipos de obra ----------
