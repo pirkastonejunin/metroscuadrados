@@ -228,13 +228,22 @@ async function productosConfigurados(store) {
     .map((p) => {
       const cache = porProductId[p.id];
       const variante = p.variants && p.variants[0];
+      // categorias: cada categoría de Tiendanube por separado (un producto
+      // puede estar en varias a la vez, ej. "Accesorios" Y "Zocalos"). Se
+      // guarda además de "categoria" (todas juntas, para mostrar) porque el
+      // rubro configurado en un tipo de obra tiene que poder matchear con
+      // CUALQUIERA de las categorías del producto, no con la combinación
+      // exacta — si no, un producto que además de "Zocalos" está etiquetado
+      // en "Accesorios" queda afuera del rubro "Zocalos" aunque sí pertenece.
+      const categorias = (p.categories && p.categories.length)
+        ? p.categories.map((c) => nombreLocalizado(c.name)).filter(Boolean)
+        : [];
       return {
         id: p.id,
         nombre: nombreLocalizado(p.name),
         handle: nombreLocalizado(p.handle),
-        categoria: (p.categories && p.categories.length)
-          ? p.categories.map((c) => nombreLocalizado(c.name)).filter(Boolean).join(' / ')
-          : '',
+        categoria: categorias.join(' / '),
+        categorias,
         tipo: cache.tipo,
         cobertura: parseFloat(cache.cobertura),
         envase: cache.envase || 'caja',
@@ -524,7 +533,14 @@ router.get('/rubros-disponibles', async (req, res) => {
     const productos = await productosConfigurados(store);
     const grupos = { m2: new Set(), ml: new Set(), unidad: new Set(), litro: new Set() };
     productos.forEach((p) => {
-      if (p.categoria && grupos[p.tipo]) grupos[p.tipo].add(p.categoria);
+      if (!grupos[p.tipo]) return;
+      // Se ofrecen tanto las categorías individuales ("Zocalos") como la
+      // combinación completa ("Accesorios / Zocalos"), así el rubro elegido
+      // para un tipo de obra puede ser tan específico o tan amplio como haga
+      // falta, y no depende de que algún producto tenga esa combinación
+      // exacta y ninguna categoría de más.
+      (p.categorias || []).forEach((c) => grupos[p.tipo].add(c));
+      if (p.categoria) grupos[p.tipo].add(p.categoria);
     });
     const ordenar = (set) => Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
     res.json({ m2: ordenar(grupos.m2), ml: ordenar(grupos.ml), unidad: ordenar(grupos.unidad), litro: ordenar(grupos.litro) });
