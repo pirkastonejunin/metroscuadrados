@@ -843,6 +843,21 @@ router.get('/historial/:id', async (req, res) => {
   }
 });
 
+// Borra una cotización guardada del historial. Scopeado por store_id, igual
+// que el resto de las rutas, para que una tienda no pueda borrar cotizaciones
+// de otra.
+router.delete('/historial/:id', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getCotizacionesCollection();
+    const { deletedCount } = await col.deleteOne({ _id: new ObjectId(req.params.id), store_id: store.store_id });
+    if (!deletedCount) return res.status(404).json({ error: 'No encontrada.' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 // Trae la imagen del producto como Buffer para insertarla en el PDF. Si
 // falla (sin imagen, red, formato no soportado por pdfkit) devuelve null y
 // la fila se dibuja igual, con un recuadro vacío en vez de la foto.
