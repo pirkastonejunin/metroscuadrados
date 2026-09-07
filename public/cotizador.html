@@ -54,7 +54,8 @@
   .prod-item .meta{flex:1;}
   .prod-item .meta .name{font-weight:600;}
   .prod-item .meta .sub{color:var(--muted);font-size:12px;}
-  .prod-item .precio{font-weight:600;white-space:nowrap;}
+  .prod-item .precio{font-weight:600;white-space:nowrap;text-align:right;}
+  .prod-item .precio .precio-caja{font-weight:400;font-size:10.5px;color:var(--muted);white-space:nowrap;}
   .prod-item .ver-ficha{font-size:11.5px;color:var(--muted);white-space:nowrap;text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:3px 7px;flex-shrink:0;}
   .prod-item .ver-ficha:hover{background:#f2f1ee;color:var(--text);}
   .item-foto{width:40px;height:40px;object-fit:cover;border-radius:6px;background:#eee;display:block;}
@@ -92,6 +93,11 @@
   .vista-toggle-btn{padding:7px 13px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
   .vista-toggle-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .desc-obra{color:var(--muted);font-size:13px;margin-bottom:14px;}
+  .llave-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:12px;margin:16px 0;}
+  .llave-galeria .g-item{text-align:center;}
+  .llave-galeria .g-item img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:#eee;border:1px solid var(--border);display:block;}
+  .llave-galeria .g-item .g-vacia{width:100%;aspect-ratio:1/1;border-radius:8px;background:#eee;border:1px solid var(--border);}
+  .llave-galeria .g-item .g-nombre{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.25;}
   .llave-en-mano-total{text-align:right;margin-top:10px;}
   .llave-en-mano-total .grand{font-size:24px;font-weight:700;}
   button.whatsapp{background:#25D366;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;font-weight:600;}
@@ -397,10 +403,31 @@ function linkCotizacion(id){
   return location.origin + '/ver-cotizacion.html?id=' + id + '&store_id=' + encodeURIComponent(storeId);
 }
 
-function compartirWhatsapp(id, data){
-  const texto = 'Hola' + (data.cliente ? ' ' + data.cliente : '') + ', te comparto el presupuesto' +
-    (data.tipoObraNombre ? ' de ' + data.tipoObraNombre : '') + ' — Total ' + money(data.total) + '. ' + linkCotizacion(id);
-  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+// Comparte el PDF del presupuesto (no un link al sistema, para que el
+// cliente no pueda tocar "Ver desglose" y terminar viendo precios y
+// cantidades de cada ítem). En celulares usa el share nativo del navegador
+// para adjuntar el PDF directo en WhatsApp; si el navegador no lo soporta
+// (la mayoría de las notebooks) descarga el PDF y abre WhatsApp con el
+// mensaje, para adjuntarlo a mano.
+async function compartirWhatsapp(id, data, vistaSimple){
+  const textoBase = 'Hola' + (data.cliente ? ' ' + data.cliente : '') + ', te comparto el presupuesto' +
+    (data.tipoObraNombre ? ' de ' + data.tipoObraNombre : '') + ' — Total ' + money(data.total) + '.';
+  const urlPdfCompartir = '/api/cotizador/pdf/' + id + '?store_id=' + storeId + (vistaSimple ? '&vista=simple' : '');
+  try{
+    const res = await fetch(urlPdfCompartir);
+    if (!res.ok) throw new Error('pdf-fetch-failed');
+    const blob = await res.blob();
+    const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], text: textoBase });
+      return;
+    }
+    throw new Error('share-unsupported');
+  }catch(e){
+    if (e && e.name === 'AbortError') return; // el usuario cerró el panel de compartir
+    window.open(urlPdfCompartir, '_blank');
+    window.open('https://wa.me/?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+  }
 }
 
 async function copiarLink(id, btnCopiadoMsgEl){
@@ -683,13 +710,20 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
     const linkFicha = (tiendaDomain && p.handle)
       ? '<a class="ver-ficha" href="https://' + tiendaDomain + '/productos/' + p.handle + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Ver ficha ↗</a>'
       : '';
+    // Para piso (tipoEsperado 'm2') el precio por caja no es comparable entre
+    // productos porque cada uno rinde una cantidad distinta de m². Mostramos
+    // el precio por m² como dato principal, y el precio de la caja en chico.
+    const precioPorRendimiento = (rubro.tipoEsperado === 'm2' && p.rendimiento) ? p.precio / p.rendimiento : null;
+    const precioHtml = precioPorRendimiento !== null
+      ? money(precioPorRendimiento) + '/m²<div class="precio-caja">' + money(p.precio) + ' la ' + escapeHtml(p.envase || 'unidad') + '</div>'
+      : money(p.precio);
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
         (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + '</div>' +
         '<div class="sub">rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
         linkFicha +
-        '<div class="precio">' + money(p.precio) + '</div>' +
+        '<div class="precio">' + precioHtml + '</div>' +
       '</div>'
     );
   }).join('');
@@ -798,6 +832,15 @@ function renderResumen(data, editable, vistaSimple){
   if (vistaSimple){
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
     html += '<p class="hint">Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.</p>';
+    if (data.items && data.items.length){
+      html += '<div class="llave-galeria">';
+      data.items.forEach(it => {
+        html += '<div class="g-item">' +
+          (it.imagen ? '<img src="' + it.imagen + '">' : '<div class="g-vacia"></div>') +
+          '<div class="g-nombre">' + escapeHtml(it.producto) + '</div></div>';
+      });
+      html += '</div>';
+    }
     html += '<div class="llave-en-mano-total"><div class="grand">' + money(data.total) + '</div></div>';
   } else {
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
@@ -937,7 +980,7 @@ $('#btnWhatsappResumen').addEventListener('click', () => {
     cliente: $('#clienteGuardar').value,
     tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
     total: cotizacionActual.total
-  });
+  }, vistaSimpleResumen);
 });
 $('#btnCopiarLinkResumen').addEventListener('click', () => {
   if (!ultimaCotizacionGuardadaId) return;
@@ -1020,7 +1063,7 @@ $('#btnPdfHistorial').addEventListener('click', () => {
 $('#btnImprimirHistorial').addEventListener('click', () => window.print());
 $('#btnWhatsappHistorial').addEventListener('click', () => {
   if (!historialVistaId || !historialVistaDoc) return;
-  compartirWhatsapp(historialVistaId, historialVistaDoc);
+  compartirWhatsapp(historialVistaId, historialVistaDoc, vistaSimpleHistorial);
 });
 $('#btnCopiarLinkHistorial').addEventListener('click', () => {
   if (!historialVistaId) return;
