@@ -35,6 +35,11 @@
   th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;}
   .totales{text-align:right;margin-top:14px;font-size:14px;}
   .totales .grand{font-size:20px;font-weight:700;margin-top:4px;}
+  .llave-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:12px;margin:16px 0;}
+  .llave-galeria .g-item{text-align:center;}
+  .llave-galeria .g-item img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:#eee;border:1px solid var(--border);display:block;}
+  .llave-galeria .g-item .g-vacia{width:100%;aspect-ratio:1/1;border-radius:8px;background:#eee;border:1px solid var(--border);}
+  .llave-galeria .g-item .g-nombre{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.25;}
   .llave-en-mano-total{text-align:right;margin-top:10px;}
   .llave-en-mano-total .grand{font-size:26px;font-weight:700;}
   .formas-pago{margin-top:16px;border-top:1px solid var(--border);padding-top:12px;}
@@ -121,6 +126,15 @@ function render(){
   if (vistaSimple){
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
     html += '<p style="color:var(--muted);font-size:13.5px;">Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.</p>';
+    if (doc.items && doc.items.length){
+      html += '<div class="llave-galeria">';
+      doc.items.forEach((it) => {
+        html += '<div class="g-item">' +
+          (it.imagen ? '<img src="' + it.imagen + '">' : '<div class="g-vacia"></div>') +
+          '<div class="g-nombre">' + escapeHtml(it.producto) + '</div></div>';
+      });
+      html += '</div>';
+    }
     html += '<div class="llave-en-mano-total"><div class="grand">' + money(doc.total) + '</div></div>';
   } else {
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
@@ -169,10 +183,27 @@ function render(){
   $('#btnSimple').addEventListener('click', () => { vistaSimple = true; render(); });
   $('#btnImprimir').addEventListener('click', () => window.print());
   $('#btnPdf').addEventListener('click', () => window.open(urlPdf(), '_blank'));
-  $('#btnWhatsapp').addEventListener('click', () => {
-    const texto = 'Hola' + (doc.cliente ? ' ' + doc.cliente : '') + ', te comparto el presupuesto' +
-      (doc.tipoObraNombre ? ' de ' + doc.tipoObraNombre : '') + ' — Total ' + money(doc.total) + '. ' + location.href;
-    window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+  $('#btnWhatsapp').addEventListener('click', async () => {
+    // Comparte el PDF (no el link a esta página), para que quien lo reciba
+    // no pueda tocar "Ver desglose" y terminar viendo precios y cantidades.
+    const textoBase = 'Hola' + (doc.cliente ? ' ' + doc.cliente : '') + ', te comparto el presupuesto' +
+      (doc.tipoObraNombre ? ' de ' + doc.tipoObraNombre : '') + ' — Total ' + money(doc.total) + '.';
+    const pdfUrl = urlPdf();
+    try{
+      const res = await fetch(pdfUrl);
+      if (!res.ok) throw new Error('pdf-fetch-failed');
+      const blob = await res.blob();
+      const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })){
+        await navigator.share({ files: [file], text: textoBase });
+        return;
+      }
+      throw new Error('share-unsupported');
+    }catch(e){
+      if (e && e.name === 'AbortError') return;
+      window.open(pdfUrl, '_blank');
+      window.open('https://wa.me/?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+    }
   });
   $('#btnCopiar').addEventListener('click', async () => {
     try {
