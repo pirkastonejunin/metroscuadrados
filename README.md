@@ -96,6 +96,29 @@ tabla).
    visitando: `https://tu-app.onrender.com/admin/activar-script?store_id=XXXX`
    (una vez por cada tienda instalada).
 
+## Módulo extra: Normalizador de listas de precio (Dux)
+
+Herramienta interna, sin relación con Tiendanube: convierte la lista de un
+proveedor (Excel/CSV, con sus propios descuentos y unidades) en los dos
+archivos que Dux necesita para importar precios — "Importar productos"
+(costo) e "Importar listas de precio" (las 5 listas de venta).
+
+- `normalizador.js` — router Express (`/api/normalizador/*`), monta en
+  `server.js`. Solo guarda configuración en Mongo (colecciones
+  `normalizador_config` y `normalizador_proveedores`): márgenes de las 5
+  listas y, por proveedor, mapeo de columnas, descuentos en cascada, factor
+  de conversión de unidad y tabla de equivalencia de códigos.
+- `public/normalizador.html` — pantalla única (`/normalizador.html`). Todo el
+  parseo del Excel/CSV del proveedor y la generación de los dos archivos de
+  salida se hace en el navegador (misma librería `xlsx` por CDN que ya usa
+  `admin.html`); el servidor nunca ve el archivo del proveedor.
+- No usa la API de Dux (no disponible en el plan actual): la salida son
+  siempre los dos archivos para importar a mano en Dux.
+
+Para arrancar hace falta cargar, desde la pantalla: el margen de cada una de
+las 5 listas, y un perfil por proveedor (con al menos un producto de ejemplo
+para probar el mapeo de columnas antes de confiar en el resultado).
+
 ## Notas importantes
 
 - El selector del input de cantidad y el del precio nativo en
