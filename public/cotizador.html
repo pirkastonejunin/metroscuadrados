@@ -713,7 +713,9 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
     // Para piso (tipoEsperado 'm2') el precio por caja no es comparable entre
     // productos porque cada uno rinde una cantidad distinta de m². Mostramos
     // el precio por m² como dato principal, y el precio de la caja en chico.
-    const precioPorRendimiento = (rubro.tipoEsperado === 'm2' && p.rendimiento) ? p.precio / p.rendimiento : null;
+    // Ojo: el campo que trae /api/cotizador/productos es "cobertura", no
+    // "rendimiento" (ver productosConfigurados() en cotizador.js).
+    const precioPorRendimiento = (rubro.tipoEsperado === 'm2' && p.cobertura) ? p.precio / p.cobertura : null;
     const precioHtml = precioPorRendimiento !== null
       ? money(precioPorRendimiento) + '/m²<div class="precio-caja">' + money(p.precio) + ' la ' + escapeHtml(p.envase || 'unidad') + '</div>'
       : money(p.precio);
@@ -721,7 +723,7 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
         (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + '</div>' +
-        '<div class="sub">rinde ' + p.rendimiento + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
+        '<div class="sub">rinde ' + p.cobertura + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
         linkFicha +
         '<div class="precio">' + precioHtml + '</div>' +
       '</div>'
