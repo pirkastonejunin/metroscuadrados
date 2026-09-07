@@ -273,6 +273,33 @@ async function productoPorSku(store, sku) {
   return null;
 }
 
+// Busca UN producto puntual por id (para piso/zócalo en /calcular, cuando el
+// usuario ya eligió el producto en el paso 3). Antes /calcular volvía a traer
+// TODO el catálogo de la tienda página por página (lo mismo que ya se hizo
+// para pintar el paso 3) nada más que para sacar el precio de uno o dos
+// productos — eso hacía que pasar de pantalla se sintiera lento, sobre todo
+// en tiendas con muchos productos. Pedir el producto puntual por id es una
+// sola llamada a Tiendanube en vez de N páginas.
+async function productoPorId(store, productId, rendimientoInfo) {
+  const response = await fetch(
+    API_BASE + '/' + store.store_id + '/products/' + productId + '?fields=id,name,variants,images',
+    { headers: apiHeaders(store.access_token) }
+  );
+  if (!response.ok) return null;
+  const p = await response.json();
+  if (!p || !p.id) return null;
+  const variante = p.variants && p.variants[0];
+  return {
+    id: p.id,
+    nombre: nombreLocalizado(p.name),
+    tipo: rendimientoInfo.tipo,
+    cobertura: parseFloat(rendimientoInfo.cobertura),
+    envase: rendimientoInfo.envase || 'caja',
+    precio: variante && variante.price ? parseFloat(variante.price) : null,
+    imagen: p.images && p.images[0] ? p.images[0].src : null
+  };
+}
+
 // ---------- Calculo de la cotizacion (funcion pura, sin red ni DB) ----------
 
 // producto: { id, nombre, tipo, cobertura, envase, precio, categoria }
@@ -447,23 +474,29 @@ async function resolverProductosElegidos(store, seleccion, tipoObraId) {
   seleccion = seleccion || {};
   const resultado = {};
 
-  const necesitaCatalogo = ['piso', 'zocalo'].some((k) => seleccion[k]);
-  if (necesitaCatalogo) {
-    const catalogo = await productosConfigurados(store);
-    ['piso', 'zocalo'].forEach((clave) => {
-      const id = seleccion[clave];
-      if (!id) return;
-      const prod = catalogo.find((p) => p.id === parseInt(id, 10) || p.id === id);
-      if (prod) resultado[clave] = prod;
-    });
+  // Piso y zócalo: se piden por id, uno por uno EN PARALELO, en vez de traer
+  // el catálogo entero de la tienda (eso ya se hizo una vez para pintar el
+  // paso 3 y volver a hacerlo acá era puro tiempo perdido).
+  const claves = ['piso', 'zocalo'].filter((k) => seleccion[k]);
+  if (claves.length) {
+    const rendimientos = await getRendimientosDeTienda(store.store_id);
+    const porProductId = {};
+    rendimientos.forEach((r) => { porProductId[r.product_id] = r; });
+    await Promise.all(claves.map(async (clave) => {
+      const idNum = parseInt(seleccion[clave], 10);
+      const rInfo = porProductId[idNum] != null ? porProductId[idNum] : porProductId[seleccion[clave]];
+      if (!rInfo) return;
+      const prod = await productoPorId(store, idNum, rInfo);
+      if (prod && prod.cobertura > 0 && prod.precio !== null) resultado[clave] = prod;
+    }));
   }
 
-  for (const categoria of CATEGORIAS_ITEM) {
-    if (seleccion[categoria]) {
-      const prod = await resolverItemCatalogo(store, tipoObraId, categoria, seleccion[categoria]);
-      if (prod) resultado[categoria] = prod;
-    }
-  }
+  // Puerta/nivelación/manta/pegamento: idem, en paralelo en vez de uno por uno.
+  const categoriasElegidas = CATEGORIAS_ITEM.filter((categoria) => seleccion[categoria]);
+  await Promise.all(categoriasElegidas.map(async (categoria) => {
+    const prod = await resolverItemCatalogo(store, tipoObraId, categoria, seleccion[categoria]);
+    if (prod) resultado[categoria] = prod;
+  }));
 
   return resultado;
 }
