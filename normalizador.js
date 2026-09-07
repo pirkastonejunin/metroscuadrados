@@ -12,8 +12,13 @@
 //   - normalizador_proveedores  : un documento por proveedor, con el mapeo de
 //                                 columnas de su archivo, la cadena de
 //                                 descuentos, el factor de conversión de
-//                                 unidad y la tabla de equivalencia de
-//                                 códigos (proveedor -> Dux).
+//                                 unidad, la tabla de equivalencia de
+//                                 códigos (proveedor -> Dux), reglas
+//                                 opcionales para extraer medida/m² por
+//                                 caja/categoría/marca cuando vienen todas
+//                                 mezcladas en la columna de descripción, y
+//                                 fórmulas propias por lista de venta (por
+//                                 defecto cada lista usa el margen general).
 //
 // El PARSEO del archivo Excel/CSV del proveedor y la GENERACIÓN de los dos
 // archivos de importación de Dux se hacen en el navegador (normalizador.html,
@@ -100,6 +105,8 @@ router.put('/config', async (req, res) => {
 
 // ----------------------------- Perfiles de proveedor ---------------------------
 
+const TIPOS_FORMULA = ['margen_general', 'multiplicador_costo', 'multiplicador_lista', 'multiplicador_campo', 'vacio'];
+
 function limpiarProveedor(body) {
   const descuentos = String(body.descuentos || '')
     .split(',')
@@ -119,18 +126,51 @@ function limpiarProveedor(body) {
       if (codProveedor && codDux) equivalencias[codProveedor] = codDux;
     });
 
+  const listaDeTexto = (s) => String(s || '')
+    .split(',')
+    .map((x) => x.trim().toUpperCase())
+    .filter(Boolean);
+
+  const rd = body.reglasDescripcion || {};
+  const reglasDescripcion = {
+    activo: !!rd.activo,
+    vocabularioMarca: listaDeTexto(rd.vocabularioMarcaTexto),
+    vocabularioCategoria: listaDeTexto(rd.vocabularioCategoriaTexto),
+    vocabularioCalidad: listaDeTexto(rd.vocabularioCalidadTexto),
+    categoriaPorDefecto: String(rd.categoriaPorDefecto || '').trim().toUpperCase(),
+    // se guardan tal cual (sin normalizar) para poder re-editar en el form
+    vocabularioMarcaTexto: String(rd.vocabularioMarcaTexto || ''),
+    vocabularioCategoriaTexto: String(rd.vocabularioCategoriaTexto || ''),
+    vocabularioCalidadTexto: String(rd.vocabularioCalidadTexto || '')
+  };
+
+  const formulas = {};
+  LISTAS.forEach((l) => {
+    const f = (body.formulas && body.formulas[l]) || {};
+    const tipo = TIPOS_FORMULA.includes(f.tipo) ? f.tipo : 'margen_general';
+    formulas[l] = {
+      tipo,
+      base: String(f.base || '').trim(),
+      valor: (f.valor !== undefined && f.valor !== '' && !isNaN(parseFloat(f.valor))) ? parseFloat(f.valor) : null,
+      campo: String(f.campo || '').trim()
+    };
+  });
+
   return {
     nombre: String(body.nombre || '').trim(),
     columnas: {
       codigo: String((body.columnas && body.columnas.codigo) || '').trim().toUpperCase(),
       descripcion: String((body.columnas && body.columnas.descripcion) || '').trim().toUpperCase(),
-      precio: String((body.columnas && body.columnas.precio) || '').trim().toUpperCase()
+      precio: String((body.columnas && body.columnas.precio) || '').trim().toUpperCase(),
+      stock: String((body.columnas && body.columnas.stock) || '').trim().toUpperCase()
     },
     filaInicio: parseInt(body.filaInicio, 10) || 2,
     descuentos,
     factorConversion: parseFloat(body.factorConversion) || 1,
     equivalencias,
-    equivalenciasTexto: String(body.equivalenciasTexto || '') // se guarda tal cual para poder re-editar en el form
+    equivalenciasTexto: String(body.equivalenciasTexto || ''), // se guarda tal cual para poder re-editar en el form
+    reglasDescripcion,
+    formulas
   };
 }
 
