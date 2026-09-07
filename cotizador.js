@@ -891,6 +891,47 @@ function dibujarMarca(pdf) {
   pdf.fillColor('#000');
 }
 
+// Galería de fotos para la vista "llave en mano" del PDF: una grilla de
+// fotos de producto sin cantidades ni precios (eso es justamente lo que la
+// vista simple oculta), para que quede prolijo y presentable para el
+// cliente. Se anima con la misma imagen que usa la tabla de desglose.
+const PDF_GALERIA_COLS = 4;
+const PDF_GALERIA_GAP = 14;
+const PDF_GALERIA_NOMBRE_ALTO = 22;
+
+async function dibujarGaleriaLlaveEnMano(pdf, items) {
+  if (!items || !items.length) return;
+  const totalWidth = PDF_TABLE_RIGHT - 50;
+  const cellW = (totalWidth - PDF_GALERIA_GAP * (PDF_GALERIA_COLS - 1)) / PDF_GALERIA_COLS;
+  const filaAlto = cellW + 6 + PDF_GALERIA_NOMBRE_ALTO;
+  const pageBottom = pdf.page.height - pdf.page.margins.bottom;
+
+  for (let i = 0; i < items.length; i++) {
+    const col = i % PDF_GALERIA_COLS;
+    if (col === 0 && pdf.y + filaAlto > pageBottom) {
+      pdf.addPage();
+    }
+    const it = items[i];
+    const x = 50 + col * (cellW + PDF_GALERIA_GAP);
+    const y = pdf.y;
+    const imgBuffer = await descargarImagenPdf(it.imagen);
+    if (imgBuffer) {
+      try { pdf.image(imgBuffer, x, y, { width: cellW, height: cellW }); } catch (e) {
+        pdf.rect(x, y, cellW, cellW).strokeColor('#e2e0db').stroke();
+      }
+    } else {
+      pdf.rect(x, y, cellW, cellW).strokeColor('#e2e0db').stroke();
+    }
+    pdf.fillColor('#000').fontSize(8).text(it.producto || '', x, y + cellW + 6, { width: cellW, align: 'center' });
+    pdf.fillColor('#000');
+
+    if (col === PDF_GALERIA_COLS - 1 || i === items.length - 1) {
+      pdf.y = y + filaAlto + 8;
+    }
+  }
+  pdf.moveDown(0.4);
+}
+
 function dibujarEncabezadoTabla(pdf) {
   const y0 = pdf.y;
   pdf.fontSize(9).fillColor('#555');
@@ -945,7 +986,9 @@ router.get('/pdf/:id', async (req, res) => {
         { width: PDF_TABLE_RIGHT - 50 }
       );
       pdf.fillColor('#000');
-      pdf.moveDown(1.4);
+      pdf.moveDown(1);
+      await dibujarGaleriaLlaveEnMano(pdf, doc.items);
+      pdf.moveDown(0.8);
       pdf.fontSize(16).text('Total: $ ' + doc.total.toFixed(2), { align: 'right' });
     } else {
       dibujarEncabezadoTabla(pdf);
