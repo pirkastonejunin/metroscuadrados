@@ -698,7 +698,13 @@ function renderPasoProductos(obra){
 }
 
 function pintarListaProductos(listaEl, rubro, filtroNombre){
-  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado && p.categoria === rubro.rubro);
+  // Un producto puede estar en varias categorías de Tiendanube a la vez (ej.
+  // "Accesorios" además de "Zocalos"); el rubro configurado matchea si
+  // coincide con la combinación completa O con cualquiera de sus categorías
+  // sueltas, para que etiquetar un producto con una categoría extra no lo
+  // saque del rubro.
+  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado &&
+    (p.categoria === rubro.rubro || (p.categorias && p.categorias.includes(rubro.rubro))));
   if (filtroNombre){
     opciones = opciones.filter(p => p.nombre.toLowerCase().includes(filtroNombre));
   }
