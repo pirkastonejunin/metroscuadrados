@@ -322,6 +322,20 @@ function extraerCampos(descripcionOriginal, reglas) {
   return { campos, advertencias };
 }
 
+// Busca, en cualquier parte del texto (no solo al final), la primera palabra del
+// vocabulario de marcas que aparezca completa. Se usa para leer la marca desde un
+// encabezado de sección (ej. "Eliane 7x25 Pallet 79,04m² (152 cajas)"), a diferencia
+// de extraerCampos() que busca la marca al final de la descripción de un producto.
+function extraerMarcaDeTexto(texto, vocabMarca) {
+  const t = ' ' + String(texto || '').toUpperCase() + ' ';
+  const ordenado = (vocabMarca || []).slice().sort((a, b) => b.length - a.length);
+  for (const token of ordenado) {
+    const re = new RegExp('\\b' + escapeRegExp(token) + '\\b');
+    if (re.test(t)) return token;
+  }
+  return '';
+}
+
 // ---------------- fórmulas por lista ----------------
 // Por defecto cada lista se calcula con el margen general (%) sobre costo (sección 1).
 // Un proveedor puede reemplazar esa regla por una propia: un multiplicador fijo sobre
@@ -644,6 +658,10 @@ function procesarArchivo() {
       const margenesGuardados = window.__margenesActuales || {};
       const tieneEquivalencias = proveedor.equivalencias && Object.keys(proveedor.equivalencias).length > 0;
       const reglasDesc = proveedor.reglasDescripcion;
+      // Marca de la sección actual, tomada del último encabezado de sección visto
+      // (ej. "Eliane 7x25 Pallet..."). Se usa como resguardo cuando un proveedor no
+      // repite la marca en cada fila de producto, solo en el título de arriba.
+      let marcaSeccionActual = '';
 
       const resultado = [];
       for (let i = inicio; i < filas.length; i++) {
@@ -655,6 +673,22 @@ function procesarArchivo() {
         const descripcion = idxDescripcion !== -1 ? fila[idxDescripcion] : '';
         const precioRaw = fila[idxPrecio];
         const precioBase = parseNumeroAR(precioRaw);
+
+        // Fila de encabezado de sección (ej. "Alberdi 34x51 Pallet 108,96m² (48 cajas)"):
+        // no es un producto — no tiene descripción y el precio no es un número. No se
+        // muestra en la previsualización. Si hay reglas de descripción activas, se
+        // aprovecha para leer la marca de la sección y aplicarla a los productos que
+        // siguen (hasta el próximo encabezado), para proveedores que solo mencionan la
+        // marca acá arriba y no la repiten en cada fila.
+        const descripcionVacia = descripcion === undefined || descripcion === null || String(descripcion).trim() === '';
+        if (descripcionVacia && isNaN(precioBase)) {
+          if (reglasDesc && reglasDesc.activo) {
+            const marcaHeader = extraerMarcaDeTexto(codigoProveedor, reglasDesc.vocabularioMarca);
+            if (marcaHeader) marcaSeccionActual = marcaHeader;
+          }
+          continue;
+        }
+
         const stockRaw = idxStock !== -1 ? fila[idxStock] : undefined;
         const stockDisp = stockRaw !== undefined ? parseNumeroAR(stockRaw) : NaN;
 
@@ -678,6 +712,11 @@ function procesarArchivo() {
         const costoNeto = aplicarDescuentos(precioConvertido, proveedor.descuentos || []);
 
         const { campos, advertencias: advertenciasCampos } = extraerCampos(descripcion, reglasDesc);
+        if (reglasDesc && reglasDesc.activo && !campos.marca && marcaSeccionActual) {
+          campos.marca = marcaSeccionActual;
+          const idxAdv = advertenciasCampos.indexOf('marca no reconocida');
+          if (idxAdv !== -1) advertenciasCampos.splice(idxAdv, 1);
+        }
         const { precios, advertencias: advertenciasFormula } = calcularListasConFormulas(costoNeto, campos, proveedor.formulas, margenesGuardados);
 
         resultado.push({
