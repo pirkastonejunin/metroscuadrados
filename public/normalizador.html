@@ -24,6 +24,8 @@
   table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; }
   tr.sin-mapear { background: #fde8e8; }
+  tr.aviso { background: #fff6e0; }
+  .aviso-txt { color: #a06a00; }
   .ok { color: #27632a; }
   .error { color: #b00020; }
   .lista-proveedores li { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #eee; }
@@ -93,12 +95,53 @@
       </label>
       <p class="ayuda">Multiplica el precio antes de aplicar descuentos. Ej: si el proveedor cotiza el bulto de 10 unidades y vos cargás precio por unidad en Dux, poné 0.1. Dejar en 1 si coincide.</p>
     </div>
+    <div>
+      <label>Columna stock disponible (opcional)
+        <input type="text" id="p-col-stock" placeholder="Ej: D" />
+      </label>
+      <p class="ayuda">Solo para verla en la previsualización, no se exporta a Dux.</p>
+    </div>
   </div>
 
   <label>Equivalencia de códigos (proveedor = tuDux), uno por línea
     <textarea id="p-equivalencias" placeholder="codigoProveedor=codigoDux&#10;otroCodigo=otroCodigoDux"></textarea>
   </label>
   <p class="ayuda">Dejar vacío si el código del proveedor ya es igual a tu código de Dux.</p>
+
+  <label style="display:flex; align-items:center; gap:8px; margin-top:16px;">
+    <input type="checkbox" id="p-desc-compuesta-activo" onchange="toggleDescCompuesta()" style="width:auto; margin:0;" />
+    Esta lista trae varios datos mezclados en la descripción (nombre + medida + m²/caja + categoría + calidad + marca)
+  </label>
+
+  <div id="bloque-desc-compuesta" style="display:none; margin-top:8px;">
+    <div class="fila">
+      <div>
+        <label>Marcas conocidas (separadas por coma)
+          <textarea id="p-vocab-marca" placeholder="ALBERDI, CN, CORTINES, LUME"></textarea>
+        </label>
+      </div>
+      <div>
+        <label>Categorías conocidas (separadas por coma)
+          <textarea id="p-vocab-categoria" placeholder="PISO, REV, PORC, ESM"></textarea>
+        </label>
+      </div>
+      <div>
+        <label>Calidad conocida (separadas por coma)
+          <textarea id="p-vocab-calidad" placeholder="1ERA, 2DA"></textarea>
+        </label>
+      </div>
+    </div>
+    <label>Categoría por defecto (si no reconoce ninguna de la lista de arriba)
+      <input type="text" id="p-categoria-defecto" placeholder="Ej: PISO" />
+    </label>
+    <p class="ayuda">La app busca estas palabras dentro de la descripción para separar medida, m²/caja, categoría, calidad y marca. Lo que no reconozca queda marcado con un aviso en la previsualización para que lo revises antes de descargar.</p>
+  </div>
+
+  <div class="caja" style="background:#fff; margin-top:16px;">
+    <h4 style="margin-top:0;">Fórmulas de las 5 listas para este proveedor (opcional)</h4>
+    <p class="ayuda">Por defecto cada lista usa el margen general (%) sobre costo de la sección 1. Acá podés reemplazar esa regla para este proveedor en particular, incluso encadenando una lista sobre otra o multiplicando por un dato extraído de la descripción (como m²/caja).</p>
+    <div id="fila-formulas"></div>
+  </div>
 
   <br />
   <button class="primario" onclick="guardarProveedor()">Guardar proveedor</button>
@@ -128,8 +171,10 @@
       <thead>
         <tr>
           <th>Código prov.</th><th>Código Dux</th><th>Descripción</th>
+          <th>Medida</th><th>M²/caja</th><th>Categoría</th><th>Marca</th><th>Stock disp.</th>
           <th>Precio lista</th><th>Costo neto</th>
           <th>Colocado</th><th>Contado</th><th>Lista</th><th>Mayorista</th><th>Tiendanube</th>
+          <th>Avisos</th>
         </tr>
       </thead>
       <tbody id="tbody-preview"></tbody>
@@ -188,6 +233,229 @@ function aplicarDescuentos(precio, descuentos) {
   let c = precio;
   (descuentos || []).forEach((pct) => { c = c * (1 - pct / 100); });
   return c;
+}
+
+function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+// ---------------- extracción de campos desde la descripción ----------------
+// Cuando el proveedor mezcla nombre + medida + m²/caja + categoría + calidad + marca
+// en un solo campo de descripción (ej: "IBIZA 34X51 2,27 1ERA ALBERDI"), esta función
+// va "sacando" del texto lo que reconoce (en este orden: medida, calidad, marca,
+// categoría) contra las listas de palabras configuradas para el proveedor, y lo que
+// queda del texto es donde busca el número suelto que sería el m² por caja. Lo que
+// no logra reconocer queda reportado en `advertencias` para que se revise en la
+// previsualización — nunca se inventa un valor.
+function extraerCampos(descripcionOriginal, reglas) {
+  const campos = { medida: '', m2xcaja: null, categoria: '', marca: '', calidad: '' };
+  const advertencias = [];
+  if (!reglas || !reglas.activo) return { campos, advertencias };
+
+  let texto = ' ' + String(descripcionOriginal || '').toUpperCase() + ' ';
+
+  // 1. Medida: patrón NNxNN (acepta coma o punto decimal en cada lado)
+  const reMedida = /(\d+(?:[.,]\d+)?)\s*X\s*(\d+(?:[.,]\d+)?)/;
+  const mMedida = texto.match(reMedida);
+  if (mMedida) {
+    campos.medida = mMedida[1] + 'X' + mMedida[2];
+    texto = texto.slice(0, mMedida.index) + ' ' + texto.slice(mMedida.index + mMedida[0].length);
+  } else {
+    advertencias.push('medida no encontrada');
+  }
+
+  // 2. Calidad: primera palabra del vocabulario que aparezca completa
+  const vocabCalidad = (reglas.vocabularioCalidad && reglas.vocabularioCalidad.length) ? reglas.vocabularioCalidad : ['1ERA', '2DA'];
+  for (const token of vocabCalidad) {
+    const re = new RegExp('\\b' + escapeRegExp(token) + '\\b');
+    const m = texto.match(re);
+    if (m) {
+      campos.calidad = token;
+      texto = texto.slice(0, m.index) + ' ' + texto.slice(m.index + m[0].length);
+      break;
+    }
+  }
+
+  // 3. Marca: se busca el token del vocabulario (probando primero los más largos,
+  // para no confundir "MARAZZI" con "MARAZZI/RAGNO") con el que TERMINA el texto.
+  const vocabMarca = (reglas.vocabularioMarca || []).slice().sort((a, b) => b.length - a.length);
+  const textoTrim = texto.trim();
+  let marcaEncontrada = '';
+  for (const token of vocabMarca) {
+    if (textoTrim.endsWith(token)) { marcaEncontrada = token; break; }
+  }
+  if (marcaEncontrada) {
+    campos.marca = marcaEncontrada;
+    const idx = texto.lastIndexOf(marcaEncontrada);
+    texto = texto.slice(0, idx) + ' ' + texto.slice(idx + marcaEncontrada.length);
+  } else {
+    advertencias.push('marca no reconocida');
+  }
+
+  // 4. Categoría: primera palabra del vocabulario que aparezca completa en lo que queda
+  const vocabCategoria = reglas.vocabularioCategoria || [];
+  let categoriaEncontrada = '';
+  for (const token of vocabCategoria) {
+    const re = new RegExp('\\b' + escapeRegExp(token) + '\\b');
+    const m = texto.match(re);
+    if (m) {
+      categoriaEncontrada = token;
+      texto = texto.slice(0, m.index) + ' ' + texto.slice(m.index + m[0].length);
+      break;
+    }
+  }
+  if (categoriaEncontrada) {
+    campos.categoria = categoriaEncontrada;
+  } else if (reglas.categoriaPorDefecto) {
+    campos.categoria = reglas.categoriaPorDefecto;
+  } else {
+    advertencias.push('categoría no reconocida');
+  }
+
+  // 5. m² por caja: el número (con decimales) que quede suelto en el texto restante
+  const reNumero = /\d+[.,]\d+|\d+/;
+  const mNumero = texto.match(reNumero);
+  if (mNumero) {
+    campos.m2xcaja = parseNumeroAR(mNumero[0]);
+  } else {
+    advertencias.push('m² por caja no encontrado');
+  }
+
+  return { campos, advertencias };
+}
+
+// ---------------- fórmulas por lista ----------------
+// Por defecto cada lista se calcula con el margen general (%) sobre costo (sección 1).
+// Un proveedor puede reemplazar esa regla por una propia: un multiplicador fijo sobre
+// el costo, un multiplicador fijo encadenado sobre OTRA lista ya calculada (ej. Lista =
+// Contado x 1,15), multiplicar una base por un campo extraído de la descripción (ej.
+// Tiendanube = Contado x m²/caja), o dejarla vacía. Se calculan en el orden fijo de
+// LISTAS, así que una fórmula solo puede tomar como base una lista anterior en ese orden.
+function calcularListasConFormulas(costo, campos, formulas, margenesGlobales) {
+  const precios = {};
+  const advertencias = [];
+  LISTAS.forEach((l) => {
+    const regla = (formulas && formulas[l]) || { tipo: 'margen_general' };
+    let valor = '';
+    if (regla.tipo === 'vacio') {
+      valor = '';
+    } else if (regla.tipo === 'multiplicador_costo') {
+      const mult = parseFloat(regla.valor);
+      valor = isNaN(mult) ? '' : round2(costo * mult);
+      if (isNaN(mult)) advertencias.push(ETIQUETAS_LISTA[l] + ': falta el multiplicador');
+    } else if (regla.tipo === 'multiplicador_lista') {
+      const baseValor = precios[regla.base];
+      const mult = parseFloat(regla.valor);
+      if (baseValor === '' || baseValor === undefined || baseValor === null || isNaN(mult)) {
+        valor = '';
+        advertencias.push(ETIQUETAS_LISTA[l] + ': falta "' + (ETIQUETAS_LISTA[regla.base] || regla.base) + '" para calcularla');
+      } else {
+        valor = round2(baseValor * mult);
+      }
+    } else if (regla.tipo === 'multiplicador_campo') {
+      const baseValor = regla.base === 'costo' ? costo : precios[regla.base];
+      const campoValor = campos ? campos[regla.campo] : undefined;
+      if (baseValor === '' || baseValor === undefined || baseValor === null || campoValor === undefined || campoValor === null || isNaN(campoValor)) {
+        valor = '';
+        advertencias.push(ETIQUETAS_LISTA[l] + ': falta "' + (regla.campo || 'el campo') + '" extraído de la descripción');
+      } else {
+        valor = round2(baseValor * campoValor);
+      }
+    } else {
+      const pct = parseFloat(margenesGlobales[l]) || 0;
+      valor = round2(costo * (1 + pct / 100));
+    }
+    precios[l] = valor;
+  });
+  return { precios, advertencias };
+}
+
+// ---------------- UI de fórmulas por lista (form de proveedor) ----------------
+
+const CAMPOS_EXTRAIBLES = [{ id: 'm2xcaja', label: 'm² por caja' }];
+
+function basesDisponibles(lista) {
+  const idx = LISTAS.indexOf(lista);
+  const anteriores = LISTAS.slice(0, idx);
+  return [{ id: 'costo', label: 'Costo' }].concat(anteriores.map((l) => ({ id: l, label: ETIQUETAS_LISTA[l] })));
+}
+
+function renderFilaFormulas(formulas) {
+  const cont = document.getElementById('fila-formulas');
+  cont.innerHTML = '';
+  LISTAS.forEach((l) => {
+    const f = (formulas && formulas[l]) || { tipo: 'margen_general' };
+    const bases = basesDisponibles(l);
+    const div = document.createElement('div');
+    div.style.cssText = 'border-bottom:1px solid #eee; padding:8px 0;';
+    div.innerHTML =
+      '<b>' + ETIQUETAS_LISTA[l] + '</b> ' +
+      '<select id="f-tipo-' + l + '" onchange="onCambioTipoFormula(\'' + l + '\')" style="width:auto; display:inline-block;">' +
+        '<option value="margen_general">Margen general (%) sobre costo</option>' +
+        '<option value="multiplicador_costo">Multiplicador fijo sobre el costo</option>' +
+        (bases.length > 1 ? '<option value="multiplicador_lista">Multiplicador fijo sobre otra lista</option>' : '') +
+        '<option value="multiplicador_campo">Multiplicar por un campo extraído de la descripción</option>' +
+        '<option value="vacio">Vacío / no aplica</option>' +
+      '</select> ' +
+      '<span id="f-extra-' + l + '"></span>';
+    cont.appendChild(div);
+    document.getElementById('f-tipo-' + l).value = f.tipo || 'margen_general';
+    renderExtraFormula(l, f);
+  });
+}
+
+function renderExtraFormula(l, f) {
+  f = f || {};
+  const tipo = document.getElementById('f-tipo-' + l).value;
+  const cont = document.getElementById('f-extra-' + l);
+  const bases = basesDisponibles(l);
+  let html = '';
+  if (tipo === 'multiplicador_costo') {
+    html = ' × <input type="number" step="any" id="f-valor-' + l + '" value="' + (f.valor != null ? f.valor : 1) + '" style="width:80px; display:inline-block;">';
+  } else if (tipo === 'multiplicador_lista') {
+    html = ' base: <select id="f-base-' + l + '" style="width:auto; display:inline-block;">' +
+      bases.filter((b) => b.id !== 'costo').map((b) => '<option value="' + b.id + '">' + b.label + '</option>').join('') +
+      '</select> × <input type="number" step="any" id="f-valor-' + l + '" value="' + (f.valor != null ? f.valor : 1) + '" style="width:80px; display:inline-block;">';
+  } else if (tipo === 'multiplicador_campo') {
+    html = ' base: <select id="f-base-' + l + '" style="width:auto; display:inline-block;">' +
+      bases.map((b) => '<option value="' + b.id + '">' + b.label + '</option>').join('') +
+      '</select> × <select id="f-campo-' + l + '" style="width:auto; display:inline-block;">' +
+      CAMPOS_EXTRAIBLES.map((c) => '<option value="' + c.id + '">' + c.label + '</option>').join('') +
+      '</select>';
+  }
+  cont.innerHTML = html;
+  if (tipo === 'multiplicador_lista' && f.base) document.getElementById('f-base-' + l).value = f.base;
+  if (tipo === 'multiplicador_campo') {
+    if (f.base) document.getElementById('f-base-' + l).value = f.base;
+    if (f.campo) document.getElementById('f-campo-' + l).value = f.campo;
+  }
+}
+
+function onCambioTipoFormula(l) {
+  renderExtraFormula(l, {});
+}
+
+function leerFormulasDelForm() {
+  const formulas = {};
+  LISTAS.forEach((l) => {
+    const tipo = document.getElementById('f-tipo-' + l).value;
+    const obj = { tipo };
+    if (tipo === 'multiplicador_costo') {
+      obj.base = 'costo';
+      obj.valor = document.getElementById('f-valor-' + l).value;
+    } else if (tipo === 'multiplicador_lista') {
+      obj.base = document.getElementById('f-base-' + l).value;
+      obj.valor = document.getElementById('f-valor-' + l).value;
+    } else if (tipo === 'multiplicador_campo') {
+      obj.base = document.getElementById('f-base-' + l).value;
+      obj.campo = document.getElementById('f-campo-' + l).value;
+    }
+    formulas[l] = obj;
+  });
+  return formulas;
+}
+
+function toggleDescCompuesta() {
+  const activo = document.getElementById('p-desc-compuesta-activo').checked;
+  document.getElementById('bloque-desc-compuesta').style.display = activo ? 'block' : 'none';
 }
 
 async function api(path, opts) {
@@ -258,10 +526,18 @@ function nuevoProveedor() {
   document.getElementById('p-col-codigo').value = '';
   document.getElementById('p-col-descripcion').value = '';
   document.getElementById('p-col-precio').value = '';
+  document.getElementById('p-col-stock').value = '';
   document.getElementById('p-fila-inicio').value = 2;
   document.getElementById('p-descuentos').value = '';
   document.getElementById('p-factor').value = 1;
   document.getElementById('p-equivalencias').value = '';
+  document.getElementById('p-desc-compuesta-activo').checked = false;
+  document.getElementById('p-vocab-marca').value = '';
+  document.getElementById('p-vocab-categoria').value = '';
+  document.getElementById('p-vocab-calidad').value = '';
+  document.getElementById('p-categoria-defecto').value = '';
+  toggleDescCompuesta();
+  renderFilaFormulas(null);
   document.getElementById('msg-proveedor').textContent = '';
 }
 
@@ -274,10 +550,19 @@ function editarProveedor(id) {
   document.getElementById('p-col-codigo').value = (p.columnas && p.columnas.codigo) || '';
   document.getElementById('p-col-descripcion').value = (p.columnas && p.columnas.descripcion) || '';
   document.getElementById('p-col-precio').value = (p.columnas && p.columnas.precio) || '';
+  document.getElementById('p-col-stock').value = (p.columnas && p.columnas.stock) || '';
   document.getElementById('p-fila-inicio').value = p.filaInicio || 2;
   document.getElementById('p-descuentos').value = (p.descuentos || []).join(',');
   document.getElementById('p-factor').value = p.factorConversion || 1;
   document.getElementById('p-equivalencias').value = p.equivalenciasTexto || '';
+  const rd = p.reglasDescripcion || {};
+  document.getElementById('p-desc-compuesta-activo').checked = !!rd.activo;
+  document.getElementById('p-vocab-marca').value = rd.vocabularioMarcaTexto || '';
+  document.getElementById('p-vocab-categoria').value = rd.vocabularioCategoriaTexto || '';
+  document.getElementById('p-vocab-calidad').value = rd.vocabularioCalidadTexto || '';
+  document.getElementById('p-categoria-defecto').value = rd.categoriaPorDefecto || '';
+  toggleDescCompuesta();
+  renderFilaFormulas(p.formulas);
   window.scrollTo(0, document.getElementById('titulo-form-proveedor').offsetTop);
 }
 
@@ -293,12 +578,21 @@ async function guardarProveedor() {
     columnas: {
       codigo: document.getElementById('p-col-codigo').value,
       descripcion: document.getElementById('p-col-descripcion').value,
-      precio: document.getElementById('p-col-precio').value
+      precio: document.getElementById('p-col-precio').value,
+      stock: document.getElementById('p-col-stock').value
     },
     filaInicio: document.getElementById('p-fila-inicio').value,
     descuentos: document.getElementById('p-descuentos').value,
     factorConversion: document.getElementById('p-factor').value,
-    equivalenciasTexto: document.getElementById('p-equivalencias').value
+    equivalenciasTexto: document.getElementById('p-equivalencias').value,
+    reglasDescripcion: {
+      activo: document.getElementById('p-desc-compuesta-activo').checked,
+      vocabularioMarcaTexto: document.getElementById('p-vocab-marca').value,
+      vocabularioCategoriaTexto: document.getElementById('p-vocab-categoria').value,
+      vocabularioCalidadTexto: document.getElementById('p-vocab-calidad').value,
+      categoriaPorDefecto: document.getElementById('p-categoria-defecto').value
+    },
+    formulas: leerFormulasDelForm()
   };
   try {
     if (proveedorEnEdicion) {
@@ -330,6 +624,7 @@ function procesarArchivo() {
   const idxCodigo = colIdx(proveedor.columnas.codigo);
   const idxDescripcion = colIdx(proveedor.columnas.descripcion);
   const idxPrecio = colIdx(proveedor.columnas.precio);
+  const idxStock = colIdx(proveedor.columnas.stock);
   if (idxCodigo === -1 || idxPrecio === -1) {
     msg.innerHTML = '<span class="error">Este proveedor no tiene bien configuradas las columnas de código/precio.</span>';
     return;
@@ -348,6 +643,7 @@ function procesarArchivo() {
       const inicio = (proveedor.filaInicio || 2) - 1;
       const margenesGuardados = window.__margenesActuales || {};
       const tieneEquivalencias = proveedor.equivalencias && Object.keys(proveedor.equivalencias).length > 0;
+      const reglasDesc = proveedor.reglasDescripcion;
 
       const resultado = [];
       for (let i = inicio; i < filas.length; i++) {
@@ -359,6 +655,8 @@ function procesarArchivo() {
         const descripcion = idxDescripcion !== -1 ? fila[idxDescripcion] : '';
         const precioRaw = fila[idxPrecio];
         const precioBase = parseNumeroAR(precioRaw);
+        const stockRaw = idxStock !== -1 ? fila[idxStock] : undefined;
+        const stockDisp = stockRaw !== undefined ? parseNumeroAR(stockRaw) : NaN;
 
         const codProvStr = String(codigoProveedor).trim();
         let codigoDux, coincide;
@@ -378,10 +676,9 @@ function procesarArchivo() {
 
         const precioConvertido = precioBase * (proveedor.factorConversion || 1);
         const costoNeto = aplicarDescuentos(precioConvertido, proveedor.descuentos || []);
-        const precios = {};
-        LISTAS.forEach((l) => {
-          precios[l] = round2(costoNeto * (1 + (parseFloat(margenesGuardados[l]) || 0) / 100));
-        });
+
+        const { campos, advertencias: advertenciasCampos } = extraerCampos(descripcion, reglasDesc);
+        const { precios, advertencias: advertenciasFormula } = calcularListasConFormulas(costoNeto, campos, proveedor.formulas, margenesGuardados);
 
         resultado.push({
           codigoProveedor: codProvStr,
@@ -390,7 +687,10 @@ function procesarArchivo() {
           descripcion: descripcion || '',
           precioBase: round2(precioBase),
           costoNeto: round2(costoNeto),
-          precios
+          precios,
+          campos,
+          stockDisp: isNaN(stockDisp) ? null : stockDisp,
+          advertencias: advertenciasCampos.concat(advertenciasFormula)
         });
       }
 
@@ -406,24 +706,34 @@ function procesarArchivo() {
 function mostrarPreview(filas) {
   const tbody = document.getElementById('tbody-preview');
   tbody.innerHTML = '';
-  let sinMapear = 0, conError = 0;
+  let sinMapear = 0, conError = 0, conAviso = 0;
 
   filas.forEach((f) => {
     const tr = document.createElement('tr');
+    const tieneAvisos = !f.error && f.advertencias && f.advertencias.length > 0;
     if (!f.coincide || f.error) { tr.className = 'sin-mapear'; }
+    else if (tieneAvisos) { tr.className = 'aviso'; }
     if (!f.coincide && !f.error) sinMapear++;
     if (f.error) conError++;
+    if (tieneAvisos) conAviso++;
 
     if (f.error) {
-      tr.innerHTML = '<td>' + f.codigoProveedor + '</td><td colspan="8" class="error">' + f.error + '</td>';
+      tr.innerHTML = '<td>' + f.codigoProveedor + '</td><td colspan="14" class="error">' + f.error + '</td>';
     } else {
+      const c = f.campos || {};
       tr.innerHTML =
         '<td>' + f.codigoProveedor + '</td>' +
         '<td>' + (f.codigoDux || '<em>sin mapear</em>') + '</td>' +
         '<td>' + (f.descripcion || '') + '</td>' +
+        '<td>' + (c.medida || '') + '</td>' +
+        '<td>' + (c.m2xcaja != null ? c.m2xcaja : '') + '</td>' +
+        '<td>' + (c.categoria || '') + '</td>' +
+        '<td>' + (c.marca || '') + '</td>' +
+        '<td>' + (f.stockDisp != null ? f.stockDisp : '') + '</td>' +
         '<td>' + f.precioBase + '</td>' +
         '<td>' + f.costoNeto + '</td>' +
-        LISTAS.map((l) => '<td>' + f.precios[l] + '</td>').join('');
+        LISTAS.map((l) => '<td>' + (f.precios[l] === '' || f.precios[l] == null ? '' : f.precios[l]) + '</td>').join('') +
+        '<td class="aviso-txt" style="font-size:11px;">' + ((f.advertencias || []).join('; ')) + '</td>';
     }
     tbody.appendChild(tr);
   });
@@ -433,7 +743,8 @@ function mostrarPreview(filas) {
   document.getElementById('resumen-procesar').innerHTML =
     total + ' filas leídas — <b>' + incluidos + ' listas para exportar</b>' +
     (sinMapear ? ', <b class="error">' + sinMapear + ' sin código Dux</b> (no se incluyen en la descarga)' : '') +
-    (conError ? ', <b class="error">' + conError + ' con precio inválido</b>' : '') + '.';
+    (conError ? ', <b class="error">' + conError + ' con precio inválido</b>' : '') +
+    (conAviso ? ', <b class="aviso-txt">' + conAviso + ' con avisos para revisar</b> (se incluyen igual, pero conviene chequearlas)' : '') + '.';
 
   document.getElementById('resultado-procesar').style.display = 'block';
 }
@@ -447,10 +758,14 @@ function descargarProductos() {
   if (filas.length === 0) { alert('No hay filas para exportar.'); return; }
   const aoa = [PRODUCTOS_HEADERS];
   filas.forEach((f) => {
+    const c = f.campos || {};
     const fila = {
       CODIGO: f.codigoDux,
       COSTO: f.costoNeto,
-      DESCRIPCION: f.descripcion || ''
+      DESCRIPCION: f.descripcion || '',
+      RUBRO: c.categoria || '',
+      'SUB RUBRO': c.medida || '',
+      MARCA: c.marca || ''
     };
     aoa.push(PRODUCTOS_HEADERS.map((h) => (fila[h] !== undefined ? fila[h] : '')));
   });
@@ -485,6 +800,7 @@ function descargarPrecios() {
 async function init() {
   await cargarMargenes();
   await cargarProveedores();
+  nuevoProveedor();
 }
 init();
 </script>
