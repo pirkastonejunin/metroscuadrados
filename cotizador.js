@@ -1000,13 +1000,24 @@ async function dibujarGaleriaLlaveEnMano(pdf, items) {
     const y = pdf.y;
     const imgBuffer = await descargarImagenPdf(it.imagen);
     if (imgBuffer) {
-      try { pdf.image(imgBuffer, x, y, { width: cellW, height: cellW }); } catch (e) {
+      // "cover" recorta la foto para llenar el cuadrado manteniendo la
+      // proporción (como object-fit:cover en la web). Antes se pasaba
+      // width+height a secas, que en pdfkit ESTIRA la imagen a la fuerza a
+      // esas dimensiones si no es cuadrada — eso deformaba las fotos.
+      try { pdf.image(imgBuffer, x, y, { cover: [cellW, cellW], align: 'center', valign: 'center' }); } catch (e) {
         pdf.rect(x, y, cellW, cellW).strokeColor('#e2e0db').stroke();
       }
     } else {
       pdf.rect(x, y, cellW, cellW).strokeColor('#e2e0db').stroke();
     }
-    pdf.fillColor('#000').fontSize(8).text(it.producto || '', x, y + cellW + 6, { width: cellW, align: 'center' });
+    // Los nombres de producto vienen tal cual de Tiendanube y suelen ser
+    // largos; sin height+ellipsis el texto se desbordaba del alto fijo de
+    // la fila (PDF_GALERIA_NOMBRE_ALTO) y se pisaba con la fila siguiente
+    // de fotos — con esto se trunca prolijo con "…" y cada fila mide
+    // siempre lo mismo.
+    pdf.fillColor('#000').fontSize(8).text(it.producto || '', x, y + cellW + 6, {
+      width: cellW, height: PDF_GALERIA_NOMBRE_ALTO, align: 'center', ellipsis: true
+    });
     pdf.fillColor('#000');
 
     if (col === PDF_GALERIA_COLS - 1 || i === items.length - 1) {
@@ -1113,7 +1124,10 @@ router.get('/pdf/:id', async (req, res) => {
         const y0 = pdf.y;
 
         if (imgBuffer) {
-          try { pdf.image(imgBuffer, PDF_IMG_X, y0, { width: PDF_IMG_W, height: PDF_IMG_W }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+          // Mismo motivo que en la galería llave-en-mano: "cover" recorta
+          // manteniendo la proporción en vez de estirar la foto a un
+          // cuadrado (width+height a secas la deforma si no es cuadrada).
+          try { pdf.image(imgBuffer, PDF_IMG_X, y0, { cover: [PDF_IMG_W, PDF_IMG_W], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
         } else {
           pdf.rect(PDF_IMG_X, y0, PDF_IMG_W, PDF_IMG_W).strokeColor('#e2e0db').stroke();
         }
