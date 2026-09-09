@@ -45,12 +45,19 @@
   .rubro-block h4{margin:0 0 4px;font-size:14px;}
   .rubro-block .rubro-tag{color:var(--muted);font-size:12px;margin-bottom:10px;}
   .search-row{display:flex;gap:8px;margin-bottom:10px;}
+  .search-row .buscador-nombre{flex:1;}
+  .search-row .filtro-marca{flex:0 0 auto;min-width:140px;}
   .prod-list{max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
   .prod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13.5px;}
   .prod-item:last-child{border-bottom:none;}
   .prod-item:hover{background:#faf9f7;}
   .prod-item.selected{background:#eef2ff;}
-  .prod-item img{width:32px;height:32px;object-fit:cover;border-radius:5px;background:#eee;flex-shrink:0;}
+  .prod-item img,.prod-item .img-ph{width:32px;height:32px;object-fit:cover;border-radius:5px;background:#eee;flex-shrink:0;}
+  /* Piso pidió fotos más grandes en su lista, sin tocar el resto de los
+     rubros/accesorios (zócalo, niveladores, manta, pegamento). */
+  .prod-list.fotos-grandes{max-height:340px;}
+  .prod-list.fotos-grandes .prod-item{padding:11px 12px;gap:14px;}
+  .prod-list.fotos-grandes .prod-item img,.prod-list.fotos-grandes .prod-item .img-ph{width:68px;height:68px;border-radius:8px;}
   .prod-item .meta{flex:1;}
   .prod-item .meta .name{font-weight:600;}
   .prod-item .meta .sub{color:var(--muted);font-size:12px;}
@@ -624,17 +631,31 @@ function renderPasoProductos(obra){
       return;
     }
 
+    // Piso pidió poder filtrar por marca (además del buscador por nombre) y
+    // fotos más grandes en su lista — solo ahí, el resto de los rubros y
+    // accesorios queda igual que antes.
+    const esPiso = r.clave === 'piso';
+    const selectMarcaHtml = esPiso ? '<select class="filtro-marca" data-rubro="' + r.clave + '"><option value="">Todas las marcas</option></select>' : '';
     bloque.innerHTML =
       '<h4>' + r.titulo + '</h4>' +
       '<div class="rubro-tag">Rubro: ' + escapeHtml(r.rubro) + '</div>' +
-      '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '"></div>' +
-      '<div class="prod-list" data-lista="' + r.clave + '"></div>';
+      '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '">' + selectMarcaHtml + '</div>' +
+      '<div class="prod-list' + (esPiso ? ' fotos-grandes' : '') + '" data-lista="' + r.clave + '"></div>';
     cont.appendChild(bloque);
 
     const inputNombre = bloque.querySelector('.buscador-nombre');
+    const selectMarca = bloque.querySelector('.filtro-marca');
     const lista = bloque.querySelector('.prod-list');
-    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase());
+    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase(), selectMarca ? selectMarca.value : '');
     inputNombre.addEventListener('input', pintar);
+    if (selectMarca){
+      // Solo las marcas que efectivamente aparecen entre los productos de
+      // este rubro (no todo el catálogo de la tienda).
+      const marcas = [...new Set(opcionesRubro(r).map(p => p.marca).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+      selectMarca.innerHTML = '<option value="">Todas las marcas</option>' +
+        marcas.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+      selectMarca.addEventListener('change', pintar);
+    }
     pintar();
 
     // El check de manta va justo después del piso: muchos pisos ya la traen
@@ -697,14 +718,23 @@ function renderPasoProductos(obra){
   }
 }
 
-function pintarListaProductos(listaEl, rubro, filtroNombre){
-  // Un producto puede estar en varias categorías de Tiendanube a la vez (ej.
-  // "Accesorios" además de "Zocalos"); el rubro configurado matchea si
-  // coincide con la combinación completa O con cualquiera de sus categorías
-  // sueltas, para que etiquetar un producto con una categoría extra no lo
-  // saque del rubro.
-  let opciones = catalogoCache.filter(p => p.tipo === rubro.tipoEsperado &&
+// Productos del catálogo que pertenecen a un rubro (piso/zócalo), sin
+// aplicar todavía los filtros de nombre/marca que elija el vendedor. Un
+// producto puede estar en varias categorías de Tiendanube a la vez (ej.
+// "Accesorios" además de "Zocalos"); el rubro configurado matchea si
+// coincide con la combinación completa O con cualquiera de sus categorías
+// sueltas, para que etiquetar un producto con una categoría extra no lo
+// saque del rubro.
+function opcionesRubro(rubro){
+  return catalogoCache.filter(p => p.tipo === rubro.tipoEsperado &&
     (p.categoria === rubro.rubro || (p.categorias && p.categorias.includes(rubro.rubro))));
+}
+
+function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca){
+  let opciones = opcionesRubro(rubro);
+  if (filtroMarca){
+    opciones = opciones.filter(p => p.marca === filtroMarca);
+  }
   if (filtroNombre){
     opciones = opciones.filter(p => p.nombre.toLowerCase().includes(filtroNombre));
   }
@@ -728,9 +758,9 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
       : money(p.precio);
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
-        (p.imagen ? '<img src="' + p.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
+        (p.imagen ? '<img src="' + p.imagen + '">' : '<div class="img-ph"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + '</div>' +
-        '<div class="sub">rinde ' + p.cobertura + ' ' + rubro.tipoEsperado + '/' + p.envase + '</div></div>' +
+        '<div class="sub">rinde ' + p.cobertura + ' ' + rubro.tipoEsperado + '/' + p.envase + (p.marca ? ' · ' + escapeHtml(p.marca) : '') + '</div></div>' +
         linkFicha +
         '<div class="precio">' + precioHtml + '</div>' +
       '</div>'
@@ -741,7 +771,7 @@ function pintarListaProductos(listaEl, rubro, filtroNombre){
       const id = parseInt(el.dataset.id, 10);
       const prod = catalogoCache.find(p => p.id === id);
       seleccion[rubro.clave] = prod;
-      pintarListaProductos(listaEl, rubro, filtroNombre);
+      pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca);
     });
   });
 }
