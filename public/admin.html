@@ -17,7 +17,6 @@
 </style>
 </head>
 <body>
-  <p><a href="/normalizador.html">Normalizador de listas de precio (Dux) &rarr;</a></p>
   <h1>Rendimiento por producto</h1>
 
   <div class="caja">
@@ -27,6 +26,22 @@
   </div>
 
   <p>Para cada producto que se vende por caja/bulto, elegí la unidad de medida y cuánto rinde una caja en esa unidad. Esto queda guardado como atributo propio del producto (metafield), sin tocar el SKU.</p>
+
+  <div class="caja">
+    <h3 style="margin-top:0;">Carga desde la ficha de Tiendanube</h3>
+    <p style="font-size:13px;color:#555;">
+      La app crea en Tiendanube un campo personalizado llamado
+      <strong>"Rendimiento por caja"</strong>, que aparece al editar
+      cualquier producto (sección "Campos personalizados"). Quien carga
+      productos puede completarlo ahí, sin entrar a este panel.
+      El valor se toma solo la primera vez que alguien visita la ficha
+      del producto; con este botón lo bajás de todos los productos de
+      una vez. Los productos que ya tengan rendimiento cargado acá no
+      se pisan.
+    </p>
+    <button onclick="sincronizarCampos()">Sincronizar desde Tiendanube</button>
+    <div id="resultado-sync" style="margin-top:10px;font-size:14px;"></div>
+  </div>
 
   <div class="caja">
     <h3 style="margin-top:0;">Carga masiva por Excel</h3>
@@ -165,6 +180,28 @@
       });
       okEl.textContent = res.ok ? 'Guardado ✓' : 'Error';
       setTimeout(() => okEl.textContent = '', 2000);
+    }
+
+    async function sincronizarCampos() {
+      const el = document.getElementById('resultado-sync');
+      el.style.color = '#333';
+      el.textContent = 'Sincronizando... (puede tardar un rato)';
+      try {
+        const res = await fetch('/admin/sincronizar-campos?store_id=' + storeIdActual);
+        const data = await res.json();
+        if (data.error) {
+          el.style.color = '#c0392b';
+          el.textContent = 'Error: ' + data.error;
+          return;
+        }
+        el.style.color = '#27632a';
+        el.textContent = data.actualizados + ' producto(s) actualizados desde Tiendanube. ' +
+          data.omitidos + ' sin cambios.';
+        await cargar();
+      } catch (e) {
+        el.style.color = '#c0392b';
+        el.textContent = 'Error de red al sincronizar.';
+      }
     }
 
     function descargarPlantilla() {
