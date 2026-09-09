@@ -44,9 +44,16 @@
   .rubro-block{border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;}
   .rubro-block h4{margin:0 0 4px;font-size:14px;}
   .rubro-block .rubro-tag{color:var(--muted);font-size:12px;margin-bottom:10px;}
-  .search-row{display:flex;gap:8px;margin-bottom:10px;}
-  .search-row .buscador-nombre{flex:1;}
-  .search-row .filtro-marca{flex:0 0 auto;min-width:140px;}
+  /* flex-wrap + min-width:0 evita que el buscador de texto quede aplastado
+     a un cuadradito ilegible en pantallas angostas (celular): si no entran
+     los dos uno al lado del otro, el buscador pasa a ocupar su propia fila
+     completa en vez de resignar todo el ancho al select de marca. */
+  .search-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+  .search-row .buscador-nombre{flex:1 1 200px;min-width:0;}
+  .search-row .filtro-marca{flex:1 1 160px;min-width:0;}
+  @media (max-width:480px){
+    .search-row .buscador-nombre,.search-row .filtro-marca{flex:1 1 100%;}
+  }
   .prod-list{max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
   .prod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13.5px;}
   .prod-item:last-child{border-bottom:none;}
