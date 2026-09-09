@@ -193,13 +193,32 @@ function nombreLocalizado(campo) {
   return campo.es || Object.values(campo)[0] || '';
 }
 
+// El campo "brand" de Tiendanube es texto simple (no multi-idioma como
+// "name"), pero por las dudas soporta también el formato localizado.
+function marcaProducto(p) {
+  if (!p.brand) return '';
+  if (typeof p.brand === 'string') return p.brand.trim();
+  return nombreLocalizado(p.brand);
+}
+
+// Si el producto tiene precio promocional activo en Tiendanube (oferta), ese
+// es el que hay que cotizar — promotional_price viene vacío/nulo cuando no
+// hay oferta vigente, y en ese caso se usa el precio de lista normal.
+function precioVigente(variante) {
+  if (!variante) return null;
+  const promo = parseFloat(variante.promotional_price);
+  if (!isNaN(promo) && promo > 0) return promo;
+  const precio = parseFloat(variante.price);
+  return isNaN(precio) ? null : precio;
+}
+
 async function fetchAllProducts(storeId, accessToken) {
   let todos = [];
   let page = 1;
   while (true) {
     const response = await fetch(
       API_BASE + '/' + storeId + '/products?per_page=200&page=' + page +
-        '&fields=id,name,variants,handle,categories,images',
+        '&fields=id,name,variants,handle,categories,images,brand',
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
@@ -244,10 +263,11 @@ async function productosConfigurados(store) {
         handle: nombreLocalizado(p.handle),
         categoria: categorias.join(' / '),
         categorias,
+        marca: marcaProducto(p),
         tipo: cache.tipo,
         cobertura: parseFloat(cache.cobertura),
         envase: cache.envase || 'caja',
-        precio: variante && variante.price ? parseFloat(variante.price) : null,
+        precio: precioVigente(variante),
         imagen: p.images && p.images[0] ? p.images[0].src : null
       };
     })
@@ -272,7 +292,7 @@ async function productoPorSku(store, sku) {
       if (v.sku && String(v.sku).toLowerCase() === String(sku).toLowerCase()) {
         return {
           nombre: nombreLocalizado(p.name),
-          precio: v.price ? parseFloat(v.price) : null,
+          precio: precioVigente(v),
           imagen: p.images && p.images[0] ? p.images[0].src : null,
           variant_id: v.id
         };
@@ -304,7 +324,7 @@ async function productoPorId(store, productId, rendimientoInfo) {
     tipo: rendimientoInfo.tipo,
     cobertura: parseFloat(rendimientoInfo.cobertura),
     envase: rendimientoInfo.envase || 'caja',
-    precio: variante && variante.price ? parseFloat(variante.price) : null,
+    precio: precioVigente(variante),
     imagen: p.images && p.images[0] ? p.images[0].src : null
   };
 }
