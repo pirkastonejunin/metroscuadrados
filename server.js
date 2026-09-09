@@ -342,6 +342,144 @@ async function fetchAllProducts(storeId, accessToken) {
   return todos;
 }
 
+// ---------- Campo personalizado en la ficha de Tiendanube ----------
+// Crea (una vez por tienda) un campo "Rendimiento por caja" que aparece
+// en la ficha del producto dentro del admin de Tiendanube, para que
+// quien carga el producto pueda completarlo ahi sin entrar a /admin.html.
+
+const NOMBRE_CAMPO = 'Rendimiento por caja';
+
+async function getOrCreateCustomFieldId(store) {
+  const col = await getRendimientosCollection();
+  const cacheKey = 'customfield_' + store.store_id;
+
+  const cached = await col.findOne({ _id: cacheKey });
+  if (cached && cached.field_id) return cached.field_id;
+
+  // Busca si ya existe (por si se creo en una instalacion anterior)
+  const listResp = await fetch(API_BASE + '/' + store.store_id + '/products/custom-fields', {
+    headers: apiHeaders(store.access_token)
+  });
+  const existentes = await listResp.json();
+  if (Array.isArray(existentes)) {
+    const encontrado = existentes.find((f) => f.name === NOMBRE_CAMPO);
+    if (encontrado) {
+      await col.updateOne({ _id: cacheKey }, { $set: { field_id: encontrado.id } }, { upsert: true });
+      return encontrado.id;
+    }
+  }
+
+  // No existe: lo crea
+  const createResp = await fetch(API_BASE + '/' + store.store_id + '/products/custom-fields', {
+    method: 'POST',
+    headers: apiHeaders(store.access_token),
+    body: JSON.stringify({
+      name: NOMBRE_CAMPO,
+      description: 'Cuantos m2 (o ml/litros) rinde una caja de este producto',
+      value_type: 'numeric',
+      read_only: false,
+      values: []
+    })
+  });
+  const creado = await createResp.json();
+  if (creado && creado.id) {
+    await col.updateOne({ _id: cacheKey }, { $set: { field_id: creado.id } }, { upsert: true });
+    return creado.id;
+  }
+  return null;
+}
+
+// Lee el valor del campo personalizado para un producto puntual.
+async function leerCampoPersonalizado(store, productId) {
+  try {
+    const fieldId = await getOrCreateCustomFieldId(store);
+    if (!fieldId) return null;
+
+    const resp = await fetch(
+      API_BASE + '/' + store.store_id + '/products/' + productId + '/custom-fields',
+      { headers: apiHeaders(store.access_token) }
+    );
+    const campos = await resp.json();
+    if (!Array.isArray(campos)) return null;
+
+    const campo = campos.find((c) => c.id === fieldId);
+    if (!campo || campo.value === null || campo.value === undefined || campo.value === '') return null;
+
+    const valor = parseFloat(String(campo.value).replace(',', '.'));
+    return (!isNaN(valor) && valor > 0) ? valor : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Endpoint para crear el campo a mano si hiciera falta
+app.get('/admin/crear-campo', async (req, res) => {
+  try {
+    const store = await getStoreFromRequest(req);
+    const fieldId = await getOrCreateCustomFieldId(store);
+    res.json({ ok: !!fieldId, field_id: fieldId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Recorre todos los productos y baja el valor del campo personalizado
+// "Rendimiento por caja" de los que lo tengan cargado en Tiendanube.
+app.get('/admin/sincronizar-campos', async (req, res) => {
+  try {
+    const store = await getStoreFromRequest(req);
+    const fieldId = await getOrCreateCustomFieldId(store);
+    if (!fieldId) return res.status(500).json({ error: 'No se pudo obtener el campo personalizado' });
+
+    // Trae de una todos los productos que tienen valor en ese campo
+    const resp = await fetch(
+      API_BASE + '/' + store.store_id + '/products/custom-fields/' + fieldId + '/owners',
+      { headers: apiHeaders(store.access_token) }
+    );
+    const data = await resp.json();
+    const productos = (data && data.products) ? data.products : [];
+
+    const rendimientos = await getRendimientosDeTienda(store.store_id);
+    const yaConfigurados = {};
+    rendimientos.forEach((r) => {
+      if (r.cobertura) yaConfigurados[r.product_id] = r;
+    });
+
+    let actualizados = 0, omitidos = 0;
+
+    for (const p of productos) {
+      const valor = parseFloat(String(p.value).replace(',', '.'));
+      if (!valor || valor <= 0) { omitidos++; continue; }
+
+      const existente = yaConfigurados[p.id];
+      // No pisa lo que ya este configurado con otro valor desde el admin
+      if (existente && parseFloat(existente.cobertura) === valor) { omitidos++; continue; }
+
+      const info = await fetch(
+        API_BASE + '/' + store.store_id + '/products/' + p.id + '?fields=id,handle',
+        { headers: apiHeaders(store.access_token) }
+      ).then((r) => r.json()).catch(() => null);
+
+      const handle = info && info.handle
+        ? (info.handle.es || Object.values(info.handle)[0])
+        : null;
+
+      await guardarRendimientoCache(
+        store.store_id, p.id,
+        existente ? existente.tipo : 'm2',
+        valor, handle,
+        existente ? existente.envase : 'caja',
+        undefined
+      );
+      actualizados++;
+    }
+
+    res.json({ ok: true, actualizados, omitidos, total: productos.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------- Productos ----------
 
 app.get('/api/products', async (req, res) => {
@@ -492,6 +630,28 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
       cache = await intentar();
     }
 
+    // Si el producto no esta configurado en nuestra base, intentamos
+    // leer el campo personalizado "Rendimiento por caja" que se carga
+    // directamente en la ficha del producto en Tiendanube.
+    if (!cache || !cache.cobertura) {
+      const productoTn = await buscarProductoPorHandle(store, handleBuscado);
+      if (productoTn) {
+        const valorCampo = await leerCampoPersonalizado(store, productoTn.id);
+        if (valorCampo) {
+          // Lo guarda en el cache para no volver a consultarlo
+          await guardarRendimientoCache(
+            store.store_id, productoTn.id, 'm2', valorCampo, handleBuscado, 'caja', undefined
+          );
+          return res.json({
+            coberturaCaja: valorCampo,
+            tipoUnidad: 'm2',
+            envase: 'caja',
+            asociados: []
+          });
+        }
+      }
+    }
+
     const asociados = cache && cache.asociados
       ? await resolverAsociados(store, cache.asociados)
       : [];
@@ -540,6 +700,20 @@ async function resolverAsociados(store, textoAsociados) {
   }
 
   return resultado;
+}
+
+async function buscarProductoPorHandle(store, handle) {
+  try {
+    const resp = await fetch(
+      API_BASE + '/' + store.store_id + '/products?handle=' + encodeURIComponent(handle) + '&fields=id,handle',
+      { headers: apiHeaders(store.access_token) }
+    );
+    const productos = await resp.json();
+    if (Array.isArray(productos) && productos.length) return productos[0];
+    return null;
+  } catch (e) {
+    return null;
+  }
 }
 
 async function buscarProductoPorSku(store, sku) {
