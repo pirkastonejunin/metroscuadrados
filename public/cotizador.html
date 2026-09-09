@@ -53,11 +53,24 @@
   .prod-item:hover{background:#faf9f7;}
   .prod-item.selected{background:#eef2ff;}
   .prod-item img,.prod-item .img-ph{width:32px;height:32px;object-fit:cover;border-radius:5px;background:#eee;flex-shrink:0;}
-  /* Piso pidió fotos más grandes en su lista, sin tocar el resto de los
-     rubros/accesorios (zócalo, niveladores, manta, pegamento). */
-  .prod-list.fotos-grandes{max-height:340px;}
-  .prod-list.fotos-grandes .prod-item{padding:11px 12px;gap:14px;}
-  .prod-list.fotos-grandes .prod-item img,.prod-list.fotos-grandes .prod-item .img-ph{width:68px;height:68px;border-radius:8px;}
+  /* Piso pidió poder elegir a golpe de vista: en vez de la lista angosta con
+     miniatura, una cuadrícula de tarjetas con la foto grande arriba. Solo se
+     aplica al bloque de piso — el resto de los rubros/accesorios (zócalo,
+     niveladores, manta, pegamento) sigue siendo la lista de antes. */
+  .prod-list.fotos-grandes{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;
+    max-height:560px;overflow-y:auto;border:none;padding:2px;
+  }
+  .prod-list.fotos-grandes .prod-item{
+    display:flex;flex-direction:column;align-items:stretch;text-align:center;gap:6px;
+    padding:10px;border:1px solid var(--border);border-radius:10px;border-bottom:1px solid var(--border);
+  }
+  .prod-list.fotos-grandes .prod-item img,.prod-list.fotos-grandes .prod-item .img-ph{
+    width:100%;height:140px;border-radius:8px;
+  }
+  .prod-list.fotos-grandes .prod-item .meta{flex:none;}
+  .prod-list.fotos-grandes .prod-item .precio{text-align:center;white-space:normal;}
+  .prod-list.fotos-grandes .prod-item .ver-ficha{align-self:center;}
   .prod-item .meta{flex:1;}
   .prod-item .meta .name{font-weight:600;}
   .prod-item .meta .sub{color:var(--muted);font-size:12px;}
