@@ -990,14 +990,27 @@ async function dibujarGaleriaLlaveEnMano(pdf, items) {
   const filaAlto = cellW + 6 + PDF_GALERIA_NOMBRE_ALTO;
   const pageBottom = pdf.page.height - pdf.page.margins.bottom;
 
+  // OJO con pdf.y acá: pdf.text() mueve el cursor pdf.y cuando el texto
+  // desborda a más de una línea (los nombres de producto son largos y
+  // wrappean seguido) — aunque se le pase una posición explícita. Si cada
+  // columna de la fila leyera "pdf.y" de nuevo después de dibujar el
+  // nombre de la columna anterior, la 2da/3ra/4ta columna arrancaban más
+  // abajo que la 1ra (efecto escalera — esto era el "desorden" real).
+  // Por eso la posición Y de la fila se fija UNA sola vez por fila
+  // (rowY) y se reutiliza para las 4 columnas, en vez de releer pdf.y en
+  // cada vuelta del for.
+  let rowY = pdf.y;
   for (let i = 0; i < items.length; i++) {
     const col = i % PDF_GALERIA_COLS;
-    if (col === 0 && pdf.y + filaAlto > pageBottom) {
-      pdf.addPage();
+    if (col === 0) {
+      if (rowY + filaAlto > pageBottom) {
+        pdf.addPage();
+        rowY = pdf.y;
+      }
     }
     const it = items[i];
     const x = 50 + col * (cellW + PDF_GALERIA_GAP);
-    const y = pdf.y;
+    const y = rowY;
     const imgBuffer = await descargarImagenPdf(it.imagen);
     if (imgBuffer) {
       // "cover" recorta la foto para llenar el cuadrado manteniendo la
@@ -1021,7 +1034,8 @@ async function dibujarGaleriaLlaveEnMano(pdf, items) {
     pdf.fillColor('#000');
 
     if (col === PDF_GALERIA_COLS - 1 || i === items.length - 1) {
-      pdf.y = y + filaAlto + 8;
+      rowY = y + filaAlto + 8;
+      pdf.y = rowY;
     }
   }
   pdf.moveDown(0.4);
