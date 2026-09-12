@@ -50,9 +50,9 @@
      completa en vez de resignar todo el ancho al select de marca. */
   .search-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
   .search-row .buscador-nombre{flex:1 1 200px;min-width:0;}
-  .search-row .filtro-marca{flex:1 1 160px;min-width:0;}
+  .search-row .filtro-marca,.search-row .orden-precio{flex:1 1 160px;min-width:0;}
   @media (max-width:480px){
-    .search-row .buscador-nombre,.search-row .filtro-marca{flex:1 1 100%;}
+    .search-row .buscador-nombre,.search-row .filtro-marca,.search-row .orden-precio{flex:1 1 100%;}
   }
   .prod-list{max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
   .prod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13.5px;}
@@ -427,8 +427,13 @@ function descripcionObra(o){
   return datos.join(' · ');
 }
 
-function linkCotizacion(id){
-  return location.origin + '/ver-cotizacion.html?id=' + id + '&store_id=' + encodeURIComponent(storeId);
+// Antes armaba un link a ver-cotizacion.html (la página del sistema). Un
+// cliente con ese link podía tocar "Ver desglose" y terminar viendo precios
+// y cantidades de cada ítem — lo mismo que ya se evitaba en WhatsApp. Ahora
+// "Copiar link" comparte directamente el PDF, respetando la vista
+// (desglose/llave en mano) que esté activa en ese momento.
+function urlPdfCotizacion(id, vistaSimple){
+  return location.origin + '/api/cotizador/pdf/' + id + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : '');
 }
 
 // Comparte el PDF del presupuesto (no un link al sistema, para que el
@@ -458,9 +463,9 @@ async function compartirWhatsapp(id, data, vistaSimple){
   }
 }
 
-async function copiarLink(id, btnCopiadoMsgEl){
+async function copiarLink(id, btnCopiadoMsgEl, vistaSimple){
   try{
-    await navigator.clipboard.writeText(linkCotizacion(id));
+    await navigator.clipboard.writeText(urlPdfCotizacion(id, vistaSimple));
     btnCopiadoMsgEl.classList.remove('hidden');
     setTimeout(() => btnCopiadoMsgEl.classList.add('hidden'), 2000);
   }catch(e){ /* portapapeles no disponible */ }
@@ -656,17 +661,28 @@ function renderPasoProductos(obra){
     // accesorios queda igual que antes.
     const esPiso = r.clave === 'piso';
     const selectMarcaHtml = esPiso ? '<select class="filtro-marca" data-rubro="' + r.clave + '"><option value="">Todas las marcas</option></select>' : '';
+    // El orden por precio solo tiene sentido en piso: ahí el precio
+    // comparable entre productos es el de $/m² (ver precioComparable), no
+    // el de la caja, que varía según cuánto rinde cada uno.
+    const selectOrdenHtml = esPiso
+      ? '<select class="orden-precio" data-rubro="' + r.clave + '">' +
+          '<option value="">Ordenar por precio</option>' +
+          '<option value="asc">Precio: menor a mayor</option>' +
+          '<option value="desc">Precio: mayor a menor</option>' +
+        '</select>'
+      : '';
     bloque.innerHTML =
       '<h4>' + r.titulo + '</h4>' +
       '<div class="rubro-tag">Rubro: ' + escapeHtml(r.rubro) + '</div>' +
-      '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '">' + selectMarcaHtml + '</div>' +
+      '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '">' + selectMarcaHtml + selectOrdenHtml + '</div>' +
       '<div class="prod-list' + (esPiso ? ' fotos-grandes' : '') + '" data-lista="' + r.clave + '"></div>';
     cont.appendChild(bloque);
 
     const inputNombre = bloque.querySelector('.buscador-nombre');
     const selectMarca = bloque.querySelector('.filtro-marca');
+    const selectOrden = bloque.querySelector('.orden-precio');
     const lista = bloque.querySelector('.prod-list');
-    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase(), selectMarca ? selectMarca.value : '');
+    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase(), selectMarca ? selectMarca.value : '', selectOrden ? selectOrden.value : '');
     inputNombre.addEventListener('input', pintar);
     if (selectMarca){
       // Solo las marcas que efectivamente aparecen entre los productos de
@@ -675,6 +691,9 @@ function renderPasoProductos(obra){
       selectMarca.innerHTML = '<option value="">Todas las marcas</option>' +
         marcas.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
       selectMarca.addEventListener('change', pintar);
+    }
+    if (selectOrden){
+      selectOrden.addEventListener('change', pintar);
     }
     pintar();
 
@@ -750,13 +769,28 @@ function opcionesRubro(rubro){
     (p.categoria === rubro.rubro || (p.categorias && p.categorias.includes(rubro.rubro))));
 }
 
-function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca){
+// Precio "comparable" para ordenar: en piso el precio de caja no sirve para
+// comparar productos porque cada uno rinde una cantidad distinta de m² (ver
+// el comentario sobre precioPorRendimiento más abajo), así que se ordena
+// por $/m². Para los demás rubros no hay selector de orden todavía, pero
+// queda resuelto por si se reutiliza esta función más adelante.
+function precioComparable(p, rubro){
+  return (rubro.tipoEsperado === 'm2' && p.cobertura) ? p.precio / p.cobertura : p.precio;
+}
+
+function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio){
   let opciones = opcionesRubro(rubro);
   if (filtroMarca){
     opciones = opciones.filter(p => p.marca === filtroMarca);
   }
   if (filtroNombre){
     opciones = opciones.filter(p => p.nombre.toLowerCase().includes(filtroNombre));
+  }
+  if (ordenPrecio === 'asc' || ordenPrecio === 'desc'){
+    opciones = opciones.slice().sort((a, b) => {
+      const diff = precioComparable(a, rubro) - precioComparable(b, rubro);
+      return ordenPrecio === 'asc' ? diff : -diff;
+    });
   }
   if (!opciones.length){
     listaEl.innerHTML = '<div class="empty">No hay productos configurados en ese rubro (revisá que tengan rendimiento cargado en el admin).</div>';
@@ -791,7 +825,7 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca){
       const id = parseInt(el.dataset.id, 10);
       const prod = catalogoCache.find(p => p.id === id);
       seleccion[rubro.clave] = prod;
-      pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca);
+      pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio);
     });
   });
 }
@@ -1043,7 +1077,7 @@ $('#btnWhatsappResumen').addEventListener('click', () => {
 });
 $('#btnCopiarLinkResumen').addEventListener('click', () => {
   if (!ultimaCotizacionGuardadaId) return;
-  copiarLink(ultimaCotizacionGuardadaId, $('#copiadoResumen'));
+  copiarLink(ultimaCotizacionGuardadaId, $('#copiadoResumen'), vistaSimpleResumen);
 });
 
 $('#btnNueva').addEventListener('click', () => {
@@ -1148,7 +1182,7 @@ $('#btnWhatsappHistorial').addEventListener('click', () => {
 });
 $('#btnCopiarLinkHistorial').addEventListener('click', () => {
   if (!historialVistaId) return;
-  copiarLink(historialVistaId, $('#copiadoHistorial'));
+  copiarLink(historialVistaId, $('#copiadoHistorial'), vistaSimpleHistorial);
 });
 $('#btnBorrarHistorial').addEventListener('click', () => {
   if (!historialVistaId) return;
