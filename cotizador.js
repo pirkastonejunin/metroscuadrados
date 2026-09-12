@@ -244,11 +244,6 @@ async function productosConfigurados(store) {
 
   return productos
     .filter((p) => porProductId[p.id])
-    // No ofrecer para cotizar productos que Mato tiene ocultos en Tiendanube
-    // (visibility "hidden") — si no se ve en la tienda, tampoco tiene que
-    // aparecer acá para elegir. "unlisted" (no listado pero accesible por
-    // link directo) sí se deja pasar, no es lo mismo que oculto.
-    .filter((p) => p.visibility !== 'hidden')
     .map((p) => {
       const cache = porProductId[p.id];
       const variante = p.variants && p.variants[0];
@@ -269,6 +264,12 @@ async function productosConfigurados(store) {
         categoria: categorias.join(' / '),
         categorias,
         marca: marcaProducto(p),
+        // No se filtra acá: se manda el dato y el vendedor elige con un
+        // tilde en la pantalla de elegir producto si quiere verlos o no
+        // (por defecto quedan ocultos). "unlisted" (no aparece en la
+        // grilla de la tienda pero es accesible por link directo) no
+        // cuenta como oculto.
+        oculto: p.visibility === 'hidden',
         tipo: cache.tipo,
         cobertura: parseFloat(cache.cobertura),
         envase: cache.envase || 'caja',
