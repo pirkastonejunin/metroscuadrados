@@ -218,7 +218,7 @@ async function fetchAllProducts(storeId, accessToken) {
   while (true) {
     const response = await fetch(
       API_BASE + '/' + storeId + '/products?per_page=200&page=' + page +
-        '&fields=id,name,variants,handle,categories,images,brand',
+        '&fields=id,name,variants,handle,categories,images,brand,visibility',
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
@@ -244,6 +244,11 @@ async function productosConfigurados(store) {
 
   return productos
     .filter((p) => porProductId[p.id])
+    // No ofrecer para cotizar productos que Mato tiene ocultos en Tiendanube
+    // (visibility "hidden") — si no se ve en la tienda, tampoco tiene que
+    // aparecer acá para elegir. "unlisted" (no listado pero accesible por
+    // link directo) sí se deja pasar, no es lo mismo que oculto.
+    .filter((p) => p.visibility !== 'hidden')
     .map((p) => {
       const cache = porProductId[p.id];
       const variante = p.variants && p.variants[0];
