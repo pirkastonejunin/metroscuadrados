@@ -514,13 +514,25 @@ async function cargarTiendas(){
   const sel = $('#selTienda');
   sel.innerHTML = tiendas.map(t => '<option value="' + t.store_id + '">' + (t.domain || t.store_id) + '</option>').join('');
   if (tiendas.length){
-    storeId = String(tiendas[0].store_id);
-    tiendaDomain = tiendas[0].domain || null;
+    // Recordar (por navegador) la última tienda elegida, en vez de arrancar
+    // siempre en la primera que devuelve /api/stores. Sin esto, el
+    // cotizador abría siempre en la tienda demo (la que viene primero en la
+    // lista) salvo que se cambiara el select a mano cada vez — y desde ahí
+    // parecía que faltaban productos, cuando en realidad se estaba viendo
+    // el catálogo de la tienda equivocada.
+    let guardada = null;
+    try { guardada = localStorage.getItem('cotizador_store_id'); } catch (e) { /* sin acceso a localStorage */ }
+    const tiendaGuardada = guardada && tiendas.find(t => String(t.store_id) === guardada);
+    const inicial = tiendaGuardada || tiendas[0];
+    storeId = String(inicial.store_id);
+    tiendaDomain = inicial.domain || null;
+    sel.value = storeId;
   }
   sel.addEventListener('change', () => {
     storeId = sel.value;
     const tienda = tiendas.find(t => String(t.store_id) === storeId);
     tiendaDomain = tienda ? tienda.domain : null;
+    try { localStorage.setItem('cotizador_store_id', storeId); } catch (e) { /* sin acceso a localStorage */ }
     catalogoCache = null;
     tiposObraCache = null;
     catalogosTipoObraCache = null;
