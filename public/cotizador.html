@@ -785,8 +785,25 @@ function renderPasoProductos(obra){
 // sueltas, para que etiquetar un producto con una categoría extra no lo
 // saque del rubro.
 function opcionesRubro(rubro){
-  return catalogoCache.filter(p => p.tipo === rubro.tipoEsperado &&
-    (p.categoria === rubro.rubro || (p.categorias && p.categorias.includes(rubro.rubro))));
+  return catalogoCache.filter(p => p.tipo === rubro.tipoEsperado && coincideRubro(p, rubro));
+}
+
+// Tiendanube a veces tiene la misma categoría cargada de formas distintas
+// (ej: "Pisos / Piso Flotante", pero también "PISO FLOTANTE" suelta o
+// "Pisos / Piso Flotante / PISO FLOTANTE" anidada, típico de una
+// recategorización o import que dejó duplicados). Para no perder esos
+// productos, además del match exacto de siempre, se compara el último
+// tramo del rubro configurado (ej. "Piso Flotante") contra cada elemento
+// de categorias, sin importar mayúsculas — así matchea "PISO FLOTANTE"
+// pero no matchea de más por el tramo genérico "Pisos" solo.
+function coincideRubro(p, rubro){
+  if (p.categoria === rubro.rubro) return true;
+  if (p.categorias && p.categorias.includes(rubro.rubro)) return true;
+  const tramos = rubro.rubro.split('/').map(s => s.trim()).filter(Boolean);
+  const hoja = tramos[tramos.length - 1];
+  if (!hoja || !p.categorias) return false;
+  const hojaNorm = hoja.toLowerCase();
+  return p.categorias.some(c => c.trim().toLowerCase() === hojaNorm);
 }
 
 // Precio "comparable" para ordenar: en piso el precio de caja no sirve para
