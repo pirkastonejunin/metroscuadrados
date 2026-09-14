@@ -105,6 +105,12 @@
   .modal-simulador h3{margin:0 0 4px;font-size:16px;}
   .modal-simulador .sim-sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
   .sim-preview{width:100%;max-height:70vh;border-radius:10px;background:#f2f1ee;display:block;min-height:120px;object-fit:contain;}
+  /* Comparativo antes/después al reabrir una simulación guardada que tiene
+     la foto original + el resultado de la IA. */
+  .sim-antes-despues{display:flex;flex-wrap:wrap;gap:10px;}
+  .sim-antes-despues > div{flex:1;min-width:220px;text-align:center;}
+  .sim-antes-despues img{width:100%;max-height:45vh;border-radius:10px;background:#f2f1ee;object-fit:contain;display:block;}
+  .sim-antes-despues .etq{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-top:6px;}
   .sim-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px 10px;color:var(--muted);font-size:13px;}
   .sim-spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:sim-spin 0.8s linear infinite;}
   @keyframes sim-spin{to{transform:rotate(360deg);}}
@@ -954,7 +960,7 @@ $('#inputFotoSimulador').addEventListener('change', async (e) => {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulación.');
-    mostrarModalSimulador(prod, 'resultado', data.imagen);
+    mostrarModalSimulador(prod, 'resultado', data.imagen, null, fotoDataUrl);
   }catch(err){
     mostrarModalSimulador(prod, 'error', null, err.message);
   }
@@ -986,7 +992,7 @@ function redimensionarFoto(file, maxLado, calidad){
   });
 }
 
-function mostrarModalSimulador(prod, estado, imagen, errorMsg){
+function mostrarModalSimulador(prod, estado, imagen, errorMsg, antes){
   $('#simSubtitulo').textContent = prod.nombre;
   const contenido = $('#simContenido');
   const acciones = $('#simAcciones');
@@ -1003,7 +1009,10 @@ function mostrarModalSimulador(prod, estado, imagen, errorMsg){
     acciones.innerHTML =
       '<button class="secondary" onclick="cerrarModalSimulador()">Descartar</button>' +
       '<button class="primary" onclick="guardarSimulacionPendiente()">Guardar en esta cotización</button>';
-    simResultadoActual = { productId: prod.id, producto: prod.nombre, imagen };
+    // Se guarda también la foto original ("antes") junto con el resultado
+    // de la IA ("después"), para poder mostrar el comparativo en el PDF y
+    // al reabrir la simulación guardada.
+    simResultadoActual = { productId: prod.id, producto: prod.nombre, imagen, antes: antes || null };
   }
   $('#modalSimulador').classList.remove('hidden');
 }
@@ -1034,7 +1043,12 @@ function verSimulacionGuardada(idx){
   simResultadoActual = null;
   productoSimulando = null;
   $('#simSubtitulo').textContent = s.producto || '';
-  $('#simContenido').innerHTML = '<img class="sim-preview" src="' + s.imagen + '">';
+  $('#simContenido').innerHTML = s.antes
+    ? '<div class="sim-antes-despues">' +
+        '<div><img src="' + s.antes + '"><div class="etq">Antes</div></div>' +
+        '<div><img src="' + s.imagen + '"><div class="etq">Después</div></div>' +
+      '</div>'
+    : '<img class="sim-preview" src="' + s.imagen + '">';
   const nombreArchivo = 'simulacion-' +
     (s.producto || 'piso').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
       .replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') + '.png';
