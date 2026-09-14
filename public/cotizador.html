@@ -38,6 +38,11 @@
   button.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;}
   button.primary:disabled{opacity:.45;cursor:not-allowed;}
   button.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;}
+  /* Mismo estilo de button.primary/secondary pero para el link de
+     "Descargar" de una simulación guardada (un <a>, no un <button>, para
+     que el atributo download funcione). */
+  a.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;}
+  a.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;text-decoration:none;display:inline-flex;align-items:center;}
   button.link{background:none;border:none;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:13px;padding:0;}
   button.small{padding:6px 10px;font-size:12.5px;}
   .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
@@ -93,16 +98,19 @@
   .btn-simular{font-size:11.5px;color:var(--accent);white-space:nowrap;background:#fff;cursor:pointer;border:1px solid var(--accent);border-radius:6px;padding:3px 7px;flex-shrink:0;}
   .btn-simular:hover{background:#eef2ff;}
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
-  .modal-simulador{background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;padding:20px;}
+  /* Modal más ancho y sim-preview con más alto (antes 520px/sin límite de
+     alto) para que el resultado de la IA se vea grande — pedido de Mato,
+     el resultado quedaba chico dentro del modal angosto. */
+  .modal-simulador{background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:92vh;overflow-y:auto;padding:20px;}
   .modal-simulador h3{margin:0 0 4px;font-size:16px;}
   .modal-simulador .sim-sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
-  .sim-preview{width:100%;border-radius:10px;background:#f2f1ee;display:block;min-height:120px;object-fit:contain;}
+  .sim-preview{width:100%;max-height:70vh;border-radius:10px;background:#f2f1ee;display:block;min-height:120px;object-fit:contain;}
   .sim-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px 10px;color:var(--muted);font-size:13px;}
   .sim-spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:sim-spin 0.8s linear infinite;}
   @keyframes sim-spin{to{transform:rotate(360deg);}}
   .modal-simulador .actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
-  .sim-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin:14px 0;}
-  .sim-galeria .s-item{text-align:center;}
+  .sim-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:14px 0;}
+  .sim-galeria .s-item{text-align:center;cursor:pointer;}
   .sim-galeria .s-item img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;background:#eee;border:1px solid var(--border);display:block;}
   .sim-galeria .s-item .s-nombre{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.25;}
   .sim-galeria-titulo{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin:16px 0 8px;}
@@ -427,6 +435,7 @@ let catalogosTipoObraCache = null; // { puerta: [...], nivelacion: [...], manta:
 let seleccion = {};                // { piso, zocalo, puerta, nivelacion, manta } (producto/item elegido)
 let simulacionesPendientes = [];   // [{ productId, producto, imagen }] simulaciones de piso que se guardan junto con la cotización
 let productoSimulando = null;      // producto de piso sobre el que se está corriendo el simulador (mientras el modal está abierto)
+let simulacionesEnVista = [];      // misma lista que se pintó en la galería de renderResumen, para poder reabrirlas al hacer click
 let cotizacionActual = null;       // resultado de /calcular, editable en pantalla antes de guardar
 let ultimaCotizacionGuardadaId = null;
 let vistaSimpleResumen = false;    // toggle "ver desglose" / "llave en mano" del paso 4
@@ -1016,6 +1025,25 @@ function guardarSimulacionPendiente(){
   if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
 }
 
+// Reabre en el mismo modal una simulación ya guardada (de la galería del
+// resumen o del historial), en grande, con opción de descargarla. No hay
+// "Guardar" acá porque ya está guardada — solo ver y descargar.
+function verSimulacionGuardada(idx){
+  const s = simulacionesEnVista[idx];
+  if (!s || !s.imagen) return;
+  simResultadoActual = null;
+  productoSimulando = null;
+  $('#simSubtitulo').textContent = s.producto || '';
+  $('#simContenido').innerHTML = '<img class="sim-preview" src="' + s.imagen + '">';
+  const nombreArchivo = 'simulacion-' +
+    (s.producto || 'piso').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') + '.png';
+  $('#simAcciones').innerHTML =
+    '<a class="secondary" href="' + s.imagen + '" download="' + nombreArchivo + '">⬇ Descargar foto</a>' +
+    '<button class="primary" onclick="cerrarModalSimulador()">Cerrar</button>';
+  $('#modalSimulador').classList.remove('hidden');
+}
+
 // Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
 // de piso, manta y silicona/pegamento), todos con la misma forma:
 // { id, sku, cobertura, nombre, precio, imagen }.
@@ -1167,10 +1195,11 @@ function renderResumen(data, editable, vistaSimple){
   // guardar) se muestran las que se fueron probando en este paso 3
   // (simulacionesPendientes), para que quede claro qué se va a guardar.
   const simulacionesMostrar = (data && data.simulaciones) ? data.simulaciones : simulacionesPendientes;
+  simulacionesEnVista = simulacionesMostrar || [];
   if (simulacionesMostrar && simulacionesMostrar.length){
     html += '<div class="sim-galeria-titulo">Simulación de piso con IA</div><div class="sim-galeria">';
-    simulacionesMostrar.forEach(s => {
-      html += '<div class="s-item"><img src="' + s.imagen + '"><div class="s-nombre">' + escapeHtml(s.producto || '') + '</div></div>';
+    simulacionesMostrar.forEach((s, i) => {
+      html += '<div class="s-item" onclick="verSimulacionGuardada(' + i + ')"><img src="' + s.imagen + '"><div class="s-nombre">' + escapeHtml(s.producto || '') + '</div></div>';
     });
     html += '</div>';
   }
