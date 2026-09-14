@@ -600,6 +600,20 @@ function dataUrlAPartes(dataUrl) {
   return { mimeType: m[1], data: m[2] };
 }
 
+// Igual que dataUrlAPartes pero devuelve directamente el Buffer, listo para
+// pdf.image() — usado para dibujar las fotos antes/después del simulador de
+// piso en el PDF (ya vienen como PNG/JPEG de Gemini y del canvas del
+// navegador, pdfkit las dibuja sin conversión).
+function dataUrlABuffer(dataUrl) {
+  const partes = dataUrlAPartes(dataUrl);
+  if (!partes) return null;
+  try {
+    return Buffer.from(partes.data, 'base64');
+  } catch (e) {
+    return null;
+  }
+}
+
 // Descarga la foto real del producto (la misma que ya se usa en las
 // tarjetas del selector y en el PDF) para pasarla como referencia visual —
 // no como descripción de texto — y así el color/veta que la IA dibuja sea
@@ -978,6 +992,10 @@ router.post('/guardar', async (req, res) => {
           productoId: s.productId != null ? s.productId : null,
           producto: String(s.producto || '').trim(),
           imagen: s.imagen,
+          // Foto original del ambiente ("antes"), para el comparativo en el
+          // PDF y al reabrir la simulación. Opcional: simulaciones viejas
+          // (guardadas antes de este cambio) no la van a tener.
+          antes: (typeof s.antes === 'string' && s.antes.indexOf('data:image/') === 0) ? s.antes : null,
           fecha: new Date()
         }))
       : [];
@@ -1321,6 +1339,45 @@ router.get('/pdf/:id', async (req, res) => {
           { align: 'right' }
         );
       });
+    }
+
+    // ---------- Simulación de piso con IA (antes / después) ----------
+    // Una página aparte por cada simulación guardada que tenga las dos
+    // fotos (antes y después) — las guardadas antes de agregar este campo
+    // solo tienen el resultado, así que esas se omiten del comparativo en
+    // vez de mostrar un "antes" vacío.
+    const simulacionesConAntes = (doc.simulaciones || []).filter((s) => s && s.imagen && s.antes);
+    for (const sim of simulacionesConAntes) {
+      pdf.addPage();
+      dibujarMarca(pdf);
+      pdf.moveDown(0.3);
+      pdf.fontSize(14).fillColor('#000').text('Simulación de piso con IA', { align: 'left' });
+      if (sim.producto) {
+        pdf.fontSize(10).fillColor('#555').text(sim.producto);
+      }
+      pdf.fillColor('#000');
+      pdf.moveDown(0.8);
+
+      const anchoDisponible = PDF_TABLE_RIGHT - 50;
+      const anchoImg = (anchoDisponible - 16) / 2; // dos fotos lado a lado, 16pt de separación
+      const altoImg = anchoImg * 0.75;
+
+      const yImgs = pdf.y;
+      const antesBuf = dataUrlABuffer(sim.antes);
+      const despuesBuf = dataUrlABuffer(sim.imagen);
+
+      if (antesBuf) {
+        try { pdf.image(antesBuf, 50, yImgs, { fit: [anchoImg, altoImg], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+      }
+      if (despuesBuf) {
+        try { pdf.image(despuesBuf, 50 + anchoImg + 16, yImgs, { fit: [anchoImg, altoImg], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+      }
+
+      pdf.fontSize(9).fillColor('#888');
+      pdf.text('Antes', 50, yImgs + altoImg + 6, { width: anchoImg, align: 'center' });
+      pdf.text('Después', 50 + anchoImg + 16, yImgs + altoImg + 6, { width: anchoImg, align: 'center' });
+      pdf.fillColor('#000');
+      pdf.y = yImgs + altoImg + 24;
     }
 
     pdf.end();
