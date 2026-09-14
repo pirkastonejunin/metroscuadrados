@@ -576,6 +576,102 @@ router.get('/rubros-disponibles', async (req, res) => {
 });
 
 // =====================================================================
+// Simulador de piso con IA
+// =====================================================================
+// Pedido por Mato (2026-09-14): sacarle una foto al ambiente y que la IA
+// "ponga" ahí el piso elegido. Se probaron dos enfoques (ver
+// claude/simulador-piso-ia.md en el Proyecto): pegar la textura real del
+// producto con homografía (Método A) quedó descartado por calidad tras
+// probarlo con una foto real; se sigue con edición por IA generativa
+// (Método B), pasándole al modelo tanto la foto del ambiente como la foto
+// REAL del producto (no una descripción de texto), para que el resultado
+// sea fiel al SKU que se va a vender, no una aproximación inventada.
+//
+// Requiere la variable de entorno GEMINI_API_KEY (alta gratuita en
+// aistudio.google.com/apikey). El modelo se llama server-side, nunca desde
+// el frontend, para no exponer la key.
+const GEMINI_MODEL = 'gemini-3.1-flash-image';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/' + GEMINI_MODEL + ':generateContent';
+
+function dataUrlAPartes(dataUrl) {
+  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(String(dataUrl || ''));
+  if (!m) return null;
+  return { mimeType: m[1], data: m[2] };
+}
+
+// Descarga la foto real del producto (la misma que ya se usa en las
+// tarjetas del selector y en el PDF) para pasarla como referencia visual —
+// no como descripción de texto — y así el color/veta que la IA dibuja sea
+// el del SKU real, no una aproximación.
+async function descargarImagenComoParte(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('No se pudo descargar la imagen del producto.');
+  const buf = Buffer.from(await resp.arrayBuffer());
+  const mimeType = resp.headers.get('content-type') || 'image/jpeg';
+  return { mimeType, data: buf.toString('base64') };
+}
+
+router.post('/simular-piso', async (req, res) => {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      throw Object.assign(new Error('Falta configurar GEMINI_API_KEY en el servidor.'), { status: 500 });
+    }
+    const store = await getStoreFromQuery(req);
+    const { productId, foto } = req.body || {};
+    if (!productId) throw Object.assign(new Error('Falta productId.'), { status: 400 });
+    const fotoParte = dataUrlAPartes(foto);
+    if (!fotoParte) throw Object.assign(new Error('Falta la foto del ambiente (o no es una imagen valida).'), { status: 400 });
+    // Limite generoso pero no ilimitado, para no pagar de mas por una foto
+    // gigante subida sin comprimir (el frontend ya la comprime antes de
+    // mandarla, esto es un resguardo extra).
+    if (fotoParte.data.length > 8_000_000) {
+      throw Object.assign(new Error('La foto es demasiado pesada.'), { status: 400 });
+    }
+
+    const productos = await productosConfigurados(store);
+    const producto = productos.find((p) => String(p.id) === String(productId));
+    if (!producto) throw Object.assign(new Error('Producto no encontrado.'), { status: 404 });
+    if (!producto.imagen) throw Object.assign(new Error('Ese producto no tiene foto cargada en Tiendanube.'), { status: 400 });
+
+    const productoParte = await descargarImagenComoParte(producto.imagen);
+
+    const prompt = 'Reemplaza SOLO el piso de la primera imagen (una foto real de un ambiente) por el material de piso de la segunda imagen (foto real de un producto). Conserva la perspectiva, la iluminacion, las sombras de los muebles y objetos, y el resto del ambiente sin cambios. El resultado debe verse fotorrealista, como si ese piso estuviera realmente instalado ahi.';
+
+    const geminiResp = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inlineData: fotoParte },
+            { inlineData: productoParte }
+          ]
+        }],
+        generationConfig: { responseModalities: ['IMAGE'] }
+      })
+    });
+    if (!geminiResp.ok) {
+      const detalle = await geminiResp.text();
+      throw Object.assign(new Error('La IA de imagenes no pudo procesar la foto (' + geminiResp.status + ').'), { status: 502, detalle });
+    }
+    const geminiData = await geminiResp.json();
+    const partes = (geminiData.candidates && geminiData.candidates[0] && geminiData.candidates[0].content && geminiData.candidates[0].content.parts) || [];
+    const parteImagen = partes.find((p) => p.inlineData && p.inlineData.data);
+    if (!parteImagen) throw Object.assign(new Error('La IA no devolvio una imagen.'), { status: 502 });
+
+    res.json({
+      imagen: 'data:' + (parteImagen.inlineData.mimeType || 'image/png') + ';base64,' + parteImagen.inlineData.data,
+      productId: producto.id,
+      producto: producto.nombre
+    });
+  } catch (err) {
+    if (err.detalle) console.error('Gemini error:', err.detalle);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// =====================================================================
 // Rutas: tipos de obra
 // =====================================================================
 
@@ -850,7 +946,7 @@ function finalizarItems(items) {
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago } = req.body || {};
+    const { obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
     if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
     if (!Array.isArray(items) || !items.length) {
@@ -867,6 +963,24 @@ router.post('/guardar', async (req, res) => {
       return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(total * factor) };
     });
 
+    // Simulaciones de piso con IA (ver /simular-piso): el vendedor puede
+    // haber probado el simulador con una o mas fotos/productos durante el
+    // paso 3, y elige cuales quedan guardadas dentro de esta cotizacion al
+    // guardarla — no se guardan automaticamente todas las que probo. Cada
+    // imagen ya viene como data URL base64 (misma que devuelve /simular-piso),
+    // asi que se guarda tal cual dentro del documento, sin storage externo.
+    const simulacionesFinales = Array.isArray(simulaciones)
+      ? simulaciones
+        .filter((s) => s && typeof s.imagen === 'string' && s.imagen.indexOf('data:image/') === 0)
+        .slice(0, 8) // resguardo: no dejar cargar un documento enorme
+        .map((s) => ({
+          productoId: s.productId != null ? s.productId : null,
+          producto: String(s.producto || '').trim(),
+          imagen: s.imagen,
+          fecha: new Date()
+        }))
+      : [];
+
     const doc = {
       store_id: store.store_id,
       fecha: new Date(),
@@ -879,7 +993,8 @@ router.post('/guardar', async (req, res) => {
       totalProductos,
       totalManoObra: totalManoObraFinal,
       total,
-      formasPago: formasPagoFinales
+      formasPago: formasPagoFinales,
+      simulaciones: simulacionesFinales
     };
 
     const col = await getCotizacionesCollection();
