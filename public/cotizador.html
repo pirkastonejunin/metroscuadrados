@@ -87,6 +87,25 @@
   .prod-item .precio .precio-caja{font-weight:400;font-size:10.5px;color:var(--muted);white-space:nowrap;}
   .prod-item .ver-ficha{font-size:11.5px;color:var(--muted);white-space:nowrap;text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:3px 7px;flex-shrink:0;}
   .prod-item .ver-ficha:hover{background:#f2f1ee;color:var(--text);}
+  /* Simulador de piso con IA: solo aparece en las tarjetas de piso (ver
+     pintarListaProductos). El botón vive en el mismo lugar que "Ver ficha"
+     para que sea fácil de encontrar sin agregar otra fila a la tarjeta. */
+  .btn-simular{font-size:11.5px;color:var(--accent);white-space:nowrap;background:#fff;cursor:pointer;border:1px solid var(--accent);border-radius:6px;padding:3px 7px;flex-shrink:0;}
+  .btn-simular:hover{background:#eef2ff;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  .modal-simulador{background:#fff;border-radius:12px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;padding:20px;}
+  .modal-simulador h3{margin:0 0 4px;font-size:16px;}
+  .modal-simulador .sim-sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
+  .sim-preview{width:100%;border-radius:10px;background:#f2f1ee;display:block;min-height:120px;object-fit:contain;}
+  .sim-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px 10px;color:var(--muted);font-size:13px;}
+  .sim-spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:sim-spin 0.8s linear infinite;}
+  @keyframes sim-spin{to{transform:rotate(360deg);}}
+  .modal-simulador .actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+  .sim-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin:14px 0;}
+  .sim-galeria .s-item{text-align:center;}
+  .sim-galeria .s-item img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;background:#eee;border:1px solid var(--border);display:block;}
+  .sim-galeria .s-item .s-nombre{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.25;}
+  .sim-galeria-titulo{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin:16px 0 8px;}
   .item-foto{width:40px;height:40px;object-fit:cover;border-radius:6px;background:#eee;display:block;}
   .item-foto-vacia{width:40px;height:40px;border-radius:6px;background:#eee;}
   .item-rubro{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
@@ -382,6 +401,19 @@
 
 </div>
 
+<!-- Simulador de piso con IA: un solo input de archivo oculto (reutilizado
+     para cualquier producto de piso) y un modal genérico que se llena según
+     el producto que se esté probando. -->
+<input type="file" id="inputFotoSimulador" accept="image/*" capture="environment" class="hidden">
+<div id="modalSimulador" class="modal-overlay hidden">
+  <div class="modal-simulador">
+    <h3>Simular piso con foto</h3>
+    <div class="sim-sub" id="simSubtitulo"></div>
+    <div id="simContenido"></div>
+    <div class="actions" id="simAcciones"></div>
+  </div>
+</div>
+
 <script>
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -393,6 +425,8 @@ let tiposObraCache = null;         // tipos de obra configurados
 let tipoObraElegido = null;        // tipo de obra elegido para la cotizacion actual
 let catalogosTipoObraCache = null; // { puerta: [...], nivelacion: [...], manta: [...] } del tipo de obra elegido
 let seleccion = {};                // { piso, zocalo, puerta, nivelacion, manta } (producto/item elegido)
+let simulacionesPendientes = [];   // [{ productId, producto, imagen }] simulaciones de piso que se guardan junto con la cotización
+let productoSimulando = null;      // producto de piso sobre el que se está corriendo el simulador (mientras el modal está abierto)
 let cotizacionActual = null;       // resultado de /calcular, editable en pantalla antes de guardar
 let ultimaCotizacionGuardadaId = null;
 let vistaSimpleResumen = false;    // toggle "ver desglose" / "llave en mano" del paso 4
@@ -538,6 +572,7 @@ async function cargarTiendas(){
     catalogosTipoObraCache = null;
     tipoObraElegido = null;
     seleccion = {};
+    simulacionesPendientes = [];
     cargarPasoTipoObra();
   });
   cargarPasoTipoObra();
@@ -850,12 +885,20 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
     const precioHtml = precioPorRendimiento !== null
       ? money(precioPorRendimiento) + '/m²<div class="precio-caja">' + money(p.precio) + ' la ' + escapeHtml(p.envase || 'unidad') + '</div>'
       : money(p.precio);
+    // El simulador con IA (ver /simular-piso en cotizador.js) solo tiene
+    // sentido para piso — es lo que se "pisa", no zócalo/niveladores/etc.
+    // Necesita la foto real del producto para ser fiel al SKU, así que si
+    // no hay imagen cargada en Tiendanube ni se muestra el botón.
+    const btnSimularHtml = (rubro.clave === 'piso' && p.imagen)
+      ? '<button type="button" class="btn-simular" data-id="' + p.id + '" onclick="event.stopPropagation(); abrirSimulador(' + p.id + ')">📷 Probar en mi foto</button>'
+      : '';
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
         (p.imagen ? '<img src="' + p.imagen + '">' : '<div class="img-ph"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + (p.oculto ? ' <span class="badge-oculto">oculto</span>' : '') + '</div>' +
         '<div class="sub">rinde ' + p.cobertura + ' ' + rubro.tipoEsperado + '/' + p.envase + (p.marca ? ' · ' + escapeHtml(p.marca) : '') + '</div></div>' +
         linkFicha +
+        btnSimularHtml +
         '<div class="precio">' + precioHtml + '</div>' +
       '</div>'
     );
@@ -868,6 +911,109 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
       pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos);
     });
   });
+}
+
+// ---------- Simulador de piso con IA ----------
+// Flujo: el vendedor toca "Probar en mi foto" en una tarjeta de piso -> elige
+// o saca una foto del ambiente -> se manda al backend (que llama a la IA con
+// esa foto MÁS la foto real del producto, para que el resultado sea fiel al
+// SKU) -> se muestra el resultado en un modal -> el vendedor decide si lo
+// guarda (queda en simulacionesPendientes hasta que se guarde la cotización
+// entera) o lo descarta y prueba otra cosa. No se guarda nada solo, para no
+// llenar la cotización de pruebas descartadas.
+let simResultadoActual = null; // { productId, producto, imagen } del resultado que se está mostrando en el modal
+
+function abrirSimulador(productId){
+  const prod = catalogoCache && catalogoCache.find(p => p.id === productId);
+  if (!prod) return;
+  productoSimulando = prod;
+  $('#inputFotoSimulador').value = '';
+  $('#inputFotoSimulador').click();
+}
+
+$('#inputFotoSimulador').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  const prod = productoSimulando;
+  if (!file || !prod) return;
+  try{
+    const fotoDataUrl = await redimensionarFoto(file, 900, 0.75);
+    mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
+    const res = await fetch('/api/cotizador/simular-piso?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ productId: prod.id, foto: fotoDataUrl })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulación.');
+    mostrarModalSimulador(prod, 'resultado', data.imagen);
+  }catch(err){
+    mostrarModalSimulador(prod, 'error', null, err.message);
+  }
+});
+
+// Achica la foto en el navegador antes de mandarla: una foto de celular
+// puede pesar varios MB, y no hace falta esa resolución para que la IA
+// distinga bien el ambiente — así el POST es liviano y rápido. Devuelve un
+// data URL jpeg.
+function redimensionarFoto(file, maxLado, calidad){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la foto.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('No se pudo leer la foto.'));
+      img.onload = () => {
+        const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+        const w = Math.round(img.width * escala);
+        const h = Math.round(img.height * escala);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', calidad));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function mostrarModalSimulador(prod, estado, imagen, errorMsg){
+  $('#simSubtitulo').textContent = prod.nombre;
+  const contenido = $('#simContenido');
+  const acciones = $('#simAcciones');
+  simResultadoActual = null;
+  if (estado === 'cargando'){
+    contenido.innerHTML = '<img class="sim-preview" src="' + imagen + '">' +
+      '<div class="sim-loading"><div class="sim-spinner"></div>Generando la simulación con IA… puede tardar unos segundos.</div>';
+    acciones.innerHTML = '<button class="secondary" onclick="cerrarModalSimulador()">Cancelar</button>';
+  } else if (estado === 'error'){
+    contenido.innerHTML = '<div class="msg error">' + escapeHtml(errorMsg || 'Ocurrió un error.') + '</div>';
+    acciones.innerHTML = '<button class="secondary" onclick="cerrarModalSimulador()">Cerrar</button>';
+  } else {
+    contenido.innerHTML = '<img class="sim-preview" src="' + imagen + '">';
+    acciones.innerHTML =
+      '<button class="secondary" onclick="cerrarModalSimulador()">Descartar</button>' +
+      '<button class="primary" onclick="guardarSimulacionPendiente()">Guardar en esta cotización</button>';
+    simResultadoActual = { productId: prod.id, producto: prod.nombre, imagen };
+  }
+  $('#modalSimulador').classList.remove('hidden');
+}
+
+function cerrarModalSimulador(){
+  $('#modalSimulador').classList.add('hidden');
+  simResultadoActual = null;
+  productoSimulando = null;
+}
+
+function guardarSimulacionPendiente(){
+  if (!simResultadoActual) return;
+  // Si ya había una simulación guardada para el mismo producto, la reemplaza
+  // en vez de duplicarla.
+  simulacionesPendientes = simulacionesPendientes.filter(s => s.productId !== simResultadoActual.productId);
+  simulacionesPendientes.push(simResultadoActual);
+  cerrarModalSimulador();
+  mostrarMsg('Simulación guardada — se va a incluir cuando guardes esta cotización.', 'ok');
+  if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
 }
 
 // Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
@@ -1015,6 +1161,19 @@ function renderResumen(data, editable, vistaSimple){
     });
     html += '</div>';
   }
+
+  // Simulaciones de piso con IA: en una cotización ya guardada (historial)
+  // vienen en data.simulaciones; mientras se está armando (todavía sin
+  // guardar) se muestran las que se fueron probando en este paso 3
+  // (simulacionesPendientes), para que quede claro qué se va a guardar.
+  const simulacionesMostrar = (data && data.simulaciones) ? data.simulaciones : simulacionesPendientes;
+  if (simulacionesMostrar && simulacionesMostrar.length){
+    html += '<div class="sim-galeria-titulo">Simulación de piso con IA</div><div class="sim-galeria">';
+    simulacionesMostrar.forEach(s => {
+      html += '<div class="s-item"><img src="' + s.imagen + '"><div class="s-nombre">' + escapeHtml(s.producto || '') + '</div></div>';
+    });
+    html += '</div>';
+  }
   $('#resumen-tabla').innerHTML = html;
 
   if (editable){
@@ -1088,12 +1247,14 @@ $('#btnGuardar').addEventListener('click', async () => {
         tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
         items: cotizacionActual.items,
         totalManoObra: cotizacionActual.totalManoObra,
-        formasPago: cotizacionActual.formasPago
+        formasPago: cotizacionActual.formasPago,
+        simulaciones: simulacionesPendientes
       })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al guardar');
     ultimaCotizacionGuardadaId = data._id;
+    cotizacionActual.simulaciones = data.simulaciones || [];
     mostrarMsg('Cotización guardada.', 'ok');
     $('#btnPdf').classList.remove('hidden');
     $('#btnNueva').classList.remove('hidden');
@@ -1122,6 +1283,7 @@ $('#btnCopiarLinkResumen').addEventListener('click', () => {
 
 $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
+  simulacionesPendientes = [];
   tipoObraElegido = null;
   cotizacionActual = null;
   ultimaCotizacionGuardadaId = null;
