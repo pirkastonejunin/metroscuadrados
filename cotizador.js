@@ -29,6 +29,7 @@ const path = require('path');
 const fs = require('fs');
 const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
+const sharp = require('sharp');
 
 const router = express.Router();
 
@@ -1049,15 +1050,32 @@ router.delete('/historial/:id', async (req, res) => {
 });
 
 // Trae la imagen del producto como Buffer para insertarla en el PDF. Si
-// falla (sin imagen, red, formato no soportado por pdfkit) devuelve null y
-// la fila se dibuja igual, con un recuadro vacío en vez de la foto.
+// falla (sin imagen, red) devuelve null y la fila se dibuja igual, con un
+// recuadro vacío en vez de la foto.
+//
+// Tiendanube sirve la mayoría de las fotos de producto en WebP, y pdfkit
+// SOLO sabe dibujar JPEG y PNG (lanza una excepción con cualquier otro
+// formato) — por eso, antes de este cambio, casi todas las fotos del PDF
+// terminaban como un recuadro vacío en vez de mostrarse. Se normaliza
+// siempre con sharp (que sí entiende WebP/AVIF/PNG/etc.) a un JPEG chico:
+// en el PDF estas fotos nunca se muestran a más de un par de cm, así que
+// no hace falta el archivo original entero.
 async function descargarImagenPdf(url) {
   if (!url) return null;
   try {
     const resp = await fetch(url);
     if (!resp.ok) return null;
     const buf = Buffer.from(await resp.arrayBuffer());
-    return buf.length ? buf : null;
+    if (!buf.length) return null;
+    try {
+      return await sharp(buf)
+        .rotate() // respeta la orientación EXIF de fotos sacadas con el celular
+        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+    } catch (e) {
+      return buf; // formato que ni sharp reconoce: probamos con el buffer crudo, pdfkit decidirá
+    }
   } catch (e) {
     return null;
   }
