@@ -97,6 +97,20 @@
      para que sea fácil de encontrar sin agregar otra fila a la tarjeta. */
   .btn-simular{font-size:11.5px;color:var(--accent);white-space:nowrap;background:#fff;cursor:pointer;border:1px solid var(--accent);border-radius:6px;padding:3px 7px;flex-shrink:0;}
   .btn-simular:hover{background:#eef2ff;}
+  /* Elegir varios pisos con checkboxes y compararlos todos juntos con la
+     misma foto, en vez de probarlos de a uno — pedido de Mato. */
+  .chk-comparar{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);white-space:nowrap;cursor:pointer;flex-shrink:0;}
+  .chk-comparar input{margin:0;cursor:pointer;}
+  .compare-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#eef2ff;border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-top:10px;}
+  .compare-bar span{font-size:13px;color:var(--accent2);font-weight:600;}
+  .compare-bar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .sim-comparacion-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;}
+  .sim-comparacion-grid .cmp-item{border:1px solid var(--border);border-radius:10px;padding:8px;text-align:center;}
+  .sim-comparacion-grid .cmp-item img{width:100%;max-height:220px;object-fit:contain;border-radius:8px;background:#f2f1ee;display:block;}
+  .sim-comparacion-grid .cmp-item .cmp-nombre{font-size:12.5px;font-weight:600;margin:6px 0 4px;}
+  .sim-comparacion-grid .cmp-item .cmp-estado{font-size:12px;color:var(--muted);padding:26px 0;}
+  .sim-comparacion-grid .cmp-item .cmp-spinner{width:22px;height:22px;margin:0 auto 8px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:sim-spin 0.8s linear infinite;}
+  .sim-comparacion-grid .cmp-item label.check{padding:4px 0 0;font-size:12px;justify-content:center;}
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
   /* Modal más ancho y sim-preview con más alto (antes 520px/sin límite de
      alto) para que el resultado de la IA se vea grande — pedido de Mato,
@@ -466,6 +480,9 @@ let obraOriginalEdicion = null;    // "obra" tal cual estaba guardada al entrar 
 let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
 let categoriaActivaCatalogo = 'puerta';
+let productosComparar = [];        // ids de productos de piso tildados con "Comparar" en paso 3, para generarlos todos juntos con la misma foto
+let modoComparacionPendiente = false; // true mientras se espera que el usuario elija la foto para arrancar una comparación (ver abrirComparacionPisos)
+let comparacionEnCurso = [];       // [{ productId, producto, estado, imagen, errorMsg }] resultados de la comparación que se está mostrando en el modal
 
 const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml' };
 const LABEL_COBERTURA_INPUT = {
@@ -603,6 +620,8 @@ async function cargarTiendas(){
     tipoObraElegido = null;
     seleccion = {};
     simulacionesPendientes = [];
+    productosComparar = [];
+    fotoSimuladorActual = null;
     cargarPasoTipoObra();
   });
   cargarPasoTipoObra();
@@ -758,7 +777,14 @@ function renderPasoProductos(obra){
       '<h4>' + r.titulo + '</h4>' +
       '<div class="rubro-tag">Rubro: ' + escapeHtml(r.rubro) + '</div>' +
       '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '">' + selectMarcaHtml + selectOrdenHtml + chkOcultosHtml + '</div>' +
-      '<div class="prod-list' + (esPiso ? ' fotos-grandes' : '') + '" data-lista="' + r.clave + '"></div>';
+      '<div class="prod-list' + (esPiso ? ' fotos-grandes' : '') + '" data-lista="' + r.clave + '"></div>' +
+      (esPiso
+        ? '<div class="compare-bar hidden" id="barCompararPisos"><span id="compareCount"></span>' +
+          '<div class="compare-bar-actions">' +
+            '<button type="button" class="secondary small" id="btnLimpiarComparar">Limpiar selección</button>' +
+            '<button type="button" class="primary small" id="btnGenerarComparacion">🖼 Generar comparación</button>' +
+          '</div></div>'
+        : '');
     cont.appendChild(bloque);
 
     const inputNombre = bloque.querySelector('.buscador-nombre');
@@ -781,6 +807,16 @@ function renderPasoProductos(obra){
     }
     chkOcultos.addEventListener('change', pintar);
     pintar();
+
+    if (esPiso){
+      bloque.querySelector('#btnGenerarComparacion').addEventListener('click', abrirComparacionPisos);
+      bloque.querySelector('#btnLimpiarComparar').addEventListener('click', () => {
+        productosComparar = [];
+        actualizarBarraComparar();
+        pintar();
+      });
+      actualizarBarraComparar();
+    }
 
     // El check de manta va justo después del piso: muchos pisos ya la traen
     // incorporada y otros no, así que la decisión depende del piso elegido.
@@ -919,8 +955,12 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
     // sentido para piso — es lo que se "pisa", no zócalo/niveladores/etc.
     // Necesita la foto real del producto para ser fiel al SKU, así que si
     // no hay imagen cargada en Tiendanube ni se muestra el botón.
+    // Además de probar un piso solo ("Probar en mi foto"), se puede tildar
+    // "Comparar" en varios pisos y generarlos todos juntos con la misma
+    // foto para ver las opciones lado a lado (ver btnGenerarComparacion).
     const btnSimularHtml = (rubro.clave === 'piso' && p.imagen)
-      ? '<button type="button" class="btn-simular" data-id="' + p.id + '" onclick="event.stopPropagation(); abrirSimulador(' + p.id + ')">📷 Probar en mi foto</button>'
+      ? '<button type="button" class="btn-simular" data-id="' + p.id + '" onclick="event.stopPropagation(); abrirSimulador(' + p.id + ')">📷 Probar en mi foto</button>' +
+        '<label class="chk-comparar" onclick="event.stopPropagation()"><input type="checkbox" class="chk-comparar-input" data-comparar-id="' + p.id + '"' + (productosComparar.includes(p.id) ? ' checked' : '') + '> Comparar</label>'
       : '';
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
@@ -941,6 +981,28 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
       pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos);
     });
   });
+  listaEl.querySelectorAll('.chk-comparar-input').forEach(chk => {
+    chk.addEventListener('change', () => {
+      const id = parseInt(chk.dataset.compararId, 10);
+      if (chk.checked){
+        if (!productosComparar.includes(id)) productosComparar.push(id);
+      } else {
+        productosComparar = productosComparar.filter(x => x !== id);
+      }
+      actualizarBarraComparar();
+    });
+  });
+}
+
+// Muestra/oculta la barra "Generar comparación" y actualiza el contador,
+// según cuántos pisos estén tildados con "Comparar" en este momento.
+function actualizarBarraComparar(){
+  const bar = document.getElementById('barCompararPisos');
+  if (!bar) return;
+  const n = productosComparar.length;
+  bar.classList.toggle('hidden', n === 0);
+  const count = document.getElementById('compareCount');
+  if (count) count.textContent = n === 1 ? '1 piso elegido para comparar' : (n + ' pisos elegidos para comparar');
 }
 
 // ---------- Simulador de piso con IA ----------
@@ -979,14 +1041,24 @@ function cambiarFotoSimulador(){
 
 $('#inputFotoSimulador').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
-  const prod = productoSimulando;
-  if (!file || !prod) return;
+  const comparando = modoComparacionPendiente;
+  modoComparacionPendiente = false;
+  if (!file){ return; }
+  if (!comparando && !productoSimulando){ return; }
   try{
     const fotoDataUrl = await redimensionarFoto(file, 900, 0.75);
     fotoSimuladorActual = fotoDataUrl;
-    await ejecutarSimulacion(prod, fotoDataUrl);
+    if (comparando){
+      await ejecutarComparacion(fotoDataUrl);
+    } else {
+      await ejecutarSimulacion(productoSimulando, fotoDataUrl);
+    }
   }catch(err){
-    mostrarModalSimulador(prod, 'error', null, err.message);
+    if (comparando){
+      mostrarMsg(err.message);
+    } else {
+      mostrarModalSimulador(productoSimulando, 'error', null, err.message);
+    }
   }
 });
 
@@ -1008,6 +1080,106 @@ async function ejecutarSimulacion(prod, fotoDataUrl){
   }catch(err){
     mostrarModalSimulador(prod, 'error', null, err.message);
   }
+}
+
+// ---------- Comparar varios pisos con la misma foto ----------
+// Flujo: el vendedor tilda "Comparar" en dos o más pisos (checkboxes en
+// cada tarjeta, ver pintarListaProductos) y toca "Generar comparación" ->
+// si no hay una foto ya elegida, la pide una sola vez -> se corren todas
+// las simulaciones con esa misma foto y se muestran juntas en una grilla,
+// para poder ver las opciones lado a lado en vez de una por una.
+function abrirComparacionPisos(){
+  if (!productosComparar.length){ mostrarMsg('Tildá "Comparar" en al menos un piso.'); return; }
+  if (fotoSimuladorActual){
+    ejecutarComparacion(fotoSimuladorActual);
+    return;
+  }
+  modoComparacionPendiente = true;
+  $('#inputFotoSimulador').value = '';
+  $('#inputFotoSimulador').click();
+}
+
+async function ejecutarComparacion(fotoDataUrl){
+  const prods = productosComparar
+    .map(id => catalogoCache && catalogoCache.find(p => p.id === id))
+    .filter(Boolean);
+  if (!prods.length){ mostrarMsg('Tildá "Comparar" en al menos un piso.'); return; }
+
+  productoSimulando = null;
+  simResultadoActual = null;
+  comparacionEnCurso = prods.map(p => ({ productId: p.id, producto: p.nombre, estado: 'cargando', imagen: null, errorMsg: null }));
+  mostrarModalComparacion(fotoDataUrl);
+
+  // En paralelo: son como máximo un puñado de pisos a la vez (2 a 4), y así
+  // se arma la grilla completa mucho más rápido que pidiéndolas de a una.
+  await Promise.all(prods.map(async (p, idx) => {
+    try{
+      const res = await fetch('/api/cotizador/simular-piso?store_id=' + storeId, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ productId: p.id, foto: fotoDataUrl })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo generar.');
+      comparacionEnCurso[idx].estado = 'resultado';
+      comparacionEnCurso[idx].imagen = data.imagen;
+      comparacionEnCurso[idx].keep = true;
+    }catch(err){
+      comparacionEnCurso[idx].estado = 'error';
+      comparacionEnCurso[idx].errorMsg = err.message;
+    }
+    renderCeldasComparacion(fotoDataUrl);
+  }));
+}
+
+function mostrarModalComparacion(fotoDataUrl){
+  $('#simSubtitulo').textContent = comparacionEnCurso.length + ' pisos — comparación con la misma foto';
+  renderCeldasComparacion(fotoDataUrl);
+  $('#simAcciones').innerHTML =
+    '<button class="secondary" onclick="cerrarModalSimulador()">Cerrar</button>' +
+    '<button class="primary" onclick="guardarSeleccionComparacion()">Guardar elegidos en esta cotización</button>';
+  $('#modalSimulador').classList.remove('hidden');
+}
+
+// Repinta la grilla de la comparación (se llama al abrir el modal y cada
+// vez que termina una de las simulaciones en paralelo, para ir mostrando
+// los resultados a medida que están listos en vez de esperar a todos).
+function renderCeldasComparacion(fotoDataUrl){
+  const html = comparacionEnCurso.map((c, idx) => {
+    let cuerpo;
+    if (c.estado === 'cargando'){
+      cuerpo = '<div class="cmp-estado"><div class="cmp-spinner"></div>Generando…</div>';
+    } else if (c.estado === 'error'){
+      cuerpo = '<div class="cmp-estado">' + escapeHtml(c.errorMsg || 'Error') + '</div>';
+    } else {
+      // El estado de cada tilde se guarda en comparacionEnCurso[idx].keep
+      // (no solo en el DOM) porque esta grilla se vuelve a pintar entera
+      // cada vez que termina otra de las simulaciones en paralelo — si se
+      // leyera solo del checkbox, destildar una mientras las demás siguen
+      // cargando se perdería en el próximo repintado.
+      cuerpo = '<img src="' + c.imagen + '">' +
+        '<label class="check"><input type="checkbox" class="cmp-keep" data-idx="' + idx + '"' +
+        (c.keep === false ? '' : ' checked') +
+        ' onchange="comparacionEnCurso[' + idx + '].keep = this.checked"> Guardar esta</label>';
+    }
+    return '<div class="cmp-item"><div class="cmp-nombre">' + escapeHtml(c.producto) + '</div>' + cuerpo + '</div>';
+  }).join('');
+  $('#simContenido').innerHTML = '<div class="sim-comparacion-grid">' + html + '</div>';
+}
+
+// Guarda en simulacionesPendientes las opciones de la comparación que el
+// vendedor haya dejado tildadas ("Guardar esta"), igual que hace
+// guardarSimulacionPendiente() con una simulación individual.
+function guardarSeleccionComparacion(){
+  const elegidos = comparacionEnCurso.filter(c => c.estado === 'resultado' && c.keep !== false);
+  if (!elegidos.length){ mostrarMsg('No hay ninguna comparación lista para guardar.'); return; }
+  elegidos.forEach(c => {
+    simulacionesPendientes = simulacionesPendientes.filter(s => s.productId !== c.productId);
+    simulacionesPendientes.push({ productId: c.productId, producto: c.producto, imagen: c.imagen, antes: fotoSimuladorActual });
+  });
+  cerrarModalSimulador();
+  mostrarMsg(elegidos.length + ' simulación(es) guardada(s) — se van a incluir cuando guardes esta cotización.', 'ok');
+  if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
 }
 
 // Achica la foto en el navegador antes de mandarla: una foto de celular
@@ -1066,6 +1238,7 @@ function cerrarModalSimulador(){
   $('#modalSimulador').classList.add('hidden');
   simResultadoActual = null;
   productoSimulando = null;
+  comparacionEnCurso = [];
 }
 
 function guardarSimulacionPendiente(){
@@ -1381,6 +1554,7 @@ $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
   simulacionesPendientes = [];
   fotoSimuladorActual = null;
+  productosComparar = [];
   tipoObraElegido = null;
   cotizacionActual = null;
   ultimaCotizacionGuardadaId = null;
@@ -1479,6 +1653,7 @@ async function editarCotizacionHistorial(){
   cotizacionActual.obra = doc.obra || {};
   simulacionesPendientes = Array.isArray(doc.simulaciones) ? JSON.parse(JSON.stringify(doc.simulaciones)) : [];
   fotoSimuladorActual = null;
+  productosComparar = [];
   ultimaCotizacionGuardadaId = doc._id;
   vistaSimpleResumen = false;
 
