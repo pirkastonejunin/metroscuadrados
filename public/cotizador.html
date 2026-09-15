@@ -101,8 +101,17 @@
   /* Modal más ancho y sim-preview con más alto (antes 520px/sin límite de
      alto) para que el resultado de la IA se vea grande — pedido de Mato,
      el resultado quedaba chico dentro del modal angosto. */
-  .modal-simulador{background:#fff;border-radius:12px;max-width:760px;width:100%;max-height:92vh;overflow-y:auto;padding:20px;}
-  .modal-simulador h3{margin:0 0 4px;font-size:16px;}
+  /* Wrapper sin scroll propio: el botón de cerrar se ancla acá (position:
+     absolute) para que quede siempre visible en pantalla, sin importar el
+     scroll interno de .modal-simulador — antes solo se podía cerrar con el
+     botón "Cerrar" dentro de .actions, que quedaba fuera de vista en el
+     comparativo antes/después y obligaba a usar el botón Atrás del
+     navegador (borrando todo el cotizador en curso). */
+  .modal-simulador-wrap{position:relative;max-width:760px;width:100%;max-height:92vh;}
+  .modal-close-btn{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;border:none;background:rgba(0,0,0,.08);color:#333;font-size:17px;line-height:1;cursor:pointer;z-index:5;display:flex;align-items:center;justify-content:center;}
+  .modal-close-btn:hover{background:rgba(0,0,0,.16);}
+  .modal-simulador{background:#fff;border-radius:12px;width:100%;max-height:92vh;overflow-y:auto;padding:20px;}
+  .modal-simulador h3{margin:0 0 4px;font-size:16px;padding-right:28px;}
   .modal-simulador .sim-sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
   .sim-preview{width:100%;max-height:70vh;border-radius:10px;background:#f2f1ee;display:block;min-height:120px;object-fit:contain;}
   /* Comparativo antes/después al reabrir una simulación guardada que tiene
@@ -307,6 +316,7 @@
         <button class="secondary" id="btnImprimirHistorial">Imprimir</button>
         <button class="whatsapp" id="btnWhatsappHistorial">Compartir por WhatsApp</button>
         <button class="secondary" id="btnCopiarLinkHistorial">Copiar link<span class="copiado hidden" id="copiadoHistorial">¡Copiado!</span></button>
+        <button class="secondary" id="btnEditarHistorial">✎ Editar</button>
         <button class="secondary" id="btnBorrarHistorial" style="color:var(--warn);border-color:var(--warn);">Borrar cotización</button>
       </div>
     </div>
@@ -418,13 +428,16 @@
 <!-- Simulador de piso con IA: un solo input de archivo oculto (reutilizado
      para cualquier producto de piso) y un modal genérico que se llena según
      el producto que se esté probando. -->
-<input type="file" id="inputFotoSimulador" accept="image/*" capture="environment" class="hidden">
+<input type="file" id="inputFotoSimulador" accept="image/*" class="hidden">
 <div id="modalSimulador" class="modal-overlay hidden">
-  <div class="modal-simulador">
-    <h3>Simular piso con foto</h3>
-    <div class="sim-sub" id="simSubtitulo"></div>
-    <div id="simContenido"></div>
-    <div class="actions" id="simAcciones"></div>
+  <div class="modal-simulador-wrap">
+    <button type="button" class="modal-close-btn" onclick="cerrarModalSimulador()" aria-label="Cerrar">✕</button>
+    <div class="modal-simulador">
+      <h3>Simular piso con foto</h3>
+      <div class="sim-sub" id="simSubtitulo"></div>
+      <div id="simContenido"></div>
+      <div class="actions" id="simAcciones"></div>
+    </div>
   </div>
 </div>
 
@@ -448,6 +461,8 @@ let vistaSimpleResumen = false;    // toggle "ver desglose" / "llave en mano" de
 let vistaSimpleHistorial = false;  // idem para el detalle del historial
 let historialVistaId = null;       // id de la cotización que se está viendo en el detalle del historial
 let historialVistaDoc = null;      // documento completo de esa cotización (para poder re-renderizar al togglear vista)
+let editandoCotizacionId = null;   // _id de una cotización del historial que se está reabriendo para editar: si no es null, btnGuardar actualiza ese documento en vez de crear uno nuevo
+let obraOriginalEdicion = null;    // "obra" tal cual estaba guardada al entrar a editar, para no perder utilizaManta si no se vuelve a pasar por paso-productos
 let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
 let categoriaActivaCatalogo = 'puerta';
@@ -937,11 +952,27 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
 // entera) o lo descarta y prueba otra cosa. No se guarda nada solo, para no
 // llenar la cotización de pruebas descartadas.
 let simResultadoActual = null; // { productId, producto, imagen } del resultado que se está mostrando en el modal
+// Foto de ambiente ya elegida por el usuario en esta cotización, para poder
+// probar varios pisos con la misma foto sin tener que volver a sacarla o
+// elegir el archivo cada vez — pedido de Mato.
+let fotoSimuladorActual = null;
 
 function abrirSimulador(productId){
   const prod = catalogoCache && catalogoCache.find(p => p.id === productId);
   if (!prod) return;
   productoSimulando = prod;
+  if (fotoSimuladorActual){
+    ejecutarSimulacion(prod, fotoSimuladorActual);
+    return;
+  }
+  $('#inputFotoSimulador').value = '';
+  $('#inputFotoSimulador').click();
+}
+
+// Descarta la foto actual y abre de nuevo el selector (cámara o galería)
+// para elegir una nueva — se usa desde el botón "Cambiar foto" del modal.
+function cambiarFotoSimulador(){
+  fotoSimuladorActual = null;
   $('#inputFotoSimulador').value = '';
   $('#inputFotoSimulador').click();
 }
@@ -952,7 +983,20 @@ $('#inputFotoSimulador').addEventListener('change', async (e) => {
   if (!file || !prod) return;
   try{
     const fotoDataUrl = await redimensionarFoto(file, 900, 0.75);
-    mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
+    fotoSimuladorActual = fotoDataUrl;
+    await ejecutarSimulacion(prod, fotoDataUrl);
+  }catch(err){
+    mostrarModalSimulador(prod, 'error', null, err.message);
+  }
+});
+
+// Corre la simulación con IA para "prod" usando una foto ya elegida
+// (fotoDataUrl). Separado del listener de archivo para poder reutilizar la
+// misma foto en varios productos sin volver a pedirla cada vez.
+async function ejecutarSimulacion(prod, fotoDataUrl){
+  productoSimulando = prod;
+  mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
+  try{
     const res = await fetch('/api/cotizador/simular-piso?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
@@ -964,7 +1008,7 @@ $('#inputFotoSimulador').addEventListener('change', async (e) => {
   }catch(err){
     mostrarModalSimulador(prod, 'error', null, err.message);
   }
-});
+}
 
 // Achica la foto en el navegador antes de mandarla: una foto de celular
 // puede pesar varios MB, y no hace falta esa resolución para que la IA
@@ -1008,6 +1052,7 @@ function mostrarModalSimulador(prod, estado, imagen, errorMsg, antes){
     contenido.innerHTML = '<img class="sim-preview" src="' + imagen + '">';
     acciones.innerHTML =
       '<button class="secondary" onclick="cerrarModalSimulador()">Descartar</button>' +
+      '<button class="secondary" onclick="cambiarFotoSimulador()">🔄 Cambiar foto</button>' +
       '<button class="primary" onclick="guardarSimulacionPendiente()">Guardar en esta cotización</button>';
     // Se guarda también la foto original ("antes") junto con el resultado
     // de la IA ("después"), para poder mostrar el comparativo en el PDF y
@@ -1279,12 +1324,16 @@ $('#btnGuardar').addEventListener('click', async () => {
   if (!cotizacionActual || !cotizacionActual.items.length){ mostrarMsg('No hay ítems para guardar.'); return; }
   const obra = leerObra();
   const chkManta = document.getElementById('chkUtilizaManta');
-  obra.utilizaManta = chkManta ? chkManta.checked : false;
+  // Si estamos editando una cotización del historial y el checkbox de manta
+  // no está en el DOM (porque no se volvió a pasar por paso-productos), se
+  // conserva el valor que ya tenía guardado en vez de resetearlo a false.
+  obra.utilizaManta = chkManta ? chkManta.checked
+    : (editandoCotizacionId && obraOriginalEdicion ? !!obraOriginalEdicion.utilizaManta : false);
   try{
     const res = await fetch('/api/cotizador/guardar?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         obra, tipoObraId: tipoObraElegido.id,
         cliente: $('#clienteGuardar').value, direccion: $('#direccion').value,
         tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
@@ -1292,11 +1341,15 @@ $('#btnGuardar').addEventListener('click', async () => {
         totalManoObra: cotizacionActual.totalManoObra,
         formasPago: cotizacionActual.formasPago,
         simulaciones: simulacionesPendientes
-      })
+      }, editandoCotizacionId ? { _id: editandoCotizacionId } : {}))
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al guardar');
     ultimaCotizacionGuardadaId = data._id;
+    // Guardados siguientes (si toca "Guardar" de nuevo) actualizan el mismo
+    // documento en vez de crear uno duplicado.
+    editandoCotizacionId = data._id;
+    obraOriginalEdicion = obra;
     cotizacionActual.simulaciones = data.simulaciones || [];
     mostrarMsg('Cotización guardada.', 'ok');
     $('#btnPdf').classList.remove('hidden');
@@ -1327,9 +1380,13 @@ $('#btnCopiarLinkResumen').addEventListener('click', () => {
 $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
   simulacionesPendientes = [];
+  fotoSimuladorActual = null;
   tipoObraElegido = null;
   cotizacionActual = null;
   ultimaCotizacionGuardadaId = null;
+  editandoCotizacionId = null;
+  obraOriginalEdicion = null;
+  $('#btnVolverProductos').classList.remove('hidden');
   vistaSimpleResumen = false;
   $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
   $('#formOtroItem').classList.remove('hidden');
@@ -1390,6 +1447,59 @@ async function borrarCotizacion(id){
     cargarHistorial();
   }catch(e){ mostrarMsg(e.message); }
 }
+
+// Reabre una cotización guardada del historial directo en el paso 4
+// (resumen), para poder cambiarle cliente/dirección/cantidades/ítems y
+// volver a guardarla actualizando el mismo documento (en vez de crear una
+// cotización nueva) — pedido de Mato.
+async function editarCotizacionHistorial(){
+  if (!historialVistaId || !historialVistaDoc) return;
+  const doc = historialVistaDoc;
+
+  if (!tiposObraCache || !tiposObraCache.length) await cargarPasoTipoObra();
+  tipoObraElegido = (tiposObraCache || []).find(t => String(t.id) === String(doc.tipoObraId))
+    || { id: doc.tipoObraId, nombre: doc.tipoObraNombre };
+
+  editandoCotizacionId = doc._id;
+  obraOriginalEdicion = doc.obra || {};
+
+  // Precarga los campos del paso 2 (por si el usuario vuelve a esa
+  // pantalla) y los que "Guardar" lee directo del DOM.
+  $('#cliente').value = doc.cliente || '';
+  $('#clienteGuardar').value = doc.cliente || '';
+  $('#direccion').value = doc.direccion || '';
+  $('#m2Pisos').value = (doc.obra && doc.obra.m2Pisos != null) ? doc.obra.m2Pisos : 0;
+  $('#mlZocalos').value = (doc.obra && doc.obra.mlZocalos != null) ? doc.obra.mlZocalos : 0;
+  $('#cantidadPuertas').value = (doc.obra && doc.obra.cantidadPuertas != null) ? doc.obra.cantidadPuertas : 0;
+  $('#desperdicioPctPiso').value = (doc.obra && doc.obra.desperdicioPctPiso != null) ? doc.obra.desperdicioPctPiso : 0;
+  $('#requiereNivelacion').checked = !!(doc.obra && doc.obra.requiereNivelacion);
+  $('#manoObra').checked = !!(doc.obra && doc.obra.manoObra);
+
+  cotizacionActual = JSON.parse(JSON.stringify(doc));
+  cotizacionActual.obra = doc.obra || {};
+  simulacionesPendientes = Array.isArray(doc.simulaciones) ? JSON.parse(JSON.stringify(doc.simulaciones)) : [];
+  fotoSimuladorActual = null;
+  ultimaCotizacionGuardadaId = doc._id;
+  vistaSimpleResumen = false;
+
+  $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+  $('#formOtroItem').classList.remove('hidden');
+  $('#accionesExtraResumen').classList.remove('hidden');
+  // Se salta paso-productos: el detalle no queda armado para esa pantalla,
+  // así que "← Volver" ahí se esconde mientras se edita así.
+  $('#btnVolverProductos').classList.add('hidden');
+  renderResumen(cotizacionActual, true, vistaSimpleResumen);
+  $('#paso-tipo-obra').classList.add('hidden');
+  $('#paso-obra').classList.add('hidden');
+  $('#paso-productos').classList.add('hidden');
+  $('#paso-resumen').classList.remove('hidden');
+  $('#btnPdf').classList.remove('hidden');
+  $('#btnNueva').classList.remove('hidden');
+
+  cambiarTab('nueva');
+  mostrarMsg('Editando cotización guardada — al guardar se actualiza esta misma cotización.', 'ok');
+}
+$('#btnEditarHistorial').addEventListener('click', editarCotizacionHistorial);
 
 function renderDetalleHistorial(doc){
   renderResumen(doc, false, vistaSimpleHistorial);
