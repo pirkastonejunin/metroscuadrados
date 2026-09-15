@@ -1363,42 +1363,67 @@ router.get('/pdf/:id', async (req, res) => {
     }
 
     // ---------- Simulación de piso con IA (antes / después) ----------
-    // Una página aparte por cada simulación guardada que tenga las dos
-    // fotos (antes y después) — las guardadas antes de agregar este campo
-    // solo tienen el resultado, así que esas se omiten del comparativo en
-    // vez de mostrar un "antes" vacío.
+    // Todas las simulaciones guardadas que tengan las dos fotos (antes y
+    // después) van juntas, apiladas en la misma sección — antes se les
+    // daba una página aparte a cada una (aunque entraran varias en una
+    // sola hoja), y quedaba un PDF larguísimo para 2 o 3 simulaciones.
+    // Ahora solo se pasa de página cuando ya no entra otra fila más,
+    // igual que hace la tabla de ítems más arriba. Las simulaciones
+    // guardadas antes de agregar el campo "antes" solo tienen el
+    // resultado, así que se omiten de este comparativo en vez de mostrar
+    // un "antes" vacío.
     const simulacionesConAntes = (doc.simulaciones || []).filter((s) => s && s.imagen && s.antes);
-    for (const sim of simulacionesConAntes) {
-      pdf.addPage();
-      dibujarMarca(pdf);
-      pdf.moveDown(0.3);
-      pdf.fontSize(14).fillColor('#000').text('Simulación de piso con IA', { align: 'left' });
-      if (sim.producto) {
-        pdf.fontSize(10).fillColor('#555').text(sim.producto);
-      }
-      pdf.fillColor('#000');
-      pdf.moveDown(0.8);
-
+    if (simulacionesConAntes.length) {
       const anchoDisponible = PDF_TABLE_RIGHT - 50;
       const anchoImg = (anchoDisponible - 16) / 2; // dos fotos lado a lado, 16pt de separación
-      const altoImg = anchoImg * 0.75;
+      const altoImg = anchoImg * 0.55;
 
-      const yImgs = pdf.y;
-      const antesBuf = dataUrlABuffer(sim.antes);
-      const despuesBuf = dataUrlABuffer(sim.imagen);
+      const dibujarEncabezadoSimulaciones = (continuacion) => {
+        dibujarMarca(pdf);
+        pdf.moveDown(0.3);
+        pdf.fontSize(14).fillColor('#000').text('Simulaciones de piso con IA' + (continuacion ? ' (continuación)' : ''), { align: 'left' });
+        pdf.fillColor('#000');
+        pdf.moveDown(0.6);
+      };
 
-      if (antesBuf) {
-        try { pdf.image(antesBuf, 50, yImgs, { fit: [anchoImg, altoImg], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+      pdf.addPage();
+      dibujarEncabezadoSimulaciones(false);
+      const pageBottomSim = pdf.page.height - pdf.page.margins.bottom;
+
+      for (const sim of simulacionesConAntes) {
+        pdf.fontSize(10);
+        const hNombre = sim.producto ? pdf.heightOfString(sim.producto, { width: anchoDisponible }) : 0;
+        // Nombre (si hay) + espacio + las dos fotos + etiqueta "Antes/Después"
+        // + margen antes de la fila siguiente, con un margen de sobra.
+        const filaAlto = hNombre + (hNombre ? 6 : 0) + altoImg + 15 + 18;
+
+        if (pdf.y + filaAlto > pageBottomSim) {
+          pdf.addPage();
+          dibujarEncabezadoSimulaciones(true);
+        }
+
+        if (sim.producto) {
+          pdf.fontSize(10).fillColor('#000').text(sim.producto, { width: anchoDisponible });
+          pdf.moveDown(0.2);
+        }
+
+        const yImgs = pdf.y;
+        const antesBuf = dataUrlABuffer(sim.antes);
+        const despuesBuf = dataUrlABuffer(sim.imagen);
+
+        if (antesBuf) {
+          try { pdf.image(antesBuf, 50, yImgs, { fit: [anchoImg, altoImg], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+        }
+        if (despuesBuf) {
+          try { pdf.image(despuesBuf, 50 + anchoImg + 16, yImgs, { fit: [anchoImg, altoImg], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
+        }
+
+        pdf.fontSize(9).fillColor('#888');
+        pdf.text('Antes', 50, yImgs + altoImg + 6, { width: anchoImg, align: 'center' });
+        pdf.text('Después', 50 + anchoImg + 16, yImgs + altoImg + 6, { width: anchoImg, align: 'center' });
+        pdf.fillColor('#000');
+        pdf.y = yImgs + altoImg + 9 + 18;
       }
-      if (despuesBuf) {
-        try { pdf.image(despuesBuf, 50 + anchoImg + 16, yImgs, { fit: [anchoImg, altoImg], align: 'center', valign: 'center' }); } catch (e) { /* formato no soportado, seguimos sin foto */ }
-      }
-
-      pdf.fontSize(9).fillColor('#888');
-      pdf.text('Antes', 50, yImgs + altoImg + 6, { width: anchoImg, align: 'center' });
-      pdf.text('Después', 50 + anchoImg + 16, yImgs + altoImg + 6, { width: anchoImg, align: 'center' });
-      pdf.fillColor('#000');
-      pdf.y = yImgs + altoImg + 24;
     }
 
     pdf.end();
