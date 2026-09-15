@@ -961,7 +961,7 @@ function finalizarItems(items) {
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones } = req.body || {};
+    const { _id, obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
     if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
     if (!Array.isArray(items) || !items.length) {
@@ -1017,6 +1017,27 @@ router.post('/guardar', async (req, res) => {
     };
 
     const col = await getCotizacionesCollection();
+
+    // Si viene un _id, es una edición de una cotización ya guardada (ver
+    // "Editar" en el historial) en vez de una nueva: se reemplaza el
+    // documento manteniendo su _id y su fecha original, para que los links
+    // de PDF/WhatsApp/"copiar link" que ya se hayan compartido con ese id
+    // sigan apuntando a la misma cotización actualizada.
+    if (_id) {
+      let objectId;
+      try {
+        objectId = new ObjectId(String(_id));
+      } catch (e) {
+        return res.status(400).json({ error: 'Id de cotización inválido.' });
+      }
+      const existente = await col.findOne({ _id: objectId, store_id: store.store_id });
+      if (!existente) return res.status(404).json({ error: 'No se encontró la cotización a editar.' });
+      doc.fecha = existente.fecha;
+      doc.actualizada = new Date();
+      await col.replaceOne({ _id: objectId, store_id: store.store_id }, doc);
+      return res.json(Object.assign({ _id: objectId }, doc));
+    }
+
     const { insertedId } = await col.insertOne(doc);
     res.json(Object.assign({ _id: insertedId }, doc));
   } catch (err) {
