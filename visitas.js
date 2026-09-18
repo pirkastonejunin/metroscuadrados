@@ -87,6 +87,60 @@ function err(status, message) {
   return Object.assign(new Error(message), { status });
 }
 
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ---------------------------------------------------------------------
+// Estados de una visita.
+//   sin_visita    -> agendada, todavía no se hizo la visita (nombre viejo:
+//                    "agendada", se conserva como alias por compatibilidad
+//                    con documentos ya guardados con ese valor)
+//   presupuestada -> el vendedor visitó y armó el presupuesto
+//   vendido       -> el cliente confirmó (nombre viejo: "confirmada"),
+//                    dispara la creación automática de la Obra
+//   instalado     -> la Obra vinculada ya tiene todas sus tareas terminadas
+//                    (se detecta solo, ver sincronizarInstalacion)
+//   cancelada     -> se bajó; se puede reprogramar (vuelve a sin_visita)
+// ---------------------------------------------------------------------
+const ESTADOS_VISITA_VALIDOS = ['sin_visita', 'presupuestada', 'vendido', 'instalado', 'cancelada'];
+const ALIAS_ESTADO_LEGACY = { agendada: 'sin_visita', confirmada: 'vendido' };
+function normalizarEstadoVisita(estado) {
+  if (!estado) return estado;
+  return ALIAS_ESTADO_LEGACY[estado] || estado;
+}
+
+// Si una visita ya está "vendido" (generó Obra) y esa Obra ya tiene todas
+// sus tareas terminadas, la pasa sola a "instalado" — así el estado de la
+// visita refleja el avance real sin que nadie tenga que ir a tocarlo a mano.
+// Muta los documentos de `lista` en memoria (para la respuesta) y persiste
+// el cambio en Mongo para las próximas consultas/filtros/orden.
+async function sincronizarInstalacion(db, lista) {
+  const pendientes = lista.filter(v => v.estado === 'vendido' && v.obraId);
+  if (!pendientes.length) return lista;
+  const obras = await db.collection('obras')
+    .find({ _id: { $in: pendientes.map(v => v.obraId) } })
+    .project({ tareas: 1 })
+    .toArray();
+  const obraPorId = new Map(obras.map(o => [String(o._id), o]));
+  const idsAActualizar = [];
+  for (const v of pendientes) {
+    const obra = obraPorId.get(String(v.obraId));
+    const tareas = obra && obra.tareas;
+    if (tareas && tareas.length && tareas.every(t => t.estado === 'terminada')) {
+      v.estado = 'instalado';
+      idsAActualizar.push(v._id);
+    }
+  }
+  if (idsAActualizar.length) {
+    await db.collection('visitas').updateMany(
+      { _id: { $in: idsAActualizar } },
+      { $set: { estado: 'instalado', updatedAt: new Date() } }
+    );
+  }
+  return lista;
+}
+
 async function siguienteNumeroVisita() {
   return conReintento(async () => {
     const db = await getDb();
@@ -325,8 +379,11 @@ router.get('/', authAdmin, async (req, res) => {
     const { vendedorId, estado, desde, hasta, q } = req.query;
     const match = {};
     if (vendedorId) match.vendedorId = toObjectId(vendedorId);
-    if (estado) match.estado = estado;
-    if (q) match['cliente.nombre'] = { $regex: q, $options: 'i' };
+    if (estado) match.estado = normalizarEstadoVisita(estado);
+    if (q) {
+      const rx = { $regex: escapeRegex(q), $options: 'i' };
+      match.$or = [{ 'cliente.nombre': rx }, { 'cliente.telefono': rx }];
+    }
     if (desde || hasta) {
       match.fechaHora = {};
       if (desde) match.fechaHora.$gte = new Date(desde);
@@ -334,7 +391,8 @@ router.get('/', authAdmin, async (req, res) => {
     }
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('visitas').find(match).sort({ fechaHora: 1 }).toArray();
+      const lista = await db.collection('visitas').find(match).sort({ fechaHora: 1 }).toArray();
+      return sincronizarInstalacion(db, lista);
     });
     res.json(lista);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -366,7 +424,10 @@ router.get('/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const visita = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('visitas').findOne({ _id: id });
+      const doc = await db.collection('visitas').findOne({ _id: id });
+      if (!doc) return null;
+      const [sincronizada] = await sincronizarInstalacion(db, [doc]);
+      return sincronizada;
     });
     if (!visita) throw err(404, 'Visita no encontrada');
     res.json(visita);
@@ -400,7 +461,7 @@ router.post('/', authAdmin, async (req, res) => {
         vendedorNombre: vendedor.nombre,
         fechaHora: new Date(fechaHora),
         notasEmpleada: notasEmpleada || '',
-        estado: 'agendada',
+        estado: 'sin_visita',
         fotos: [],
         presupuesto: null,
         obraId: null,
@@ -427,14 +488,27 @@ router.put('/:id', authAdmin, async (req, res) => {
     if (cliente) set.cliente = cliente;
     if (fechaHora) set.fechaHora = new Date(fechaHora);
     if (notasEmpleada !== undefined) set.notasEmpleada = notasEmpleada;
+    let estadoNorm = null;
     if (estado) {
-      if (!['agendada', 'presupuestada', 'confirmada', 'cancelada'].includes(estado)) throw err(400, 'Estado inválido');
-      set.estado = estado;
+      estadoNorm = normalizarEstadoVisita(estado);
+      if (!ESTADOS_VISITA_VALIDOS.includes(estadoNorm)) throw err(400, 'Estado inválido');
+      set.estado = estadoNorm;
     }
     const actualizado = await conReintento(async () => {
       const db = await getDb();
       const actual = await db.collection('visitas').findOne({ _id: id });
       if (!actual) throw err(404, 'Visita no encontrada');
+
+      // "Vendido" es el estado que dispara la creación de la Obra — si
+      // todavía no existe esa Obra para esta visita, este PUT genérico no
+      // alcanza (faltaría armar las tareas a partir del presupuesto), así
+      // que se pide usar la acción de "Confirmar obra" en su lugar. Si la
+      // Obra ya existe (por ej. se está volviendo de "instalado" a
+      // "vendido" a mano), se deja pasar como un cambio de estado normal.
+      if (estadoNorm === 'vendido' && !actual.obraId) {
+        throw err(400, 'Para pasar a "Vendido" primero hay que confirmar la obra (botón "Confirmar obra"), que necesita el presupuesto ya cargado.');
+      }
+
       if (vendedorId) {
         const vId = toObjectId(vendedorId);
         const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
@@ -568,7 +642,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', async (req, 
       const db = await getDb();
       const visita = await visitaDelVendedor(db, req.params.id, req.params.vendedorId);
       const set = { presupuesto, updatedAt: new Date() };
-      if (visita.estado === 'agendada') set.estado = 'presupuestada';
+      if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });
@@ -602,7 +676,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
         fecha: new Date()
       };
       const set = { presupuesto, updatedAt: new Date() };
-      if (visita.estado === 'agendada') set.estado = 'presupuestada';
+      if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });
@@ -656,7 +730,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     const db = await getDb();
     const visita = await db.collection('visitas').findOne({ _id: visitaId });
     if (!visita) throw err(404, 'Visita no encontrada');
-    if (visita.estado === 'confirmada') throw err(400, 'Esta visita ya fue confirmada');
+    if (visita.estado === 'vendido' || visita.estado === 'instalado') throw err(400, 'Esta visita ya fue confirmada');
     if (visita.estado === 'cancelada') throw err(400, 'Esta visita está cancelada');
     if (!visita.presupuesto) throw err(400, 'Todavía no se cargó el presupuesto de esta visita');
 
@@ -711,7 +785,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
 
     await db.collection('visitas').updateOne(
       { _id: visita._id },
-      { $set: { estado: 'confirmada', obraId: r.insertedId, confirmadaPor, googleEventId: null, updatedAt: new Date() } }
+      { $set: { estado: 'vendido', obraId: r.insertedId, confirmadaPor, googleEventId: null, updatedAt: new Date() } }
     );
 
     return { visita: await db.collection('visitas').findOne({ _id: visita._id }), obra: obraDoc };
