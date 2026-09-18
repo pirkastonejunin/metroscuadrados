@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piedra Negra — Calendario</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f3f4f6;
+    --card: #ffffff;
+    --ink: #171a1f;
+    --muted: #6b7280;
+    --accent: #ff5a36;
+    --accent-soft: #ffe7de;
+    --accent-ink: #ffffff;
+    --obra: #2f6fed;
+    --obra-soft: #e2ebff;
+    --border: #e5e7eb;
+    --danger: #c53030;
+    --shadow: 0 1px 2px rgba(17, 20, 24, 0.04), 0 8px 20px -12px rgba(17, 20, 24, 0.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 56px; }
+
+  .volver { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 600; margin-bottom: 18px; }
+  .volver:hover { color: var(--accent); }
+  .volver svg { width: 15px; height: 15px; }
+
+  h1 { font-size: 1.35rem; font-weight: 800; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .sub { margin: 0 0 22px; color: var(--muted); font-size: 0.88rem; }
+
+  /* ---------- login ---------- */
+  #loginScreen { display: flex; align-items: center; justify-content: center; min-height: 70vh; }
+  #loginScreen .card {
+    width: 300px; background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 24px; box-shadow: var(--shadow); text-align: center;
+  }
+  #loginScreen h2 { font-size: 1.05rem; margin: 0 0 14px; }
+  #loginScreen input {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+    font-size: 14px; background: var(--bg); color: var(--ink); margin-bottom: 10px;
+  }
+  .btn {
+    background: var(--accent); color: var(--accent-ink); border: none; padding: 10px 16px;
+    border-radius: 10px; font-weight: 700; font-size: 0.88rem; cursor: pointer; width: 100%;
+    font-family: inherit;
+  }
+  .btn:hover { opacity: 0.92; }
+  .btn.ghost { background: var(--card); color: var(--ink); border: 1px solid var(--border); width: auto; }
+  .err { color: var(--danger); font-size: 0.8rem; margin: 4px 0 10px; min-height: 1em; }
+
+  /* ---------- toolbar ---------- */
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .nav { display: flex; align-items: center; gap: 10px; }
+  .nav button {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; width: 34px; height: 34px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink);
+    box-shadow: var(--shadow);
+  }
+  .nav button svg { width: 16px; height: 16px; }
+  .nav .mes { font-weight: 800; font-size: 1.05rem; min-width: 168px; text-align: center; text-transform: capitalize; }
+  .hoy-btn {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 14px;
+    font-size: 0.82rem; font-weight: 700; cursor: pointer; color: var(--ink); box-shadow: var(--shadow); font-family: inherit;
+  }
+  .legend { display: flex; gap: 14px; font-size: 0.78rem; color: var(--muted); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .dot.visita { background: var(--accent); }
+  .dot.obra { background: var(--obra); }
+
+  /* ---------- grid ---------- */
+  .grid-head, .grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .grid-head { margin-bottom: 6px; }
+  .grid-head div { text-align: center; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding-bottom: 4px; }
+  .grid { gap: 6px; }
+  .dia {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px; min-height: 88px;
+    padding: 6px 6px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .dia:hover { border-color: var(--accent); }
+  .dia.fuera { opacity: 0.38; }
+  .dia.hoy { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .dia.sel { box-shadow: var(--shadow), 0 0 0 2px var(--ink) inset; }
+  .dia .num { font-size: 0.8rem; font-weight: 700; }
+  .chips { display: flex; flex-direction: column; gap: 3px; }
+  .chip {
+    font-size: 0.66rem; font-weight: 600; padding: 2px 5px; border-radius: 5px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px;
+  }
+  .chip.visita { background: var(--accent-soft); color: var(--accent); }
+  .chip.obra { background: var(--obra-soft); color: var(--obra); }
+  .chip.cancelada { background: transparent; color: var(--muted); text-decoration: line-through; padding-left: 0; }
+  .chip .b { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .mas { font-size: 0.66rem; color: var(--muted); font-weight: 700; padding-left: 1px; }
+
+  /* ---------- panel del día ---------- */
+  .panel { margin-top: 22px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); }
+  .panel h3 { margin: 0 0 12px; font-size: 1rem; text-transform: capitalize; }
+  .panel .vacio { color: var(--muted); font-size: 0.85rem; }
+  .item { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .item:last-child { border-bottom: none; }
+  .item .tag {
+    flex-shrink: 0; font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 3px 7px; border-radius: 6px; height: fit-content; margin-top: 2px;
+  }
+  .item .tag.visita { background: var(--accent-soft); color: var(--accent); }
+  .item .tag.obra { background: var(--obra-soft); color: var(--obra); }
+  .item .cont { flex: 1; min-width: 0; }
+  .item .titulo { font-weight: 700; font-size: 0.9rem; }
+  .item .detalle { font-size: 0.8rem; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+  .item .hora { font-size: 0.78rem; color: var(--muted); font-weight: 700; white-space: nowrap; margin-left: auto; padding-left: 10px; }
+  .estado-cancelada .titulo, .estado-cancelada .detalle { text-decoration: line-through; opacity: 0.6; }
+
+  .cargando { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 30px 0; }
+
+  @media (max-width: 520px) {
+    .dia { min-height: 64px; }
+    .chip span.txt { display: none; }
+    .grid-head div { font-size: 0.62rem; }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121316;
+      --card: #1c1e22;
+      --ink: #f4f5f6;
+      --muted: #9aa0a8;
+      --accent: #ff7a56;
+      --accent-soft: #3a241f;
+      --accent-ink: #121316;
+      --obra: #7ea2ff;
+      --obra-soft: #1c2740;
+      --border: #2c2f34;
+      --danger: #ff8080;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 20px -12px rgba(0, 0, 0, 0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121316;
+    --card: #1c1e22;
+    --ink: #f4f5f6;
+    --muted: #9aa0a8;
+    --accent: #ff7a56;
+    --accent-soft: #3a241f;
+    --accent-ink: #121316;
+    --obra: #7ea2ff;
+    --obra-soft: #1c2740;
+    --border: #2c2f34;
+    --danger: #ff8080;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 20px -12px rgba(0, 0, 0, 0.5);
+  }
+</style>
+</head>
+<body>
+
+  <div id="loginScreen">
+    <div class="card">
+      <h2>Calendario</h2>
+      <input type="password" id="loginPass" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
+      <div class="err" id="loginErr"></div>
+      <button class="btn" onclick="login()">Entrar</button>
+    </div>
+  </div>
+
+  <div class="wrap hidden" id="app">
+    <a class="volver" href="/inicio.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 6 9 12 15 18"/></svg>
+      Inicio
+    </a>
+    <h1>Calendario</h1>
+    <p class="sub">Visitas agendadas y tareas de obra con fecha estimada, en un solo lugar.</p>
+
+    <div class="toolbar">
+      <div class="nav">
+        <button onclick="cambiarMes(-1)" aria-label="Mes anterior">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <div class="mes" id="mesLabel">—</div>
+        <button onclick="cambiarMes(1)" aria-label="Mes siguiente">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="hoy-btn" onclick="irHoy()" style="width:auto;">Hoy</button>
+      </div>
+      <div class="legend">
+        <span><span class="dot visita"></span> Visitas</span>
+        <span><span class="dot obra"></span> Tareas de obra</span>
+      </div>
+    </div>
+
+    <div class="grid-head">
+      <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
+    </div>
+    <div class="grid" id="grid"></div>
+
+    <div class="panel" id="panel">
+      <h3 id="panelTitulo">—</h3>
+      <div id="panelBody" class="vacio">Elegí un día para ver el detalle.</div>
+    </div>
+  </div>
+
+<script>
+const BASE_VISITAS = '/api/visitas';
+const BASE_OBRAS = '/api/obras';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+
+let mesActual = new Date(); mesActual.setDate(1); mesActual.setHours(0,0,0,0);
+let diaSeleccionado = null;
+let colocadoresMap = {};
+let obrasCache = null;
+let eventosPorDia = {};
+
+async function api(base, path, opts = {}) {
+  opts.headers = Object.assign({ 'Content-Type': 'application/json', 'x-admin-token': TOKEN }, opts.headers || {});
+  const r = await fetch(base + path, opts);
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('Error ' + r.status)); }
+  return r.json();
+}
+
+async function login() {
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try {
+    const r = await api(BASE_VISITAS, '/login', { method: 'POST', body: JSON.stringify({ password: pass }) });
+    TOKEN = r.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await entrar();
+  } catch (e) {
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+
+async function entrar() {
+  await cargarColocadores(); // primera llamada autenticada: valida el token
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  await renderCalendario();
+}
+
+async function cargarColocadores() {
+  const lista = await api(BASE_OBRAS, '/colocadores'); // si el token es inválido, tira acá (401)
+  colocadoresMap = {};
+  lista.forEach(c => { colocadoresMap[c._id] = c.nombre; });
+}
+
+function pad(n) { return String(n).padStart(2, '0'); }
+function fechaISO(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function mismoDia(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
+// Lunes = 0 ... Domingo = 6
+function offsetLunes(date) { return (date.getDay() + 6) % 7; }
+
+async function cambiarMes(delta) {
+  mesActual.setMonth(mesActual.getMonth() + delta);
+  diaSeleccionado = null;
+  await renderCalendario();
+}
+
+async function irHoy() {
+  mesActual = new Date(); mesActual.setDate(1); mesActual.setHours(0,0,0,0);
+  diaSeleccionado = new Date();
+  await renderCalendario();
+}
+
+async function renderCalendario() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '<div class="cargando" style="grid-column:1/-1;">Cargando…</div>';
+
+  const label = mesActual.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  document.getElementById('mesLabel').textContent = label;
+
+  const primerDiaMes = new Date(mesActual.getFullYear(), mesActual.getMonth(), 1);
+  const ultimoDiaMes = new Date(mesActual.getFullYear(), mesActual.getMonth() + 1, 0);
+  const inicioGrid = new Date(primerDiaMes); inicioGrid.setDate(inicioGrid.getDate() - offsetLunes(primerDiaMes));
+  const finGrid = new Date(ultimoDiaMes); finGrid.setDate(finGrid.getDate() + (6 - offsetLunes(ultimoDiaMes)));
+
+  try {
+    await cargarEventos(inicioGrid, finGrid);
+  } catch (e) {
+    grid.innerHTML = '<div class="cargando" style="grid-column:1/-1;">No se pudieron cargar los datos: ' + e.message + '</div>';
+    return;
+  }
+
+  const hoy = new Date();
+  let celdas = '';
+  let cur = new Date(inicioGrid);
+  while (cur <= finGrid) {
+    const iso = fechaISO(cur);
+    const eventos = eventosPorDia[iso] || [];
+    const fueraDeMes = cur.getMonth() !== mesActual.getMonth();
+    const esHoy = mismoDia(cur, hoy);
+    const esSel = diaSeleccionado && mismoDia(cur, diaSeleccionado);
+    const visibles = eventos.slice(0, 3);
+    const resto = eventos.length - visibles.length;
+
+    const chips = visibles.map(ev => {
+      const cancelada = ev.tipo === 'visita' && ev.estado === 'cancelada';
+      const clase = cancelada ? 'chip cancelada' : ('chip ' + ev.tipo);
+      return `<div class="${clase}">${cancelada ? '' : '<span class="b"></span>'}<span class="txt">${ev.titulo}</span></div>`;
+    }).join('');
+
+    celdas += `<div class="dia${fueraDeMes ? ' fuera' : ''}${esHoy ? ' hoy' : ''}${esSel ? ' sel' : ''}" onclick="seleccionarDia('${iso}')">
+      <div class="num">${cur.getDate()}</div>
+      <div class="chips">${chips}${resto > 0 ? `<div class="mas">+${resto} más</div>` : ''}</div>
+    </div>`;
+    cur.setDate(cur.getDate() + 1);
+  }
+  grid.innerHTML = celdas;
+
+  if (diaSeleccionado) mostrarPanel(diaSeleccionado);
+}
+
+async function cargarEventos(desde, hasta) {
+  const desdeISO = fechaISO(desde);
+  const hastaISO = fechaISO(hasta);
+
+  const [visitas, obras] = await Promise.all([
+    api(BASE_VISITAS, `/?desde=${desdeISO}&hasta=${hastaISO}`),
+    obrasCache ? Promise.resolve(obrasCache) : api(BASE_OBRAS, '/')
+  ]);
+  obrasCache = obras;
+
+  eventosPorDia = {};
+  const agregar = (iso, ev) => {
+    if (!eventosPorDia[iso]) eventosPorDia[iso] = [];
+    eventosPorDia[iso].push(ev);
+  };
+
+  visitas.forEach(v => {
+    const d = new Date(v.fechaHora);
+    const iso = fechaISO(d);
+    agregar(iso, {
+      tipo: 'visita',
+      fecha: d,
+      titulo: v.cliente.nombre,
+      estado: v.estado,
+      raw: v
+    });
+  });
+
+  obras.forEach(o => {
+    (o.tareas || []).forEach(t => {
+      if (!t.colocadorId || !t.fechaFinEstimada) return;
+      const d = new Date(t.fechaFinEstimada);
+      if (d < desde || d > hasta) return;
+      const iso = fechaISO(d);
+      agregar(iso, {
+        tipo: 'obra',
+        fecha: d,
+        titulo: `Obra #${o.numero} — ${t.tipoTrabajo}`,
+        estado: t.estado,
+        raw: t,
+        obra: o
+      });
+    });
+  });
+
+  Object.values(eventosPorDia).forEach(lista => lista.sort((a, b) => a.fecha - b.fecha));
+}
+
+function seleccionarDia(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  diaSeleccionado = new Date(y, m - 1, d);
+  renderCalendario();
+}
+
+function mostrarPanel(dia) {
+  const iso = fechaISO(dia);
+  const eventos = eventosPorDia[iso] || [];
+  document.getElementById('panelTitulo').textContent = dia.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const body = document.getElementById('panelBody');
+
+  if (!eventos.length) {
+    body.className = 'vacio';
+    body.textContent = 'No hay visitas ni tareas con fecha ese día.';
+    return;
+  }
+
+  body.className = '';
+  body.innerHTML = eventos.map(ev => {
+    if (ev.tipo === 'visita') {
+      const v = ev.raw;
+      const hora = ev.fecha.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+      const cancelada = v.estado === 'cancelada';
+      return `<div class="item${cancelada ? ' estado-cancelada' : ''}">
+        <div class="tag visita">Visita</div>
+        <div class="cont">
+          <div class="titulo">${v.cliente.nombre}</div>
+          <div class="detalle">${v.vendedorNombre || 'Sin vendedor'} · ${v.cliente.direccion || ''}${cancelada ? ' · Cancelada' : ''}</div>
+        </div>
+        <div class="hora">${hora}</div>
+      </div>`;
+    } else {
+      const t = ev.raw, o = ev.obra;
+      const colocador = colocadoresMap[t.colocadorId] || 'Colocador';
+      return `<div class="item">
+        <div class="tag obra">Obra</div>
+        <div class="cont">
+          <div class="titulo">Obra #${o.numero} — ${o.cliente.nombre}</div>
+          <div class="detalle">${t.tipoTrabajo} · ${colocador} · ${t.m2Presupuestados || 0} m²</div>
+        </div>
+      </div>`;
+    }
+  }).join('');
+}
+
+(async function init() {
+  if (TOKEN) { try { await entrar(); return; } catch (e) { /* token vencido, pedir login de nuevo */ } }
+})();
+</script>
+</body>
+</html>
