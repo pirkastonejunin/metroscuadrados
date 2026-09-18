@@ -30,6 +30,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
+const googleCalendar = require('./google-calendar');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -132,6 +133,50 @@ async function authColocador(req, res, next) {
 function costoVigente(colocador, tipoTrabajo) {
   const c = (colocador.costos || []).find(x => x.tipoTrabajo === tipoTrabajo);
   return c ? c.costoPorM2 : null;
+}
+
+// Lista de productos que el colocador debe llevar a la obra: [{tipo, cantidad}].
+// "cantidad" queda como texto libre (no todos los materiales se miden igual:
+// "10 cajas", "2 bolsas de 25kg", "8", etc.) — se descartan las filas sin tipo.
+function normalizarMateriales(materiales) {
+  if (!Array.isArray(materiales)) return [];
+  return materiales
+    .map(m => ({ tipo: String((m && m.tipo) || '').trim(), cantidad: String((m && m.cantidad) || '').trim() }))
+    .filter(m => m.tipo);
+}
+
+// Sincroniza (o borra) el evento de Google Calendar de UNA tarea. Solo tiene
+// sentido armar el evento cuando la tarea ya tiene colocador asignado Y una
+// fecha estimada de fin — son los dos datos mínimos para que sirva para
+// planificar. Si falta cualquiera de los dos (se reasignó a "sin colocador",
+// se borró la fecha), se elimina el evento si existía. Modifica `tarea` in
+// place (le actualiza `googleEventId`); quien llama es responsable de
+// persistir la tarea actualizada.
+async function sincronizarCalendarDeTarea(db, obra, tarea) {
+  if (tarea.colocadorId && tarea.fechaFinEstimada) {
+    let colocadorNombre = '';
+    try {
+      const colocador = await db.collection('obras_colocadores').findOne({ _id: tarea.colocadorId });
+      colocadorNombre = colocador ? colocador.nombre : '';
+    } catch (e) { /* si falla la búsqueda del nombre, seguimos igual */ }
+    const inicio = tarea.fechaInicio || tarea.fechaFinEstimada;
+    const fin = new Date(new Date(tarea.fechaFinEstimada).getTime() + 24 * 60 * 60 * 1000); // día completo
+    tarea.googleEventId = await googleCalendar.upsertEvento(tarea.googleEventId, {
+      titulo: `Obra #${obra.numero} — ${tarea.tipoTrabajo} (${colocadorNombre || 'sin colocador'})`,
+      descripcion: [
+        `Cliente: ${obra.cliente.nombre}`,
+        `Colocador: ${colocadorNombre || '-'}`,
+        `m² presupuestados: ${tarea.m2Presupuestados}`,
+        tarea.notas ? `Notas: ${tarea.notas}` : null
+      ].filter(Boolean).join('\n'),
+      ubicacion: obra.cliente.direccion || '',
+      inicio,
+      fin
+    });
+  } else if (tarea.googleEventId) {
+    await googleCalendar.eliminarEvento(tarea.googleEventId);
+    tarea.googleEventId = null;
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -348,7 +393,9 @@ router.post('/', authAdmin, async (req, res) => {
       fechaFinReal: null,
       m2Realizados: 0,
       notas: t.notas || '',
-      avances: []
+      materiales: normalizarMateriales(t.materiales), // productos que el colocador debe llevar: [{tipo, cantidad}]
+      avances: [],
+      googleEventId: null
     }));
     const doc = {
       numero,
@@ -400,7 +447,7 @@ router.post('/:id/tareas', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) return res.status(400).json({ error: 'id inválido' });
-    const { tipoTrabajo, m2Presupuestados, fechaFinEstimada, notas } = req.body || {};
+    const { tipoTrabajo, m2Presupuestados, fechaFinEstimada, notas, materiales } = req.body || {};
     if (!tipoTrabajo) return res.status(400).json({ error: 'Falta el tipo de trabajo' });
     const nuevaTarea = {
       _id: new ObjectId(),
@@ -414,7 +461,9 @@ router.post('/:id/tareas', authAdmin, async (req, res) => {
       fechaFinReal: null,
       m2Realizados: 0,
       notas: notas || '',
-      avances: []
+      materiales: normalizarMateriales(materiales),
+      avances: [],
+      googleEventId: null
     };
     await conReintento(async () => {
       const db = await getDb();
@@ -438,7 +487,7 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
       const tarea = (obra.tareas || []).find(t => String(t._id) === String(tareaId));
       if (!tarea) throw Object.assign(new Error('Tarea no encontrada'), { status: 404 });
 
-      const { colocadorId, m2Presupuestados, fechaFinEstimada, notas, estado } = req.body || {};
+      const { colocadorId, m2Presupuestados, fechaFinEstimada, notas, estado, materiales } = req.body || {};
 
       if (colocadorId !== undefined) {
         if (colocadorId === null) {
@@ -461,11 +510,14 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
       if (m2Presupuestados !== undefined) tarea.m2Presupuestados = Number(m2Presupuestados) || 0;
       if (fechaFinEstimada !== undefined) tarea.fechaFinEstimada = fechaFinEstimada ? new Date(fechaFinEstimada) : null;
       if (notas !== undefined) tarea.notas = notas;
+      if (materiales !== undefined) tarea.materiales = normalizarMateriales(materiales);
       if (estado !== undefined) {
         tarea.estado = estado;
         if (estado === 'en_curso' && !tarea.fechaInicio) tarea.fechaInicio = new Date();
         if (estado === 'terminada' && !tarea.fechaFinReal) tarea.fechaFinReal = new Date();
       }
+
+      await sincronizarCalendarDeTarea(db, obra, tarea);
 
       await db.collection('obras').updateOne(
         { _id: obraId, 'tareas._id': tareaId },
@@ -484,6 +536,9 @@ router.delete('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
     if (!obraId || !tareaId) return res.status(400).json({ error: 'id inválido' });
     await conReintento(async () => {
       const db = await getDb();
+      const obra = await db.collection('obras').findOne({ _id: obraId });
+      const tarea = obra && (obra.tareas || []).find(t => String(t._id) === String(tareaId));
+      if (tarea && tarea.googleEventId) await googleCalendar.eliminarEvento(tarea.googleEventId);
       await db.collection('obras').updateOne({ _id: obraId }, { $pull: { tareas: { _id: tareaId } }, $set: { updatedAt: new Date() } });
     });
     res.json({ ok: true });
