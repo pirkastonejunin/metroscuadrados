@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mis Visitas - Piedra Negra</title>
+<style>
+  :root{ --bg:#f4f5f7; --card:#fff; --text:#1f2430; --muted:#6b7280; --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742; --warn:#b8860b; --danger:#b3392c; }
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding-bottom:30px;}
+  header{background:var(--primary-dark);color:#fff;padding:16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5;}
+  header h1{font-size:17px;margin:0;font-weight:600;}
+  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;}
+  main{padding:14px;max-width:520px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  input,select{padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;width:100%;background:#fff;}
+  button.btn{background:var(--primary);color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:600;width:100%;}
+  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
+  button.btn.danger{background:var(--danger);color:#fff;border:none;}
+  button.btn.small{width:auto;padding:8px 12px;font-size:13px;}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;}
+  .pill.agendada{background:#eee;color:#555;}
+  .pill.presupuestada{background:#fff4d6;color:var(--warn);}
+  .pill.confirmada{background:#e3f3ec;color:var(--primary);}
+  .visita-titulo{font-weight:700;font-size:15px;}
+  .muted{color:var(--muted);font-size:12.5px;}
+  .err{color:var(--danger);font-size:13px;margin:8px 0;}
+  #vendedorScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;}
+  #vendedorScreen .card{width:100%;max-width:340px;}
+  .hidden{display:none !important;}
+  .vend-btn{display:block;width:100%;text-align:left;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;margin-bottom:8px;}
+  .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;margin:10px 0;}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);}
+  .item-row{display:flex;gap:6px;margin-bottom:6px;}
+  .item-row select{flex:2} .item-row input{flex:1}
+  .back-link{color:var(--primary-dark);font-size:13px;text-decoration:none;display:inline-block;margin-bottom:10px;}
+  .cotizacion-opcion{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;font-size:13px;}
+  .divider{border-top:1px solid var(--border);margin:14px 0;padding-top:14px;}
+</style>
+</head>
+<body>
+
+<div id="vendedorScreen">
+  <div class="card">
+    <h2 style="margin-top:0;text-align:center">Mis Visitas</h2>
+    <p class="muted" style="text-align:center">Elegí tu nombre para ver tus visitas asignadas</p>
+    <div id="listaVendedores"><p class="muted">Cargando…</p></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1 id="saludo">Mis Visitas</h1>
+    <button onclick="cambiarVendedor()">Cambiar</button>
+  </header>
+  <main id="pantalla"></main>
+</div>
+
+<script>
+const BASE = '/api/visitas'; // coincide con app.use('/api/visitas', visitasRouter) en server.js
+let VENDEDOR_ID = localStorage.getItem('vendedor_id') || '';
+let VENDEDOR_NOMBRE = localStorage.getItem('vendedor_nombre') || '';
+let STORE_ID = null;
+let TIPOS_TRABAJO = [];
+let VISITAS = [];
+
+function api(path, opts={}) {
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  return fetch(BASE+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{weekday:'short', day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
+const ESTADOS = {agendada:'Agendada', presupuestada:'Presupuestada', confirmada:'Confirmada'};
+
+async function cargarSelectorVendedor(){
+  try{
+    const lista = await api('/vendedores/publico');
+    document.getElementById('listaVendedores').innerHTML = lista.map(v =>
+      `<button class="vend-btn" onclick='elegirVendedor("${v._id}", ${JSON.stringify(v.nombre)})'>${v.nombre}</button>`
+    ).join('') || '<p class="muted">Todavía no hay vendedores cargados. Pedile a la oficina que te agregue en el panel de Visitas.</p>';
+  }catch(e){
+    document.getElementById('listaVendedores').innerHTML = `<p class="err">${e.message}</p>`;
+  }
+}
+function elegirVendedor(id, nombre){
+  VENDEDOR_ID = id; VENDEDOR_NOMBRE = nombre;
+  localStorage.setItem('vendedor_id', id);
+  localStorage.setItem('vendedor_nombre', nombre);
+  iniciar();
+}
+function cambiarVendedor(){
+  localStorage.removeItem('vendedor_id');
+  localStorage.removeItem('vendedor_nombre');
+  location.reload();
+}
+
+async function iniciar(){
+  document.getElementById('vendedorScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('saludo').textContent = 'Hola, ' + VENDEDOR_NOMBRE;
+  try{
+    const cfg = await api('/config');
+    STORE_ID = cfg.storeId;
+  }catch(e){ /* seguimos sin cotizador si falla */ }
+  try{ TIPOS_TRABAJO = await api('/catalogo/tipos-trabajo'); }catch(e){ TIPOS_TRABAJO = []; }
+  mostrarListaVisitas();
+}
+if (VENDEDOR_ID) iniciar(); else cargarSelectorVendedor();
+
+// ---------------- LISTA DE VISITAS ----------------
+
+async function mostrarListaVisitas(){
+  const pant = document.getElementById('pantalla');
+  pant.innerHTML = '<p class="muted">Cargando…</p>';
+  try{
+    VISITAS = await api(`/vendedor/${VENDEDOR_ID}/visitas`);
+  }catch(e){
+    pant.innerHTML = `<p class="err">${e.message}</p>`;
+    return;
+  }
+  if (!VISITAS.length){
+    pant.innerHTML = '<p class="muted">No tenés visitas agendadas por ahora.</p>';
+    return;
+  }
+  pant.innerHTML = VISITAS.map(v => `
+    <div class="card" onclick="mostrarDetalleVisita('${v._id}')" style="cursor:pointer">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="visita-titulo">${v.cliente.nombre}</div>
+        <span class="pill ${v.estado}">${ESTADOS[v.estado]||v.estado}</span>
+      </div>
+      <div class="muted">${v.cliente.direccion||''}</div>
+      <div class="muted">${fmtFecha(v.fechaHora)}</div>
+    </div>
+  `).join('');
+}
+
+// ---------------- DETALLE DE VISITA ----------------
+
+async function mostrarDetalleVisita(id){
+  const pant = document.getElementById('pantalla');
+  pant.innerHTML = '<p class="muted">Cargando…</p>';
+  let v;
+  try{ v = await api(`/vendedor/${VENDEDOR_ID}/visitas/${id}`); }
+  catch(e){ pant.innerHTML = `<p class="err">${e.message}</p>`; return; }
+
+  const fotosHtml = (v.fotos && v.fotos.length)
+    ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${f.data}">`).join('')}</div>`
+    : '<p class="muted">Todavía no sacaste fotos.</p>';
+
+  let presupuestoHtml;
+  if (v.presupuesto){
+    if (v.presupuesto.tipo === 'manual'){
+      presupuestoHtml = `<div class="card"><b>Presupuesto (a mano)</b><br>` +
+        v.presupuesto.items.map(it=>`${it.tipoTrabajo}: ${it.m2} — $${(it.precioCliente||0).toLocaleString('es-AR')}`).join('<br>') +
+        `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
+    } else {
+      presupuestoHtml = `<div class="card"><b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
+    }
+  } else {
+    presupuestoHtml = `
+      <div class="card">
+        <b>Presupuesto</b>
+        <p class="muted">Elegí cómo presupuestar esta visita.</p>
+        <button class="btn secondary" onclick="abrirCotizador('${v._id}')">Abrir cotizador</button>
+        <div style="margin-top:8px"><button class="btn secondary" onclick="mostrarVincularCotizacion('${v._id}')">Ya guardé la cotización, vincularla</button></div>
+        <div id="vincularCotizacion"></div>
+        <div class="divider">
+          <button class="btn secondary" onclick="mostrarFormManual('${v._id}')">Cargar presupuesto a mano</button>
+          <div id="formManual"></div>
+        </div>
+      </div>`;
+  }
+
+  const puedeConfirmar = v.estado === 'presupuestada';
+
+  pant.innerHTML = `
+    <a class="back-link" href="javascript:void(0)" onclick="mostrarListaVisitas()">&larr; Volver a mis visitas</a>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="visita-titulo">${v.cliente.nombre}</div>
+        <span class="pill ${v.estado}">${ESTADOS[v.estado]||v.estado}</span>
+      </div>
+      <div class="muted">${v.cliente.direccion||''} ${v.cliente.localidad?'· '+v.cliente.localidad:''}</div>
+      <div class="muted">${v.cliente.telefono||''}</div>
+      <div class="muted">${fmtFecha(v.fechaHora)}</div>
+      ${v.notasEmpleada ? `<div class="muted">Nota del local: ${v.notasEmpleada}</div>` : ''}
+    </div>
+    <div class="card">
+      <b>Fotos del lugar</b>
+      ${fotosHtml}
+      <input type="file" accept="image/*" capture="environment" multiple id="inputFotos" style="margin-top:8px">
+      <button class="btn small" style="margin-top:8px" onclick="subirFotos('${v._id}')">Agregar fotos</button>
+      <div class="err" id="fotoErr"></div>
+    </div>
+    ${presupuestoHtml}
+    <div class="err" id="confirmErr"></div>
+    ${puedeConfirmar ? `<button class="btn" onclick="confirmarVisita('${v._id}')">Confirmar obra con el cliente</button>` : ''}
+    ${v.obraId ? `<p class="muted" style="text-align:center;margin-top:10px">Esta visita ya generó una obra.</p>` : ''}
+  `;
+}
+
+// ---------------- FOTOS ----------------
+
+function leerComoDataURL(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function subirFotos(visitaId){
+  const input = document.getElementById('inputFotos');
+  const errEl = document.getElementById('fotoErr');
+  errEl.textContent = '';
+  if (!input.files.length){ errEl.textContent = 'Elegí al menos una foto'; return; }
+  try{
+    const fotos = await Promise.all([...input.files].map(leerComoDataURL));
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/fotos`, {method:'POST', body:{fotos}});
+    mostrarDetalleVisita(visitaId);
+  }catch(e){ errEl.textContent = e.message; }
+}
+
+// ---------------- ABRIR COTIZADOR ----------------
+
+function abrirCotizador(visitaId){
+  const v = VISITAS.find(x => x._id === visitaId) || {};
+  const params = new URLSearchParams();
+  if (STORE_ID) params.set('store_id', STORE_ID);
+  if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
+  if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
+  window.open('/cotizador.html?' + params.toString(), '_blank');
+}
+
+async function mostrarVincularCotizacion(visitaId){
+  const cont = document.getElementById('vincularCotizacion');
+  if (!STORE_ID){ cont.innerHTML = '<p class="err">Falta configurar la tienda del cotizador (TIENDA_REAL_STORE_ID).</p>'; return; }
+  cont.innerHTML = '<p class="muted">Buscando cotizaciones guardadas recientes…</p>';
+  try{
+    const res = await fetch('/api/cotizador/historial?store_id=' + encodeURIComponent(STORE_ID));
+    const historial = await res.json();
+    if (!res.ok) throw new Error(historial.error || 'No se pudo leer el historial del cotizador');
+    cont.innerHTML = historial.slice(0, 8).map(c => `
+      <div class="cotizacion-opcion">
+        <b>${c.cliente || '(sin cliente)'}</b> — $${(c.total||0).toLocaleString('es-AR')}<br>
+        <span class="muted">${c.tipoObraNombre||''} · ${new Date(c.fecha).toLocaleDateString('es-AR')}</span>
+        <button class="btn small" style="margin-top:6px" onclick="vincularCotizacion('${visitaId}','${c._id}')">Usar esta</button>
+      </div>
+    `).join('') || '<p class="muted">No hay cotizaciones guardadas todavía.</p>';
+  }catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; }
+}
+async function vincularCotizacion(visitaId, cotizacionId){
+  try{
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-cotizador`, {
+      method:'POST', body:{ cotizacionId, storeId: STORE_ID }
+    });
+    mostrarDetalleVisita(visitaId);
+  }catch(e){ alert(e.message); }
+}
+
+// ---------------- PRESUPUESTO MANUAL ----------------
+
+function filaItemManual(){
+  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
+  return `<div class="item-row">
+    <select class="itTipo">${opciones}</select>
+    <input class="itM2" type="number" step="0.01" placeholder="m²">
+    <input class="itPrecio" type="number" step="0.01" placeholder="$ cliente">
+  </div>`;
+}
+function mostrarFormManual(visitaId){
+  const cont = document.getElementById('formManual');
+  cont.innerHTML = `
+    <div id="itemsManual">${filaItemManual()}</div>
+    <button class="btn small secondary" type="button" onclick="document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual())">+ Agregar tipo de trabajo</button>
+    <div class="err" id="manualErr"></div>
+    <button class="btn" style="margin-top:8px" onclick="guardarPresupuestoManual('${visitaId}')">Guardar presupuesto</button>
+  `;
+}
+async function guardarPresupuestoManual(visitaId){
+  const items = [...document.querySelectorAll('#itemsManual .item-row')].map(row => ({
+    tipoTrabajo: row.querySelector('.itTipo').value,
+    m2: Number(row.querySelector('.itM2').value) || 0,
+    precioCliente: Number(row.querySelector('.itPrecio').value) || 0
+  }));
+  try{
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items}});
+    mostrarDetalleVisita(visitaId);
+  }catch(e){ document.getElementById('manualErr').textContent = e.message; }
+}
+
+// ---------------- CONFIRMAR ----------------
+
+async function confirmarVisita(visitaId){
+  if (!confirm('¿El cliente confirmó la obra?')) return;
+  try{
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/confirmar`, {method:'POST'});
+    alert('¡Obra creada! Ya queda lista para que oficina asigne colocador.');
+    mostrarListaVisitas();
+  }catch(e){ document.getElementById('confirmErr').textContent = e.message; }
+}
+</script>
+</body>
+</html>

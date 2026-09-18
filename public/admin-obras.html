@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestión de Obras - Piedra Negra</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --text:#1f2430; --muted:#6b7280;
+    --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742;
+    --danger:#b3392c; --warn:#b8860b; --ok:#1f6f54;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;}
+  header{background:var(--primary-dark);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;}
+  header h1{font-size:18px;margin:0;font-weight:600;}
+  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;}
+  nav{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--border);padding:0 16px;}
+  nav button{background:none;border:none;padding:12px 14px;font-size:14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  nav button.active{color:var(--primary-dark);border-bottom-color:var(--primary-dark);font-weight:600;}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  input,select,textarea{padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:14px;width:100%;background:#fff;color:var(--text);}
+  textarea{min-height:50px;font-family:inherit;}
+  button.btn{background:var(--primary);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;}
+  button.btn:hover{background:var(--primary-dark);}
+  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
+  button.btn.danger{background:var(--danger);}
+  button.btn.small{padding:4px 9px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em;}
+  tr:hover td{background:#fafbfc;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+  .pill.pendiente{background:#eee;color:#555;}
+  .pill.asignada{background:#e7f0ff;color:#2255aa;}
+  .pill.en_curso{background:#fff4d6;color:var(--warn);}
+  .pill.terminada{background:#e3f3ec;color:var(--ok);}
+  .pill.cancelada{background:#fbe4e1;color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:#fff;border-radius:10px;padding:20px;max-width:680px;width:100%;}
+  .modal h2{margin-top:0;font-size:16px;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
+  .tarea-box{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px;}
+  .costo-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;}
+  #loginScreen .card{width:300px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .total-box{font-size:14px;font-weight:600;margin-top:8px;}
+  .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="card">
+    <h2 style="margin-top:0">Gestión de Obras</h2>
+    <label>Contraseña de administración</label>
+    <input type="password" id="loginPass" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>Gestión de Obras — Piedra Negra</h1>
+    <button onclick="logout()">Cerrar sesión</button>
+  </header>
+  <nav>
+    <button data-tab="obras" class="active" onclick="showTab('obras')">Obras</button>
+    <button data-tab="colocadores" onclick="showTab('colocadores')">Colocadores</button>
+    <button data-tab="tipos" onclick="showTab('tipos')">Tipos de trabajo</button>
+    <button data-tab="reportes" onclick="showTab('reportes')">Reportes</button>
+  </nav>
+  <main>
+
+    <!-- OBRAS -->
+    <section id="tab-obras">
+      <div class="card">
+        <div class="row">
+          <div style="flex:1;min-width:160px"><label>Buscar cliente</label><input id="fObraQ" oninput="cargarObras()"></div>
+          <div style="min-width:160px"><label>Estado</label>
+            <select id="fObraEstado" onchange="cargarObras()">
+              <option value="">Todos</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="en_curso">En curso</option>
+              <option value="terminada">Terminada</option>
+              <option value="cancelada">Cancelada</option>
+            </select>
+          </div>
+          <div><button class="btn" onclick="abrirNuevaObra()">+ Nueva obra</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>#</th><th>Cliente</th><th>Dirección</th><th>Fecha venta</th><th>Tareas</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="obrasBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- COLOCADORES -->
+    <section id="tab-colocadores" class="hidden">
+      <div class="card">
+        <button class="btn" onclick="abrirNuevoColocador()">+ Nuevo colocador</button>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th>PIN</th><th>Costos por m²</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="colocadoresBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TIPOS DE TRABAJO -->
+    <section id="tab-tipos" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div style="flex:1"><label>Nuevo tipo de trabajo</label><input id="nuevoTipoNombre" placeholder="Ej: Colocación de pisos"></div>
+          <button class="btn" onclick="crearTipoTrabajo()">Agregar</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="tiposBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- REPORTES -->
+    <section id="tab-reportes" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div><label>Desde</label><input type="date" id="repDesde"></div>
+          <div><label>Hasta</label><input type="date" id="repHasta"></div>
+          <div><label>Colocador</label><select id="repColocador"><option value="">Todos</option></select></div>
+          <div><label>Tipo de trabajo</label><select id="repTipo"><option value="">Todos</option></select></div>
+          <button class="btn" onclick="cargarReporte()">Generar</button>
+          <button class="btn secondary" onclick="exportarCSV()">Exportar CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Colocador</th><th>Tipo de trabajo</th><th>m² realizados</th><th>Monto a pagar</th></tr></thead>
+          <tbody id="reporteBody"></tbody>
+        </table>
+        <div class="total-box" id="reporteTotal"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/obras'; // coincide con app.use('/api/obras', obrasRouter) en server.js
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let COLOCADORES = [];
+let TIPOS = [];
+
+function api(path, opts={}) {
+  opts.headers = Object.assign({'Content-Type':'application/json','x-admin-token':TOKEN}, opts.headers||{});
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch(BASE+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+async function login(){
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch(BASE+'/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+function iniciarApp(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  cargarColocadores();
+  cargarTipos();
+  cargarObras();
+}
+if (TOKEN) iniciarApp();
+
+function showTab(tab){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
+  document.getElementById('tab-'+tab).classList.remove('hidden');
+  if (tab==='reportes') cargarReporte();
+}
+
+function modal(html){
+  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal">${html}</div></div>`;
+}
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+// ---------------- COLOCADORES ----------------
+
+async function cargarColocadores(){
+  COLOCADORES = await api('/colocadores');
+  const body = document.getElementById('colocadoresBody');
+  body.innerHTML = COLOCADORES.map(c => `
+    <tr>
+      <td>${c.nombre}</td>
+      <td>${c.telefono||''}</td>
+      <td>${c.pin}</td>
+      <td>${(c.costos||[]).map(x=>`${x.tipoTrabajo}: $${x.costoPorM2}/m²`).join('<br>') || '<span class="muted">sin costos cargados</span>'}</td>
+      <td>${c.activo!==false ? 'Activo' : '<span class="muted">Inactivo</span>'}</td>
+      <td><button class="btn small secondary" onclick='abrirEditarColocador(${JSON.stringify(c._id)})'>Editar</button></td>
+    </tr>`).join('');
+  // refrescar selects que dependen de colocadores
+  const sel = document.getElementById('repColocador');
+  if (sel) sel.innerHTML = '<option value="">Todos</option>' + COLOCADORES.map(c=>`<option value="${c._id}">${c.nombre}</option>`).join('');
+}
+
+function filaCosto(tipoTrabajo='', costoPorM2=''){
+  const opciones = TIPOS.map(t=>`<option value="${t.nombre}" ${t.nombre===tipoTrabajo?'selected':''}>${t.nombre}</option>`).join('');
+  return `<div class="costo-row">
+    <select class="costoTipo" style="flex:2">${opciones}</select>
+    <input class="costoValor" type="number" step="0.01" placeholder="$/m²" value="${costoPorM2}" style="flex:1">
+    <button class="btn small secondary" type="button" onclick="this.parentElement.remove()">Quitar</button>
+  </div>`;
+}
+
+function abrirNuevoColocador(){ abrirFormColocador(null); }
+function abrirEditarColocador(id){ abrirFormColocador(COLOCADORES.find(c=>c._id===id)); }
+
+function abrirFormColocador(c){
+  const costosHtml = (c && c.costos && c.costos.length) ? c.costos.map(x=>filaCosto(x.tipoTrabajo,x.costoPorM2)).join('') : filaCosto();
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>${c ? 'Editar colocador' : 'Nuevo colocador'}</h2>
+    <div class="grid2">
+      <div><label>Nombre</label><input id="colNombre" value="${c?c.nombre:''}"></div>
+      <div><label>Teléfono</label><input id="colTelefono" value="${c?c.telefono||'':''}"></div>
+      <div><label>PIN (para que ingrese desde el celular)</label><input id="colPin" value="${c?c.pin:''}"></div>
+      <div><label>Estado</label><select id="colActivo"><option value="true" ${!c||c.activo!==false?'selected':''}>Activo</option><option value="false" ${c&&c.activo===false?'selected':''}>Inactivo</option></select></div>
+    </div>
+    <div style="margin-top:12px">
+      <label>Costo por m² según tipo de trabajo</label>
+      <div id="costosContainer">${costosHtml}</div>
+      <button class="btn small secondary" type="button" onclick="document.getElementById('costosContainer').insertAdjacentHTML('beforeend', filaCosto())">+ Agregar tipo de trabajo</button>
+    </div>
+    <div class="err" id="colErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="guardarColocador(${c?`'${c._id}'`:'null'})">Guardar</button>
+      <button class="btn secondary" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  `);
+}
+
+async function guardarColocador(id){
+  const nombre = document.getElementById('colNombre').value.trim();
+  const telefono = document.getElementById('colTelefono').value.trim();
+  const pin = document.getElementById('colPin').value.trim();
+  const activo = document.getElementById('colActivo').value === 'true';
+  const costos = [...document.querySelectorAll('#costosContainer .costo-row')].map(row=>({
+    tipoTrabajo: row.querySelector('.costoTipo').value,
+    costoPorM2: Number(row.querySelector('.costoValor').value)||0
+  })).filter(c=>c.tipoTrabajo);
+  try{
+    if (id) await api(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo}});
+    else await api('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos}});
+    cerrarModal();
+    cargarColocadores();
+  }catch(e){ document.getElementById('colErr').textContent = e.message; }
+}
+
+// ---------------- TIPOS DE TRABAJO ----------------
+
+async function cargarTipos(){
+  TIPOS = await api('/tipos-trabajo');
+  document.getElementById('tiposBody').innerHTML = TIPOS.map(t=>`
+    <tr><td>${t.nombre}</td><td>${t.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
+    <td><button class="btn small secondary" onclick="toggleTipo('${t._id}', ${t.activo===false})">${t.activo===false?'Reactivar':'Desactivar'}</button></td></tr>`).join('');
+  const sel = document.getElementById('repTipo');
+  if (sel) sel.innerHTML = '<option value="">Todos</option>' + TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
+}
+async function crearTipoTrabajo(){
+  const nombre = document.getElementById('nuevoTipoNombre').value.trim();
+  if (!nombre) return;
+  await api('/tipos-trabajo', {method:'POST', body:{nombre}});
+  document.getElementById('nuevoTipoNombre').value='';
+  cargarTipos();
+}
+async function toggleTipo(id, activar){
+  await api(`/tipos-trabajo/${id}`, {method:'PUT', body:{activo: activar}});
+  cargarTipos();
+}
+
+// ---------------- OBRAS ----------------
+
+const ESTADOS_TAREA = {pendiente:'Pendiente', asignada:'Asignada', en_curso:'En curso', terminada:'Terminada'};
+
+async function cargarObras(){
+  const q = document.getElementById('fObraQ').value;
+  const estado = document.getElementById('fObraEstado').value;
+  const params = new URLSearchParams();
+  if (q) params.set('q', q);
+  if (estado) params.set('estado', estado);
+  const obras = await api('?' + params.toString());
+  document.getElementById('obrasBody').innerHTML = obras.map(o => `
+    <tr>
+      <td>#${o.numero}</td>
+      <td>${o.cliente.nombre}</td>
+      <td>${o.cliente.direccion||''}</td>
+      <td>${o.fechaVenta ? new Date(o.fechaVenta).toLocaleDateString('es-AR') : ''}</td>
+      <td>${(o.tareas||[]).map(t=>`${t.tipoTrabajo} <span class="pill ${t.estado}">${ESTADOS_TAREA[t.estado]||t.estado}</span>`).join('<br>')}</td>
+      <td><span class="pill ${o.estado}">${o.estado}</span></td>
+      <td><button class="btn small secondary" onclick="abrirObra('${o._id}')">Ver</button></td>
+    </tr>`).join('');
+}
+
+function abrirNuevaObra(){
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Nueva obra</h2>
+    <div class="grid2">
+      <div><label>Cliente</label><input id="nObCliente"></div>
+      <div><label>Teléfono</label><input id="nObTelefono"></div>
+      <div><label>Dirección</label><input id="nObDireccion"></div>
+      <div><label>Localidad</label><input id="nObLocalidad"></div>
+      <div><label>Fecha de venta</label><input type="date" id="nObFecha" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div><label>Vendedor</label><input id="nObVendedor"></div>
+    </div>
+    <div style="margin-top:10px">
+      <label>Tareas (tipo de trabajo y m² presupuestados)</label>
+      <div id="nObTareas">${filaTareaNueva()}</div>
+      <button class="btn small secondary" type="button" onclick="document.getElementById('nObTareas').insertAdjacentHTML('beforeend', filaTareaNueva())">+ Agregar tarea</button>
+    </div>
+    <div><label style="margin-top:10px">Notas generales</label><textarea id="nObNotas"></textarea></div>
+    <div class="err" id="nObErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="guardarObraNueva()">Crear obra</button>
+      <button class="btn secondary" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  `);
+}
+function filaTareaNueva(){
+  const opciones = TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
+  return `<div class="costo-row">
+    <select class="tTipo" style="flex:2">${opciones}</select>
+    <input class="tM2" type="number" step="0.01" placeholder="m²" style="flex:1">
+    <button class="btn small secondary" type="button" onclick="this.parentElement.remove()">Quitar</button>
+  </div>`;
+}
+async function guardarObraNueva(){
+  const tareas = [...document.querySelectorAll('#nObTareas .costo-row')].map(row=>({
+    tipoTrabajo: row.querySelector('.tTipo').value,
+    m2Presupuestados: Number(row.querySelector('.tM2').value)||0
+  })).filter(t=>t.tipoTrabajo);
+  const body = {
+    cliente: {
+      nombre: document.getElementById('nObCliente').value.trim(),
+      telefono: document.getElementById('nObTelefono').value.trim(),
+      direccion: document.getElementById('nObDireccion').value.trim(),
+      localidad: document.getElementById('nObLocalidad').value.trim()
+    },
+    fechaVenta: document.getElementById('nObFecha').value,
+    vendedor: document.getElementById('nObVendedor').value.trim(),
+    notasGenerales: document.getElementById('nObNotas').value.trim(),
+    tareas
+  };
+  try{
+    const obra = await api('', {method:'POST', body});
+    cerrarModal();
+    cargarObras();
+    abrirObra(obra._id);
+  }catch(e){ document.getElementById('nObErr').textContent = e.message; }
+}
+
+async function abrirObra(id){
+  const o = await api('/'+id);
+  const tareasHtml = (o.tareas||[]).map(t => `
+    <div class="tarea-box">
+      <div class="row" style="justify-content:space-between">
+        <div><b>${t.tipoTrabajo}</b> <span class="pill ${t.estado}">${ESTADOS_TAREA[t.estado]||t.estado}</span></div>
+        <button class="btn small danger" onclick="borrarTarea('${o._id}','${t._id}')">Eliminar</button>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <div><label>m² presupuestados</label><input type="number" value="${t.m2Presupuestados}" onchange="editarTarea('${o._id}','${t._id}',{m2Presupuestados:this.value})"></div>
+        <div><label>Colocador asignado</label>
+          <select onchange="asignarColocador('${o._id}','${t._id}',this.value)">
+            <option value="">Sin asignar</option>
+            ${COLOCADORES.map(c=>`<option value="${c._id}" ${t.colocadorId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
+          </select>
+        </div>
+        <div><label>Fecha fin estimada</label><input type="date" value="${t.fechaFinEstimada?t.fechaFinEstimada.slice(0,10):''}" onchange="editarTarea('${o._id}','${t._id}',{fechaFinEstimada:this.value})"></div>
+        <div><label>Costo aplicado</label><input value="${t.costoPorM2Aplicado!=null?'$'+t.costoPorM2Aplicado+'/m²':'—'}" disabled></div>
+      </div>
+      <div style="margin-top:6px"><label>Notas</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${t.notas||''}</textarea></div>
+      <div class="muted" style="margin-top:6px">m² realizados: <b>${t.m2Realizados||0}</b> / ${t.m2Presupuestados}
+        ${t.fechaInicio?` · inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
+        ${t.fechaFinReal?` · fin ${new Date(t.fechaFinReal).toLocaleDateString('es-AR')}`:''}
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div style="width:100px"><label>Avance m²</label><input type="number" id="avM2-${t._id}" step="0.01"></div>
+        <div style="flex:1"><label>Nota</label><input id="avNota-${t._id}"></div>
+        <button class="btn small" onclick="cargarAvance('${o._id}','${t._id}')">Registrar avance</button>
+        <select onchange="cambiarEstadoTarea('${o._id}','${t._id}',this.value)">
+          <option value="">Cambiar estado...</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="asignada">Asignada</option>
+          <option value="en_curso">En curso</option>
+          <option value="terminada">Terminada</option>
+        </select>
+      </div>
+      ${(t.avances&&t.avances.length) ? `<div class="muted" style="margin-top:6px">Historial: ${t.avances.map(a=>`${new Date(a.fecha).toLocaleDateString('es-AR')} — ${a.m2}m² (${a.registradoPor})${a.nota?': '+a.nota:''}`).join(' · ')}</div>` : ''}
+    </div>
+  `).join('') || '<p class="muted">Esta obra todavía no tiene tareas.</p>';
+
+  const fotosHtml = (o.fotos && o.fotos.length)
+    ? `<div class="foto-galeria">${o.fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
+    : '';
+
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Obra #${o.numero} — ${o.cliente.nombre}</h2>
+    <div class="muted">${o.cliente.direccion||''} ${o.cliente.localidad?'· '+o.cliente.localidad:''} ${o.cliente.telefono?'· '+o.cliente.telefono:''}</div>
+    <div class="muted">Venta: ${o.fechaVenta?new Date(o.fechaVenta).toLocaleDateString('es-AR'):''} ${o.vendedor?'· Vendedor: '+o.vendedor:''}${o.precioVentaCliente?' · Presupuestado: $'+o.precioVentaCliente.toLocaleString('es-AR'):''}</div>
+    ${o.visitaId ? '<div class="muted">Generada automáticamente desde una visita confirmada</div>' : ''}
+    ${fotosHtml}
+    <div style="margin:14px 0">${tareasHtml}</div>
+    <div class="row">
+      <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('')}</select>
+      <input id="nuevaTareaM2" type="number" step="0.01" placeholder="m²" style="flex:1">
+      <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar tarea</button>
+    </div>
+    <div style="margin-top:10px"><label>Estado general de la obra</label>
+      <select onchange="editarObraEstado('${o._id}',this.value)">
+        <option value="pendiente" ${o.estado==='pendiente'?'selected':''}>Pendiente</option>
+        <option value="en_curso" ${o.estado==='en_curso'?'selected':''}>En curso</option>
+        <option value="terminada" ${o.estado==='terminada'?'selected':''}>Terminada</option>
+        <option value="cancelada" ${o.estado==='cancelada'?'selected':''}>Cancelada</option>
+      </select>
+    </div>
+  `);
+}
+
+async function editarTarea(obraId, tareaId, cambios){
+  await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:cambios});
+  abrirObra(obraId);
+  cargarObras();
+}
+async function asignarColocador(obraId, tareaId, colocadorId){
+  try{
+    await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:{colocadorId: colocadorId||null}});
+  }catch(e){ alert(e.message); }
+  abrirObra(obraId);
+  cargarObras();
+}
+async function cambiarEstadoTarea(obraId, tareaId, estado){
+  if (!estado) return;
+  await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:{estado}});
+  abrirObra(obraId);
+  cargarObras();
+}
+async function borrarTarea(obraId, tareaId){
+  if (!confirm('¿Eliminar esta tarea de la obra?')) return;
+  await api(`/${obraId}/tareas/${tareaId}`, {method:'DELETE'});
+  abrirObra(obraId);
+  cargarObras();
+}
+async function cargarAvance(obraId, tareaId){
+  const m2 = document.getElementById(`avM2-${tareaId}`).value;
+  const nota = document.getElementById(`avNota-${tareaId}`).value;
+  if (!m2) return;
+  await api(`/${obraId}/tareas/${tareaId}/avances`, {method:'POST', body:{m2, nota}});
+  abrirObra(obraId);
+  cargarObras();
+}
+async function agregarTarea(obraId){
+  const tipoTrabajo = document.getElementById('nuevaTareaTipo').value;
+  const m2Presupuestados = document.getElementById('nuevaTareaM2').value;
+  if (!tipoTrabajo) return;
+  await api(`/${obraId}/tareas`, {method:'POST', body:{tipoTrabajo, m2Presupuestados}});
+  abrirObra(obraId);
+  cargarObras();
+}
+async function editarObraEstado(obraId, estado){
+  await api(`/${obraId}`, {method:'PUT', body:{estado}});
+  cargarObras();
+}
+
+// ---------------- REPORTES ----------------
+
+let ULTIMO_REPORTE = [];
+
+async function cargarReporte(){
+  if (COLOCADORES.length && document.getElementById('repColocador').options.length<=1){
+    document.getElementById('repColocador').innerHTML = '<option value="">Todos</option>' + COLOCADORES.map(c=>`<option value="${c._id}">${c.nombre}</option>`).join('');
+  }
+  const params = new URLSearchParams();
+  const desde = document.getElementById('repDesde').value;
+  const hasta = document.getElementById('repHasta').value;
+  const colocadorId = document.getElementById('repColocador').value;
+  const tipoTrabajo = document.getElementById('repTipo').value;
+  if (desde) params.set('desde', desde);
+  if (hasta) params.set('hasta', hasta);
+  if (colocadorId) params.set('colocadorId', colocadorId);
+  if (tipoTrabajo) params.set('tipoTrabajo', tipoTrabajo);
+  const filas = await api('/reportes/m2?' + params.toString());
+  ULTIMO_REPORTE = filas;
+  document.getElementById('reporteBody').innerHTML = filas.map(f=>`
+    <tr><td>${f.colocador}</td><td>${f.tipoTrabajo}</td><td>${f.m2Total}</td><td>$${f.montoTotal.toLocaleString('es-AR')}</td></tr>
+  `).join('') || '<tr><td colspan="4" class="muted">Sin datos para este filtro</td></tr>';
+  const totalM2 = filas.reduce((s,f)=>s+f.m2Total,0);
+  const totalMonto = filas.reduce((s,f)=>s+f.montoTotal,0);
+  document.getElementById('reporteTotal').textContent = `Total: ${totalM2.toLocaleString('es-AR')} m² — $${totalMonto.toLocaleString('es-AR')}`;
+}
+
+function exportarCSV(){
+  if (!ULTIMO_REPORTE.length) { alert('Generá el reporte primero'); return; }
+  const filas = [['Colocador','Tipo de trabajo','m2 realizados','Monto a pagar'], ...ULTIMO_REPORTE.map(f=>[f.colocador,f.tipoTrabajo,f.m2Total,f.montoTotal])];
+  const csv = filas.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `reporte_obras_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+</script>
+</body>
+</html>

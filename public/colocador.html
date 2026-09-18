@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mis Obras - Piedra Negra</title>
+<style>
+  :root{ --bg:#f4f5f7; --card:#fff; --text:#1f2430; --muted:#6b7280; --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742; }
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding-bottom:30px;}
+  header{background:var(--primary-dark);color:#fff;padding:16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5;}
+  header h1{font-size:17px;margin:0;font-weight:600;}
+  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;}
+  main{padding:14px;max-width:480px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  input,select{padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;width:100%;background:#fff;}
+  button.btn{background:var(--primary);color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:600;width:100%;}
+  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;}
+  .pill.pendiente{background:#eee;color:#555;}
+  .pill.asignada{background:#e7f0ff;color:#2255aa;}
+  .pill.en_curso{background:#fff4d6;color:#b8860b;}
+  .pill.terminada{background:#e3f3ec;color:#1f6f54;}
+  .obra-titulo{font-weight:700;font-size:15px;}
+  .muted{color:var(--muted);font-size:12.5px;}
+  .err{color:#b3392c;font-size:13px;margin:8px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;}
+  #loginScreen .card{width:100%;max-width:340px;}
+  .hidden{display:none !important;}
+  .barra{background:#eef1ee;border-radius:6px;height:8px;overflow:hidden;margin:6px 0;}
+  .barra-fill{background:var(--primary);height:100%;}
+  .avance-form{display:flex;gap:8px;margin-top:10px;}
+  .avance-form input:first-child{flex:1}
+  details summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:6px;}
+  .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin:8px 0;}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="card">
+    <h2 style="margin-top:0;text-align:center">Mis Obras</h2>
+    <p class="muted" style="text-align:center">Ingresá tu PIN para ver tus obras asignadas</p>
+    <label>PIN</label>
+    <input id="pin" inputmode="numeric" autofocus onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="margin-top:10px" onclick="login()">Ingresar</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1 id="saludo">Mis Obras</h1>
+    <button onclick="logout()">Salir</button>
+  </header>
+  <main id="listaObras"></main>
+</div>
+
+<script>
+const BASE = '/api/obras'; // coincide con app.use('/api/obras', obrasRouter) en server.js
+let TOKEN = localStorage.getItem('colocador_token') || '';
+let NOMBRE = localStorage.getItem('colocador_nombre') || '';
+
+function api(path, opts={}) {
+  opts.headers = Object.assign({'Content-Type':'application/json','x-colocador-token':TOKEN}, opts.headers||{});
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch(BASE+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+async function login(){
+  const pin = document.getElementById('pin').value.trim();
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch(BASE+'/colocador/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pin})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    NOMBRE = data.colocador.nombre;
+    localStorage.setItem('colocador_token', TOKEN);
+    localStorage.setItem('colocador_nombre', NOMBRE);
+    iniciar();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('colocador_token');
+  localStorage.removeItem('colocador_nombre');
+  location.reload();
+}
+function iniciar(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('saludo').textContent = 'Hola, ' + NOMBRE;
+  cargarMisObras();
+}
+if (TOKEN) iniciar();
+
+const ESTADOS = {pendiente:'Pendiente', asignada:'Asignada', en_curso:'En curso', terminada:'Terminada'};
+
+async function cargarMisObras(){
+  let obras;
+  try{
+    obras = await api('/colocador/mis-obras');
+  }catch(e){
+    if (e.message.includes('vencida') || e.message.includes('inválida')) { logout(); return; }
+    document.getElementById('listaObras').innerHTML = `<div class="err">${e.message}</div>`;
+    return;
+  }
+  if (!obras.length){
+    document.getElementById('listaObras').innerHTML = '<p class="muted">No tenés obras asignadas por ahora.</p>';
+    return;
+  }
+  document.getElementById('listaObras').innerHTML = obras.map(o => `
+    <div class="card">
+      <div class="obra-titulo">Obra #${o.numero} — ${o.cliente.nombre}</div>
+      <div class="muted">${o.cliente.direccion||''} ${o.cliente.localidad?'· '+o.cliente.localidad:''}</div>
+      ${(o.fotos&&o.fotos.length) ? `<div class="foto-galeria">${o.fotos.map(f=>`<img src="${f.data}">`).join('')}</div>` : ''}
+      ${o.tareas.map(t=>`
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <b>${t.tipoTrabajo}</b>
+            <span class="pill ${t.estado}">${ESTADOS[t.estado]||t.estado}</span>
+          </div>
+          <div class="barra"><div class="barra-fill" style="width:${Math.min(100, t.m2Presupuestados? (t.m2Realizados/t.m2Presupuestados*100):0)}%"></div></div>
+          <div class="muted">${t.m2Realizados||0} m² de ${t.m2Presupuestados} m²</div>
+          ${t.notas?`<div class="muted">Nota de oficina: ${t.notas}</div>`:''}
+          <div class="avance-form">
+            <input type="number" step="0.01" id="m2-${o.obraId}-${t._id}" placeholder="m² de hoy">
+            <button class="btn" style="width:auto" onclick="registrarAvance('${o.obraId}','${t._id}')">Cargar</button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            ${t.estado!=='terminada' ? `<button class="btn secondary" style="width:auto;flex:1" onclick="marcarEstado('${o.obraId}','${t._id}','terminada')">Marcar terminada</button>` : ''}
+          </div>
+          ${(t.avances&&t.avances.length) ? `<details><summary>Ver historial (${t.avances.length})</summary>${t.avances.map(a=>`<div class="muted">${new Date(a.fecha).toLocaleDateString('es-AR')} — ${a.m2} m²${a.nota?': '+a.nota:''}</div>`).join('')}</details>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+async function registrarAvance(obraId, tareaId){
+  const input = document.getElementById(`m2-${obraId}-${tareaId}`);
+  const m2 = input.value;
+  if (!m2 || Number(m2)<=0) { alert('Ingresá los m² realizados'); return; }
+  try{
+    await api(`/colocador/tareas/${obraId}/${tareaId}/avance`, {method:'POST', body:{m2}});
+    cargarMisObras();
+  }catch(e){ alert(e.message); }
+}
+async function marcarEstado(obraId, tareaId, estado){
+  try{
+    await api(`/colocador/tareas/${obraId}/${tareaId}/estado`, {method:'POST', body:{estado}});
+    cargarMisObras();
+  }catch(e){ alert(e.message); }
+}
+</script>
+</body>
+</html>
