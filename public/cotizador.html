@@ -456,6 +456,28 @@
 </div>
 
 <script>
+// Prellenado desde una Visita (visitas.js / vendedor.html): si el vendedor
+// llega acá con el botón "Abrir cotizador" desde una visita, viene con
+// ?cliente=...&direccion=...&store_id=... en la URL. No cambia nada del
+// cotizador en sí — solo completa estos campos para no tener que tipearlos
+// de nuevo.
+(function prellenarDesdeVisita(){
+  try {
+    const params = new URLSearchParams(location.search);
+    const storeIdVisita = params.get('store_id');
+    if (storeIdVisita) localStorage.setItem('cotizador_store_id', storeIdVisita);
+    const cliente = params.get('cliente');
+    const direccion = params.get('direccion');
+    if (cliente) {
+      const c1 = document.getElementById('cliente'); if (c1) c1.value = cliente;
+      const c2 = document.getElementById('clienteGuardar'); if (c2) c2.value = cliente;
+    }
+    if (direccion) {
+      const d1 = document.getElementById('direccion'); if (d1) d1.value = direccion;
+    }
+  } catch (e) { /* localStorage puede no estar disponible */ }
+})();
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
