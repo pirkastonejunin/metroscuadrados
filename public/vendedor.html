@@ -12,7 +12,8 @@
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
     --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
     --ok:#1f8a5f; --ok-soft:#e1f5ea;
-    --danger:#c53030;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
     --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
   }
   *{box-sizing:border-box;}
@@ -32,9 +33,11 @@
   button.btn.danger{background:var(--danger);color:#fff;border:none;}
   button.btn.small{width:auto;padding:8px 12px;font-size:13px;}
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
-  .pill.agendada{background:var(--bg);color:var(--muted);}
+  .pill.sin_visita,.pill.agendada{background:var(--bg);color:var(--muted);}
   .pill.presupuestada{background:var(--accent-soft);color:var(--accent);}
-  .pill.confirmada{background:var(--ok-soft);color:var(--ok);}
+  .pill.vendido,.pill.confirmada{background:var(--ok-soft);color:var(--ok);}
+  .pill.instalado{background:var(--info-soft);color:var(--info);}
+  .pill.cancelada{background:var(--danger-soft);color:var(--danger);}
   .visita-titulo{font-weight:800;font-size:15px;}
   .muted{color:var(--muted);font-size:12.5px;}
   .err{color:var(--danger);font-size:13px;margin:8px 0;}
@@ -54,7 +57,8 @@
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
       --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
-      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
       --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
     }
     :root:not([data-theme="light"]) .logo{filter:invert(1);}
@@ -62,7 +66,8 @@
   :root[data-theme="dark"] {
     --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
     --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
-    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
     --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
   }
   :root[data-theme="dark"] .logo{filter:invert(1);}
@@ -108,7 +113,9 @@ function api(path, opts={}) {
   });
 }
 function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{weekday:'short', day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
-const ESTADOS = {agendada:'Agendada', presupuestada:'Presupuestada', confirmada:'Confirmada'};
+const ESTADOS = {sin_visita:'Sin visita', presupuestada:'Presupuestada', vendido:'Vendido', instalado:'Instalado', cancelada:'Cancelada',
+  // alias por compatibilidad con nombres de estado viejos
+  agendada:'Sin visita', confirmada:'Vendido'};
 
 async function cargarSelectorVendedor(){
   try{
