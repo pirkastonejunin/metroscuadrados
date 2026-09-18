@@ -13,6 +13,12 @@ app.use('/api/cotizador', cotizadorRouter);
 const normalizadorRouter = require('./normalizador');
 app.use('/api/normalizador', normalizadorRouter);
 
+const obrasRouter = require('./obras');
+app.use('/api/obras', obrasRouter);
+
+const visitasRouter = require('./visitas');
+app.use('/api/visitas', visitasRouter);
+
 const API_BASE = 'https://api.tiendanube.com/v1';
 const NAMESPACE = process.env.METAFIELD_NAMESPACE || 'calculadora_m2';
 const KEY_COBERTURA = 'cobertura_m2_caja';
