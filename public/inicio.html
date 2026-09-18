@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piedra Negra — Accesos</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --card: #ffffff;
+    --ink: #2a2420;
+    --muted: #766e63;
+    --accent: #b5502f;
+    --accent-ink: #ffffff;
+    --border: #e4ddd0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 32px 16px 48px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .grupo { margin-bottom: 28px; }
+  .grupo h2 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 10px;
+    padding-left: 2px;
+  }
+  .lista { display: flex; flex-direction: column; gap: 10px; }
+  a.acceso {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  a.acceso:active { transform: scale(0.99); }
+  a.acceso:hover { border-color: var(--accent); }
+  .icono {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+  .texto { flex: 1; min-width: 0; }
+  .texto strong { display: block; font-size: 1rem; }
+  .texto span { display: block; font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+  footer { margin-top: 36px; text-align: center; color: var(--muted); font-size: 0.8rem; }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #201c18;
+      --card: #2b2621;
+      --ink: #f2ece2;
+      --muted: #a89d8d;
+      --accent: #d97a52;
+      --accent-ink: #201c18;
+      --border: #3a332c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #201c18;
+    --card: #2b2621;
+    --ink: #f2ece2;
+    --muted: #a89d8d;
+    --accent: #d97a52;
+    --accent-ink: #201c18;
+    --border: #3a332c;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Piedra Negra</h1>
+      <p>Accesos a las herramientas de obras y visitas.</p>
+    </header>
+
+    <div class="grupo">
+      <h2>Oficina</h2>
+      <div class="lista">
+        <a class="acceso" href="/admin-visitas.html">
+          <div class="icono">📅</div>
+          <div class="texto">
+            <strong>Panel de Visitas</strong>
+            <span>Agendar visitas, vendedores, mapeo de tipos de trabajo</span>
+          </div>
+        </a>
+        <a class="acceso" href="/admin-obras.html">
+          <div class="icono">🏗️</div>
+          <div class="texto">
+            <strong>Panel de Obras</strong>
+            <span>Colocadores, tipos de trabajo, asignaciones, reportes de m² y pago</span>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <div class="grupo">
+      <h2>Vendedores</h2>
+      <div class="lista">
+        <a class="acceso" href="/vendedor.html">
+          <div class="icono">🧑‍💼</div>
+          <div class="texto">
+            <strong>Mis visitas</strong>
+            <span>Ver visitas del día, sacar fotos, presupuestar</span>
+          </div>
+        </a>
+        <a class="acceso" href="/cotizador.html">
+          <div class="icono">🧮</div>
+          <div class="texto">
+            <strong>Cotizador</strong>
+            <span>Calculadora de presupuestos por m²</span>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <div class="grupo">
+      <h2>Colocadores</h2>
+      <div class="lista">
+        <a class="acceso" href="/colocador.html">
+          <div class="icono">🧱</div>
+          <div class="texto">
+            <strong>Mis obras</strong>
+            <span>Ver obras asignadas y cargar avances de m²</span>
+          </div>
+        </a>
+      </div>
+    </div>
+
+    <footer>Grupo Piedra Negra</footer>
+  </div>
+</body>
+</html>
