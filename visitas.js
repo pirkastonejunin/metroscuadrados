@@ -43,6 +43,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
+const googleCalendar = require('./google-calendar');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -120,6 +121,26 @@ function authAdmin(req, res, next) {
   if (!pass) return res.status(500).json({ error: 'OBRAS_ADMIN_PASSWORD no está configurada en el servidor' });
   if (token !== pass) return res.status(401).json({ error: 'No autorizado' });
   next();
+}
+
+// Duración por defecto de una visita en el calendario, cuando no tenemos
+// otra forma de saber cuánto va a durar.
+const DURACION_VISITA_MS = 60 * 60 * 1000; // 1 hora
+
+// Arma los campos del evento de Google Calendar a partir de una visita
+// (o de la fusión de la visita actual con los cambios que se le van a aplicar).
+function eventoDeVisita(v) {
+  return {
+    titulo: `Visita: ${v.cliente.nombre}`,
+    descripcion: [
+      `Vendedor: ${v.vendedorNombre || '-'}`,
+      v.cliente.telefono ? `Teléfono: ${v.cliente.telefono}` : null,
+      v.notasEmpleada ? `Notas: ${v.notasEmpleada}` : null
+    ].filter(Boolean).join('\n'),
+    ubicacion: v.cliente.direccion || '',
+    inicio: v.fechaHora,
+    fin: new Date(new Date(v.fechaHora).getTime() + DURACION_VISITA_MS)
+  };
 }
 
 // Campos del objeto "obra" de una cotización (ver cotizador.js) que pueden
@@ -384,9 +405,11 @@ router.post('/', authAdmin, async (req, res) => {
         presupuesto: null,
         obraId: null,
         confirmadaPor: null,
+        googleEventId: null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
+      doc.googleEventId = await googleCalendar.upsertEvento(null, eventoDeVisita(doc));
       const r = await db.collection('visitas').insertOne(doc);
       doc._id = r.insertedId;
       return doc;
@@ -410,6 +433,8 @@ router.put('/:id', authAdmin, async (req, res) => {
     }
     const actualizado = await conReintento(async () => {
       const db = await getDb();
+      const actual = await db.collection('visitas').findOne({ _id: id });
+      if (!actual) throw err(404, 'Visita no encontrada');
       if (vendedorId) {
         const vId = toObjectId(vendedorId);
         const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
@@ -417,6 +442,17 @@ router.put('/:id', authAdmin, async (req, res) => {
         set.vendedorId = vId;
         set.vendedorNombre = vendedor.nombre;
       }
+
+      // Sincroniza el evento de Google Calendar con los datos que va a
+      // tener la visita después de este cambio.
+      if (set.estado === 'cancelada') {
+        await googleCalendar.eliminarEvento(actual.googleEventId);
+        set.googleEventId = null;
+      } else {
+        const fusion = { ...actual, ...set };
+        set.googleEventId = await googleCalendar.upsertEvento(actual.googleEventId, eventoDeVisita(fusion));
+      }
+
       await db.collection('visitas').updateOne({ _id: id }, { $set: set });
       return db.collection('visitas').findOne({ _id: id });
     });
@@ -640,7 +676,8 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       fechaFinReal: null,
       m2Realizados: 0,
       notas: '',
-      avances: []
+      avances: [],
+      googleEventId: null
     }));
 
     const numero = await siguienteNumeroObra();
@@ -667,9 +704,14 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     const r = await db.collection('obras').insertOne(obraDoc);
     obraDoc._id = r.insertedId;
 
+    // La visita ya se convirtió en Obra: se borra su evento de Calendar acá
+    // (las fechas de trabajo de la Obra se sincronizan aparte, por tarea,
+    // desde obras.js cuando se le asigna colocador).
+    await googleCalendar.eliminarEvento(visita.googleEventId);
+
     await db.collection('visitas').updateOne(
       { _id: visita._id },
-      { $set: { estado: 'confirmada', obraId: r.insertedId, confirmadaPor, updatedAt: new Date() } }
+      { $set: { estado: 'confirmada', obraId: r.insertedId, confirmadaPor, googleEventId: null, updatedAt: new Date() } }
     );
 
     return { visita: await db.collection('visitas').findOne({ _id: visita._id }), obra: obraDoc };
