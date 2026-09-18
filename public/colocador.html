@@ -155,6 +155,7 @@ async function cargarMisObras(){
     <div class="card">
       <div class="obra-titulo">Obra #${o.numero} — ${o.cliente.nombre}</div>
       <div class="muted">${o.cliente.direccion||''} ${o.cliente.localidad?'· '+o.cliente.localidad:''}</div>
+      ${o.cliente.telefono ? `<div class="muted">Tel. cliente: ${o.cliente.telefono}</div>` : ''}
       ${(o.fotos&&o.fotos.length) ? `<div class="foto-galeria">${o.fotos.map(f=>`<img src="${f.data}">`).join('')}</div>` : ''}
       ${o.tareas.map(t=>`
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
@@ -164,7 +165,8 @@ async function cargarMisObras(){
           </div>
           <div class="barra"><div class="barra-fill" style="width:${Math.min(100, t.m2Presupuestados? (t.m2Realizados/t.m2Presupuestados*100):0)}%"></div></div>
           <div class="muted">${t.m2Realizados||0} m² de ${t.m2Presupuestados} m²</div>
-          ${t.notas?`<div class="muted">Nota de oficina: ${t.notas}</div>`:''}
+          ${(t.materiales&&t.materiales.length) ? `<div class="muted" style="margin-top:4px"><b>Materiales a llevar:</b><br>${t.materiales.map(m=>`• ${m.cantidad?m.cantidad+' ':''}${m.tipo}`).join('<br>')}</div>` : ''}
+          ${t.notas?`<div class="muted">Aclaración de oficina: ${t.notas}</div>`:''}
           <div class="avance-form">
             <input type="number" step="0.01" id="m2-${o.obraId}-${t._id}" placeholder="m² de hoy">
             <button class="btn" style="width:auto" onclick="registrarAvance('${o.obraId}','${t._id}')">Cargar</button>
