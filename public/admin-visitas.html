@@ -519,7 +519,7 @@ function renderDetalleVisita(v, editando){
   if (v.presupuesto){
     if (v.presupuesto.tipo === 'manual'){
       presupuestoHtml = `<b>Presupuesto manual</b> — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}<br>` +
-        v.presupuesto.items.map(it=>`${escapeHtml(it.tipoTrabajo)}: ${it.m2} — $${(it.precioCliente||0).toLocaleString('es-AR')}`).join('<br>');
+        v.presupuesto.items.map(it=>`${escapeHtml(it.tipoTrabajo)}${it.descripcion?' ('+escapeHtml(it.descripcion)+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>');
     } else {
       presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${escapeHtml(v.presupuesto.tipoObraNombre||'')} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}`;
     }

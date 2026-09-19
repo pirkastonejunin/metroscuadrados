@@ -196,7 +196,7 @@ async function mostrarDetalleVisita(id){
   if (v.presupuesto){
     if (v.presupuesto.tipo === 'manual'){
       presupuestoHtml = `<div class="card"><b>Presupuesto (a mano)</b><br>` +
-        v.presupuesto.items.map(it=>`${it.tipoTrabajo}: ${it.m2} — $${(it.precioCliente||0).toLocaleString('es-AR')}`).join('<br>') +
+        v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
         `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
     } else {
       presupuestoHtml = `<div class="card"><b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
@@ -233,7 +233,7 @@ async function mostrarDetalleVisita(id){
     <div class="card">
       <b>Fotos del lugar</b>
       ${fotosHtml}
-      <input type="file" accept="image/*" capture="environment" multiple id="inputFotos" style="margin-top:8px">
+      <input type="file" accept="image/*" multiple id="inputFotos" style="margin-top:8px">
       <button class="btn small" style="margin-top:8px" onclick="subirFotos('${v._id}')">Agregar fotos</button>
       <div class="err" id="fotoErr"></div>
     </div>
@@ -307,17 +307,25 @@ async function vincularCotizacion(visitaId, cotizacionId){
 
 function filaItemManual(){
   const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
-  return `<div class="item-row">
-    <select class="itTipo">${opciones}</select>
-    <input class="itM2" type="number" step="0.01" placeholder="m²">
-    <input class="itPrecio" type="number" step="0.01" placeholder="$ cliente">
+  return `<div class="item-row" style="flex-wrap:wrap">
+    <select class="itTipo" style="flex:2;min-width:120px">${opciones}</select>
+    <input class="itDescripcion" placeholder="Descripción" style="flex:2;min-width:120px">
+    <input class="itCantidad" type="number" step="0.01" placeholder="Cantidad" style="flex:1;min-width:70px" oninput="actualizarTotalItem(this)">
+    <input class="itValor" type="number" step="0.01" placeholder="Valor unit." style="flex:1;min-width:80px" oninput="actualizarTotalItem(this)">
+    <span class="muted itTotal" style="flex:1;min-width:70px;align-self:center">Total: $0</span>
   </div>`;
+}
+function actualizarTotalItem(el){
+  const row = el.closest('.item-row');
+  const cantidad = Number(row.querySelector('.itCantidad').value) || 0;
+  const valor = Number(row.querySelector('.itValor').value) || 0;
+  row.querySelector('.itTotal').textContent = 'Total: $' + (cantidad*valor).toLocaleString('es-AR');
 }
 function mostrarFormManual(visitaId){
   const cont = document.getElementById('formManual');
   cont.innerHTML = `
     <div id="itemsManual">${filaItemManual()}</div>
-    <button class="btn small secondary" type="button" onclick="document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual())">+ Agregar tipo de trabajo</button>
+    <button class="btn small secondary" type="button" onclick="document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual())">+ Agregar producto</button>
     <div class="err" id="manualErr"></div>
     <button class="btn" style="margin-top:8px" onclick="guardarPresupuestoManual('${visitaId}')">Guardar presupuesto</button>
   `;
@@ -325,8 +333,9 @@ function mostrarFormManual(visitaId){
 async function guardarPresupuestoManual(visitaId){
   const items = [...document.querySelectorAll('#itemsManual .item-row')].map(row => ({
     tipoTrabajo: row.querySelector('.itTipo').value,
-    m2: Number(row.querySelector('.itM2').value) || 0,
-    precioCliente: Number(row.querySelector('.itPrecio').value) || 0
+    descripcion: row.querySelector('.itDescripcion').value.trim(),
+    cantidad: Number(row.querySelector('.itCantidad').value) || 0,
+    valor: Number(row.querySelector('.itValor').value) || 0
   }));
   try{
     await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items}});

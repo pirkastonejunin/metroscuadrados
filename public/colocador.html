@@ -42,11 +42,6 @@
   #loginScreen .card{width:100%;max-width:340px;text-align:center;}
   #loginScreen .logo{height:24px;width:auto;margin:0 auto 16px;display:block;}
   .hidden{display:none !important;}
-  .barra{background:var(--bg);border-radius:6px;height:8px;overflow:hidden;margin:6px 0;}
-  .barra-fill{background:var(--accent);height:100%;}
-  .avance-form{display:flex;gap:8px;margin-top:10px;}
-  .avance-form input:first-child{flex:1}
-  details summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:6px;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin:8px 0;}
   .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
   @media (prefers-color-scheme: dark) {
@@ -136,7 +131,7 @@ function iniciar(){
 }
 if (TOKEN) iniciar();
 
-const ESTADOS = {pendiente:'Pendiente', asignada:'Asignada', en_curso:'En curso', terminada:'Terminada'};
+const ESTADOS = {pendiente:'Pendiente', asignada:'Pendiente', en_curso:'En curso', terminada:'Terminada'};
 
 async function cargarMisObras(){
   let obras;
@@ -151,50 +146,82 @@ async function cargarMisObras(){
     document.getElementById('listaObras').innerHTML = '<p class="muted">No tenés obras asignadas por ahora.</p>';
     return;
   }
-  document.getElementById('listaObras').innerHTML = obras.map(o => `
+  document.getElementById('listaObras').innerHTML = obras.map(o => {
+    const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
+    const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
+    return `
     <div class="card">
       <div class="obra-titulo">Obra #${o.numero} — ${o.cliente.nombre}</div>
       <div class="muted">${o.cliente.direccion||''} ${o.cliente.localidad?'· '+o.cliente.localidad:''}</div>
       ${o.cliente.telefono ? `<div class="muted">Tel. cliente: ${o.cliente.telefono}</div>` : ''}
-      ${(o.fotos&&o.fotos.length) ? `<div class="foto-galeria">${o.fotos.map(f=>`<img src="${f.data}">`).join('')}</div>` : ''}
+      ${fotosAntes.length ? `<div class="muted" style="margin-top:6px">Fotos del lugar</div><div class="foto-galeria">${fotosAntes.map(f=>`<img src="${f.data}">`).join('')}</div>` : ''}
       ${o.tareas.map(t=>`
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <b>${t.tipoTrabajo}</b>
             <span class="pill ${t.estado}">${ESTADOS[t.estado]||t.estado}</span>
           </div>
-          <div class="barra"><div class="barra-fill" style="width:${Math.min(100, t.m2Presupuestados? (t.m2Realizados/t.m2Presupuestados*100):0)}%"></div></div>
-          <div class="muted">${t.m2Realizados||0} m² de ${t.m2Presupuestados} m²</div>
+          <div class="muted">${t.m2Presupuestados} m² presupuestados</div>
           ${(t.materiales&&t.materiales.length) ? `<div class="muted" style="margin-top:4px"><b>Materiales a llevar:</b><br>${t.materiales.map(m=>`• ${m.cantidad?m.cantidad+' ':''}${m.tipo}`).join('<br>')}</div>` : ''}
           ${t.notas?`<div class="muted">Aclaración de oficina: ${t.notas}</div>`:''}
-          <div class="avance-form">
-            <input type="number" step="0.01" id="m2-${o.obraId}-${t._id}" placeholder="m² de hoy">
-            <button class="btn" style="width:auto" onclick="registrarAvance('${o.obraId}','${t._id}')">Cargar</button>
-          </div>
+          ${t.observaciones?`<div class="muted">Observación cargada: ${t.observaciones}</div>`:''}
           <div style="display:flex;gap:8px;margin-top:8px">
-            ${t.estado!=='terminada' ? `<button class="btn secondary" style="width:auto;flex:1" onclick="marcarEstado('${o.obraId}','${t._id}','terminada')">Marcar terminada</button>` : ''}
+            ${t.estado==='pendiente' ? `<button class="btn secondary" style="width:auto;flex:1" onclick="marcarEstado('${o.obraId}','${t._id}','en_curso')">Comenzar</button>` : ''}
+            ${t.estado!=='terminada' ? `<button class="btn" style="width:auto;flex:1" onclick="mostrarFormTerminar('${o.obraId}','${t._id}')">Marcar terminada</button>` : ''}
           </div>
-          ${(t.avances&&t.avances.length) ? `<details><summary>Ver historial (${t.avances.length})</summary>${t.avances.map(a=>`<div class="muted">${new Date(a.fecha).toLocaleDateString('es-AR')} — ${a.m2} m²${a.nota?': '+a.nota:''}</div>`).join('')}</details>` : ''}
+          <div id="terminarBox-${t._id}"></div>
         </div>
       `).join('')}
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
+        <b>Fotos del trabajo terminado</b>
+        ${fotosDespues.length ? `<div class="foto-galeria">${fotosDespues.map(f=>`<img src="${f.data}">`).join('')}</div>` : '<p class="muted">Todavía no subiste fotos del resultado.</p>'}
+        <input type="file" accept="image/*" multiple id="inputFotosObra-${o.obraId}" style="margin-top:8px">
+        <button class="btn small secondary" style="margin-top:8px;width:auto" onclick="subirFotosObra('${o.obraId}')">Agregar fotos</button>
+        <div class="err" id="fotoObraErr-${o.obraId}"></div>
+      </div>
     </div>
-  `).join('');
+  `; }).join('');
 }
 
-async function registrarAvance(obraId, tareaId){
-  const input = document.getElementById(`m2-${obraId}-${tareaId}`);
-  const m2 = input.value;
-  if (!m2 || Number(m2)<=0) { alert('Ingresá los m² realizados'); return; }
+function mostrarFormTerminar(obraId, tareaId){
+  document.getElementById(`terminarBox-${tareaId}`).innerHTML = `
+    <label style="margin-top:8px">¿Quedó algo pendiente? (opcional)</label>
+    <input id="obs-${tareaId}" placeholder="Ej: falta silicona en el borde">
+    <button class="btn" style="margin-top:8px" onclick="confirmarTerminar('${obraId}','${tareaId}')">Confirmar terminada</button>
+  `;
+}
+async function confirmarTerminar(obraId, tareaId){
+  const observaciones = document.getElementById(`obs-${tareaId}`).value.trim();
+  await marcarEstado(obraId, tareaId, 'terminada', observaciones);
+}
+async function marcarEstado(obraId, tareaId, estado, observaciones){
   try{
-    await api(`/colocador/tareas/${obraId}/${tareaId}/avance`, {method:'POST', body:{m2}});
+    const body = observaciones !== undefined ? {estado, observaciones} : {estado};
+    await api(`/colocador/tareas/${obraId}/${tareaId}/estado`, {method:'POST', body});
     cargarMisObras();
   }catch(e){ alert(e.message); }
 }
-async function marcarEstado(obraId, tareaId, estado){
+
+// ---------------- FOTOS DEL RESULTADO ----------------
+
+function leerComoDataURL(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function subirFotosObra(obraId){
+  const input = document.getElementById(`inputFotosObra-${obraId}`);
+  const errEl = document.getElementById(`fotoObraErr-${obraId}`);
+  errEl.textContent = '';
+  if (!input.files.length){ errEl.textContent = 'Elegí al menos una foto'; return; }
   try{
-    await api(`/colocador/tareas/${obraId}/${tareaId}/estado`, {method:'POST', body:{estado}});
+    const fotos = await Promise.all([...input.files].map(leerComoDataURL));
+    await api(`/colocador/obras/${obraId}/fotos`, {method:'POST', body:{fotos}});
     cargarMisObras();
-  }catch(e){ alert(e.message); }
+  }catch(e){ errEl.textContent = e.message; }
 }
 </script>
 </body>

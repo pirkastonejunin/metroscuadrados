@@ -186,7 +186,7 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Colocador</th><th>Tipo de trabajo</th><th>m² realizados</th><th>Monto a pagar</th></tr></thead>
+          <thead><tr><th>Colocador</th><th>Tipo de trabajo</th><th>m² (tareas terminadas)</th><th>Monto a pagar</th></tr></thead>
           <tbody id="reporteBody"></tbody>
         </table>
         <div class="total-box" id="reporteTotal"></div>
@@ -518,30 +518,30 @@ async function abrirObra(id){
         </div>
       </div>
       <div style="margin-top:6px"><label>Aclaraciones para el colocador</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${escapeHtml(t.notas||'')}</textarea></div>
-      <div class="muted" style="margin-top:6px">m² realizados: <b>${t.m2Realizados||0}</b> / ${t.m2Presupuestados}
-        ${t.fechaInicio?` · inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
+      <div style="margin-top:6px"><label>Observaciones (ej: quedó algo pendiente)</label><textarea onchange="editarTarea('${o._id}','${t._id}',{observaciones:this.value})">${escapeHtml(t.observaciones||'')}</textarea></div>
+      <div class="muted" style="margin-top:6px">
+        ${t.fechaInicio?`inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
         ${t.fechaFinReal?` · fin ${new Date(t.fechaFinReal).toLocaleDateString('es-AR')}`:''}
       </div>
       <div class="row" style="margin-top:8px">
-        <div style="width:100px"><label>Avance m²</label><input type="number" id="avM2-${t._id}" step="0.01"></div>
-        <div style="flex:1"><label>Nota</label><input id="avNota-${t._id}"></div>
-        <button class="btn small" onclick="cargarAvance('${o._id}','${t._id}')">Registrar avance</button>
         <select onchange="cambiarEstadoTarea('${o._id}','${t._id}',this.value)">
           <option value="">Cambiar estado...</option>
-          <option value="pendiente">Pendiente</option>
-          <option value="asignada">Asignada</option>
-          <option value="en_curso">En curso</option>
-          <option value="terminada">Terminada</option>
+          <option value="pendiente" ${t.estado==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="en_curso" ${t.estado==='en_curso'?'selected':''}>En curso</option>
+          <option value="terminada" ${t.estado==='terminada'?'selected':''}>Terminada</option>
         </select>
       </div>
-      ${(t.avances&&t.avances.length) ? `<div class="muted" style="margin-top:6px">Historial: ${t.avances.map(a=>`${new Date(a.fecha).toLocaleDateString('es-AR')} — ${a.m2}m² (${a.registradoPor})${a.nota?': '+a.nota:''}`).join(' · ')}</div>` : ''}
     </div>
   `;
   }).join('') || '<p class="muted">Esta obra todavía no tiene tareas.</p>';
 
-  const fotosHtml = (o.fotos && o.fotos.length)
-    ? `<div class="foto-galeria">${o.fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
-    : '';
+  const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
+  const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
+  const galeria = fotos => `<div class="foto-galeria">${fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`;
+  const fotosHtml = (fotosAntes.length || fotosDespues.length) ? `
+    ${fotosAntes.length ? `<div style="margin-top:8px"><label>Fotos antes (vendedor)</label>${galeria(fotosAntes)}</div>` : ''}
+    ${fotosDespues.length ? `<div style="margin-top:8px"><label>Fotos después (colocador)</label>${galeria(fotosDespues)}</div>` : ''}
+  ` : '';
 
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
@@ -591,14 +591,6 @@ async function borrarTarea(obraId, tareaId){
   abrirObra(obraId);
   cargarObras();
 }
-async function cargarAvance(obraId, tareaId){
-  const m2 = document.getElementById(`avM2-${tareaId}`).value;
-  const nota = document.getElementById(`avNota-${tareaId}`).value;
-  if (!m2) return;
-  await api(`/${obraId}/tareas/${tareaId}/avances`, {method:'POST', body:{m2, nota}});
-  abrirObra(obraId);
-  cargarObras();
-}
 async function agregarTarea(obraId){
   const tipoTrabajo = document.getElementById('nuevaTareaTipo').value;
   const m2Presupuestados = document.getElementById('nuevaTareaM2').value;
@@ -641,7 +633,7 @@ async function cargarReporte(){
 
 function exportarCSV(){
   if (!ULTIMO_REPORTE.length) { alert('Generá el reporte primero'); return; }
-  const filas = [['Colocador','Tipo de trabajo','m2 realizados','Monto a pagar'], ...ULTIMO_REPORTE.map(f=>[f.colocador,f.tipoTrabajo,f.m2Total,f.montoTotal])];
+  const filas = [['Colocador','Tipo de trabajo','m2 (tareas terminadas)','Monto a pagar'], ...ULTIMO_REPORTE.map(f=>[f.colocador,f.tipoTrabajo,f.m2Total,f.montoTotal])];
   const csv = filas.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
