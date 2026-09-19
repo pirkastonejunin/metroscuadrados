@@ -43,6 +43,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
+const googleCalendar = require('./google-calendar');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -86,6 +87,60 @@ function err(status, message) {
   return Object.assign(new Error(message), { status });
 }
 
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ---------------------------------------------------------------------
+// Estados de una visita.
+//   sin_visita    -> agendada, todavía no se hizo la visita (nombre viejo:
+//                    "agendada", se conserva como alias por compatibilidad
+//                    con documentos ya guardados con ese valor)
+//   presupuestada -> el vendedor visitó y armó el presupuesto
+//   vendido       -> el cliente confirmó (nombre viejo: "confirmada"),
+//                    dispara la creación automática de la Obra
+//   instalado     -> la Obra vinculada ya tiene todas sus tareas terminadas
+//                    (se detecta solo, ver sincronizarInstalacion)
+//   cancelada     -> se bajó; se puede reprogramar (vuelve a sin_visita)
+// ---------------------------------------------------------------------
+const ESTADOS_VISITA_VALIDOS = ['sin_visita', 'presupuestada', 'vendido', 'instalado', 'cancelada'];
+const ALIAS_ESTADO_LEGACY = { agendada: 'sin_visita', confirmada: 'vendido' };
+function normalizarEstadoVisita(estado) {
+  if (!estado) return estado;
+  return ALIAS_ESTADO_LEGACY[estado] || estado;
+}
+
+// Si una visita ya está "vendido" (generó Obra) y esa Obra ya tiene todas
+// sus tareas terminadas, la pasa sola a "instalado" — así el estado de la
+// visita refleja el avance real sin que nadie tenga que ir a tocarlo a mano.
+// Muta los documentos de `lista` en memoria (para la respuesta) y persiste
+// el cambio en Mongo para las próximas consultas/filtros/orden.
+async function sincronizarInstalacion(db, lista) {
+  const pendientes = lista.filter(v => v.estado === 'vendido' && v.obraId);
+  if (!pendientes.length) return lista;
+  const obras = await db.collection('obras')
+    .find({ _id: { $in: pendientes.map(v => v.obraId) } })
+    .project({ tareas: 1 })
+    .toArray();
+  const obraPorId = new Map(obras.map(o => [String(o._id), o]));
+  const idsAActualizar = [];
+  for (const v of pendientes) {
+    const obra = obraPorId.get(String(v.obraId));
+    const tareas = obra && obra.tareas;
+    if (tareas && tareas.length && tareas.every(t => t.estado === 'terminada')) {
+      v.estado = 'instalado';
+      idsAActualizar.push(v._id);
+    }
+  }
+  if (idsAActualizar.length) {
+    await db.collection('visitas').updateMany(
+      { _id: { $in: idsAActualizar } },
+      { $set: { estado: 'instalado', updatedAt: new Date() } }
+    );
+  }
+  return lista;
+}
+
 async function siguienteNumeroVisita() {
   return conReintento(async () => {
     const db = await getDb();
@@ -120,6 +175,26 @@ function authAdmin(req, res, next) {
   if (!pass) return res.status(500).json({ error: 'OBRAS_ADMIN_PASSWORD no está configurada en el servidor' });
   if (token !== pass) return res.status(401).json({ error: 'No autorizado' });
   next();
+}
+
+// Duración por defecto de una visita en el calendario, cuando no tenemos
+// otra forma de saber cuánto va a durar.
+const DURACION_VISITA_MS = 60 * 60 * 1000; // 1 hora
+
+// Arma los campos del evento de Google Calendar a partir de una visita
+// (o de la fusión de la visita actual con los cambios que se le van a aplicar).
+function eventoDeVisita(v) {
+  return {
+    titulo: `Visita: ${v.cliente.nombre}`,
+    descripcion: [
+      `Vendedor: ${v.vendedorNombre || '-'}`,
+      v.cliente.telefono ? `Teléfono: ${v.cliente.telefono}` : null,
+      v.notasEmpleada ? `Notas: ${v.notasEmpleada}` : null
+    ].filter(Boolean).join('\n'),
+    ubicacion: v.cliente.direccion || '',
+    inicio: v.fechaHora,
+    fin: new Date(new Date(v.fechaHora).getTime() + DURACION_VISITA_MS)
+  };
 }
 
 // Campos del objeto "obra" de una cotización (ver cotizador.js) que pueden
@@ -304,8 +379,11 @@ router.get('/', authAdmin, async (req, res) => {
     const { vendedorId, estado, desde, hasta, q } = req.query;
     const match = {};
     if (vendedorId) match.vendedorId = toObjectId(vendedorId);
-    if (estado) match.estado = estado;
-    if (q) match['cliente.nombre'] = { $regex: q, $options: 'i' };
+    if (estado) match.estado = normalizarEstadoVisita(estado);
+    if (q) {
+      const rx = { $regex: escapeRegex(q), $options: 'i' };
+      match.$or = [{ 'cliente.nombre': rx }, { 'cliente.telefono': rx }];
+    }
     if (desde || hasta) {
       match.fechaHora = {};
       if (desde) match.fechaHora.$gte = new Date(desde);
@@ -313,7 +391,8 @@ router.get('/', authAdmin, async (req, res) => {
     }
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('visitas').find(match).sort({ fechaHora: 1 }).toArray();
+      const lista = await db.collection('visitas').find(match).sort({ fechaHora: 1 }).toArray();
+      return sincronizarInstalacion(db, lista);
     });
     res.json(lista);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -345,7 +424,10 @@ router.get('/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const visita = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('visitas').findOne({ _id: id });
+      const doc = await db.collection('visitas').findOne({ _id: id });
+      if (!doc) return null;
+      const [sincronizada] = await sincronizarInstalacion(db, [doc]);
+      return sincronizada;
     });
     if (!visita) throw err(404, 'Visita no encontrada');
     res.json(visita);
@@ -379,14 +461,16 @@ router.post('/', authAdmin, async (req, res) => {
         vendedorNombre: vendedor.nombre,
         fechaHora: new Date(fechaHora),
         notasEmpleada: notasEmpleada || '',
-        estado: 'agendada',
+        estado: 'sin_visita',
         fotos: [],
         presupuesto: null,
         obraId: null,
         confirmadaPor: null,
+        googleEventId: null,
         createdAt: new Date(),
         updatedAt: new Date()
       };
+      doc.googleEventId = await googleCalendar.upsertEvento(null, eventoDeVisita(doc));
       const r = await db.collection('visitas').insertOne(doc);
       doc._id = r.insertedId;
       return doc;
@@ -404,12 +488,27 @@ router.put('/:id', authAdmin, async (req, res) => {
     if (cliente) set.cliente = cliente;
     if (fechaHora) set.fechaHora = new Date(fechaHora);
     if (notasEmpleada !== undefined) set.notasEmpleada = notasEmpleada;
+    let estadoNorm = null;
     if (estado) {
-      if (!['agendada', 'presupuestada', 'confirmada', 'cancelada'].includes(estado)) throw err(400, 'Estado inválido');
-      set.estado = estado;
+      estadoNorm = normalizarEstadoVisita(estado);
+      if (!ESTADOS_VISITA_VALIDOS.includes(estadoNorm)) throw err(400, 'Estado inválido');
+      set.estado = estadoNorm;
     }
     const actualizado = await conReintento(async () => {
       const db = await getDb();
+      const actual = await db.collection('visitas').findOne({ _id: id });
+      if (!actual) throw err(404, 'Visita no encontrada');
+
+      // "Vendido" es el estado que dispara la creación de la Obra — si
+      // todavía no existe esa Obra para esta visita, este PUT genérico no
+      // alcanza (faltaría armar las tareas a partir del presupuesto), así
+      // que se pide usar la acción de "Confirmar obra" en su lugar. Si la
+      // Obra ya existe (por ej. se está volviendo de "instalado" a
+      // "vendido" a mano), se deja pasar como un cambio de estado normal.
+      if (estadoNorm === 'vendido' && !actual.obraId) {
+        throw err(400, 'Para pasar a "Vendido" primero hay que confirmar la obra (botón "Confirmar obra"), que necesita el presupuesto ya cargado.');
+      }
+
       if (vendedorId) {
         const vId = toObjectId(vendedorId);
         const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
@@ -417,6 +516,17 @@ router.put('/:id', authAdmin, async (req, res) => {
         set.vendedorId = vId;
         set.vendedorNombre = vendedor.nombre;
       }
+
+      // Sincroniza el evento de Google Calendar con los datos que va a
+      // tener la visita después de este cambio.
+      if (set.estado === 'cancelada') {
+        await googleCalendar.eliminarEvento(actual.googleEventId);
+        set.googleEventId = null;
+      } else {
+        const fusion = { ...actual, ...set };
+        set.googleEventId = await googleCalendar.upsertEvento(actual.googleEventId, eventoDeVisita(fusion));
+      }
+
       await db.collection('visitas').updateOne({ _id: id }, { $set: set });
       return db.collection('visitas').findOne({ _id: id });
     });
@@ -482,7 +592,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/fotos', async (req, res) => {
     if (!Array.isArray(fotos) || !fotos.length) throw err(400, 'No llegaron fotos');
     const nuevas = fotos
       .filter(f => typeof f === 'string' && f.indexOf('data:image/') === 0)
-      .map(f => ({ data: f, fecha: new Date() }));
+      .map(f => ({ data: f, fecha: new Date(), origen: 'vendedor' }));
     if (!nuevas.length) throw err(400, 'Formato de foto inválido');
 
     const resultado = await conReintento(async () => {
@@ -511,28 +621,39 @@ router.delete('/vendedor/:vendedorId/visitas/:id/fotos/:index', async (req, res)
 });
 
 // Presupuesto cargado a mano, sin pasar por el cotizador.
-// items: [{ tipoTrabajo, m2, precioCliente }]
+// items: [{ tipoTrabajo (= "producto", del catálogo de tipos de trabajo),
+//           descripcion, cantidad, valor }]
+// "cantidad" reemplaza a los m² de antes (sigue siendo lo que se usa para
+// armar la tarea de la Obra y calcular el costo del colocador), "valor" es
+// el precio unitario que carga el vendedor, y "total" (cantidad × valor) se
+// calcula acá, nunca se toma del cliente.
 router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', async (req, res) => {
   try {
     const { items, notas } = req.body || {};
-    if (!Array.isArray(items) || !items.length) throw err(400, 'Agregá al menos un tipo de trabajo');
+    if (!Array.isArray(items) || !items.length) throw err(400, 'Agregá al menos un producto');
     for (const it of items) {
-      if (!it.tipoTrabajo) throw err(400, 'Falta el tipo de trabajo en un ítem');
-      if (!(Number(it.m2) > 0)) throw err(400, `Ingresá los m² de "${it.tipoTrabajo}"`);
+      if (!it.tipoTrabajo) throw err(400, 'Falta el producto en un ítem');
+      if (!(Number(it.cantidad) > 0)) throw err(400, `Ingresá la cantidad de "${it.tipoTrabajo}"`);
     }
-    const itemsFinales = items.map(it => ({
-      tipoTrabajo: it.tipoTrabajo,
-      m2: Number(it.m2),
-      precioCliente: Number(it.precioCliente) || 0
-    }));
-    const total = itemsFinales.reduce((s, it) => s + it.precioCliente, 0);
+    const itemsFinales = items.map(it => {
+      const cantidad = Number(it.cantidad);
+      const valor = Number(it.valor) || 0;
+      return {
+        tipoTrabajo: it.tipoTrabajo,
+        descripcion: it.descripcion || '',
+        cantidad,
+        valor,
+        total: Math.round(cantidad * valor * 100) / 100
+      };
+    });
+    const total = itemsFinales.reduce((s, it) => s + it.total, 0);
     const presupuesto = { tipo: 'manual', items: itemsFinales, total, notas: notas || '', fecha: new Date() };
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const visita = await visitaDelVendedor(db, req.params.id, req.params.vendedorId);
       const set = { presupuesto, updatedAt: new Date() };
-      if (visita.estado === 'agendada') set.estado = 'presupuestada';
+      if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });
@@ -566,7 +687,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
         fecha: new Date()
       };
       const set = { presupuesto, updatedAt: new Date() };
-      if (visita.estado === 'agendada') set.estado = 'presupuestada';
+      if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });
@@ -609,7 +730,7 @@ async function tareasDesdeMapeo(db, presupuesto) {
 }
 
 function tareasDesdeManual(presupuesto) {
-  return presupuesto.items.map(it => ({ tipoTrabajo: it.tipoTrabajo, m2Presupuestados: it.m2 }));
+  return presupuesto.items.map(it => ({ tipoTrabajo: it.tipoTrabajo, m2Presupuestados: it.cantidad }));
 }
 
 async function confirmarVisita(visitaIdStr, confirmadaPor) {
@@ -620,7 +741,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     const db = await getDb();
     const visita = await db.collection('visitas').findOne({ _id: visitaId });
     if (!visita) throw err(404, 'Visita no encontrada');
-    if (visita.estado === 'confirmada') throw err(400, 'Esta visita ya fue confirmada');
+    if (visita.estado === 'vendido' || visita.estado === 'instalado') throw err(400, 'Esta visita ya fue confirmada');
     if (visita.estado === 'cancelada') throw err(400, 'Esta visita está cancelada');
     if (!visita.presupuesto) throw err(400, 'Todavía no se cargó el presupuesto de esta visita');
 
@@ -634,13 +755,14 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       m2Presupuestados: Number(t.m2Presupuestados) || 0,
       colocadorId: null,
       costoPorM2Aplicado: null,
-      estado: 'pendiente',
+      estado: 'pendiente', // pendiente -> en_curso -> terminada
       fechaInicio: null,
       fechaFinEstimada: null,
       fechaFinReal: null,
-      m2Realizados: 0,
       notas: '',
-      avances: []
+      observaciones: '',
+      materiales: [],
+      googleEventId: null
     }));
 
     const numero = await siguienteNumeroObra();
@@ -667,9 +789,14 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     const r = await db.collection('obras').insertOne(obraDoc);
     obraDoc._id = r.insertedId;
 
+    // La visita ya se convirtió en Obra: se borra su evento de Calendar acá
+    // (las fechas de trabajo de la Obra se sincronizan aparte, por tarea,
+    // desde obras.js cuando se le asigna colocador).
+    await googleCalendar.eliminarEvento(visita.googleEventId);
+
     await db.collection('visitas').updateOne(
       { _id: visita._id },
-      { $set: { estado: 'confirmada', obraId: r.insertedId, confirmadaPor, updatedAt: new Date() } }
+      { $set: { estado: 'vendido', obraId: r.insertedId, confirmadaPor, googleEventId: null, updatedAt: new Date() } }
     );
 
     return { visita: await db.collection('visitas').findOne({ _id: visita._id }), obra: obraDoc };
