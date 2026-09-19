@@ -11,8 +11,9 @@
 //   - obras_tipos_trabajo : catálogo de tipos de trabajo (colocación de
 //                           piedras, placas, pisos, etc.)
 //   - obras               : una obra por documento (cliente, tareas —cada
-//                           tarea con su colocador asignado, m2 presupuestados
-//                           y realizados, estado, fechas y avances embebidos)
+//                           tarea con su colocador asignado, m2 presupuestados,
+//                           estado (pendiente/en_curso/terminada), materiales
+//                           a llevar y observaciones)
 //   - obras_counters      : solo guarda el correlativo del número de obra
 //
 // Integración (en server.js):
@@ -128,6 +129,9 @@ async function authColocador(req, res, next) {
   req.colocador = colocador;
   next();
 }
+
+const ESTADOS_TAREA_VALIDOS = ['pendiente', 'en_curso', 'terminada'];
+const MAX_FOTOS_OBRA = 20; // combinadas: fotos "antes" (vendedor) + "después" (colocador)
 
 // Busca el costo por m2 vigente de un colocador para un tipo de trabajo dado
 function costoVigente(colocador, tipoTrabajo) {
@@ -387,14 +391,13 @@ router.post('/', authAdmin, async (req, res) => {
       m2Presupuestados: Number(t.m2Presupuestados) || 0,
       colocadorId: null,
       costoPorM2Aplicado: null,
-      estado: 'pendiente', // pendiente -> asignada -> en_curso -> terminada
+      estado: 'pendiente', // pendiente -> en_curso -> terminada
       fechaInicio: null,
       fechaFinEstimada: t.fechaFinEstimada ? new Date(t.fechaFinEstimada) : null,
       fechaFinReal: null,
-      m2Realizados: 0,
       notas: t.notas || '',
+      observaciones: '', // algo que haya quedado pendiente/a aclarar al terminar
       materiales: normalizarMateriales(t.materiales), // productos que el colocador debe llevar: [{tipo, cantidad}]
-      avances: [],
       googleEventId: null
     }));
     const doc = {
@@ -459,10 +462,9 @@ router.post('/:id/tareas', authAdmin, async (req, res) => {
       fechaInicio: null,
       fechaFinEstimada: fechaFinEstimada ? new Date(fechaFinEstimada) : null,
       fechaFinReal: null,
-      m2Realizados: 0,
       notas: notas || '',
+      observaciones: '',
       materiales: normalizarMateriales(materiales),
-      avances: [],
       googleEventId: null
     };
     await conReintento(async () => {
@@ -487,13 +489,12 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
       const tarea = (obra.tareas || []).find(t => String(t._id) === String(tareaId));
       if (!tarea) throw Object.assign(new Error('Tarea no encontrada'), { status: 404 });
 
-      const { colocadorId, m2Presupuestados, fechaFinEstimada, notas, estado, materiales } = req.body || {};
+      const { colocadorId, m2Presupuestados, fechaFinEstimada, notas, observaciones, estado, materiales } = req.body || {};
 
       if (colocadorId !== undefined) {
         if (colocadorId === null) {
           tarea.colocadorId = null;
           tarea.costoPorM2Aplicado = null;
-          if (tarea.estado === 'asignada') tarea.estado = 'pendiente';
         } else {
           const cId = toObjectId(colocadorId);
           const colocador = await db.collection('obras_colocadores').findOne({ _id: cId });
@@ -504,14 +505,15 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
           }
           tarea.colocadorId = cId;
           tarea.costoPorM2Aplicado = costo;
-          if (tarea.estado === 'pendiente') tarea.estado = 'asignada';
         }
       }
       if (m2Presupuestados !== undefined) tarea.m2Presupuestados = Number(m2Presupuestados) || 0;
       if (fechaFinEstimada !== undefined) tarea.fechaFinEstimada = fechaFinEstimada ? new Date(fechaFinEstimada) : null;
       if (notas !== undefined) tarea.notas = notas;
+      if (observaciones !== undefined) tarea.observaciones = observaciones;
       if (materiales !== undefined) tarea.materiales = normalizarMateriales(materiales);
       if (estado !== undefined) {
+        if (!ESTADOS_TAREA_VALIDOS.includes(estado)) throw Object.assign(new Error('Estado inválido'), { status: 400 });
         tarea.estado = estado;
         if (estado === 'en_curso' && !tarea.fechaInicio) tarea.fechaInicio = new Date();
         if (estado === 'terminada' && !tarea.fechaFinReal) tarea.fechaFinReal = new Date();
@@ -545,18 +547,6 @@ router.delete('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Cargar avance manualmente desde el panel de administración
-router.post('/:obraId/tareas/:tareaId/avances', authAdmin, async (req, res) => {
-  try {
-    const { m2, nota, fecha } = req.body || {};
-    const resultado = await agregarAvance(req.params.obraId, req.params.tareaId, {
-      m2: Number(m2) || 0, nota: nota || '', fecha: fecha ? new Date(fecha) : new Date(),
-      registradoPor: 'Oficina'
-    });
-    res.json(resultado);
-  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
-});
-
 // ---------------------------------------------------------------------
 // COLOCADOR (acceso mobile con PIN)
 // ---------------------------------------------------------------------
@@ -573,29 +563,21 @@ router.get('/colocador/mis-obras', authColocador, async (req, res) => {
       obraId: o._id,
       numero: o.numero,
       cliente: o.cliente,
-      fotos: o.fotos || [], // heredadas de la visita, si la obra vino de ahí
+      fotos: o.fotos || [], // heredadas de la visita ("antes") + las que suba este colocador ("después")
       tareas: (o.tareas || []).filter(t => t.colocadorId && String(t.colocadorId) === String(colocadorId))
     })).filter(o => o.tareas.length > 0);
     res.json(resultado);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/colocador/tareas/:obraId/:tareaId/avance', authColocador, async (req, res) => {
-  try {
-    const { m2, nota } = req.body || {};
-    if (!m2 || Number(m2) <= 0) return res.status(400).json({ error: 'Ingresá los m² realizados' });
-    const resultado = await agregarAvance(req.params.obraId, req.params.tareaId, {
-      m2: Number(m2), nota: nota || '', fecha: new Date(), registradoPor: req.colocador.nombre
-    }, req.colocador._id);
-    res.json(resultado);
-  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
-});
-
+// Marca una tarea propia como en curso o terminada. Al terminar, puede
+// mandar una observación (ej: "quedó pendiente colocar el zócalo del
+// pasillo, faltó material") que queda guardada en la tarea.
 router.post('/colocador/tareas/:obraId/:tareaId/estado', authColocador, async (req, res) => {
   try {
     const obraId = toObjectId(req.params.obraId);
     const tareaId = toObjectId(req.params.tareaId);
-    const { estado } = req.body || {};
+    const { estado, observaciones } = req.body || {};
     if (!['en_curso', 'terminada'].includes(estado)) {
       return res.status(400).json({ error: 'Estado inválido' });
     }
@@ -610,6 +592,7 @@ router.post('/colocador/tareas/:obraId/:tareaId/estado', authColocador, async (r
       tarea.estado = estado;
       if (estado === 'en_curso' && !tarea.fechaInicio) tarea.fechaInicio = new Date();
       if (estado === 'terminada' && !tarea.fechaFinReal) tarea.fechaFinReal = new Date();
+      if (observaciones !== undefined) tarea.observaciones = observaciones;
       await db.collection('obras').updateOne({ _id: obraId, 'tareas._id': tareaId }, { $set: { 'tareas.$': tarea, updatedAt: new Date() } });
       return tarea;
     });
@@ -617,67 +600,63 @@ router.post('/colocador/tareas/:obraId/:tareaId/estado', authColocador, async (r
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
-// Helper compartido admin/colocador para registrar un avance de m2.
-// Si se pasa colocadorIdEsperado, valida que la tarea sea de ese colocador.
-async function agregarAvance(obraIdStr, tareaIdStr, avance, colocadorIdEsperado) {
-  const obraId = toObjectId(obraIdStr);
-  const tareaId = toObjectId(tareaIdStr);
-  if (!obraId || !tareaId) throw Object.assign(new Error('id inválido'), { status: 400 });
+// Fotos del trabajo terminado, sacadas por el colocador — quedan en el mismo
+// arreglo obra.fotos que las "antes" heredadas de la visita (sacadas por el
+// vendedor), etiquetadas con origen para poder separarlas en el panel.
+router.post('/colocador/obras/:obraId/fotos', authColocador, async (req, res) => {
+  try {
+    const obraId = toObjectId(req.params.obraId);
+    if (!obraId) return res.status(400).json({ error: 'id inválido' });
+    const { fotos } = req.body || {};
+    if (!Array.isArray(fotos) || !fotos.length) return res.status(400).json({ error: 'No llegaron fotos' });
+    const nuevas = fotos
+      .filter(f => typeof f === 'string' && f.indexOf('data:image/') === 0)
+      .map(f => ({ data: f, fecha: new Date(), origen: 'colocador', colocadorNombre: req.colocador.nombre }));
+    if (!nuevas.length) return res.status(400).json({ error: 'Formato de foto inválido' });
 
-  return conReintento(async () => {
-    const db = await getDb();
-    const obra = await db.collection('obras').findOne({ _id: obraId });
-    if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
-    const tarea = (obra.tareas || []).find(t => String(t._id) === String(tareaId));
-    if (!tarea) throw Object.assign(new Error('Tarea no encontrada'), { status: 404 });
-    if (colocadorIdEsperado && String(tarea.colocadorId) !== String(colocadorIdEsperado)) {
-      throw Object.assign(new Error('Esta tarea no está asignada a tu usuario'), { status: 403 });
-    }
-
-    tarea.avances = tarea.avances || [];
-    tarea.avances.push(avance);
-    tarea.m2Realizados = tarea.avances.reduce((s, a) => s + (a.m2 || 0), 0);
-    if (tarea.estado === 'pendiente' || tarea.estado === 'asignada') {
-      tarea.estado = 'en_curso';
-      if (!tarea.fechaInicio) tarea.fechaInicio = new Date();
-    }
-
-    await db.collection('obras').updateOne(
-      { _id: obraId, 'tareas._id': tareaId },
-      { $set: { 'tareas.$': tarea, updatedAt: new Date() } }
-    );
-    return tarea;
-  });
-}
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const obra = await db.collection('obras').findOne({ _id: obraId });
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+      const tienenTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
+      if (!tienenTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+      const totales = (obra.fotos || []).concat(nuevas).slice(0, MAX_FOTOS_OBRA);
+      await db.collection('obras').updateOne({ _id: obraId }, { $set: { fotos: totales, updatedAt: new Date() } });
+      return totales;
+    });
+    res.json({ fotos: resultado });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
 
 // ---------------------------------------------------------------------
 // REPORTES
 // ---------------------------------------------------------------------
 
-// Metros realizados y monto a pagar, agrupado por colocador + tipo de trabajo,
-// filtrable por rango de fechas y por colocador/tipo específico.
+// Metros presupuestados y monto a pagar, agrupado por colocador + tipo de
+// trabajo, filtrable por rango de fechas y por colocador/tipo específico.
+// La comisión se paga sobre el 100% de los m² presupuestados de cada tarea
+// una vez que queda "Terminada" (ya no hay carga de avances parciales).
 router.get('/reportes/m2', authAdmin, async (req, res) => {
   try {
     const { desde, hasta, colocadorId, tipoTrabajo } = req.query;
 
-    const match = { 'tareas.colocadorId': { $ne: null } };
+    const match = { 'tareas.colocadorId': { $ne: null }, 'tareas.estado': 'terminada' };
     if (desde || hasta) {
-      match['tareas.avances.fecha'] = {};
-      if (desde) match['tareas.avances.fecha'].$gte = new Date(desde);
-      if (hasta) match['tareas.avances.fecha'].$lte = new Date(hasta + 'T23:59:59');
+      match['tareas.fechaFinReal'] = {};
+      if (desde) match['tareas.fechaFinReal'].$gte = new Date(desde);
+      if (hasta) match['tareas.fechaFinReal'].$lte = new Date(hasta + 'T23:59:59');
     }
     if (colocadorId) match['tareas.colocadorId'] = toObjectId(colocadorId);
     if (tipoTrabajo) match['tareas.tipoTrabajo'] = tipoTrabajo;
 
     const pipeline = [
       { $unwind: '$tareas' },
-      { $unwind: '$tareas.avances' },
       { $match: match },
       {
         $group: {
           _id: { colocadorId: '$tareas.colocadorId', tipoTrabajo: '$tareas.tipoTrabajo' },
-          m2Total: { $sum: '$tareas.avances.m2' },
-          montoTotal: { $sum: { $multiply: ['$tareas.avances.m2', { $ifNull: ['$tareas.costoPorM2Aplicado', 0] }] } }
+          m2Total: { $sum: '$tareas.m2Presupuestados' },
+          montoTotal: { $sum: { $multiply: ['$tareas.m2Presupuestados', { $ifNull: ['$tareas.costoPorM2Aplicado', 0] }] } }
         }
       }
     ];
