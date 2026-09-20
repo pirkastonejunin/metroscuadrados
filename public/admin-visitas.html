@@ -4,103 +4,65 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Visitas - Piedra Negra</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
-    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
-    --ok:#1f8a5f; --ok-soft:#e1f5ea;
-    --danger:#c53030; --danger-soft:#fbe4e1;
-    --info:#1d4ed8; --info-soft:#dbeafe;
-    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+    --bg:#f4f5f7; --card:#ffffff; --text:#1f2430; --muted:#6b7280;
+    --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742;
+    --danger:#b3392c; --warn:#b8860b; --ok:#1f6f54; --info:#2255aa;
   }
   *{box-sizing:border-box;}
-  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
-  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
-  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
-  header .logo{height:22px;width:auto;display:block;flex-shrink:0;}
-  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
-  header button:hover{border-color:var(--danger);color:var(--danger);}
-  nav{display:flex;gap:4px;background:var(--card);border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto;}
-  nav button{background:none;border:none;padding:13px 14px;font-size:13.5px;font-family:inherit;font-weight:600;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;}
-  nav button.active{color:var(--accent);border-bottom-color:var(--accent);}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;}
+  header{background:var(--primary-dark);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;}
+  header h1{font-size:18px;margin:0;font-weight:600;}
+  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;}
+  nav{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--border);padding:0 16px;}
+  nav button{background:none;border:none;padding:12px 14px;font-size:14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  nav button.active{color:var(--primary-dark);border-bottom-color:var(--primary-dark);font-weight:600;}
   main{padding:20px;max-width:1200px;margin:0 auto;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
-  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  input,select,textarea{padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:14px;width:100%;background:#fff;color:var(--text);}
   textarea{min-height:50px;font-family:inherit;}
-  button.btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
-  button.btn:hover{filter:brightness(0.94);}
-  button.btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  button.btn{background:var(--primary);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;}
+  button.btn:hover{background:var(--primary-dark);}
+  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
   button.btn.danger{background:var(--danger);}
-  button.btn.small{padding:5px 10px;font-size:12px;}
+  button.btn.small{padding:4px 9px;font-size:12px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
-  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
-  tr:hover td{background:var(--bg);}
-  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
-  .pill.sin_visita,.pill.agendada{background:var(--bg);color:var(--muted);}
-  .pill.presupuestada{background:var(--accent-soft);color:var(--accent);}
-  .pill.vendido,.pill.confirmada{background:var(--ok-soft);color:var(--ok);}
-  .pill.instalado{background:var(--info-soft);color:var(--info);}
-  .pill.cancelada{background:var(--danger-soft);color:var(--danger);}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em;}
+  tr:hover td{background:#fafbfc;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+  .pill.agendada{background:#eee;color:#555;}
+  .pill.presupuestada{background:#fff4d6;color:var(--warn);}
+  .pill.confirmada{background:#e3f3ec;color:var(--ok);}
+  .pill.cancelada{background:#fbe4e1;color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
-  th.sortable{cursor:pointer;user-select:none;white-space:nowrap;}
-  th.sortable:hover{color:var(--text);}
-  th.sortable .arrow{display:inline-block;width:10px;opacity:.6;}
-  .btn.whatsapp{background:#25D366;color:#fff;}
-  .btn.whatsapp:hover{filter:brightness(0.95);}
-  .estado-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;}
-  .campo-edit{margin-bottom:8px;}
   .hidden{display:none !important;}
-  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
-  .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:#fff;border-radius:10px;padding:20px;max-width:680px;width:100%;}
   .modal h2{margin-top:0;font-size:16px;}
   .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
   .err{color:var(--danger);font-size:13px;margin:6px 0;}
   .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
-  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
-  #loginScreen .card{width:300px;text-align:center;}
-  #loginScreen .logo{height:26px;width:auto;margin:0 auto 16px;display:block;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;}
+  #loginScreen .card{width:300px;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .agenda-item{border-left:3px solid var(--border);padding:6px 10px;margin-bottom:6px;font-size:13px;border-radius:0 8px 8px 0;}
-  .agenda-item.agendada{border-color:var(--muted);}
-  .agenda-item.presupuestada{border-color:var(--accent);}
+  .agenda-item{border-left:3px solid var(--border);padding:6px 10px;margin-bottom:6px;font-size:13px;}
+  .agenda-item.agendada{border-color:#999;}
+  .agenda-item.presupuestada{border-color:var(--warn);}
   .agenda-item.confirmada{border-color:var(--ok);}
   .regla-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
-      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
-      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
-      --info:#7fa8ff; --info-soft:#1c2a4a;
-      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
-    }
-    :root:not([data-theme="light"]) .logo{filter:invert(1);}
-  }
-  :root[data-theme="dark"] {
-    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
-    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
-    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
-    --info:#7fa8ff; --info-soft:#1c2a4a;
-    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
-  }
-  :root[data-theme="dark"] .logo{filter:invert(1);}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;}
 </style>
 </head>
 <body>
 
 <div id="loginScreen">
   <div class="card">
-    <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
-    <h2 style="margin-top:0;margin-bottom:14px">Visitas</h2>
+    <h2 style="margin-top:0">Visitas</h2>
     <label>Contraseña de administración</label>
     <input type="password" id="loginPass" onkeydown="if(event.key==='Enter')login()">
     <div class="err" id="loginErr"></div>
@@ -111,10 +73,7 @@
 
 <div id="app" class="hidden">
   <header>
-    <div class="brand">
-      <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
-      <h1>Visitas</h1>
-    </div>
+    <h1>Visitas — Piedra Negra</h1>
     <button onclick="logout()">Cerrar sesión</button>
   </header>
   <nav>
@@ -128,15 +87,14 @@
     <section id="tab-visitas">
       <div class="card">
         <div class="row">
-          <div style="flex:1;min-width:160px"><label>Buscar cliente o teléfono</label><input id="fVisQ" oninput="cargarVisitas()"></div>
+          <div style="flex:1;min-width:160px"><label>Buscar cliente</label><input id="fVisQ" oninput="cargarVisitas()"></div>
           <div style="min-width:160px"><label>Vendedor</label><select id="fVisVendedor" onchange="cargarVisitas()"><option value="">Todos</option></select></div>
           <div style="min-width:160px"><label>Estado</label>
             <select id="fVisEstado" onchange="cargarVisitas()">
               <option value="">Todos</option>
-              <option value="sin_visita">Sin visita</option>
+              <option value="agendada">Agendada</option>
               <option value="presupuestada">Presupuestada</option>
-              <option value="vendido">Vendido</option>
-              <option value="instalado">Instalado</option>
+              <option value="confirmada">Confirmada</option>
               <option value="cancelada">Cancelada</option>
             </select>
           </div>
@@ -145,16 +103,7 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr>
-            <th class="sortable" data-campo="numero" onclick="ordenarVisitas('numero')">#<span class="arrow" id="arrow-numero"></span></th>
-            <th class="sortable" data-campo="cliente" onclick="ordenarVisitas('cliente')">Cliente<span class="arrow" id="arrow-cliente"></span></th>
-            <th class="sortable" data-campo="direccion" onclick="ordenarVisitas('direccion')">Dirección<span class="arrow" id="arrow-direccion"></span></th>
-            <th class="sortable" data-campo="telefono" onclick="ordenarVisitas('telefono')">Teléfono<span class="arrow" id="arrow-telefono"></span></th>
-            <th class="sortable" data-campo="vendedor" onclick="ordenarVisitas('vendedor')">Vendedor<span class="arrow" id="arrow-vendedor"></span></th>
-            <th class="sortable" data-campo="fechaHora" onclick="ordenarVisitas('fechaHora')">Fecha y hora<span class="arrow" id="arrow-fechaHora"></span></th>
-            <th class="sortable" data-campo="estado" onclick="ordenarVisitas('estado')">Estado<span class="arrow" id="arrow-estado"></span></th>
-            <th></th>
-          </tr></thead>
+          <thead><tr><th>#</th><th>Cliente</th><th>Dirección</th><th>Vendedor</th><th>Fecha y hora</th><th>Estado</th><th></th></tr></thead>
           <tbody id="visitasBody"></tbody>
         </table>
       </div>
@@ -267,78 +216,6 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
 
-function escapeHtml(s){
-  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// Para precargar un <input type="datetime-local"> con la fecha guardada
-// (formato local, sin zona horaria ni segundos).
-function toDatetimeLocal(fechaISO){
-  if (!fechaISO) return '';
-  const d = new Date(fechaISO);
-  if (isNaN(d.getTime())) return '';
-  const pad = n => String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// ---------------- Recordatorio al cliente (WhatsApp + agregar a calendario) ----------------
-// No hay una integración de envío automático de WhatsApp/SMS (eso requiere
-// contratar la API de WhatsApp Business o algo como Twilio) — lo que arma
-// esta función es el mensaje ya redactado y el link de WhatsApp con todo
-// cargado, para que alguien del local lo abra y solo tenga que tocar
-// "Enviar", igual que ya hace el cotizador para compartir una cotización.
-
-// Heurística de normalización para Argentina: WhatsApp necesita el número
-// completo con código de país (54) + 9 para celulares. Si el teléfono ya
-// viene con el 54 lo deja como está; si no, se lo agrega. No es infalible
-// con todos los formatos que puede tipear una empleada, así que si el link
-// no abre bien el chat esperado, conviene revisar el teléfono cargado.
-function normalizarTelefonoWA(telefono){
-  let d = String(telefono||'').replace(/\D/g, '');
-  if (!d) return '';
-  if (d.startsWith('54')) return d;
-  if (d.startsWith('0')) d = d.slice(1);
-  d = d.replace(/^(\d{2,4})15/, '$1'); // saca el "15" de celular si está (ej: 236-15-1234567)
-  return '549' + d;
-}
-
-function linkCalendarioGoogle(v){
-  const inicio = new Date(v.fechaHora);
-  const fin = new Date(inicio.getTime() + 60*60*1000); // 1 hora, mismo default que el evento del servidor
-  const fmt = d => d.toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: 'Visita Grupo Piedra Negra — ' + v.cliente.nombre,
-    dates: fmt(inicio) + '/' + fmt(fin),
-    details: 'Visita coordinada con Grupo Piedra Negra.' + (v.vendedorNombre ? (' Asesor: ' + v.vendedorNombre + '.') : ''),
-    location: v.cliente.direccion || ''
-  });
-  return 'https://www.google.com/calendar/render?' + params.toString();
-}
-
-function mensajeRecordatorioVisita(v){
-  const fecha = v.fechaHora ? new Date(v.fechaHora).toLocaleDateString('es-AR',{weekday:'long', day:'2-digit', month:'2-digit'}) : '';
-  const hora = v.fechaHora ? new Date(v.fechaHora).toLocaleTimeString('es-AR',{hour:'2-digit', minute:'2-digit'}) : '';
-  return `¡Hola ${v.cliente.nombre}! 👋 Te saluda *Grupo Piedra Negra*.\n\n`+
-    `Te escribimos para recordarte tu visita:\n`+
-    `📅 ${fecha}\n`+
-    `🕐 ${hora} hs\n`+
-    `📍 ${v.cliente.direccion||''}\n`+
-    (v.vendedorNombre ? `🧑‍💼 Te va a visitar: ${v.vendedorNombre}\n` : '')+
-    `\nAgendalo en tu calendario acá: ${linkCalendarioGoogle(v)}\n\n`+
-    `¡Gracias por elegirnos, te esperamos!`;
-}
-
-function linkWhatsappRecordatorio(v){
-  const tel = normalizarTelefonoWA(v.cliente.telefono);
-  const texto = encodeURIComponent(mensajeRecordatorioVisita(v));
-  return tel ? `https://wa.me/${tel}?text=${texto}` : `https://wa.me/?text=${texto}`;
-}
-function botonWhatsappRecordatorio(v){
-  if (!v.cliente.telefono) return '';
-  return `<a class="btn whatsapp small" href="${linkWhatsappRecordatorio(v)}" target="_blank" rel="noopener">💬 Enviar recordatorio por WhatsApp</a>`;
-}
-
 // ---------------- VENDEDORES ----------------
 
 async function cargarVendedores(){
@@ -374,36 +251,7 @@ async function cargarTiposTrabajo(){
 
 // ---------------- VISITAS ----------------
 
-const ESTADOS_VISITA = {sin_visita:'Sin visita', presupuestada:'Presupuestada', vendido:'Vendido', instalado:'Instalado', cancelada:'Cancelada',
-  // alias por compatibilidad, por si algún documento viejo todavía tiene el nombre anterior
-  agendada:'Sin visita', confirmada:'Vendido'};
-
-let VISITAS_ACTUALES = [];
-let sortCampo = 'fechaHora';
-let sortDir = 1; // 1 asc, -1 desc
-
-function valorOrden(v, campo){
-  switch(campo){
-    case 'numero': return v.numero||0;
-    case 'cliente': return (v.cliente.nombre||'').toLowerCase();
-    case 'direccion': return (v.cliente.direccion||'').toLowerCase();
-    case 'telefono': return (v.cliente.telefono||'').toLowerCase();
-    case 'vendedor': return (v.vendedorNombre||'').toLowerCase();
-    case 'fechaHora': return v.fechaHora ? new Date(v.fechaHora).getTime() : 0;
-    case 'estado': return v.estado||'';
-    default: return '';
-  }
-}
-function ordenarVisitas(campo){
-  if (sortCampo === campo) sortDir = -sortDir;
-  else { sortCampo = campo; sortDir = 1; }
-  renderVisitasTabla();
-}
-function actualizarFlechasOrden(){
-  document.querySelectorAll('th.sortable .arrow').forEach(el => el.textContent = '');
-  const el = document.getElementById('arrow-'+sortCampo);
-  if (el) el.textContent = sortDir === 1 ? '▲' : '▼';
-}
+const ESTADOS_VISITA = {agendada:'Agendada', presupuestada:'Presupuestada', confirmada:'Confirmada', cancelada:'Cancelada'};
 
 async function cargarVisitas(){
   const params = new URLSearchParams();
@@ -413,28 +261,17 @@ async function cargarVisitas(){
   if (q) params.set('q', q);
   if (vendedorId) params.set('vendedorId', vendedorId);
   if (estado) params.set('estado', estado);
-  VISITAS_ACTUALES = await api('?' + params.toString());
-  renderVisitasTabla();
-}
-function renderVisitasTabla(){
-  const visitas = VISITAS_ACTUALES.slice().sort((a,b) => {
-    const va = valorOrden(a, sortCampo), vb = valorOrden(b, sortCampo);
-    if (va < vb) return -1*sortDir;
-    if (va > vb) return 1*sortDir;
-    return 0;
-  });
+  const visitas = await api('?' + params.toString());
   document.getElementById('visitasBody').innerHTML = visitas.map(v => `
     <tr>
       <td>#${v.numero}</td>
       <td>${v.cliente.nombre}</td>
       <td>${v.cliente.direccion||''}</td>
-      <td>${v.cliente.telefono||'<span class="muted">—</span>'}</td>
       <td>${v.vendedorNombre||''}</td>
       <td>${fmtFecha(v.fechaHora)}</td>
       <td><span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]||v.estado}</span></td>
       <td><button class="btn small secondary" onclick="abrirVisita('${v._id}')">Ver</button></td>
-    </tr>`).join('') || '<tr><td colspan="8" class="muted">Sin visitas para este filtro</td></tr>';
-  actualizarFlechasOrden();
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Sin visitas para este filtro</td></tr>';
 }
 
 async function verAgendaVendedor(vendedorId, contenedorId){
@@ -484,33 +321,14 @@ async function guardarVisitaNueva(){
     notasEmpleada: document.getElementById('nVisNotas').value.trim()
   };
   try{
-    const creada = await api('', {method:'POST', body});
+    await api('', {method:'POST', body});
+    cerrarModal();
     cargarVisitas();
-    // En vez de cerrar el modal sin más, se deja lista la posibilidad de
-    // avisarle al cliente al toque, con el mensaje de bienvenida + recordatorio
-    // ya armado y el link para que se lo agende en su calendario.
-    modal(`
-      <span class="close-x" onclick="cerrarModal()">✕</span>
-      <h2>¡Visita #${creada.numero} creada!</h2>
-      <p class="muted">Ya podés avisarle al cliente y ofrecerle agendar la visita en su calendario.</p>
-      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-        ${botonWhatsappRecordatorio(creada)}
-        <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
-      </div>
-    `);
   }catch(e){ document.getElementById('nVisErr').textContent = e.message; }
 }
 
-let VISITA_DETALLE_ACTUAL = null;
-
 async function abrirVisita(id){
   const v = await api('/'+id);
-  VISITA_DETALLE_ACTUAL = v;
-  renderDetalleVisita(v, false);
-}
-
-function renderDetalleVisita(v, editando){
-  VISITA_DETALLE_ACTUAL = v;
   const fotosHtml = (v.fotos && v.fotos.length)
     ? `<div class="foto-galeria">${v.fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
     : '<p class="muted">El vendedor todavía no cargó fotos.</p>';
@@ -519,167 +337,43 @@ function renderDetalleVisita(v, editando){
   if (v.presupuesto){
     if (v.presupuesto.tipo === 'manual'){
       presupuestoHtml = `<b>Presupuesto manual</b> — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}<br>` +
-        v.presupuesto.items.map(it=>`${escapeHtml(it.tipoTrabajo)}${it.descripcion?' ('+escapeHtml(it.descripcion)+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>');
+        v.presupuesto.items.map(it=>`${it.tipoTrabajo}: ${it.m2} — $${(it.precioCliente||0).toLocaleString('es-AR')}`).join('<br>');
     } else {
-      presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${escapeHtml(v.presupuesto.tipoObraNombre||'')} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}`;
+      presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${v.presupuesto.tipoObraNombre||''} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}`;
     }
   }
 
-  // "Vendido" desde acá pasa por confirmarVisita (necesita generar la Obra
-  // con el presupuesto ya cargado); "Cancelada" pasa por cancelarVisita
-  // (pide confirmación y limpia el evento de Google Calendar). El resto son
-  // cambios de estado simples con un PUT directo — así el local puede
-  // corregir el estado a mano si hace falta, no solo el vendedor.
-  const puedeConfirmar = v.estado === 'presupuestada' && !v.obraId;
-  const puedeCancelar = v.estado !== 'cancelada' && v.estado !== 'instalado';
-  const esCancelada = v.estado === 'cancelada';
-
-  let cuerpoHtml;
-  if (editando){
-    const opcionesVend = VENDEDORES
-      .filter(vd => vd.activo!==false || String(vd._id)===String(v.vendedorId))
-      .map(vd => `<option value="${vd._id}" ${String(vd._id)===String(v.vendedorId)?'selected':''}>${escapeHtml(vd.nombre)}</option>`)
-      .join('');
-    cuerpoHtml = `
-      <div class="grid2">
-        <div><label>Cliente</label><input id="eVisCliente" value="${escapeHtml(v.cliente.nombre)}"></div>
-        <div><label>Teléfono</label><input id="eVisTelefono" value="${escapeHtml(v.cliente.telefono)}"></div>
-        <div style="grid-column:1/-1"><label>Domicilio</label><input id="eVisDireccion" value="${escapeHtml(v.cliente.direccion)}"></div>
-        <div><label>Localidad</label><input id="eVisLocalidad" value="${escapeHtml(v.cliente.localidad)}"></div>
-        <div><label>Vendedor</label><select id="eVisVendedor">${opcionesVend}</select></div>
-        <div style="grid-column:1/-1"><label>Fecha y hora</label><input type="datetime-local" id="eVisFecha" value="${toDatetimeLocal(v.fechaHora)}"></div>
-      </div>
-      <div style="margin-top:10px"><label>Notas para el vendedor</label><textarea id="eVisNotas">${escapeHtml(v.notasEmpleada||'')}</textarea></div>
-      <div class="err" id="visErr"></div>
-      <div style="margin-top:14px;display:flex;gap:8px">
-        <button class="btn" onclick="guardarEdicionVisita('${v._id}')">Guardar cambios</button>
-        <button class="btn secondary" onclick="renderDetalleVisita(VISITA_DETALLE_ACTUAL, false)">Cancelar edición</button>
-      </div>
-    `;
-  } else {
-    cuerpoHtml = `
-      <div class="muted">${escapeHtml(v.cliente.direccion||'')} ${v.cliente.localidad?'· '+escapeHtml(v.cliente.localidad):''} ${v.cliente.telefono?'· '+escapeHtml(v.cliente.telefono):''}</div>
-      <div class="muted">Vendedor: ${escapeHtml(v.vendedorNombre||'')} · ${fmtFecha(v.fechaHora)}</div>
-      ${v.notasEmpleada ? `<div class="muted">Nota: ${escapeHtml(v.notasEmpleada)}</div>` : ''}
-      <div style="margin:12px 0">${fotosHtml}</div>
-      <div style="margin:12px 0">${presupuestoHtml}</div>
-      ${v.obraId ? `<div class="ok-msg">Ya se generó la Obra a partir de esta visita.</div>` : ''}
-      <div class="err" id="visErr"></div>
-
-      <div class="estado-row">
-        <button class="btn small secondary" onclick="renderDetalleVisita(VISITA_DETALLE_ACTUAL, true)">✎ Editar datos</button>
-        ${botonWhatsappRecordatorio(v)}
-      </div>
-
-      ${!esCancelada ? `
-        <div class="estado-row">
-          <label style="margin:0">Cambiar estado:</label>
-          <select id="detEstadoSelect" style="width:auto">
-            ${Object.entries({sin_visita:'Sin visita',presupuestada:'Presupuestada',vendido:'Vendido',instalado:'Instalado',cancelada:'Cancelada'})
-              .map(([val,label]) => `<option value="${val}" ${val===v.estado?'selected':''}>${label}</option>`).join('')}
-          </select>
-          <button class="btn small" onclick="cambiarEstadoVisita('${v._id}')">Guardar estado</button>
-        </div>
-      ` : ''}
-
-      ${puedeConfirmar ? `<div class="estado-row"><button class="btn" onclick="confirmarVisita('${v._id}')">Confirmar obra</button></div>` : ''}
-
-      ${esCancelada ? `
-        <div class="estado-row">
-          <button class="btn small" onclick="mostrarReprogramar('${v._id}')">↻ Reprogramar visita</button>
-        </div>
-        <div id="reprogramarBox"></div>
-      ` : ''}
-
-      <div style="margin-top:14px;display:flex;gap:8px">
-        ${puedeCancelar ? `<button class="btn danger" onclick="cancelarVisita('${v._id}')">Cancelar visita</button>` : ''}
-        <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
-      </div>
-    `;
-  }
+  const puedeConfirmar = v.estado === 'presupuestada';
 
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2>Visita #${v.numero} — ${escapeHtml(v.cliente.nombre)} <span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]}</span></h2>
-    ${cuerpoHtml}
+    <h2>Visita #${v.numero} — ${v.cliente.nombre} <span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]}</span></h2>
+    <div class="muted">${v.cliente.direccion||''} ${v.cliente.localidad?'· '+v.cliente.localidad:''} ${v.cliente.telefono?'· '+v.cliente.telefono:''}</div>
+    <div class="muted">Vendedor: ${v.vendedorNombre||''} · ${fmtFecha(v.fechaHora)}</div>
+    ${v.notasEmpleada ? `<div class="muted">Nota: ${v.notasEmpleada}</div>` : ''}
+    <div style="margin:12px 0">${fotosHtml}</div>
+    <div style="margin:12px 0">${presupuestoHtml}</div>
+    ${v.obraId ? `<div class="ok-msg">Ya se generó la Obra a partir de esta visita.</div>` : ''}
+    <div class="err" id="visErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      ${puedeConfirmar ? `<button class="btn" onclick="confirmarVisita('${v._id}')">Confirmar obra</button>` : ''}
+      ${v.estado!=='cancelada' && v.estado!=='confirmada' ? `<button class="btn danger" onclick="cancelarVisita('${v._id}')">Cancelar visita</button>` : ''}
+      <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
+    </div>
   `);
 }
-
-async function guardarEdicionVisita(id){
-  const body = {
-    cliente: {
-      nombre: document.getElementById('eVisCliente').value.trim(),
-      telefono: document.getElementById('eVisTelefono').value.trim(),
-      direccion: document.getElementById('eVisDireccion').value.trim(),
-      localidad: document.getElementById('eVisLocalidad').value.trim()
-    },
-    vendedorId: document.getElementById('eVisVendedor').value,
-    fechaHora: document.getElementById('eVisFecha').value,
-    notasEmpleada: document.getElementById('eVisNotas').value.trim()
-  };
+async function confirmarVisita(id){
   try{
-    const actualizado = await api(`/${id}`, {method:'PUT', body});
+    await api(`/${id}/confirmar`, {method:'POST'});
+    cerrarModal();
     cargarVisitas();
-    renderDetalleVisita(actualizado, false);
   }catch(e){ document.getElementById('visErr').textContent = e.message; }
 }
-
-async function cambiarEstadoVisita(id){
-  const estado = document.getElementById('detEstadoSelect').value;
-  // "Vendido" y "Cancelada" tienen su propio flujo (generar la Obra / pedir
-  // confirmación y liberar el evento de Google Calendar) — se reusan esas
-  // mismas funciones en vez de duplicar la lógica acá.
-  if (estado === 'vendido') return confirmarVisita(id);
-  if (estado === 'cancelada') return cancelarVisita(id);
-  const errEl = document.getElementById('visErr');
-  if (errEl) errEl.textContent = '';
-  try{
-    const actualizado = await api(`/${id}`, {method:'PUT', body:{estado}});
-    cargarVisitas();
-    renderDetalleVisita(actualizado, false);
-  }catch(e){ if (errEl) errEl.textContent = e.message; }
-}
-
-async function confirmarVisita(id){
-  const errEl = document.getElementById('visErr');
-  try{
-    const actualizado = await api(`/${id}/confirmar`, {method:'POST'});
-    cargarVisitas();
-    renderDetalleVisita(actualizado, false);
-  }catch(e){ if (errEl) errEl.textContent = e.message; }
-}
-
 async function cancelarVisita(id){
   if (!confirm('¿Cancelar esta visita?')) return;
-  const errEl = document.getElementById('visErr');
-  try{
-    const actualizado = await api(`/${id}`, {method:'PUT', body:{estado:'cancelada'}});
-    cargarVisitas();
-    renderDetalleVisita(actualizado, false);
-  }catch(e){ if (errEl) errEl.textContent = e.message; }
-}
-
-function mostrarReprogramar(id){
-  const opcionesVend = VENDEDORES.filter(v=>v.activo!==false).map(v=>`<option value="${v._id}">${escapeHtml(v.nombre)}</option>`).join('');
-  document.getElementById('reprogramarBox').innerHTML = `
-    <div class="grid2" style="margin-top:8px">
-      <div><label>Nueva fecha y hora</label><input type="datetime-local" id="reprogFecha"></div>
-      <div><label>Vendedor</label><select id="reprogVendedor"><option value="">Elegir…</option>${opcionesVend}</select></div>
-    </div>
-    <button class="btn small" style="margin-top:8px" onclick="guardarReprogramar('${id}')">Confirmar nueva fecha</button>
-  `;
-}
-
-async function guardarReprogramar(id){
-  const fechaHora = document.getElementById('reprogFecha').value;
-  const vendedorId = document.getElementById('reprogVendedor').value;
-  const errEl = document.getElementById('visErr');
-  if (!fechaHora || !vendedorId){ if (errEl) errEl.textContent = 'Elegí fecha y vendedor para reprogramar.'; return; }
-  try{
-    const actualizado = await api(`/${id}`, {method:'PUT', body:{estado:'sin_visita', fechaHora, vendedorId}});
-    cargarVisitas();
-    renderDetalleVisita(actualizado, false);
-  }catch(e){ if (errEl) errEl.textContent = e.message; }
+  await api(`/${id}`, {method:'PUT', body:{estado:'cancelada'}});
+  cerrarModal();
+  cargarVisitas();
 }
 
 // ---------------- MAPEO ----------------
