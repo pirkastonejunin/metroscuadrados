@@ -42,6 +42,7 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
 const googleCalendar = require('./google-calendar');
@@ -514,6 +515,14 @@ router.put('/:id', authAdmin, async (req, res) => {
         throw err(400, 'Para pasar a "Vendido" primero hay que confirmar la obra (botón "Confirmar obra"), que necesita el presupuesto ya cargado.');
       }
 
+      // Una vez que la visita cambió de estado (ya se presupuestó, se
+      // vendió o se instaló) se entiende que la visita ya se realizó, así
+      // que no tiene sentido cancelarla — solo se puede cancelar mientras
+      // sigue "sin_visita" (agendada, todavía no pasó).
+      if (estadoNorm === 'cancelada' && actual.estado !== 'sin_visita') {
+        throw err(400, 'Esta visita ya se realizó (cambió de estado), así que no se puede cancelar.');
+      }
+
       if (vendedorId) {
         const vId = toObjectId(vendedorId);
         const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
@@ -731,28 +740,110 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
 
 const PDF_ANCHO_DISPONIBLE = 495; // 595pt (A4) - 50pt de margen a cada lado
 
-function dibujarPdfPresupuestoManual(pdf, visita) {
-  const p = visita.presupuesto;
+// Mismo logo que ya usa cotizador.js para sus PDFs (public/assets/logo-piedra-negra.png,
+// que ese módulo se encarga de escribir a disco si hace falta la primera vez
+// que corre el server). No se importa cotizador.js para no tocarlo ni
+// acoplarse a su código — solo se apunta al mismo archivo en disco, con el
+// mismo respaldo en texto si por algún motivo no está disponible.
+const LOGO_PNG_PATH = path.join(__dirname, 'public', 'assets', 'logo-piedra-negra.png');
 
+function dibujarMarca(pdf) {
   const y0 = pdf.y;
-  pdf.fontSize(15).font('Helvetica-Bold').fillColor('#000').text('PIEDRA NEGRA', 50, y0, { characterSpacing: 1.2 });
-  pdf.font('Helvetica');
-  pdf.y = y0 + 20;
+  let dibujoLogo = false;
+  try {
+    pdf.image(LOGO_PNG_PATH, 50, y0, { height: 30 });
+    pdf.y = y0 + 34;
+    dibujoLogo = true;
+  } catch (e) { dibujoLogo = false; }
+  if (!dibujoLogo) {
+    pdf.fontSize(15).fillColor('#000').font('Helvetica-Bold').text('PIEDRA NEGRA', 50, y0, { characterSpacing: 1.2 });
+    pdf.font('Helvetica');
+    pdf.y = y0 + 20;
+  }
   pdf.moveDown(0.3);
   pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#1f2937').lineWidth(1.4).stroke();
   pdf.strokeColor('#ddd').lineWidth(1);
   pdf.moveDown(0.6);
   pdf.fillColor('#000');
+}
 
-  pdf.fontSize(16).text('Presupuesto de obra — Llave en mano');
+function dibujarEncabezadoPresupuestoManual(pdf, visita, vistaDetalle) {
+  const p = visita.presupuesto;
+  dibujarMarca(pdf);
+  pdf.fontSize(16).text(vistaDetalle ? 'Presupuesto de obra' : 'Presupuesto de obra — Llave en mano');
   pdf.moveDown(0.3);
   pdf.fontSize(10).fillColor('#555').text('Fecha: ' + new Date(p.fecha).toLocaleDateString('es-AR'));
   pdf.fillColor('#000');
   pdf.moveDown(0.8);
-
   if (visita.cliente && visita.cliente.nombre) pdf.fontSize(11).text('Cliente: ' + visita.cliente.nombre);
   if (visita.cliente && visita.cliente.direccion) pdf.fontSize(11).text('Dirección: ' + visita.cliente.direccion);
   pdf.moveDown(0.8);
+}
+
+function dibujarFormasPagoManual(pdf, p) {
+  if (p.formasPago && p.formasPago.length) {
+    pdf.moveDown(0.8);
+    pdf.fontSize(10).fillColor('#555').text('Formas de pago', { align: 'right' });
+    pdf.fillColor('#000');
+    p.formasPago.forEach(fp => {
+      const signo = fp.tipo === 'recargo' ? '+' : '-';
+      pdf.fontSize(10).text(
+        fp.nombre + (fp.porcentaje ? ' (' + signo + fp.porcentaje + '%)' : '') + ': $ ' + Number(fp.total).toFixed(2),
+        { align: 'right' }
+      );
+    });
+  }
+}
+
+// Fotos que sacó el vendedor (visita.fotos), en una grilla — vienen ya como
+// data URLs base64 (no hay que descargarlas de ningún lado, a diferencia de
+// las fotos de producto de cotizador.js).
+const PDF_FOTOS_COLS = 3;
+const PDF_FOTOS_GAP = 12;
+
+function bufferDesdeDataUrl(dataUrl) {
+  try {
+    const idx = String(dataUrl).indexOf(',');
+    if (idx === -1) return null;
+    return Buffer.from(dataUrl.slice(idx + 1), 'base64');
+  } catch (e) { return null; }
+}
+
+function dibujarFotosVisita(pdf, fotos) {
+  if (!fotos || !fotos.length) return;
+  pdf.moveDown(0.6);
+  pdf.fontSize(12).font('Helvetica-Bold').text('Fotos del lugar');
+  pdf.font('Helvetica');
+  pdf.moveDown(0.4);
+
+  const cellW = (PDF_ANCHO_DISPONIBLE - PDF_FOTOS_GAP * (PDF_FOTOS_COLS - 1)) / PDF_FOTOS_COLS;
+  const pageBottom = pdf.page.height - pdf.page.margins.bottom;
+  let rowY = pdf.y;
+  fotos.forEach((f, i) => {
+    const col = i % PDF_FOTOS_COLS;
+    if (col === 0 && rowY + cellW > pageBottom) { pdf.addPage(); rowY = pdf.y; }
+    const x = 50 + col * (cellW + PDF_FOTOS_GAP);
+    const buf = bufferDesdeDataUrl(f.data);
+    if (buf) {
+      try { pdf.image(buf, x, rowY, { cover: [cellW, cellW], align: 'center', valign: 'center' }); }
+      catch (e) { pdf.rect(x, rowY, cellW, cellW).strokeColor('#e2e0db').stroke(); }
+    } else {
+      pdf.rect(x, rowY, cellW, cellW).strokeColor('#e2e0db').stroke();
+    }
+    if (col === PDF_FOTOS_COLS - 1 || i === fotos.length - 1) {
+      rowY = rowY + cellW + 10;
+      pdf.y = rowY;
+    }
+  });
+  pdf.moveDown(0.4);
+}
+
+// Vista "llave en mano" para el cliente: nunca cantidades ni precios
+// unitarios — solo qué trabajo se va a hacer, con qué producto, el total
+// con las formas de pago, y las fotos del lugar.
+function dibujarPdfPresupuestoManualSimple(pdf, visita) {
+  const p = visita.presupuesto;
+  dibujarEncabezadoPresupuestoManual(pdf, visita, false);
 
   pdf.fontSize(10).fillColor('#555').text(
     'Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.',
@@ -776,18 +867,54 @@ function dibujarPdfPresupuestoManual(pdf, visita) {
   pdf.moveDown(0.5);
   pdf.fontSize(16).text('Total: $ ' + Number(p.total || 0).toFixed(2), { align: 'right' });
 
-  if (p.formasPago && p.formasPago.length) {
-    pdf.moveDown(0.8);
-    pdf.fontSize(10).fillColor('#555').text('Formas de pago', { align: 'right' });
+  dibujarFormasPagoManual(pdf, p);
+  dibujarFotosVisita(pdf, visita.fotos);
+}
+
+// Vista completa, con cantidad, precio unitario y subtotal de cada ítem —
+// para uso interno o cuando el cliente pide ver el detalle.
+function dibujarPdfPresupuestoManualDetalle(pdf, visita) {
+  const p = visita.presupuesto;
+  dibujarEncabezadoPresupuestoManual(pdf, visita, true);
+
+  const col = { producto: { x: 50, w: 235 }, cantidad: { x: 295, w: 65 }, precio: { x: 365, w: 85 }, subtotal: { x: 455, w: 90 } };
+
+  function encabezadoTabla() {
+    const y0 = pdf.y;
+    pdf.fontSize(9).fillColor('#555');
+    pdf.text('Trabajo / producto', col.producto.x, y0, { width: col.producto.w });
+    pdf.text('Cantidad', col.cantidad.x, y0, { width: col.cantidad.w });
+    pdf.text('Precio unit.', col.precio.x, y0, { width: col.precio.w });
+    pdf.text('Subtotal', col.subtotal.x, y0, { width: col.subtotal.w, align: 'right' });
     pdf.fillColor('#000');
-    p.formasPago.forEach(fp => {
-      const signo = fp.tipo === 'recargo' ? '+' : '-';
-      pdf.fontSize(10).text(
-        fp.nombre + (fp.porcentaje ? ' (' + signo + fp.porcentaje + '%)' : '') + ': $ ' + Number(fp.total).toFixed(2),
-        { align: 'right' }
-      );
-    });
+    pdf.y = y0 + 14;
+    pdf.moveDown(0.3);
+    pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#ddd').stroke();
+    pdf.moveDown(0.3);
   }
+
+  encabezadoTabla();
+  const pageBottom = pdf.page.height - pdf.page.margins.bottom;
+  (p.items || []).forEach(it => {
+    const etiqueta = it.tipoTrabajo + (it.descripcion ? ' (' + it.descripcion + ')' : '');
+    pdf.fontSize(10);
+    const alturaFila = Math.max(pdf.heightOfString(etiqueta, { width: col.producto.w }), 14);
+    if (pdf.y + alturaFila > pageBottom) { pdf.addPage(); encabezadoTabla(); }
+    const y0 = pdf.y;
+    pdf.fillColor('#000').text(etiqueta, col.producto.x, y0, { width: col.producto.w });
+    pdf.text(String(it.cantidad), col.cantidad.x, y0, { width: col.cantidad.w });
+    pdf.text('$ ' + Number(it.valor || 0).toFixed(2), col.precio.x, y0, { width: col.precio.w });
+    pdf.text('$ ' + Number(it.total || 0).toFixed(2), col.subtotal.x, y0, { width: col.subtotal.w, align: 'right' });
+    pdf.y = y0 + alturaFila + 8;
+  });
+
+  pdf.moveDown(0.3);
+  pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#ddd').stroke();
+  pdf.moveDown(0.5);
+  pdf.fontSize(16).text('Total: $ ' + Number(p.total || 0).toFixed(2), { align: 'right' });
+
+  dibujarFormasPagoManual(pdf, p);
+  dibujarFotosVisita(pdf, visita.fotos);
 }
 
 function validarPresupuestoManualParaPdf(visita) {
@@ -797,12 +924,13 @@ function validarPresupuestoManualParaPdf(visita) {
   }
 }
 
-function enviarPdfPresupuestoManual(res, visita) {
+function enviarPdfPresupuestoManual(res, visita, vistaDetalle) {
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', 'inline; filename="presupuesto-' + visita._id + '.pdf"');
+  res.setHeader('Content-Disposition', 'inline; filename="presupuesto-' + visita._id + (vistaDetalle ? '-detalle' : '') + '.pdf"');
   const pdf = new PDFDocument({ margin: 50 });
   pdf.pipe(res);
-  dibujarPdfPresupuestoManual(pdf, visita);
+  if (vistaDetalle) dibujarPdfPresupuestoManualDetalle(pdf, visita);
+  else dibujarPdfPresupuestoManualSimple(pdf, visita);
   pdf.end();
 }
 
@@ -813,7 +941,7 @@ router.get('/vendedor/:vendedorId/visitas/:id/presupuesto-pdf', async (req, res)
       return visitaDelVendedor(db, req.params.id, req.params.vendedorId);
     });
     validarPresupuestoManualParaPdf(visita);
-    enviarPdfPresupuestoManual(res, visita);
+    enviarPdfPresupuestoManual(res, visita, req.query.vista === 'detalle');
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -827,7 +955,7 @@ router.get('/:id/presupuesto-pdf', authAdmin, async (req, res) => {
     });
     if (!visita) throw err(404, 'Visita no encontrada');
     validarPresupuestoManualParaPdf(visita);
-    enviarPdfPresupuestoManual(res, visita);
+    enviarPdfPresupuestoManual(res, visita, req.query.vista === 'detalle');
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
