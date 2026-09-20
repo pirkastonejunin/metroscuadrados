@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visitas - Piedra Negra</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --text:#1f2430; --muted:#6b7280;
+    --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742;
+    --danger:#b3392c; --warn:#b8860b; --ok:#1f6f54; --info:#2255aa;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;}
+  header{background:var(--primary-dark);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;}
+  header h1{font-size:18px;margin:0;font-weight:600;}
+  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;}
+  nav{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--border);padding:0 16px;}
+  nav button{background:none;border:none;padding:12px 14px;font-size:14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  nav button.active{color:var(--primary-dark);border-bottom-color:var(--primary-dark);font-weight:600;}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  input,select,textarea{padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:14px;width:100%;background:#fff;color:var(--text);}
+  textarea{min-height:50px;font-family:inherit;}
+  button.btn{background:var(--primary);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;}
+  button.btn:hover{background:var(--primary-dark);}
+  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
+  button.btn.danger{background:var(--danger);}
+  button.btn.small{padding:4px 9px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em;}
+  tr:hover td{background:#fafbfc;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
+  .pill.agendada{background:#eee;color:#555;}
+  .pill.presupuestada{background:#fff4d6;color:var(--warn);}
+  .pill.confirmada{background:#e3f3ec;color:var(--ok);}
+  .pill.cancelada{background:#fbe4e1;color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:#fff;border-radius:10px;padding:20px;max-width:680px;width:100%;}
+  .modal h2{margin-top:0;font-size:16px;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;}
+  #loginScreen .card{width:300px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .agenda-item{border-left:3px solid var(--border);padding:6px 10px;margin-bottom:6px;font-size:13px;}
+  .agenda-item.agendada{border-color:#999;}
+  .agenda-item.presupuestada{border-color:var(--warn);}
+  .agenda-item.confirmada{border-color:var(--ok);}
+  .regla-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
+  .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="card">
+    <h2 style="margin-top:0">Visitas</h2>
+    <label>Contraseña de administración</label>
+    <input type="password" id="loginPass" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+    <div class="muted" style="margin-top:8px">Es la misma contraseña del panel de Obras.</div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>Visitas — Piedra Negra</h1>
+    <button onclick="logout()">Cerrar sesión</button>
+  </header>
+  <nav>
+    <button data-tab="visitas" class="active" onclick="showTab('visitas')">Visitas</button>
+    <button data-tab="vendedores" onclick="showTab('vendedores')">Vendedores</button>
+    <button data-tab="mapeo" onclick="showTab('mapeo')">Mapeo tipo de obra → tipo de trabajo</button>
+  </nav>
+  <main>
+
+    <!-- VISITAS -->
+    <section id="tab-visitas">
+      <div class="card">
+        <div class="row">
+          <div style="flex:1;min-width:160px"><label>Buscar cliente</label><input id="fVisQ" oninput="cargarVisitas()"></div>
+          <div style="min-width:160px"><label>Vendedor</label><select id="fVisVendedor" onchange="cargarVisitas()"><option value="">Todos</option></select></div>
+          <div style="min-width:160px"><label>Estado</label>
+            <select id="fVisEstado" onchange="cargarVisitas()">
+              <option value="">Todos</option>
+              <option value="agendada">Agendada</option>
+              <option value="presupuestada">Presupuestada</option>
+              <option value="confirmada">Confirmada</option>
+              <option value="cancelada">Cancelada</option>
+            </select>
+          </div>
+          <div><button class="btn" onclick="abrirNuevaVisita()">+ Nueva visita</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>#</th><th>Cliente</th><th>Dirección</th><th>Vendedor</th><th>Fecha y hora</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="visitasBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- VENDEDORES -->
+    <section id="tab-vendedores" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div style="flex:1"><label>Nombre</label><input id="nuevoVendNombre" placeholder="Nombre y apellido"></div>
+          <div style="flex:1"><label>Teléfono</label><input id="nuevoVendTelefono"></div>
+          <button class="btn" onclick="crearVendedor()">Agregar</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="vendedoresBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- MAPEO -->
+    <section id="tab-mapeo" class="hidden">
+      <div class="card">
+        <p class="muted">Definí a qué tipo(s) de trabajo del panel de Obras corresponde cada tipo de obra del cotizador. Se usa para armar las tareas solas cuando el vendedor presupuesta con el cotizador (no hace falta si presupuesta a mano).</p>
+        <div class="row">
+          <div style="flex:1;min-width:200px"><label>Tipo de obra (cotizador)</label><select id="mapTipoObra"></select></div>
+          <button class="btn" onclick="agregarReglaMapeo()">+ Agregar regla</button>
+        </div>
+        <div id="mapReglas" style="margin-top:10px"></div>
+        <div class="err" id="mapErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarMapeo()">Guardar mapeo de este tipo de obra</button>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Tipo de obra</th><th>Reglas</th><th></th></tr></thead>
+          <tbody id="mapeoBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/visitas'; // coincide con app.use('/api/visitas', visitasRouter) en server.js
+let TOKEN = localStorage.getItem('obras_admin_token') || ''; // misma clave que admin-obras.html: comparten contraseña
+let VENDEDORES = [];
+let TIPOS_TRABAJO = [];
+let TIPOS_OBRA = [];
+let MAPEOS = [];
+
+const CAMPOS_OBRA = [
+  {valor:'m2Pisos', label:'m² de piso'},
+  {valor:'mlZocalos', label:'ml de zócalo'},
+  {valor:'cantidadPuertas', label:'cantidad de puertas'}
+];
+
+function api(path, opts={}) {
+  opts.headers = Object.assign({'Content-Type':'application/json','x-admin-token':TOKEN}, opts.headers||{});
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch(BASE+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+async function login(){
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch(BASE+'/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+async function iniciarApp(){
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  await cargarVendedores();
+  await cargarTiposTrabajo();
+  cargarVisitas();
+}
+if (TOKEN) iniciarApp();
+
+function showTab(tab){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
+  document.getElementById('tab-'+tab).classList.remove('hidden');
+  if (tab==='mapeo') cargarMapeo();
+}
+
+function modal(html){
+  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal">${html}</div></div>`;
+}
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
+
+// ---------------- VENDEDORES ----------------
+
+async function cargarVendedores(){
+  VENDEDORES = await api('/vendedores');
+  document.getElementById('vendedoresBody').innerHTML = VENDEDORES.map(v=>`
+    <tr>
+      <td>${v.nombre}</td><td>${v.telefono||''}</td>
+      <td>${v.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
+      <td><button class="btn small secondary" onclick="toggleVendedor('${v._id}', ${v.activo===false})">${v.activo===false?'Reactivar':'Desactivar'}</button></td>
+    </tr>`).join('');
+  const opciones = '<option value="">Todos</option>' + VENDEDORES.map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
+  document.getElementById('fVisVendedor').innerHTML = opciones;
+}
+async function crearVendedor(){
+  const nombre = document.getElementById('nuevoVendNombre').value.trim();
+  const telefono = document.getElementById('nuevoVendTelefono').value.trim();
+  if (!nombre) return;
+  await api('/vendedores', {method:'POST', body:{nombre, telefono}});
+  document.getElementById('nuevoVendNombre').value='';
+  document.getElementById('nuevoVendTelefono').value='';
+  cargarVendedores();
+}
+async function toggleVendedor(id, activar){
+  await api(`/vendedores/${id}`, {method:'PUT', body:{activo: activar}});
+  cargarVendedores();
+}
+
+// ---------------- TIPOS DE TRABAJO (catálogo de obras.js, solo lectura acá) ----------------
+
+async function cargarTiposTrabajo(){
+  TIPOS_TRABAJO = await api('/catalogo/tipos-trabajo');
+}
+
+// ---------------- VISITAS ----------------
+
+const ESTADOS_VISITA = {agendada:'Agendada', presupuestada:'Presupuestada', confirmada:'Confirmada', cancelada:'Cancelada'};
+
+async function cargarVisitas(){
+  const params = new URLSearchParams();
+  const q = document.getElementById('fVisQ').value;
+  const vendedorId = document.getElementById('fVisVendedor').value;
+  const estado = document.getElementById('fVisEstado').value;
+  if (q) params.set('q', q);
+  if (vendedorId) params.set('vendedorId', vendedorId);
+  if (estado) params.set('estado', estado);
+  const visitas = await api('?' + params.toString());
+  document.getElementById('visitasBody').innerHTML = visitas.map(v => `
+    <tr>
+      <td>#${v.numero}</td>
+      <td>${v.cliente.nombre}</td>
+      <td>${v.cliente.direccion||''}</td>
+      <td>${v.vendedorNombre||''}</td>
+      <td>${fmtFecha(v.fechaHora)}</td>
+      <td><span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]||v.estado}</span></td>
+      <td><button class="btn small secondary" onclick="abrirVisita('${v._id}')">Ver</button></td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Sin visitas para este filtro</td></tr>';
+}
+
+async function verAgendaVendedor(vendedorId, contenedorId){
+  if (!vendedorId) { document.getElementById(contenedorId).innerHTML=''; return; }
+  const desde = new Date(); desde.setHours(0,0,0,0);
+  const params = new URLSearchParams({vendedorId, desde: desde.toISOString()});
+  const lista = await api('/agenda?' + params.toString());
+  const cont = document.getElementById(contenedorId);
+  if (!lista.length){ cont.innerHTML = '<p class="muted">Este vendedor no tiene visitas agendadas próximamente.</p>'; return; }
+  cont.innerHTML = '<label>Agenda de este vendedor (para no pisar turnos)</label>' + lista.map(v=>`
+    <div class="agenda-item ${v.estado}">${fmtFecha(v.fechaHora)} — ${v.cliente.nombre} <span class="muted">${v.cliente.direccion||''}</span></div>
+  `).join('');
+}
+
+function abrirNuevaVisita(){
+  const opcionesVend = VENDEDORES.filter(v=>v.activo!==false).map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Nueva visita</h2>
+    <div class="grid2">
+      <div><label>Cliente</label><input id="nVisCliente"></div>
+      <div><label>Teléfono</label><input id="nVisTelefono"></div>
+      <div style="grid-column:1/-1"><label>Domicilio</label><input id="nVisDireccion"></div>
+      <div><label>Localidad</label><input id="nVisLocalidad"></div>
+      <div><label>Vendedor</label><select id="nVisVendedor" onchange="verAgendaVendedor(this.value,'nVisAgenda')"><option value="">Elegir…</option>${opcionesVend}</select></div>
+      <div style="grid-column:1/-1"><label>Fecha y hora de la visita</label><input type="datetime-local" id="nVisFecha"></div>
+    </div>
+    <div id="nVisAgenda" style="margin-top:10px"></div>
+    <div style="margin-top:10px"><label>Notas para el vendedor</label><textarea id="nVisNotas" placeholder="Ej: timbre roto, golpear la puerta"></textarea></div>
+    <div class="err" id="nVisErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="guardarVisitaNueva()">Crear visita</button>
+      <button class="btn secondary" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  `);
+}
+async function guardarVisitaNueva(){
+  const body = {
+    cliente: {
+      nombre: document.getElementById('nVisCliente').value.trim(),
+      telefono: document.getElementById('nVisTelefono').value.trim(),
+      direccion: document.getElementById('nVisDireccion').value.trim(),
+      localidad: document.getElementById('nVisLocalidad').value.trim()
+    },
+    vendedorId: document.getElementById('nVisVendedor').value,
+    fechaHora: document.getElementById('nVisFecha').value,
+    notasEmpleada: document.getElementById('nVisNotas').value.trim()
+  };
+  try{
+    await api('', {method:'POST', body});
+    cerrarModal();
+    cargarVisitas();
+  }catch(e){ document.getElementById('nVisErr').textContent = e.message; }
+}
+
+async function abrirVisita(id){
+  const v = await api('/'+id);
+  const fotosHtml = (v.fotos && v.fotos.length)
+    ? `<div class="foto-galeria">${v.fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
+    : '<p class="muted">El vendedor todavía no cargó fotos.</p>';
+
+  let presupuestoHtml = '<p class="muted">Todavía no se cargó un presupuesto.</p>';
+  if (v.presupuesto){
+    if (v.presupuesto.tipo === 'manual'){
+      presupuestoHtml = `<b>Presupuesto manual</b> — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}<br>` +
+        v.presupuesto.items.map(it=>`${it.tipoTrabajo}: ${it.m2} — $${(it.precioCliente||0).toLocaleString('es-AR')}`).join('<br>');
+    } else {
+      presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${v.presupuesto.tipoObraNombre||''} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}`;
+    }
+  }
+
+  const puedeConfirmar = v.estado === 'presupuestada';
+
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Visita #${v.numero} — ${v.cliente.nombre} <span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]}</span></h2>
+    <div class="muted">${v.cliente.direccion||''} ${v.cliente.localidad?'· '+v.cliente.localidad:''} ${v.cliente.telefono?'· '+v.cliente.telefono:''}</div>
+    <div class="muted">Vendedor: ${v.vendedorNombre||''} · ${fmtFecha(v.fechaHora)}</div>
+    ${v.notasEmpleada ? `<div class="muted">Nota: ${v.notasEmpleada}</div>` : ''}
+    <div style="margin:12px 0">${fotosHtml}</div>
+    <div style="margin:12px 0">${presupuestoHtml}</div>
+    ${v.obraId ? `<div class="ok-msg">Ya se generó la Obra a partir de esta visita.</div>` : ''}
+    <div class="err" id="visErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      ${puedeConfirmar ? `<button class="btn" onclick="confirmarVisita('${v._id}')">Confirmar obra</button>` : ''}
+      ${v.estado!=='cancelada' && v.estado!=='confirmada' ? `<button class="btn danger" onclick="cancelarVisita('${v._id}')">Cancelar visita</button>` : ''}
+      <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
+    </div>
+  `);
+}
+async function confirmarVisita(id){
+  try{
+    await api(`/${id}/confirmar`, {method:'POST'});
+    cerrarModal();
+    cargarVisitas();
+  }catch(e){ document.getElementById('visErr').textContent = e.message; }
+}
+async function cancelarVisita(id){
+  if (!confirm('¿Cancelar esta visita?')) return;
+  await api(`/${id}`, {method:'PUT', body:{estado:'cancelada'}});
+  cerrarModal();
+  cargarVisitas();
+}
+
+// ---------------- MAPEO ----------------
+
+async function cargarMapeo(){
+  const storeId = new URLSearchParams(location.search).get('store_id'); // opcional, para depurar
+  try{
+    TIPOS_OBRA = await api('/catalogo/tipos-obra');
+  }catch(e){
+    document.getElementById('mapeoBody').innerHTML = `<tr><td colspan="3" class="err">${e.message}</td></tr>`;
+    return;
+  }
+  MAPEOS = await api('/mapeo');
+  document.getElementById('mapTipoObra').innerHTML = TIPOS_OBRA.map(t=>`<option value="${t._id}" data-nombre="${t.nombre}">${t.nombre}</option>`).join('');
+  cargarReglasDelSeleccionado();
+  document.getElementById('mapTipoObra').onchange = cargarReglasDelSeleccionado;
+
+  document.getElementById('mapeoBody').innerHTML = MAPEOS.map(m=>`
+    <tr>
+      <td>${m.tipoObraNombre||m.tipoObraId}</td>
+      <td>${m.reglas.map(r=>`${(CAMPOS_OBRA.find(c=>c.valor===r.campoObra)||{}).label||r.campoObra} → ${r.tipoTrabajo}`).join('<br>')}</td>
+      <td><button class="btn small danger" onclick="borrarMapeo('${m._id}')">Eliminar</button></td>
+    </tr>`).join('') || '<tr><td colspan="3" class="muted">Todavía no hay mapeos definidos</td></tr>';
+}
+
+function cargarReglasDelSeleccionado(){
+  const sel = document.getElementById('mapTipoObra');
+  const tipoObraId = sel.value;
+  const existente = MAPEOS.find(m=>m.tipoObraId===tipoObraId);
+  const reglas = existente ? existente.reglas : [{campoObra:'m2Pisos', tipoTrabajo:''}];
+  document.getElementById('mapReglas').innerHTML = reglas.map(r=>filaRegla(r.campoObra, r.tipoTrabajo)).join('');
+}
+function filaRegla(campoObra='m2Pisos', tipoTrabajo=''){
+  const opcionesCampo = CAMPOS_OBRA.map(c=>`<option value="${c.valor}" ${c.valor===campoObra?'selected':''}>${c.label}</option>`).join('');
+  const opcionesTipo = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}" ${t.nombre===tipoTrabajo?'selected':''}>${t.nombre}</option>`).join('');
+  return `<div class="regla-row">
+    <select class="reglaCampo" style="flex:1">${opcionesCampo}</select>
+    <span class="muted">→</span>
+    <select class="reglaTipo" style="flex:1">${opcionesTipo}</select>
+    <button class="btn small secondary" type="button" onclick="this.parentElement.remove()">Quitar</button>
+  </div>`;
+}
+function agregarReglaMapeo(){
+  document.getElementById('mapReglas').insertAdjacentHTML('beforeend', filaRegla());
+}
+async function guardarMapeo(){
+  const sel = document.getElementById('mapTipoObra');
+  const tipoObraId = sel.value;
+  const tipoObraNombre = sel.selectedOptions[0] ? sel.selectedOptions[0].dataset.nombre : '';
+  const reglas = [...document.querySelectorAll('#mapReglas .regla-row')].map(row=>({
+    campoObra: row.querySelector('.reglaCampo').value,
+    tipoTrabajo: row.querySelector('.reglaTipo').value
+  })).filter(r=>r.tipoTrabajo);
+  document.getElementById('mapErr').textContent = '';
+  try{
+    await api('/mapeo', {method:'POST', body:{tipoObraId, tipoObraNombre, reglas}});
+    cargarMapeo();
+  }catch(e){ document.getElementById('mapErr').textContent = e.message; }
+}
+async function borrarMapeo(id){
+  if (!confirm('¿Eliminar este mapeo?')) return;
+  await api(`/mapeo/${id}`, {method:'DELETE'});
+  cargarMapeo();
+}
+</script>
+</body>
+</html>
