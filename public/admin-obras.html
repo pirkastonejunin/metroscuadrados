@@ -34,11 +34,11 @@
   input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
   textarea{min-height:50px;font-family:inherit;}
-  button.btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
-  button.btn:hover{filter:brightness(0.94);}
-  button.btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
-  button.btn.danger{background:var(--danger);}
-  button.btn.small{padding:5px 10px;font-size:12px;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
   th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
@@ -55,7 +55,11 @@
   .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
   .modal h2{margin-top:0;font-size:16px;}
   .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
-  .tarea-box{border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;}
+  .tarea-box{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px;}
+  .tarea-seccion{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
+  .tarea-seccion:first-of-type{margin-top:10px;padding-top:0;border-top:none;}
+  .tarea-seccion-titulo{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;}
+  .materiales-origen{font-size:12px;color:var(--ok);margin-bottom:6px;}
   .costo-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
   .btn.whatsapp{background:#25D366;color:#fff;}
   .btn.whatsapp:hover{filter:brightness(0.95);}
@@ -108,7 +112,10 @@
       <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
       <h1>Gestión de Obras</h1>
     </div>
-    <button onclick="logout()">Cerrar sesión</button>
+    <div style="display:flex;gap:8px">
+      <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
   </header>
   <nav>
     <button data-tab="obras" class="active" onclick="showTab('obras')">Obras</button>
@@ -498,38 +505,57 @@ async function abrirObra(id){
         <div><b>${t.tipoTrabajo}</b> <span class="pill ${t.estado}">${ESTADOS_TAREA[t.estado]||t.estado}</span></div>
         <button class="btn small danger" onclick="borrarTarea('${o._id}','${t._id}')">Eliminar</button>
       </div>
-      <div class="grid2" style="margin-top:8px">
+
+      <div class="tarea-seccion">
+        <div class="tarea-seccion-titulo">Alcance</div>
         <div><label>m² presupuestados</label><input type="number" value="${t.m2Presupuestados}" onchange="editarTarea('${o._id}','${t._id}',{m2Presupuestados:this.value})"></div>
-        <div><label>Colocador asignado</label>
-          <select onchange="asignarColocador('${o._id}','${t._id}',this.value)">
-            <option value="">Sin asignar</option>
-            ${COLOCADORES.map(c=>`<option value="${c._id}" ${t.colocadorId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
-          </select>
-        </div>
-        <div style="grid-column:1/-1"><label>Fecha fin estimada</label><input type="date" value="${t.fechaFinEstimada?t.fechaFinEstimada.slice(0,10):''}" onchange="editarTarea('${o._id}','${t._id}',{fechaFinEstimada:this.value})"></div>
       </div>
-      ${asignado ? `<div class="estado-row" style="margin-top:8px">${botonWhatsappColocador(o, t, asignado)}</div>` : '<div class="muted" style="margin-top:6px">Asigná un colocador para poder mandarle el detalle por WhatsApp.</div>'}
-      <div style="margin-top:10px">
-        <label>Materiales a llevar (producto y cantidad)</label>
+
+      <div class="tarea-seccion">
+        <div class="tarea-seccion-titulo">Asignación</div>
+        <div class="grid2">
+          <div><label>Colocador asignado</label>
+            <select onchange="asignarColocador('${o._id}','${t._id}',this.value)">
+              <option value="">Sin asignar</option>
+              ${COLOCADORES.map(c=>`<option value="${c._id}" ${t.colocadorId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
+            </select>
+          </div>
+          <div><label>Fecha fin estimada</label><input type="date" value="${t.fechaFinEstimada?t.fechaFinEstimada.slice(0,10):''}" onchange="editarTarea('${o._id}','${t._id}',{fechaFinEstimada:this.value})"></div>
+        </div>
+        ${asignado ? `<div class="estado-row" style="margin-top:8px">${botonWhatsappColocador(o, t, asignado)}</div>` : '<div class="muted" style="margin-top:6px">Asigná un colocador para poder mandarle el detalle por WhatsApp.</div>'}
+      </div>
+
+      <div class="tarea-seccion">
+        <div class="tarea-seccion-titulo">Materiales a llevar</div>
+        ${(o.visitaId && t.materiales && t.materiales.length) ? '<div class="materiales-origen">✓ Precargados desde el presupuesto de la visita</div>' : ''}
         <div id="materialesContainer-${t._id}">${(t.materiales&&t.materiales.length) ? t.materiales.map(m=>filaMaterial(m.tipo,m.cantidad)).join('') : filaMaterial()}</div>
         <div class="row" style="margin-top:6px">
           <button class="btn small secondary" type="button" onclick="document.getElementById('materialesContainer-${t._id}').insertAdjacentHTML('beforeend', filaMaterial())">+ Agregar producto</button>
           <button class="btn small" type="button" onclick="guardarMateriales('${o._id}','${t._id}')">Guardar materiales</button>
         </div>
+        <div class="muted" style="margin-top:4px">Los productos se guardan solo al tocar "Guardar materiales".</div>
       </div>
-      <div style="margin-top:6px"><label>Aclaraciones para el colocador</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${escapeHtml(t.notas||'')}</textarea></div>
-      <div style="margin-top:6px"><label>Observaciones (ej: quedó algo pendiente)</label><textarea onchange="editarTarea('${o._id}','${t._id}',{observaciones:this.value})">${escapeHtml(t.observaciones||'')}</textarea></div>
-      <div class="muted" style="margin-top:6px">
-        ${t.fechaInicio?`inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
-        ${t.fechaFinReal?` · fin ${new Date(t.fechaFinReal).toLocaleDateString('es-AR')}`:''}
+
+      <div class="tarea-seccion">
+        <div class="tarea-seccion-titulo">Notas</div>
+        <div><label>Aclaraciones para el colocador</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${escapeHtml(t.notas||'')}</textarea></div>
+        <div style="margin-top:6px"><label>Observaciones (ej: quedó algo pendiente)</label><textarea onchange="editarTarea('${o._id}','${t._id}',{observaciones:this.value})">${escapeHtml(t.observaciones||'')}</textarea></div>
       </div>
-      <div class="row" style="margin-top:8px">
-        <select onchange="cambiarEstadoTarea('${o._id}','${t._id}',this.value)">
-          <option value="">Cambiar estado...</option>
-          <option value="pendiente" ${t.estado==='pendiente'?'selected':''}>Pendiente</option>
-          <option value="en_curso" ${t.estado==='en_curso'?'selected':''}>En curso</option>
-          <option value="terminada" ${t.estado==='terminada'?'selected':''}>Terminada</option>
-        </select>
+
+      <div class="tarea-seccion">
+        <div class="tarea-seccion-titulo">Estado</div>
+        <div class="row">
+          <select onchange="cambiarEstadoTarea('${o._id}','${t._id}',this.value)">
+            <option value="">Cambiar estado...</option>
+            <option value="pendiente" ${t.estado==='pendiente'?'selected':''}>Pendiente</option>
+            <option value="en_curso" ${t.estado==='en_curso'?'selected':''}>En curso</option>
+            <option value="terminada" ${t.estado==='terminada'?'selected':''}>Terminada</option>
+          </select>
+        </div>
+        <div class="muted" style="margin-top:6px">
+          ${t.fechaInicio?`inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
+          ${t.fechaFinReal?` · fin ${new Date(t.fechaFinReal).toLocaleDateString('es-AR')}`:''}
+        </div>
       </div>
     </div>
   `;

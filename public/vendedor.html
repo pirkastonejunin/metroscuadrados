@@ -28,10 +28,10 @@
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
   input,select{padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
   input:focus,select:focus{outline:none;border-color:var(--accent);}
-  button.btn{background:var(--accent);color:var(--accent-ink);border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:700;width:100%;font-family:inherit;}
-  button.btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
-  button.btn.danger{background:var(--danger);color:#fff;border:none;}
-  button.btn.small{width:auto;padding:8px 12px;font-size:13px;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:700;width:100%;font-family:inherit;display:inline-block;text-decoration:none;text-align:center;box-sizing:border-box;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);color:#fff;border:none;}
+  .btn.small{width:auto;padding:8px 12px;font-size:13px;}
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
   .pill.sin_visita,.pill.agendada{background:var(--bg);color:var(--muted);}
   .pill.presupuestada{background:var(--accent-soft);color:var(--accent);}
@@ -90,7 +90,10 @@
       <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
       <h1 id="saludo">Mis Visitas</h1>
     </div>
-    <button onclick="cambiarVendedor()">Cambiar</button>
+    <div style="display:flex;gap:8px">
+      <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
+      <button onclick="cambiarVendedor()">Cambiar</button>
+    </div>
   </header>
   <main id="pantalla"></main>
 </div>
@@ -192,28 +195,36 @@ async function mostrarDetalleVisita(id){
     ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${f.data}">`).join('')}</div>`
     : '<p class="muted">Todavía no sacaste fotos.</p>';
 
+  // Se puede editar/rehacer el presupuesto mientras la visita no se haya
+  // confirmado todavía (una vez "vendido" ya se generó la Obra a partir de
+  // ese presupuesto, así que cambiarlo acá no tendría efecto).
+  const presupuestoEditable = v.estado !== 'vendido' && v.estado !== 'instalado';
+
   let presupuestoHtml;
   if (v.presupuesto){
+    let resumen;
     if (v.presupuesto.tipo === 'manual'){
-      presupuestoHtml = `<div class="card"><b>Presupuesto (a mano)</b><br>` +
+      const formasPagoHtml = (v.presupuesto.formasPago && v.presupuesto.formasPago.length)
+        ? '<div class="muted" style="margin-top:6px">' +
+          v.presupuesto.formasPago.map(fp => `${fp.nombre}: $${Number(fp.total||0).toLocaleString('es-AR')}`).join(' · ') +
+          '</div>'
+        : '';
+      resumen = `<b>Presupuesto (a mano)</b><br>` +
         v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
-        `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
+        `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` + formasPagoHtml +
+        `<div style="margin-top:8px"><a class="btn small secondary" href="/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf" target="_blank">Ver PDF llave en mano</a></div>`;
     } else {
-      presupuestoHtml = `<div class="card"><b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
+      const params = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID, vista: 'simple' });
+      resumen = `<b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` +
+        `<div style="margin-top:8px"><a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${params.toString()}" target="_blank">Ver PDF llave en mano</a></div>`;
     }
-  } else {
     presupuestoHtml = `
       <div class="card">
-        <b>Presupuesto</b>
-        <p class="muted">Elegí cómo presupuestar esta visita.</p>
-        <button class="btn secondary" onclick="abrirCotizador('${v._id}')">Abrir cotizador</button>
-        <div style="margin-top:8px"><button class="btn secondary" onclick="mostrarVincularCotizacion('${v._id}')">Ya guardé la cotización, vincularla</button></div>
-        <div id="vincularCotizacion"></div>
-        <div class="divider">
-          <button class="btn secondary" onclick="mostrarFormManual('${v._id}')">Cargar presupuesto a mano</button>
-          <div id="formManual"></div>
-        </div>
+        ${resumen}
+        ${presupuestoEditable ? `<div style="margin-top:10px"><button class="btn small secondary" onclick="mostrarElegirPresupuesto('${v._id}')">Editar presupuesto</button></div><div id="elegirPresupuesto"></div>` : ''}
       </div>`;
+  } else {
+    presupuestoHtml = `<div class="card"><b>Presupuesto</b><div id="elegirPresupuesto">${formularioElegirPresupuesto(v._id)}</div></div>`;
   }
 
   const puedeConfirmar = v.estado === 'presupuestada';
@@ -264,6 +275,23 @@ async function subirFotos(visitaId){
     await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/fotos`, {method:'POST', body:{fotos}});
     mostrarDetalleVisita(visitaId);
   }catch(e){ errEl.textContent = e.message; }
+}
+
+// ---------------- ELEGIR / EDITAR PRESUPUESTO ----------------
+
+function formularioElegirPresupuesto(visitaId){
+  return `
+    <p class="muted">Elegí cómo presupuestar esta visita.</p>
+    <button class="btn secondary" onclick="abrirCotizador('${visitaId}')">Abrir cotizador</button>
+    <div style="margin-top:8px"><button class="btn secondary" onclick="mostrarVincularCotizacion('${visitaId}')">Ya guardé la cotización, vincularla</button></div>
+    <div id="vincularCotizacion"></div>
+    <div class="divider">
+      <button class="btn secondary" onclick="mostrarFormManual('${visitaId}')">Cargar presupuesto a mano</button>
+      <div id="formManual"></div>
+    </div>`;
+}
+function mostrarElegirPresupuesto(visitaId){
+  document.getElementById('elegirPresupuesto').innerHTML = formularioElegirPresupuesto(visitaId);
 }
 
 // ---------------- ABRIR COTIZADOR ----------------
@@ -321,14 +349,34 @@ function actualizarTotalItem(el){
   const valor = Number(row.querySelector('.itValor').value) || 0;
   row.querySelector('.itTotal').textContent = 'Total: $' + (cantidad*valor).toLocaleString('es-AR');
 }
-function mostrarFormManual(visitaId){
+async function mostrarFormManual(visitaId){
   const cont = document.getElementById('formManual');
   cont.innerHTML = `
     <div id="itemsManual">${filaItemManual()}</div>
     <button class="btn small secondary" type="button" onclick="document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual())">+ Agregar producto</button>
+    <div id="formasPagoManual" class="muted" style="margin-top:10px">Cargando formas de pago…</div>
     <div class="err" id="manualErr"></div>
     <button class="btn" style="margin-top:8px" onclick="guardarPresupuestoManual('${visitaId}')">Guardar presupuesto</button>
   `;
+  cargarFormasPagoManual();
+}
+// Mismo catálogo de formas de pago que ya carga Mato para el cotizador
+// (/api/cotizador/formas-pago) — así no hay que cargarlas dos veces.
+async function cargarFormasPagoManual(){
+  const cont = document.getElementById('formasPagoManual');
+  if (!STORE_ID){ cont.innerHTML = ''; return; }
+  try{
+    const res = await fetch('/api/cotizador/formas-pago?store_id=' + encodeURIComponent(STORE_ID));
+    const formas = await res.json();
+    if (!res.ok) throw new Error(formas.error || 'No se pudieron cargar las formas de pago');
+    if (!formas.length){ cont.innerHTML = ''; return; }
+    cont.innerHTML = '<b class="muted">Formas de pago a mostrar en el presupuesto</b>' +
+      formas.map(fp => `
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal">
+          <input type="checkbox" class="fpCheck" value='${JSON.stringify(fp).replace(/'/g,'&#39;')}'>
+          ${fp.nombre}${fp.porcentaje ? ` (${fp.tipo==='recargo'?'+':'-'}${fp.porcentaje}%)` : ''}
+        </label>`).join('');
+  }catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; }
 }
 async function guardarPresupuestoManual(visitaId){
   const items = [...document.querySelectorAll('#itemsManual .item-row')].map(row => ({
@@ -337,8 +385,9 @@ async function guardarPresupuestoManual(visitaId){
     cantidad: Number(row.querySelector('.itCantidad').value) || 0,
     valor: Number(row.querySelector('.itValor').value) || 0
   }));
+  const formasPagoSeleccionadas = [...document.querySelectorAll('.fpCheck:checked')].map(chk => JSON.parse(chk.value));
   try{
-    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items}});
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items, formasPagoSeleccionadas}});
     mostrarDetalleVisita(visitaId);
   }catch(e){ document.getElementById('manualErr').textContent = e.message; }
 }

@@ -34,11 +34,11 @@
   input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
   textarea{min-height:50px;font-family:inherit;}
-  button.btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
-  button.btn:hover{filter:brightness(0.94);}
-  button.btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
-  button.btn.danger{background:var(--danger);}
-  button.btn.small{padding:5px 10px;font-size:12px;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
   th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
@@ -69,9 +69,24 @@
   #loginScreen .logo{height:26px;width:auto;margin:0 auto 16px;display:block;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .agenda-item{border-left:3px solid var(--border);padding:6px 10px;margin-bottom:6px;font-size:13px;border-radius:0 8px 8px 0;}
-  .agenda-item.agendada{border-color:var(--muted);}
+  .agenda-item.sin_visita,.agenda-item.agendada{border-color:var(--muted);}
   .agenda-item.presupuestada{border-color:var(--accent);}
-  .agenda-item.confirmada{border-color:var(--ok);}
+  .agenda-item.vendido,.agenda-item.confirmada{border-color:var(--ok);}
+  .agenda-item.instalado{border-color:var(--info);}
+  .agenda-item.cancelada{border-color:var(--danger);}
+  .mini-cal{margin-top:4px;}
+  .mini-cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+  .mini-cal-header button{background:var(--bg);border:1px solid var(--border);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:14px;line-height:1;color:var(--text);font-family:inherit;}
+  .mini-cal-header span{font-weight:700;font-size:12.5px;text-transform:capitalize;}
+  .mini-cal-grid-head,.mini-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+  .mini-cal-grid-head div{text-align:center;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;}
+  .mini-cal-dia{aspect-ratio:1/1;border:1px solid var(--border);border-radius:6px;padding:2px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:11px;background:var(--bg);min-height:30px;}
+  .mini-cal-dia:hover{border-color:var(--accent);}
+  .mini-cal-dia.fuera{opacity:.35;}
+  .mini-cal-dia.hoy{border-color:var(--accent);}
+  .mini-cal-dia.sel{background:var(--accent-soft);border-color:var(--accent);}
+  .mini-cal-dia .n{font-weight:700;}
+  .mini-cal-dia .c{font-size:9px;color:var(--accent);font-weight:700;}
   .regla-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
   .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
@@ -115,7 +130,10 @@
       <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
       <h1>Visitas</h1>
     </div>
-    <button onclick="logout()">Cerrar sesión</button>
+    <div style="display:flex;gap:8px">
+      <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
   </header>
   <nav>
     <button data-tab="visitas" class="active" onclick="showTab('visitas')">Visitas</button>
@@ -224,6 +242,18 @@ function api(path, opts={}) {
     if (!r.ok) throw new Error(data.error || 'Error de red');
     return data;
   });
+}
+
+async function verPdfPresupuestoManual(id){
+  try{
+    const r = await fetch(BASE+'/'+id+'/presupuesto-pdf', {headers:{'x-admin-token':TOKEN}});
+    if (!r.ok){
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.error || 'No se pudo generar el PDF');
+    }
+    const blob = await r.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  }catch(e){ alert(e.message); }
 }
 
 async function login(){
@@ -437,16 +467,102 @@ function renderVisitasTabla(){
   actualizarFlechasOrden();
 }
 
+// Agenda del vendedor en formato calendario (mes con un punto/contador por
+// día que ya tiene turnos) — así se ve de un vistazo su disponibilidad en
+// vez de tener que leer una lista larga. Se muestra al elegir vendedor en
+// "Nueva visita"; tocar un día abre el detalle de esos turnos debajo.
+let AGENDA_VENDEDOR_ID = '';
+let AGENDA_CONTENEDOR_ID = '';
+let AGENDA_MES = null;
+let AGENDA_EVENTOS = {};
+let AGENDA_DIA_SEL = null;
+
+function offsetLunesAgenda(date){ return (date.getDay() + 6) % 7; }
+function fechaISOAgenda(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+
 async function verAgendaVendedor(vendedorId, contenedorId){
-  if (!vendedorId) { document.getElementById(contenedorId).innerHTML=''; return; }
-  const desde = new Date(); desde.setHours(0,0,0,0);
-  const params = new URLSearchParams({vendedorId, desde: desde.toISOString()});
-  const lista = await api('/agenda?' + params.toString());
+  AGENDA_VENDEDOR_ID = vendedorId;
+  AGENDA_CONTENEDOR_ID = contenedorId;
   const cont = document.getElementById(contenedorId);
-  if (!lista.length){ cont.innerHTML = '<p class="muted">Este vendedor no tiene visitas agendadas próximamente.</p>'; return; }
-  cont.innerHTML = '<label>Agenda de este vendedor (para no pisar turnos)</label>' + lista.map(v=>`
-    <div class="agenda-item ${v.estado}">${fmtFecha(v.fechaHora)} — ${v.cliente.nombre} <span class="muted">${v.cliente.direccion||''}</span></div>
-  `).join('');
+  if (!vendedorId) { cont.innerHTML=''; return; }
+  AGENDA_MES = new Date(); AGENDA_MES.setDate(1); AGENDA_MES.setHours(0,0,0,0);
+  AGENDA_DIA_SEL = null;
+  cont.innerHTML = `
+    <label>Agenda de este vendedor (para no pisar turnos)</label>
+    <div class="mini-cal">
+      <div class="mini-cal-header">
+        <button type="button" onclick="cambiarMesAgenda(-1)">‹</button>
+        <span id="agendaMesLabel">—</span>
+        <button type="button" onclick="cambiarMesAgenda(1)">›</button>
+      </div>
+      <div class="mini-cal-grid-head"><div>L</div><div>M</div><div>M</div><div>J</div><div>V</div><div>S</div><div>D</div></div>
+      <div class="mini-cal-grid" id="agendaGrid"></div>
+      <div id="agendaDiaDetalle" style="margin-top:8px"></div>
+    </div>
+  `;
+  await renderAgendaCalendario();
+}
+
+async function cambiarMesAgenda(delta){
+  AGENDA_MES.setMonth(AGENDA_MES.getMonth() + delta);
+  AGENDA_DIA_SEL = null;
+  await renderAgendaCalendario();
+}
+
+async function renderAgendaCalendario(){
+  const grid = document.getElementById('agendaGrid');
+  if (!grid) return; // el modal se cerró mientras cargaba
+  document.getElementById('agendaMesLabel').textContent = AGENDA_MES.toLocaleDateString('es-AR', {month:'long', year:'numeric'});
+
+  const primerDiaMes = new Date(AGENDA_MES.getFullYear(), AGENDA_MES.getMonth(), 1);
+  const ultimoDiaMes = new Date(AGENDA_MES.getFullYear(), AGENDA_MES.getMonth()+1, 0);
+  const inicioGrid = new Date(primerDiaMes); inicioGrid.setDate(inicioGrid.getDate() - offsetLunesAgenda(primerDiaMes));
+  const finGrid = new Date(ultimoDiaMes); finGrid.setDate(finGrid.getDate() + (6 - offsetLunesAgenda(ultimoDiaMes)));
+
+  const params = new URLSearchParams({vendedorId: AGENDA_VENDEDOR_ID, desde: fechaISOAgenda(inicioGrid), hasta: fechaISOAgenda(finGrid)});
+  let lista = [];
+  try { lista = await api('/agenda?' + params.toString()); }
+  catch(e){ grid.innerHTML = '<div class="muted" style="grid-column:1/-1">No se pudo cargar la agenda.</div>'; return; }
+  if (!document.getElementById('agendaGrid')) return; // se cerró el modal mientras esperábamos la respuesta
+
+  AGENDA_EVENTOS = {};
+  lista.forEach(v => {
+    const iso = fechaISOAgenda(new Date(v.fechaHora));
+    (AGENDA_EVENTOS[iso] = AGENDA_EVENTOS[iso] || []).push(v);
+  });
+  Object.values(AGENDA_EVENTOS).forEach(l => l.sort((a,b) => new Date(a.fechaHora) - new Date(b.fechaHora)));
+
+  const hoy = new Date();
+  let celdas = '';
+  let cur = new Date(inicioGrid);
+  while (cur <= finGrid){
+    const iso = fechaISOAgenda(cur);
+    const eventos = AGENDA_EVENTOS[iso] || [];
+    const fuera = cur.getMonth() !== AGENDA_MES.getMonth();
+    const esHoy = fechaISOAgenda(hoy) === iso;
+    const esSel = AGENDA_DIA_SEL === iso;
+    celdas += `<div class="mini-cal-dia${fuera?' fuera':''}${esHoy?' hoy':''}${esSel?' sel':''}" onclick="seleccionarDiaAgenda('${iso}')">
+      <div class="n">${cur.getDate()}</div>
+      ${eventos.length ? `<div class="c">${eventos.length}</div>` : ''}
+    </div>`;
+    cur.setDate(cur.getDate() + 1);
+  }
+  grid.innerHTML = celdas;
+  mostrarDetalleDiaAgenda();
+}
+
+function seleccionarDiaAgenda(iso){
+  AGENDA_DIA_SEL = (AGENDA_DIA_SEL === iso) ? null : iso;
+  renderAgendaCalendario();
+}
+
+function mostrarDetalleDiaAgenda(){
+  const cont = document.getElementById('agendaDiaDetalle');
+  if (!cont) return;
+  if (!AGENDA_DIA_SEL){ cont.innerHTML = '<p class="muted">Tocá un día para ver los turnos que ya tiene.</p>'; return; }
+  const eventos = AGENDA_EVENTOS[AGENDA_DIA_SEL] || [];
+  if (!eventos.length){ cont.innerHTML = '<p class="muted">Sin turnos ese día.</p>'; return; }
+  cont.innerHTML = eventos.map(v => `<div class="agenda-item ${v.estado}">${fmtFecha(v.fechaHora)} — ${escapeHtml(v.cliente.nombre)} <span class="muted">${escapeHtml(v.cliente.direccion||'')}</span></div>`).join('');
 }
 
 function abrirNuevaVisita(){
@@ -519,9 +635,13 @@ function renderDetalleVisita(v, editando){
   if (v.presupuesto){
     if (v.presupuesto.tipo === 'manual'){
       presupuestoHtml = `<b>Presupuesto manual</b> — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}<br>` +
-        v.presupuesto.items.map(it=>`${escapeHtml(it.tipoTrabajo)}${it.descripcion?' ('+escapeHtml(it.descripcion)+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>');
+        v.presupuesto.items.map(it=>`${escapeHtml(it.tipoTrabajo)}${it.descripcion?' ('+escapeHtml(it.descripcion)+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
+        `<div style="margin-top:8px"><button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}')">📄 Ver PDF llave en mano</button></div>`;
     } else {
-      presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${escapeHtml(v.presupuesto.tipoObraNombre||'')} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}`;
+      const linkPdf = (v.presupuesto.cotizacionId && v.presupuesto.storeId)
+        ? `<div style="margin-top:8px"><a class="btn small secondary" style="text-decoration:none;display:inline-block" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?store_id=${v.presupuesto.storeId}&vista=simple" target="_blank">📄 Ver PDF llave en mano</a></div>`
+        : '';
+      presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${escapeHtml(v.presupuesto.tipoObraNombre||'')} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}` + linkPdf;
     }
   }
 

@@ -19,6 +19,8 @@
   .brand-logo{height:32px;display:block;}
   .brand-title h1{margin:0;font-size:15px;font-weight:600;letter-spacing:.2px;color:var(--text);}
   .brand-title p{margin:2px 0 0;font-size:12px;color:var(--muted);}
+  .volver-menu{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--muted);text-decoration:none;font-size:12.5px;font-weight:600;border:1px solid var(--border);border-radius:8px;padding:7px 12px;flex-shrink:0;}
+  .volver-menu:hover{color:var(--accent);border-color:var(--accent);}
   .wrap{max-width:980px;margin:0 auto;padding:20px;}
   .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
   .tab-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--panel);cursor:pointer;font-size:13px;color:var(--muted);}
@@ -192,7 +194,7 @@
   .copiado{color:var(--ok);font-size:12px;margin-left:6px;}
   @media print{
     header.brand-header{border-bottom:2px solid #000;}
-    .tabs, .subtabs, #selTienda, .actions, .acciones-extra, .vista-toggle, .field label[for="selTienda"], .grid:has(#selTienda){display:none !important;}
+    .tabs, .subtabs, #selTienda, .actions, .acciones-extra, .vista-toggle, .field label[for="selTienda"], .grid:has(#selTienda), .volver-menu{display:none !important;}
     body *{visibility:hidden;}
     #paso-resumen, #paso-resumen *, #historial-detalle-card, #historial-detalle-card *{visibility:visible;}
     #paso-resumen, #historial-detalle-card{position:absolute;left:0;top:0;width:100%;border:none;}
@@ -208,6 +210,10 @@
       <h1>Cotizador de obra</h1>
       <p>Herramienta interna</p>
     </div>
+    <a class="volver-menu" href="/inicio.html">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+      Menú
+    </a>
   </div>
 </header>
 
