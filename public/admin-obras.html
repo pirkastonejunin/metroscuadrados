@@ -4,64 +4,97 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Gestión de Obras - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#f4f5f7; --card:#ffffff; --text:#1f2430; --muted:#6b7280;
-    --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742;
-    --danger:#b3392c; --warn:#b8860b; --ok:#1f6f54;
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --obra:#2f6fed; --obra-soft:#e2ebff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
   }
   *{box-sizing:border-box;}
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;}
-  header{background:var(--primary-dark);color:#fff;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;}
-  header h1{font-size:18px;margin:0;font-weight:600;}
-  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;}
-  nav{display:flex;gap:4px;background:#fff;border-bottom:1px solid var(--border);padding:0 16px;}
-  nav button{background:none;border:none;padding:12px 14px;font-size:14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
-  nav button.active{color:var(--primary-dark);border-bottom-color:var(--primary-dark);font-weight:600;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header .logo{height:22px;width:auto;display:block;flex-shrink:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  nav{display:flex;gap:4px;background:var(--card);border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto;}
+  nav button{background:none;border:none;padding:13px 14px;font-size:13.5px;font-family:inherit;font-weight:600;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;}
+  nav button.active{color:var(--accent);border-bottom-color:var(--accent);}
   main{padding:20px;max-width:1200px;margin:0 auto;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
-  input,select,textarea{padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:14px;width:100%;background:#fff;color:var(--text);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
   textarea{min-height:50px;font-family:inherit;}
-  button.btn{background:var(--primary);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:500;}
-  button.btn:hover{background:var(--primary-dark);}
-  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
+  button.btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+  button.btn:hover{filter:brightness(0.94);}
+  button.btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
   button.btn.danger{background:var(--danger);}
-  button.btn.small{padding:4px 9px;font-size:12px;}
+  button.btn.small{padding:5px 10px;font-size:12px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
-  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em;}
-  tr:hover td{background:#fafbfc;}
-  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;}
-  .pill.pendiente{background:#eee;color:#555;}
-  .pill.asignada{background:#e7f0ff;color:#2255aa;}
-  .pill.en_curso{background:#fff4d6;color:var(--warn);}
-  .pill.terminada{background:#e3f3ec;color:var(--ok);}
-  .pill.cancelada{background:#fbe4e1;color:var(--danger);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.pendiente{background:var(--bg);color:var(--muted);}
+  .pill.asignada{background:var(--obra-soft);color:var(--obra);}
+  .pill.en_curso{background:var(--accent-soft);color:var(--accent);}
+  .pill.terminada{background:var(--ok-soft);color:var(--ok);}
+  .pill.cancelada{background:var(--danger-soft);color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
-  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
-  .modal{background:#fff;border-radius:10px;padding:20px;max-width:680px;width:100%;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
   .modal h2{margin-top:0;font-size:16px;}
   .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
-  .tarea-box{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px;}
+  .tarea-box{border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px;}
   .costo-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
+  .btn.whatsapp{background:#25D366;color:#fff;}
+  .btn.whatsapp:hover{filter:brightness(0.95);}
+  .estado-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
   .err{color:var(--danger);font-size:13px;margin:6px 0;}
   .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
-  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;}
-  #loginScreen .card{width:300px;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  #loginScreen .logo{height:26px;width:auto;margin:0 auto 16px;display:block;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .total-box{font-size:14px;font-weight:600;margin-top:8px;}
+  .total-box{font-size:14px;font-weight:700;margin-top:8px;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer;}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --obra:#7ea2ff; --obra-soft:#1c2740; --ok:#5fd39a; --ok-soft:#173328;
+      --danger:#ff8080; --danger-soft:#3a1f1f;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+    :root:not([data-theme="light"]) .logo{filter:invert(1);}
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --obra:#7ea2ff; --obra-soft:#1c2740; --ok:#5fd39a; --ok-soft:#173328;
+    --danger:#ff8080; --danger-soft:#3a1f1f;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+  :root[data-theme="dark"] .logo{filter:invert(1);}
 </style>
 </head>
 <body>
 
 <div id="loginScreen">
   <div class="card">
-    <h2 style="margin-top:0">Gestión de Obras</h2>
+    <img class="logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAWcAAAA8BAMAAABIqGY+AAAAGFBMVEUQExcRFBgQExcQExcAAFX/AAAAAAAQExf8CAf0AAAACHRSTlNcHqHQAwEA8Hfw2WwAAAkoSURBVHja1ZrtbxTXFcZ/s94xUozKAn6R4Ms2haQCVaVCNKWJ2kGVsQo1nlDbqEUxTsWu1ZZKDsLy35AEYUuhfDCoQDFEXr/NYkJFvSlrlVA1qSqnLZXSSGarUNQiF9bEduSdsacf5u3Oy9bxl2p7v+zOnbt3nnvueZ5zzp2V0vjaMG1UeivF/ZDnvmZe6qx41CJo/fIX06D0pSodtJQWILcy+fiTU8ZYY4W7R9VuG/LFp6kdxvA/D33l3HLTz3dXNOhl29IDX2rFGF1UAUZSxuj+ira0lAYym1sxRucc3RjZrgztr2z10Mc3d2GMP/GkrjXDkSHL6hVKxFen2jDG7/sVI9OgDs+rlUvET15h+FfyUX/3zvcffH/2/S9XKhGrVr6Radwdgrfzg/vNs+/trFDQcZCjbrTpI6362QoNjjGoibwhf2tE/tmlig3j+wbVaNRv9iQ9ahYBpDoV0C9Sr9o9UK9misBGWXXClMXwQDKQKVLvjUg7nb6J7LvPcr9OdeepU4PzJOLocjF6PXKHsAkNXQBMaiqYvfTB84p1p4/PegEmz1swpV4AAslAqQvjiv0920tfJ4De0JVBt6dm3AK1uRcYBtOeZ1QTUesNXQzFWNG2RiAeBq6Huxu3lN2zxpPnfVvY7vOtCSE3k0CkeMK3uIZWAA9n/IjPfSXV8unZlhDizEARWIiA1jRZ3tNe03zXJ8TLWv/YfVr0HPrbFtwVoe+wuPqrNhGbq3wz6JkLG4tSHZAUOl1ztJTnh+zfBtHtSgHalHPJbLf1OSUaQ9yWpE1E6Ya3QcPm0+SmxJO09aC8ON+taYjtUdZdU8UeqAf0M8S2qzRZrsrrQNUpfrIoipS/JcWLpX57Ir0O9LE58+k2AIYKEOsRlcJafBzk2VcWbcSbNqnjMw7JJ45N73DnLVqZ94gikHPRzcXNNAxrqg3TqFdB19SYR6Gr3QHQBxaFi7vORNkUhhAcHqaB/m4hkEwcdyqX5ipLaZ5TjNEznlLV3vY9RlkAWvKKty26+80E2kpQ5cGUZ5G8kbuClq4SNeFFmz16HYwFA9pRcH1Jr3X3TbpxfuDCn3rb9KEr+1OCG/uJmAeQp/l2OZeuPk1cYHozcfdhWYXhAGtrglMDpooeYr8p+JKpMmmDlmdP9vYow2882C/SJftSsZwulWkdZYctYASZF0Xo6zAeDnR5n3D+0WFIczw3dGY+5R+/sCxeFz8HaLm/jJTpu/BNhq4R0yLXFiGz3qP1WkvG4gCSVgpVKnry7q615gRHo5MvJIWbL/l6ZiNFLxlYW3CTTZUV1bG0XAxvq6ROR9tsqjzoFdEsExgJLyIU/CObfUFRcYkdMXlWcX88AVlPQL8bZtc7eqd/ubI9g7eBIbNKeY8zei2mu2noAU2o1tjnXb1nf6oRQViv8xY/b7uPlRBIE58G9yVxe0+gyBkAXhBt9swAkPbHuRqARwNQdcraSitfuKEEpp9F9o6yvtkP1KumNbl+OQkriwdgywDEejBVgRolF7Q8H/SPkjoeCLtNTVb08mzW1AT6fEQSYuVn3LSRZo8HvQNawMvT1vWC8al72QPog8AR69oxn6SQbRTi68EDweLAr1FeHMkGPMInAgUEi+pFP+f96psPi14srHEAxj88aiyIA83fBhToaoDHzlOX/uuRWVJ4oNGnupy/HRIFeZoqrYysB1xpzPOOJVUELf8l8PtkNnK+yWtBi5U9aHg35XH+XpQ8xhM+9dfcfDSfywsZtd7oyUjWf2p6dIOPuIbaF3zKUn+w9rk1LW2YS0U40evwgiJ5qbQeUSCbeaXGsfStQlEsz/5GTEE7AEMFnldXwqHHAW1OPRDxXP1pZzAs3U2HAlg6HAcW7Cxvin3zbja5kqG4KRXKqPddfM4WwHanokkCchsjoJbgYZrLbmqlJzEfDSTo8kDL90xfOLy9J5j06iFjGSHreXFgFsl+2MRx1nVFuM8s8kJgak2tcQsyu9W4aZepIvcGsvOjW32eeg8oqQtrC+NVHmFbiCciCy0xKG71h3KZcAp5yA2dV8IyQ3yjmG7pCdB/J8je58nyGPS2w8zb1UKpHFOrNV5OBH2wKphGSZqzkG0RoPlQGL+wokJWHVvbGWSp2xMTuWjH6etlhxeQA+Km+9NsALlgL0RcvPfO5dhtIS26qaDX6Wt8jfF2N1qjZzVZUy3OjxasmjFckgTDZF55eVC1KyHPqRM2NYYKQKxHBG1u8KJeqg+yqTfW9sZopFtMhw9aLqXvYnl/JGsx80oo4ihyjZ+IHIKDC5ZwLqaBks895D+7/rGwlEDfvpRanXfe8Yue2Y6YDpt5DtipdLmaIZz7/gAOT2riWQ2ShmR5hxdWY+vX/dr+uiHhCt6Uyi+Vc6uZ9gu5XC6X0wBpYGDqeQXjnA9STIOr4UJL2Hnn6CaXy+Vyl6BaI354/cDAHZ+eS1ogrMYP5Y9kLEdsmXYFr29P5tStTlYptxrtszwcAfVV0uuRi+FCKyBnNrA25yxvL8QDr4wPEk+AL+mKyR/lD1uHcPKHTrKgJ2gwHgYkdPXmr6SbYSuS4hUjRoTohbr6vVRE9DNddbNzKMRo/+iOfXSYsA/N5lfUkbDcKathnvQfGUt5Wrgs7Go8IiiGNvGHI9bnb/x+lhVz4mQc2keUk291Ai15R/BerAuePxi5x54A5gBmc949gH8778NylmDJfzDMryZzy53ijyzbOTZvzgGyfSdesE/F9ygYo4tqyflBTQ7mcqYDKBcvxIHWN3tODKog/90SvFffmk1lAoZ+/Fiw4QydXk+CDg1w/71gztjO1KFxn8d8PdAN5i/swdIMMjx6JAZd+dj475HqVKQZu6dFo214xplfmiFhvbG90KOf7QRjsBO4/OO5v+69trZg+D9tJUunj52WT2hgbgVI3r2unKtgzE5wkTtOy1s05PtASf1g21InlQ8aueN00zMaP9Jgwnh29bhSEaCRO7QjW1hJQC2ttzr/P0Aj/0trmqwuoSfi/rhSgc37Zw2Zhu+NPak2UmQq/Z81wsuQ9r132p8WFyLOtSutibG1+mNee/ezqHPtCgZN6wjfiS9VvKED78paP45zruINTZX/j2E7zs4frHjMy8G3ksceUvntP37CSgqOrUKCAAAAAElFTkSuQmCC" alt="Piedra Negra">
+    <h2 style="margin-top:0;margin-bottom:14px">Gestión de Obras</h2>
     <label>Contraseña de administración</label>
     <input type="password" id="loginPass" onkeydown="if(event.key==='Enter')login()">
     <div class="err" id="loginErr"></div>
@@ -71,7 +104,10 @@
 
 <div id="app" class="hidden">
   <header>
-    <h1>Gestión de Obras — Piedra Negra</h1>
+    <div class="brand">
+      <img class="logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAWcAAAA8BAMAAABIqGY+AAAAGFBMVEUQExcRFBgQExcQExcAAFX/AAAAAAAQExf8CAf0AAAACHRSTlNcHqHQAwEA8Hfw2WwAAAkoSURBVHja1ZrtbxTXFcZ/s94xUozKAn6R4Ms2haQCVaVCNKWJ2kGVsQo1nlDbqEUxTsWu1ZZKDsLy35AEYUuhfDCoQDFEXr/NYkJFvSlrlVA1qSqnLZXSSGarUNQiF9bEduSdsacf5u3Oy9bxl2p7v+zOnbt3nnvueZ5zzp2V0vjaMG1UeivF/ZDnvmZe6qx41CJo/fIX06D0pSodtJQWILcy+fiTU8ZYY4W7R9VuG/LFp6kdxvA/D33l3HLTz3dXNOhl29IDX2rFGF1UAUZSxuj+ira0lAYym1sxRucc3RjZrgztr2z10Mc3d2GMP/GkrjXDkSHL6hVKxFen2jDG7/sVI9OgDs+rlUvET15h+FfyUX/3zvcffH/2/S9XKhGrVr6Radwdgrfzg/vNs+/trFDQcZCjbrTpI6362QoNjjGoibwhf2tE/tmlig3j+wbVaNRv9iQ9ahYBpDoV0C9Sr9o9UK9misBGWXXClMXwQDKQKVLvjUg7nb6J7LvPcr9OdeepU4PzJOLocjF6PXKHsAkNXQBMaiqYvfTB84p1p4/PegEmz1swpV4AAslAqQvjiv0920tfJ4De0JVBt6dm3AK1uRcYBtOeZ1QTUesNXQzFWNG2RiAeBq6Huxu3lN2zxpPnfVvY7vOtCSE3k0CkeMK3uIZWAA9n/IjPfSXV8unZlhDizEARWIiA1jRZ3tNe03zXJ8TLWv/YfVr0HPrbFtwVoe+wuPqrNhGbq3wz6JkLG4tSHZAUOl1ztJTnh+zfBtHtSgHalHPJbLf1OSUaQ9yWpE1E6Ya3QcPm0+SmxJO09aC8ON+taYjtUdZdU8UeqAf0M8S2qzRZrsrrQNUpfrIoipS/JcWLpX57Ir0O9LE58+k2AIYKEOsRlcJafBzk2VcWbcSbNqnjMw7JJ45N73DnLVqZ94gikHPRzcXNNAxrqg3TqFdB19SYR6Gr3QHQBxaFi7vORNkUhhAcHqaB/m4hkEwcdyqX5ipLaZ5TjNEznlLV3vY9RlkAWvKKty26+80E2kpQ5cGUZ5G8kbuClq4SNeFFmz16HYwFA9pRcH1Jr3X3TbpxfuDCn3rb9KEr+1OCG/uJmAeQp/l2OZeuPk1cYHozcfdhWYXhAGtrglMDpooeYr8p+JKpMmmDlmdP9vYow2882C/SJftSsZwulWkdZYctYASZF0Xo6zAeDnR5n3D+0WFIczw3dGY+5R+/sCxeFz8HaLm/jJTpu/BNhq4R0yLXFiGz3qP1WkvG4gCSVgpVKnry7q615gRHo5MvJIWbL/l6ZiNFLxlYW3CTTZUV1bG0XAxvq6ROR9tsqjzoFdEsExgJLyIU/CObfUFRcYkdMXlWcX88AVlPQL8bZtc7eqd/ubI9g7eBIbNKeY8zei2mu2noAU2o1tjnXb1nf6oRQViv8xY/b7uPlRBIE58G9yVxe0+gyBkAXhBt9swAkPbHuRqARwNQdcraSitfuKEEpp9F9o6yvtkP1KumNbl+OQkriwdgywDEejBVgRolF7Q8H/SPkjoeCLtNTVb08mzW1AT6fEQSYuVn3LSRZo8HvQNawMvT1vWC8al72QPog8AR69oxn6SQbRTi68EDweLAr1FeHMkGPMInAgUEi+pFP+f96psPi14srHEAxj88aiyIA83fBhToaoDHzlOX/uuRWVJ4oNGnupy/HRIFeZoqrYysB1xpzPOOJVUELf8l8PtkNnK+yWtBi5U9aHg35XH+XpQ8xhM+9dfcfDSfywsZtd7oyUjWf2p6dIOPuIbaF3zKUn+w9rk1LW2YS0U40evwgiJ5qbQeUSCbeaXGsfStQlEsz/5GTEE7AEMFnldXwqHHAW1OPRDxXP1pZzAs3U2HAlg6HAcW7Cxvin3zbja5kqG4KRXKqPddfM4WwHanokkCchsjoJbgYZrLbmqlJzEfDSTo8kDL90xfOLy9J5j06iFjGSHreXFgFsl+2MRx1nVFuM8s8kJgak2tcQsyu9W4aZepIvcGsvOjW32eeg8oqQtrC+NVHmFbiCciCy0xKG71h3KZcAp5yA2dV8IyQ3yjmG7pCdB/J8je58nyGPS2w8zb1UKpHFOrNV5OBH2wKphGSZqzkG0RoPlQGL+wokJWHVvbGWSp2xMTuWjH6etlhxeQA+Km+9NsALlgL0RcvPfO5dhtIS26qaDX6Wt8jfF2N1qjZzVZUy3OjxasmjFckgTDZF55eVC1KyHPqRM2NYYKQKxHBG1u8KJeqg+yqTfW9sZopFtMhw9aLqXvYnl/JGsx80oo4ihyjZ+IHIKDC5ZwLqaBks895D+7/rGwlEDfvpRanXfe8Yue2Y6YDpt5DtipdLmaIZz7/gAOT2riWQ2ShmR5hxdWY+vX/dr+uiHhCt6Uyi+Vc6uZ9gu5XC6X0wBpYGDqeQXjnA9STIOr4UJL2Hnn6CaXy+Vyl6BaI354/cDAHZ+eS1ogrMYP5Y9kLEdsmXYFr29P5tStTlYptxrtszwcAfVV0uuRi+FCKyBnNrA25yxvL8QDr4wPEk+AL+mKyR/lD1uHcPKHTrKgJ2gwHgYkdPXmr6SbYSuS4hUjRoTohbr6vVRE9DNddbNzKMRo/+iOfXSYsA/N5lfUkbDcKathnvQfGUt5Wrgs7Go8IiiGNvGHI9bnb/x+lhVz4mQc2keUk291Ai15R/BerAuePxi5x54A5gBmc949gH8778NylmDJfzDMryZzy53ijyzbOTZvzgGyfSdesE/F9ygYo4tqyflBTQ7mcqYDKBcvxIHWN3tODKog/90SvFffmk1lAoZ+/Fiw4QydXk+CDg1w/71gztjO1KFxn8d8PdAN5i/swdIMMjx6JAZd+dj475HqVKQZu6dFo214xplfmiFhvbG90KOf7QRjsBO4/OO5v+69trZg+D9tJUunj52WT2hgbgVI3r2unKtgzE5wkTtOy1s05PtASf1g21InlQ8aueN00zMaP9Jgwnh29bhSEaCRO7QjW1hJQC2ttzr/P0Aj/0trmqwuoSfi/rhSgc37Zw2Zhu+NPak2UmQq/Z81wsuQ9r132p8WFyLOtSutibG1+mNee/ezqHPtCgZN6wjfiS9VvKED78paP45zruINTZX/j2E7zs4frHjMy8G3ksceUvntP37CSgqOrUKCAAAAAElFTkSuQmCC" alt="Piedra Negra">
+      <h1>Gestión de Obras</h1>
+    </div>
     <button onclick="logout()">Cerrar sesión</button>
   </header>
   <nav>
@@ -150,7 +186,7 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Colocador</th><th>Tipo de trabajo</th><th>m² realizados</th><th>Monto a pagar</th></tr></thead>
+          <thead><tr><th>Colocador</th><th>Tipo de trabajo</th><th>m² (tareas terminadas)</th><th>Monto a pagar</th></tr></thead>
           <tbody id="reporteBody"></tbody>
         </table>
         <div class="total-box" id="reporteTotal"></div>
@@ -216,6 +252,66 @@ function modal(html){
   document.getElementById('modalRoot').innerHTML = `<div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal">${html}</div></div>`;
 }
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---------------- Mensaje al colocador (WhatsApp) ----------------
+// Mismo criterio que en Visitas: no hay envío automático (no está contratada
+// una API de WhatsApp Business), así que esto arma el link con el mensaje ya
+// redactado para que alguien de la oficina lo abra y toque "Enviar".
+
+function normalizarTelefonoWA(telefono){
+  let d = String(telefono||'').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('54')) return d;
+  if (d.startsWith('0')) d = d.slice(1);
+  d = d.replace(/^(\d{2,4})15/, '$1'); // saca el "15" de celular si está
+  return '549' + d;
+}
+
+function mensajeAsignacionColocador(obra, tarea, colocadorNombre){
+  const materiales = (tarea.materiales && tarea.materiales.length)
+    ? tarea.materiales.map(m => `• ${m.cantidad ? m.cantidad + ' ' : ''}${m.tipo}`).join('\n')
+    : 'No se cargaron materiales para esta tarea.';
+  return `¡Hola ${colocadorNombre}! 👋 Te paso los datos de la obra:\n\n`+
+    `🏗️ Obra #${obra.numero} — ${tarea.tipoTrabajo}\n`+
+    `👤 Cliente: ${obra.cliente.nombre}\n`+
+    `📍 Dirección: ${obra.cliente.direccion||''}${obra.cliente.localidad?' · '+obra.cliente.localidad:''}\n`+
+    `📞 Teléfono del cliente: ${obra.cliente.telefono||'-'}\n`+
+    `📐 m² presupuestados: ${tarea.m2Presupuestados}\n`+
+    (tarea.fechaFinEstimada ? `🗓️ Fecha estimada: ${new Date(tarea.fechaFinEstimada).toLocaleDateString('es-AR')}\n` : '')+
+    `\n📦 Materiales a llevar:\n${materiales}\n`+
+    (tarea.notas ? `\n📝 Aclaraciones: ${tarea.notas}\n` : '')+
+    `\n¡Gracias!`;
+}
+
+function linkWhatsappColocador(obra, tarea, colocador){
+  const tel = normalizarTelefonoWA(colocador.telefono);
+  const texto = encodeURIComponent(mensajeAsignacionColocador(obra, tarea, colocador.nombre));
+  return tel ? `https://wa.me/${tel}?text=${texto}` : `https://wa.me/?text=${texto}`;
+}
+function botonWhatsappColocador(obra, tarea, colocador){
+  if (!colocador) return '';
+  return `<a class="btn whatsapp small" href="${linkWhatsappColocador(obra,tarea,colocador)}" target="_blank" rel="noopener">💬 Enviar detalle por WhatsApp</a>`;
+}
+
+function filaMaterial(tipo='', cantidad=''){
+  return `<div class="costo-row">
+    <input class="matTipo" placeholder="Producto (ej: caja de piso 60x60)" value="${escapeHtml(tipo)}" style="flex:2">
+    <input class="matCantidad" placeholder="Cantidad (ej: 8 cajas)" value="${escapeHtml(cantidad)}" style="flex:1">
+    <button class="btn small secondary" type="button" onclick="this.parentElement.remove()">Quitar</button>
+  </div>`;
+}
+async function guardarMateriales(obraId, tareaId){
+  const container = document.getElementById(`materialesContainer-${tareaId}`);
+  const materiales = [...container.querySelectorAll('.costo-row')].map(row=>({
+    tipo: row.querySelector('.matTipo').value.trim(),
+    cantidad: row.querySelector('.matCantidad').value.trim()
+  })).filter(m=>m.tipo);
+  await editarTarea(obraId, tareaId, {materiales});
+}
 
 // ---------------- COLOCADORES ----------------
 
@@ -394,7 +490,9 @@ async function guardarObraNueva(){
 
 async function abrirObra(id){
   const o = await api('/'+id);
-  const tareasHtml = (o.tareas||[]).map(t => `
+  const tareasHtml = (o.tareas||[]).map(t => {
+    const asignado = t.colocadorId ? COLOCADORES.find(c=>c._id===t.colocadorId) : null;
+    return `
     <div class="tarea-box">
       <div class="row" style="justify-content:space-between">
         <div><b>${t.tipoTrabajo}</b> <span class="pill ${t.estado}">${ESTADOS_TAREA[t.estado]||t.estado}</span></div>
@@ -408,33 +506,42 @@ async function abrirObra(id){
             ${COLOCADORES.map(c=>`<option value="${c._id}" ${t.colocadorId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
           </select>
         </div>
-        <div><label>Fecha fin estimada</label><input type="date" value="${t.fechaFinEstimada?t.fechaFinEstimada.slice(0,10):''}" onchange="editarTarea('${o._id}','${t._id}',{fechaFinEstimada:this.value})"></div>
-        <div><label>Costo aplicado</label><input value="${t.costoPorM2Aplicado!=null?'$'+t.costoPorM2Aplicado+'/m²':'—'}" disabled></div>
+        <div style="grid-column:1/-1"><label>Fecha fin estimada</label><input type="date" value="${t.fechaFinEstimada?t.fechaFinEstimada.slice(0,10):''}" onchange="editarTarea('${o._id}','${t._id}',{fechaFinEstimada:this.value})"></div>
       </div>
-      <div style="margin-top:6px"><label>Notas</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${t.notas||''}</textarea></div>
-      <div class="muted" style="margin-top:6px">m² realizados: <b>${t.m2Realizados||0}</b> / ${t.m2Presupuestados}
-        ${t.fechaInicio?` · inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
+      ${asignado ? `<div class="estado-row" style="margin-top:8px">${botonWhatsappColocador(o, t, asignado)}</div>` : '<div class="muted" style="margin-top:6px">Asigná un colocador para poder mandarle el detalle por WhatsApp.</div>'}
+      <div style="margin-top:10px">
+        <label>Materiales a llevar (producto y cantidad)</label>
+        <div id="materialesContainer-${t._id}">${(t.materiales&&t.materiales.length) ? t.materiales.map(m=>filaMaterial(m.tipo,m.cantidad)).join('') : filaMaterial()}</div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn small secondary" type="button" onclick="document.getElementById('materialesContainer-${t._id}').insertAdjacentHTML('beforeend', filaMaterial())">+ Agregar producto</button>
+          <button class="btn small" type="button" onclick="guardarMateriales('${o._id}','${t._id}')">Guardar materiales</button>
+        </div>
+      </div>
+      <div style="margin-top:6px"><label>Aclaraciones para el colocador</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${escapeHtml(t.notas||'')}</textarea></div>
+      <div style="margin-top:6px"><label>Observaciones (ej: quedó algo pendiente)</label><textarea onchange="editarTarea('${o._id}','${t._id}',{observaciones:this.value})">${escapeHtml(t.observaciones||'')}</textarea></div>
+      <div class="muted" style="margin-top:6px">
+        ${t.fechaInicio?`inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
         ${t.fechaFinReal?` · fin ${new Date(t.fechaFinReal).toLocaleDateString('es-AR')}`:''}
       </div>
       <div class="row" style="margin-top:8px">
-        <div style="width:100px"><label>Avance m²</label><input type="number" id="avM2-${t._id}" step="0.01"></div>
-        <div style="flex:1"><label>Nota</label><input id="avNota-${t._id}"></div>
-        <button class="btn small" onclick="cargarAvance('${o._id}','${t._id}')">Registrar avance</button>
         <select onchange="cambiarEstadoTarea('${o._id}','${t._id}',this.value)">
           <option value="">Cambiar estado...</option>
-          <option value="pendiente">Pendiente</option>
-          <option value="asignada">Asignada</option>
-          <option value="en_curso">En curso</option>
-          <option value="terminada">Terminada</option>
+          <option value="pendiente" ${t.estado==='pendiente'?'selected':''}>Pendiente</option>
+          <option value="en_curso" ${t.estado==='en_curso'?'selected':''}>En curso</option>
+          <option value="terminada" ${t.estado==='terminada'?'selected':''}>Terminada</option>
         </select>
       </div>
-      ${(t.avances&&t.avances.length) ? `<div class="muted" style="margin-top:6px">Historial: ${t.avances.map(a=>`${new Date(a.fecha).toLocaleDateString('es-AR')} — ${a.m2}m² (${a.registradoPor})${a.nota?': '+a.nota:''}`).join(' · ')}</div>` : ''}
     </div>
-  `).join('') || '<p class="muted">Esta obra todavía no tiene tareas.</p>';
+  `;
+  }).join('') || '<p class="muted">Esta obra todavía no tiene tareas.</p>';
 
-  const fotosHtml = (o.fotos && o.fotos.length)
-    ? `<div class="foto-galeria">${o.fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
-    : '';
+  const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
+  const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
+  const galeria = fotos => `<div class="foto-galeria">${fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`;
+  const fotosHtml = (fotosAntes.length || fotosDespues.length) ? `
+    ${fotosAntes.length ? `<div style="margin-top:8px"><label>Fotos antes (vendedor)</label>${galeria(fotosAntes)}</div>` : ''}
+    ${fotosDespues.length ? `<div style="margin-top:8px"><label>Fotos después (colocador)</label>${galeria(fotosDespues)}</div>` : ''}
+  ` : '';
 
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
@@ -461,7 +568,9 @@ async function abrirObra(id){
 }
 
 async function editarTarea(obraId, tareaId, cambios){
-  await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:cambios});
+  try{
+    await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:cambios});
+  }catch(e){ alert('No se pudo guardar: ' + e.message); }
   abrirObra(obraId);
   cargarObras();
 }
@@ -474,21 +583,17 @@ async function asignarColocador(obraId, tareaId, colocadorId){
 }
 async function cambiarEstadoTarea(obraId, tareaId, estado){
   if (!estado) return;
-  await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:{estado}});
+  try{
+    await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:{estado}});
+  }catch(e){ alert('No se pudo guardar: ' + e.message); }
   abrirObra(obraId);
   cargarObras();
 }
 async function borrarTarea(obraId, tareaId){
   if (!confirm('¿Eliminar esta tarea de la obra?')) return;
-  await api(`/${obraId}/tareas/${tareaId}`, {method:'DELETE'});
-  abrirObra(obraId);
-  cargarObras();
-}
-async function cargarAvance(obraId, tareaId){
-  const m2 = document.getElementById(`avM2-${tareaId}`).value;
-  const nota = document.getElementById(`avNota-${tareaId}`).value;
-  if (!m2) return;
-  await api(`/${obraId}/tareas/${tareaId}/avances`, {method:'POST', body:{m2, nota}});
+  try{
+    await api(`/${obraId}/tareas/${tareaId}`, {method:'DELETE'});
+  }catch(e){ alert('No se pudo eliminar: ' + e.message); }
   abrirObra(obraId);
   cargarObras();
 }
@@ -534,7 +639,7 @@ async function cargarReporte(){
 
 function exportarCSV(){
   if (!ULTIMO_REPORTE.length) { alert('Generá el reporte primero'); return; }
-  const filas = [['Colocador','Tipo de trabajo','m2 realizados','Monto a pagar'], ...ULTIMO_REPORTE.map(f=>[f.colocador,f.tipoTrabajo,f.m2Total,f.montoTotal])];
+  const filas = [['Colocador','Tipo de trabajo','m2 (tareas terminadas)','Monto a pagar'], ...ULTIMO_REPORTE.map(f=>[f.colocador,f.tipoTrabajo,f.m2Total,f.montoTotal])];
   const csv = filas.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
