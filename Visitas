@@ -295,7 +295,11 @@ router.get('/catalogo/tipos-obra', authAdmin, async (req, res) => {
     if (!storeId) throw err(500, 'TIENDA_REAL_STORE_ID no está configurada en el servidor');
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('tipos_obra').find({ store_id: storeId }).sort({ nombre: 1 }).toArray();
+      // store_id se guarda como Number en cotizador.js (viene de
+      // parseInt/JSON del user_id de Tiendanube) — hay que convertir el
+      // valor de la env var (siempre string) antes de comparar, si no el
+      // find nunca matchea nada.
+      return db.collection('tipos_obra').find({ store_id: Number(storeId) }).sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -674,13 +678,20 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const visita = await visitaDelVendedor(db, req.params.id, req.params.vendedorId);
-      const cot = await db.collection('cotizaciones').findOne({ _id: cotId, store_id: String(storeId) });
+      // Igual que en /catalogo/tipos-obra: store_id en 'cotizaciones' es
+      // Number, así que hay que convertir storeId (viene como string desde
+      // el body/env var) antes de comparar. Antes acá se forzaba a
+      // String(storeId), que nunca matcheaba y por eso vincular una
+      // cotización siempre tiraba "no existe" aunque la cotización sí
+      // estuviera guardada (el historial sí la mostraba bien, porque esa
+      // consulta usa store.store_id ya con el tipo correcto).
+      const cot = await db.collection('cotizaciones').findOne({ _id: cotId, store_id: Number(storeId) });
       if (!cot) throw err(404, 'No se encontró esa cotización en el cotizador');
 
       const presupuesto = {
         tipo: 'cotizador',
         cotizacionId: cot._id,
-        storeId: String(storeId),
+        storeId: Number(storeId),
         tipoObraId: cot.tipoObraId,
         tipoObraNombre: cot.tipoObraNombre,
         total: cot.total,
