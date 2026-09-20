@@ -131,6 +131,13 @@ async function authColocador(req, res, next) {
 }
 
 const ESTADOS_TAREA_VALIDOS = ['pendiente', 'en_curso', 'terminada'];
+// Estado general de la obra (distinto del estado por tarea, de arriba).
+// "asignado" se agrega para poder marcar que ya se le asignó colocador
+// aunque todavía no arrancó ninguna tarea.
+const ESTADOS_OBRA_VALIDOS = ['pendiente', 'asignado', 'en_curso', 'terminada', 'cancelada'];
+// Estados de obra que cuentan como "en curso" para el panel del colocador y
+// para el listado principal de Obras (todo lo que no sea terminada/cancelada).
+const ESTADOS_OBRA_NO_EN_CURSO = ['terminada', 'cancelada'];
 const MAX_FOTOS_OBRA = 20; // combinadas: fotos "antes" (vendedor) + "después" (colocador)
 
 // Busca el costo por m2 vigente de un colocador para un tipo de trabajo dado
@@ -350,12 +357,16 @@ router.delete('/tipos-trabajo/:id', authAdmin, async (req, res) => {
 // ADMIN: OBRAS
 // ---------------------------------------------------------------------
 
-// Listado con filtros: estado, colocadorId, texto de búsqueda (cliente)
+// Listado con filtros: estado, colocadorId, texto de búsqueda (cliente).
+// excluirEstado=X excluye ese estado (sin filtrar por uno específico) — lo
+// usa el panel principal de Obras para no listar las obras terminadas, que
+// pasaron a mostrarse aparte en el panel de Historial.
 router.get('/', authAdmin, async (req, res) => {
   try {
-    const { estado, colocadorId, q } = req.query;
+    const { estado, excluirEstado, colocadorId, q } = req.query;
     const match = {};
     if (estado) match.estado = estado;
+    else if (excluirEstado) match.estado = { $ne: excluirEstado };
     if (colocadorId) match['tareas.colocadorId'] = toObjectId(colocadorId);
     if (q) match['cliente.nombre'] = { $regex: q, $options: 'i' };
     const lista = await conReintento(async () => {
@@ -435,7 +446,10 @@ router.put('/:id', authAdmin, async (req, res) => {
     if (fechaVenta) set.fechaVenta = new Date(fechaVenta);
     if (vendedor !== undefined) set.vendedor = vendedor;
     if (notasGenerales !== undefined) set.notasGenerales = notasGenerales;
-    if (estado) set.estado = estado;
+    if (estado) {
+      if (!ESTADOS_OBRA_VALIDOS.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
+      set.estado = estado;
+    }
     const actualizado = await conReintento(async () => {
       const db = await getDb();
       await db.collection('obras').updateOne({ _id: id }, { $set: set });
@@ -556,7 +570,13 @@ router.get('/colocador/mis-obras', authColocador, async (req, res) => {
     const colocadorId = req.colocador._id;
     const obras = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('obras').find({ 'tareas.colocadorId': colocadorId }).sort({ numero: -1 }).toArray();
+      // Solo obras "en curso" (no terminadas ni canceladas) — para que la
+      // pantalla del colocador se limite a lo que todavía tiene pendiente,
+      // sin acumular para siempre las obras ya cerradas.
+      return db.collection('obras').find({
+        'tareas.colocadorId': colocadorId,
+        estado: { $nin: ESTADOS_OBRA_NO_EN_CURSO }
+      }).sort({ numero: -1 }).toArray();
     });
     // Devolvemos solo las tareas de este colocador, junto con los datos de la obra/cliente
     const resultado = obras.map(o => ({
