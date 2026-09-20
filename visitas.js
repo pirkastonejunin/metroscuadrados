@@ -43,6 +43,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
+const PDFDocument = require('pdfkit');
 const googleCalendar = require('./google-calendar');
 
 const router = express.Router();
@@ -631,9 +632,14 @@ router.delete('/vendedor/:vendedorId/visitas/:id/fotos/:index', async (req, res)
 // armar la tarea de la Obra y calcular el costo del colocador), "valor" es
 // el precio unitario que carga el vendedor, y "total" (cantidad × valor) se
 // calcula acá, nunca se toma del cliente.
+// formasPagoSeleccionadas: [{ nombre, tipo: 'descuento'|'recargo', porcentaje }]
+// — las trae el vendedor desde /api/cotizador/formas-pago (mismo catálogo
+// que ya carga Mato para el cotizador) y acá se recalcula el total de cada
+// una, mismo cálculo que cotizador.js usa en /guardar, para que quede
+// consistente con lo que ya conoce del cotizador.
 router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', async (req, res) => {
   try {
-    const { items, notas } = req.body || {};
+    const { items, notas, formasPagoSeleccionadas } = req.body || {};
     if (!Array.isArray(items) || !items.length) throw err(400, 'Agregá al menos un producto');
     for (const it of items) {
       if (!it.tipoTrabajo) throw err(400, 'Falta el producto en un ítem');
@@ -651,7 +657,15 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', async (req, 
       };
     });
     const total = itemsFinales.reduce((s, it) => s + it.total, 0);
-    const presupuesto = { tipo: 'manual', items: itemsFinales, total, notas: notas || '', fecha: new Date() };
+    const formasPago = Array.isArray(formasPagoSeleccionadas)
+      ? formasPagoSeleccionadas.map(fp => {
+        const pct = Number(fp.porcentaje) || 0;
+        const tipo = fp.tipo === 'recargo' ? 'recargo' : 'descuento';
+        const factor = tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
+        return { nombre: String(fp.nombre || ''), tipo, porcentaje: pct, total: Math.round(total * factor * 100) / 100 };
+      })
+      : [];
+    const presupuesto = { tipo: 'manual', items: itemsFinales, total, formasPago, notas: notas || '', fecha: new Date() };
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -706,6 +720,117 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------
+// PDF del presupuesto manual ("llave en mano" para pasarle al cliente):
+// a diferencia del PDF del cotizador, acá NUNCA se muestran cantidades ni
+// precios unitarios — solo qué trabajo se va a hacer, con qué producto, y
+// el total con las formas de pago (mismo bloque que ya usa cotizador.js).
+// Para un presupuesto tipo "cotizador" no hace falta esto: ya tiene su
+// propio PDF armado en /api/cotizador/pdf/:id?vista=simple.
+// ---------------------------------------------------------------------
+
+const PDF_ANCHO_DISPONIBLE = 495; // 595pt (A4) - 50pt de margen a cada lado
+
+function dibujarPdfPresupuestoManual(pdf, visita) {
+  const p = visita.presupuesto;
+
+  const y0 = pdf.y;
+  pdf.fontSize(15).font('Helvetica-Bold').fillColor('#000').text('PIEDRA NEGRA', 50, y0, { characterSpacing: 1.2 });
+  pdf.font('Helvetica');
+  pdf.y = y0 + 20;
+  pdf.moveDown(0.3);
+  pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#1f2937').lineWidth(1.4).stroke();
+  pdf.strokeColor('#ddd').lineWidth(1);
+  pdf.moveDown(0.6);
+  pdf.fillColor('#000');
+
+  pdf.fontSize(16).text('Presupuesto de obra — Llave en mano');
+  pdf.moveDown(0.3);
+  pdf.fontSize(10).fillColor('#555').text('Fecha: ' + new Date(p.fecha).toLocaleDateString('es-AR'));
+  pdf.fillColor('#000');
+  pdf.moveDown(0.8);
+
+  if (visita.cliente && visita.cliente.nombre) pdf.fontSize(11).text('Cliente: ' + visita.cliente.nombre);
+  if (visita.cliente && visita.cliente.direccion) pdf.fontSize(11).text('Dirección: ' + visita.cliente.direccion);
+  pdf.moveDown(0.8);
+
+  pdf.fontSize(10).fillColor('#555').text(
+    'Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.',
+    { width: PDF_ANCHO_DISPONIBLE }
+  );
+  pdf.fillColor('#000');
+  pdf.moveDown(1);
+
+  (p.items || []).forEach(it => {
+    pdf.fontSize(12).font('Helvetica-Bold').text(it.tipoTrabajo, { width: PDF_ANCHO_DISPONIBLE });
+    pdf.font('Helvetica');
+    if (it.descripcion) {
+      pdf.fontSize(10).fillColor('#555').text(it.descripcion, { width: PDF_ANCHO_DISPONIBLE });
+      pdf.fillColor('#000');
+    }
+    pdf.moveDown(0.6);
+  });
+
+  pdf.moveDown(0.2);
+  pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#ddd').stroke();
+  pdf.moveDown(0.5);
+  pdf.fontSize(16).text('Total: $ ' + Number(p.total || 0).toFixed(2), { align: 'right' });
+
+  if (p.formasPago && p.formasPago.length) {
+    pdf.moveDown(0.8);
+    pdf.fontSize(10).fillColor('#555').text('Formas de pago', { align: 'right' });
+    pdf.fillColor('#000');
+    p.formasPago.forEach(fp => {
+      const signo = fp.tipo === 'recargo' ? '+' : '-';
+      pdf.fontSize(10).text(
+        fp.nombre + (fp.porcentaje ? ' (' + signo + fp.porcentaje + '%)' : '') + ': $ ' + Number(fp.total).toFixed(2),
+        { align: 'right' }
+      );
+    });
+  }
+}
+
+function validarPresupuestoManualParaPdf(visita) {
+  if (!visita.presupuesto) throw err(400, 'Esta visita todavía no tiene presupuesto cargado.');
+  if (visita.presupuesto.tipo !== 'manual') {
+    throw err(400, 'Este presupuesto se armó con el cotizador: generá el PDF desde ahí (vista llave en mano).');
+  }
+}
+
+function enviarPdfPresupuestoManual(res, visita) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="presupuesto-' + visita._id + '.pdf"');
+  const pdf = new PDFDocument({ margin: 50 });
+  pdf.pipe(res);
+  dibujarPdfPresupuestoManual(pdf, visita);
+  pdf.end();
+}
+
+router.get('/vendedor/:vendedorId/visitas/:id/presupuesto-pdf', async (req, res) => {
+  try {
+    const visita = await conReintento(async () => {
+      const db = await getDb();
+      return visitaDelVendedor(db, req.params.id, req.params.vendedorId);
+    });
+    validarPresupuestoManualParaPdf(visita);
+    enviarPdfPresupuestoManual(res, visita);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/:id/presupuesto-pdf', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const visita = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('visitas').findOne({ _id: id });
+    });
+    if (!visita) throw err(404, 'Visita no encontrada');
+    validarPresupuestoManualParaPdf(visita);
+    enviarPdfPresupuestoManual(res, visita);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Confirmación en el momento, por el vendedor.
 router.post('/vendedor/:vendedorId/visitas/:id/confirmar', async (req, res) => {
   try {
@@ -740,8 +865,17 @@ async function tareasDesdeMapeo(db, presupuesto) {
   return tareas;
 }
 
+// Prefill de materiales de la tarea a partir del propio ítem del
+// presupuesto manual (el "producto a utilizar" que ya cargó el vendedor),
+// para que en el panel de obra no haya que volver a escribirlo — queda
+// como punto de partida editable, con la posibilidad de agregar más a
+// mano (ver admin-obras.html).
 function tareasDesdeManual(presupuesto) {
-  return presupuesto.items.map(it => ({ tipoTrabajo: it.tipoTrabajo, m2Presupuestados: it.cantidad }));
+  return presupuesto.items.map(it => ({
+    tipoTrabajo: it.tipoTrabajo,
+    m2Presupuestados: it.cantidad,
+    materialesIniciales: it.descripcion ? [{ tipo: it.descripcion, cantidad: String(it.cantidad) }] : []
+  }));
 }
 
 async function confirmarVisita(visitaIdStr, confirmadaPor) {
@@ -772,7 +906,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       fechaFinReal: null,
       notas: '',
       observaciones: '',
-      materiales: [],
+      materiales: t.materialesIniciales || [],
       googleEventId: null
     }));
 
