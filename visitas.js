@@ -1039,12 +1039,10 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       m2Presupuestados: Number(t.m2Presupuestados) || 0,
       colocadorId: null,
       costoPorM2Aplicado: null,
-      estado: 'pendiente', // pendiente -> en_curso -> terminada
+      estado: 'pendiente', // pendiente -> en_curso -> terminada (se sincroniza solo con el estado general de la obra, ver obras.js)
       fechaInicio: null,
       fechaFinEstimada: null,
       fechaFinReal: null,
-      notas: '',
-      observaciones: '',
       materiales: t.materialesIniciales || [],
       googleEventId: null
     }));
@@ -1061,6 +1059,9 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       fechaVenta: new Date(),
       vendedor: visita.vendedorNombre || '',
       estado: 'pendiente',
+      fechaInicio: null, // fecha de inicio de la obra completa (una sola, no por producto — ver obras.js)
+      notasColocador: '', // aclaraciones de oficina para el colocador (una sola, para toda la obra)
+      notasAsesor: '', // notas/observaciones para el asesor — una sola, para toda la obra
       tareas,
       notasGenerales: visita.notasEmpleada || '',
       fotos: visita.fotos || [],
