@@ -178,7 +178,7 @@ async function sincronizarCalendarDeTarea(db, obra, tarea) {
         `Cliente: ${obra.cliente.nombre}`,
         `Colocador: ${colocadorNombre || '-'}`,
         `m² presupuestados: ${tarea.m2Presupuestados}`,
-        tarea.notas ? `Notas: ${tarea.notas}` : null
+        obra.notasColocador ? `Notas: ${obra.notasColocador}` : null
       ].filter(Boolean).join('\n'),
       ubicacion: obra.cliente.direccion || '',
       inicio,
@@ -187,6 +187,37 @@ async function sincronizarCalendarDeTarea(db, obra, tarea) {
   } else if (tarea.googleEventId) {
     await googleCalendar.eliminarEvento(tarea.googleEventId);
     tarea.googleEventId = null;
+  }
+}
+
+// El estado de una obra se maneja como uno solo, aunque tenga varios
+// productos/tareas adentro (pedido de Mato) — pero por dentro se sigue
+// guardando el estado de cada tarea, porque el reporte de m²/comisiones
+// (más abajo) se calcula sobre tarea.estado === 'terminada'. Esta función
+// traduce el estado general de la obra al estado que le corresponde a cada
+// tarea, para no tener que tocarlas una por una nunca más.
+function estadoTareaParaObra(estadoObra) {
+  if (estadoObra === 'en_curso') return 'en_curso';
+  if (estadoObra === 'terminada') return 'terminada';
+  if (estadoObra === 'pendiente' || estadoObra === 'asignado') return 'pendiente';
+  return null; // "cancelada": no se toca el progreso ya cargado de las tareas
+}
+
+// Aplica esa traducción a TODAS las tareas de la obra (muta `obra.tareas` in
+// place) y sincroniza el calendario de cada una. Quien llama es responsable
+// de persistir `obra.tareas` actualizado.
+async function sincronizarTareasConEstadoObra(db, obra) {
+  const estadoTarea = estadoTareaParaObra(obra.estado);
+  if (!estadoTarea) return;
+  const ahora = new Date();
+  for (const tarea of (obra.tareas || [])) {
+    tarea.estado = estadoTarea;
+    if (estadoTarea === 'en_curso' && !tarea.fechaInicio) tarea.fechaInicio = ahora;
+    if (estadoTarea === 'terminada') {
+      if (!tarea.fechaInicio) tarea.fechaInicio = ahora;
+      if (!tarea.fechaFinReal) tarea.fechaFinReal = ahora;
+    }
+    await sincronizarCalendarDeTarea(db, obra, tarea);
   }
 }
 
@@ -402,12 +433,10 @@ router.post('/', authAdmin, async (req, res) => {
       m2Presupuestados: Number(t.m2Presupuestados) || 0,
       colocadorId: null,
       costoPorM2Aplicado: null,
-      estado: 'pendiente', // pendiente -> en_curso -> terminada
+      estado: 'pendiente', // pendiente -> en_curso -> terminada (se sincroniza solo con el estado general de la obra)
       fechaInicio: null,
       fechaFinEstimada: t.fechaFinEstimada ? new Date(t.fechaFinEstimada) : null,
       fechaFinReal: null,
-      notas: t.notas || '',
-      observaciones: '', // algo que haya quedado pendiente/a aclarar al terminar
       materiales: normalizarMateriales(t.materiales), // productos que el colocador debe llevar: [{tipo, cantidad}]
       googleEventId: null
     }));
@@ -422,6 +451,9 @@ router.post('/', authAdmin, async (req, res) => {
       fechaVenta: fechaVenta ? new Date(fechaVenta) : new Date(),
       vendedor: vendedor || '',
       estado: 'pendiente',
+      fechaInicio: null, // fecha de inicio de la obra completa (una sola, no por producto)
+      notasColocador: '', // aclaraciones de oficina para el colocador (una sola, para toda la obra)
+      notasAsesor: '', // notas/observaciones para el asesor (ej: algo que quedó pendiente) — una sola, para toda la obra
       tareas: tareasDoc,
       notasGenerales: notasGenerales || '',
       createdAt: new Date(),
@@ -440,56 +472,83 @@ router.put('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) return res.status(400).json({ error: 'id inválido' });
-    const { cliente, fechaVenta, vendedor, notasGenerales, estado } = req.body || {};
-    const set = { updatedAt: new Date() };
-    if (cliente) set.cliente = cliente;
-    if (fechaVenta) set.fechaVenta = new Date(fechaVenta);
-    if (vendedor !== undefined) set.vendedor = vendedor;
-    if (notasGenerales !== undefined) set.notasGenerales = notasGenerales;
-    if (estado) {
-      if (!ESTADOS_OBRA_VALIDOS.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
-      set.estado = estado;
-    }
+    const { cliente, fechaVenta, vendedor, notasGenerales, estado, fechaInicio, notasColocador, notasAsesor } = req.body || {};
+    if (estado && !ESTADOS_OBRA_VALIDOS.includes(estado)) return res.status(400).json({ error: 'Estado inválido' });
+
     const actualizado = await conReintento(async () => {
       const db = await getDb();
+      const obra = await db.collection('obras').findOne({ _id: id });
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+
+      const set = { updatedAt: new Date() };
+      if (cliente) set.cliente = cliente;
+      if (fechaVenta) set.fechaVenta = new Date(fechaVenta);
+      if (vendedor !== undefined) set.vendedor = vendedor;
+      if (notasGenerales !== undefined) set.notasGenerales = notasGenerales;
+      if (notasColocador !== undefined) set.notasColocador = notasColocador;
+      if (notasAsesor !== undefined) set.notasAsesor = notasAsesor;
+      if (fechaInicio !== undefined) set.fechaInicio = fechaInicio ? new Date(fechaInicio) : null;
+
+      if (estado) {
+        set.estado = estado;
+        // Si entra en curso y todavía no tiene fecha de inicio (y no vino una
+        // fecha explícita en este mismo pedido), se la asigna sola.
+        if (estado === 'en_curso' && fechaInicio === undefined && !obra.fechaInicio) set.fechaInicio = new Date();
+        // La obra se maneja como una sola aunque tenga varios productos
+        // adentro: al cambiar su estado general, se sincroniza el de todas
+        // sus tareas para que los reportes de m²/comisiones sigan andando.
+        const obraConNuevoEstado = { ...obra, estado, fechaInicio: set.fechaInicio !== undefined ? set.fechaInicio : obra.fechaInicio };
+        await sincronizarTareasConEstadoObra(db, obraConNuevoEstado);
+        set.tareas = obraConNuevoEstado.tareas;
+      }
+
       await db.collection('obras').updateOne({ _id: id }, { $set: set });
       return db.collection('obras').findOne({ _id: id });
     });
     res.json(actualizado);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
-// Agregar tarea a una obra existente
+// Agregar tarea a una obra existente. Arranca con el estado que le
+// corresponda según el estado general de la obra (si la obra ya está en
+// curso o terminada, el producto nuevo entra directo en ese mismo estado,
+// para no dejarlo desincronizado).
 router.post('/:id/tareas', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) return res.status(400).json({ error: 'id inválido' });
-    const { tipoTrabajo, m2Presupuestados, fechaFinEstimada, notas, materiales } = req.body || {};
+    const { tipoTrabajo, m2Presupuestados, fechaFinEstimada, materiales } = req.body || {};
     if (!tipoTrabajo) return res.status(400).json({ error: 'Falta el tipo de trabajo' });
-    const nuevaTarea = {
-      _id: new ObjectId(),
-      tipoTrabajo,
-      m2Presupuestados: Number(m2Presupuestados) || 0,
-      colocadorId: null,
-      costoPorM2Aplicado: null,
-      estado: 'pendiente',
-      fechaInicio: null,
-      fechaFinEstimada: fechaFinEstimada ? new Date(fechaFinEstimada) : null,
-      fechaFinReal: null,
-      notas: notas || '',
-      observaciones: '',
-      materiales: normalizarMateriales(materiales),
-      googleEventId: null
-    };
-    await conReintento(async () => {
+
+    const resultado = await conReintento(async () => {
       const db = await getDb();
+      const obra = await db.collection('obras').findOne({ _id: id });
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+      const estadoInicial = estadoTareaParaObra(obra.estado) || 'pendiente';
+      const ahora = new Date();
+      const nuevaTarea = {
+        _id: new ObjectId(),
+        tipoTrabajo,
+        m2Presupuestados: Number(m2Presupuestados) || 0,
+        colocadorId: null,
+        costoPorM2Aplicado: null,
+        estado: estadoInicial,
+        fechaInicio: (estadoInicial === 'en_curso' || estadoInicial === 'terminada') ? ahora : null,
+        fechaFinEstimada: fechaFinEstimada ? new Date(fechaFinEstimada) : null,
+        fechaFinReal: estadoInicial === 'terminada' ? ahora : null,
+        materiales: normalizarMateriales(materiales),
+        googleEventId: null
+      };
       await db.collection('obras').updateOne({ _id: id }, { $push: { tareas: nuevaTarea }, $set: { updatedAt: new Date() } });
+      return nuevaTarea;
     });
-    res.json(nuevaTarea);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json(resultado);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
-// Editar una tarea: asignar colocador, cambiar m2 presupuestados, fechas, notas, estado manual
+// Editar una tarea: cambiar m2 presupuestados, fecha fin estimada, materiales
+// o el colocador asignado (aunque en la práctica el colocador se asigna a
+// toda la obra de una vez, ver asignarColocadorObra en admin-obras.html).
 router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
   try {
     const obraId = toObjectId(req.params.obraId);
@@ -503,7 +562,7 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
       const tarea = (obra.tareas || []).find(t => String(t._id) === String(tareaId));
       if (!tarea) throw Object.assign(new Error('Tarea no encontrada'), { status: 404 });
 
-      const { colocadorId, m2Presupuestados, fechaFinEstimada, notas, observaciones, estado, materiales } = req.body || {};
+      const { colocadorId, m2Presupuestados, fechaFinEstimada, estado, materiales } = req.body || {};
 
       if (colocadorId !== undefined) {
         if (colocadorId === null) {
@@ -523,8 +582,6 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
       }
       if (m2Presupuestados !== undefined) tarea.m2Presupuestados = Number(m2Presupuestados) || 0;
       if (fechaFinEstimada !== undefined) tarea.fechaFinEstimada = fechaFinEstimada ? new Date(fechaFinEstimada) : null;
-      if (notas !== undefined) tarea.notas = notas;
-      if (observaciones !== undefined) tarea.observaciones = observaciones;
       if (materiales !== undefined) tarea.materiales = normalizarMateriales(materiales);
       if (estado !== undefined) {
         if (!ESTADOS_TAREA_VALIDOS.includes(estado)) throw Object.assign(new Error('Estado inválido'), { status: 400 });
@@ -565,24 +622,27 @@ router.delete('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
 // COLOCADOR (acceso mobile con PIN)
 // ---------------------------------------------------------------------
 
+// ?historial=1 trae las obras YA TERMINADAS de este colocador (para el
+// panel "Historial" de colocador.html); sin ese parámetro trae solo las que
+// todavía tiene en curso (ni terminadas ni canceladas), que es la pantalla
+// principal — así no se le acumulan para siempre las obras ya cerradas.
 router.get('/colocador/mis-obras', authColocador, async (req, res) => {
   try {
     const colocadorId = req.colocador._id;
+    const historial = req.query.historial === '1' || req.query.historial === 'true';
     const obras = await conReintento(async () => {
       const db = await getDb();
-      // Solo obras "en curso" (no terminadas ni canceladas) — para que la
-      // pantalla del colocador se limite a lo que todavía tiene pendiente,
-      // sin acumular para siempre las obras ya cerradas.
-      return db.collection('obras').find({
-        'tareas.colocadorId': colocadorId,
-        estado: { $nin: ESTADOS_OBRA_NO_EN_CURSO }
-      }).sort({ numero: -1 }).toArray();
+      const match = { 'tareas.colocadorId': colocadorId };
+      match.estado = historial ? 'terminada' : { $nin: ESTADOS_OBRA_NO_EN_CURSO };
+      return db.collection('obras').find(match).sort({ numero: -1 }).toArray();
     });
     // Devolvemos solo las tareas de este colocador, junto con los datos de la obra/cliente
     const resultado = obras.map(o => ({
       obraId: o._id,
       numero: o.numero,
       cliente: o.cliente,
+      estado: o.estado,
+      notasColocador: o.notasColocador || '', // aclaraciones de oficina, para toda la obra
       fotos: o.fotos || [], // heredadas de la visita ("antes") + las que suba este colocador ("después")
       tareas: (o.tareas || []).filter(t => t.colocadorId && String(t.colocadorId) === String(colocadorId))
     })).filter(o => o.tareas.length > 0);
@@ -590,13 +650,14 @@ router.get('/colocador/mis-obras', authColocador, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Marca una tarea propia como en curso o terminada. Al terminar, puede
-// mandar una observación (ej: "quedó pendiente colocar el zócalo del
-// pasillo, faltó material") que queda guardada en la tarea.
-router.post('/colocador/tareas/:obraId/:tareaId/estado', authColocador, async (req, res) => {
+// Marca la OBRA ENTERA (no un producto suelto) como en curso o terminada —
+// se maneja como una sola obra aunque tenga varios productos adentro. Al
+// terminar, puede mandar una observación (ej: "quedó pendiente colocar el
+// zócalo del pasillo, faltó material") que queda como notas para el asesor.
+router.post('/colocador/obras/:obraId/estado', authColocador, async (req, res) => {
   try {
     const obraId = toObjectId(req.params.obraId);
-    const tareaId = toObjectId(req.params.tareaId);
+    if (!obraId) return res.status(400).json({ error: 'id inválido' });
     const { estado, observaciones } = req.body || {};
     if (!['en_curso', 'terminada'].includes(estado)) {
       return res.status(400).json({ error: 'Estado inválido' });
@@ -605,16 +666,19 @@ router.post('/colocador/tareas/:obraId/:tareaId/estado', authColocador, async (r
       const db = await getDb();
       const obra = await db.collection('obras').findOne({ _id: obraId });
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
-      const tarea = (obra.tareas || []).find(t => String(t._id) === String(tareaId));
-      if (!tarea || String(tarea.colocadorId) !== String(req.colocador._id)) {
-        throw Object.assign(new Error('Esta tarea no está asignada a tu usuario'), { status: 403 });
-      }
-      tarea.estado = estado;
-      if (estado === 'en_curso' && !tarea.fechaInicio) tarea.fechaInicio = new Date();
-      if (estado === 'terminada' && !tarea.fechaFinReal) tarea.fechaFinReal = new Date();
-      if (observaciones !== undefined) tarea.observaciones = observaciones;
-      await db.collection('obras').updateOne({ _id: obraId, 'tareas._id': tareaId }, { $set: { 'tareas.$': tarea, updatedAt: new Date() } });
-      return tarea;
+      const tieneTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
+      if (!tieneTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+
+      const set = { estado, updatedAt: new Date() };
+      if (estado === 'en_curso' && !obra.fechaInicio) set.fechaInicio = new Date();
+      if (observaciones !== undefined) set.notasAsesor = observaciones;
+
+      const obraConNuevoEstado = { ...obra, estado, fechaInicio: set.fechaInicio !== undefined ? set.fechaInicio : obra.fechaInicio };
+      await sincronizarTareasConEstadoObra(db, obraConNuevoEstado);
+      set.tareas = obraConNuevoEstado.tareas;
+
+      await db.collection('obras').updateOne({ _id: obraId }, { $set: set });
+      return db.collection('obras').findOne({ _id: obraId });
     });
     res.json(resultado);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
