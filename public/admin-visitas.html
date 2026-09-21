@@ -244,9 +244,10 @@ function api(path, opts={}) {
   });
 }
 
-async function verPdfPresupuestoManual(id){
+async function verPdfPresupuestoManual(id, vistaDetalle){
   try{
-    const r = await fetch(BASE+'/'+id+'/presupuesto-pdf', {headers:{'x-admin-token':TOKEN}});
+    const qs = vistaDetalle ? '?vista=detalle' : '';
+    const r = await fetch(BASE+'/'+id+'/presupuesto-pdf'+qs, {headers:{'x-admin-token':TOKEN}});
     if (!r.ok){
       const d = await r.json().catch(()=>({}));
       throw new Error(d.error || 'No se pudo generar el PDF');
@@ -636,10 +637,16 @@ function renderDetalleVisita(v, editando){
     if (v.presupuesto.tipo === 'manual'){
       presupuestoHtml = `<b>Presupuesto manual</b> — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}<br>` +
         v.presupuesto.items.map(it=>`${escapeHtml(it.tipoTrabajo)}${it.descripcion?' ('+escapeHtml(it.descripcion)+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
-        `<div style="margin-top:8px"><button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}')">📄 Ver PDF llave en mano</button></div>`;
+        `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}')">📄 Ver PDF llave en mano</button>
+          <button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}', true)">📄 Ver PDF completo</button>
+        </div>`;
     } else {
       const linkPdf = (v.presupuesto.cotizacionId && v.presupuesto.storeId)
-        ? `<div style="margin-top:8px"><a class="btn small secondary" style="text-decoration:none;display:inline-block" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?store_id=${v.presupuesto.storeId}&vista=simple" target="_blank">📄 Ver PDF llave en mano</a></div>`
+        ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?store_id=${v.presupuesto.storeId}&vista=simple" target="_blank">📄 Ver PDF llave en mano</a>
+            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?store_id=${v.presupuesto.storeId}" target="_blank">📄 Ver PDF completo</a>
+          </div>`
         : '';
       presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${escapeHtml(v.presupuesto.tipoObraNombre||'')} — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}` + linkPdf;
     }
@@ -651,7 +658,11 @@ function renderDetalleVisita(v, editando){
   // cambios de estado simples con un PUT directo — así el local puede
   // corregir el estado a mano si hace falta, no solo el vendedor.
   const puedeConfirmar = v.estado === 'presupuestada' && !v.obraId;
-  const puedeCancelar = v.estado !== 'cancelada' && v.estado !== 'instalado';
+  // Una vez que la visita cambió de estado (ya no está "sin_visita") se
+  // entiende que ya se realizó, así que no se puede cancelar más — ni con
+  // el botón dedicado ni cambiando el estado a mano (mismo límite que
+  // aplica el backend en el PUT).
+  const puedeCancelar = v.estado === 'sin_visita';
   const esCancelada = v.estado === 'cancelada';
 
   let cuerpoHtml;
@@ -696,6 +707,7 @@ function renderDetalleVisita(v, editando){
           <label style="margin:0">Cambiar estado:</label>
           <select id="detEstadoSelect" style="width:auto">
             ${Object.entries({sin_visita:'Sin visita',presupuestada:'Presupuestada',vendido:'Vendido',instalado:'Instalado',cancelada:'Cancelada'})
+              .filter(([val]) => val !== 'cancelada' || puedeCancelar)
               .map(([val,label]) => `<option value="${val}" ${val===v.estado?'selected':''}>${label}</option>`).join('')}
           </select>
           <button class="btn small" onclick="cambiarEstadoVisita('${v._id}')">Guardar estado</button>
@@ -763,9 +775,12 @@ async function cambiarEstadoVisita(id){
 async function confirmarVisita(id){
   const errEl = document.getElementById('visErr');
   try{
-    const actualizado = await api(`/${id}/confirmar`, {method:'POST'});
+    // El endpoint devuelve {visita, obra} (la Obra recién creada), no la
+    // visita sola — hay que desarmarlo antes de pasárselo a
+    // renderDetalleVisita, si no v.cliente queda undefined y explota.
+    const resultado = await api(`/${id}/confirmar`, {method:'POST'});
     cargarVisitas();
-    renderDetalleVisita(actualizado, false);
+    renderDetalleVisita(resultado.visita, false);
   }catch(e){ if (errEl) errEl.textContent = e.message; }
 }
 

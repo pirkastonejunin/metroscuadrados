@@ -53,6 +53,8 @@
   .back-link{color:var(--accent);font-size:13px;text-decoration:none;display:inline-block;margin-bottom:10px;font-weight:700;}
   .cotizacion-opcion{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;font-size:13px;}
   .divider{border-top:1px solid var(--border);margin:14px 0;padding-top:14px;}
+  .botonera-pdf{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
+  .botonera-pdf .btn{width:auto;}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
@@ -105,6 +107,7 @@ let VENDEDOR_NOMBRE = localStorage.getItem('vendedor_nombre') || '';
 let STORE_ID = null;
 let TIPOS_TRABAJO = [];
 let VISITAS = [];
+let VISITA_ACTUAL = null; // última visita abierta en el detalle, para el botón de compartir por WhatsApp
 
 function api(path, opts={}) {
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
@@ -190,6 +193,7 @@ async function mostrarDetalleVisita(id){
   let v;
   try{ v = await api(`/vendedor/${VENDEDOR_ID}/visitas/${id}`); }
   catch(e){ pant.innerHTML = `<p class="err">${e.message}</p>`; return; }
+  VISITA_ACTUAL = v;
 
   const fotosHtml = (v.fotos && v.fotos.length)
     ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${f.data}">`).join('')}</div>`
@@ -212,11 +216,20 @@ async function mostrarDetalleVisita(id){
       resumen = `<b>Presupuesto (a mano)</b><br>` +
         v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
         `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` + formasPagoHtml +
-        `<div style="margin-top:8px"><a class="btn small secondary" href="/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf" target="_blank">Ver PDF llave en mano</a></div>`;
+        `<div class="botonera-pdf">
+          <a class="btn small secondary" href="/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf" target="_blank">Ver PDF llave en mano</a>
+          <a class="btn small secondary" href="/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf?vista=detalle" target="_blank">Ver PDF completo</a>
+          <button class="btn small secondary" type="button" onclick="compartirPresupuestoWhatsapp(false)">💬 Compartir por WhatsApp</button>
+        </div>`;
     } else {
-      const params = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID, vista: 'simple' });
+      const paramsSimple = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID, vista: 'simple' });
+      const paramsDetalle = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
       resumen = `<b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` +
-        `<div style="margin-top:8px"><a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${params.toString()}" target="_blank">Ver PDF llave en mano</a></div>`;
+        `<div class="botonera-pdf">
+          <a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsSimple.toString()}" target="_blank">Ver PDF llave en mano</a>
+          <a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsDetalle.toString()}" target="_blank">Ver PDF completo</a>
+          <button class="btn small secondary" type="button" onclick="compartirPresupuestoWhatsapp(false)">💬 Compartir por WhatsApp</button>
+        </div>`;
     }
     presupuestoHtml = `
       <div class="card">
@@ -290,7 +303,38 @@ function formularioElegirPresupuesto(visitaId){
       <div id="formManual"></div>
     </div>`;
 }
-function mostrarElegirPresupuesto(visitaId){
+
+// Al editar un presupuesto ya cargado, en vez de arrancar de cero como si
+// fuera nuevo (lo que antes hacía que se "perdiera" todo lo ya cargado),
+// se trae lo que ya tiene: si es manual, se abre el mismo formulario
+// precargado con sus ítems y formas de pago; si es del cotizador, se ofrece
+// reabrir esa misma cotización en el cotizador (en vez de una en blanco) o
+// actualizar el total acá mismo si ya se guardó el cambio allá. Las fotos
+// del lugar no se tocan en ningún caso — viven aparte del presupuesto.
+async function mostrarElegirPresupuesto(visitaId){
+  const cont = document.getElementById('elegirPresupuesto');
+  cont.innerHTML = '<p class="muted">Cargando…</p>';
+  let v;
+  try{ v = await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}`); }
+  catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; return; }
+
+  if (v.presupuesto && v.presupuesto.tipo === 'manual'){
+    cont.innerHTML = '<div id="formManual"></div>';
+    mostrarFormManual(visitaId, v.presupuesto);
+  } else if (v.presupuesto && v.presupuesto.tipo === 'cotizador'){
+    cont.innerHTML = `
+      <p class="muted">Este presupuesto se armó con el cotizador.</p>
+      <button class="btn secondary" onclick="abrirCotizadorParaEditar('${visitaId}')">Editar en el cotizador</button>
+      <div style="margin-top:8px"><button class="btn small secondary" type="button" onclick="vincularCotizacion('${visitaId}','${v.presupuesto.cotizacionId}')">🔄 Actualizar total desde el cotizador</button></div>
+      <div class="divider"><button class="btn small secondary" type="button" onclick="mostrarElegirPresupuestoDesdeCero('${visitaId}')">Cargar presupuesto a mano en su lugar</button></div>
+    `;
+  } else {
+    cont.innerHTML = formularioElegirPresupuesto(visitaId);
+  }
+}
+// Chooser en blanco de toda la vida — solo para cuando alguien elige
+// explícitamente cambiar de tipo de presupuesto (de cotizador a manual).
+function mostrarElegirPresupuestoDesdeCero(visitaId){
   document.getElementById('elegirPresupuesto').innerHTML = formularioElegirPresupuesto(visitaId);
 }
 
@@ -300,6 +344,21 @@ function abrirCotizador(visitaId){
   const v = VISITAS.find(x => x._id === visitaId) || {};
   const params = new URLSearchParams();
   if (STORE_ID) params.set('store_id', STORE_ID);
+  if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
+  if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
+  window.open('/cotizador.html?' + params.toString(), '_blank');
+}
+
+// Reabre la MISMA cotización ya guardada en modo edición (en vez de una
+// nueva en blanco), usando el mismo flujo que ya tiene el cotizador para
+// reabrir una cotización de su historial — solo que arrancado por link en
+// vez de tener que ir a buscarla a mano en la pestaña Historial.
+function abrirCotizadorParaEditar(visitaId){
+  const v = VISITAS.find(x => x._id === visitaId) || {};
+  if (!v.presupuesto || !v.presupuesto.cotizacionId) return;
+  const params = new URLSearchParams();
+  params.set('editarCotizacionId', v.presupuesto.cotizacionId);
+  params.set('store_id', v.presupuesto.storeId || STORE_ID || '');
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
   window.open('/cotizador.html?' + params.toString(), '_blank');
@@ -333,14 +392,24 @@ async function vincularCotizacion(visitaId, cotizacionId){
 
 // ---------------- PRESUPUESTO MANUAL ----------------
 
-function filaItemManual(){
-  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
+// Escapa texto para poder insertarlo dentro de un atributo value="..." sin
+// romper el HTML (por ej. si la descripción tiene comillas).
+function escAttr(s){
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function filaItemManual(it){
+  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}"${it && it.tipoTrabajo===t.nombre ? ' selected' : ''}>${t.nombre}</option>`).join('');
+  const descripcion = it ? escAttr(it.descripcion) : '';
+  const cantidad = it ? escAttr(it.cantidad) : '';
+  const valor = it ? escAttr(it.valor) : '';
+  const total = it ? Number(it.total || (it.cantidad*it.valor) || 0).toLocaleString('es-AR') : '0';
   return `<div class="item-row" style="flex-wrap:wrap">
     <select class="itTipo" style="flex:2;min-width:120px">${opciones}</select>
-    <input class="itDescripcion" placeholder="Descripción" style="flex:2;min-width:120px">
-    <input class="itCantidad" type="number" step="0.01" placeholder="m²" style="flex:1;min-width:70px" oninput="actualizarTotalItem(this)">
-    <input class="itValor" type="number" step="0.01" placeholder="Precio unit." style="flex:1;min-width:80px" oninput="actualizarTotalItem(this)">
-    <span class="muted itTotal" style="flex:1;min-width:70px;align-self:center">Total: $0</span>
+    <input class="itDescripcion" placeholder="Descripción" value="${descripcion}" style="flex:2;min-width:120px">
+    <input class="itCantidad" type="number" step="0.01" placeholder="m²" value="${cantidad}" style="flex:1;min-width:70px" oninput="actualizarTotalItem(this)">
+    <input class="itValor" type="number" step="0.01" placeholder="Precio unit." value="${valor}" style="flex:1;min-width:80px" oninput="actualizarTotalItem(this)">
+    <span class="muted itTotal" style="flex:1;min-width:70px;align-self:center">Total: $${total}</span>
+    <button class="btn small secondary" type="button" onclick="this.closest('.item-row').remove(); actualizarTotalGeneralManual();">Quitar</button>
   </div>`;
 }
 function actualizarTotalItem(el){
@@ -348,23 +417,49 @@ function actualizarTotalItem(el){
   const cantidad = Number(row.querySelector('.itCantidad').value) || 0;
   const valor = Number(row.querySelector('.itValor').value) || 0;
   row.querySelector('.itTotal').textContent = 'Total: $' + (cantidad*valor).toLocaleString('es-AR');
+  actualizarTotalGeneralManual();
 }
-async function mostrarFormManual(visitaId){
+// Suma parcial de todos los ítems cargados hasta el momento, para que el
+// vendedor vea el total del presupuesto a medida que lo va armando (antes
+// solo se veía el total al guardar).
+function actualizarTotalGeneralManual(){
+  const el = document.getElementById('totalGeneralManual');
+  if (!el) return;
+  const total = [...document.querySelectorAll('#itemsManual .item-row')].reduce((s, row) => {
+    const cantidad = Number(row.querySelector('.itCantidad').value) || 0;
+    const valor = Number(row.querySelector('.itValor').value) || 0;
+    return s + cantidad*valor;
+  }, 0);
+  el.textContent = 'Total del presupuesto: $' + total.toLocaleString('es-AR');
+}
+function agregarFilaItemManual(){
+  document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual());
+  actualizarTotalGeneralManual();
+}
+async function mostrarFormManual(visitaId, presupuestoExistente){
   const cont = document.getElementById('formManual');
+  const itemsHtml = (presupuestoExistente && presupuestoExistente.items && presupuestoExistente.items.length)
+    ? presupuestoExistente.items.map(it => filaItemManual(it)).join('')
+    : filaItemManual();
   cont.innerHTML = `
-    <div id="itemsManual">${filaItemManual()}</div>
-    <button class="btn small secondary" type="button" onclick="document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual())">+ Agregar producto</button>
+    ${presupuestoExistente ? '<p class="muted">Editando el presupuesto ya cargado — modificá lo que necesites y guardá de nuevo.</p>' : ''}
+    <div id="itemsManual">${itemsHtml}</div>
+    <button class="btn small secondary" type="button" onclick="agregarFilaItemManual()">+ Agregar producto</button>
+    <div class="muted" id="totalGeneralManual" style="margin-top:8px;font-weight:700"></div>
     <div id="formasPagoManual" class="muted" style="margin-top:10px">Cargando formas de pago…</div>
+    <div style="margin-top:10px"><label>Observaciones</label><textarea id="observacionesManual" placeholder="Aclaraciones para el cliente sobre este presupuesto">${escAttr(presupuestoExistente ? presupuestoExistente.notas || '' : '')}</textarea></div>
     <div class="err" id="manualErr"></div>
     <button class="btn" style="margin-top:8px" onclick="guardarPresupuestoManual('${visitaId}')">Guardar presupuesto</button>
   `;
-  cargarFormasPagoManual();
+  cargarFormasPagoManual(presupuestoExistente && presupuestoExistente.formasPago);
+  actualizarTotalGeneralManual();
 }
 // Mismo catálogo de formas de pago que ya carga Mato para el cotizador
 // (/api/cotizador/formas-pago) — así no hay que cargarlas dos veces.
-async function cargarFormasPagoManual(){
+async function cargarFormasPagoManual(formasPagoExistentes){
   const cont = document.getElementById('formasPagoManual');
   if (!STORE_ID){ cont.innerHTML = ''; return; }
+  const seleccionadasNombres = new Set((formasPagoExistentes||[]).map(fp => fp.nombre));
   try{
     const res = await fetch('/api/cotizador/formas-pago?store_id=' + encodeURIComponent(STORE_ID));
     const formas = await res.json();
@@ -373,7 +468,7 @@ async function cargarFormasPagoManual(){
     cont.innerHTML = '<b class="muted">Formas de pago a mostrar en el presupuesto</b>' +
       formas.map(fp => `
         <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal">
-          <input type="checkbox" class="fpCheck" value='${JSON.stringify(fp).replace(/'/g,'&#39;')}'>
+          <input type="checkbox" class="fpCheck" value='${JSON.stringify(fp).replace(/'/g,'&#39;')}'${seleccionadasNombres.has(fp.nombre) ? ' checked' : ''}>
           ${fp.nombre}${fp.porcentaje ? ` (${fp.tipo==='recargo'?'+':'-'}${fp.porcentaje}%)` : ''}
         </label>`).join('');
   }catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; }
@@ -386,10 +481,66 @@ async function guardarPresupuestoManual(visitaId){
     valor: Number(row.querySelector('.itValor').value) || 0
   }));
   const formasPagoSeleccionadas = [...document.querySelectorAll('.fpCheck:checked')].map(chk => JSON.parse(chk.value));
+  const notasEl = document.getElementById('observacionesManual');
+  const notas = notasEl ? notasEl.value.trim() : '';
   try{
-    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items, formasPagoSeleccionadas}});
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items, formasPagoSeleccionadas, notas}});
     mostrarDetalleVisita(visitaId);
   }catch(e){ document.getElementById('manualErr').textContent = e.message; }
+}
+
+// ---------------- COMPARTIR PDF POR WHATSAPP ----------------
+// Mismo patrón que ya usa cotizador.html para compartir su PDF: en el
+// celular intenta adjuntar el PDF directo al chat con el share nativo del
+// navegador; si no está disponible (la mayoría de las notebooks), descarga
+// el PDF y abre WhatsApp con el mensaje para adjuntarlo a mano. El número
+// del cliente (si lo cargó la empleada) se usa para abrir directo su chat.
+
+// Mismo criterio que ya usa admin-visitas.html para armar el link de
+// WhatsApp: si el teléfono ya viene con el 54 lo deja como está, si no se
+// lo agrega, y saca el "15" de celular si está.
+function normalizarTelefonoWA(telefono){
+  let d = String(telefono||'').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('54')) return d;
+  if (d.startsWith('0')) d = d.slice(1);
+  d = d.replace(/^(\d{2,4})15/, '$1');
+  return '549' + d;
+}
+
+function urlPdfPresupuestoActual(vistaDetalle){
+  const v = VISITA_ACTUAL;
+  if (!v || !v.presupuesto) return null;
+  if (v.presupuesto.tipo === 'manual'){
+    return `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf` + (vistaDetalle ? '?vista=detalle' : '');
+  }
+  const params = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
+  if (!vistaDetalle) params.set('vista', 'simple');
+  return `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${params.toString()}`;
+}
+
+async function compartirPresupuestoWhatsapp(vistaDetalle){
+  const v = VISITA_ACTUAL;
+  const urlPdf = urlPdfPresupuestoActual(vistaDetalle);
+  if (!v || !urlPdf) return;
+  const tel = normalizarTelefonoWA(v.cliente && v.cliente.telefono);
+  const textoBase = 'Hola' + (v.cliente && v.cliente.nombre ? ' ' + v.cliente.nombre : '') +
+    ', te comparto el presupuesto — Total $' + Number(v.presupuesto.total||0).toLocaleString('es-AR') + '.';
+  try{
+    const res = await fetch(urlPdf);
+    if (!res.ok) throw new Error('pdf-fetch-failed');
+    const blob = await res.blob();
+    const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], text: textoBase });
+      return;
+    }
+    throw new Error('share-unsupported');
+  }catch(e){
+    if (e && e.name === 'AbortError') return; // el usuario cerró el panel de compartir
+    window.open(urlPdf, '_blank');
+    window.open((tel ? `https://wa.me/${tel}` : 'https://wa.me/') + '?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+  }
 }
 
 // ---------------- CONFIRMAR ----------------

@@ -1707,6 +1707,21 @@ async function editarCotizacionHistorial(){
 }
 $('#btnEditarHistorial').addEventListener('click', editarCotizacionHistorial);
 
+// Si se llega acá con ?editarCotizacionId=... (desde el botón "Editar en el
+// cotizador" de vendedor.html), abre directo esa cotización en modo edición
+// — mismo flujo que ya usa la pestaña Historial, solo que disparado por
+// link en vez de tener que buscarla a mano. Se llama después de
+// cargarTiendas() porque necesita storeId ya cargado.
+async function abrirEdicionDesdeQuery(){
+  try {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('editarCotizacionId');
+    if (!id || !storeId) return;
+    await verDetalleHistorial(id);
+    if (historialVistaId === id) await editarCotizacionHistorial();
+  } catch (e) { /* si falla, queda como si no hubiera venido el parámetro */ }
+}
+
 function renderDetalleHistorial(doc){
   renderResumen(doc, false, vistaSimpleHistorial);
   $('#historial-detalle').innerHTML = $('#resumen-tabla').innerHTML;
@@ -2016,7 +2031,7 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
   if (res.ok) mostrarMsg('Tarifas guardadas.', 'ok'); else mostrarMsg('Error al guardar tarifas.');
 });
 
-cargarTiendas();
+cargarTiendas().then(abrirEdicionDesdeQuery);
 </script>
 </body>
 </html>
