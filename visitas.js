@@ -795,6 +795,15 @@ function dibujarFormasPagoManual(pdf, p) {
   }
 }
 
+// Aclaraciones que carga el vendedor al armar el presupuesto (p.ej.
+// "el precio no incluye flete", "colocación a partir del lunes").
+function dibujarObservacionesManual(pdf, p) {
+  if (!p.notas) return;
+  pdf.moveDown(0.8);
+  pdf.fontSize(10).font('Helvetica-Bold').fillColor('#555').text('Observaciones');
+  pdf.font('Helvetica').fontSize(10).fillColor('#000').text(p.notas, { width: PDF_ANCHO_DISPONIBLE });
+}
+
 // Fotos que sacó el vendedor (visita.fotos), en una grilla — vienen ya como
 // data URLs base64 (no hay que descargarlas de ningún lado, a diferencia de
 // las fotos de producto de cotizador.js).
@@ -868,6 +877,7 @@ function dibujarPdfPresupuestoManualSimple(pdf, visita) {
   pdf.fontSize(16).text('Total: $ ' + Number(p.total || 0).toFixed(2), { align: 'right' });
 
   dibujarFormasPagoManual(pdf, p);
+  dibujarObservacionesManual(pdf, p);
   dibujarFotosVisita(pdf, visita.fotos);
 }
 
@@ -914,6 +924,7 @@ function dibujarPdfPresupuestoManualDetalle(pdf, visita) {
   pdf.fontSize(16).text('Total: $ ' + Number(p.total || 0).toFixed(2), { align: 'right' });
 
   dibujarFormasPagoManual(pdf, p);
+  dibujarObservacionesManual(pdf, p);
   dibujarFotosVisita(pdf, visita.fotos);
 }
 
