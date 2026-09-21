@@ -33,6 +33,7 @@
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
   .pill.pendiente{background:var(--bg);color:var(--muted);}
   .pill.asignada{background:var(--obra-soft);color:var(--obra);}
+  .pill.asignado{background:var(--obra-soft);color:var(--obra);}
   .pill.en_curso{background:var(--accent-soft);color:var(--accent);}
   .pill.terminada{background:var(--ok-soft);color:var(--ok);}
   .obra-titulo{font-weight:800;font-size:15px;}
@@ -87,7 +88,13 @@
       <button onclick="logout()">Salir</button>
     </div>
   </header>
-  <main id="listaObras"></main>
+  <main>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button id="tabEnCurso" class="btn" style="width:auto;flex:1;padding:8px" onclick="cambiarTabObras(false)">En curso</button>
+      <button id="tabHistorial" class="btn secondary" style="width:auto;flex:1;padding:8px" onclick="cambiarTabObras(true)">Historial</button>
+    </div>
+    <div id="listaObras"></div>
+  </main>
 </div>
 
 <script>
@@ -134,19 +141,34 @@ function iniciar(){
 }
 if (TOKEN) iniciar();
 
-const ESTADOS = {pendiente:'Pendiente', asignada:'Pendiente', en_curso:'En curso', terminada:'Terminada'};
+// La obra se maneja como una sola, aunque tenga varios productos adentro
+// (piso, zócalo, etc.) — un solo estado, una sola aclaración de oficina.
+const ESTADOS_OBRA = {pendiente:'Por comenzar', asignado:'Por comenzar', en_curso:'En curso', terminada:'Terminada'};
+
+let VIENDO_HISTORIAL = false;
+
+function cambiarTabObras(historial){
+  VIENDO_HISTORIAL = historial;
+  document.getElementById('tabEnCurso').className = historial ? 'btn secondary' : 'btn';
+  document.getElementById('tabHistorial').className = historial ? 'btn' : 'btn secondary';
+  document.getElementById('tabEnCurso').style.cssText = 'width:auto;flex:1;padding:8px';
+  document.getElementById('tabHistorial').style.cssText = 'width:auto;flex:1;padding:8px';
+  cargarMisObras();
+}
 
 async function cargarMisObras(){
   let obras;
   try{
-    obras = await api('/colocador/mis-obras');
+    obras = await api('/colocador/mis-obras' + (VIENDO_HISTORIAL ? '?historial=1' : ''));
   }catch(e){
     if (e.message.includes('vencida') || e.message.includes('inválida')) { logout(); return; }
     document.getElementById('listaObras').innerHTML = `<div class="err">${e.message}</div>`;
     return;
   }
   if (!obras.length){
-    document.getElementById('listaObras').innerHTML = '<p class="muted">No tenés obras asignadas por ahora.</p>';
+    document.getElementById('listaObras').innerHTML = VIENDO_HISTORIAL
+      ? '<p class="muted">Todavía no tenés obras terminadas.</p>'
+      : '<p class="muted">No tenés obras asignadas por ahora.</p>';
     return;
   }
   document.getElementById('listaObras').innerHTML = obras.map(o => {
@@ -154,53 +176,61 @@ async function cargarMisObras(){
     const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
     return `
     <div class="card">
-      <div class="obra-titulo">Obra #${o.numero} — ${o.cliente.nombre}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div class="obra-titulo">Obra #${o.numero} — ${o.cliente.nombre}</div>
+        <span class="pill ${o.estado}">${ESTADOS_OBRA[o.estado]||o.estado}</span>
+      </div>
       <div class="muted">${o.cliente.direccion||''} ${o.cliente.localidad?'· '+o.cliente.localidad:''}</div>
       ${o.cliente.telefono ? `<div class="muted">Tel. cliente: ${o.cliente.telefono}</div>` : ''}
+      ${o.notasColocador ? `<div class="muted" style="margin-top:6px">Aclaración de oficina: ${o.notasColocador}</div>` : ''}
       ${fotosAntes.length ? `<div class="muted" style="margin-top:6px">Fotos del lugar</div><div class="foto-galeria">${fotosAntes.map(f=>`<img src="${f.data}">`).join('')}</div>` : ''}
-      ${o.tareas.map(t=>`
-        <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <b>${t.tipoTrabajo}</b>
-            <span class="pill ${t.estado}">${ESTADOS[t.estado]||t.estado}</span>
+
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
+        <b>Productos</b>
+        ${o.tareas.map(t=>`
+          <div style="margin-top:6px">
+            <div>${t.tipoTrabajo} <span class="muted">— ${t.m2Presupuestados} m²</span></div>
+            ${(t.materiales&&t.materiales.length) ? `<div class="muted" style="margin-top:2px">${t.materiales.map(m=>`• ${m.cantidad?m.cantidad+' ':''}${m.tipo}`).join('<br>')}</div>` : ''}
           </div>
-          <div class="muted">${t.m2Presupuestados} m² presupuestados</div>
-          ${(t.materiales&&t.materiales.length) ? `<div class="muted" style="margin-top:4px"><b>Materiales a llevar:</b><br>${t.materiales.map(m=>`• ${m.cantidad?m.cantidad+' ':''}${m.tipo}`).join('<br>')}</div>` : ''}
-          ${t.notas?`<div class="muted">Aclaración de oficina: ${t.notas}</div>`:''}
-          ${t.observaciones?`<div class="muted">Observación cargada: ${t.observaciones}</div>`:''}
-          <div style="display:flex;gap:8px;margin-top:8px">
-            ${t.estado==='pendiente' ? `<button class="btn secondary" style="width:auto;flex:1" onclick="marcarEstado('${o.obraId}','${t._id}','en_curso')">Comenzar</button>` : ''}
-            ${t.estado!=='terminada' ? `<button class="btn" style="width:auto;flex:1" onclick="mostrarFormTerminar('${o.obraId}','${t._id}')">Marcar terminada</button>` : ''}
-          </div>
-          <div id="terminarBox-${t._id}"></div>
+        `).join('')}
+      </div>
+
+      ${!VIENDO_HISTORIAL ? `
+        <div style="display:flex;gap:8px;margin-top:12px">
+          ${(o.estado==='pendiente'||o.estado==='asignado') ? `<button class="btn secondary" style="width:auto;flex:1" onclick="marcarEstadoObra('${o.obraId}','en_curso')">Comenzar obra</button>` : ''}
+          ${o.estado!=='terminada' ? `<button class="btn" style="width:auto;flex:1" onclick="mostrarFormTerminarObra('${o.obraId}')">Marcar obra terminada</button>` : ''}
         </div>
-      `).join('')}
+        <div id="terminarBox-${o.obraId}"></div>
+      ` : ''}
+
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
         <b>Fotos del trabajo terminado</b>
         ${fotosDespues.length ? `<div class="foto-galeria">${fotosDespues.map(f=>`<img src="${f.data}">`).join('')}</div>` : '<p class="muted">Todavía no subiste fotos del resultado.</p>'}
-        <input type="file" accept="image/*" multiple id="inputFotosObra-${o.obraId}" style="margin-top:8px">
-        <button class="btn small secondary" style="margin-top:8px;width:auto" onclick="subirFotosObra('${o.obraId}')">Agregar fotos</button>
-        <div class="err" id="fotoObraErr-${o.obraId}"></div>
+        ${!VIENDO_HISTORIAL ? `
+          <input type="file" accept="image/*" multiple id="inputFotosObra-${o.obraId}" style="margin-top:8px">
+          <button class="btn small secondary" style="margin-top:8px;width:auto" onclick="subirFotosObra('${o.obraId}')">Agregar fotos</button>
+          <div class="err" id="fotoObraErr-${o.obraId}"></div>
+        ` : ''}
       </div>
     </div>
   `; }).join('');
 }
 
-function mostrarFormTerminar(obraId, tareaId){
-  document.getElementById(`terminarBox-${tareaId}`).innerHTML = `
+function mostrarFormTerminarObra(obraId){
+  document.getElementById(`terminarBox-${obraId}`).innerHTML = `
     <label style="margin-top:8px">¿Quedó algo pendiente? (opcional)</label>
-    <input id="obs-${tareaId}" placeholder="Ej: falta silicona en el borde">
-    <button class="btn" style="margin-top:8px" onclick="confirmarTerminar('${obraId}','${tareaId}')">Confirmar terminada</button>
+    <input id="obs-${obraId}" placeholder="Ej: falta silicona en el borde">
+    <button class="btn" style="margin-top:8px" onclick="confirmarTerminarObra('${obraId}')">Confirmar terminada</button>
   `;
 }
-async function confirmarTerminar(obraId, tareaId){
-  const observaciones = document.getElementById(`obs-${tareaId}`).value.trim();
-  await marcarEstado(obraId, tareaId, 'terminada', observaciones);
+async function confirmarTerminarObra(obraId){
+  const observaciones = document.getElementById(`obs-${obraId}`).value.trim();
+  await marcarEstadoObra(obraId, 'terminada', observaciones);
 }
-async function marcarEstado(obraId, tareaId, estado, observaciones){
+async function marcarEstadoObra(obraId, estado, observaciones){
   try{
     const body = observaciones !== undefined ? {estado, observaciones} : {estado};
-    await api(`/colocador/tareas/${obraId}/${tareaId}/estado`, {method:'POST', body});
+    await api(`/colocador/obras/${obraId}/estado`, {method:'POST', body});
     cargarMisObras();
   }catch(e){ alert(e.message); }
 }

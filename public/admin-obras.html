@@ -308,7 +308,7 @@ function mensajeAsignacionColocador(obra, tarea, colocadorNombre){
     `📐 m² presupuestados: ${tarea.m2Presupuestados}\n`+
     (tarea.fechaFinEstimada ? `🗓️ Fecha estimada: ${new Date(tarea.fechaFinEstimada).toLocaleDateString('es-AR')}\n` : '')+
     `\n📦 Materiales a llevar:\n${materiales}\n`+
-    (tarea.notas ? `\n📝 Aclaraciones: ${tarea.notas}\n` : '')+
+    (obra.notasColocador ? `\n📝 Aclaraciones: ${obra.notasColocador}\n` : '')+
     `\n¡Gracias!`;
 }
 
@@ -434,8 +434,6 @@ async function toggleTipo(id, activar){
 
 // ---------------- OBRAS ----------------
 
-const ESTADOS_TAREA = {pendiente:'Pendiente', asignada:'Asignada', en_curso:'En curso', terminada:'Terminada'};
-
 const ESTADOS_OBRA = {pendiente:'Pendiente', asignado:'Asignada', en_curso:'En curso', terminada:'Terminada', cancelada:'Cancelada'};
 
 function filaObra(o){
@@ -445,7 +443,7 @@ function filaObra(o){
       <td>${o.cliente.nombre}</td>
       <td>${o.cliente.direccion||''}</td>
       <td>${o.fechaVenta ? new Date(o.fechaVenta).toLocaleDateString('es-AR') : ''}</td>
-      <td>${(o.tareas||[]).map(t=>`${t.tipoTrabajo} <span class="pill ${t.estado}">${ESTADOS_TAREA[t.estado]||t.estado}</span>`).join('<br>')}</td>
+      <td>${(o.tareas||[]).map(t=>t.tipoTrabajo).join(', ') || '<span class="muted">Sin productos</span>'}</td>
       <td><span class="pill ${o.estado}">${ESTADOS_OBRA[o.estado]||o.estado}</span></td>
       <td><button class="btn small secondary" onclick="abrirObra('${o._id}')">Ver</button></td>
     </tr>`;
@@ -550,7 +548,7 @@ async function abrirObra(id){
     return `
     <div class="tarea-seccion">
       <div class="row" style="justify-content:space-between">
-        <div><b>${t.tipoTrabajo}</b> <span class="pill ${t.estado}">${ESTADOS_TAREA[t.estado]||t.estado}</span></div>
+        <div><b>${t.tipoTrabajo}</b></div>
         <button class="btn small danger" onclick="borrarTarea('${o._id}','${t._id}')">Eliminar</button>
       </div>
 
@@ -570,48 +568,47 @@ async function abrirObra(id){
         </div>
         <div class="muted" style="margin-top:4px">Los productos se guardan solo al tocar "Guardar materiales".</div>
       </div>
-
-      <div style="margin-top:10px">
-        <div class="tarea-seccion-titulo">Notas</div>
-        <div><label>Aclaraciones para el colocador</label><textarea onchange="editarTarea('${o._id}','${t._id}',{notas:this.value})">${escapeHtml(t.notas||'')}</textarea></div>
-        <div style="margin-top:6px"><label>Observaciones (ej: quedó algo pendiente)</label><textarea onchange="editarTarea('${o._id}','${t._id}',{observaciones:this.value})">${escapeHtml(t.observaciones||'')}</textarea></div>
-      </div>
-
-      <div style="margin-top:10px">
-        <div class="tarea-seccion-titulo">Estado de este producto</div>
-        <div class="row">
-          <select onchange="cambiarEstadoTarea('${o._id}','${t._id}',this.value)">
-            <option value="">Cambiar estado...</option>
-            <option value="pendiente" ${t.estado==='pendiente'?'selected':''}>Pendiente</option>
-            <option value="en_curso" ${t.estado==='en_curso'?'selected':''}>En curso</option>
-            <option value="terminada" ${t.estado==='terminada'?'selected':''}>Terminada</option>
-          </select>
-        </div>
-        <div class="muted" style="margin-top:6px">
-          ${t.fechaInicio?`inicio ${new Date(t.fechaInicio).toLocaleDateString('es-AR')}`:''}
-          ${t.fechaFinReal?` · fin ${new Date(t.fechaFinReal).toLocaleDateString('es-AR')}`:''}
-        </div>
-      </div>
     </div>
   `;
   }).join('');
 
-  // Una sola tarjeta para toda la obra (antes era una tarjeta por producto,
-  // cada una con su propia asignación) — arriba se elige un único
-  // colocador para todos los productos, y abajo se listan todos juntos.
-  const tareasHtml = tareas.length ? `
-    <div class="tarea-box">
-      <div class="tarea-seccion">
-        <div class="tarea-seccion-titulo">Colocador asignado (toda la obra)</div>
-        <select onchange="asignarColocadorObra('${o._id}',this.value)">
-          <option value="">Sin asignar</option>
-          ${COLOCADORES.map(c=>`<option value="${c._id}" ${colocadorComunId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
-        </select>
-        ${colocadoresMixtos ? '<div class="muted" style="margin-top:6px">Los productos de esta obra tienen colocadores distintos (de antes de este cambio) — elegí uno acá para unificarlos.</div>' : ''}
+  // Una sola tarjeta para toda la obra: arriba, todo lo que se maneja como
+  // un único dato para toda la obra (colocador, estado, fecha de inicio,
+  // notas) — abajo, los productos, que son lo único que sigue siendo por
+  // separado (m², materiales, fecha fin estimada de cada uno).
+  const datosGeneralesHtml = `
+    <div class="tarea-seccion">
+      <div class="tarea-seccion-titulo">Datos generales de la obra</div>
+      <div class="grid2">
+        <div><label>Colocador asignado</label>
+          <select onchange="asignarColocadorObra('${o._id}',this.value)">
+            <option value="">Sin asignar</option>
+            ${COLOCADORES.map(c=>`<option value="${c._id}" ${colocadorComunId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
+          </select>
+        </div>
+        <div><label>Estado general</label>
+          <select onchange="editarObra('${o._id}',{estado:this.value})">
+            <option value="pendiente" ${o.estado==='pendiente'?'selected':''}>Pendiente</option>
+            <option value="asignado" ${o.estado==='asignado'?'selected':''}>Asignada</option>
+            <option value="en_curso" ${o.estado==='en_curso'?'selected':''}>En curso</option>
+            <option value="terminada" ${o.estado==='terminada'?'selected':''}>Terminada</option>
+            <option value="cancelada" ${o.estado==='cancelada'?'selected':''}>Cancelada</option>
+          </select>
+        </div>
       </div>
-      ${productosHtml}
+      ${colocadoresMixtos ? '<div class="muted" style="margin-top:6px">Los productos de esta obra tienen colocadores distintos (de antes de este cambio) — elegí uno acá para unificarlos.</div>' : ''}
+      <div style="margin-top:8px"><label>Fecha de inicio de obra</label><input type="date" value="${o.fechaInicio?o.fechaInicio.slice(0,10):''}" onchange="editarObra('${o._id}',{fechaInicio:this.value})"></div>
+      <div style="margin-top:8px"><label>Notas para el colocador</label><textarea onchange="editarObra('${o._id}',{notasColocador:this.value})">${escapeHtml(o.notasColocador||'')}</textarea></div>
+      <div style="margin-top:8px"><label>Notas para el asesor</label><textarea onchange="editarObra('${o._id}',{notasAsesor:this.value})">${escapeHtml(o.notasAsesor||'')}</textarea></div>
     </div>
-  ` : '<p class="muted">Esta obra todavía no tiene tareas.</p>';
+  `;
+
+  const tareasHtml = `
+    <div class="tarea-box">
+      ${datosGeneralesHtml}
+      ${productosHtml || '<div class="tarea-seccion"><p class="muted">Esta obra todavía no tiene productos cargados.</p></div>'}
+    </div>
+  `;
 
   const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
   const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
@@ -632,18 +629,19 @@ async function abrirObra(id){
     <div class="row">
       <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('')}</select>
       <input id="nuevaTareaM2" type="number" step="0.01" placeholder="m²" style="flex:1">
-      <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar tarea</button>
-    </div>
-    <div style="margin-top:10px"><label>Estado general de la obra</label>
-      <select onchange="editarObraEstado('${o._id}',this.value)">
-        <option value="pendiente" ${o.estado==='pendiente'?'selected':''}>Pendiente</option>
-        <option value="asignado" ${o.estado==='asignado'?'selected':''}>Asignada</option>
-        <option value="en_curso" ${o.estado==='en_curso'?'selected':''}>En curso</option>
-        <option value="terminada" ${o.estado==='terminada'?'selected':''}>Terminada</option>
-        <option value="cancelada" ${o.estado==='cancelada'?'selected':''}>Cancelada</option>
-      </select>
+      <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar producto</button>
     </div>
   `);
+}
+
+// Guarda cualquier cambio a nivel obra (estado, fecha de inicio, notas,
+// etc.) y refresca tanto el modal como el listado.
+async function editarObra(obraId, cambios){
+  try{
+    await api(`/${obraId}`, {method:'PUT', body:cambios});
+  }catch(e){ alert('No se pudo guardar: ' + e.message); }
+  abrirObra(obraId);
+  cargarObras();
 }
 
 async function editarTarea(obraId, tareaId, cambios){
@@ -665,14 +663,6 @@ async function asignarColocadorObra(obraId, colocadorId){
   abrirObra(obraId);
   cargarObras();
 }
-async function cambiarEstadoTarea(obraId, tareaId, estado){
-  if (!estado) return;
-  try{
-    await api(`/${obraId}/tareas/${tareaId}`, {method:'PUT', body:{estado}});
-  }catch(e){ alert('No se pudo guardar: ' + e.message); }
-  abrirObra(obraId);
-  cargarObras();
-}
 async function borrarTarea(obraId, tareaId){
   if (!confirm('¿Eliminar esta tarea de la obra?')) return;
   try{
@@ -689,11 +679,6 @@ async function agregarTarea(obraId){
   abrirObra(obraId);
   cargarObras();
 }
-async function editarObraEstado(obraId, estado){
-  await api(`/${obraId}`, {method:'PUT', body:{estado}});
-  cargarObras();
-}
-
 // ---------------- REPORTES ----------------
 
 let ULTIMO_REPORTE = [];
