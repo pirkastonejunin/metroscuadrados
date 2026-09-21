@@ -4,46 +4,83 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mis Visitas - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
-  :root{ --bg:#f4f5f7; --card:#fff; --text:#1f2430; --muted:#6b7280; --border:#e3e5ea; --primary:#1f6f54; --primary-dark:#155742; --warn:#b8860b; --danger:#b3392c; }
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
   *{box-sizing:border-box;}
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding-bottom:30px;}
-  header{background:var(--primary-dark);color:#fff;padding:16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5;}
-  header h1{font-size:17px;margin:0;font-weight:600;}
-  header button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;padding:6px 10px;border-radius:6px;font-size:12px;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding-bottom:30px;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);color:var(--text);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5;gap:10px;}
+  header .brand{display:flex;align-items:center;gap:9px;min-width:0;}
+  header .logo{height:19px;width:auto;display:block;flex-shrink:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 12px;border-radius:8px;font-size:12px;font-family:inherit;font-weight:600;flex-shrink:0;}
   main{padding:14px;max-width:520px;margin:0 auto;}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
-  input,select{padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;width:100%;background:#fff;}
-  button.btn{background:var(--primary);color:#fff;border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:600;width:100%;}
-  button.btn.secondary{background:#fff;color:var(--text);border:1px solid var(--border);}
-  button.btn.danger{background:var(--danger);color:#fff;border:none;}
-  button.btn.small{width:auto;padding:8px 12px;font-size:13px;}
-  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;}
-  .pill.agendada{background:#eee;color:#555;}
-  .pill.presupuestada{background:#fff4d6;color:var(--warn);}
-  .pill.confirmada{background:#e3f3ec;color:var(--primary);}
-  .visita-titulo{font-weight:700;font-size:15px;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select{padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:700;width:100%;font-family:inherit;display:inline-block;text-decoration:none;text-align:center;box-sizing:border-box;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);color:#fff;border:none;}
+  .btn.small{width:auto;padding:8px 12px;font-size:13px;}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.sin_visita,.pill.agendada{background:var(--bg);color:var(--muted);}
+  .pill.presupuestada{background:var(--accent-soft);color:var(--accent);}
+  .pill.vendido,.pill.confirmada{background:var(--ok-soft);color:var(--ok);}
+  .pill.instalado{background:var(--info-soft);color:var(--info);}
+  .pill.cancelada{background:var(--danger-soft);color:var(--danger);}
+  .visita-titulo{font-weight:800;font-size:15px;}
   .muted{color:var(--muted);font-size:12.5px;}
   .err{color:var(--danger);font-size:13px;margin:8px 0;}
   #vendedorScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;}
-  #vendedorScreen .card{width:100%;max-width:340px;}
+  #vendedorScreen .card{width:100%;max-width:340px;text-align:center;}
+  #vendedorScreen .logo{height:24px;width:auto;margin:0 auto 16px;display:block;}
   .hidden{display:none !important;}
-  .vend-btn{display:block;width:100%;text-align:left;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;font-size:15px;margin-bottom:8px;}
+  .vend-btn{display:block;width:100%;text-align:left;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:15px;margin-bottom:8px;font-family:inherit;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;margin:10px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;border:1px solid var(--border);}
+  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
   .item-row{display:flex;gap:6px;margin-bottom:6px;}
   .item-row select{flex:2} .item-row input{flex:1}
-  .back-link{color:var(--primary-dark);font-size:13px;text-decoration:none;display:inline-block;margin-bottom:10px;}
+  .back-link{color:var(--accent);font-size:13px;text-decoration:none;display:inline-block;margin-bottom:10px;font-weight:700;}
   .cotizacion-opcion{border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;font-size:13px;}
   .divider{border-top:1px solid var(--border);margin:14px 0;padding-top:14px;}
+  .botonera-pdf{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;}
+  .botonera-pdf .btn{width:auto;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+    :root:not([data-theme="light"]) .logo{filter:invert(1);}
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+  :root[data-theme="dark"] .logo{filter:invert(1);}
 </style>
 </head>
 <body>
 
 <div id="vendedorScreen">
   <div class="card">
-    <h2 style="margin-top:0;text-align:center">Mis Visitas</h2>
+    <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
+    <h2 style="margin-top:0;margin-bottom:6px">Mis Visitas</h2>
     <p class="muted" style="text-align:center">Elegí tu nombre para ver tus visitas asignadas</p>
     <div id="listaVendedores"><p class="muted">Cargando…</p></div>
   </div>
@@ -51,8 +88,14 @@
 
 <div id="app" class="hidden">
   <header>
-    <h1 id="saludo">Mis Visitas</h1>
-    <button onclick="cambiarVendedor()">Cambiar</button>
+    <div class="brand">
+      <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
+      <h1 id="saludo">Mis Visitas</h1>
+    </div>
+    <div style="display:flex;gap:8px">
+      <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
+      <button onclick="cambiarVendedor()">Cambiar</button>
+    </div>
   </header>
   <main id="pantalla"></main>
 </div>
@@ -64,6 +107,7 @@ let VENDEDOR_NOMBRE = localStorage.getItem('vendedor_nombre') || '';
 let STORE_ID = null;
 let TIPOS_TRABAJO = [];
 let VISITAS = [];
+let VISITA_ACTUAL = null; // última visita abierta en el detalle, para el botón de compartir por WhatsApp
 
 function api(path, opts={}) {
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
@@ -75,7 +119,9 @@ function api(path, opts={}) {
   });
 }
 function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{weekday:'short', day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
-const ESTADOS = {agendada:'Agendada', presupuestada:'Presupuestada', confirmada:'Confirmada'};
+const ESTADOS = {sin_visita:'Sin visita', presupuestada:'Presupuestada', vendido:'Vendido', instalado:'Instalado', cancelada:'Cancelada',
+  // alias por compatibilidad con nombres de estado viejos
+  agendada:'Sin visita', confirmada:'Vendido'};
 
 async function cargarSelectorVendedor(){
   try{
@@ -147,33 +193,51 @@ async function mostrarDetalleVisita(id){
   let v;
   try{ v = await api(`/vendedor/${VENDEDOR_ID}/visitas/${id}`); }
   catch(e){ pant.innerHTML = `<p class="err">${e.message}</p>`; return; }
+  VISITA_ACTUAL = v;
 
   const fotosHtml = (v.fotos && v.fotos.length)
     ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${f.data}">`).join('')}</div>`
     : '<p class="muted">Todavía no sacaste fotos.</p>';
 
+  // Se puede editar/rehacer el presupuesto mientras la visita no se haya
+  // confirmado todavía (una vez "vendido" ya se generó la Obra a partir de
+  // ese presupuesto, así que cambiarlo acá no tendría efecto).
+  const presupuestoEditable = v.estado !== 'vendido' && v.estado !== 'instalado';
+
   let presupuestoHtml;
   if (v.presupuesto){
+    let resumen;
     if (v.presupuesto.tipo === 'manual'){
-      presupuestoHtml = `<div class="card"><b>Presupuesto (a mano)</b><br>` +
-        v.presupuesto.items.map(it=>`${it.tipoTrabajo}: ${it.m2} — $${(it.precioCliente||0).toLocaleString('es-AR')}`).join('<br>') +
-        `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
+      const formasPagoHtml = (v.presupuesto.formasPago && v.presupuesto.formasPago.length)
+        ? '<div class="muted" style="margin-top:6px">' +
+          v.presupuesto.formasPago.map(fp => `${fp.nombre}: $${Number(fp.total||0).toLocaleString('es-AR')}`).join(' · ') +
+          '</div>'
+        : '';
+      resumen = `<b>Presupuesto (a mano)</b><br>` +
+        v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
+        `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` + formasPagoHtml +
+        `<div class="botonera-pdf">
+          <a class="btn small secondary" href="/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf" target="_blank">Ver PDF llave en mano</a>
+          <a class="btn small secondary" href="/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf?vista=detalle" target="_blank">Ver PDF completo</a>
+          <button class="btn small secondary" type="button" onclick="compartirPresupuestoWhatsapp(false)">💬 Compartir por WhatsApp</button>
+        </div>`;
     } else {
-      presupuestoHtml = `<div class="card"><b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b></div>`;
+      const paramsSimple = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID, vista: 'simple' });
+      const paramsDetalle = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
+      resumen = `<b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` +
+        `<div class="botonera-pdf">
+          <a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsSimple.toString()}" target="_blank">Ver PDF llave en mano</a>
+          <a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsDetalle.toString()}" target="_blank">Ver PDF completo</a>
+          <button class="btn small secondary" type="button" onclick="compartirPresupuestoWhatsapp(false)">💬 Compartir por WhatsApp</button>
+        </div>`;
     }
-  } else {
     presupuestoHtml = `
       <div class="card">
-        <b>Presupuesto</b>
-        <p class="muted">Elegí cómo presupuestar esta visita.</p>
-        <button class="btn secondary" onclick="abrirCotizador('${v._id}')">Abrir cotizador</button>
-        <div style="margin-top:8px"><button class="btn secondary" onclick="mostrarVincularCotizacion('${v._id}')">Ya guardé la cotización, vincularla</button></div>
-        <div id="vincularCotizacion"></div>
-        <div class="divider">
-          <button class="btn secondary" onclick="mostrarFormManual('${v._id}')">Cargar presupuesto a mano</button>
-          <div id="formManual"></div>
-        </div>
+        ${resumen}
+        ${presupuestoEditable ? `<div style="margin-top:10px"><button class="btn small secondary" onclick="mostrarElegirPresupuesto('${v._id}')">Editar presupuesto</button></div><div id="elegirPresupuesto"></div>` : ''}
       </div>`;
+  } else {
+    presupuestoHtml = `<div class="card"><b>Presupuesto</b><div id="elegirPresupuesto">${formularioElegirPresupuesto(v._id)}</div></div>`;
   }
 
   const puedeConfirmar = v.estado === 'presupuestada';
@@ -193,7 +257,7 @@ async function mostrarDetalleVisita(id){
     <div class="card">
       <b>Fotos del lugar</b>
       ${fotosHtml}
-      <input type="file" accept="image/*" capture="environment" multiple id="inputFotos" style="margin-top:8px">
+      <input type="file" accept="image/*" multiple id="inputFotos" style="margin-top:8px">
       <button class="btn small" style="margin-top:8px" onclick="subirFotos('${v._id}')">Agregar fotos</button>
       <div class="err" id="fotoErr"></div>
     </div>
@@ -226,12 +290,75 @@ async function subirFotos(visitaId){
   }catch(e){ errEl.textContent = e.message; }
 }
 
+// ---------------- ELEGIR / EDITAR PRESUPUESTO ----------------
+
+function formularioElegirPresupuesto(visitaId){
+  return `
+    <p class="muted">Elegí cómo presupuestar esta visita.</p>
+    <button class="btn secondary" onclick="abrirCotizador('${visitaId}')">Abrir cotizador</button>
+    <div style="margin-top:8px"><button class="btn secondary" onclick="mostrarVincularCotizacion('${visitaId}')">Ya guardé la cotización, vincularla</button></div>
+    <div id="vincularCotizacion"></div>
+    <div class="divider">
+      <button class="btn secondary" onclick="mostrarFormManual('${visitaId}')">Cargar presupuesto a mano</button>
+      <div id="formManual"></div>
+    </div>`;
+}
+
+// Al editar un presupuesto ya cargado, en vez de arrancar de cero como si
+// fuera nuevo (lo que antes hacía que se "perdiera" todo lo ya cargado),
+// se trae lo que ya tiene: si es manual, se abre el mismo formulario
+// precargado con sus ítems y formas de pago; si es del cotizador, se ofrece
+// reabrir esa misma cotización en el cotizador (en vez de una en blanco) o
+// actualizar el total acá mismo si ya se guardó el cambio allá. Las fotos
+// del lugar no se tocan en ningún caso — viven aparte del presupuesto.
+async function mostrarElegirPresupuesto(visitaId){
+  const cont = document.getElementById('elegirPresupuesto');
+  cont.innerHTML = '<p class="muted">Cargando…</p>';
+  let v;
+  try{ v = await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}`); }
+  catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; return; }
+
+  if (v.presupuesto && v.presupuesto.tipo === 'manual'){
+    cont.innerHTML = '<div id="formManual"></div>';
+    mostrarFormManual(visitaId, v.presupuesto);
+  } else if (v.presupuesto && v.presupuesto.tipo === 'cotizador'){
+    cont.innerHTML = `
+      <p class="muted">Este presupuesto se armó con el cotizador.</p>
+      <button class="btn secondary" onclick="abrirCotizadorParaEditar('${visitaId}')">Editar en el cotizador</button>
+      <div style="margin-top:8px"><button class="btn small secondary" type="button" onclick="vincularCotizacion('${visitaId}','${v.presupuesto.cotizacionId}')">🔄 Actualizar total desde el cotizador</button></div>
+      <div class="divider"><button class="btn small secondary" type="button" onclick="mostrarElegirPresupuestoDesdeCero('${visitaId}')">Cargar presupuesto a mano en su lugar</button></div>
+    `;
+  } else {
+    cont.innerHTML = formularioElegirPresupuesto(visitaId);
+  }
+}
+// Chooser en blanco de toda la vida — solo para cuando alguien elige
+// explícitamente cambiar de tipo de presupuesto (de cotizador a manual).
+function mostrarElegirPresupuestoDesdeCero(visitaId){
+  document.getElementById('elegirPresupuesto').innerHTML = formularioElegirPresupuesto(visitaId);
+}
+
 // ---------------- ABRIR COTIZADOR ----------------
 
 function abrirCotizador(visitaId){
   const v = VISITAS.find(x => x._id === visitaId) || {};
   const params = new URLSearchParams();
   if (STORE_ID) params.set('store_id', STORE_ID);
+  if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
+  if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
+  window.open('/cotizador.html?' + params.toString(), '_blank');
+}
+
+// Reabre la MISMA cotización ya guardada en modo edición (en vez de una
+// nueva en blanco), usando el mismo flujo que ya tiene el cotizador para
+// reabrir una cotización de su historial — solo que arrancado por link en
+// vez de tener que ir a buscarla a mano en la pestaña Historial.
+function abrirCotizadorParaEditar(visitaId){
+  const v = VISITAS.find(x => x._id === visitaId) || {};
+  if (!v.presupuesto || !v.presupuesto.cotizacionId) return;
+  const params = new URLSearchParams();
+  params.set('editarCotizacionId', v.presupuesto.cotizacionId);
+  params.set('store_id', v.presupuesto.storeId || STORE_ID || '');
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
   window.open('/cotizador.html?' + params.toString(), '_blank');
@@ -265,33 +392,155 @@ async function vincularCotizacion(visitaId, cotizacionId){
 
 // ---------------- PRESUPUESTO MANUAL ----------------
 
-function filaItemManual(){
-  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
-  return `<div class="item-row">
-    <select class="itTipo">${opciones}</select>
-    <input class="itM2" type="number" step="0.01" placeholder="m²">
-    <input class="itPrecio" type="number" step="0.01" placeholder="$ cliente">
+// Escapa texto para poder insertarlo dentro de un atributo value="..." sin
+// romper el HTML (por ej. si la descripción tiene comillas).
+function escAttr(s){
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function filaItemManual(it){
+  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}"${it && it.tipoTrabajo===t.nombre ? ' selected' : ''}>${t.nombre}</option>`).join('');
+  const descripcion = it ? escAttr(it.descripcion) : '';
+  const cantidad = it ? escAttr(it.cantidad) : '';
+  const valor = it ? escAttr(it.valor) : '';
+  const total = it ? Number(it.total || (it.cantidad*it.valor) || 0).toLocaleString('es-AR') : '0';
+  return `<div class="item-row" style="flex-wrap:wrap">
+    <select class="itTipo" style="flex:2;min-width:120px">${opciones}</select>
+    <input class="itDescripcion" placeholder="Descripción" value="${descripcion}" style="flex:2;min-width:120px">
+    <input class="itCantidad" type="number" step="0.01" placeholder="m²" value="${cantidad}" style="flex:1;min-width:70px" oninput="actualizarTotalItem(this)">
+    <input class="itValor" type="number" step="0.01" placeholder="Precio unit." value="${valor}" style="flex:1;min-width:80px" oninput="actualizarTotalItem(this)">
+    <span class="muted itTotal" style="flex:1;min-width:70px;align-self:center">Total: $${total}</span>
+    <button class="btn small secondary" type="button" onclick="this.closest('.item-row').remove(); actualizarTotalGeneralManual();">Quitar</button>
   </div>`;
 }
-function mostrarFormManual(visitaId){
+function actualizarTotalItem(el){
+  const row = el.closest('.item-row');
+  const cantidad = Number(row.querySelector('.itCantidad').value) || 0;
+  const valor = Number(row.querySelector('.itValor').value) || 0;
+  row.querySelector('.itTotal').textContent = 'Total: $' + (cantidad*valor).toLocaleString('es-AR');
+  actualizarTotalGeneralManual();
+}
+// Suma parcial de todos los ítems cargados hasta el momento, para que el
+// vendedor vea el total del presupuesto a medida que lo va armando (antes
+// solo se veía el total al guardar).
+function actualizarTotalGeneralManual(){
+  const el = document.getElementById('totalGeneralManual');
+  if (!el) return;
+  const total = [...document.querySelectorAll('#itemsManual .item-row')].reduce((s, row) => {
+    const cantidad = Number(row.querySelector('.itCantidad').value) || 0;
+    const valor = Number(row.querySelector('.itValor').value) || 0;
+    return s + cantidad*valor;
+  }, 0);
+  el.textContent = 'Total del presupuesto: $' + total.toLocaleString('es-AR');
+}
+function agregarFilaItemManual(){
+  document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual());
+  actualizarTotalGeneralManual();
+}
+async function mostrarFormManual(visitaId, presupuestoExistente){
   const cont = document.getElementById('formManual');
+  const itemsHtml = (presupuestoExistente && presupuestoExistente.items && presupuestoExistente.items.length)
+    ? presupuestoExistente.items.map(it => filaItemManual(it)).join('')
+    : filaItemManual();
   cont.innerHTML = `
-    <div id="itemsManual">${filaItemManual()}</div>
-    <button class="btn small secondary" type="button" onclick="document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual())">+ Agregar tipo de trabajo</button>
+    ${presupuestoExistente ? '<p class="muted">Editando el presupuesto ya cargado — modificá lo que necesites y guardá de nuevo.</p>' : ''}
+    <div id="itemsManual">${itemsHtml}</div>
+    <button class="btn small secondary" type="button" onclick="agregarFilaItemManual()">+ Agregar producto</button>
+    <div class="muted" id="totalGeneralManual" style="margin-top:8px;font-weight:700"></div>
+    <div id="formasPagoManual" class="muted" style="margin-top:10px">Cargando formas de pago…</div>
+    <div style="margin-top:10px"><label>Observaciones</label><textarea id="observacionesManual" placeholder="Aclaraciones para el cliente sobre este presupuesto">${escAttr(presupuestoExistente ? presupuestoExistente.notas || '' : '')}</textarea></div>
     <div class="err" id="manualErr"></div>
     <button class="btn" style="margin-top:8px" onclick="guardarPresupuestoManual('${visitaId}')">Guardar presupuesto</button>
   `;
+  cargarFormasPagoManual(presupuestoExistente && presupuestoExistente.formasPago);
+  actualizarTotalGeneralManual();
+}
+// Mismo catálogo de formas de pago que ya carga Mato para el cotizador
+// (/api/cotizador/formas-pago) — así no hay que cargarlas dos veces.
+async function cargarFormasPagoManual(formasPagoExistentes){
+  const cont = document.getElementById('formasPagoManual');
+  if (!STORE_ID){ cont.innerHTML = ''; return; }
+  const seleccionadasNombres = new Set((formasPagoExistentes||[]).map(fp => fp.nombre));
+  try{
+    const res = await fetch('/api/cotizador/formas-pago?store_id=' + encodeURIComponent(STORE_ID));
+    const formas = await res.json();
+    if (!res.ok) throw new Error(formas.error || 'No se pudieron cargar las formas de pago');
+    if (!formas.length){ cont.innerHTML = ''; return; }
+    cont.innerHTML = '<b class="muted">Formas de pago a mostrar en el presupuesto</b>' +
+      formas.map(fp => `
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal">
+          <input type="checkbox" class="fpCheck" value='${JSON.stringify(fp).replace(/'/g,'&#39;')}'${seleccionadasNombres.has(fp.nombre) ? ' checked' : ''}>
+          ${fp.nombre}${fp.porcentaje ? ` (${fp.tipo==='recargo'?'+':'-'}${fp.porcentaje}%)` : ''}
+        </label>`).join('');
+  }catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; }
 }
 async function guardarPresupuestoManual(visitaId){
   const items = [...document.querySelectorAll('#itemsManual .item-row')].map(row => ({
     tipoTrabajo: row.querySelector('.itTipo').value,
-    m2: Number(row.querySelector('.itM2').value) || 0,
-    precioCliente: Number(row.querySelector('.itPrecio').value) || 0
+    descripcion: row.querySelector('.itDescripcion').value.trim(),
+    cantidad: Number(row.querySelector('.itCantidad').value) || 0,
+    valor: Number(row.querySelector('.itValor').value) || 0
   }));
+  const formasPagoSeleccionadas = [...document.querySelectorAll('.fpCheck:checked')].map(chk => JSON.parse(chk.value));
+  const notasEl = document.getElementById('observacionesManual');
+  const notas = notasEl ? notasEl.value.trim() : '';
   try{
-    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items}});
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items, formasPagoSeleccionadas, notas}});
     mostrarDetalleVisita(visitaId);
   }catch(e){ document.getElementById('manualErr').textContent = e.message; }
+}
+
+// ---------------- COMPARTIR PDF POR WHATSAPP ----------------
+// Mismo patrón que ya usa cotizador.html para compartir su PDF: en el
+// celular intenta adjuntar el PDF directo al chat con el share nativo del
+// navegador; si no está disponible (la mayoría de las notebooks), descarga
+// el PDF y abre WhatsApp con el mensaje para adjuntarlo a mano. El número
+// del cliente (si lo cargó la empleada) se usa para abrir directo su chat.
+
+// Mismo criterio que ya usa admin-visitas.html para armar el link de
+// WhatsApp: si el teléfono ya viene con el 54 lo deja como está, si no se
+// lo agrega, y saca el "15" de celular si está.
+function normalizarTelefonoWA(telefono){
+  let d = String(telefono||'').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.startsWith('54')) return d;
+  if (d.startsWith('0')) d = d.slice(1);
+  d = d.replace(/^(\d{2,4})15/, '$1');
+  return '549' + d;
+}
+
+function urlPdfPresupuestoActual(vistaDetalle){
+  const v = VISITA_ACTUAL;
+  if (!v || !v.presupuesto) return null;
+  if (v.presupuesto.tipo === 'manual'){
+    return `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf` + (vistaDetalle ? '?vista=detalle' : '');
+  }
+  const params = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
+  if (!vistaDetalle) params.set('vista', 'simple');
+  return `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${params.toString()}`;
+}
+
+async function compartirPresupuestoWhatsapp(vistaDetalle){
+  const v = VISITA_ACTUAL;
+  const urlPdf = urlPdfPresupuestoActual(vistaDetalle);
+  if (!v || !urlPdf) return;
+  const tel = normalizarTelefonoWA(v.cliente && v.cliente.telefono);
+  const textoBase = 'Hola' + (v.cliente && v.cliente.nombre ? ' ' + v.cliente.nombre : '') +
+    ', te comparto el presupuesto — Total $' + Number(v.presupuesto.total||0).toLocaleString('es-AR') + '.';
+  try{
+    const res = await fetch(urlPdf);
+    if (!res.ok) throw new Error('pdf-fetch-failed');
+    const blob = await res.blob();
+    const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], text: textoBase });
+      return;
+    }
+    throw new Error('share-unsupported');
+  }catch(e){
+    if (e && e.name === 'AbortError') return; // el usuario cerró el panel de compartir
+    window.open(urlPdf, '_blank');
+    window.open((tel ? `https://wa.me/${tel}` : 'https://wa.me/') + '?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+  }
 }
 
 // ---------------- CONFIRMAR ----------------

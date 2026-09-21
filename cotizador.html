@@ -1,0 +1,2037 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cotizador de obra — Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f3f4f6; --panel:#fff; --border:#e5e7eb; --text:#171a1f; --muted:#6b7280;
+    --accent:#ff5a36; --accent2:#2f6fed; --ok:#1f8a5f; --warn:#c53030;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:"Manrope",-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
+  header.brand-header{background:#fff;border-bottom:1px solid var(--border);padding:14px 24px;}
+  .brand-header-inner{max-width:980px;margin:0 auto;display:flex;align-items:center;gap:14px;}
+  .brand-logo{height:32px;display:block;}
+  .brand-title h1{margin:0;font-size:15px;font-weight:600;letter-spacing:.2px;color:var(--text);}
+  .brand-title p{margin:2px 0 0;font-size:12px;color:var(--muted);}
+  .volver-menu{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--muted);text-decoration:none;font-size:12.5px;font-weight:600;border:1px solid var(--border);border-radius:8px;padding:7px 12px;flex-shrink:0;}
+  .volver-menu:hover{color:var(--accent);border-color:var(--accent);}
+  .wrap{max-width:980px;margin:0 auto;padding:20px;}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;}
+  .tab-btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--panel);cursor:pointer;font-size:13px;color:var(--muted);}
+  .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .subtabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .subtab-btn{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
+  .subtab-btn.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+  .catsub-btn{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
+  .catsub-btn.active{background:var(--accent2);color:#fff;border-color:var(--accent2);}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
+  .card h2{margin:0 0 14px;font-size:15px;font-weight:600;}
+  .card h3{margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+  .card p.hint{color:var(--muted);font-size:13px;margin-top:-6px;}
+  label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;}
+  input[type=text],input[type=number],select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;background:#fff;color:var(--text);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;}
+  .field{margin-bottom:2px;}
+  .check{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:14px;}
+  .check input{width:auto;}
+  button.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;}
+  button.primary:disabled{opacity:.45;cursor:not-allowed;}
+  button.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;}
+  /* Mismo estilo de button.primary/secondary pero para el link de
+     "Descargar" de una simulación guardada (un <a>, no un <button>, para
+     que el atributo download funcione). */
+  a.primary{background:var(--accent);color:#fff;border:none;padding:11px 18px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;}
+  a.secondary{background:#fff;color:var(--accent2);border:1px solid var(--border);padding:10px 16px;border-radius:8px;font-size:13.5px;text-decoration:none;display:inline-flex;align-items:center;}
+  button.link{background:none;border:none;color:var(--accent);text-decoration:underline;cursor:pointer;font-size:13px;padding:0;}
+  button.small{padding:6px 10px;font-size:12.5px;}
+  .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;}
+  .rubro-block{border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px;}
+  .rubro-block h4{margin:0 0 4px;font-size:14px;}
+  .rubro-block .rubro-tag{color:var(--muted);font-size:12px;margin-bottom:10px;}
+  /* flex-wrap + min-width:0 evita que el buscador de texto quede aplastado
+     a un cuadradito ilegible en pantallas angostas (celular): si no entran
+     los dos uno al lado del otro, el buscador pasa a ocupar su propia fila
+     completa en vez de resignar todo el ancho al select de marca. */
+  .search-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;}
+  .search-row .buscador-nombre{flex:1 1 200px;min-width:0;}
+  .search-row .filtro-marca,.search-row .orden-precio{flex:1 1 160px;min-width:0;}
+  .search-row .chk-ocultos{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap;}
+  @media (max-width:480px){
+    .search-row .buscador-nombre,.search-row .filtro-marca,.search-row .orden-precio{flex:1 1 100%;}
+  }
+  .prod-list{max-height:230px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
+  .prod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13.5px;}
+  .prod-item:last-child{border-bottom:none;}
+  .prod-item:hover{background:#faf9f7;}
+  .prod-item.selected{background:#eef2ff;}
+  .prod-item img,.prod-item .img-ph{width:32px;height:32px;object-fit:cover;border-radius:5px;background:#eee;flex-shrink:0;}
+  /* Piso pidió poder elegir a golpe de vista: en vez de la lista angosta con
+     miniatura, una cuadrícula de tarjetas con la foto grande arriba. Solo se
+     aplica al bloque de piso — el resto de los rubros/accesorios (zócalo,
+     niveladores, manta, pegamento) sigue siendo la lista de antes. */
+  .prod-list.fotos-grandes{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;
+    max-height:560px;overflow-y:auto;border:none;padding:2px;
+  }
+  .prod-list.fotos-grandes .prod-item{
+    display:flex;flex-direction:column;align-items:stretch;text-align:center;gap:6px;
+    padding:10px;border:1px solid var(--border);border-radius:10px;border-bottom:1px solid var(--border);
+  }
+  .prod-list.fotos-grandes .prod-item img,.prod-list.fotos-grandes .prod-item .img-ph{
+    width:100%;height:140px;border-radius:8px;
+  }
+  .prod-list.fotos-grandes .prod-item .meta{flex:none;}
+  .prod-list.fotos-grandes .prod-item .precio{text-align:center;white-space:normal;}
+  .prod-list.fotos-grandes .prod-item .ver-ficha{align-self:center;}
+  .prod-item .meta{flex:1;}
+  .prod-item .meta .name{font-weight:600;}
+  .prod-item .meta .sub{color:var(--muted);font-size:12px;}
+  .badge-oculto{display:inline-block;font-size:10px;font-weight:600;color:var(--warn);border:1px solid var(--warn);border-radius:4px;padding:1px 5px;vertical-align:middle;text-transform:uppercase;}
+  .prod-item .precio{font-weight:600;white-space:nowrap;text-align:right;}
+  .prod-item .precio .precio-caja{font-weight:400;font-size:10.5px;color:var(--muted);white-space:nowrap;}
+  .prod-item .ver-ficha{font-size:11.5px;color:var(--muted);white-space:nowrap;text-decoration:none;border:1px solid var(--border);border-radius:6px;padding:3px 7px;flex-shrink:0;}
+  .prod-item .ver-ficha:hover{background:#f2f1ee;color:var(--text);}
+  /* Simulador de piso con IA: solo aparece en las tarjetas de piso (ver
+     pintarListaProductos). El botón vive en el mismo lugar que "Ver ficha"
+     para que sea fácil de encontrar sin agregar otra fila a la tarjeta. */
+  .btn-simular{font-size:11.5px;color:var(--accent);white-space:nowrap;background:#fff;cursor:pointer;border:1px solid var(--accent);border-radius:6px;padding:3px 7px;flex-shrink:0;}
+  .btn-simular:hover{background:#eef2ff;}
+  /* Elegir varios pisos con checkboxes y compararlos todos juntos con la
+     misma foto, en vez de probarlos de a uno — pedido de Mato. */
+  .chk-comparar{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);white-space:nowrap;cursor:pointer;flex-shrink:0;}
+  .chk-comparar input{margin:0;cursor:pointer;}
+  .compare-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;background:#eef2ff;border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-top:10px;}
+  .compare-bar span{font-size:13px;color:var(--accent2);font-weight:600;}
+  .compare-bar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .sim-comparacion-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;}
+  .sim-comparacion-grid .cmp-item{border:1px solid var(--border);border-radius:10px;padding:8px;text-align:center;}
+  .sim-comparacion-grid .cmp-item img{width:100%;max-height:220px;object-fit:contain;border-radius:8px;background:#f2f1ee;display:block;}
+  .sim-comparacion-grid .cmp-item .cmp-nombre{font-size:12.5px;font-weight:600;margin:6px 0 4px;}
+  .sim-comparacion-grid .cmp-item .cmp-estado{font-size:12px;color:var(--muted);padding:26px 0;}
+  .sim-comparacion-grid .cmp-item .cmp-spinner{width:22px;height:22px;margin:0 auto 8px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:sim-spin 0.8s linear infinite;}
+  .sim-comparacion-grid .cmp-item label.check{padding:4px 0 0;font-size:12px;justify-content:center;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  /* Modal más ancho y sim-preview con más alto (antes 520px/sin límite de
+     alto) para que el resultado de la IA se vea grande — pedido de Mato,
+     el resultado quedaba chico dentro del modal angosto. */
+  /* Wrapper sin scroll propio: el botón de cerrar se ancla acá (position:
+     absolute) para que quede siempre visible en pantalla, sin importar el
+     scroll interno de .modal-simulador — antes solo se podía cerrar con el
+     botón "Cerrar" dentro de .actions, que quedaba fuera de vista en el
+     comparativo antes/después y obligaba a usar el botón Atrás del
+     navegador (borrando todo el cotizador en curso). */
+  .modal-simulador-wrap{position:relative;max-width:760px;width:100%;max-height:92vh;}
+  .modal-close-btn{position:absolute;top:8px;right:8px;width:32px;height:32px;border-radius:50%;border:none;background:rgba(0,0,0,.08);color:#333;font-size:17px;line-height:1;cursor:pointer;z-index:5;display:flex;align-items:center;justify-content:center;}
+  .modal-close-btn:hover{background:rgba(0,0,0,.16);}
+  .modal-simulador{background:#fff;border-radius:12px;width:100%;max-height:92vh;overflow-y:auto;padding:20px;}
+  .modal-simulador h3{margin:0 0 4px;font-size:16px;padding-right:28px;}
+  .modal-simulador .sim-sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
+  .sim-preview{width:100%;max-height:70vh;border-radius:10px;background:#f2f1ee;display:block;min-height:120px;object-fit:contain;}
+  /* Comparativo antes/después al reabrir una simulación guardada que tiene
+     la foto original + el resultado de la IA. */
+  .sim-antes-despues{display:flex;flex-wrap:wrap;gap:10px;}
+  .sim-antes-despues > div{flex:1;min-width:220px;text-align:center;}
+  .sim-antes-despues img{width:100%;max-height:45vh;border-radius:10px;background:#f2f1ee;object-fit:contain;display:block;}
+  .sim-antes-despues .etq{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-top:6px;}
+  .sim-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px 10px;color:var(--muted);font-size:13px;}
+  .sim-spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--accent);animation:sim-spin 0.8s linear infinite;}
+  @keyframes sim-spin{to{transform:rotate(360deg);}}
+  .modal-simulador .actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+  .sim-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin:14px 0;}
+  .sim-galeria .s-item{text-align:center;cursor:pointer;}
+  .sim-galeria .s-item img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:8px;background:#eee;border:1px solid var(--border);display:block;}
+  .sim-galeria .s-item .s-nombre{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.25;}
+  .sim-galeria-titulo{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin:16px 0 8px;}
+  .item-foto{width:40px;height:40px;object-fit:cover;border-radius:6px;background:#eee;display:block;}
+  .item-foto-vacia{width:40px;height:40px;border-radius:6px;background:#eee;}
+  .item-rubro{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;}
+  .item-nombre{font-weight:600;font-size:13.5px;}
+  #resumen-tabla input.cant-input{width:80px;display:inline-block;}
+  .cant-principal{font-weight:600;}
+  .cant-nota{font-size:11px;color:var(--muted);margin-top:2px;}
+  .quitar-item{background:none;border:1px solid var(--border);border-radius:6px;color:var(--warn);cursor:pointer;font-size:12px;padding:3px 7px;}
+  .quitar-item:hover{background:#fdecea;}
+  .empty{color:var(--muted);font-size:13px;padding:14px;text-align:center;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;}
+  tfoot td{border-bottom:none;font-weight:600;}
+  .totales{text-align:right;margin-top:10px;font-size:14px;}
+  .totales .grand{font-size:19px;font-weight:700;margin-top:4px;}
+  .formas-pago{margin-top:14px;border-top:1px solid var(--border);padding-top:12px;}
+  .formas-pago .fp-row{display:flex;justify-content:space-between;font-size:14px;padding:4px 0;}
+  .formas-pago .fp-row .fp-nombre{color:var(--text);}
+  .formas-pago .fp-row .fp-pct{color:var(--muted);font-size:12px;margin-left:6px;}
+  .msg{padding:10px 14px;border-radius:8px;font-size:13.5px;margin-bottom:14px;}
+  .msg.error{background:#fdecea;color:var(--warn);}
+  .msg.ok{background:#eaf5ec;color:var(--ok);}
+  .hidden{display:none !important;}
+  .hist-row{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
+  .hist-row:last-child{border-bottom:none;}
+  .hist-row .d{color:var(--muted);font-size:12px;}
+  .cfg-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
+  .cfg-row:last-child{border-bottom:none;}
+  .cfg-row .cfg-meta{color:var(--muted);font-size:12px;}
+  .cfg-form{border-top:1px dashed var(--border);margin-top:12px;padding-top:14px;}
+  .vista-toggle{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+  .vista-toggle-btn{padding:7px 13px;border-radius:20px;border:1px solid var(--border);background:#fff;cursor:pointer;font-size:12.5px;color:var(--muted);}
+  .vista-toggle-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .desc-obra{color:var(--muted);font-size:13px;margin-bottom:14px;}
+  .llave-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:12px;margin:16px 0;}
+  .llave-galeria .g-item{text-align:center;}
+  .llave-galeria .g-item img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:#eee;border:1px solid var(--border);display:block;}
+  .llave-galeria .g-item .g-vacia{width:100%;aspect-ratio:1/1;border-radius:8px;background:#eee;border:1px solid var(--border);}
+  .llave-galeria .g-item .g-nombre{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.25;}
+  .llave-en-mano-total{text-align:right;margin-top:10px;}
+  .llave-en-mano-total .grand{font-size:24px;font-weight:700;}
+  button.whatsapp{background:#25D366;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;font-weight:600;}
+  .copiado{color:var(--ok);font-size:12px;margin-left:6px;}
+  @media print{
+    header.brand-header{border-bottom:2px solid #000;}
+    .tabs, .subtabs, #selTienda, .actions, .acciones-extra, .vista-toggle, .field label[for="selTienda"], .grid:has(#selTienda), .volver-menu{display:none !important;}
+    body *{visibility:hidden;}
+    #paso-resumen, #paso-resumen *, #historial-detalle-card, #historial-detalle-card *{visibility:visible;}
+    #paso-resumen, #historial-detalle-card{position:absolute;left:0;top:0;width:100%;border:none;}
+  }
+</style>
+</head>
+<body>
+
+<header class="brand-header">
+  <div class="brand-header-inner">
+    <img class="brand-logo" alt="Piedra Negra" src="/assets/logo-piedra-negra.png">
+    <div class="brand-title">
+      <h1>Cotizador de obra</h1>
+      <p>Herramienta interna</p>
+    </div>
+    <a class="volver-menu" href="/inicio.html">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+      Menú
+    </a>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="grid" style="margin-bottom:14px;">
+    <div class="field">
+      <label for="selTienda">Tienda</label>
+      <select id="selTienda"></select>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="nueva">Nueva cotización</button>
+    <button class="tab-btn" data-tab="historial">Historial</button>
+    <button class="tab-btn" data-tab="config">Configuración</button>
+  </div>
+
+  <div id="msg"></div>
+
+  <!-- ====================== TAB: NUEVA COTIZACION ====================== -->
+  <div id="tab-nueva">
+
+    <div class="card" id="paso-tipo-obra">
+      <h2>1. Tipo de obra</h2>
+      <div id="tipo-obra-vacio" class="hidden">
+        <p class="hint">Todavía no configuraste ningún tipo de obra para esta tienda.</p>
+        <div class="actions"><button class="primary" id="btnIrAConfigTipos">Configurar tipos de obra →</button></div>
+      </div>
+      <div id="tipo-obra-selector">
+        <div class="field">
+          <label for="selTipoObra">¿Qué tipo de obra vas a cotizar?</label>
+          <select id="selTipoObra"></select>
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnContinuarDatos">Continuar →</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card hidden" id="paso-obra">
+      <h2>2. Datos de la obra</h2>
+      <div class="grid">
+        <div class="field"><label>Cliente</label><input type="text" id="cliente" placeholder="Nombre y apellido"></div>
+        <div class="field"><label>Dirección</label><input type="text" id="direccion" placeholder="Opcional"></div>
+      </div>
+      <h3>Superficies y cantidades</h3>
+      <div class="grid">
+        <div class="field"><label>m² de piso</label><input type="number" id="m2Pisos" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>% desperdicio de piso</label><input type="number" id="desperdicioPctPiso" min="0" step="0.5" value="0"></div>
+        <div class="field"><label>ml de zócalo</label><input type="number" id="mlZocalos" min="0" step="0.01" value="0"></div>
+        <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
+      </div>
+      <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
+      <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
+      <p class="hint">El check de manta aparece más adelante, junto con la elección del piso (no todos los pisos la necesitan).</p>
+      <div class="actions">
+        <button class="secondary" id="btnVolverTipoObra">← Volver</button>
+        <button class="primary" id="btnContinuarProductos">Elegir productos →</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="paso-productos">
+      <h2>3. Elegir productos</h2>
+      <div id="rubros-container"></div>
+      <div class="actions">
+        <button class="secondary" id="btnVolverObra">← Volver</button>
+        <button class="primary" id="btnCalcular">Calcular cotización</button>
+      </div>
+    </div>
+
+    <div class="card hidden" id="paso-resumen">
+      <h2>4. Resumen</h2>
+      <div class="vista-toggle" id="vistaToggleResumen">
+        <button class="vista-toggle-btn active" data-vista="detalle">Ver desglose</button>
+        <button class="vista-toggle-btn" data-vista="simple">Vista llave en mano</button>
+      </div>
+      <div id="resumen-tabla"></div>
+      <div class="actions acciones-extra hidden" id="accionesExtraResumen">
+        <button class="secondary" id="btnImprimirResumen">Imprimir</button>
+        <button class="whatsapp" id="btnWhatsappResumen">Compartir por WhatsApp</button>
+        <button class="secondary" id="btnCopiarLinkResumen">Copiar link<span class="copiado hidden" id="copiadoResumen">¡Copiado!</span></button>
+      </div>
+      <div class="cfg-form" id="formOtroItem">
+        <h3>Agregar otro ítem</h3>
+        <p class="hint">Para algo que no sale del cálculo automático: traslado, un extra puntual, etc.</p>
+        <div class="grid">
+          <div class="field"><label>Descripción</label><input type="text" id="otro_desc" placeholder="Ej: Traslado de materiales"></div>
+          <div class="field"><label>Cantidad</label><input type="number" id="otro_cant" min="0.01" step="0.01" value="1"></div>
+          <div class="field"><label>Valor unitario ($)</label><input type="number" id="otro_valor" min="0" step="0.01" value="0"></div>
+        </div>
+        <div class="actions"><button class="secondary small" id="btnAgregarOtro">+ Agregar ítem</button></div>
+      </div>
+      <div class="field" style="margin-top:16px;max-width:320px;">
+        <label>Nombre del cliente (para guardar el presupuesto)</label>
+        <input type="text" id="clienteGuardar" placeholder="Nombre y apellido">
+      </div>
+      <div class="actions">
+        <button class="secondary" id="btnVolverProductos">← Volver</button>
+        <button class="primary" id="btnGuardar">Guardar cotización</button>
+        <button class="secondary hidden" id="btnPdf">Descargar PDF</button>
+        <button class="secondary hidden" id="btnNueva">Nueva cotización</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ====================== TAB: HISTORIAL ====================== -->
+  <div id="tab-historial" class="hidden">
+    <div class="card">
+      <h2>Cotizaciones guardadas</h2>
+      <div id="historial-lista"></div>
+    </div>
+    <div class="card hidden" id="historial-detalle-card">
+      <h2>Detalle</h2>
+      <div class="vista-toggle" id="vistaToggleHistorial">
+        <button class="vista-toggle-btn active" data-vista="detalle">Ver desglose</button>
+        <button class="vista-toggle-btn" data-vista="simple">Vista llave en mano</button>
+      </div>
+      <div id="historial-detalle"></div>
+      <div class="actions acciones-extra">
+        <button class="secondary" id="btnPdfHistorial">Descargar PDF</button>
+        <button class="secondary" id="btnImprimirHistorial">Imprimir</button>
+        <button class="whatsapp" id="btnWhatsappHistorial">Compartir por WhatsApp</button>
+        <button class="secondary" id="btnCopiarLinkHistorial">Copiar link<span class="copiado hidden" id="copiadoHistorial">¡Copiado!</span></button>
+        <button class="secondary" id="btnEditarHistorial">✎ Editar</button>
+        <button class="secondary" id="btnBorrarHistorial" style="color:var(--warn);border-color:var(--warn);">Borrar cotización</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================== TAB: CONFIGURACION ====================== -->
+  <div id="tab-config" class="hidden">
+
+    <div class="subtabs">
+      <button class="subtab-btn active" data-subtab="tipos">Tipos de obra</button>
+      <button class="subtab-btn" data-subtab="pagos">Formas de pago</button>
+    </div>
+
+    <!-- Tipos de obra -->
+    <div id="cfg-tipos" class="card">
+      <h2>Tipos de obra</h2>
+      <p class="hint">Cada tipo de obra (Piso flotante, Deck, Ranurados, Atérmicos, Cerámica...) tiene su propio rubro de piso/zócalo en Tiendanube, y su propia configuración de niveladores de puerta, nivelantes de piso, manta, silicona/pegamento y mano de obra (en "Catálogos") — cada tipo de obra cotiza su mano de obra por separado.</p>
+      <div id="cfg-tipos-lista"></div>
+      <div class="cfg-form">
+        <h3 id="cfg-tipos-form-titulo">Agregar tipo de obra</h3>
+        <div class="grid">
+          <div class="field"><label>Nombre</label><input type="text" id="to_nombre" placeholder="Ej: Piso flotante"></div>
+          <div class="field"><label>% desperdicio por defecto</label><input type="number" id="to_desperdicio" min="0" step="0.5" value="0"></div>
+        </div>
+        <div class="grid">
+          <div class="field"><label>Rubro de piso (obligatorio)</label><select id="to_rubroPiso"></select></div>
+          <div class="field"><label>Rubro de zócalo (opcional)</label><select id="to_rubroZocalo"><option value="">— No aplica —</option></select></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnGuardarTipoObra">Guardar</button>
+          <button class="secondary hidden" id="btnCancelarEdicionTipo">Cancelar edición</button>
+        </div>
+      </div>
+
+      <!-- Catálogos y mano de obra del tipo de obra que se esté gestionando -->
+      <div class="cfg-form hidden" id="cfg-catalogos-panel">
+        <h3 id="cfg-catalogos-titulo">Catálogos de: —</h3>
+
+        <div class="subtabs">
+          <button class="catsub-btn active" data-cat="puerta">Niveladores de puerta</button>
+          <button class="catsub-btn" data-cat="nivelacion">Nivelantes de piso</button>
+          <button class="catsub-btn" data-cat="manta">Manta</button>
+          <button class="catsub-btn" data-cat="pegamento">Silicona/pegamento</button>
+          <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
+        </div>
+
+        <!-- Vista: catálogo por SKU (niveladores de puerta / nivelantes de piso / manta / pegamento) -->
+        <div id="cfg-catalogo-sku">
+          <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación), manta y silicona/pegamento para zócalo no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
+          <div id="cfg-catalogo-lista"></div>
+          <div class="grid" style="margin-top:10px;">
+            <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
+            <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="1" step="1" value="1"></div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="btnAgregarCatalogoItem">Buscar y agregar</button>
+          </div>
+        </div>
+
+        <!-- Vista: tarifas de mano de obra de este tipo de obra -->
+        <div id="cfg-catalogo-tarifas" class="hidden">
+          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente.</p>
+          <div class="grid">
+            <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
+            <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
+            <div class="field"><label>Por puerta ($)</label><input type="number" id="t_puertas_unidad" min="0" step="0.01"></div>
+            <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
+          </div>
+          <div class="grid" style="margin-top:10px;">
+            <div class="field"><label>Mínimo de m² cotizables</label><input type="number" id="t_minimoM2Cotizable" min="0" step="0.01" value="0"></div>
+          </div>
+          <p class="hint">Si la obra tiene menos m² de piso que este mínimo, la mano de obra (piso y nivelación) se cobra igual como si tuviera este mínimo. No afecta la cantidad de producto a comprar, solo el cálculo de mano de obra. Dejalo en 0 para no aplicar mínimo.</p>
+          <div class="actions">
+            <button class="primary" id="btnGuardarTarifasTipoObra">Guardar tarifas</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="secondary" id="btnCerrarCatalogos">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Formas de pago -->
+    <div id="cfg-pagos" class="card hidden">
+      <h2>Formas de pago</h2>
+      <p class="hint">Se van a mostrar todas juntas en el resumen y el PDF de cada cotización, cada una con su total ya calculado.</p>
+      <div id="cfg-pagos-lista"></div>
+      <div class="cfg-form">
+        <h3>Agregar forma de pago</h3>
+        <div class="grid">
+          <div class="field"><label>Nombre</label><input type="text" id="fp_nombre" placeholder="Ej: Efectivo/Transferencia"></div>
+          <div class="field"><label>Tipo</label>
+            <select id="fp_tipo">
+              <option value="descuento">Descuento</option>
+              <option value="recargo">Recargo</option>
+            </select>
+          </div>
+          <div class="field"><label>Porcentaje (%)</label><input type="number" id="fp_porcentaje" min="0" step="0.5" value="0"></div>
+        </div>
+        <div class="actions"><button class="primary" id="btnAgregarFormaPago">Guardar</button></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- Simulador de piso con IA: un solo input de archivo oculto (reutilizado
+     para cualquier producto de piso) y un modal genérico que se llena según
+     el producto que se esté probando. -->
+<input type="file" id="inputFotoSimulador" accept="image/*" class="hidden">
+<div id="modalSimulador" class="modal-overlay hidden">
+  <div class="modal-simulador-wrap">
+    <button type="button" class="modal-close-btn" onclick="cerrarModalSimulador()" aria-label="Cerrar">✕</button>
+    <div class="modal-simulador">
+      <h3>Simular piso con foto</h3>
+      <div class="sim-sub" id="simSubtitulo"></div>
+      <div id="simContenido"></div>
+      <div class="actions" id="simAcciones"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Prellenado desde una Visita (visitas.js / vendedor.html): si el vendedor
+// llega acá con el botón "Abrir cotizador" desde una visita, viene con
+// ?cliente=...&direccion=...&store_id=... en la URL. No cambia nada del
+// cotizador en sí — solo completa estos campos para no tener que tipearlos
+// de nuevo.
+(function prellenarDesdeVisita(){
+  try {
+    const params = new URLSearchParams(location.search);
+    const storeIdVisita = params.get('store_id');
+    if (storeIdVisita) localStorage.setItem('cotizador_store_id', storeIdVisita);
+    const cliente = params.get('cliente');
+    const direccion = params.get('direccion');
+    if (cliente) {
+      const c1 = document.getElementById('cliente'); if (c1) c1.value = cliente;
+      const c2 = document.getElementById('clienteGuardar'); if (c2) c2.value = cliente;
+    }
+    if (direccion) {
+      const d1 = document.getElementById('direccion'); if (d1) d1.value = direccion;
+    }
+  } catch (e) { /* localStorage puede no estar disponible */ }
+})();
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+let storeId = null;
+let tiendaDomain = null;      // dominio de la tienda actual, para armar el link "Ver ficha" a Tiendanube
+let catalogoCache = null;          // catalogo completo de la tienda actual (con rendimiento+precio, para piso/zocalo)
+let tiposObraCache = null;         // tipos de obra configurados
+let tipoObraElegido = null;        // tipo de obra elegido para la cotizacion actual
+let catalogosTipoObraCache = null; // { puerta: [...], nivelacion: [...], manta: [...] } del tipo de obra elegido
+let seleccion = {};                // { piso, zocalo, puerta, nivelacion, manta } (producto/item elegido)
+let simulacionesPendientes = [];   // [{ productId, producto, imagen }] simulaciones de piso que se guardan junto con la cotización
+let productoSimulando = null;      // producto de piso sobre el que se está corriendo el simulador (mientras el modal está abierto)
+let simulacionesEnVista = [];      // misma lista que se pintó en la galería de renderResumen, para poder reabrirlas al hacer click
+let cotizacionActual = null;       // resultado de /calcular, editable en pantalla antes de guardar
+let ultimaCotizacionGuardadaId = null;
+let vistaSimpleResumen = false;    // toggle "ver desglose" / "llave en mano" del paso 4
+let vistaSimpleHistorial = false;  // idem para el detalle del historial
+let historialVistaId = null;       // id de la cotización que se está viendo en el detalle del historial
+let historialVistaDoc = null;      // documento completo de esa cotización (para poder re-renderizar al togglear vista)
+let editandoCotizacionId = null;   // _id de una cotización del historial que se está reabriendo para editar: si no es null, btnGuardar actualiza ese documento en vez de crear uno nuevo
+let obraOriginalEdicion = null;    // "obra" tal cual estaba guardada al entrar a editar, para no perder utilizaManta si no se vuelve a pasar por paso-productos
+let editandoTipoObraId = null;
+let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
+let categoriaActivaCatalogo = 'puerta';
+let productosComparar = [];        // ids de productos de piso tildados con "Comparar" en paso 3, para generarlos todos juntos con la misma foto
+let modoComparacionPendiente = false; // true mientras se espera que el usuario elija la foto para arrancar una comparación (ver abrirComparacionPisos)
+let comparacionEnCurso = [];       // [{ productId, producto, estado, imagen, errorMsg }] resultados de la comparación que se está mostrando en el modal
+
+const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml' };
+const LABEL_COBERTURA_INPUT = {
+  puerta: 'Cuántas puertas cubre 1 unidad',
+  nivelacion: 'Cuántos m² cubre 1 unidad',
+  manta: 'Cuántos m² cubre 1 unidad',
+  pegamento: 'Cuántos ml de zócalo cubre 1 unidad'
+};
+
+function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+// Espejo de descripcionObra() en cotizador.js: descripción del alcance de la
+// obra (sin precios ni productos puntuales), para la vista "llave en mano".
+function descripcionObra(o){
+  o = o || {};
+  const datos = [];
+  if (o.m2Pisos) datos.push(o.m2Pisos + ' m2 de piso');
+  if (o.mlZocalos) datos.push(o.mlZocalos + ' ml de zócalo');
+  if (o.cantidadPuertas) datos.push(o.cantidadPuertas + ' puerta(s)');
+  if (o.requiereNivelacion) datos.push('con nivelación');
+  if (o.utilizaManta) datos.push('con manta');
+  if (o.manoObra) datos.push('con mano de obra');
+  return datos.join(' · ');
+}
+
+// Antes armaba un link a ver-cotizacion.html (la página del sistema). Un
+// cliente con ese link podía tocar "Ver desglose" y terminar viendo precios
+// y cantidades de cada ítem — lo mismo que ya se evitaba en WhatsApp. Ahora
+// "Copiar link" comparte directamente el PDF, respetando la vista
+// (desglose/llave en mano) que esté activa en ese momento.
+function urlPdfCotizacion(id, vistaSimple){
+  return location.origin + '/api/cotizador/pdf/' + id + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : '');
+}
+
+// Comparte el PDF del presupuesto (no un link al sistema, para que el
+// cliente no pueda tocar "Ver desglose" y terminar viendo precios y
+// cantidades de cada ítem). En celulares usa el share nativo del navegador
+// para adjuntar el PDF directo en WhatsApp; si el navegador no lo soporta
+// (la mayoría de las notebooks) descarga el PDF y abre WhatsApp con el
+// mensaje, para adjuntarlo a mano.
+async function compartirWhatsapp(id, data, vistaSimple){
+  const textoBase = 'Hola' + (data.cliente ? ' ' + data.cliente : '') + ', te comparto el presupuesto' +
+    (data.tipoObraNombre ? ' de ' + data.tipoObraNombre : '') + ' — Total ' + money(data.total) + '.';
+  const urlPdfCompartir = '/api/cotizador/pdf/' + id + '?store_id=' + storeId + (vistaSimple ? '&vista=simple' : '');
+  try{
+    const res = await fetch(urlPdfCompartir);
+    if (!res.ok) throw new Error('pdf-fetch-failed');
+    const blob = await res.blob();
+    const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({ files: [file], text: textoBase });
+      return;
+    }
+    throw new Error('share-unsupported');
+  }catch(e){
+    if (e && e.name === 'AbortError') return; // el usuario cerró el panel de compartir
+    window.open(urlPdfCompartir, '_blank');
+    window.open('https://wa.me/?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+  }
+}
+
+async function copiarLink(id, btnCopiadoMsgEl, vistaSimple){
+  try{
+    await navigator.clipboard.writeText(urlPdfCotizacion(id, vistaSimple));
+    btnCopiadoMsgEl.classList.remove('hidden');
+    setTimeout(() => btnCopiadoMsgEl.classList.add('hidden'), 2000);
+  }catch(e){ /* portapapeles no disponible */ }
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function mostrarMsg(texto, tipo){
+  const el = $('#msg');
+  if (!texto){ el.innerHTML=''; return; }
+  el.innerHTML = '<div class="msg ' + (tipo||'error') + '">' + texto + '</div>';
+}
+
+function cambiarTab(nombre){
+  $$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === nombre));
+  ['nueva','historial','config'].forEach(t => {
+    $('#tab-' + t).classList.toggle('hidden', t !== nombre);
+  });
+  if (nombre === 'historial') cargarHistorial();
+  if (nombre === 'config') cargarConfigTipos();
+}
+$$('.tab-btn').forEach(b => b.addEventListener('click', () => cambiarTab(b.dataset.tab)));
+
+function cambiarSubtab(nombre){
+  $$('.subtab-btn').forEach(b => b.classList.toggle('active', b.dataset.subtab === nombre));
+  ['tipos','pagos'].forEach(t => {
+    $('#cfg-' + t).classList.toggle('hidden', t !== nombre);
+  });
+  if (nombre === 'tipos') cargarConfigTipos();
+  if (nombre === 'pagos') cargarConfigPagos();
+}
+$$('.subtab-btn').forEach(b => b.addEventListener('click', () => cambiarSubtab(b.dataset.subtab)));
+
+$('#btnIrAConfigTipos').addEventListener('click', () => { cambiarTab('config'); cambiarSubtab('tipos'); });
+
+// ---------- Cargar tiendas ----------
+async function cargarTiendas(){
+  const res = await fetch('/api/stores');
+  const tiendas = await res.json();
+  const sel = $('#selTienda');
+  sel.innerHTML = tiendas.map(t => '<option value="' + t.store_id + '">' + (t.domain || t.store_id) + '</option>').join('');
+  if (tiendas.length){
+    // Recordar (por navegador) la última tienda elegida, en vez de arrancar
+    // siempre en la primera que devuelve /api/stores. Sin esto, el
+    // cotizador abría siempre en la tienda demo (la que viene primero en la
+    // lista) salvo que se cambiara el select a mano cada vez — y desde ahí
+    // parecía que faltaban productos, cuando en realidad se estaba viendo
+    // el catálogo de la tienda equivocada.
+    let guardada = null;
+    try { guardada = localStorage.getItem('cotizador_store_id'); } catch (e) { /* sin acceso a localStorage */ }
+    const tiendaGuardada = guardada && tiendas.find(t => String(t.store_id) === guardada);
+    const inicial = tiendaGuardada || tiendas[0];
+    storeId = String(inicial.store_id);
+    tiendaDomain = inicial.domain || null;
+    sel.value = storeId;
+  }
+  sel.addEventListener('change', () => {
+    storeId = sel.value;
+    const tienda = tiendas.find(t => String(t.store_id) === storeId);
+    tiendaDomain = tienda ? tienda.domain : null;
+    try { localStorage.setItem('cotizador_store_id', storeId); } catch (e) { /* sin acceso a localStorage */ }
+    catalogoCache = null;
+    tiposObraCache = null;
+    catalogosTipoObraCache = null;
+    tipoObraElegido = null;
+    seleccion = {};
+    simulacionesPendientes = [];
+    productosComparar = [];
+    fotoSimuladorActual = null;
+    cargarPasoTipoObra();
+  });
+  cargarPasoTipoObra();
+}
+
+// ---------- Paso 1: tipo de obra ----------
+async function cargarPasoTipoObra(){
+  if (!storeId) return;
+  try{
+    const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId);
+    tiposObraCache = await res.json();
+  }catch(e){ tiposObraCache = []; }
+
+  const vacio = $('#tipo-obra-vacio');
+  const selector = $('#tipo-obra-selector');
+  if (!tiposObraCache.length){
+    vacio.classList.remove('hidden');
+    selector.classList.add('hidden');
+    return;
+  }
+  vacio.classList.add('hidden');
+  selector.classList.remove('hidden');
+  const sel = $('#selTipoObra');
+  sel.innerHTML = tiposObraCache.map(t => '<option value="' + t.id + '">' + escapeHtml(t.nombre) + '</option>').join('');
+}
+
+$('#btnContinuarDatos').addEventListener('click', () => {
+  const id = $('#selTipoObra').value;
+  tipoObraElegido = tiposObraCache.find(t => String(t.id) === String(id));
+  if (!tipoObraElegido){ mostrarMsg('Elegí un tipo de obra.'); return; }
+
+  $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
+  catalogosTipoObraCache = null;
+
+  mostrarMsg(null);
+  $('#paso-tipo-obra').classList.add('hidden');
+  $('#paso-obra').classList.remove('hidden');
+});
+
+$('#btnVolverTipoObra').addEventListener('click', () => {
+  $('#paso-obra').classList.add('hidden');
+  $('#paso-tipo-obra').classList.remove('hidden');
+});
+
+// ---------- Paso 2: datos de obra ----------
+function leerObra(){
+  return {
+    m2Pisos: parseFloat($('#m2Pisos').value) || 0,
+    mlZocalos: parseFloat($('#mlZocalos').value) || 0,
+    cantidadPuertas: parseInt($('#cantidadPuertas').value, 10) || 0,
+    requiereNivelacion: $('#requiereNivelacion').checked,
+    manoObra: $('#manoObra').checked,
+    desperdicioPctPiso: parseFloat($('#desperdicioPctPiso').value) || 0
+  };
+}
+
+async function asegurarCatalogo(){
+  if (catalogoCache) return catalogoCache;
+  const res = await fetch('/api/cotizador/productos?store_id=' + storeId);
+  if (!res.ok) throw new Error((await res.json()).error || 'Error al traer productos');
+  catalogoCache = await res.json();
+  return catalogoCache;
+}
+
+async function asegurarCatalogosTipoObra(){
+  if (catalogosTipoObraCache) return catalogosTipoObraCache;
+  const categorias = ['puerta', 'nivelacion', 'manta', 'pegamento'];
+  const listas = await Promise.all(categorias.map((cat) =>
+    fetch('/api/cotizador/tipos-obra/' + tipoObraElegido.id + '/items?store_id=' + storeId + '&categoria=' + cat)
+      .then((r) => r.ok ? r.json() : [])
+  ));
+  catalogosTipoObraCache = {};
+  categorias.forEach((cat, i) => { catalogosTipoObraCache[cat] = listas[i]; });
+  return catalogosTipoObraCache;
+}
+
+$('#btnContinuarProductos').addEventListener('click', async () => {
+  mostrarMsg(null);
+  if (!storeId){ mostrarMsg('Elegí una tienda primero.'); return; }
+  const obra = leerObra();
+  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion){
+    mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas o nivelación).');
+    return;
+  }
+  try{
+    await asegurarCatalogo();
+    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0){
+      await asegurarCatalogosTipoObra();
+    }
+  }catch(e){
+    mostrarMsg(e.message);
+    return;
+  }
+  renderPasoProductos(obra);
+  $('#paso-obra').classList.add('hidden');
+  $('#paso-productos').classList.remove('hidden');
+});
+
+$('#btnVolverObra').addEventListener('click', () => {
+  $('#paso-productos').classList.add('hidden');
+  $('#paso-obra').classList.remove('hidden');
+});
+
+// ---------- Paso 3: elegir productos ----------
+// Piso y zócalo siguen atados al rubro que el tipo de obra tiene configurado.
+function bloquesRubro(obra){
+  const bloques = [];
+  if (obra.m2Pisos > 0){
+    bloques.push({ clave: 'piso', titulo: 'Piso', tipoEsperado: 'm2', rubro: tipoObraElegido.rubroPiso });
+  }
+  if (obra.mlZocalos > 0){
+    bloques.push({ clave: 'zocalo', titulo: 'Zócalo', tipoEsperado: 'ml', rubro: tipoObraElegido.rubroZocalo });
+  }
+  return bloques;
+}
+
+function renderPasoProductos(obra){
+  const cont = $('#rubros-container');
+  cont.innerHTML = '';
+
+  bloquesRubro(obra).forEach(r => {
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+
+    if (!r.rubro){
+      bloque.innerHTML =
+        '<h4>' + r.titulo + '</h4>' +
+        '<div class="empty">Este tipo de obra no tiene un rubro de ' + r.titulo.toLowerCase() + ' configurado. Andá a Configuración → Tipos de obra.</div>';
+      cont.appendChild(bloque);
+      return;
+    }
+
+    // Piso pidió poder filtrar por marca (además del buscador por nombre) y
+    // fotos más grandes en su lista — solo ahí, el resto de los rubros y
+    // accesorios queda igual que antes.
+    const esPiso = r.clave === 'piso';
+    const selectMarcaHtml = esPiso ? '<select class="filtro-marca" data-rubro="' + r.clave + '"><option value="">Todas las marcas</option></select>' : '';
+    // El orden por precio solo tiene sentido en piso: ahí el precio
+    // comparable entre productos es el de $/m² (ver precioComparable), no
+    // el de la caja, que varía según cuánto rinde cada uno.
+    const selectOrdenHtml = esPiso
+      ? '<select class="orden-precio" data-rubro="' + r.clave + '">' +
+          '<option value="">Ordenar por precio</option>' +
+          '<option value="asc">Precio: menor a mayor</option>' +
+          '<option value="desc">Precio: mayor a menor</option>' +
+        '</select>'
+      : '';
+    // Los productos ocultos en Tiendanube vienen del backend con el dato
+    // (oculto: true/false) pero sin filtrar — acá se decide si se muestran,
+    // con un tilde que arranca destildado (ocultos escondidos por defecto).
+    const chkOcultosHtml = '<label class="chk-ocultos"><input type="checkbox" class="mostrar-ocultos" data-rubro="' + r.clave + '"> Mostrar ocultos en Tiendanube</label>';
+    bloque.innerHTML =
+      '<h4>' + r.titulo + '</h4>' +
+      '<div class="rubro-tag">Rubro: ' + escapeHtml(r.rubro) + '</div>' +
+      '<div class="search-row"><input type="text" placeholder="Buscar por nombre..." class="buscador-nombre" data-rubro="' + r.clave + '">' + selectMarcaHtml + selectOrdenHtml + chkOcultosHtml + '</div>' +
+      '<div class="prod-list' + (esPiso ? ' fotos-grandes' : '') + '" data-lista="' + r.clave + '"></div>' +
+      (esPiso
+        ? '<div class="compare-bar hidden" id="barCompararPisos"><span id="compareCount"></span>' +
+          '<div class="compare-bar-actions">' +
+            '<button type="button" class="secondary small" id="btnLimpiarComparar">Limpiar selección</button>' +
+            '<button type="button" class="primary small" id="btnGenerarComparacion">🖼 Generar comparación</button>' +
+          '</div></div>'
+        : '');
+    cont.appendChild(bloque);
+
+    const inputNombre = bloque.querySelector('.buscador-nombre');
+    const selectMarca = bloque.querySelector('.filtro-marca');
+    const selectOrden = bloque.querySelector('.orden-precio');
+    const chkOcultos = bloque.querySelector('.mostrar-ocultos');
+    const lista = bloque.querySelector('.prod-list');
+    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase(), selectMarca ? selectMarca.value : '', selectOrden ? selectOrden.value : '', chkOcultos.checked);
+    inputNombre.addEventListener('input', pintar);
+    if (selectMarca){
+      // Solo las marcas que efectivamente aparecen entre los productos de
+      // este rubro (no todo el catálogo de la tienda).
+      const marcas = [...new Set(opcionesRubro(r).map(p => p.marca).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+      selectMarca.innerHTML = '<option value="">Todas las marcas</option>' +
+        marcas.map(m => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+      selectMarca.addEventListener('change', pintar);
+    }
+    if (selectOrden){
+      selectOrden.addEventListener('change', pintar);
+    }
+    chkOcultos.addEventListener('change', pintar);
+    pintar();
+
+    if (esPiso){
+      bloque.querySelector('#btnGenerarComparacion').addEventListener('click', abrirComparacionPisos);
+      bloque.querySelector('#btnLimpiarComparar').addEventListener('click', () => {
+        productosComparar = [];
+        actualizarBarraComparar();
+        pintar();
+      });
+      actualizarBarraComparar();
+    }
+
+    // El check de manta va justo después del piso: muchos pisos ya la traen
+    // incorporada y otros no, así que la decisión depende del piso elegido.
+    if (r.clave === 'piso'){
+      const bloqueManta = document.createElement('div');
+      bloqueManta.className = 'rubro-block';
+      bloqueManta.innerHTML =
+        '<label class="check"><input type="checkbox" id="chkUtilizaManta"> ¿Utiliza manta? (algunos pisos ya la traen incorporada, otros no)</label>' +
+        '<div id="bloque-manta-detalle" class="hidden">' +
+          '<div class="rubro-tag">' + obra.m2Pisos + ' m² a cubrir</div>' +
+          '<div class="prod-list" data-lista="manta"></div>' +
+        '</div>';
+      cont.appendChild(bloqueManta);
+      const chkManta = bloqueManta.querySelector('#chkUtilizaManta');
+      const detalleManta = bloqueManta.querySelector('#bloque-manta-detalle');
+      const listaManta = bloqueManta.querySelector('[data-lista="manta"]');
+      chkManta.addEventListener('change', () => {
+        detalleManta.classList.toggle('hidden', !chkManta.checked);
+        if (chkManta.checked){
+          pintarListaCatalogo(listaManta, 'manta', catalogosTipoObraCache.manta, obra.m2Pisos);
+        }
+      });
+    }
+
+    // La silicona/pegamento para pegar el zócalo va justo después del
+    // zócalo: se necesita siempre que se cotiza zócalo, sin check aparte.
+    if (r.clave === 'zocalo'){
+      const bloquePegamento = document.createElement('div');
+      bloquePegamento.className = 'rubro-block';
+      bloquePegamento.innerHTML =
+        '<h4>Silicona/pegamento para zócalo</h4>' +
+        '<div class="rubro-tag">' + obra.mlZocalos + ' ml a cubrir</div>' +
+        '<div class="prod-list" data-lista="pegamento"></div>';
+      cont.appendChild(bloquePegamento);
+      pintarListaCatalogo(bloquePegamento.querySelector('.prod-list'), 'pegamento', catalogosTipoObraCache.pegamento, obra.mlZocalos);
+    }
+  });
+
+  if (obra.cantidadPuertas > 0){
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML =
+      '<h4>Niveladores de puerta</h4>' +
+      '<div class="rubro-tag">' + obra.cantidadPuertas + ' puerta(s) a cubrir</div>' +
+      '<div class="prod-list" data-lista="puerta"></div>';
+    cont.appendChild(bloque);
+    pintarListaCatalogo(bloque.querySelector('.prod-list'), 'puerta', catalogosTipoObraCache.puerta, obra.cantidadPuertas);
+  }
+
+  if (obra.requiereNivelacion && obra.m2Pisos > 0){
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML =
+      '<h4>Nivelación de piso</h4>' +
+      '<div class="rubro-tag">' + obra.m2Pisos + ' m² a nivelar</div>' +
+      '<div class="prod-list" data-lista="nivelacion"></div>';
+    cont.appendChild(bloque);
+    pintarListaCatalogo(bloque.querySelector('.prod-list'), 'nivelacion', catalogosTipoObraCache.nivelacion, obra.m2Pisos);
+  }
+}
+
+// Productos del catálogo que pertenecen a un rubro (piso/zócalo), sin
+// aplicar todavía los filtros de nombre/marca que elija el vendedor. Un
+// producto puede estar en varias categorías de Tiendanube a la vez (ej.
+// "Accesorios" además de "Zocalos"); el rubro configurado matchea si
+// coincide con la combinación completa O con cualquiera de sus categorías
+// sueltas, para que etiquetar un producto con una categoría extra no lo
+// saque del rubro.
+function opcionesRubro(rubro){
+  return catalogoCache.filter(p => p.tipo === rubro.tipoEsperado && coincideRubro(p, rubro));
+}
+
+// Tiendanube a veces tiene la misma categoría cargada de formas distintas
+// (ej: "Pisos / Piso Flotante", pero también "PISO FLOTANTE" suelta o
+// "Pisos / Piso Flotante / PISO FLOTANTE" anidada, típico de una
+// recategorización o import que dejó duplicados). Para no perder esos
+// productos, además del match exacto de siempre, se compara el último
+// tramo del rubro configurado (ej. "Piso Flotante") contra cada elemento
+// de categorias, sin importar mayúsculas — así matchea "PISO FLOTANTE"
+// pero no matchea de más por el tramo genérico "Pisos" solo.
+function coincideRubro(p, rubro){
+  if (p.categoria === rubro.rubro) return true;
+  if (p.categorias && p.categorias.includes(rubro.rubro)) return true;
+  const tramos = rubro.rubro.split('/').map(s => s.trim()).filter(Boolean);
+  const hoja = tramos[tramos.length - 1];
+  if (!hoja || !p.categorias) return false;
+  const hojaNorm = hoja.toLowerCase();
+  return p.categorias.some(c => c.trim().toLowerCase() === hojaNorm);
+}
+
+// Precio "comparable" para ordenar: en piso el precio de caja no sirve para
+// comparar productos porque cada uno rinde una cantidad distinta de m² (ver
+// el comentario sobre precioPorRendimiento más abajo), así que se ordena
+// por $/m². Para los demás rubros no hay selector de orden todavía, pero
+// queda resuelto por si se reutiliza esta función más adelante.
+function precioComparable(p, rubro){
+  return (rubro.tipoEsperado === 'm2' && p.cobertura) ? p.precio / p.cobertura : p.precio;
+}
+
+function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos){
+  let opciones = opcionesRubro(rubro);
+  if (!mostrarOcultos){
+    opciones = opciones.filter(p => !p.oculto);
+  }
+  if (filtroMarca){
+    opciones = opciones.filter(p => p.marca === filtroMarca);
+  }
+  if (filtroNombre){
+    opciones = opciones.filter(p => p.nombre.toLowerCase().includes(filtroNombre));
+  }
+  if (ordenPrecio === 'asc' || ordenPrecio === 'desc'){
+    opciones = opciones.slice().sort((a, b) => {
+      const diff = precioComparable(a, rubro) - precioComparable(b, rubro);
+      return ordenPrecio === 'asc' ? diff : -diff;
+    });
+  }
+  if (!opciones.length){
+    listaEl.innerHTML = '<div class="empty">No hay productos configurados en ese rubro (revisá que tengan rendimiento cargado en el admin).</div>';
+    return;
+  }
+  listaEl.innerHTML = opciones.map(p => {
+    const sel = seleccion[rubro.clave] && seleccion[rubro.clave].id === p.id;
+    const linkFicha = (tiendaDomain && p.handle)
+      ? '<a class="ver-ficha" href="https://' + tiendaDomain + '/productos/' + p.handle + '" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">Ver ficha ↗</a>'
+      : '';
+    // Para piso (tipoEsperado 'm2') el precio por caja no es comparable entre
+    // productos porque cada uno rinde una cantidad distinta de m². Mostramos
+    // el precio por m² como dato principal, y el precio de la caja en chico.
+    // Ojo: el campo que trae /api/cotizador/productos es "cobertura", no
+    // "rendimiento" (ver productosConfigurados() en cotizador.js).
+    const precioPorRendimiento = (rubro.tipoEsperado === 'm2' && p.cobertura) ? p.precio / p.cobertura : null;
+    const precioHtml = precioPorRendimiento !== null
+      ? money(precioPorRendimiento) + '/m²<div class="precio-caja">' + money(p.precio) + ' la ' + escapeHtml(p.envase || 'unidad') + '</div>'
+      : money(p.precio);
+    // El simulador con IA (ver /simular-piso en cotizador.js) solo tiene
+    // sentido para piso — es lo que se "pisa", no zócalo/niveladores/etc.
+    // Necesita la foto real del producto para ser fiel al SKU, así que si
+    // no hay imagen cargada en Tiendanube ni se muestra el botón.
+    // Además de probar un piso solo ("Probar en mi foto"), se puede tildar
+    // "Comparar" en varios pisos y generarlos todos juntos con la misma
+    // foto para ver las opciones lado a lado (ver btnGenerarComparacion).
+    const btnSimularHtml = (rubro.clave === 'piso' && p.imagen)
+      ? '<button type="button" class="btn-simular" data-id="' + p.id + '" onclick="event.stopPropagation(); abrirSimulador(' + p.id + ')">📷 Probar en mi foto</button>' +
+        '<label class="chk-comparar" onclick="event.stopPropagation()"><input type="checkbox" class="chk-comparar-input" data-comparar-id="' + p.id + '"' + (productosComparar.includes(p.id) ? ' checked' : '') + '> Comparar</label>'
+      : '';
+    return (
+      '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
+        (p.imagen ? '<img src="' + p.imagen + '">' : '<div class="img-ph"></div>') +
+        '<div class="meta"><div class="name">' + escapeHtml(p.nombre) + (p.oculto ? ' <span class="badge-oculto">oculto</span>' : '') + '</div>' +
+        '<div class="sub">rinde ' + p.cobertura + ' ' + rubro.tipoEsperado + '/' + p.envase + (p.marca ? ' · ' + escapeHtml(p.marca) : '') + '</div></div>' +
+        linkFicha +
+        btnSimularHtml +
+        '<div class="precio">' + precioHtml + '</div>' +
+      '</div>'
+    );
+  }).join('');
+  listaEl.querySelectorAll('.prod-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = parseInt(el.dataset.id, 10);
+      const prod = catalogoCache.find(p => p.id === id);
+      seleccion[rubro.clave] = prod;
+      pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos);
+    });
+  });
+  listaEl.querySelectorAll('.chk-comparar-input').forEach(chk => {
+    chk.addEventListener('change', () => {
+      const id = parseInt(chk.dataset.compararId, 10);
+      if (chk.checked){
+        if (!productosComparar.includes(id)) productosComparar.push(id);
+      } else {
+        productosComparar = productosComparar.filter(x => x !== id);
+      }
+      actualizarBarraComparar();
+    });
+  });
+}
+
+// Muestra/oculta la barra "Generar comparación" y actualiza el contador,
+// según cuántos pisos estén tildados con "Comparar" en este momento.
+function actualizarBarraComparar(){
+  const bar = document.getElementById('barCompararPisos');
+  if (!bar) return;
+  const n = productosComparar.length;
+  bar.classList.toggle('hidden', n === 0);
+  const count = document.getElementById('compareCount');
+  if (count) count.textContent = n === 1 ? '1 piso elegido para comparar' : (n + ' pisos elegidos para comparar');
+}
+
+// ---------- Simulador de piso con IA ----------
+// Flujo: el vendedor toca "Probar en mi foto" en una tarjeta de piso -> elige
+// o saca una foto del ambiente -> se manda al backend (que llama a la IA con
+// esa foto MÁS la foto real del producto, para que el resultado sea fiel al
+// SKU) -> se muestra el resultado en un modal -> el vendedor decide si lo
+// guarda (queda en simulacionesPendientes hasta que se guarde la cotización
+// entera) o lo descarta y prueba otra cosa. No se guarda nada solo, para no
+// llenar la cotización de pruebas descartadas.
+let simResultadoActual = null; // { productId, producto, imagen } del resultado que se está mostrando en el modal
+// Foto de ambiente ya elegida por el usuario en esta cotización, para poder
+// probar varios pisos con la misma foto sin tener que volver a sacarla o
+// elegir el archivo cada vez — pedido de Mato.
+let fotoSimuladorActual = null;
+
+function abrirSimulador(productId){
+  const prod = catalogoCache && catalogoCache.find(p => p.id === productId);
+  if (!prod) return;
+  productoSimulando = prod;
+  if (fotoSimuladorActual){
+    ejecutarSimulacion(prod, fotoSimuladorActual);
+    return;
+  }
+  $('#inputFotoSimulador').value = '';
+  $('#inputFotoSimulador').click();
+}
+
+// Descarta la foto actual y abre de nuevo el selector (cámara o galería)
+// para elegir una nueva — se usa desde el botón "Cambiar foto" del modal.
+function cambiarFotoSimulador(){
+  fotoSimuladorActual = null;
+  $('#inputFotoSimulador').value = '';
+  $('#inputFotoSimulador').click();
+}
+
+$('#inputFotoSimulador').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  const comparando = modoComparacionPendiente;
+  modoComparacionPendiente = false;
+  if (!file){ return; }
+  if (!comparando && !productoSimulando){ return; }
+  try{
+    const fotoDataUrl = await redimensionarFoto(file, 900, 0.75);
+    fotoSimuladorActual = fotoDataUrl;
+    if (comparando){
+      await ejecutarComparacion(fotoDataUrl);
+    } else {
+      await ejecutarSimulacion(productoSimulando, fotoDataUrl);
+    }
+  }catch(err){
+    if (comparando){
+      mostrarMsg(err.message);
+    } else {
+      mostrarModalSimulador(productoSimulando, 'error', null, err.message);
+    }
+  }
+});
+
+// Corre la simulación con IA para "prod" usando una foto ya elegida
+// (fotoDataUrl). Separado del listener de archivo para poder reutilizar la
+// misma foto en varios productos sin volver a pedirla cada vez.
+async function ejecutarSimulacion(prod, fotoDataUrl){
+  productoSimulando = prod;
+  mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
+  try{
+    const res = await fetch('/api/cotizador/simular-piso?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ productId: prod.id, foto: fotoDataUrl })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulación.');
+    mostrarModalSimulador(prod, 'resultado', data.imagen, null, fotoDataUrl);
+  }catch(err){
+    mostrarModalSimulador(prod, 'error', null, err.message);
+  }
+}
+
+// ---------- Comparar varios pisos con la misma foto ----------
+// Flujo: el vendedor tilda "Comparar" en dos o más pisos (checkboxes en
+// cada tarjeta, ver pintarListaProductos) y toca "Generar comparación" ->
+// si no hay una foto ya elegida, la pide una sola vez -> se corren todas
+// las simulaciones con esa misma foto y se muestran juntas en una grilla,
+// para poder ver las opciones lado a lado en vez de una por una.
+function abrirComparacionPisos(){
+  if (!productosComparar.length){ mostrarMsg('Tildá "Comparar" en al menos un piso.'); return; }
+  if (fotoSimuladorActual){
+    ejecutarComparacion(fotoSimuladorActual);
+    return;
+  }
+  modoComparacionPendiente = true;
+  $('#inputFotoSimulador').value = '';
+  $('#inputFotoSimulador').click();
+}
+
+async function ejecutarComparacion(fotoDataUrl){
+  const prods = productosComparar
+    .map(id => catalogoCache && catalogoCache.find(p => p.id === id))
+    .filter(Boolean);
+  if (!prods.length){ mostrarMsg('Tildá "Comparar" en al menos un piso.'); return; }
+
+  productoSimulando = null;
+  simResultadoActual = null;
+  comparacionEnCurso = prods.map(p => ({ productId: p.id, producto: p.nombre, estado: 'cargando', imagen: null, errorMsg: null }));
+  mostrarModalComparacion(fotoDataUrl);
+
+  // En paralelo: son como máximo un puñado de pisos a la vez (2 a 4), y así
+  // se arma la grilla completa mucho más rápido que pidiéndolas de a una.
+  await Promise.all(prods.map(async (p, idx) => {
+    try{
+      const res = await fetch('/api/cotizador/simular-piso?store_id=' + storeId, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ productId: p.id, foto: fotoDataUrl })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'No se pudo generar.');
+      comparacionEnCurso[idx].estado = 'resultado';
+      comparacionEnCurso[idx].imagen = data.imagen;
+      comparacionEnCurso[idx].keep = true;
+    }catch(err){
+      comparacionEnCurso[idx].estado = 'error';
+      comparacionEnCurso[idx].errorMsg = err.message;
+    }
+    renderCeldasComparacion(fotoDataUrl);
+  }));
+}
+
+function mostrarModalComparacion(fotoDataUrl){
+  $('#simSubtitulo').textContent = comparacionEnCurso.length + ' pisos — comparación con la misma foto';
+  renderCeldasComparacion(fotoDataUrl);
+  $('#simAcciones').innerHTML =
+    '<button class="secondary" onclick="cerrarModalSimulador()">Cerrar</button>' +
+    '<button class="primary" onclick="guardarSeleccionComparacion()">Guardar elegidos en esta cotización</button>';
+  $('#modalSimulador').classList.remove('hidden');
+}
+
+// Repinta la grilla de la comparación (se llama al abrir el modal y cada
+// vez que termina una de las simulaciones en paralelo, para ir mostrando
+// los resultados a medida que están listos en vez de esperar a todos).
+function renderCeldasComparacion(fotoDataUrl){
+  const html = comparacionEnCurso.map((c, idx) => {
+    let cuerpo;
+    if (c.estado === 'cargando'){
+      cuerpo = '<div class="cmp-estado"><div class="cmp-spinner"></div>Generando…</div>';
+    } else if (c.estado === 'error'){
+      cuerpo = '<div class="cmp-estado">' + escapeHtml(c.errorMsg || 'Error') + '</div>';
+    } else {
+      // El estado de cada tilde se guarda en comparacionEnCurso[idx].keep
+      // (no solo en el DOM) porque esta grilla se vuelve a pintar entera
+      // cada vez que termina otra de las simulaciones en paralelo — si se
+      // leyera solo del checkbox, destildar una mientras las demás siguen
+      // cargando se perdería en el próximo repintado.
+      cuerpo = '<img src="' + c.imagen + '">' +
+        '<label class="check"><input type="checkbox" class="cmp-keep" data-idx="' + idx + '"' +
+        (c.keep === false ? '' : ' checked') +
+        ' onchange="comparacionEnCurso[' + idx + '].keep = this.checked"> Guardar esta</label>';
+    }
+    return '<div class="cmp-item"><div class="cmp-nombre">' + escapeHtml(c.producto) + '</div>' + cuerpo + '</div>';
+  }).join('');
+  $('#simContenido').innerHTML = '<div class="sim-comparacion-grid">' + html + '</div>';
+}
+
+// Guarda en simulacionesPendientes las opciones de la comparación que el
+// vendedor haya dejado tildadas ("Guardar esta"), igual que hace
+// guardarSimulacionPendiente() con una simulación individual.
+function guardarSeleccionComparacion(){
+  const elegidos = comparacionEnCurso.filter(c => c.estado === 'resultado' && c.keep !== false);
+  if (!elegidos.length){ mostrarMsg('No hay ninguna comparación lista para guardar.'); return; }
+  elegidos.forEach(c => {
+    simulacionesPendientes = simulacionesPendientes.filter(s => s.productId !== c.productId);
+    simulacionesPendientes.push({ productId: c.productId, producto: c.producto, imagen: c.imagen, antes: fotoSimuladorActual });
+  });
+  cerrarModalSimulador();
+  mostrarMsg(elegidos.length + ' simulación(es) guardada(s) — se van a incluir cuando guardes esta cotización.', 'ok');
+  if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
+}
+
+// Achica la foto en el navegador antes de mandarla: una foto de celular
+// puede pesar varios MB, y no hace falta esa resolución para que la IA
+// distinga bien el ambiente — así el POST es liviano y rápido. Devuelve un
+// data URL jpeg.
+function redimensionarFoto(file, maxLado, calidad){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la foto.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('No se pudo leer la foto.'));
+      img.onload = () => {
+        const escala = Math.min(1, maxLado / Math.max(img.width, img.height));
+        const w = Math.round(img.width * escala);
+        const h = Math.round(img.height * escala);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', calidad));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function mostrarModalSimulador(prod, estado, imagen, errorMsg, antes){
+  $('#simSubtitulo').textContent = prod.nombre;
+  const contenido = $('#simContenido');
+  const acciones = $('#simAcciones');
+  simResultadoActual = null;
+  if (estado === 'cargando'){
+    contenido.innerHTML = '<img class="sim-preview" src="' + imagen + '">' +
+      '<div class="sim-loading"><div class="sim-spinner"></div>Generando la simulación con IA… puede tardar unos segundos.</div>';
+    acciones.innerHTML = '<button class="secondary" onclick="cerrarModalSimulador()">Cancelar</button>';
+  } else if (estado === 'error'){
+    contenido.innerHTML = '<div class="msg error">' + escapeHtml(errorMsg || 'Ocurrió un error.') + '</div>';
+    acciones.innerHTML = '<button class="secondary" onclick="cerrarModalSimulador()">Cerrar</button>';
+  } else {
+    contenido.innerHTML = '<img class="sim-preview" src="' + imagen + '">';
+    acciones.innerHTML =
+      '<button class="secondary" onclick="cerrarModalSimulador()">Descartar</button>' +
+      '<button class="secondary" onclick="cambiarFotoSimulador()">🔄 Cambiar foto</button>' +
+      '<button class="primary" onclick="guardarSimulacionPendiente()">Guardar en esta cotización</button>';
+    // Se guarda también la foto original ("antes") junto con el resultado
+    // de la IA ("después"), para poder mostrar el comparativo en el PDF y
+    // al reabrir la simulación guardada.
+    simResultadoActual = { productId: prod.id, producto: prod.nombre, imagen, antes: antes || null };
+  }
+  $('#modalSimulador').classList.remove('hidden');
+}
+
+function cerrarModalSimulador(){
+  $('#modalSimulador').classList.add('hidden');
+  simResultadoActual = null;
+  productoSimulando = null;
+  comparacionEnCurso = [];
+}
+
+function guardarSimulacionPendiente(){
+  if (!simResultadoActual) return;
+  // Si ya había una simulación guardada para el mismo producto, la reemplaza
+  // en vez de duplicarla.
+  simulacionesPendientes = simulacionesPendientes.filter(s => s.productId !== simResultadoActual.productId);
+  simulacionesPendientes.push(simResultadoActual);
+  cerrarModalSimulador();
+  mostrarMsg('Simulación guardada — se va a incluir cuando guardes esta cotización.', 'ok');
+  if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
+}
+
+// Reabre en el mismo modal una simulación ya guardada (de la galería del
+// resumen o del historial), en grande, con opción de descargarla. No hay
+// "Guardar" acá porque ya está guardada — solo ver y descargar.
+function verSimulacionGuardada(idx){
+  const s = simulacionesEnVista[idx];
+  if (!s || !s.imagen) return;
+  simResultadoActual = null;
+  productoSimulando = null;
+  $('#simSubtitulo').textContent = s.producto || '';
+  $('#simContenido').innerHTML = s.antes
+    ? '<div class="sim-antes-despues">' +
+        '<div><img src="' + s.antes + '"><div class="etq">Antes</div></div>' +
+        '<div><img src="' + s.imagen + '"><div class="etq">Después</div></div>' +
+      '</div>'
+    : '<img class="sim-preview" src="' + s.imagen + '">';
+  const nombreArchivo = 'simulacion-' +
+    (s.producto || 'piso').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') + '.png';
+  $('#simAcciones').innerHTML =
+    '<a class="secondary" href="' + s.imagen + '" download="' + nombreArchivo + '">⬇ Descargar foto</a>' +
+    '<button class="primary" onclick="cerrarModalSimulador()">Cerrar</button>';
+  $('#modalSimulador').classList.remove('hidden');
+}
+
+// Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
+// de piso, manta y silicona/pegamento), todos con la misma forma:
+// { id, sku, cobertura, nombre, precio, imagen }.
+function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
+  if (!lista || !lista.length){
+    listaEl.innerHTML = '<div class="empty">No hay productos cargados en esta categoría para este tipo de obra. Andá a Configuración → Tipos de obra → Catálogos.</div>';
+    return;
+  }
+  const etiqueta = ETIQUETA_COBERTURA[clave] || 'unidad(es)';
+  listaEl.innerHTML = lista.map(n => {
+    const sel = seleccion[clave] && String(seleccion[clave].id) === String(n.id);
+    const necesarios = Math.ceil((cantidadNecesariaBase / (n.cobertura || 1)) - 1e-9);
+    return (
+      '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + n.id + '">' +
+        (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
+        '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div>' +
+        '<div class="sub">cubre ' + n.cobertura + ' ' + etiqueta + ' por unidad · necesita ' + necesarios + '</div></div>' +
+        '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div>' +
+      '</div>'
+    );
+  }).join('');
+  listaEl.querySelectorAll('.prod-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const item = lista.find(n => String(n.id) === String(id));
+      seleccion[clave] = item;
+      pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase);
+    });
+  });
+}
+
+// ---------- Paso 3 -> 4 (calcular) ----------
+$('#btnCalcular').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const obra = leerObra();
+  const chkManta = document.getElementById('chkUtilizaManta');
+  obra.utilizaManta = chkManta ? chkManta.checked : false;
+  const seleccionIds = {};
+  Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
+
+  try{
+    const res = await fetch('/api/cotizador/calcular?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ obra, productos: seleccionIds, tipoObraId: tipoObraElegido.id })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al calcular');
+    if (data.faltantes && data.faltantes.length){
+      mostrarMsg('Falta elegir producto para: ' + data.faltantes.join(', '));
+      return;
+    }
+    ultimaCotizacionGuardadaId = null;
+    cotizacionActual = JSON.parse(JSON.stringify(data));
+    cotizacionActual.obra = obra;
+    vistaSimpleResumen = false;
+    $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+    $('#formOtroItem').classList.remove('hidden');
+    $('#accionesExtraResumen').classList.add('hidden');
+    renderResumen(cotizacionActual, true, vistaSimpleResumen);
+    $('#clienteGuardar').value = $('#cliente').value;
+    $('#paso-productos').classList.add('hidden');
+    $('#paso-resumen').classList.remove('hidden');
+    $('#btnPdf').classList.add('hidden');
+    $('#btnNueva').classList.add('hidden');
+  }catch(e){ mostrarMsg(e.message); }
+});
+
+$$('#vistaToggleResumen .vista-toggle-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    vistaSimpleResumen = b.dataset.vista === 'simple';
+    $$('#vistaToggleResumen .vista-toggle-btn').forEach(x => x.classList.toggle('active', x === b));
+    $('#formOtroItem').classList.toggle('hidden', vistaSimpleResumen);
+    if (cotizacionActual) renderResumen(cotizacionActual, true, vistaSimpleResumen);
+  });
+});
+
+$('#btnVolverProductos').addEventListener('click', () => {
+  $('#paso-resumen').classList.add('hidden');
+  $('#paso-productos').classList.remove('hidden');
+});
+
+// editable=true (paso 4, cotización en curso): cantidad editable a mano y
+// botón para quitar el ítem. editable=false (detalle de historial): tabla
+// de solo lectura, sin controles. vistaSimple=true: sin desglose de ítems,
+// solo la descripción del alcance de la obra y el total ("llave en mano").
+function renderResumen(data, editable, vistaSimple){
+  editable = editable !== false && !vistaSimple;
+  let html = '';
+
+  const descTxt = descripcionObra(data.obra);
+
+  if (vistaSimple){
+    if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    html += '<p class="hint">Provisión de materiales y mano de obra necesarios para la ejecución de la obra detallada, llave en mano.</p>';
+    if (data.items && data.items.length){
+      html += '<div class="llave-galeria">';
+      data.items.forEach(it => {
+        html += '<div class="g-item">' +
+          (it.imagen ? '<img src="' + it.imagen + '">' : '<div class="g-vacia"></div>') +
+          '<div class="g-nombre">' + escapeHtml(it.producto) + '</div></div>';
+      });
+      html += '</div>';
+    }
+    html += '<div class="llave-en-mano-total"><div class="grand">' + money(data.total) + '</div></div>';
+  } else {
+    if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Precio unit.</th><th>Subtotal</th>' +
+      (editable ? '<th></th>' : '') + '</tr></thead><tbody>';
+    data.items.forEach((it, idx) => {
+      const notaCantidad = it.unidadObra
+        ? (it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : ''))
+        : '';
+      const envaseTxt = (it.envase || 'unidad') + (Number(it.paquetesNecesarios) === 1 ? '' : '(s)');
+      html += '<tr>' +
+        '<td>' + (it.imagen ? '<img class="item-foto" src="' + it.imagen + '">' : '<div class="item-foto-vacia"></div>') + '</td>' +
+        '<td><div class="item-rubro">' + escapeHtml(it.rubro) + '</div><div class="item-nombre">' + escapeHtml(it.producto) + '</div></td>' +
+        '<td>' +
+          (editable
+            ? '<input type="number" class="cant-input" data-idx="' + idx + '" min="0" step="0.01" value="' + it.paquetesNecesarios + '"> ' + escapeHtml(it.envase || 'unidad')
+            : '<div class="cant-principal">' + it.paquetesNecesarios + ' ' + escapeHtml(envaseTxt) + '</div>') +
+          (notaCantidad ? '<div class="cant-nota">' + escapeHtml(notaCantidad) + '</div>' : '') +
+        '</td>' +
+        '<td>' + money(it.precioUnitario) + '</td>' +
+        '<td>' + money(it.subtotal) + '</td>' +
+        (editable ? '<td><button class="quitar-item" data-idx="' + idx + '" title="Quitar ítem">✕</button></td>' : '') +
+      '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="totales">' +
+      'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
+      (data.totalManoObra ? 'Mano de obra: ' + money(data.totalManoObra) + '<br>' : '') +
+      '<div class="grand">Total: ' + money(data.total) + '</div></div>';
+  }
+
+  if (data.formasPago && data.formasPago.length){
+    html += '<div class="formas-pago">';
+    data.formasPago.forEach(fp => {
+      const signo = fp.tipo === 'recargo' ? '+' : '-';
+      html += '<div class="fp-row"><span class="fp-nombre">' + escapeHtml(fp.nombre) +
+        (fp.porcentaje ? '<span class="fp-pct">(' + signo + fp.porcentaje + '%)</span>' : '') +
+        '</span><strong>' + money(fp.total) + '</strong></div>';
+    });
+    html += '</div>';
+  }
+
+  // Simulaciones de piso con IA: en una cotización ya guardada (historial)
+  // vienen en data.simulaciones; mientras se está armando (todavía sin
+  // guardar) se muestran las que se fueron probando en este paso 3
+  // (simulacionesPendientes), para que quede claro qué se va a guardar.
+  const simulacionesMostrar = (data && data.simulaciones) ? data.simulaciones : simulacionesPendientes;
+  simulacionesEnVista = simulacionesMostrar || [];
+  if (simulacionesMostrar && simulacionesMostrar.length){
+    html += '<div class="sim-galeria-titulo">Simulación de piso con IA</div><div class="sim-galeria">';
+    simulacionesMostrar.forEach((s, i) => {
+      html += '<div class="s-item" onclick="verSimulacionGuardada(' + i + ')"><img src="' + s.imagen + '"><div class="s-nombre">' + escapeHtml(s.producto || '') + '</div></div>';
+    });
+    html += '</div>';
+  }
+  $('#resumen-tabla').innerHTML = html;
+
+  if (editable){
+    $$('#resumen-tabla .cant-input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const idx = parseInt(inp.dataset.idx, 10);
+        const nuevaCant = parseFloat(inp.value) || 0;
+        cotizacionActual.items[idx].paquetesNecesarios = nuevaCant;
+        cotizacionActual.items[idx].subtotal = round2(nuevaCant * cotizacionActual.items[idx].precioUnitario);
+        recalcularTotalesFront();
+        renderResumen(cotizacionActual, true, vistaSimpleResumen);
+      });
+    });
+    $$('#resumen-tabla .quitar-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        cotizacionActual.items.splice(idx, 1);
+        recalcularTotalesFront();
+        renderResumen(cotizacionActual, true, vistaSimpleResumen);
+      });
+    });
+  }
+}
+
+// Recalcula totalProductos, total y las formas de pago en el navegador,
+// a partir de los items actuales de cotizacionActual (después de editar una
+// cantidad, agregar un ítem manual o quitar uno). La mano de obra no
+// depende de los items, así que se deja como vino de /calcular.
+function recalcularTotalesFront(){
+  cotizacionActual.totalProductos = round2(cotizacionActual.items.reduce((s, it) => s + (Number(it.subtotal) || 0), 0));
+  cotizacionActual.total = round2(cotizacionActual.totalProductos + (Number(cotizacionActual.totalManoObra) || 0));
+  cotizacionActual.formasPago = (cotizacionActual.formasPago || []).map(fp => {
+    const pct = Number(fp.porcentaje) || 0;
+    const factor = fp.tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
+    return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(cotizacionActual.total * factor) };
+  });
+}
+
+$('#btnAgregarOtro').addEventListener('click', () => {
+  mostrarMsg(null);
+  if (!cotizacionActual){ mostrarMsg('Primero calculá la cotización.'); return; }
+  const desc = $('#otro_desc').value.trim();
+  const cant = parseFloat($('#otro_cant').value) || 0;
+  const valor = parseFloat($('#otro_valor').value) || 0;
+  if (!desc){ mostrarMsg('Cargá una descripción para el ítem.'); return; }
+  if (cant <= 0){ mostrarMsg('La cantidad tiene que ser mayor a 0.'); return; }
+  cotizacionActual.items.push({
+    rubro: 'Otros', productoId: null, producto: desc, categoria: '', imagen: null,
+    unidadObra: '', cantidadObra: cant, desperdicioPct: 0, cantidadConDesperdicio: cant,
+    rendimiento: null, envase: 'unidad', paquetesNecesarios: cant, precioUnitario: valor,
+    subtotal: round2(cant * valor), manual: true
+  });
+  recalcularTotalesFront();
+  renderResumen(cotizacionActual, true);
+  $('#otro_desc').value = ''; $('#otro_cant').value = 1; $('#otro_valor').value = 0;
+});
+
+$('#btnGuardar').addEventListener('click', async () => {
+  mostrarMsg(null);
+  if (!cotizacionActual || !cotizacionActual.items.length){ mostrarMsg('No hay ítems para guardar.'); return; }
+  const obra = leerObra();
+  const chkManta = document.getElementById('chkUtilizaManta');
+  // Si estamos editando una cotización del historial y el checkbox de manta
+  // no está en el DOM (porque no se volvió a pasar por paso-productos), se
+  // conserva el valor que ya tenía guardado en vez de resetearlo a false.
+  obra.utilizaManta = chkManta ? chkManta.checked
+    : (editandoCotizacionId && obraOriginalEdicion ? !!obraOriginalEdicion.utilizaManta : false);
+  try{
+    const res = await fetch('/api/cotizador/guardar?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({
+        obra, tipoObraId: tipoObraElegido.id,
+        cliente: $('#clienteGuardar').value, direccion: $('#direccion').value,
+        tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
+        items: cotizacionActual.items,
+        totalManoObra: cotizacionActual.totalManoObra,
+        formasPago: cotizacionActual.formasPago,
+        simulaciones: simulacionesPendientes
+      }, editandoCotizacionId ? { _id: editandoCotizacionId } : {}))
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar');
+    ultimaCotizacionGuardadaId = data._id;
+    // Guardados siguientes (si toca "Guardar" de nuevo) actualizan el mismo
+    // documento en vez de crear uno duplicado.
+    editandoCotizacionId = data._id;
+    obraOriginalEdicion = obra;
+    cotizacionActual.simulaciones = data.simulaciones || [];
+    mostrarMsg('Cotización guardada.', 'ok');
+    $('#btnPdf').classList.remove('hidden');
+    $('#btnNueva').classList.remove('hidden');
+    $('#accionesExtraResumen').classList.remove('hidden');
+  }catch(e){ mostrarMsg(e.message); }
+});
+
+$('#btnPdf').addEventListener('click', () => {
+  if (!ultimaCotizacionGuardadaId) return;
+  window.open('/api/cotizador/pdf/' + ultimaCotizacionGuardadaId + '?store_id=' + storeId + (vistaSimpleResumen ? '&vista=simple' : ''), '_blank');
+});
+
+$('#btnImprimirResumen').addEventListener('click', () => window.print());
+$('#btnWhatsappResumen').addEventListener('click', () => {
+  if (!ultimaCotizacionGuardadaId || !cotizacionActual) return;
+  compartirWhatsapp(ultimaCotizacionGuardadaId, {
+    cliente: $('#clienteGuardar').value,
+    tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
+    total: cotizacionActual.total
+  }, vistaSimpleResumen);
+});
+$('#btnCopiarLinkResumen').addEventListener('click', () => {
+  if (!ultimaCotizacionGuardadaId) return;
+  copiarLink(ultimaCotizacionGuardadaId, $('#copiadoResumen'), vistaSimpleResumen);
+});
+
+$('#btnNueva').addEventListener('click', () => {
+  seleccion = {};
+  simulacionesPendientes = [];
+  fotoSimuladorActual = null;
+  productosComparar = [];
+  tipoObraElegido = null;
+  cotizacionActual = null;
+  ultimaCotizacionGuardadaId = null;
+  editandoCotizacionId = null;
+  obraOriginalEdicion = null;
+  $('#btnVolverProductos').classList.remove('hidden');
+  vistaSimpleResumen = false;
+  $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+  $('#formOtroItem').classList.remove('hidden');
+  $('#accionesExtraResumen').classList.add('hidden');
+  $('#cliente').value=''; $('#direccion').value=''; $('#clienteGuardar').value='';
+  $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
+  $('#requiereNivelacion').checked=false;
+  $('#manoObra').checked=false;
+  mostrarMsg(null);
+  $('#paso-resumen').classList.add('hidden');
+  $('#paso-tipo-obra').classList.remove('hidden');
+});
+
+// ---------- Historial ----------
+async function cargarHistorial(){
+  const cont = $('#historial-lista');
+  cont.innerHTML = '<div class="empty">Cargando...</div>';
+  $('#historial-detalle-card').classList.add('hidden');
+  try{
+    const res = await fetch('/api/cotizador/historial?store_id=' + storeId);
+    const lista = await res.json();
+    if (!res.ok) throw new Error(lista.error || 'Error al traer el historial');
+    if (!lista.length){ cont.innerHTML = '<div class="empty">Todavía no hay cotizaciones guardadas.</div>'; return; }
+    cont.innerHTML = lista.map(c =>
+      '<div class="hist-row">' +
+        '<div><strong>' + escapeHtml(c.cliente || '(sin cliente)') + '</strong><div class="d">' +
+          new Date(c.fecha).toLocaleDateString('es-AR') +
+          (c.tipoObraNombre ? ' · ' + escapeHtml(c.tipoObraNombre) : '') +
+          (c.direccion ? ' · ' + escapeHtml(c.direccion) : '') + '</div></div>' +
+        '<div style="display:flex;align-items:center;gap:12px;">' + money(c.total) +
+        '<button class="link" data-action="ver" data-id="' + c._id + '">ver</button>' +
+        '<button class="link" data-action="borrar" data-id="' + c._id + '" style="color:var(--warn);">borrar</button></div>' +
+      '</div>'
+    ).join('');
+    cont.querySelectorAll('button.link').forEach(b => {
+      b.addEventListener('click', () => {
+        if (b.dataset.action === 'borrar') borrarCotizacion(b.dataset.id);
+        else verDetalleHistorial(b.dataset.id);
+      });
+    });
+  }catch(e){ cont.innerHTML = '<div class="empty">' + e.message + '</div>'; }
+}
+
+// Borra una cotización guardada (desde la fila del listado o desde el botón
+// del detalle). Pide confirmación porque no se puede deshacer, y si la
+// cotización borrada era la que estaba abierta en el detalle, lo cierra.
+async function borrarCotizacion(id){
+  if (!confirm('¿Borrar esta cotización guardada? No se puede deshacer.')) return;
+  try{
+    const res = await fetch('/api/cotizador/historial/' + id + '?store_id=' + storeId, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al borrar');
+    if (historialVistaId === id){
+      historialVistaId = null;
+      historialVistaDoc = null;
+      $('#historial-detalle-card').classList.add('hidden');
+    }
+    cargarHistorial();
+  }catch(e){ mostrarMsg(e.message); }
+}
+
+// Reabre una cotización guardada del historial directo en el paso 4
+// (resumen), para poder cambiarle cliente/dirección/cantidades/ítems y
+// volver a guardarla actualizando el mismo documento (en vez de crear una
+// cotización nueva) — pedido de Mato.
+async function editarCotizacionHistorial(){
+  if (!historialVistaId || !historialVistaDoc) return;
+  const doc = historialVistaDoc;
+
+  if (!tiposObraCache || !tiposObraCache.length) await cargarPasoTipoObra();
+  tipoObraElegido = (tiposObraCache || []).find(t => String(t.id) === String(doc.tipoObraId))
+    || { id: doc.tipoObraId, nombre: doc.tipoObraNombre };
+
+  editandoCotizacionId = doc._id;
+  obraOriginalEdicion = doc.obra || {};
+
+  // Precarga los campos del paso 2 (por si el usuario vuelve a esa
+  // pantalla) y los que "Guardar" lee directo del DOM.
+  $('#cliente').value = doc.cliente || '';
+  $('#clienteGuardar').value = doc.cliente || '';
+  $('#direccion').value = doc.direccion || '';
+  $('#m2Pisos').value = (doc.obra && doc.obra.m2Pisos != null) ? doc.obra.m2Pisos : 0;
+  $('#mlZocalos').value = (doc.obra && doc.obra.mlZocalos != null) ? doc.obra.mlZocalos : 0;
+  $('#cantidadPuertas').value = (doc.obra && doc.obra.cantidadPuertas != null) ? doc.obra.cantidadPuertas : 0;
+  $('#desperdicioPctPiso').value = (doc.obra && doc.obra.desperdicioPctPiso != null) ? doc.obra.desperdicioPctPiso : 0;
+  $('#requiereNivelacion').checked = !!(doc.obra && doc.obra.requiereNivelacion);
+  $('#manoObra').checked = !!(doc.obra && doc.obra.manoObra);
+
+  cotizacionActual = JSON.parse(JSON.stringify(doc));
+  cotizacionActual.obra = doc.obra || {};
+  simulacionesPendientes = Array.isArray(doc.simulaciones) ? JSON.parse(JSON.stringify(doc.simulaciones)) : [];
+  fotoSimuladorActual = null;
+  productosComparar = [];
+  ultimaCotizacionGuardadaId = doc._id;
+  vistaSimpleResumen = false;
+
+  $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+  $('#formOtroItem').classList.remove('hidden');
+  $('#accionesExtraResumen').classList.remove('hidden');
+  // Se salta paso-productos: el detalle no queda armado para esa pantalla,
+  // así que "← Volver" ahí se esconde mientras se edita así.
+  $('#btnVolverProductos').classList.add('hidden');
+  renderResumen(cotizacionActual, true, vistaSimpleResumen);
+  $('#paso-tipo-obra').classList.add('hidden');
+  $('#paso-obra').classList.add('hidden');
+  $('#paso-productos').classList.add('hidden');
+  $('#paso-resumen').classList.remove('hidden');
+  $('#btnPdf').classList.remove('hidden');
+  $('#btnNueva').classList.remove('hidden');
+
+  cambiarTab('nueva');
+  mostrarMsg('Editando cotización guardada — al guardar se actualiza esta misma cotización.', 'ok');
+}
+$('#btnEditarHistorial').addEventListener('click', editarCotizacionHistorial);
+
+// Si se llega acá con ?editarCotizacionId=... (desde el botón "Editar en el
+// cotizador" de vendedor.html), abre directo esa cotización en modo edición
+// — mismo flujo que ya usa la pestaña Historial, solo que disparado por
+// link en vez de tener que buscarla a mano. Se llama después de
+// cargarTiendas() porque necesita storeId ya cargado.
+async function abrirEdicionDesdeQuery(){
+  try {
+    const params = new URLSearchParams(location.search);
+    const id = params.get('editarCotizacionId');
+    if (!id || !storeId) return;
+    await verDetalleHistorial(id);
+    if (historialVistaId === id) await editarCotizacionHistorial();
+  } catch (e) { /* si falla, queda como si no hubiera venido el parámetro */ }
+}
+
+function renderDetalleHistorial(doc){
+  renderResumen(doc, false, vistaSimpleHistorial);
+  $('#historial-detalle').innerHTML = $('#resumen-tabla').innerHTML;
+}
+
+async function verDetalleHistorial(id){
+  const res = await fetch('/api/cotizador/historial/' + id + '?store_id=' + storeId);
+  const doc = await res.json();
+  if (!res.ok){ mostrarMsg(doc.error); return; }
+  historialVistaId = id;
+  historialVistaDoc = doc;
+  vistaSimpleHistorial = false;
+  $$('#vistaToggleHistorial .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
+  renderDetalleHistorial(doc);
+  $('#historial-detalle-card').classList.remove('hidden');
+}
+
+$$('#vistaToggleHistorial .vista-toggle-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    vistaSimpleHistorial = b.dataset.vista === 'simple';
+    $$('#vistaToggleHistorial .vista-toggle-btn').forEach(x => x.classList.toggle('active', x === b));
+    if (historialVistaDoc) renderDetalleHistorial(historialVistaDoc);
+  });
+});
+
+$('#btnPdfHistorial').addEventListener('click', () => {
+  if (!historialVistaId) return;
+  window.open('/api/cotizador/pdf/' + historialVistaId + '?store_id=' + storeId + (vistaSimpleHistorial ? '&vista=simple' : ''), '_blank');
+});
+$('#btnImprimirHistorial').addEventListener('click', () => window.print());
+$('#btnWhatsappHistorial').addEventListener('click', () => {
+  if (!historialVistaId || !historialVistaDoc) return;
+  compartirWhatsapp(historialVistaId, historialVistaDoc, vistaSimpleHistorial);
+});
+$('#btnCopiarLinkHistorial').addEventListener('click', () => {
+  if (!historialVistaId) return;
+  copiarLink(historialVistaId, $('#copiadoHistorial'), vistaSimpleHistorial);
+});
+$('#btnBorrarHistorial').addEventListener('click', () => {
+  if (!historialVistaId) return;
+  borrarCotizacion(historialVistaId);
+});
+
+// ---------- Configuración: tipos de obra ----------
+let rubrosDisponiblesCache = null;
+
+async function asegurarRubrosDisponibles(){
+  if (rubrosDisponiblesCache) return rubrosDisponiblesCache;
+  const res = await fetch('/api/cotizador/rubros-disponibles?store_id=' + storeId);
+  rubrosDisponiblesCache = await res.json();
+  return rubrosDisponiblesCache;
+}
+
+function llenarSelectRubros(sel, opciones, permitirVacio){
+  const actual = sel.value;
+  sel.innerHTML = (permitirVacio ? '<option value="">— No aplica —</option>' : '<option value="">Elegí un rubro...</option>') +
+    opciones.map(o => '<option value="' + escapeHtml(o) + '">' + escapeHtml(o) + '</option>').join('');
+  if (actual) sel.value = actual;
+}
+
+let tiposObraConfigCache = [];
+
+async function cargarConfigTipos(){
+  if (!storeId) return;
+  rubrosDisponiblesCache = null;
+  const rubros = await asegurarRubrosDisponibles();
+  llenarSelectRubros($('#to_rubroPiso'), rubros.m2, false);
+  llenarSelectRubros($('#to_rubroZocalo'), rubros.ml, true);
+
+  const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId);
+  const lista = await res.json();
+  tiposObraConfigCache = lista;
+  const cont = $('#cfg-tipos-lista');
+  if (!lista.length){
+    cont.innerHTML = '<div class="empty">Todavía no hay tipos de obra configurados.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(t =>
+    '<div class="cfg-row">' +
+      '<div><strong>' + escapeHtml(t.nombre) + '</strong><div class="cfg-meta">' +
+        'Piso: ' + escapeHtml(t.rubroPiso) +
+        (t.rubroZocalo ? ' · Zócalo: ' + escapeHtml(t.rubroZocalo) : '') +
+        ' · Desperdicio: ' + t.desperdicioDefaultPct + '%</div></div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button class="secondary small" data-catalogos="' + t.id + '">Catálogos</button>' +
+        '<button class="secondary small" data-editar="' + t.id + '">Editar</button>' +
+        '<button class="secondary small" data-borrar="' + t.id + '">Borrar</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+
+  cont.querySelectorAll('[data-editar]').forEach(b => {
+    b.addEventListener('click', () => {
+      const t = lista.find(x => String(x.id) === b.dataset.editar);
+      if (!t) return;
+      editandoTipoObraId = t.id;
+      $('#to_nombre').value = t.nombre;
+      $('#to_desperdicio').value = t.desperdicioDefaultPct;
+      $('#to_rubroPiso').value = t.rubroPiso;
+      $('#to_rubroZocalo').value = t.rubroZocalo || '';
+      $('#cfg-tipos-form-titulo').textContent = 'Editando: ' + t.nombre;
+      $('#btnCancelarEdicionTipo').classList.remove('hidden');
+    });
+  });
+  cont.querySelectorAll('[data-catalogos]').forEach(b => {
+    b.addEventListener('click', () => {
+      const t = lista.find(x => String(x.id) === b.dataset.catalogos);
+      if (t) abrirCatalogos(t);
+    });
+  });
+  cont.querySelectorAll('[data-borrar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar este tipo de obra? También se van a borrar sus catálogos de niveladores, nivelantes, manta y pegamento.')) return;
+      await fetch('/api/cotizador/tipos-obra/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      if (gestionandoTipoObraId === b.dataset.borrar){
+        gestionandoTipoObraId = null;
+        $('#cfg-catalogos-panel').classList.add('hidden');
+      }
+      cargarConfigTipos();
+    });
+  });
+}
+
+$('#btnCancelarEdicionTipo').addEventListener('click', () => {
+  editandoTipoObraId = null;
+  $('#to_nombre').value = ''; $('#to_desperdicio').value = 0;
+  $('#to_rubroPiso').value = ''; $('#to_rubroZocalo').value = '';
+  $('#cfg-tipos-form-titulo').textContent = 'Agregar tipo de obra';
+  $('#btnCancelarEdicionTipo').classList.add('hidden');
+});
+
+$('#btnGuardarTipoObra').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const eraNuevo = !editandoTipoObraId;
+  const body = {
+    id: editandoTipoObraId || undefined,
+    nombre: $('#to_nombre').value.trim(),
+    rubroPiso: $('#to_rubroPiso').value,
+    rubroZocalo: $('#to_rubroZocalo').value,
+    desperdicioDefaultPct: parseFloat($('#to_desperdicio').value) || 0
+  };
+  if (!body.nombre || !body.rubroPiso){ mostrarMsg('Falta el nombre o el rubro de piso.'); return; }
+  const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok){ mostrarMsg(data.error || 'Error al guardar.'); return; }
+  mostrarMsg('Tipo de obra guardado.', 'ok');
+  $('#btnCancelarEdicionTipo').click();
+  await cargarConfigTipos();
+  if (eraNuevo){
+    // Recién creado: abrimos directo sus catálogos para que cargue los SKU.
+    abrirCatalogos({ id: data.id, nombre: data.nombre });
+  }
+});
+
+// ---------- Configuración: catálogos por SKU / mano de obra de un tipo de obra ----------
+function abrirCatalogos(tipoObra){
+  gestionandoTipoObraId = String(tipoObra.id);
+  categoriaActivaCatalogo = 'puerta';
+  $('#cfg-catalogos-titulo').textContent = 'Catálogos de: ' + tipoObra.nombre;
+  $('#cfg-catalogos-panel').classList.remove('hidden');
+  $$('.catsub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'puerta'));
+  $('#cfg-catalogo-sku').classList.remove('hidden');
+  $('#cfg-catalogo-tarifas').classList.add('hidden');
+  $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT.puerta;
+  $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  cargarCatalogoActivo();
+}
+
+$('#btnCerrarCatalogos').addEventListener('click', () => {
+  gestionandoTipoObraId = null;
+  $('#cfg-catalogos-panel').classList.add('hidden');
+});
+
+$$('.catsub-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    categoriaActivaCatalogo = b.dataset.cat;
+    $$('.catsub-btn').forEach(x => x.classList.toggle('active', x === b));
+    if (categoriaActivaCatalogo === 'tarifas'){
+      $('#cfg-catalogo-sku').classList.add('hidden');
+      $('#cfg-catalogo-tarifas').classList.remove('hidden');
+      cargarTarifasTipoObra();
+    } else {
+      $('#cfg-catalogo-tarifas').classList.add('hidden');
+      $('#cfg-catalogo-sku').classList.remove('hidden');
+      $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
+      $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+      cargarCatalogoActivo();
+    }
+  });
+});
+
+async function cargarCatalogoActivo(){
+  if (!gestionandoTipoObraId) return;
+  const cont = $('#cfg-catalogo-lista');
+  cont.innerHTML = '<div class="empty">Cargando...</div>';
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items?store_id=' + storeId + '&categoria=' + categoriaActivaCatalogo);
+  const lista = await res.json();
+  if (!res.ok){ cont.innerHTML = '<div class="empty">' + (lista.error || 'Error al traer el catálogo.') + '</div>'; return; }
+  if (!lista.length){ cont.innerHTML = '<div class="empty">Todavía no hay productos cargados en esta categoría.</div>'; return; }
+  const etiqueta = ETIQUETA_COBERTURA[categoriaActivaCatalogo] || 'unidad(es)';
+  cont.innerHTML = lista.map(it =>
+    '<div class="cfg-row">' +
+      '<div><strong>' + escapeHtml(it.nombre) + '</strong><div class="cfg-meta">SKU ' + escapeHtml(it.sku) +
+        ' · cubre ' + it.cobertura + ' ' + etiqueta + ' · ' + (it.precio !== null ? money(it.precio) : 'sin precio') + '</div></div>' +
+      '<button class="secondary small" data-borrar="' + it.id + '">Borrar</button>' +
+    '</div>'
+  ).join('');
+  cont.querySelectorAll('[data-borrar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar este producto del catálogo?')) return;
+      await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      cargarCatalogoActivo();
+    });
+  });
+}
+
+$('#btnAgregarCatalogoItem').addEventListener('click', async () => {
+  mostrarMsg(null);
+  if (!gestionandoTipoObraId) return;
+  const sku = $('#cat_sku').value.trim();
+  const cobertura = parseInt($('#cat_cobertura').value, 10) || 1;
+  if (!sku){ mostrarMsg('Cargá un SKU.'); return; }
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ categoria: categoriaActivaCatalogo, sku, cobertura })
+  });
+  const data = await res.json();
+  if (!res.ok){ mostrarMsg(data.error || 'Error al agregar.'); return; }
+  mostrarMsg('Producto agregado: ' + data.nombre, 'ok');
+  $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  catalogosTipoObraCache = null; // invalida cache del paso 3 de "Nueva cotización"
+  cargarCatalogoActivo();
+});
+
+// ---------- Configuración: formas de pago ----------
+async function cargarConfigPagos(){
+  if (!storeId) return;
+  const cont = $('#cfg-pagos-lista');
+  cont.innerHTML = '<div class="empty">Cargando...</div>';
+  const res = await fetch('/api/cotizador/formas-pago?store_id=' + storeId);
+  const lista = await res.json();
+  if (!lista.length){
+    cont.innerHTML = '<div class="empty">Todavía no hay formas de pago configuradas.</div>';
+    return;
+  }
+  cont.innerHTML = lista.map(fp => {
+    const signo = fp.tipo === 'recargo' ? '+' : '-';
+    return '<div class="cfg-row">' +
+      '<div><strong>' + escapeHtml(fp.nombre) + '</strong><div class="cfg-meta">' + fp.tipo + ' ' + signo + fp.porcentaje + '%</div></div>' +
+      '<button class="secondary small" data-borrar="' + fp.id + '">Borrar</button>' +
+    '</div>';
+  }).join('');
+  cont.querySelectorAll('[data-borrar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('¿Borrar esta forma de pago?')) return;
+      await fetch('/api/cotizador/formas-pago/' + b.dataset.borrar + '?store_id=' + storeId, { method: 'DELETE' });
+      cargarConfigPagos();
+    });
+  });
+}
+
+$('#btnAgregarFormaPago').addEventListener('click', async () => {
+  mostrarMsg(null);
+  const body = {
+    nombre: $('#fp_nombre').value.trim(),
+    tipo: $('#fp_tipo').value,
+    porcentaje: parseFloat($('#fp_porcentaje').value) || 0
+  };
+  if (!body.nombre){ mostrarMsg('Falta el nombre.'); return; }
+  const res = await fetch('/api/cotizador/formas-pago?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok){ mostrarMsg(data.error || 'Error al guardar.'); return; }
+  mostrarMsg('Forma de pago guardada.', 'ok');
+  $('#fp_nombre').value=''; $('#fp_porcentaje').value=0;
+  cargarConfigPagos();
+});
+
+// ---------- Configuración: tarifas de mano de obra (propias de cada tipo de obra) ----------
+async function cargarTarifasTipoObra(){
+  if (!gestionandoTipoObraId) return;
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId);
+  const t = await res.json();
+  if (!res.ok) return;
+  $('#t_pisos_m2').value = t.pisos_m2;
+  $('#t_zocalos_ml').value = t.zocalos_ml;
+  $('#t_puertas_unidad').value = t.puertas_unidad;
+  $('#t_nivelacion_m2').value = t.nivelacion_m2;
+  $('#t_minimoM2Cotizable').value = t.minimoM2Cotizable || 0;
+}
+$('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
+  mostrarMsg(null);
+  if (!gestionandoTipoObraId) return;
+  const body = {
+    pisos_m2: parseFloat($('#t_pisos_m2').value) || 0,
+    zocalos_ml: parseFloat($('#t_zocalos_ml').value) || 0,
+    puertas_unidad: parseFloat($('#t_puertas_unidad').value) || 0,
+    nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0,
+    minimoM2Cotizable: parseFloat($('#t_minimoM2Cotizable').value) || 0
+  };
+  const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (res.ok) mostrarMsg('Tarifas guardadas.', 'ok'); else mostrarMsg('Error al guardar tarifas.');
+});
+
+cargarTiendas().then(abrirEdicionDesdeQuery);
+</script>
+</body>
+</html>
