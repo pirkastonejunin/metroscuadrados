@@ -294,6 +294,47 @@ router.put('/vendedores/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Da de alta el calendario de Google de este vendedor: crea un calendario
+// nuevo (lo administra la cuenta de servicio) y lo comparte automáticamente
+// con su mail de Google — no hace falta que el vendedor ni nadie entre a
+// Google Calendar a mano. A partir de ahí sus visitas se sincronizan solas.
+router.post('/vendedores/:id/calendario', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const email = (req.body && req.body.email || '').trim();
+    if (!email) throw err(400, 'Falta el mail de la cuenta de Google del vendedor');
+    if (!googleCalendar.habilitado()) throw err(400, 'Google Calendar no está configurado en el servidor (falta GOOGLE_SERVICE_ACCOUNT_KEY)');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const vendedor = await db.collection('visitas_vendedores').findOne({ _id: id });
+      if (!vendedor) throw err(404, 'Vendedor no encontrado');
+      const calendarId = await googleCalendar.crearCalendarioParaPersona(`Visitas — ${vendedor.nombre}`, email);
+      if (!calendarId) throw err(500, 'No se pudo crear el calendario en Google (revisá los logs del servidor)');
+      await db.collection('visitas_vendedores').updateOne({ _id: id }, { $set: { googleCalendarId: calendarId, googleAccountEmail: email } });
+      return db.collection('visitas_vendedores').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Da de baja el calendario de este vendedor: deja de usarlo para sus
+// próximas visitas (caen al calendario general de respaldo, si hay uno).
+// No borra el calendario de Google en sí, para no perder el historial ya
+// sincronizado ahí.
+router.delete('/vendedores/:id/calendario', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const actualizado = await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('visitas_vendedores').updateOne({ _id: id }, { $set: { googleCalendarId: '', googleAccountEmail: '' } });
+      return db.collection('visitas_vendedores').findOne({ _id: id });
+    });
+    res.json(actualizado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // ---------------------------------------------------------------------
 // CATÁLOGOS (lectura, para armar formularios en los paneles)
 // ---------------------------------------------------------------------
