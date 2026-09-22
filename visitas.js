@@ -685,26 +685,38 @@ router.put('/:id', authAdmin, async (req, res) => {
 
 // Borrado definitivo del registro (no un cambio de estado): pensado para
 // sacar de encima visitas de prueba o cargadas mal, no para el uso diario
-// (para eso está "Cancelar visita", que conserva el historial). No se deja
-// borrar una visita que ya generó una Obra, para no dejar a esa Obra con
-// una referencia (obraId/visitaId) colgando — primero hay que resolverlo
-// desde el panel de Obras. Si tenía evento de Google Calendar, se borra
-// también de ahí.
+// (para eso está "Cancelar visita", que conserva el historial). Si la
+// visita ya generó una Obra (obraId), esa Obra se borra en cascada junto
+// con la visita — no tendría sentido dejarla huérfana apuntando a un
+// registro que ya no existe. El frontend avisa de esto antes de confirmar.
+// Si había eventos de Google Calendar (de la visita y/o de la obra), se
+// borran también de ahí.
 router.delete('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    await conReintento(async () => {
+    const resultado = await conReintento(async () => {
       const db = await getDb();
       const visita = await db.collection('visitas').findOne({ _id: id });
       if (!visita) throw err(404, 'Visita no encontrada');
-      if (visita.obraId) throw err(400, 'Esta visita ya generó una obra — no se puede borrar el registro origen. Si hace falta, resolvelo desde el panel de Obras.');
+      let obraBorrada = null;
+      if (visita.obraId) {
+        const obra = await db.collection('obras').findOne({ _id: visita.obraId });
+        if (obra) {
+          if (obra.googleEventId) {
+            await googleCalendar.eliminarEvento(obra.googleEventId, obra.googleCalendarId);
+          }
+          await db.collection('obras').deleteOne({ _id: obra._id });
+          obraBorrada = obra.numero;
+        }
+      }
       if (visita.googleEventId) {
         await googleCalendar.eliminarEvento(visita.googleEventId, visita.vendedorGoogleCalendarId);
       }
       await db.collection('visitas').deleteOne({ _id: id });
+      return { obraBorrada };
     });
-    res.json({ ok: true });
+    res.json({ ok: true, obraBorrada: resultado.obraBorrada });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
