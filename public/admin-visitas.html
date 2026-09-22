@@ -889,22 +889,31 @@ function renderDetalleVisita(v, editando){
 }
 
 async function guardarEdicionVisita(id){
-  const body = {
-    cliente: {
-      nombre: document.getElementById('eVisCliente').value.trim(),
-      telefono: document.getElementById('eVisTelefono').value.trim(),
-      direccion: document.getElementById('eVisDireccion').value.trim(),
-      localidad: document.getElementById('eVisLocalidad').value.trim()
-    },
-    vendedorId: document.getElementById('eVisVendedor').value,
-    fechaHora: document.getElementById('eVisFecha').value,
-    notasEmpleada: document.getElementById('eVisNotas').value.trim()
-  };
+  // Todo lo que lee del formulario va DENTRO del try: si algún campo no se
+  // encuentra en la página (por ejemplo por un problema de renderizado),
+  // antes esto tiraba un error silencioso que no se veía en ningún lado —
+  // parecía que "Guardar cambios" no hacía nada. Ahora, cualquier problema
+  // acá queda visible en el cartel de error de abajo.
+  const errEl = document.getElementById('visErr');
+  if (errEl) errEl.textContent = '';
   try{
+    const fechaHora = document.getElementById('eVisFecha').value;
+    if (!fechaHora) throw new Error('Elegí fecha y hora — el campo quedó vacío.');
+    const body = {
+      cliente: {
+        nombre: document.getElementById('eVisCliente').value.trim(),
+        telefono: document.getElementById('eVisTelefono').value.trim(),
+        direccion: document.getElementById('eVisDireccion').value.trim(),
+        localidad: document.getElementById('eVisLocalidad').value.trim()
+      },
+      vendedorId: document.getElementById('eVisVendedor').value,
+      fechaHora,
+      notasEmpleada: document.getElementById('eVisNotas').value.trim()
+    };
     const actualizado = await api(`/${id}`, {method:'PUT', body});
     cargarVisitas();
     renderDetalleVisita(actualizado, false);
-  }catch(e){ document.getElementById('visErr').textContent = e.message; }
+  }catch(e){ if (errEl) errEl.textContent = e.message; else alert(e.message); }
 }
 
 async function cambiarEstadoVisita(id){
