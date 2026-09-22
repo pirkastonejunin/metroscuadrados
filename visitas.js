@@ -183,6 +183,21 @@ function authAdmin(req, res, next) {
 // otra forma de saber cuánto va a durar.
 const DURACION_VISITA_MS = 60 * 60 * 1000; // 1 hora
 
+// Los <input type="datetime-local"> del panel (nueva visita, editar,
+// reprogramar) mandan un string SIN zona horaria (ej. "2025-01-15T15:00").
+// new Date(...) sobre ese string lo interpreta como hora local del
+// SERVIDOR, no de Argentina — si el servidor corre en UTC (lo más común en
+// Render), una visita cargada para las 15:00 quedaba guardada como las
+// 15:00 UTC (12:00 en Argentina), 3 horas antes de lo tipeado. Argentina no
+// tiene horario de verano, así que el offset es siempre -03:00 — se lo
+// agregamos acá antes de parsear (si el string ya trae zona horaria propia,
+// se respeta tal cual, no se toca).
+function parsearFechaHoraLocal(fechaHoraStr) {
+  const s = String(fechaHoraStr || '').trim();
+  const yaTieneZona = /Z$|[+-]\d{2}:\d{2}$/.test(s);
+  return new Date(yaTieneZona ? s : s + '-03:00');
+}
+
 // Arma los campos del evento de Google Calendar a partir de una visita
 // (o de la fusión de la visita actual con los cambios que se le van a aplicar).
 function eventoDeVisita(v) {
@@ -540,6 +555,8 @@ router.post('/', authAdmin, async (req, res) => {
     if (!cliente.direccion) throw err(400, 'Falta el domicilio de la visita');
     if (!vendedorId) throw err(400, 'Falta asignar un vendedor');
     if (!fechaHora) throw err(400, 'Falta la fecha y hora de la visita');
+    const fechaHoraParsed = parsearFechaHoraLocal(fechaHora);
+    if (isNaN(fechaHoraParsed.getTime())) throw err(400, 'La fecha y hora no son válidas.');
     const vId = toObjectId(vendedorId);
     if (!vId) throw err(400, 'vendedorId inválido');
 
@@ -563,7 +580,7 @@ router.post('/', authAdmin, async (req, res) => {
         // para saber de qué calendario borrar/mover si el vendedor cambia
         // de calendario o la visita se reasigna a otro vendedor más tarde.
         vendedorGoogleCalendarId: vendedor.googleCalendarId || null,
-        fechaHora: new Date(fechaHora),
+        fechaHora: fechaHoraParsed,
         notasEmpleada: notasEmpleada || '',
         estado: 'sin_visita',
         fotos: [],
@@ -590,7 +607,17 @@ router.put('/:id', authAdmin, async (req, res) => {
     const { cliente, vendedorId, fechaHora, notasEmpleada, estado } = req.body || {};
     const set = { updatedAt: new Date() };
     if (cliente) set.cliente = cliente;
-    if (fechaHora) set.fechaHora = new Date(fechaHora);
+    if (fechaHora) {
+      // Antes, una fecha mal formada acá (ej. el campo llegaba vacío o en un
+      // formato que new Date() no puede interpretar) generaba un "Invalid
+      // Date" que Mongo terminaba guardando igual — el cambio "se guardaba"
+      // pero la visita quedaba con una fecha rota (o, según cómo la haya
+      // leído la pantalla después, parecía que directamente no había
+      // cambiado nada). Ahora se valida explícitamente y se avisa.
+      const fecha = parsearFechaHoraLocal(fechaHora);
+      if (isNaN(fecha.getTime())) throw err(400, 'La fecha y hora no son válidas.');
+      set.fechaHora = fecha;
+    }
     if (notasEmpleada !== undefined) set.notasEmpleada = notasEmpleada;
     let estadoNorm = null;
     if (estado) {
