@@ -1088,4 +1088,87 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
   });
 }
 
+// ---------------------------------------------------------------------
+// REPORTES: embudo de ventas
+// ---------------------------------------------------------------------
+// Cuántas visitas se cargaron, cuántas llegaron a tener presupuesto
+// (estado 'presupuestada' en adelante) y cuántas se vendieron (estado
+// 'vendido'/'instalado'), con desglose por tipo de producto — mismo
+// catálogo de "tipo de trabajo" que ya usa el panel de Obras (Piso,
+// Piedra, Placa, etc.), para no inventar una clasificación nueva.
+//
+// La clasificación por tipo de producto reutiliza la MISMA lógica que ya
+// arma las tareas de la Obra al confirmar una visita (ver
+// tareasDesdeMapeo/tareasDesdeManual más arriba), pero en versión
+// tolerante: si falta el mapeo configurado o la cotización ya no existe,
+// esa visita queda "sin clasificar" en vez de hacer fallar todo el
+// reporte (a diferencia de confirmarVisita, acá no hay nada que bloquear).
+async function tiposTrabajoDePresupuesto(db, presupuesto) {
+  try {
+    if (!presupuesto) return [];
+    if (presupuesto.tipo === 'manual') {
+      return [...new Set((presupuesto.items || []).map(it => it.tipoTrabajo).filter(Boolean))];
+    }
+    if (presupuesto.tipo === 'cotizador') {
+      const mapeo = await db.collection('visitas_mapeo_tipo_obra').findOne({ tipoObraId: String(presupuesto.tipoObraId) });
+      if (!mapeo || !Array.isArray(mapeo.reglas)) return [];
+      const cot = await db.collection('cotizaciones').findOne({ _id: presupuesto.cotizacionId });
+      const obraCot = (cot && cot.obra) || {};
+      return [...new Set(
+        mapeo.reglas
+          .filter(r => Number(obraCot[r.campoObra]) > 0)
+          .map(r => r.tipoTrabajo)
+      )];
+    }
+  } catch (e) { /* cotización borrada, mapeo mal formado, etc. — queda sin clasificar */ }
+  return [];
+}
+
+// desde/hasta filtran por fecha de la visita (fechaHora), igual que /agenda.
+// Se excluyen las visitas canceladas (no cuentan para el embudo).
+router.get('/reportes/embudo', authAdmin, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const match = { estado: { $ne: 'cancelada' } };
+    if (desde || hasta) {
+      match.fechaHora = {};
+      if (desde) match.fechaHora.$gte = new Date(desde);
+      if (hasta) match.fechaHora.$lte = new Date(hasta.length <= 10 ? hasta + 'T23:59:59' : hasta);
+    }
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const visitas = await db.collection('visitas').find(match).toArray();
+
+      const general = { visitas: visitas.length, presupuestadas: 0, vendidas: 0 };
+      const porTipo = {}; // tipoTrabajo -> { tipoTrabajo, presupuestadas, vendidas }
+      let sinClasificar = 0;
+
+      for (const v of visitas) {
+        const tienePresupuesto = v.estado === 'presupuestada' || v.estado === 'vendido' || v.estado === 'instalado';
+        const vendida = v.estado === 'vendido' || v.estado === 'instalado';
+        if (tienePresupuesto) general.presupuestadas++;
+        if (vendida) general.vendidas++;
+        if (!tienePresupuesto) continue;
+
+        const tipos = await tiposTrabajoDePresupuesto(db, v.presupuesto);
+        if (!tipos.length) { sinClasificar++; continue; }
+        for (const tipo of tipos) {
+          if (!porTipo[tipo]) porTipo[tipo] = { tipoTrabajo: tipo, presupuestadas: 0, vendidas: 0 };
+          porTipo[tipo].presupuestadas++;
+          if (vendida) porTipo[tipo].vendidas++;
+        }
+      }
+
+      return {
+        general,
+        porTipo: Object.values(porTipo).sort((a, b) => b.presupuestadas - a.presupuestadas),
+        sinClasificar
+      };
+    });
+
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;
