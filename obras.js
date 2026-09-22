@@ -156,38 +156,67 @@ function normalizarMateriales(materiales) {
     .filter(m => m.tipo);
 }
 
-// Sincroniza (o borra) el evento de Google Calendar de UNA tarea. Solo tiene
-// sentido armar el evento cuando la tarea ya tiene colocador asignado Y una
-// fecha estimada de fin — son los dos datos mínimos para que sirva para
-// planificar. Si falta cualquiera de los dos (se reasignó a "sin colocador",
-// se borró la fecha), se elimina el evento si existía. Modifica `tarea` in
-// place (le actualiza `googleEventId`); quien llama es responsable de
-// persistir la tarea actualizada.
-async function sincronizarCalendarDeTarea(db, obra, tarea) {
-  if (tarea.colocadorId && tarea.fechaFinEstimada) {
-    let colocadorNombre = '';
-    try {
-      const colocador = await db.collection('obras_colocadores').findOne({ _id: tarea.colocadorId });
-      colocadorNombre = colocador ? colocador.nombre : '';
-    } catch (e) { /* si falla la búsqueda del nombre, seguimos igual */ }
-    const inicio = tarea.fechaInicio || tarea.fechaFinEstimada;
-    const fin = new Date(new Date(tarea.fechaFinEstimada).getTime() + 24 * 60 * 60 * 1000); // día completo
-    tarea.googleEventId = await googleCalendar.upsertEvento(tarea.googleEventId, {
-      titulo: `Obra #${obra.numero} — ${tarea.tipoTrabajo} (${colocadorNombre || 'sin colocador'})`,
-      descripcion: [
-        `Cliente: ${obra.cliente.nombre}`,
-        `Colocador: ${colocadorNombre || '-'}`,
-        `m² presupuestados: ${tarea.m2Presupuestados}`,
-        obra.notasColocador ? `Notas: ${obra.notasColocador}` : null
-      ].filter(Boolean).join('\n'),
-      ubicacion: obra.cliente.direccion || '',
-      inicio,
-      fin
-    });
-  } else if (tarea.googleEventId) {
-    await googleCalendar.eliminarEvento(tarea.googleEventId);
-    tarea.googleEventId = null;
+// Sincroniza (o borra) el evento de Google Calendar de la OBRA — uno solo
+// para toda la obra, no uno por producto: la obra se maneja como una sola
+// aunque tenga varios productos adentro, y desde el panel el colocador se
+// asigna igual para todos los productos a la vez, así que en la práctica
+// todas las tareas de una obra comparten colocador (se toma el de la
+// primera tarea que tenga uno asignado). El evento va al calendario propio
+// del colocador (obras_colocadores.googleCalendarId) si lo tiene cargado;
+// si no, cae al calendario general de respaldo (GOOGLE_CALENDAR_ID) — ver
+// google-calendar.js. Solo tiene sentido armar el evento cuando hay
+// colocador asignado Y fecha de inicio de obra (los dos datos mínimos para
+// que sirva para planificar) y la obra no está cancelada; si falta algo de
+// eso, se elimina el evento si existía. Modifica `obra` in place (le
+// actualiza `googleEventId`/`googleCalendarId`); quien llama es
+// responsable de persistir esos dos campos.
+async function sincronizarCalendarDeObra(db, obra) {
+  const tareaConColocador = (obra.tareas || []).find(t => t.colocadorId);
+  const colocadorId = tareaConColocador ? tareaConColocador.colocadorId : null;
+
+  if (!colocadorId || !obra.fechaInicio || obra.estado === 'cancelada') {
+    if (obra.googleEventId) {
+      await googleCalendar.eliminarEvento(obra.googleEventId, obra.googleCalendarId);
+    }
+    obra.googleEventId = null;
+    obra.googleCalendarId = null;
+    return;
   }
+
+  let colocador = null;
+  try {
+    colocador = await db.collection('obras_colocadores').findOne({ _id: colocadorId });
+  } catch (e) { /* si falla la búsqueda, seguimos con nombre vacío y sin calendario propio */ }
+  const colocadorNombre = colocador ? colocador.nombre : '';
+  const calendarIdDestino = (colocador && colocador.googleCalendarId) || process.env.GOOGLE_CALENDAR_ID || null;
+  if (!calendarIdDestino) return; // ni el colocador ni el general están configurados: no hay dónde sincronizar
+
+  // Si el colocador (y por lo tanto el calendario destino) cambió respecto
+  // al evento que ya existía, no alcanza con "actualizar" — google-calendar.js
+  // no mueve eventos entre calendarios, así que se borra del viejo y se
+  // crea de nuevo en el nuevo.
+  if (obra.googleEventId && obra.googleCalendarId && obra.googleCalendarId !== calendarIdDestino) {
+    await googleCalendar.eliminarEvento(obra.googleEventId, obra.googleCalendarId);
+    obra.googleEventId = null;
+  }
+
+  const productos = (obra.tareas || []).map(t => `${t.tipoTrabajo} (${t.m2Presupuestados} m²)`).join(', ');
+  const inicio = obra.fechaInicio;
+  const fin = new Date(new Date(obra.fechaInicio).getTime() + 24 * 60 * 60 * 1000); // día completo
+
+  obra.googleEventId = await googleCalendar.upsertEvento(obra.googleEventId, {
+    titulo: `Obra #${obra.numero} — ${colocadorNombre || 'sin colocador'}`,
+    descripcion: [
+      `Cliente: ${obra.cliente.nombre}`,
+      `Colocador: ${colocadorNombre || '-'}`,
+      `Productos: ${productos}`,
+      obra.notasColocador ? `Notas: ${obra.notasColocador}` : null
+    ].filter(Boolean).join('\n'),
+    ubicacion: obra.cliente.direccion || '',
+    inicio,
+    fin
+  }, calendarIdDestino);
+  obra.googleCalendarId = calendarIdDestino;
 }
 
 // El estado de una obra se maneja como uno solo, aunque tenga varios
@@ -204,8 +233,9 @@ function estadoTareaParaObra(estadoObra) {
 }
 
 // Aplica esa traducción a TODAS las tareas de la obra (muta `obra.tareas` in
-// place) y sincroniza el calendario de cada una. Quien llama es responsable
-// de persistir `obra.tareas` actualizado.
+// place). Quien llama es responsable de persistir `obra.tareas` actualizado
+// (y de llamar a sincronizarCalendarDeObra aparte si corresponde — el
+// calendario ya no es por tarea, ver más arriba).
 async function sincronizarTareasConEstadoObra(db, obra) {
   const estadoTarea = estadoTareaParaObra(obra.estado);
   if (!estadoTarea) return;
@@ -217,7 +247,6 @@ async function sincronizarTareasConEstadoObra(db, obra) {
       if (!tarea.fechaInicio) tarea.fechaInicio = ahora;
       if (!tarea.fechaFinReal) tarea.fechaFinReal = ahora;
     }
-    await sincronizarCalendarDeTarea(db, obra, tarea);
   }
 }
 
@@ -267,7 +296,7 @@ router.get('/colocadores', authAdmin, async (req, res) => {
 
 router.post('/colocadores', authAdmin, async (req, res) => {
   try {
-    const { nombre, telefono, pin, costos } = req.body || {};
+    const { nombre, telefono, pin, costos, googleCalendarId } = req.body || {};
     if (!nombre || !pin) return res.status(400).json({ error: 'Nombre y PIN son obligatorios' });
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -277,6 +306,11 @@ router.post('/colocadores', authAdmin, async (req, res) => {
       const doc = {
         nombre, telefono: telefono || '', pin: String(pin),
         costos: Array.isArray(costos) ? costos : [],
+        // Calendario de Google propio de este colocador, para que sus obras
+        // le lleguen ahí (ver google-calendar.js) — opcional, si lo deja
+        // vacío las obras que se le asignen caen al calendario general de
+        // respaldo (si hay uno configurado).
+        googleCalendarId: googleCalendarId || '',
         activo: true,
         createdAt: new Date(), updatedAt: new Date()
       };
@@ -291,7 +325,7 @@ router.put('/colocadores/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) return res.status(400).json({ error: 'id inválido' });
-    const { nombre, telefono, pin, costos, activo } = req.body || {};
+    const { nombre, telefono, pin, costos, activo, googleCalendarId } = req.body || {};
     const actualizado = await conReintento(async () => {
       const db = await getDb();
       const col = db.collection('obras_colocadores');
@@ -305,6 +339,7 @@ router.put('/colocadores/:id', authAdmin, async (req, res) => {
       if (pin !== undefined) set.pin = String(pin);
       if (Array.isArray(costos)) set.costos = costos;
       if (activo !== undefined) set.activo = activo;
+      if (googleCalendarId !== undefined) set.googleCalendarId = googleCalendarId;
       await col.updateOne({ _id: id }, { $set: set });
       return col.findOne({ _id: id });
     });
@@ -437,8 +472,7 @@ router.post('/', authAdmin, async (req, res) => {
       fechaInicio: null,
       fechaFinEstimada: t.fechaFinEstimada ? new Date(t.fechaFinEstimada) : null,
       fechaFinReal: null,
-      materiales: normalizarMateriales(t.materiales), // productos que el colocador debe llevar: [{tipo, cantidad}]
-      googleEventId: null
+      materiales: normalizarMateriales(t.materiales) // productos que el colocador debe llevar: [{tipo, cantidad}]
     }));
     const doc = {
       numero,
@@ -456,6 +490,10 @@ router.post('/', authAdmin, async (req, res) => {
       notasAsesor: '', // notas/observaciones para el asesor (ej: algo que quedó pendiente) — una sola, para toda la obra
       tareas: tareasDoc,
       notasGenerales: notasGenerales || '',
+      // Evento de Google Calendar de la obra (uno solo, no por producto — ver
+      // sincronizarCalendarDeObra) y el calendario donde vive.
+      googleEventId: null,
+      googleCalendarId: null,
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -502,6 +540,16 @@ router.put('/:id', authAdmin, async (req, res) => {
         set.tareas = obraConNuevoEstado.tareas;
       }
 
+      // El evento de Calendar de la obra depende de estado/fechaInicio/
+      // notasColocador (título, fecha y descripción) — se resincroniza si
+      // se tocó alguno de los tres.
+      if (estado !== undefined || fechaInicio !== undefined || notasColocador !== undefined) {
+        const obraEfectiva = { ...obra, ...set };
+        await sincronizarCalendarDeObra(db, obraEfectiva);
+        set.googleEventId = obraEfectiva.googleEventId;
+        set.googleCalendarId = obraEfectiva.googleCalendarId;
+      }
+
       await db.collection('obras').updateOne({ _id: id }, { $set: set });
       return db.collection('obras').findOne({ _id: id });
     });
@@ -536,10 +584,22 @@ router.post('/:id/tareas', authAdmin, async (req, res) => {
         fechaInicio: (estadoInicial === 'en_curso' || estadoInicial === 'terminada') ? ahora : null,
         fechaFinEstimada: fechaFinEstimada ? new Date(fechaFinEstimada) : null,
         fechaFinReal: estadoInicial === 'terminada' ? ahora : null,
-        materiales: normalizarMateriales(materiales),
-        googleEventId: null
+        materiales: normalizarMateriales(materiales)
       };
-      await db.collection('obras').updateOne({ _id: id }, { $push: { tareas: nuevaTarea }, $set: { updatedAt: new Date() } });
+
+      // El producto nuevo entra en la lista que arma la descripción del
+      // evento de la obra (si ya tenía uno) — se resincroniza.
+      const obraConNuevaTarea = { ...obra, tareas: [...(obra.tareas || []), nuevaTarea] };
+      await sincronizarCalendarDeObra(db, obraConNuevaTarea);
+
+      await db.collection('obras').updateOne({ _id: id }, {
+        $push: { tareas: nuevaTarea },
+        $set: {
+          updatedAt: new Date(),
+          googleEventId: obraConNuevaTarea.googleEventId,
+          googleCalendarId: obraConNuevaTarea.googleCalendarId
+        }
+      });
       return nuevaTarea;
     });
     res.json(resultado);
@@ -590,11 +650,21 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
         if (estado === 'terminada' && !tarea.fechaFinReal) tarea.fechaFinReal = new Date();
       }
 
-      await sincronizarCalendarDeTarea(db, obra, tarea);
+      // El colocador (y por lo tanto el destino del evento de la obra) puede
+      // haber cambiado acá — `tarea` es la misma referencia que ya está
+      // adentro de obra.tareas, así que obra ya refleja el cambio.
+      await sincronizarCalendarDeObra(db, obra);
 
       await db.collection('obras').updateOne(
         { _id: obraId, 'tareas._id': tareaId },
-        { $set: { 'tareas.$': tarea, updatedAt: new Date() } }
+        {
+          $set: {
+            'tareas.$': tarea,
+            updatedAt: new Date(),
+            googleEventId: obra.googleEventId,
+            googleCalendarId: obra.googleCalendarId
+          }
+        }
       );
       return tarea;
     });
@@ -610,9 +680,16 @@ router.delete('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
     await conReintento(async () => {
       const db = await getDb();
       const obra = await db.collection('obras').findOne({ _id: obraId });
-      const tarea = obra && (obra.tareas || []).find(t => String(t._id) === String(tareaId));
-      if (tarea && tarea.googleEventId) await googleCalendar.eliminarEvento(tarea.googleEventId);
-      await db.collection('obras').updateOne({ _id: obraId }, { $pull: { tareas: { _id: tareaId } }, $set: { updatedAt: new Date() } });
+      if (!obra) return;
+      // Se saca el producto ANTES de resincronizar: si era el único con
+      // colocador asignado, el evento de la obra tiene que borrarse; si no,
+      // al menos hay que sacarlo de la lista de productos de la descripción.
+      obra.tareas = (obra.tareas || []).filter(t => String(t._id) !== String(tareaId));
+      await sincronizarCalendarDeObra(db, obra);
+      await db.collection('obras').updateOne({ _id: obraId }, {
+        $pull: { tareas: { _id: tareaId } },
+        $set: { updatedAt: new Date(), googleEventId: obra.googleEventId, googleCalendarId: obra.googleCalendarId }
+      });
     });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -676,6 +753,10 @@ router.post('/colocador/obras/:obraId/estado', authColocador, async (req, res) =
       const obraConNuevoEstado = { ...obra, estado, fechaInicio: set.fechaInicio !== undefined ? set.fechaInicio : obra.fechaInicio };
       await sincronizarTareasConEstadoObra(db, obraConNuevoEstado);
       set.tareas = obraConNuevoEstado.tareas;
+
+      await sincronizarCalendarDeObra(db, obraConNuevoEstado);
+      set.googleEventId = obraConNuevoEstado.googleEventId;
+      set.googleCalendarId = obraConNuevoEstado.googleCalendarId;
 
       await db.collection('obras').updateOne({ _id: obraId }, { $set: set });
       return db.collection('obras').findOne({ _id: obraId });
