@@ -592,7 +592,7 @@ function renderVisitasTabla(){
       <td><span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]||v.estado}</span></td>
       <td style="white-space:nowrap">
         <button class="btn small secondary" onclick="abrirVisita('${v._id}')">Ver</button>
-        ${!v.obraId ? `<button class="btn small danger" onclick="borrarVisitaDesdeListado('${v._id}')" title="Borrar registro">🗑</button>` : ''}
+        <button class="btn small danger" onclick="borrarVisitaDesdeListado('${v._id}', ${v.obraId ? 'true' : 'false'})" title="Borrar registro">🗑</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="8" class="muted">Sin visitas para este filtro</td></tr>';
   actualizarFlechasOrden();
@@ -874,10 +874,10 @@ function renderDetalleVisita(v, editando){
 
       <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         ${puedeCancelar ? `<button class="btn danger" onclick="cancelarVisita('${v._id}')">Cancelar visita</button>` : ''}
-        ${!v.obraId ? `<button class="btn danger" onclick="borrarVisita('${v._id}')">🗑 Borrar registro</button>` : ''}
+        <button class="btn danger" onclick="borrarVisita('${v._id}', ${v.obraId ? 'true' : 'false'})">🗑 Borrar registro</button>
         <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
       </div>
-      ${!v.obraId ? '<div class="muted" style="margin-top:4px">"Borrar registro" elimina la visita para siempre (a diferencia de "Cancelar", que solo cambia el estado y conserva el historial) — pensado para visitas de prueba o cargadas por error.</div>' : ''}
+      <div class="muted" style="margin-top:4px">"Borrar registro" elimina la visita para siempre (a diferencia de "Cancelar", que solo cambia el estado y conserva el historial) — pensado para visitas de prueba o cargadas por error.${v.obraId ? ' Como esta visita ya generó una Obra, se va a borrar también esa Obra completa (tareas, fotos, estado).' : ''}</div>
     `;
   }
 
@@ -944,8 +944,13 @@ async function confirmarVisita(id){
   }catch(e){ if (errEl) errEl.textContent = e.message; }
 }
 
-async function borrarVisita(id){
-  if (!confirm('¿Borrar definitivamente esta visita? No se puede deshacer: se elimina el registro (y su evento de Google Calendar, si tenía) para siempre.')) return;
+function mensajeConfirmarBorrarVisita(tieneObra){
+  return tieneObra
+    ? '¿Borrar definitivamente esta visita? Ya generó una Obra — al borrar la visita también se borra ESA OBRA COMPLETA (tareas, fotos, estado, evento de calendario). No se puede deshacer.'
+    : '¿Borrar definitivamente esta visita? No se puede deshacer: se elimina el registro (y su evento de Google Calendar, si tenía) para siempre.';
+}
+async function borrarVisita(id, tieneObra){
+  if (!confirm(mensajeConfirmarBorrarVisita(tieneObra))) return;
   const errEl = document.getElementById('visErr');
   try{
     await api(`/${id}`, {method:'DELETE'});
@@ -954,8 +959,8 @@ async function borrarVisita(id){
   }catch(e){ if (errEl) errEl.textContent = e.message; else alert(e.message); }
 }
 // Mismo borrado, pero desde el botón 🗑 del listado (sin pasar por el modal).
-async function borrarVisitaDesdeListado(id){
-  if (!confirm('¿Borrar definitivamente esta visita? No se puede deshacer.')) return;
+async function borrarVisitaDesdeListado(id, tieneObra){
+  if (!confirm(mensajeConfirmarBorrarVisita(tieneObra))) return;
   try{
     await api(`/${id}`, {method:'DELETE'});
     cargarVisitas();
