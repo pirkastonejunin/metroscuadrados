@@ -224,10 +224,31 @@ async function mostrarDetalleVisita(id){
     } else {
       const paramsSimple = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID, vista: 'simple' });
       const paramsDetalle = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
-      resumen = `<b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` +
+      const itemsExtra = v.presupuesto.itemsExtra || [];
+      const tieneExtra = itemsExtra.length > 0;
+      const subtotalCotizador = v.presupuesto.baseTotal != null ? v.presupuesto.baseTotal : v.presupuesto.total;
+      const extraHtml = tieneExtra
+        ? '<div class="muted" style="margin-top:6px"><b>Agregado a mano:</b><br>' +
+          itemsExtra.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
+          '</div>'
+        : '';
+      // Si hay ítems agregados a mano, el PDF pasa a generarse acá mismo
+      // (visitas.js), combinando el subtotal del cotizador con esos ítems —
+      // el PDF propio del cotizador se quedó sin verlos. Sin agregados, se
+      // sigue usando el PDF del cotizador de toda la vida.
+      const pdfSimpleHref = tieneExtra
+        ? `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf`
+        : `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsSimple.toString()}`;
+      const pdfDetalleHref = tieneExtra
+        ? `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf?vista=detalle`
+        : `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsDetalle.toString()}`;
+      resumen = `<b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}` +
+        (tieneExtra ? `<br>Subtotal cotizador: $${subtotalCotizador.toLocaleString('es-AR')}` : '') +
+        extraHtml +
+        `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` +
         `<div class="botonera-pdf">
-          <a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsSimple.toString()}" target="_blank">Ver PDF llave en mano</a>
-          <a class="btn small secondary" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsDetalle.toString()}" target="_blank">Ver PDF completo</a>
+          <a class="btn small secondary" href="${pdfSimpleHref}" target="_blank">Ver PDF llave en mano</a>
+          <a class="btn small secondary" href="${pdfDetalleHref}" target="_blank">Ver PDF completo</a>
           <button class="btn small secondary" type="button" onclick="compartirPresupuestoWhatsapp(false)">💬 Compartir por WhatsApp</button>
         </div>`;
     }
@@ -322,12 +343,23 @@ async function mostrarElegirPresupuesto(visitaId){
     cont.innerHTML = '<div id="formManual"></div>';
     mostrarFormManual(visitaId, v.presupuesto);
   } else if (v.presupuesto && v.presupuesto.tipo === 'cotizador'){
+    BASE_TOTAL_COTIZADOR = Number(v.presupuesto.baseTotal != null ? v.presupuesto.baseTotal : v.presupuesto.total) || 0;
     cont.innerHTML = `
       <p class="muted">Este presupuesto se armó con el cotizador.</p>
       <button class="btn secondary" onclick="abrirCotizadorParaEditar('${visitaId}')">Editar en el cotizador</button>
       <div style="margin-top:8px"><button class="btn small secondary" type="button" onclick="vincularCotizacion('${visitaId}','${v.presupuesto.cotizacionId}')">🔄 Actualizar total desde el cotizador</button></div>
+      <div class="divider">
+        <p class="muted" style="margin-top:10px">Agregar productos a mano — se suman al total del cotizador, no lo reemplazan:</p>
+        <div id="itemsExtra"></div>
+        <button class="btn small secondary" type="button" onclick="agregarFilaItemExtra()">+ Agregar producto</button>
+        <div class="muted" id="totalGeneralExtra" style="margin-top:8px;font-weight:700"></div>
+        <div class="err" id="itemsExtraErr"></div>
+        <button class="btn" style="margin-top:8px" onclick="guardarItemsExtra('${visitaId}')">Guardar agregados</button>
+      </div>
       <div class="divider"><button class="btn small secondary" type="button" onclick="mostrarElegirPresupuestoDesdeCero('${visitaId}')">Cargar presupuesto a mano en su lugar</button></div>
     `;
+    document.getElementById('itemsExtra').innerHTML = (v.presupuesto.itemsExtra||[]).map(it=>filaItemManual(it,'actualizarTotalGeneralExtra')).join('');
+    actualizarTotalGeneralExtra();
   } else {
     cont.innerHTML = formularioElegirPresupuesto(visitaId);
   }
@@ -340,13 +372,27 @@ function mostrarElegirPresupuestoDesdeCero(visitaId){
 
 // ---------------- ABRIR COTIZADOR ----------------
 
+// Abre una URL en pestaña nueva, con manejo defensivo: si el navegador
+// bloquea el popup, window.open() devuelve null en vez de tirar un error, y
+// antes eso hacía que el botón pareciera "no hacer nada". Ahora, si lo
+// bloquea, se navega en la misma pestaña en su lugar (siempre funciona,
+// aunque el vendedor tenga que volver para atrás después).
+function abrirEnNuevaPestana(url){
+  const w = window.open(url, '_blank');
+  if (!w) window.location.href = url;
+}
+
 function abrirCotizador(visitaId){
-  const v = VISITAS.find(x => x._id === visitaId) || {};
+  // Usa VISITA_ACTUAL (la que se acaba de traer fresca del servidor al
+  // abrir el detalle) en vez de buscar en VISITAS (la lista, que se carga
+  // una sola vez al entrar y puede haber quedado vieja si el presupuesto de
+  // esta visita cambió recién, dentro de esta misma sesión).
+  const v = (VISITA_ACTUAL && VISITA_ACTUAL._id === visitaId) ? VISITA_ACTUAL : (VISITAS.find(x => x._id === visitaId) || {});
   const params = new URLSearchParams();
   if (STORE_ID) params.set('store_id', STORE_ID);
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
-  window.open('/cotizador.html?' + params.toString(), '_blank');
+  abrirEnNuevaPestana('/cotizador.html?' + params.toString());
 }
 
 // Reabre la MISMA cotización ya guardada en modo edición (en vez de una
@@ -354,14 +400,19 @@ function abrirCotizador(visitaId){
 // reabrir una cotización de su historial — solo que arrancado por link en
 // vez de tener que ir a buscarla a mano en la pestaña Historial.
 function abrirCotizadorParaEditar(visitaId){
-  const v = VISITAS.find(x => x._id === visitaId) || {};
-  if (!v.presupuesto || !v.presupuesto.cotizacionId) return;
+  // Mismo motivo que en abrirCotizador: si el presupuesto de esta visita se
+  // vinculó o actualizó hace un momento (dentro de esta misma sesión), la
+  // copia en VISITAS puede no tener todavía el cotizacionId — buscando ahí
+  // en vez de en VISITA_ACTUAL, el botón directamente no hacía nada, sin
+  // avisar por qué.
+  const v = (VISITA_ACTUAL && VISITA_ACTUAL._id === visitaId) ? VISITA_ACTUAL : (VISITAS.find(x => x._id === visitaId) || {});
+  if (!v.presupuesto || !v.presupuesto.cotizacionId) { alert('Esta visita todavía no tiene una cotización vinculada.'); return; }
   const params = new URLSearchParams();
   params.set('editarCotizacionId', v.presupuesto.cotizacionId);
   params.set('store_id', v.presupuesto.storeId || STORE_ID || '');
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
-  window.open('/cotizador.html?' + params.toString(), '_blank');
+  abrirEnNuevaPestana('/cotizador.html?' + params.toString());
 }
 
 async function mostrarVincularCotizacion(visitaId){
@@ -397,19 +448,20 @@ async function vincularCotizacion(visitaId, cotizacionId){
 function escAttr(s){
   return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function filaItemManual(it){
+function filaItemManual(it, onRemoveFn){
   const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}"${it && it.tipoTrabajo===t.nombre ? ' selected' : ''}>${t.nombre}</option>`).join('');
   const descripcion = it ? escAttr(it.descripcion) : '';
   const cantidad = it ? escAttr(it.cantidad) : '';
   const valor = it ? escAttr(it.valor) : '';
   const total = it ? Number(it.total || (it.cantidad*it.valor) || 0).toLocaleString('es-AR') : '0';
+  const removeCallback = onRemoveFn || 'actualizarTotalGeneralManual';
   return `<div class="item-row" style="flex-wrap:wrap">
     <select class="itTipo" style="flex:2;min-width:120px">${opciones}</select>
     <input class="itDescripcion" placeholder="Descripción" value="${descripcion}" style="flex:2;min-width:120px">
     <input class="itCantidad" type="number" step="0.01" placeholder="m²" value="${cantidad}" style="flex:1;min-width:70px" oninput="actualizarTotalItem(this)">
     <input class="itValor" type="number" step="0.01" placeholder="Precio unit." value="${valor}" style="flex:1;min-width:80px" oninput="actualizarTotalItem(this)">
     <span class="muted itTotal" style="flex:1;min-width:70px;align-self:center">Total: $${total}</span>
-    <button class="btn small secondary" type="button" onclick="this.closest('.item-row').remove(); actualizarTotalGeneralManual();">Quitar</button>
+    <button class="btn small secondary" type="button" onclick="this.closest('.item-row').remove(); ${removeCallback}();">Quitar</button>
   </div>`;
 }
 function actualizarTotalItem(el){
@@ -473,6 +525,37 @@ async function cargarFormasPagoManual(formasPagoExistentes){
         </label>`).join('');
   }catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; }
 }
+// ---------------- ÍTEMS AGREGADOS A MANO SOBRE UN PRESUPUESTO DEL COTIZADOR ----------------
+
+let BASE_TOTAL_COTIZADOR = 0; // subtotal del cotizador vigente, para mostrar el total combinado en vivo mientras se cargan los agregados
+
+function actualizarTotalGeneralExtra(){
+  const el = document.getElementById('totalGeneralExtra');
+  if (!el) return;
+  const extra = [...document.querySelectorAll('#itemsExtra .item-row')].reduce((s, row) => {
+    const cantidad = Number(row.querySelector('.itCantidad').value) || 0;
+    const valor = Number(row.querySelector('.itValor').value) || 0;
+    return s + cantidad*valor;
+  }, 0);
+  el.textContent = `Agregado a mano: $${extra.toLocaleString('es-AR')} · Total con el cotizador: $${(BASE_TOTAL_COTIZADOR+extra).toLocaleString('es-AR')}`;
+}
+function agregarFilaItemExtra(){
+  document.getElementById('itemsExtra').insertAdjacentHTML('beforeend', filaItemManual(null, 'actualizarTotalGeneralExtra'));
+  actualizarTotalGeneralExtra();
+}
+async function guardarItemsExtra(visitaId){
+  const items = [...document.querySelectorAll('#itemsExtra .item-row')].map(row => ({
+    tipoTrabajo: row.querySelector('.itTipo').value,
+    descripcion: row.querySelector('.itDescripcion').value.trim(),
+    cantidad: Number(row.querySelector('.itCantidad').value) || 0,
+    valor: Number(row.querySelector('.itValor').value) || 0
+  }));
+  try{
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-cotizador/items-extra`, {method:'POST', body:{items}});
+    mostrarDetalleVisita(visitaId);
+  }catch(e){ document.getElementById('itemsExtraErr').textContent = e.message; }
+}
+
 async function guardarPresupuestoManual(visitaId){
   const items = [...document.querySelectorAll('#itemsManual .item-row')].map(row => ({
     tipoTrabajo: row.querySelector('.itTipo').value,
@@ -511,7 +594,8 @@ function normalizarTelefonoWA(telefono){
 function urlPdfPresupuestoActual(vistaDetalle){
   const v = VISITA_ACTUAL;
   if (!v || !v.presupuesto) return null;
-  if (v.presupuesto.tipo === 'manual'){
+  const tieneExtra = v.presupuesto.tipo === 'cotizador' && v.presupuesto.itemsExtra && v.presupuesto.itemsExtra.length;
+  if (v.presupuesto.tipo === 'manual' || tieneExtra){
     return `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf` + (vistaDetalle ? '?vista=detalle' : '');
   }
   const params = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });

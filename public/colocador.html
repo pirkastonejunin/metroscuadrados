@@ -45,6 +45,13 @@
   .hidden{display:none !important;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin:8px 0;}
   .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
+  .modal-overlay{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  .modal-overlay.hidden{display:none !important;}
+  .modal-card{background:var(--card);border-radius:16px;padding:26px 22px;max-width:340px;width:100%;text-align:center;box-shadow:var(--shadow);animation:modalPop .25s ease;}
+  @keyframes modalPop{from{transform:scale(.92);opacity:0;}to{transform:scale(1);opacity:1;}}
+  .modal-card .icono{font-size:44px;line-height:1;margin-bottom:10px;}
+  .modal-card h2{margin:0 0 8px;font-size:19px;color:var(--ok);}
+  .modal-card p{margin:0 0 18px;color:var(--muted);font-size:13.5px;}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
@@ -97,10 +104,25 @@
   </main>
 </div>
 
+<div id="modalFelicitaciones" class="modal-overlay hidden" onclick="if(event.target===this) cerrarModalFelicitaciones()">
+  <div class="modal-card">
+    <div class="icono">🎉</div>
+    <h2>¡Felicitaciones por concluir tu Obra!</h2>
+    <p>Quedó registrada como terminada. Gracias por el trabajo.</p>
+    <button class="btn" onclick="cerrarModalFelicitaciones()">Cerrar</button>
+  </div>
+</div>
+
 <script>
 const BASE = '/api/obras'; // coincide con app.use('/api/obras', obrasRouter) en server.js
 let TOKEN = localStorage.getItem('colocador_token') || '';
 let NOMBRE = localStorage.getItem('colocador_nombre') || '';
+
+// La obra se maneja como una sola, aunque tenga varios productos adentro
+// (piso, zócalo, etc.) — un solo estado, una sola aclaración de oficina.
+const ESTADOS_OBRA = {pendiente:'Por comenzar', asignado:'Por comenzar', en_curso:'En curso', terminada:'Terminada'};
+
+let VIENDO_HISTORIAL = false;
 
 function api(path, opts={}) {
   opts.headers = Object.assign({'Content-Type':'application/json','x-colocador-token':TOKEN}, opts.headers||{});
@@ -140,12 +162,6 @@ function iniciar(){
   cargarMisObras();
 }
 if (TOKEN) iniciar();
-
-// La obra se maneja como una sola, aunque tenga varios productos adentro
-// (piso, zócalo, etc.) — un solo estado, una sola aclaración de oficina.
-const ESTADOS_OBRA = {pendiente:'Por comenzar', asignado:'Por comenzar', en_curso:'En curso', terminada:'Terminada'};
-
-let VIENDO_HISTORIAL = false;
 
 function cambiarTabObras(historial){
   VIENDO_HISTORIAL = historial;
@@ -232,7 +248,14 @@ async function marcarEstadoObra(obraId, estado, observaciones){
     const body = observaciones !== undefined ? {estado, observaciones} : {estado};
     await api(`/colocador/obras/${obraId}/estado`, {method:'POST', body});
     cargarMisObras();
+    if (estado === 'terminada') mostrarModalFelicitaciones();
   }catch(e){ alert(e.message); }
+}
+function mostrarModalFelicitaciones(){
+  document.getElementById('modalFelicitaciones').classList.remove('hidden');
+}
+function cerrarModalFelicitaciones(){
+  document.getElementById('modalFelicitaciones').classList.add('hidden');
 }
 
 // ---------------- FOTOS DEL RESULTADO ----------------
