@@ -255,9 +255,17 @@ router.get('/vendedores', authAdmin, async (req, res) => {
 
 router.post('/vendedores', authAdmin, async (req, res) => {
   try {
-    const { nombre, telefono } = req.body || {};
+    const { nombre, telefono, googleCalendarId } = req.body || {};
     if (!nombre) throw err(400, 'Nombre obligatorio');
-    const doc = { nombre, telefono: telefono || '', activo: true, createdAt: new Date() };
+    const doc = {
+      nombre, telefono: telefono || '',
+      // Calendario de Google propio de este vendedor, para que sus visitas
+      // le lleguen ahí (ver google-calendar.js) — opcional, si lo deja
+      // vacío las visitas que se le asignen caen al calendario general de
+      // respaldo (si hay uno configurado).
+      googleCalendarId: googleCalendarId || '',
+      activo: true, createdAt: new Date()
+    };
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const r = await db.collection('visitas_vendedores').insertOne(doc);
@@ -271,11 +279,12 @@ router.put('/vendedores/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { nombre, telefono, activo } = req.body || {};
+    const { nombre, telefono, activo, googleCalendarId } = req.body || {};
     const set = {};
     if (nombre !== undefined) set.nombre = nombre;
     if (telefono !== undefined) set.telefono = telefono;
     if (activo !== undefined) set.activo = activo;
+    if (googleCalendarId !== undefined) set.googleCalendarId = googleCalendarId;
     const actualizado = await conReintento(async () => {
       const db = await getDb();
       await db.collection('visitas_vendedores').updateOne({ _id: id }, { $set: set });
@@ -465,6 +474,11 @@ router.post('/', authAdmin, async (req, res) => {
         },
         vendedorId: vId,
         vendedorNombre: vendedor.nombre,
+        // Calendario propio del vendedor al momento de crear la visita —
+        // se guarda junto con el evento (no solo en la ficha del vendedor)
+        // para saber de qué calendario borrar/mover si el vendedor cambia
+        // de calendario o la visita se reasigna a otro vendedor más tarde.
+        vendedorGoogleCalendarId: vendedor.googleCalendarId || null,
         fechaHora: new Date(fechaHora),
         notasEmpleada: notasEmpleada || '',
         estado: 'sin_visita',
@@ -476,7 +490,7 @@ router.post('/', authAdmin, async (req, res) => {
         createdAt: new Date(),
         updatedAt: new Date()
       };
-      doc.googleEventId = await googleCalendar.upsertEvento(null, eventoDeVisita(doc));
+      doc.googleEventId = await googleCalendar.upsertEvento(null, eventoDeVisita(doc), doc.vendedorGoogleCalendarId);
       const r = await db.collection('visitas').insertOne(doc);
       doc._id = r.insertedId;
       return doc;
@@ -529,16 +543,26 @@ router.put('/:id', authAdmin, async (req, res) => {
         if (!vendedor) throw err(400, 'Vendedor no encontrado');
         set.vendedorId = vId;
         set.vendedorNombre = vendedor.nombre;
+        set.vendedorGoogleCalendarId = vendedor.googleCalendarId || null;
       }
 
       // Sincroniza el evento de Google Calendar con los datos que va a
       // tener la visita después de este cambio.
       if (set.estado === 'cancelada') {
-        await googleCalendar.eliminarEvento(actual.googleEventId);
+        await googleCalendar.eliminarEvento(actual.googleEventId, actual.vendedorGoogleCalendarId);
         set.googleEventId = null;
       } else {
         const fusion = { ...actual, ...set };
-        set.googleEventId = await googleCalendar.upsertEvento(actual.googleEventId, eventoDeVisita(fusion));
+        // Si se reasignó a un vendedor con otro calendario, no alcanza con
+        // "actualizar" el evento (google-calendar.js no mueve eventos entre
+        // calendarios) — se borra del calendario viejo y se crea de nuevo
+        // en el nuevo.
+        let googleEventIdBase = actual.googleEventId;
+        if (googleEventIdBase && actual.vendedorGoogleCalendarId !== fusion.vendedorGoogleCalendarId) {
+          await googleCalendar.eliminarEvento(actual.googleEventId, actual.vendedorGoogleCalendarId);
+          googleEventIdBase = null;
+        }
+        set.googleEventId = await googleCalendar.upsertEvento(googleEventIdBase, eventoDeVisita(fusion), fusion.vendedorGoogleCalendarId);
       }
 
       await db.collection('visitas').updateOne({ _id: id }, { $set: set });
@@ -1043,8 +1067,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       fechaInicio: null,
       fechaFinEstimada: null,
       fechaFinReal: null,
-      materiales: t.materialesIniciales || [],
-      googleEventId: null
+      materiales: t.materialesIniciales || []
     }));
 
     const numero = await siguienteNumeroObra();
@@ -1068,6 +1091,12 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       visitaId: visita._id,
       origenPresupuesto: visita.presupuesto.tipo,
       precioVentaCliente: visita.presupuesto.total || 0,
+      // Evento de Google Calendar de la obra (uno solo, no por producto —
+      // ver sincronizarCalendarDeObra en obras.js) y el calendario donde
+      // vive. Arranca vacío: recién se crea cuando oficina le asigna
+      // colocador y fecha de inicio desde el panel de Obras.
+      googleEventId: null,
+      googleCalendarId: null,
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -1075,9 +1104,10 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     obraDoc._id = r.insertedId;
 
     // La visita ya se convirtió en Obra: se borra su evento de Calendar acá
-    // (las fechas de trabajo de la Obra se sincronizan aparte, por tarea,
-    // desde obras.js cuando se le asigna colocador).
-    await googleCalendar.eliminarEvento(visita.googleEventId);
+    // (la Obra tiene su propio evento — uno solo para toda la obra, en el
+    // calendario del colocador — que se sincroniza aparte, desde obras.js,
+    // recién cuando se le asigna colocador y fecha de inicio).
+    await googleCalendar.eliminarEvento(visita.googleEventId, visita.vendedorGoogleCalendarId);
 
     await db.collection('visitas').updateOne(
       { _id: visita._id },
