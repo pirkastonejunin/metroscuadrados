@@ -150,4 +150,53 @@ async function eliminarEvento(googleEventId, calendarId) {
   }
 }
 
-module.exports = { upsertEvento, eliminarEvento, habilitado, _setClienteParaTests };
+// Crea un calendario nuevo (propiedad de la cuenta de servicio) para una
+// persona (vendedor o colocador) y lo comparte automáticamente con su
+// cuenta de Google (permiso de solo lectura: la app es la que escribe los
+// eventos, la persona solo necesita verlos desde su propio Google
+// Calendar). Devuelve el id del calendario nuevo, o null si Calendar no
+// está configurado o algo falla (nunca tira excepción hacia quien la
+// llama).
+async function crearCalendarioParaPersona(nombre, email) {
+  const cal = getCalendarClient();
+  if (!cal) return null;
+  try {
+    const r = await cal.calendars.insert({
+      requestBody: { summary: nombre, timeZone: 'America/Argentina/Buenos_Aires' }
+    });
+    const calendarId = r.data.id;
+    if (email) {
+      try {
+        await cal.acl.insert({
+          calendarId,
+          requestBody: { role: 'reader', scope: { type: 'user', value: email } }
+        });
+      } catch (e) {
+        console.error('Google Calendar: calendario creado pero no se pudo compartir con', email, ':', e.message);
+      }
+    }
+    return calendarId;
+  } catch (e) {
+    console.error('Google Calendar: error creando calendario para', nombre, ':', e.message);
+    return null;
+  }
+}
+
+// Borra un calendario creado por crearCalendarioParaPersona (por ejemplo al
+// eliminar definitivamente a una persona). No se usa en la baja normal de
+// un vendedor/colocador desde el panel — ahí simplemente se deja de usar
+// ese calendario (se limpia googleCalendarId) para no perder el historial
+// ya sincronizado.
+async function eliminarCalendarioDePersona(calendarId) {
+  const cal = getCalendarClient();
+  if (!cal || !calendarId) return;
+  try {
+    await cal.calendars.delete({ calendarId });
+  } catch (e) {
+    if (e.code !== 404 && e.code !== 410) {
+      console.error('Google Calendar: error borrando calendario:', e.message);
+    }
+  }
+}
+
+module.exports = { upsertEvento, eliminarEvento, habilitado, crearCalendarioParaPersona, eliminarCalendarioDePersona, _setClienteParaTests };
