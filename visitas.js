@@ -776,17 +776,74 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
       const cot = await db.collection('cotizaciones').findOne({ _id: cotId, store_id: Number(storeId) });
       if (!cot) throw err(404, 'No se encontró esa cotización en el cotizador');
 
+      // Si esta visita ya tenía ítems agregados a mano por encima del
+      // cotizador (ver /presupuesto-cotizador/items-extra), se conservan al
+      // vincular una cotización nueva o al actualizar el total de la
+      // vigente — así no se pierden por volver a abrir el cotizador o por
+      // tocar "Actualizar total desde el cotizador".
+      const itemsExtra = Array.isArray(visita.presupuesto && visita.presupuesto.itemsExtra)
+        ? visita.presupuesto.itemsExtra : [];
+      const extraTotal = itemsExtra.reduce((s, it) => s + (Number(it.total) || 0), 0);
+
       const presupuesto = {
         tipo: 'cotizador',
         cotizacionId: cot._id,
         storeId: Number(storeId),
         tipoObraId: cot.tipoObraId,
         tipoObraNombre: cot.tipoObraNombre,
-        total: cot.total,
+        baseTotal: cot.total,
+        itemsExtra,
+        total: Math.round((cot.total + extraTotal) * 100) / 100,
         fecha: new Date()
       };
       const set = { presupuesto, updatedAt: new Date() };
       if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
+      await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
+      return db.collection('visitas').findOne({ _id: visita._id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Agrega/edita/quita ítems cargados a mano POR ENCIMA de un presupuesto
+// armado con el cotizador (las dos formas conviven: lo que ya calculó el
+// cotizador queda igual, y esto se suma aparte). Reemplaza la lista
+// completa de "itemsExtra" cada vez (igual que el form de presupuesto
+// manual reemplaza toda la lista de items) — mandar un array vacío los
+// quita a todos.
+router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/items-extra', async (req, res) => {
+  try {
+    const { items } = req.body || {};
+    if (!Array.isArray(items)) throw err(400, 'Formato inválido');
+    for (const it of items) {
+      if (!it.tipoTrabajo) throw err(400, 'Falta el producto en un ítem');
+      if (!(Number(it.cantidad) > 0)) throw err(400, `Ingresá la cantidad de "${it.tipoTrabajo}"`);
+    }
+    const itemsExtra = items.map(it => {
+      const cantidad = Number(it.cantidad);
+      const valor = Number(it.valor) || 0;
+      return {
+        tipoTrabajo: it.tipoTrabajo,
+        descripcion: it.descripcion || '',
+        cantidad,
+        valor,
+        total: Math.round(cantidad * valor * 100) / 100
+      };
+    });
+    const extraTotal = itemsExtra.reduce((s, it) => s + it.total, 0);
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const visita = await visitaDelVendedor(db, req.params.id, req.params.vendedorId);
+      if (!visita.presupuesto || visita.presupuesto.tipo !== 'cotizador') {
+        throw err(400, 'Esta visita no tiene un presupuesto armado con el cotizador');
+      }
+      const baseTotal = Number(visita.presupuesto.baseTotal) || 0;
+      const set = {
+        'presupuesto.itemsExtra': itemsExtra,
+        'presupuesto.total': Math.round((baseTotal + extraTotal) * 100) / 100,
+        updatedAt: new Date()
+      };
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });
@@ -926,7 +983,7 @@ function dibujarPdfPresupuestoManualSimple(pdf, visita) {
   pdf.fillColor('#000');
   pdf.moveDown(1);
 
-  (p.items || []).forEach(it => {
+  itemsParaPdf(p).forEach(it => {
     pdf.fontSize(12).font('Helvetica-Bold').text(it.tipoTrabajo, { width: PDF_ANCHO_DISPONIBLE });
     pdf.font('Helvetica');
     if (it.descripcion) {
@@ -970,7 +1027,7 @@ function dibujarPdfPresupuestoManualDetalle(pdf, visita) {
 
   encabezadoTabla();
   const pageBottom = pdf.page.height - pdf.page.margins.bottom;
-  (p.items || []).forEach(it => {
+  itemsParaPdf(p).forEach(it => {
     const etiqueta = it.tipoTrabajo + (it.descripcion ? ' (' + it.descripcion + ')' : '');
     pdf.fontSize(10);
     const alturaFila = Math.max(pdf.heightOfString(etiqueta, { width: col.producto.w }), 14);
@@ -995,9 +1052,28 @@ function dibujarPdfPresupuestoManualDetalle(pdf, visita) {
 
 function validarPresupuestoManualParaPdf(visita) {
   if (!visita.presupuesto) throw err(400, 'Esta visita todavía no tiene presupuesto cargado.');
-  if (visita.presupuesto.tipo !== 'manual') {
+  const p = visita.presupuesto;
+  if (p.tipo === 'cotizador' && !(Array.isArray(p.itemsExtra) && p.itemsExtra.length)) {
     throw err(400, 'Este presupuesto se armó con el cotizador: generá el PDF desde ahí (vista llave en mano).');
   }
+}
+
+// Ítems a listar en el PDF: si el presupuesto es manual, los suyos tal
+// cual; si es del cotizador con ítems agregados a mano por encima, un
+// renglón resumen con el subtotal del cotizador (el detalle línea por línea
+// de ESO sigue estando en el PDF propio del cotizador) más esos ítems
+// extra — así el PDF de acá muestra el presupuesto completo, no solo lo
+// agregado a mano.
+function itemsParaPdf(p) {
+  if (p.tipo === 'manual') return p.items || [];
+  const base = {
+    tipoTrabajo: p.tipoObraNombre || 'Presupuesto (cotizador)',
+    descripcion: 'Detalle completo en el PDF del cotizador',
+    cantidad: 1,
+    valor: Number(p.baseTotal) || 0,
+    total: Number(p.baseTotal) || 0
+  };
+  return [base, ...(p.itemsExtra || [])];
 }
 
 function enviarPdfPresupuestoManual(res, visita, vistaDetalle) {
@@ -1074,12 +1150,15 @@ async function tareasDesdeMapeo(db, presupuesto) {
 // para que en el panel de obra no haya que volver a escribirlo — queda
 // como punto de partida editable, con la posibilidad de agregar más a
 // mano (ver admin-obras.html).
-function tareasDesdeManual(presupuesto) {
-  return presupuesto.items.map(it => ({
+function tareasDesdeItems(items) {
+  return (items || []).map(it => ({
     tipoTrabajo: it.tipoTrabajo,
     m2Presupuestados: it.cantidad,
     materialesIniciales: it.descripcion ? [{ tipo: it.descripcion, cantidad: String(it.cantidad) }] : []
   }));
+}
+function tareasDesdeManual(presupuesto) {
+  return tareasDesdeItems(presupuesto.items);
 }
 
 async function confirmarVisita(visitaIdStr, confirmadaPor) {
@@ -1094,9 +1173,19 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     if (visita.estado === 'cancelada') throw err(400, 'Esta visita está cancelada');
     if (!visita.presupuesto) throw err(400, 'Todavía no se cargó el presupuesto de esta visita');
 
-    const tareasBase = visita.presupuesto.tipo === 'cotizador'
-      ? await tareasDesdeMapeo(db, visita.presupuesto)
-      : tareasDesdeManual(visita.presupuesto);
+    // Si el presupuesto es del cotizador PERO además tiene ítems cargados a
+    // mano por encima (ver /presupuesto-cotizador/items-extra), las tareas
+    // de la obra se arman con las dos fuentes: las del mapeo (cotizador) y
+    // las de esos ítems extra, una lista sola.
+    let tareasBase;
+    if (visita.presupuesto.tipo === 'cotizador') {
+      tareasBase = await tareasDesdeMapeo(db, visita.presupuesto);
+      if (Array.isArray(visita.presupuesto.itemsExtra) && visita.presupuesto.itemsExtra.length) {
+        tareasBase = tareasBase.concat(tareasDesdeItems(visita.presupuesto.itemsExtra));
+      }
+    } else {
+      tareasBase = tareasDesdeManual(visita.presupuesto);
+    }
 
     const tareas = tareasBase.map(t => ({
       _id: new ObjectId(),
@@ -1185,11 +1274,11 @@ async function tiposTrabajoDePresupuesto(db, presupuesto) {
       if (!mapeo || !Array.isArray(mapeo.reglas)) return [];
       const cot = await db.collection('cotizaciones').findOne({ _id: presupuesto.cotizacionId });
       const obraCot = (cot && cot.obra) || {};
-      return [...new Set(
-        mapeo.reglas
-          .filter(r => Number(obraCot[r.campoObra]) > 0)
-          .map(r => r.tipoTrabajo)
-      )];
+      const tiposDelMapeo = mapeo.reglas
+        .filter(r => Number(obraCot[r.campoObra]) > 0)
+        .map(r => r.tipoTrabajo);
+      const tiposExtra = (presupuesto.itemsExtra || []).map(it => it.tipoTrabajo).filter(Boolean);
+      return [...new Set([...tiposDelMapeo, ...tiposExtra])];
     }
   } catch (e) { /* cotización borrada, mapeo mal formado, etc. — queda sin clasificar */ }
   return [];
