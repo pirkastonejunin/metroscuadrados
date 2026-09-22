@@ -475,10 +475,19 @@ async function cargarVendedores(){
 function celdaCalendario(persona){
   if (persona.googleCalendarId) {
     return `<div>📅 Activo${persona.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(persona.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" onclick="resincronizarCalendarioVendedor('${persona._id}', this)" title="Por si hay visitas creadas antes de tener el calendario configurado, o algún evento que quedó desincronizado">🔄 Resincronizar</button>
       <button class="btn small secondary" onclick="darDeBajaCalendarioVendedor('${persona._id}', this)">Dar de baja</button>`;
   }
   return `<input class="calEmailInput" data-id="${persona._id}" placeholder="mail@gmail.com" style="min-width:180px">
     <button class="btn small secondary" onclick="crearCalendarioVendedor('${persona._id}', this)">Crear calendario</button>`;
+}
+async function resincronizarCalendarioVendedor(id, btn){
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = 'Resincronizando...';
+  try{
+    await api(`/vendedores/${id}/calendario/resincronizar`, {method:'POST'});
+    btn.textContent = 'Listo ✓';
+    setTimeout(()=>{ btn.disabled = false; btn.textContent = textoOriginal; }, 1500);
+  }catch(e){ alert('No se pudo resincronizar: ' + e.message); btn.disabled = false; btn.textContent = textoOriginal; }
 }
 async function crearVendedor(){
   const nombre = document.getElementById('nuevoVendNombre').value.trim();
@@ -581,7 +590,10 @@ function renderVisitasTabla(){
       <td>${v.vendedorNombre||''}</td>
       <td>${fmtFecha(v.fechaHora)}</td>
       <td><span class="pill ${v.estado}">${ESTADOS_VISITA[v.estado]||v.estado}</span></td>
-      <td><button class="btn small secondary" onclick="abrirVisita('${v._id}')">Ver</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="abrirVisita('${v._id}')">Ver</button>
+        ${!v.obraId ? `<button class="btn small danger" onclick="borrarVisitaDesdeListado('${v._id}')" title="Borrar registro">🗑</button>` : ''}
+      </td>
     </tr>`).join('') || '<tr><td colspan="8" class="muted">Sin visitas para este filtro</td></tr>';
   actualizarFlechasOrden();
 }
@@ -860,10 +872,12 @@ function renderDetalleVisita(v, editando){
         <div id="reprogramarBox"></div>
       ` : ''}
 
-      <div style="margin-top:14px;display:flex;gap:8px">
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
         ${puedeCancelar ? `<button class="btn danger" onclick="cancelarVisita('${v._id}')">Cancelar visita</button>` : ''}
+        ${!v.obraId ? `<button class="btn danger" onclick="borrarVisita('${v._id}')">🗑 Borrar registro</button>` : ''}
         <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
       </div>
+      ${!v.obraId ? '<div class="muted" style="margin-top:4px">"Borrar registro" elimina la visita para siempre (a diferencia de "Cancelar", que solo cambia el estado y conserva el historial) — pensado para visitas de prueba o cargadas por error.</div>' : ''}
     `;
   }
 
@@ -919,6 +933,24 @@ async function confirmarVisita(id){
     cargarVisitas();
     renderDetalleVisita(resultado.visita, false);
   }catch(e){ if (errEl) errEl.textContent = e.message; }
+}
+
+async function borrarVisita(id){
+  if (!confirm('¿Borrar definitivamente esta visita? No se puede deshacer: se elimina el registro (y su evento de Google Calendar, si tenía) para siempre.')) return;
+  const errEl = document.getElementById('visErr');
+  try{
+    await api(`/${id}`, {method:'DELETE'});
+    cerrarModal();
+    cargarVisitas();
+  }catch(e){ if (errEl) errEl.textContent = e.message; else alert(e.message); }
+}
+// Mismo borrado, pero desde el botón 🗑 del listado (sin pasar por el modal).
+async function borrarVisitaDesdeListado(id){
+  if (!confirm('¿Borrar definitivamente esta visita? No se puede deshacer.')) return;
+  try{
+    await api(`/${id}`, {method:'DELETE'});
+    cargarVisitas();
+  }catch(e){ alert(e.message); }
 }
 
 async function cancelarVisita(id){

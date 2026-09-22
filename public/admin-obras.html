@@ -421,12 +421,21 @@ async function guardarColocador(id){
 function celdaCalendarioColocador(c){
   if (c.googleCalendarId) {
     return `<div>📅 Activo${c.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(c.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" type="button" onclick="resincronizarCalendarioColocador('${c._id}')" title="Por si hay obras con colocador y fecha ya asignados desde antes de tener el calendario configurado">🔄 Resincronizar</button>
       <button class="btn small secondary" type="button" onclick="darDeBajaCalendarioColocador('${c._id}')">Dar de baja</button>`;
   }
   return `<div style="display:flex;gap:8px;align-items:center">
       <input id="colCalEmail" placeholder="mail@gmail.com" style="flex:1">
       <button class="btn small secondary" type="button" onclick="crearCalendarioColocador('${c._id}')">Crear calendario</button>
     </div>`;
+}
+async function resincronizarCalendarioColocador(id){
+  try{
+    await api(`/colocadores/${id}/calendario/resincronizar`, {method:'POST'});
+    alert('Calendario resincronizado.');
+    await cargarColocadores();
+    abrirEditarColocador(id);
+  }catch(e){ alert('No se pudo resincronizar: ' + e.message); }
 }
 async function crearCalendarioColocador(id){
   const input = document.getElementById('colCalEmail');
