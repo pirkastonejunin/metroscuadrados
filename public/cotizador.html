@@ -192,6 +192,19 @@
   .llave-en-mano-total .grand{font-size:24px;font-weight:700;}
   button.whatsapp{background:#25D366;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:13.5px;cursor:pointer;font-weight:600;}
   .copiado{color:var(--ok);font-size:12px;margin-left:6px;}
+  /* Piedra: filas de "superficie" (largo x alto) que se pueden agregar/sacar
+     de a una en el paso 2, en vez del único m2Pisos que usa Piso. */
+  .superficie-row{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;flex-wrap:wrap;}
+  .superficie-row .field{flex:1;min-width:110px;margin-bottom:0;}
+  .superficie-row .superficie-num{color:var(--muted);font-size:12.5px;min-width:60px;padding-bottom:11px;}
+  .superficie-row button.small{flex-shrink:0;}
+  /* Marcador de área para el simulador de piedra: la foto de fondo con un
+     canvas transparente encima donde se dibuja (mouse o touch) el
+     rectángulo a revestir. */
+  .marcar-area-wrap{position:relative;width:100%;max-height:70vh;border-radius:10px;overflow:hidden;background:#f2f1ee;touch-action:none;}
+  .marcar-area-wrap img{width:100%;display:block;max-height:70vh;object-fit:contain;pointer-events:none;user-select:none;}
+  .marcar-area-wrap canvas{position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;}
+  .marcar-area-hint{color:var(--muted);font-size:12.5px;margin:10px 0 0;text-align:center;}
   @media print{
     header.brand-header{border-bottom:2px solid #000;}
     .tabs, .subtabs, #selTienda, .actions, .acciones-extra, .vista-toggle, .field label[for="selTienda"], .grid:has(#selTienda), .volver-menu{display:none !important;}
@@ -260,16 +273,29 @@
         <div class="field"><label>Cliente</label><input type="text" id="cliente" placeholder="Nombre y apellido"></div>
         <div class="field"><label>Dirección</label><input type="text" id="direccion" placeholder="Opcional"></div>
       </div>
-      <h3>Superficies y cantidades</h3>
-      <div class="grid">
-        <div class="field"><label>m² de piso</label><input type="number" id="m2Pisos" min="0" step="0.01" value="0"></div>
-        <div class="field"><label>% desperdicio de piso</label><input type="number" id="desperdicioPctPiso" min="0" step="0.5" value="0"></div>
-        <div class="field"><label>ml de zócalo</label><input type="number" id="mlZocalos" min="0" step="0.01" value="0"></div>
-        <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
+      <div id="camposPiso">
+        <h3>Superficies y cantidades</h3>
+        <div class="grid">
+          <div class="field"><label>m² de piso</label><input type="number" id="m2Pisos" min="0" step="0.01" value="0"></div>
+          <div class="field"><label>% desperdicio de piso</label><input type="number" id="desperdicioPctPiso" min="0" step="0.5" value="0"></div>
+          <div class="field"><label>ml de zócalo</label><input type="number" id="mlZocalos" min="0" step="0.01" value="0"></div>
+          <div class="field"><label>Cantidad de puertas</label><input type="number" id="cantidadPuertas" min="0" step="1" value="0"></div>
+        </div>
+        <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
+        <p class="hint">El check de manta aparece más adelante, junto con la elección del piso (no todos los pisos la necesitan).</p>
       </div>
-      <label class="check"><input type="checkbox" id="requiereNivelacion"> Requiere nivelación de piso</label>
+      <div id="camposPiedra" class="hidden">
+        <h3>Superficies a revestir</h3>
+        <p class="hint">Cargá cada pared/superficie por separado (largo x alto) — se van a sumar todas para calcular los m² totales de piedra.</p>
+        <div id="listaSuperficies"></div>
+        <div class="actions" style="margin-top:0;margin-bottom:14px;">
+          <button class="secondary small" type="button" id="btnAgregarSuperficie">+ Agregar superficie</button>
+        </div>
+        <div class="grid">
+          <div class="field"><label>% desperdicio de piedra</label><input type="number" id="desperdicioPctPiedra" min="0" step="0.5" value="0"></div>
+        </div>
+      </div>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
-      <p class="hint">El check de manta aparece más adelante, junto con la elección del piso (no todos los pisos la necesitan).</p>
       <div class="actions">
         <button class="secondary" id="btnVolverTipoObra">← Volver</button>
         <button class="primary" id="btnContinuarProductos">Elegir productos →</button>
@@ -365,8 +391,14 @@
           <div class="field"><label>% desperdicio por defecto</label><input type="number" id="to_desperdicio" min="0" step="0.5" value="0"></div>
         </div>
         <div class="grid">
+          <div class="field"><label>Categoría</label><select id="to_categoria"><option value="piso">Piso</option><option value="piedra">Piedra</option></select></div>
+        </div>
+        <div class="grid" id="to_camposPiso">
           <div class="field"><label>Rubro de piso (obligatorio)</label><select id="to_rubroPiso"></select></div>
           <div class="field"><label>Rubro de zócalo (opcional)</label><select id="to_rubroZocalo"><option value="">— No aplica —</option></select></div>
+        </div>
+        <div class="grid hidden" id="to_camposPiedra">
+          <div class="field"><label>Rubro de piedra (obligatorio)</label><select id="to_rubroPiedra"></select></div>
         </div>
         <div class="actions">
           <button class="primary" id="btnGuardarTipoObra">Guardar</button>
@@ -378,17 +410,22 @@
       <div class="cfg-form hidden" id="cfg-catalogos-panel">
         <h3 id="cfg-catalogos-titulo">Catálogos de: —</h3>
 
-        <div class="subtabs">
+        <div class="subtabs" id="cfg-catsub-piso">
           <button class="catsub-btn active" data-cat="puerta">Niveladores de puerta</button>
           <button class="catsub-btn" data-cat="nivelacion">Nivelantes de piso</button>
           <button class="catsub-btn" data-cat="manta">Manta</button>
           <button class="catsub-btn" data-cat="pegamento">Silicona/pegamento</button>
           <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
         </div>
+        <div class="subtabs hidden" id="cfg-catsub-piedra">
+          <button class="catsub-btn active" data-cat="pegamentoPiedra">Pegamento</button>
+          <button class="catsub-btn" data-cat="laca">Laca</button>
+          <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
+        </div>
 
-        <!-- Vista: catálogo por SKU (niveladores de puerta / nivelantes de piso / manta / pegamento) -->
+        <!-- Vista: catálogo por SKU (niveladores de puerta / nivelantes de piso / manta / pegamento / pegamentoPiedra / laca) -->
         <div id="cfg-catalogo-sku">
-          <p class="hint">Niveladores de puerta, nivelantes de piso (nivelación), manta y silicona/pegamento para zócalo no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
+          <p class="hint">Estos ítems no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
           <div id="cfg-catalogo-lista"></div>
           <div class="grid" style="margin-top:10px;">
             <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
@@ -401,17 +438,20 @@
 
         <!-- Vista: tarifas de mano de obra de este tipo de obra -->
         <div id="cfg-catalogo-tarifas" class="hidden">
-          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente.</p>
-          <div class="grid">
+          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente. Lo mismo para pegamento y laca en Piedra: incluidos en la tarifa de piedra.</p>
+          <div class="grid" id="t_camposPiso">
             <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
             <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
             <div class="field"><label>Por puerta ($)</label><input type="number" id="t_puertas_unidad" min="0" step="0.01"></div>
             <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
           </div>
+          <div class="grid hidden" id="t_camposPiedra">
+            <div class="field"><label>Por m² de piedra ($)</label><input type="number" id="t_piedra_m2" min="0" step="0.01"></div>
+          </div>
           <div class="grid" style="margin-top:10px;">
             <div class="field"><label>Mínimo de m² cotizables</label><input type="number" id="t_minimoM2Cotizable" min="0" step="0.01" value="0"></div>
           </div>
-          <p class="hint">Si la obra tiene menos m² de piso que este mínimo, la mano de obra (piso y nivelación) se cobra igual como si tuviera este mínimo. No afecta la cantidad de producto a comprar, solo el cálculo de mano de obra. Dejalo en 0 para no aplicar mínimo.</p>
+          <p class="hint">Si la obra tiene menos m² (de piso, o de piedra) que este mínimo, la mano de obra se cobra igual como si tuviera este mínimo. No afecta la cantidad de producto a comprar, solo el cálculo de mano de obra. Dejalo en 0 para no aplicar mínimo.</p>
           <div class="actions">
             <button class="primary" id="btnGuardarTarifasTipoObra">Guardar tarifas</button>
           </div>
@@ -452,11 +492,12 @@
      para cualquier producto de piso) y un modal genérico que se llena según
      el producto que se esté probando. -->
 <input type="file" id="inputFotoSimulador" accept="image/*" class="hidden">
+<input type="file" id="inputFotoSimuladorPiedra" accept="image/*" class="hidden">
 <div id="modalSimulador" class="modal-overlay hidden">
   <div class="modal-simulador-wrap">
     <button type="button" class="modal-close-btn" onclick="cerrarModalSimulador()" aria-label="Cerrar">✕</button>
     <div class="modal-simulador">
-      <h3>Simular piso con foto</h3>
+      <h3 id="simTitulo">Simular piso con foto</h3>
       <div class="sim-sub" id="simSubtitulo"></div>
       <div id="simContenido"></div>
       <div class="actions" id="simAcciones"></div>
@@ -510,18 +551,32 @@ let editandoCotizacionId = null;   // _id de una cotización del historial que s
 let obraOriginalEdicion = null;    // "obra" tal cual estaba guardada al entrar a editar, para no perder utilizaManta si no se vuelve a pasar por paso-productos
 let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
+let gestionandoTipoObraCategoria = 'piso'; // categoría ('piso'|'piedra') del tipo de obra cuyo panel de catálogos está abierto
 let categoriaActivaCatalogo = 'puerta';
 let productosComparar = [];        // ids de productos de piso tildados con "Comparar" en paso 3, para generarlos todos juntos con la misma foto
 let modoComparacionPendiente = false; // true mientras se espera que el usuario elija la foto para arrancar una comparación (ver abrirComparacionPisos)
 let comparacionEnCurso = [];       // [{ productId, producto, estado, imagen, errorMsg }] resultados de la comparación que se está mostrando en el modal
 
-const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml' };
+// ---- Piedra: simulador con marcado de área (ver más abajo, cerca de
+// abrirSimuladorPiedra) ----
+let simuladorModoActual = 'piso'; // 'piso' | 'piedra' — a qué flujo pertenece el modal #modalSimulador que está abierto ahora mismo
+let productoSimulandoPiedra = null; // producto de piedra sobre el que se está corriendo el simulador
+let fotoSimuladorPiedraActual = null; // foto de la pared ya elegida en esta cotización (se reutiliza entre productos, como fotoSimuladorActual)
+let areaSimuladorPiedraActual = null; // { xPct, yPct, wPct, hPct } del último rectángulo marcado sobre esa foto
+
+const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml', pegamentoPiedra: 'm²', laca: 'm²' };
 const LABEL_COBERTURA_INPUT = {
   puerta: 'Cuántas puertas cubre 1 unidad',
   nivelacion: 'Cuántos m² cubre 1 unidad',
   manta: 'Cuántos m² cubre 1 unidad',
-  pegamento: 'Cuántos ml de zócalo cubre 1 unidad'
+  pegamento: 'Cuántos ml de zócalo cubre 1 unidad',
+  pegamentoPiedra: 'Cuántos m² de piedra cubre 1 unidad',
+  laca: 'Cuántos m² de piedra cubre 1 unidad'
 };
+// Categorías de catálogo por SKU que corresponden a cada categoría de tipo
+// de obra — determina qué pestañas de "Catálogos" mostrar en Configuración
+// y qué se pide antes de calcular en el paso 3.
+const CATEGORIAS_ITEM_POR_TIPO = { piso: ['puerta', 'nivelacion', 'manta', 'pegamento'], piedra: ['pegamentoPiedra', 'laca'] };
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
@@ -537,6 +592,10 @@ function descripcionObra(o){
   if (o.cantidadPuertas) datos.push(o.cantidadPuertas + ' puerta(s)');
   if (o.requiereNivelacion) datos.push('con nivelación');
   if (o.utilizaManta) datos.push('con manta');
+  if (Array.isArray(o.superficies) && o.superficies.length){
+    const m2PiedraTotal = o.superficies.reduce((s, x) => s + (Number(x.largo)||0) * (Number(x.alto)||0), 0);
+    if (m2PiedraTotal > 0) datos.push(round2(m2PiedraTotal) + ' m2 de piedra (' + o.superficies.length + ' superficie' + (o.superficies.length===1?'':'s') + ')');
+  }
   if (o.manoObra) datos.push('con mano de obra');
   return datos.join(' · ');
 }
@@ -684,7 +743,15 @@ $('#btnContinuarDatos').addEventListener('click', () => {
   tipoObraElegido = tiposObraCache.find(t => String(t.id) === String(id));
   if (!tipoObraElegido){ mostrarMsg('Elegí un tipo de obra.'); return; }
 
-  $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
+  const esPiedra = tipoObraElegido.categoria === 'piedra';
+  $('#camposPiso').classList.toggle('hidden', esPiedra);
+  $('#camposPiedra').classList.toggle('hidden', !esPiedra);
+  if (esPiedra){
+    $('#desperdicioPctPiedra').value = tipoObraElegido.desperdicioDefaultPct || 0;
+    resetSuperficies();
+  } else {
+    $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
+  }
   catalogosTipoObraCache = null;
 
   mostrarMsg(null);
@@ -698,7 +765,60 @@ $('#btnVolverTipoObra').addEventListener('click', () => {
 });
 
 // ---------- Paso 2: datos de obra ----------
+// Piedra: filas de "superficie" (largo x alto) que se agregan/sacan de a una
+// en vez del único m2Pisos que usa Piso — ver #listaSuperficies.
+function filaSuperficieHtml(largo, alto){
+  return '<div class="superficie-row">' +
+    '<div class="superficie-num"></div>' +
+    '<div class="field"><label>Largo (m)</label><input type="number" class="sup-largo" min="0" step="0.01" value="' + (largo || '') + '"></div>' +
+    '<div class="field"><label>Alto (m)</label><input type="number" class="sup-alto" min="0" step="0.01" value="' + (alto || '') + '"></div>' +
+    '<button type="button" class="secondary small btn-quitar-superficie">Quitar</button>' +
+  '</div>';
+}
+function renumerarSuperficies(){
+  $$('#listaSuperficies .superficie-row').forEach((row, i) => {
+    row.querySelector('.superficie-num').textContent = 'Superficie ' + (i + 1);
+  });
+}
+function agregarFilaSuperficie(largo, alto){
+  const cont = $('#listaSuperficies');
+  const wrap = document.createElement('div');
+  wrap.innerHTML = filaSuperficieHtml(largo, alto);
+  const fila = wrap.firstElementChild;
+  cont.appendChild(fila);
+  fila.querySelector('.btn-quitar-superficie').addEventListener('click', () => {
+    // Siempre queda al menos una fila visible: si se borra la última, se
+    // vacía en vez de sacarla del todo (para no dejar la sección sin nada).
+    if ($$('#listaSuperficies .superficie-row').length <= 1){
+      fila.querySelector('.sup-largo').value = '';
+      fila.querySelector('.sup-alto').value = '';
+      return;
+    }
+    fila.remove();
+    renumerarSuperficies();
+  });
+  renumerarSuperficies();
+}
+function resetSuperficies(){
+  $('#listaSuperficies').innerHTML = '';
+  agregarFilaSuperficie();
+}
+function leerSuperficies(){
+  return $$('#listaSuperficies .superficie-row').map(row => ({
+    largo: parseFloat(row.querySelector('.sup-largo').value) || 0,
+    alto: parseFloat(row.querySelector('.sup-alto').value) || 0
+  })).filter(s => s.largo > 0 && s.alto > 0);
+}
+$('#btnAgregarSuperficie').addEventListener('click', () => agregarFilaSuperficie());
+
 function leerObra(){
+  if (tipoObraElegido && tipoObraElegido.categoria === 'piedra'){
+    return {
+      superficies: leerSuperficies(),
+      manoObra: $('#manoObra').checked,
+      desperdicioPctPiedra: parseFloat($('#desperdicioPctPiedra').value) || 0
+    };
+  }
   return {
     m2Pisos: parseFloat($('#m2Pisos').value) || 0,
     mlZocalos: parseFloat($('#mlZocalos').value) || 0,
@@ -719,7 +839,7 @@ async function asegurarCatalogo(){
 
 async function asegurarCatalogosTipoObra(){
   if (catalogosTipoObraCache) return catalogosTipoObraCache;
-  const categorias = ['puerta', 'nivelacion', 'manta', 'pegamento'];
+  const categorias = CATEGORIAS_ITEM_POR_TIPO[tipoObraElegido.categoria] || CATEGORIAS_ITEM_POR_TIPO.piso;
   const listas = await Promise.all(categorias.map((cat) =>
     fetch('/api/cotizador/tipos-obra/' + tipoObraElegido.id + '/items?store_id=' + storeId + '&categoria=' + cat)
       .then((r) => r.ok ? r.json() : [])
@@ -729,17 +849,27 @@ async function asegurarCatalogosTipoObra(){
   return catalogosTipoObraCache;
 }
 
+function m2TotalPiedra(obra){
+  return (obra.superficies || []).reduce((s, x) => s + (Number(x.largo) || 0) * (Number(x.alto) || 0), 0);
+}
+
 $('#btnContinuarProductos').addEventListener('click', async () => {
   mostrarMsg(null);
   if (!storeId){ mostrarMsg('Elegí una tienda primero.'); return; }
   const obra = leerObra();
-  if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion){
+  const esPiedra = tipoObraElegido && tipoObraElegido.categoria === 'piedra';
+  if (esPiedra){
+    if (m2TotalPiedra(obra) <= 0){
+      mostrarMsg('Cargá al menos una superficie (largo y alto).');
+      return;
+    }
+  } else if (obra.m2Pisos <= 0 && obra.mlZocalos <= 0 && obra.cantidadPuertas <= 0 && !obra.requiereNivelacion){
     mostrarMsg('Cargá al menos un dato de la obra (m², ml, puertas o nivelación).');
     return;
   }
   try{
     await asegurarCatalogo();
-    if (obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0){
+    if (esPiedra || obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0){
       await asegurarCatalogosTipoObra();
     }
   }catch(e){
@@ -760,6 +890,12 @@ $('#btnVolverObra').addEventListener('click', () => {
 // Piso y zócalo siguen atados al rubro que el tipo de obra tiene configurado.
 function bloquesRubro(obra){
   const bloques = [];
+  if (tipoObraElegido && tipoObraElegido.categoria === 'piedra'){
+    if (m2TotalPiedra(obra) > 0){
+      bloques.push({ clave: 'piedra', titulo: 'Piedra', tipoEsperado: 'm2', rubro: tipoObraElegido.rubroPiedra });
+    }
+    return bloques;
+  }
   if (obra.m2Pisos > 0){
     bloques.push({ clave: 'piso', titulo: 'Piso', tipoEsperado: 'm2', rubro: tipoObraElegido.rubroPiso });
   }
@@ -884,6 +1020,30 @@ function renderPasoProductos(obra){
       cont.appendChild(bloquePegamento);
       pintarListaCatalogo(bloquePegamento.querySelector('.prod-list'), 'pegamento', catalogosTipoObraCache.pegamento, obra.mlZocalos);
     }
+
+    // Piedra: pegamento y laca van justo después de elegir el producto de
+    // piedra, siempre que haya m² a cubrir, sin check aparte (igual que
+    // zócalo + pegamento en Piso).
+    if (r.clave === 'piedra'){
+      const m2 = m2TotalPiedra(obra);
+      const bloquePegamentoPiedra = document.createElement('div');
+      bloquePegamentoPiedra.className = 'rubro-block';
+      bloquePegamentoPiedra.innerHTML =
+        '<h4>Pegamento para piedra</h4>' +
+        '<div class="rubro-tag">' + round2(m2) + ' m² a cubrir</div>' +
+        '<div class="prod-list" data-lista="pegamentoPiedra"></div>';
+      cont.appendChild(bloquePegamentoPiedra);
+      pintarListaCatalogo(bloquePegamentoPiedra.querySelector('.prod-list'), 'pegamentoPiedra', catalogosTipoObraCache.pegamentoPiedra, m2);
+
+      const bloqueLaca = document.createElement('div');
+      bloqueLaca.className = 'rubro-block';
+      bloqueLaca.innerHTML =
+        '<h4>Laca</h4>' +
+        '<div class="rubro-tag">' + round2(m2) + ' m² a cubrir</div>' +
+        '<div class="prod-list" data-lista="laca"></div>';
+      cont.appendChild(bloqueLaca);
+      pintarListaCatalogo(bloqueLaca.querySelector('.prod-list'), 'laca', catalogosTipoObraCache.laca, m2);
+    }
   });
 
   if (obra.cantidadPuertas > 0){
@@ -992,6 +1152,8 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
     const btnSimularHtml = (rubro.clave === 'piso' && p.imagen)
       ? '<button type="button" class="btn-simular" data-id="' + p.id + '" onclick="event.stopPropagation(); abrirSimulador(' + p.id + ')">📷 Probar en mi foto</button>' +
         '<label class="chk-comparar" onclick="event.stopPropagation()"><input type="checkbox" class="chk-comparar-input" data-comparar-id="' + p.id + '"' + (productosComparar.includes(p.id) ? ' checked' : '') + '> Comparar</label>'
+      : (rubro.clave === 'piedra' && p.imagen)
+      ? '<button type="button" class="btn-simular" data-id="' + p.id + '" onclick="event.stopPropagation(); abrirSimuladorPiedra(' + p.id + ')">📷 Marcar pared y probar</button>'
       : '';
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + p.id + '">' +
@@ -1054,6 +1216,7 @@ function abrirSimulador(productId){
   const prod = catalogoCache && catalogoCache.find(p => p.id === productId);
   if (!prod) return;
   productoSimulando = prod;
+  simuladorModoActual = 'piso';
   if (fotoSimuladorActual){
     ejecutarSimulacion(prod, fotoSimuladorActual);
     return;
@@ -1063,8 +1226,16 @@ function abrirSimulador(productId){
 }
 
 // Descarta la foto actual y abre de nuevo el selector (cámara o galería)
-// para elegir una nueva — se usa desde el botón "Cambiar foto" del modal.
+// para elegir una nueva — se usa desde el botón "Cambiar foto" del modal,
+// tanto en el flujo de piso como en el de piedra (ver simuladorModoActual).
 function cambiarFotoSimulador(){
+  if (simuladorModoActual === 'piedra'){
+    fotoSimuladorPiedraActual = null;
+    areaSimuladorPiedraActual = null;
+    $('#inputFotoSimuladorPiedra').value = '';
+    $('#inputFotoSimuladorPiedra').click();
+    return;
+  }
   fotoSimuladorActual = null;
   $('#inputFotoSimulador').value = '';
   $('#inputFotoSimulador').click();
@@ -1098,12 +1269,166 @@ $('#inputFotoSimulador').addEventListener('change', async (e) => {
 // misma foto en varios productos sin volver a pedirla cada vez.
 async function ejecutarSimulacion(prod, fotoDataUrl){
   productoSimulando = prod;
+  simuladorModoActual = 'piso';
   mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
   try{
     const res = await fetch('/api/cotizador/simular-piso?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ productId: prod.id, foto: fotoDataUrl })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulación.');
+    mostrarModalSimulador(prod, 'resultado', data.imagen, null, fotoDataUrl);
+  }catch(err){
+    mostrarModalSimulador(prod, 'error', null, err.message);
+  }
+}
+
+// ---------- Simulador de piedra con IA (marcando el área a revestir) ----------
+// Mismo flujo que el de piso (ver arriba), con un paso extra: como una
+// pared puede tener zonas que no van revestidas, antes de mandar la foto a
+// la IA el vendedor tiene que marcar con el dedo o el mouse qué rectángulo
+// revestir (ver mostrarModalMarcarArea). El resto — modal de resultado,
+// guardar/descartar, reutilizar la misma foto para otro producto — es
+// exactamente igual que en piso, así que reutiliza mostrarModalSimulador y
+// guardarSimulacionPendiente sin cambios.
+let limpiarMarcarArea = null; // cleanup de los listeners del canvas de marcado, para no acumularlos entre aperturas
+
+function abrirSimuladorPiedra(productId){
+  const prod = catalogoCache && catalogoCache.find(p => p.id === productId);
+  if (!prod) return;
+  productoSimulandoPiedra = prod;
+  simuladorModoActual = 'piedra';
+  if (fotoSimuladorPiedraActual && areaSimuladorPiedraActual){
+    ejecutarSimulacionPiedra(prod, fotoSimuladorPiedraActual, areaSimuladorPiedraActual);
+    return;
+  }
+  $('#inputFotoSimuladorPiedra').value = '';
+  $('#inputFotoSimuladorPiedra').click();
+}
+
+$('#inputFotoSimuladorPiedra').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file || !productoSimulandoPiedra){ return; }
+  try{
+    // Un poco más grande que la de piso (900px): acá hace falta más
+    // resolución para poder marcar el área con precisión.
+    const fotoDataUrl = await redimensionarFoto(file, 1100, 0.8);
+    fotoSimuladorPiedraActual = fotoDataUrl;
+    areaSimuladorPiedraActual = null;
+    mostrarModalMarcarArea(fotoDataUrl);
+  }catch(err){
+    mostrarModalSimulador(productoSimulandoPiedra, 'error', null, err.message);
+  }
+});
+
+// Muestra la foto elegida con un canvas transparente encima donde el
+// vendedor dibuja (arrastrando, con mouse o touch/pointer) el rectángulo a
+// revestir. Al confirmar, corre la simulación con ese rectángulo.
+function mostrarModalMarcarArea(fotoDataUrl){
+  if (limpiarMarcarArea){ limpiarMarcarArea(); limpiarMarcarArea = null; }
+  $('#simTitulo').textContent = 'Simular piedra con foto';
+  $('#simSubtitulo').textContent = (productoSimulandoPiedra ? productoSimulandoPiedra.nombre + ' — ' : '') + 'marcá la zona de la pared a revestir';
+  $('#simContenido').innerHTML =
+    '<div class="marcar-area-wrap" id="marcarAreaWrap">' +
+      '<img id="marcarAreaImg" src="' + fotoDataUrl + '">' +
+      '<canvas id="marcarAreaCanvas"></canvas>' +
+    '</div>' +
+    '<p class="marcar-area-hint">Arrastrá sobre la foto para dibujar el rectángulo a revestir.</p>';
+  $('#simAcciones').innerHTML =
+    '<button class="secondary" onclick="cerrarModalSimulador()">Cancelar</button>' +
+    '<button class="secondary" onclick="cambiarFotoSimulador()">🔄 Cambiar foto</button>' +
+    '<button class="primary" id="btnConfirmarArea" disabled>Confirmar área →</button>';
+  $('#modalSimulador').classList.remove('hidden');
+
+  const img = $('#marcarAreaImg');
+  const canvas = $('#marcarAreaCanvas');
+  const wrap = $('#marcarAreaWrap');
+  const btnConfirmar = $('#btnConfirmarArea');
+  let rect = null; // { xPct, yPct, wPct, hPct } relativo al tamaño mostrado de la foto
+  let dibujando = false;
+  let inicioX = 0, inicioY = 0;
+
+  function redibujar(){
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!rect) return;
+    const x = (rect.xPct / 100) * canvas.width;
+    const y = (rect.yPct / 100) * canvas.height;
+    const w = (rect.wPct / 100) * canvas.width;
+    const h = (rect.hPct / 100) * canvas.height;
+    ctx.fillStyle = 'rgba(255,0,0,0.18)';
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 2;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+  }
+  function ajustarCanvas(){
+    canvas.width = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+    redibujar();
+  }
+  function coordsDesdeEvento(e){
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function iniciar(e){
+    e.preventDefault();
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    dibujando = true;
+    const c = coordsDesdeEvento(e);
+    inicioX = Math.max(0, Math.min(canvas.width, c.x));
+    inicioY = Math.max(0, Math.min(canvas.height, c.y));
+  }
+  function mover(e){
+    if (!dibujando) return;
+    e.preventDefault();
+    const c = coordsDesdeEvento(e);
+    const finX = Math.max(0, Math.min(canvas.width, c.x));
+    const finY = Math.max(0, Math.min(canvas.height, c.y));
+    const x1 = Math.min(inicioX, finX), x2 = Math.max(inicioX, finX);
+    const y1 = Math.min(inicioY, finY), y2 = Math.max(inicioY, finY);
+    rect = {
+      xPct: (x1 / canvas.width) * 100,
+      yPct: (y1 / canvas.height) * 100,
+      wPct: ((x2 - x1) / canvas.width) * 100,
+      hPct: ((y2 - y1) / canvas.height) * 100
+    };
+    redibujar();
+    btnConfirmar.disabled = !(rect.wPct > 1 && rect.hPct > 1);
+  }
+  function terminar(){ dibujando = false; }
+
+  canvas.addEventListener('pointerdown', iniciar);
+  canvas.addEventListener('pointermove', mover);
+  window.addEventListener('pointerup', terminar);
+  window.addEventListener('resize', ajustarCanvas);
+  if (img.complete && img.naturalWidth) ajustarCanvas();
+  else img.addEventListener('load', ajustarCanvas);
+
+  btnConfirmar.addEventListener('click', () => {
+    if (!rect) return;
+    areaSimuladorPiedraActual = rect;
+    if (limpiarMarcarArea){ limpiarMarcarArea(); limpiarMarcarArea = null; }
+    ejecutarSimulacionPiedra(productoSimulandoPiedra, fotoDataUrl, rect);
+  });
+
+  limpiarMarcarArea = () => {
+    window.removeEventListener('pointerup', terminar);
+    window.removeEventListener('resize', ajustarCanvas);
+  };
+}
+
+async function ejecutarSimulacionPiedra(prod, fotoDataUrl, area){
+  productoSimulandoPiedra = prod;
+  simuladorModoActual = 'piedra';
+  mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
+  try{
+    const res = await fetch('/api/cotizador/simular-piedra?store_id=' + storeId, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ productId: prod.id, foto: fotoDataUrl, area })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulación.');
@@ -1120,6 +1445,7 @@ async function ejecutarSimulacion(prod, fotoDataUrl){
 // las simulaciones con esa misma foto y se muestran juntas en una grilla,
 // para poder ver las opciones lado a lado en vez de una por una.
 function abrirComparacionPisos(){
+  simuladorModoActual = 'piso';
   if (!productosComparar.length){ mostrarMsg('Tildá "Comparar" en al menos un piso.'); return; }
   if (fotoSimuladorActual){
     ejecutarComparacion(fotoSimuladorActual);
@@ -1164,6 +1490,7 @@ async function ejecutarComparacion(fotoDataUrl){
 }
 
 function mostrarModalComparacion(fotoDataUrl){
+  $('#simTitulo').textContent = 'Comparar pisos con foto';
   $('#simSubtitulo').textContent = comparacionEnCurso.length + ' pisos — comparación con la misma foto';
   renderCeldasComparacion(fotoDataUrl);
   $('#simAcciones').innerHTML =
@@ -1240,6 +1567,7 @@ function redimensionarFoto(file, maxLado, calidad){
 }
 
 function mostrarModalSimulador(prod, estado, imagen, errorMsg, antes){
+  $('#simTitulo').textContent = simuladorModoActual === 'piedra' ? 'Simular piedra con foto' : 'Simular piso con foto';
   $('#simSubtitulo').textContent = prod.nombre;
   const contenido = $('#simContenido');
   const acciones = $('#simAcciones');
@@ -1266,9 +1594,11 @@ function mostrarModalSimulador(prod, estado, imagen, errorMsg, antes){
 }
 
 function cerrarModalSimulador(){
+  if (limpiarMarcarArea){ limpiarMarcarArea(); limpiarMarcarArea = null; }
   $('#modalSimulador').classList.add('hidden');
   simResultadoActual = null;
   productoSimulando = null;
+  productoSimulandoPiedra = null;
   comparacionEnCurso = [];
 }
 
@@ -1291,6 +1621,8 @@ function verSimulacionGuardada(idx){
   if (!s || !s.imagen) return;
   simResultadoActual = null;
   productoSimulando = null;
+  productoSimulandoPiedra = null;
+  $('#simTitulo').textContent = 'Simulación guardada';
   $('#simSubtitulo').textContent = s.producto || '';
   $('#simContenido').innerHTML = s.antes
     ? '<div class="sim-antes-despues">' +
@@ -1585,6 +1917,8 @@ $('#btnNueva').addEventListener('click', () => {
   seleccion = {};
   simulacionesPendientes = [];
   fotoSimuladorActual = null;
+  fotoSimuladorPiedraActual = null;
+  areaSimuladorPiedraActual = null;
   productosComparar = [];
   tipoObraElegido = null;
   cotizacionActual = null;
@@ -1600,6 +1934,8 @@ $('#btnNueva').addEventListener('click', () => {
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
   $('#requiereNivelacion').checked=false;
   $('#manoObra').checked=false;
+  $('#desperdicioPctPiedra').value=0;
+  resetSuperficies();
   mostrarMsg(null);
   $('#paso-resumen').classList.add('hidden');
   $('#paso-tipo-obra').classList.remove('hidden');
@@ -1784,12 +2120,23 @@ function llenarSelectRubros(sel, opciones, permitirVacio){
 
 let tiposObraConfigCache = [];
 
+function mostrarCamposCategoriaTipoObra(categoria){
+  const esPiedra = categoria === 'piedra';
+  $('#to_camposPiso').classList.toggle('hidden', esPiedra);
+  $('#to_camposPiedra').classList.toggle('hidden', !esPiedra);
+}
+
+$('#to_categoria').addEventListener('change', () => {
+  mostrarCamposCategoriaTipoObra($('#to_categoria').value);
+});
+
 async function cargarConfigTipos(){
   if (!storeId) return;
   rubrosDisponiblesCache = null;
   const rubros = await asegurarRubrosDisponibles();
   llenarSelectRubros($('#to_rubroPiso'), rubros.m2, false);
   llenarSelectRubros($('#to_rubroZocalo'), rubros.ml, true);
+  llenarSelectRubros($('#to_rubroPiedra'), rubros.m2, false);
 
   const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId);
   const lista = await res.json();
@@ -1802,8 +2149,9 @@ async function cargarConfigTipos(){
   cont.innerHTML = lista.map(t =>
     '<div class="cfg-row">' +
       '<div><strong>' + escapeHtml(t.nombre) + '</strong><div class="cfg-meta">' +
-        'Piso: ' + escapeHtml(t.rubroPiso) +
-        (t.rubroZocalo ? ' · Zócalo: ' + escapeHtml(t.rubroZocalo) : '') +
+        (t.categoria === 'piedra'
+          ? 'Piedra: ' + escapeHtml(t.rubroPiedra || '—')
+          : 'Piso: ' + escapeHtml(t.rubroPiso) + (t.rubroZocalo ? ' · Zócalo: ' + escapeHtml(t.rubroZocalo) : '')) +
         ' · Desperdicio: ' + t.desperdicioDefaultPct + '%</div></div>' +
       '<div style="display:flex;gap:8px;">' +
         '<button class="secondary small" data-catalogos="' + t.id + '">Catálogos</button>' +
@@ -1820,8 +2168,11 @@ async function cargarConfigTipos(){
       editandoTipoObraId = t.id;
       $('#to_nombre').value = t.nombre;
       $('#to_desperdicio').value = t.desperdicioDefaultPct;
-      $('#to_rubroPiso').value = t.rubroPiso;
+      $('#to_categoria').value = t.categoria || 'piso';
+      $('#to_rubroPiso').value = t.rubroPiso || '';
       $('#to_rubroZocalo').value = t.rubroZocalo || '';
+      $('#to_rubroPiedra').value = t.rubroPiedra || '';
+      mostrarCamposCategoriaTipoObra(t.categoria || 'piso');
       $('#cfg-tipos-form-titulo').textContent = 'Editando: ' + t.nombre;
       $('#btnCancelarEdicionTipo').classList.remove('hidden');
     });
@@ -1848,7 +2199,9 @@ async function cargarConfigTipos(){
 $('#btnCancelarEdicionTipo').addEventListener('click', () => {
   editandoTipoObraId = null;
   $('#to_nombre').value = ''; $('#to_desperdicio').value = 0;
-  $('#to_rubroPiso').value = ''; $('#to_rubroZocalo').value = '';
+  $('#to_categoria').value = 'piso';
+  $('#to_rubroPiso').value = ''; $('#to_rubroZocalo').value = ''; $('#to_rubroPiedra').value = '';
+  mostrarCamposCategoriaTipoObra('piso');
   $('#cfg-tipos-form-titulo').textContent = 'Agregar tipo de obra';
   $('#btnCancelarEdicionTipo').classList.add('hidden');
 });
@@ -1856,14 +2209,19 @@ $('#btnCancelarEdicionTipo').addEventListener('click', () => {
 $('#btnGuardarTipoObra').addEventListener('click', async () => {
   mostrarMsg(null);
   const eraNuevo = !editandoTipoObraId;
+  const categoria = $('#to_categoria').value === 'piedra' ? 'piedra' : 'piso';
   const body = {
     id: editandoTipoObraId || undefined,
     nombre: $('#to_nombre').value.trim(),
+    categoria,
     rubroPiso: $('#to_rubroPiso').value,
     rubroZocalo: $('#to_rubroZocalo').value,
+    rubroPiedra: $('#to_rubroPiedra').value,
     desperdicioDefaultPct: parseFloat($('#to_desperdicio').value) || 0
   };
-  if (!body.nombre || !body.rubroPiso){ mostrarMsg('Falta el nombre o el rubro de piso.'); return; }
+  if (!body.nombre || (categoria === 'piso' && !body.rubroPiso) || (categoria === 'piedra' && !body.rubroPiedra)){
+    mostrarMsg('Falta el nombre o el rubro correspondiente.'); return;
+  }
   const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
@@ -1874,26 +2232,31 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
   await cargarConfigTipos();
   if (eraNuevo){
     // Recién creado: abrimos directo sus catálogos para que cargue los SKU.
-    abrirCatalogos({ id: data.id, nombre: data.nombre });
+    abrirCatalogos({ id: data.id, nombre: data.nombre, categoria });
   }
 });
 
 // ---------- Configuración: catálogos por SKU / mano de obra de un tipo de obra ----------
 function abrirCatalogos(tipoObra){
   gestionandoTipoObraId = String(tipoObra.id);
-  categoriaActivaCatalogo = 'puerta';
+  gestionandoTipoObraCategoria = tipoObra.categoria === 'piedra' ? 'piedra' : 'piso';
+  const esPiedra = gestionandoTipoObraCategoria === 'piedra';
+  categoriaActivaCatalogo = esPiedra ? 'pegamentoPiedra' : 'puerta';
   $('#cfg-catalogos-titulo').textContent = 'Catálogos de: ' + tipoObra.nombre;
   $('#cfg-catalogos-panel').classList.remove('hidden');
-  $$('.catsub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === 'puerta'));
+  $('#cfg-catsub-piso').classList.toggle('hidden', esPiedra);
+  $('#cfg-catsub-piedra').classList.toggle('hidden', !esPiedra);
+  $$('.catsub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === categoriaActivaCatalogo));
   $('#cfg-catalogo-sku').classList.remove('hidden');
   $('#cfg-catalogo-tarifas').classList.add('hidden');
-  $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT.puerta;
+  $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
   $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
   cargarCatalogoActivo();
 }
 
 $('#btnCerrarCatalogos').addEventListener('click', () => {
   gestionandoTipoObraId = null;
+  gestionandoTipoObraCategoria = 'piso';
   $('#cfg-catalogos-panel').classList.add('hidden');
 });
 
@@ -2006,6 +2369,9 @@ $('#btnAgregarFormaPago').addEventListener('click', async () => {
 // ---------- Configuración: tarifas de mano de obra (propias de cada tipo de obra) ----------
 async function cargarTarifasTipoObra(){
   if (!gestionandoTipoObraId) return;
+  const esPiedra = gestionandoTipoObraCategoria === 'piedra';
+  $('#t_camposPiso').classList.toggle('hidden', esPiedra);
+  $('#t_camposPiedra').classList.toggle('hidden', !esPiedra);
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId);
   const t = await res.json();
   if (!res.ok) return;
@@ -2013,6 +2379,7 @@ async function cargarTarifasTipoObra(){
   $('#t_zocalos_ml').value = t.zocalos_ml;
   $('#t_puertas_unidad').value = t.puertas_unidad;
   $('#t_nivelacion_m2').value = t.nivelacion_m2;
+  $('#t_piedra_m2').value = t.piedra_m2 || 0;
   $('#t_minimoM2Cotizable').value = t.minimoM2Cotizable || 0;
 }
 $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
@@ -2023,6 +2390,7 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
     zocalos_ml: parseFloat($('#t_zocalos_ml').value) || 0,
     puertas_unidad: parseFloat($('#t_puertas_unidad').value) || 0,
     nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0,
+    piedra_m2: parseFloat($('#t_piedra_m2').value) || 0,
     minimoM2Cotizable: parseFloat($('#t_minimoM2Cotizable').value) || 0
   };
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId, {
