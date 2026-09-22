@@ -933,8 +933,23 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/items-extra
       if (!visita.presupuesto || visita.presupuesto.tipo !== 'cotizador') {
         throw err(400, 'Esta visita no tiene un presupuesto armado con el cotizador');
       }
-      const baseTotal = Number(visita.presupuesto.baseTotal) || 0;
+      // "baseTotal" es el subtotal que calculó el cotizador — se guarda
+      // desde que se vincula la cotización (ver /presupuesto-cotizador).
+      // Si esta visita tiene un presupuesto de cotizador vinculado de ANTES
+      // de que existiera ese campo, no estaría guardado — en vez de asumir
+      // 0 (lo que hacía que el total terminara siendo solo el de los ítems
+      // agregados a mano, como si el presupuesto del cotizador hubiera
+      // "desaparecido"), se lo recupera de la cotización original.
+      let baseTotal = Number(visita.presupuesto.baseTotal);
+      if (!(baseTotal > 0) && visita.presupuesto.cotizacionId) {
+        const cot = await db.collection('cotizaciones').findOne({
+          _id: visita.presupuesto.cotizacionId,
+          store_id: Number(visita.presupuesto.storeId)
+        });
+        baseTotal = cot ? Number(cot.total) || 0 : 0;
+      }
       const set = {
+        'presupuesto.baseTotal': baseTotal,
         'presupuesto.itemsExtra': itemsExtra,
         'presupuesto.total': Math.round((baseTotal + extraTotal) * 100) / 100,
         updatedAt: new Date()
