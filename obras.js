@@ -347,6 +347,47 @@ router.put('/colocadores/:id', authAdmin, async (req, res) => {
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
+// Da de alta el calendario de Google de este colocador: crea un calendario
+// nuevo (lo administra la cuenta de servicio) y lo comparte automáticamente
+// con su mail de Google — no hace falta entrar a Google Calendar a mano.
+// A partir de ahí sus obras se sincronizan solas.
+router.post('/colocadores/:id/calendario', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const email = (req.body && req.body.email || '').trim();
+    if (!email) return res.status(400).json({ error: 'Falta el mail de la cuenta de Google del colocador' });
+    if (!googleCalendar.habilitado()) return res.status(400).json({ error: 'Google Calendar no está configurado en el servidor (falta GOOGLE_SERVICE_ACCOUNT_KEY)' });
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const colocador = await db.collection('obras_colocadores').findOne({ _id: id });
+      if (!colocador) throw Object.assign(new Error('Colocador no encontrado'), { status: 404 });
+      const calendarId = await googleCalendar.crearCalendarioParaPersona(`Obras — ${colocador.nombre}`, email);
+      if (!calendarId) throw Object.assign(new Error('No se pudo crear el calendario en Google (revisá los logs del servidor)'), { status: 500 });
+      await db.collection('obras_colocadores').updateOne({ _id: id }, { $set: { googleCalendarId: calendarId, googleAccountEmail: email } });
+      return db.collection('obras_colocadores').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// Da de baja el calendario de este colocador: deja de usarlo para sus
+// próximas obras (caen al calendario general de respaldo, si hay uno). No
+// borra el calendario de Google en sí, para no perder el historial ya
+// sincronizado ahí.
+router.delete('/colocadores/:id/calendario', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const actualizado = await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('obras_colocadores').updateOne({ _id: id }, { $set: { googleCalendarId: '', googleAccountEmail: '' } });
+      return db.collection('obras_colocadores').findOne({ _id: id });
+    });
+    res.json(actualizado);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 router.delete('/colocadores/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
