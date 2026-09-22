@@ -81,8 +81,14 @@ async function upsertEvento(googleEventId, eventoBase) {
   const cal = getCalendarClient();
   if (!cal) return googleEventId || null;
   const calendarId = process.env.GOOGLE_CALENDAR_ID;
-  const requestBody = armarRequestBody(eventoBase);
   try {
+    // armarRequestBody va DENTRO del try: si eventoBase trae una fecha
+    // inválida o vacía (puede pasar con tareas viejas que ya tenían una
+    // fechaFinEstimada rota, de antes de que el panel dejara de pedirla),
+    // new Date(...).toISOString() tira una excepción — y como esta función
+    // no debe romper nunca el flujo de obras.js/visitas.js (ver comentario
+    // de arriba), tiene que quedar atrapada acá adentro.
+    const requestBody = armarRequestBody(eventoBase);
     if (googleEventId) {
       const r = await cal.events.update({ calendarId, eventId: googleEventId, requestBody });
       return r.data.id;
