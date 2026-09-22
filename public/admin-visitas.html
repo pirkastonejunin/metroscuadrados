@@ -198,8 +198,9 @@
         </div>
       </div>
       <div class="card">
+        <p class="muted">Calendario Google: pegá acá el id del calendario propio de cada vendedor (algo como "xxxx@group.calendar.google.com") para que sus visitas le lleguen a ESE calendario. Si lo dejás vacío, sus visitas caen al calendario general de respaldo (si hay uno configurado). Ver GOOGLE_CALENDAR_SETUP.md para cómo compartir el calendario y conseguir ese id.</p>
         <table>
-          <thead><tr><th>Nombre</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
           <tbody id="vendedoresBody"></tbody>
         </table>
       </div>
@@ -462,8 +463,12 @@ async function cargarVendedores(){
   document.getElementById('vendedoresBody').innerHTML = VENDEDORES.map(v=>`
     <tr>
       <td>${v.nombre}</td><td>${v.telefono||''}</td>
+      <td><input class="calInput" data-id="${v._id}" value="${escapeHtml(v.googleCalendarId||'')}" placeholder="xxxx@group.calendar.google.com" style="min-width:220px"></td>
       <td>${v.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
-      <td><button class="btn small secondary" onclick="toggleVendedor('${v._id}', ${v.activo===false})">${v.activo===false?'Reactivar':'Desactivar'}</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarCalendarioVendedor('${v._id}', this)">Guardar calendario</button>
+        <button class="btn small secondary" onclick="toggleVendedor('${v._id}', ${v.activo===false})">${v.activo===false?'Reactivar':'Desactivar'}</button>
+      </td>
     </tr>`).join('');
   const opciones = '<option value="">Todos</option>' + VENDEDORES.map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
   document.getElementById('fVisVendedor').innerHTML = opciones;
@@ -480,6 +485,14 @@ async function crearVendedor(){
 async function toggleVendedor(id, activar){
   await api(`/vendedores/${id}`, {method:'PUT', body:{activo: activar}});
   cargarVendedores();
+}
+async function guardarCalendarioVendedor(id, btn){
+  const input = btn.closest('tr').querySelector('.calInput');
+  try{
+    await api(`/vendedores/${id}`, {method:'PUT', body:{googleCalendarId: input.value.trim()}});
+    btn.textContent = 'Guardado ✓';
+    setTimeout(()=>{ btn.textContent = 'Guardar calendario'; }, 1500);
+  }catch(e){ alert('No se pudo guardar: ' + e.message); }
 }
 
 // ---------------- TIPOS DE TRABAJO (catálogo de obras.js, solo lectura acá) ----------------

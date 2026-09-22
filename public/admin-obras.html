@@ -296,30 +296,33 @@ function normalizarTelefonoWA(telefono){
   return '549' + d;
 }
 
-function mensajeAsignacionColocador(obra, tarea, colocadorNombre){
-  const materiales = (tarea.materiales && tarea.materiales.length)
-    ? tarea.materiales.map(m => `• ${m.cantidad ? m.cantidad + ' ' : ''}${m.tipo}`).join('\n')
-    : 'No se cargaron materiales para esta tarea.';
+function mensajeAsignacionObra(obra, colocadorNombre){
+  const tareas = obra.tareas || [];
+  const productos = tareas.map(t => `• ${t.tipoTrabajo} — ${t.m2Presupuestados} m²`).join('\n');
+  const materiales = tareas.map(t => {
+    if (!t.materiales || !t.materiales.length) return '';
+    return `*${t.tipoTrabajo}:*\n` + t.materiales.map(m => `• ${m.cantidad ? m.cantidad + ' ' : ''}${m.tipo}`).join('\n');
+  }).filter(Boolean).join('\n');
   return `¡Hola ${colocadorNombre}! 👋 Te paso los datos de la obra:\n\n`+
-    `🏗️ Obra #${obra.numero} — ${tarea.tipoTrabajo}\n`+
+    `🏗️ Obra #${obra.numero}\n`+
     `👤 Cliente: ${obra.cliente.nombre}\n`+
     `📍 Dirección: ${obra.cliente.direccion||''}${obra.cliente.localidad?' · '+obra.cliente.localidad:''}\n`+
     `📞 Teléfono del cliente: ${obra.cliente.telefono||'-'}\n`+
-    `📐 m² presupuestados: ${tarea.m2Presupuestados}\n`+
-    (tarea.fechaFinEstimada ? `🗓️ Fecha estimada: ${new Date(tarea.fechaFinEstimada).toLocaleDateString('es-AR')}\n` : '')+
-    `\n📦 Materiales a llevar:\n${materiales}\n`+
+    (obra.fechaInicio ? `🗓️ Fecha de inicio: ${new Date(obra.fechaInicio).toLocaleDateString('es-AR')}\n` : '')+
+    `\n📋 Productos:\n${productos}\n`+
+    (materiales ? `\n📦 Materiales a llevar:\n${materiales}\n` : '')+
     (obra.notasColocador ? `\n📝 Aclaraciones: ${obra.notasColocador}\n` : '')+
     `\n¡Gracias!`;
 }
 
-function linkWhatsappColocador(obra, tarea, colocador){
+function linkWhatsappObra(obra, colocador){
   const tel = normalizarTelefonoWA(colocador.telefono);
-  const texto = encodeURIComponent(mensajeAsignacionColocador(obra, tarea, colocador.nombre));
+  const texto = encodeURIComponent(mensajeAsignacionObra(obra, colocador.nombre));
   return tel ? `https://wa.me/${tel}?text=${texto}` : `https://wa.me/?text=${texto}`;
 }
-function botonWhatsappColocador(obra, tarea, colocador){
+function botonWhatsappObra(obra, colocador){
   if (!colocador) return '';
-  return `<a class="btn whatsapp small" href="${linkWhatsappColocador(obra,tarea,colocador)}" target="_blank" rel="noopener">💬 Enviar detalle por WhatsApp</a>`;
+  return `<a class="btn whatsapp small" href="${linkWhatsappObra(obra,colocador)}" target="_blank" rel="noopener">💬 Enviar detalle por WhatsApp</a>`;
 }
 
 function filaMaterial(tipo='', cantidad=''){
@@ -381,6 +384,11 @@ function abrirFormColocador(c){
       <div><label>Estado</label><select id="colActivo"><option value="true" ${!c||c.activo!==false?'selected':''}>Activo</option><option value="false" ${c&&c.activo===false?'selected':''}>Inactivo</option></select></div>
     </div>
     <div style="margin-top:12px">
+      <label>Calendario Google</label>
+      <input id="colGoogleCalendarId" value="${c?escapeHtml(c.googleCalendarId||''):''}" placeholder="xxxx@group.calendar.google.com">
+      <div class="muted" style="margin-top:2px">Sus obras (una fecha por obra, no por producto) le van a llegar a este calendario. Vacío = calendario general de respaldo, si hay uno configurado.</div>
+    </div>
+    <div style="margin-top:12px">
       <label>Costo por m² según tipo de trabajo</label>
       <div id="costosContainer">${costosHtml}</div>
       <button class="btn small secondary" type="button" onclick="document.getElementById('costosContainer').insertAdjacentHTML('beforeend', filaCosto())">+ Agregar tipo de trabajo</button>
@@ -398,13 +406,14 @@ async function guardarColocador(id){
   const telefono = document.getElementById('colTelefono').value.trim();
   const pin = document.getElementById('colPin').value.trim();
   const activo = document.getElementById('colActivo').value === 'true';
+  const googleCalendarId = document.getElementById('colGoogleCalendarId').value.trim();
   const costos = [...document.querySelectorAll('#costosContainer .costo-row')].map(row=>({
     tipoTrabajo: row.querySelector('.costoTipo').value,
     costoPorM2: Number(row.querySelector('.costoValor').value)||0
   })).filter(c=>c.tipoTrabajo);
   try{
-    if (id) await api(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo}});
-    else await api('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos}});
+    if (id) await api(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo,googleCalendarId}});
+    else await api('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos,googleCalendarId}});
     cerrarModal();
     cargarColocadores();
   }catch(e){ document.getElementById('colErr').textContent = e.message; }
@@ -544,7 +553,6 @@ async function abrirObra(id){
   const colocadoresMixtos = colocadorIds.length > 1;
 
   const productosHtml = tareas.map(t => {
-    const asignado = t.colocadorId ? COLOCADORES.find(c=>c._id===t.colocadorId) : null;
     return `
     <div class="tarea-seccion">
       <div class="row" style="justify-content:space-between">
@@ -552,11 +560,7 @@ async function abrirObra(id){
         <button class="btn small danger" onclick="borrarTarea('${o._id}','${t._id}')">Eliminar</button>
       </div>
 
-      <div class="grid2" style="margin-top:8px">
-        <div><label>m² presupuestados</label><input type="number" value="${t.m2Presupuestados}" onchange="editarTarea('${o._id}','${t._id}',{m2Presupuestados:this.value})"></div>
-        <div><label>Fecha fin estimada</label><input type="date" value="${t.fechaFinEstimada?t.fechaFinEstimada.slice(0,10):''}" onchange="editarTarea('${o._id}','${t._id}',{fechaFinEstimada:this.value})"></div>
-      </div>
-      ${asignado ? `<div class="estado-row" style="margin-top:8px">${botonWhatsappColocador(o, t, asignado)}</div>` : '<div class="muted" style="margin-top:6px">Asigná un colocador arriba para poder mandarle el detalle por WhatsApp.</div>'}
+      <div style="margin-top:8px"><label>m² presupuestados</label><input type="number" value="${t.m2Presupuestados}" onchange="editarTarea('${o._id}','${t._id}',{m2Presupuestados:this.value})"></div>
 
       <div style="margin-top:10px">
         <div class="tarea-seccion-titulo">Materiales a llevar</div>
@@ -572,10 +576,13 @@ async function abrirObra(id){
   `;
   }).join('');
 
+  const colocadorComun = colocadorComunId ? COLOCADORES.find(c=>c._id===colocadorComunId) : null;
+
   // Una sola tarjeta para toda la obra: arriba, todo lo que se maneja como
   // un único dato para toda la obra (colocador, estado, fecha de inicio,
-  // notas) — abajo, los productos, que son lo único que sigue siendo por
-  // separado (m², materiales, fecha fin estimada de cada uno).
+  // notas, y el único botón de WhatsApp con todos los productos juntos) —
+  // abajo, los productos, que son lo único que sigue siendo por separado
+  // (m² y materiales de cada uno).
   const datosGeneralesHtml = `
     <div class="tarea-seccion">
       <div class="tarea-seccion-titulo">Datos generales de la obra</div>
@@ -600,6 +607,9 @@ async function abrirObra(id){
       <div style="margin-top:8px"><label>Fecha de inicio de obra</label><input type="date" value="${o.fechaInicio?o.fechaInicio.slice(0,10):''}" onchange="editarObra('${o._id}',{fechaInicio:this.value})"></div>
       <div style="margin-top:8px"><label>Notas para el colocador</label><textarea onchange="editarObra('${o._id}',{notasColocador:this.value})">${escapeHtml(o.notasColocador||'')}</textarea></div>
       <div style="margin-top:8px"><label>Notas para el asesor</label><textarea onchange="editarObra('${o._id}',{notasAsesor:this.value})">${escapeHtml(o.notasAsesor||'')}</textarea></div>
+      <div style="margin-top:10px">
+        ${colocadorComun ? botonWhatsappObra(o, colocadorComun) : '<div class="muted">Asigná un colocador para poder mandarle el detalle por WhatsApp.</div>'}
+      </div>
     </div>
   `;
 
