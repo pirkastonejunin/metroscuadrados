@@ -198,7 +198,7 @@
         </div>
       </div>
       <div class="card">
-        <p class="muted">Calendario Google: pegá acá el id del calendario propio de cada vendedor (algo como "xxxx@group.calendar.google.com") para que sus visitas le lleguen a ESE calendario. Si lo dejás vacío, sus visitas caen al calendario general de respaldo (si hay uno configurado). Ver GOOGLE_CALENDAR_SETUP.md para cómo compartir el calendario y conseguir ese id.</p>
+        <p class="muted">Calendario Google: poné el mail de la cuenta de Google del vendedor y tocá "Crear calendario" — la app crea un calendario propio para esa persona y se lo comparte sola (no hace falta entrar a Google Calendar a mano). A partir de ahí sus visitas le llegan ahí. Si nadie tiene calendario propio cargado, las visitas caen al calendario general de respaldo (si hay uno configurado).</p>
         <table>
           <thead><tr><th>Nombre</th><th>Teléfono</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
           <tbody id="vendedoresBody"></tbody>
@@ -463,15 +463,22 @@ async function cargarVendedores(){
   document.getElementById('vendedoresBody').innerHTML = VENDEDORES.map(v=>`
     <tr>
       <td>${v.nombre}</td><td>${v.telefono||''}</td>
-      <td><input class="calInput" data-id="${v._id}" value="${escapeHtml(v.googleCalendarId||'')}" placeholder="xxxx@group.calendar.google.com" style="min-width:220px"></td>
+      <td>${celdaCalendario(v)}</td>
       <td>${v.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
       <td style="white-space:nowrap">
-        <button class="btn small secondary" onclick="guardarCalendarioVendedor('${v._id}', this)">Guardar calendario</button>
         <button class="btn small secondary" onclick="toggleVendedor('${v._id}', ${v.activo===false})">${v.activo===false?'Reactivar':'Desactivar'}</button>
       </td>
     </tr>`).join('');
   const opciones = '<option value="">Todos</option>' + VENDEDORES.map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
   document.getElementById('fVisVendedor').innerHTML = opciones;
+}
+function celdaCalendario(persona){
+  if (persona.googleCalendarId) {
+    return `<div>📅 Activo${persona.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(persona.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" onclick="darDeBajaCalendarioVendedor('${persona._id}', this)">Dar de baja</button>`;
+  }
+  return `<input class="calEmailInput" data-id="${persona._id}" placeholder="mail@gmail.com" style="min-width:180px">
+    <button class="btn small secondary" onclick="crearCalendarioVendedor('${persona._id}', this)">Crear calendario</button>`;
 }
 async function crearVendedor(){
   const nombre = document.getElementById('nuevoVendNombre').value.trim();
@@ -486,13 +493,26 @@ async function toggleVendedor(id, activar){
   await api(`/vendedores/${id}`, {method:'PUT', body:{activo: activar}});
   cargarVendedores();
 }
-async function guardarCalendarioVendedor(id, btn){
-  const input = btn.closest('tr').querySelector('.calInput');
+async function crearCalendarioVendedor(id, btn){
+  const input = btn.parentElement.querySelector('.calEmailInput');
+  const email = input.value.trim();
+  if (!email) { alert('Ingresá el mail de la cuenta de Google del vendedor'); return; }
+  btn.disabled = true; btn.textContent = 'Creando...';
   try{
-    await api(`/vendedores/${id}`, {method:'PUT', body:{googleCalendarId: input.value.trim()}});
-    btn.textContent = 'Guardado ✓';
-    setTimeout(()=>{ btn.textContent = 'Guardar calendario'; }, 1500);
-  }catch(e){ alert('No se pudo guardar: ' + e.message); }
+    await api(`/vendedores/${id}/calendario`, {method:'POST', body:{email}});
+    await cargarVendedores();
+  }catch(e){
+    alert('No se pudo crear el calendario: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Crear calendario';
+  }
+}
+async function darDeBajaCalendarioVendedor(id, btn){
+  if (!confirm('¿Dar de baja el calendario de este vendedor? Sus próximas visitas van a dejar de sincronizarse ahí (no se borra el calendario ni el historial ya sincronizado).')) return;
+  btn.disabled = true;
+  try{
+    await api(`/vendedores/${id}/calendario`, {method:'DELETE'});
+    await cargarVendedores();
+  }catch(e){ alert('No se pudo dar de baja: ' + e.message); btn.disabled = false; }
 }
 
 // ---------------- TIPOS DE TRABAJO (catálogo de obras.js, solo lectura acá) ----------------

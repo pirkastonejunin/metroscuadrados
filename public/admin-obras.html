@@ -385,8 +385,8 @@ function abrirFormColocador(c){
     </div>
     <div style="margin-top:12px">
       <label>Calendario Google</label>
-      <input id="colGoogleCalendarId" value="${c?escapeHtml(c.googleCalendarId||''):''}" placeholder="xxxx@group.calendar.google.com">
-      <div class="muted" style="margin-top:2px">Sus obras (una fecha por obra, no por producto) le van a llegar a este calendario. Vacío = calendario general de respaldo, si hay uno configurado.</div>
+      ${c ? celdaCalendarioColocador(c) : '<div class="muted">Guardá el colocador primero — después de creado vas a poder darle de alta su calendario desde "Editar".</div>'}
+      <div class="muted" style="margin-top:2px">Sus obras (una fecha por obra, no por producto) le van a llegar a este calendario. Sin calendario propio = calendario general de respaldo, si hay uno configurado.</div>
     </div>
     <div style="margin-top:12px">
       <label>Costo por m² según tipo de trabajo</label>
@@ -406,17 +406,45 @@ async function guardarColocador(id){
   const telefono = document.getElementById('colTelefono').value.trim();
   const pin = document.getElementById('colPin').value.trim();
   const activo = document.getElementById('colActivo').value === 'true';
-  const googleCalendarId = document.getElementById('colGoogleCalendarId').value.trim();
   const costos = [...document.querySelectorAll('#costosContainer .costo-row')].map(row=>({
     tipoTrabajo: row.querySelector('.costoTipo').value,
     costoPorM2: Number(row.querySelector('.costoValor').value)||0
   })).filter(c=>c.tipoTrabajo);
   try{
-    if (id) await api(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo,googleCalendarId}});
-    else await api('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos,googleCalendarId}});
+    if (id) await api(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo}});
+    else await api('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos}});
     cerrarModal();
     cargarColocadores();
   }catch(e){ document.getElementById('colErr').textContent = e.message; }
+}
+
+function celdaCalendarioColocador(c){
+  if (c.googleCalendarId) {
+    return `<div>📅 Activo${c.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(c.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" type="button" onclick="darDeBajaCalendarioColocador('${c._id}')">Dar de baja</button>`;
+  }
+  return `<div style="display:flex;gap:8px;align-items:center">
+      <input id="colCalEmail" placeholder="mail@gmail.com" style="flex:1">
+      <button class="btn small secondary" type="button" onclick="crearCalendarioColocador('${c._id}')">Crear calendario</button>
+    </div>`;
+}
+async function crearCalendarioColocador(id){
+  const input = document.getElementById('colCalEmail');
+  const email = input.value.trim();
+  if (!email) { alert('Ingresá el mail de la cuenta de Google del colocador'); return; }
+  try{
+    await api(`/colocadores/${id}/calendario`, {method:'POST', body:{email}});
+    await cargarColocadores();
+    abrirEditarColocador(id);
+  }catch(e){ alert('No se pudo crear el calendario: ' + e.message); }
+}
+async function darDeBajaCalendarioColocador(id){
+  if (!confirm('¿Dar de baja el calendario de este colocador? Sus próximas obras van a dejar de sincronizarse ahí (no se borra el calendario ni el historial ya sincronizado).')) return;
+  try{
+    await api(`/colocadores/${id}/calendario`, {method:'DELETE'});
+    await cargarColocadores();
+    abrirEditarColocador(id);
+  }catch(e){ alert('No se pudo dar de baja: ' + e.message); }
 }
 
 // ---------------- TIPOS DE TRABAJO ----------------
