@@ -3,11 +3,22 @@
 // visitas.js.
 //
 // Usa una Service Account de Google (sin pantalla de login ni consentimiento
-// por usuario): se crea UNA vez en Google Cloud Console, se comparte UN
-// calendario de Google con el mail de esa cuenta de servicio (permiso
-// "Hacer cambios en los eventos"), y desde ahí la app crea/edita/borra
-// eventos en ese calendario sola, sin que nadie tenga que loguearse con
-// Google. Ver el instructivo de configuración para los pasos completos.
+// por usuario): se crea UNA vez en Google Cloud Console, y esa cuenta de
+// servicio necesita permiso de "Hacer cambios en los eventos" sobre CADA
+// calendario de Google al que se le vayan a escribir eventos — ver el
+// instructivo de configuración (GOOGLE_CALENDAR_SETUP.md) para los pasos
+// completos.
+//
+// A diferencia de la versión original (un solo calendario compartido para
+// toda la empresa), cada llamada a upsertEvento/eliminarEvento recibe el id
+// del calendario destino: las visitas van al calendario del vendedor
+// (visitas_vendedores.googleCalendarId) y las obras al del colocador
+// (obras_colocadores.googleCalendarId) — cada uno configurable en su ficha
+// del panel. Si esa persona todavía no tiene calendario propio cargado, se
+// usa GOOGLE_CALENDAR_ID como calendario general de respaldo (para que el
+// evento no se pierda mientras se va completando la carga persona por
+// persona); si tampoco hay uno general configurado, esa sincronización en
+// particular se salta sin romper nada.
 //
 // Si las variables de entorno no están cargadas, la sincronización queda
 // desactivada SIN romper nada del resto de la app: obras.js y visitas.js
@@ -21,16 +32,22 @@
 //                                 de credenciales de la cuenta de servicio,
 //                                 tal cual lo descarga Google Cloud Console
 //                                 (pegarlo entero como valor de la variable)
-//   GOOGLE_CALENDAR_ID         -> el id del calendario compartido (algo
-//                                 como "xxxx@group.calendar.google.com")
+//   GOOGLE_CALENDAR_ID         -> (opcional) id de un calendario general de
+//                                 respaldo, para vendedores/colocadores que
+//                                 todavía no tengan su propio calendario
+//                                 cargado en su ficha del panel
 // ---------------------------------------------------------------------------
 
 let calendarClientOverride = null; // solo lo usan los tests
 let calendarClientCache = null;
 let googleApisLoadFallo = false;
 
+// "Habilitado" acá significa que la cuenta de servicio está configurada
+// (precondición para poder sincronizar con CUALQUIER calendario) — ya no
+// depende de GOOGLE_CALENDAR_ID, que ahora es opcional (solo el calendario
+// de respaldo).
 function habilitado() {
-  return !!(calendarClientOverride || (process.env.GOOGLE_SERVICE_ACCOUNT_KEY && process.env.GOOGLE_CALENDAR_ID));
+  return !!(calendarClientOverride || process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
 }
 
 // Los tests inyectan acá un cliente falso con .events.insert/update/delete,
@@ -43,7 +60,7 @@ function _setClienteParaTests(clienteFalso) {
 function getCalendarClient() {
   if (calendarClientOverride) return calendarClientOverride;
   if (calendarClientCache) return calendarClientCache;
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY || !process.env.GOOGLE_CALENDAR_ID) return null;
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_KEY) return null;
   if (googleApisLoadFallo) return null;
   try {
     const { google } = require('googleapis');
@@ -73,14 +90,19 @@ function armarRequestBody(eventoBase) {
 }
 
 // Crea el evento si googleEventId es null/undefined, o lo actualiza si ya
-// existe. Devuelve el googleEventId a guardar (nuevo o el mismo), o el
-// googleEventId original (puede ser null) si la integración no está
-// configurada o algo falló — nunca tira una excepción hacia quien la llama,
-// para no romper el flujo principal de obras.js/visitas.js.
-async function upsertEvento(googleEventId, eventoBase) {
+// existe, en el calendario "calendarId" indicado (el del vendedor o
+// colocador correspondiente — ver arriba). Si no se pasa uno, cae al
+// calendario general de respaldo (GOOGLE_CALENDAR_ID); si tampoco hay uno
+// configurado, no hace nada. Devuelve el googleEventId a guardar (nuevo o
+// el mismo), o el googleEventId original (puede ser null) si la
+// integración no está configurada o algo falló — nunca tira una excepción
+// hacia quien la llama, para no romper el flujo principal de
+// obras.js/visitas.js.
+async function upsertEvento(googleEventId, eventoBase, calendarId) {
   const cal = getCalendarClient();
   if (!cal) return googleEventId || null;
-  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  const calId = calendarId || process.env.GOOGLE_CALENDAR_ID;
+  if (!calId) return googleEventId || null; // sin calendario propio ni general: no hay dónde sincronizar
   try {
     // armarRequestBody va DENTRO del try: si eventoBase trae una fecha
     // inválida o vacía (puede pasar con tareas viejas que ya tenían una
@@ -90,17 +112,17 @@ async function upsertEvento(googleEventId, eventoBase) {
     // de arriba), tiene que quedar atrapada acá adentro.
     const requestBody = armarRequestBody(eventoBase);
     if (googleEventId) {
-      const r = await cal.events.update({ calendarId, eventId: googleEventId, requestBody });
+      const r = await cal.events.update({ calendarId: calId, eventId: googleEventId, requestBody });
       return r.data.id;
     }
-    const r = await cal.events.insert({ calendarId, requestBody });
+    const r = await cal.events.insert({ calendarId: calId, requestBody });
     return r.data.id;
   } catch (e) {
     // Si el evento fue borrado a mano en Google Calendar, se recrea en vez
     // de fallar para siempre.
     if (googleEventId && (e.code === 404 || e.code === 410)) {
       try {
-        const r = await cal.events.insert({ calendarId, requestBody });
+        const r = await cal.events.insert({ calendarId: calId, requestBody });
         return r.data.id;
       } catch (e2) {
         console.error('Google Calendar: error recreando evento:', e2.message);
@@ -112,14 +134,16 @@ async function upsertEvento(googleEventId, eventoBase) {
   }
 }
 
-async function eliminarEvento(googleEventId) {
+async function eliminarEvento(googleEventId, calendarId) {
   const cal = getCalendarClient();
   if (!cal || !googleEventId) return;
-  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  const calId = calendarId || process.env.GOOGLE_CALENDAR_ID;
+  if (!calId) return;
   try {
-    await cal.events.delete({ calendarId, eventId: googleEventId });
+    await cal.events.delete({ calendarId: calId, eventId: googleEventId });
   } catch (e) {
-    // 404/410: ya no existe (por ejemplo, lo borraron a mano) — no es un error real.
+    // 404/410: ya no existe (por ejemplo, lo borraron a mano, o ya se había
+    // borrado de este mismo calendario antes) — no es un error real.
     if (e.code !== 404 && e.code !== 410) {
       console.error('Google Calendar: error borrando evento:', e.message);
     }
