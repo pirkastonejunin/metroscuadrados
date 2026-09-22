@@ -372,13 +372,27 @@ function mostrarElegirPresupuestoDesdeCero(visitaId){
 
 // ---------------- ABRIR COTIZADOR ----------------
 
+// Abre una URL en pestaña nueva, con manejo defensivo: si el navegador
+// bloquea el popup, window.open() devuelve null en vez de tirar un error, y
+// antes eso hacía que el botón pareciera "no hacer nada". Ahora, si lo
+// bloquea, se navega en la misma pestaña en su lugar (siempre funciona,
+// aunque el vendedor tenga que volver para atrás después).
+function abrirEnNuevaPestana(url){
+  const w = window.open(url, '_blank');
+  if (!w) window.location.href = url;
+}
+
 function abrirCotizador(visitaId){
-  const v = VISITAS.find(x => x._id === visitaId) || {};
+  // Usa VISITA_ACTUAL (la que se acaba de traer fresca del servidor al
+  // abrir el detalle) en vez de buscar en VISITAS (la lista, que se carga
+  // una sola vez al entrar y puede haber quedado vieja si el presupuesto de
+  // esta visita cambió recién, dentro de esta misma sesión).
+  const v = (VISITA_ACTUAL && VISITA_ACTUAL._id === visitaId) ? VISITA_ACTUAL : (VISITAS.find(x => x._id === visitaId) || {});
   const params = new URLSearchParams();
   if (STORE_ID) params.set('store_id', STORE_ID);
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
-  window.open('/cotizador.html?' + params.toString(), '_blank');
+  abrirEnNuevaPestana('/cotizador.html?' + params.toString());
 }
 
 // Reabre la MISMA cotización ya guardada en modo edición (en vez de una
@@ -386,14 +400,19 @@ function abrirCotizador(visitaId){
 // reabrir una cotización de su historial — solo que arrancado por link en
 // vez de tener que ir a buscarla a mano en la pestaña Historial.
 function abrirCotizadorParaEditar(visitaId){
-  const v = VISITAS.find(x => x._id === visitaId) || {};
-  if (!v.presupuesto || !v.presupuesto.cotizacionId) return;
+  // Mismo motivo que en abrirCotizador: si el presupuesto de esta visita se
+  // vinculó o actualizó hace un momento (dentro de esta misma sesión), la
+  // copia en VISITAS puede no tener todavía el cotizacionId — buscando ahí
+  // en vez de en VISITA_ACTUAL, el botón directamente no hacía nada, sin
+  // avisar por qué.
+  const v = (VISITA_ACTUAL && VISITA_ACTUAL._id === visitaId) ? VISITA_ACTUAL : (VISITAS.find(x => x._id === visitaId) || {});
+  if (!v.presupuesto || !v.presupuesto.cotizacionId) { alert('Esta visita todavía no tiene una cotización vinculada.'); return; }
   const params = new URLSearchParams();
   params.set('editarCotizacionId', v.presupuesto.cotizacionId);
   params.set('store_id', v.presupuesto.storeId || STORE_ID || '');
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
-  window.open('/cotizador.html?' + params.toString(), '_blank');
+  abrirEnNuevaPestana('/cotizador.html?' + params.toString());
 }
 
 async function mostrarVincularCotizacion(visitaId){
