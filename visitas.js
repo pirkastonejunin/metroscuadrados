@@ -298,6 +298,28 @@ router.put('/vendedores/:id', authAdmin, async (req, res) => {
 // nuevo (lo administra la cuenta de servicio) y lo comparte automáticamente
 // con su mail de Google — no hace falta que el vendedor ni nadie entre a
 // Google Calendar a mano. A partir de ahí sus visitas se sincronizan solas.
+// Las visitas que ya existían para este vendedor ANTES de que tuviera
+// calendario propio quedaron creadas con vendedorGoogleCalendarId=null (ese
+// dato se toma una sola vez, al crear la visita — ver POST /) y por eso su
+// evento nunca se creó, aunque después se le haya cargado el calendario. Al
+// dar de alta (o volver a dar de alta) el calendario de un vendedor, se
+// recorren sus visitas no canceladas y se sincroniza cada una a ESTE
+// calendario — así no hace falta recrear las visitas para que aparezcan.
+async function resincronizarVisitasDelVendedor(db, vendedorId, calendarId) {
+  const visitas = await db.collection('visitas').find({ vendedorId, estado: { $ne: 'cancelada' } }).toArray();
+  for (const v of visitas) {
+    if (v.googleEventId && v.vendedorGoogleCalendarId && v.vendedorGoogleCalendarId !== calendarId) {
+      // Tenía evento en otro calendario (por ejemplo uno viejo, ya dado de
+      // baja, del mismo vendedor): se saca de ahí antes de recrearlo en el
+      // nuevo, para no dejar duplicados sueltos.
+      await googleCalendar.eliminarEvento(v.googleEventId, v.vendedorGoogleCalendarId);
+      v.googleEventId = null;
+    }
+    const googleEventId = await googleCalendar.upsertEvento(v.googleEventId, eventoDeVisita(v), calendarId);
+    await db.collection('visitas').updateOne({ _id: v._id }, { $set: { googleEventId, vendedorGoogleCalendarId: calendarId } });
+  }
+}
+
 router.post('/vendedores/:id/calendario', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -312,7 +334,28 @@ router.post('/vendedores/:id/calendario', authAdmin, async (req, res) => {
       const calendarId = await googleCalendar.crearCalendarioParaPersona(`Visitas — ${vendedor.nombre}`, email);
       if (!calendarId) throw err(500, 'No se pudo crear el calendario en Google (revisá los logs del servidor)');
       await db.collection('visitas_vendedores').updateOne({ _id: id }, { $set: { googleCalendarId: calendarId, googleAccountEmail: email } });
+      await resincronizarVisitasDelVendedor(db, id, calendarId);
       return db.collection('visitas_vendedores').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Fuerza una resincronización del calendario YA configurado de este
+// vendedor (sin crear uno nuevo): sirve para el caso de visitas que
+// quedaron sin evento porque se crearon antes de que el vendedor tuviera
+// calendario, o si por lo que sea algún evento quedó desincronizado.
+router.post('/vendedores/:id/calendario/resincronizar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const vendedor = await db.collection('visitas_vendedores').findOne({ _id: id });
+      if (!vendedor) throw err(404, 'Vendedor no encontrado');
+      if (!vendedor.googleCalendarId) throw err(400, 'Este vendedor todavía no tiene calendario propio configurado');
+      await resincronizarVisitasDelVendedor(db, id, vendedor.googleCalendarId);
+      return { ok: true };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -610,6 +653,31 @@ router.put('/:id', authAdmin, async (req, res) => {
       return db.collection('visitas').findOne({ _id: id });
     });
     res.json(actualizado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Borrado definitivo del registro (no un cambio de estado): pensado para
+// sacar de encima visitas de prueba o cargadas mal, no para el uso diario
+// (para eso está "Cancelar visita", que conserva el historial). No se deja
+// borrar una visita que ya generó una Obra, para no dejar a esa Obra con
+// una referencia (obraId/visitaId) colgando — primero hay que resolverlo
+// desde el panel de Obras. Si tenía evento de Google Calendar, se borra
+// también de ahí.
+router.delete('/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const visita = await db.collection('visitas').findOne({ _id: id });
+      if (!visita) throw err(404, 'Visita no encontrada');
+      if (visita.obraId) throw err(400, 'Esta visita ya generó una obra — no se puede borrar el registro origen. Si hace falta, resolvelo desde el panel de Obras.');
+      if (visita.googleEventId) {
+        await googleCalendar.eliminarEvento(visita.googleEventId, visita.vendedorGoogleCalendarId);
+      }
+      await db.collection('visitas').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

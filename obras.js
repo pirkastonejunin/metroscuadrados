@@ -351,6 +351,23 @@ router.put('/colocadores/:id', authAdmin, async (req, res) => {
 // nuevo (lo administra la cuenta de servicio) y lo comparte automáticamente
 // con su mail de Google — no hace falta entrar a Google Calendar a mano.
 // A partir de ahí sus obras se sincronizan solas.
+// Las obras que ya tenían colocador y fecha de inicio asignados ANTES de
+// que ese colocador tuviera calendario propio se quedaron sin evento
+// (sincronizarCalendarDeObra solo se dispara cuando algo de la obra
+// cambia — ver PUT /:id, agregar/editar/borrar tarea, cambio de estado —
+// no cuando lo que cambia es el calendario del colocador). Al dar de alta
+// su calendario, se recorren sus obras activas y se sincroniza cada una.
+async function resincronizarObrasDelColocador(db, colocadorId) {
+  const obras = await db.collection('obras').find({
+    'tareas.colocadorId': colocadorId,
+    estado: { $ne: 'cancelada' }
+  }).toArray();
+  for (const obra of obras) {
+    await sincronizarCalendarDeObra(db, obra);
+    await db.collection('obras').updateOne({ _id: obra._id }, { $set: { googleEventId: obra.googleEventId, googleCalendarId: obra.googleCalendarId, updatedAt: new Date() } });
+  }
+}
+
 router.post('/colocadores/:id/calendario', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -365,7 +382,28 @@ router.post('/colocadores/:id/calendario', authAdmin, async (req, res) => {
       const calendarId = await googleCalendar.crearCalendarioParaPersona(`Obras — ${colocador.nombre}`, email);
       if (!calendarId) throw Object.assign(new Error('No se pudo crear el calendario en Google (revisá los logs del servidor)'), { status: 500 });
       await db.collection('obras_colocadores').updateOne({ _id: id }, { $set: { googleCalendarId: calendarId, googleAccountEmail: email } });
+      await resincronizarObrasDelColocador(db, id);
       return db.collection('obras_colocadores').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// Fuerza una resincronización del calendario YA configurado de este
+// colocador (sin crear uno nuevo): sirve para obras que quedaron sin
+// evento porque ya tenían colocador y fecha de inicio asignados antes de
+// que ese colocador tuviera calendario propio.
+router.post('/colocadores/:id/calendario/resincronizar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const colocador = await db.collection('obras_colocadores').findOne({ _id: id });
+      if (!colocador) throw Object.assign(new Error('Colocador no encontrado'), { status: 404 });
+      if (!colocador.googleCalendarId) throw Object.assign(new Error('Este colocador todavía no tiene calendario propio configurado'), { status: 400 });
+      await resincronizarObrasDelColocador(db, id);
+      return { ok: true };
     });
     res.json(resultado);
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
