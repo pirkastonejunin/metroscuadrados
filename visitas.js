@@ -860,9 +860,38 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', async (req, 
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Un presupuesto tipo "cotizador" puede tener MÁS DE UNA cotización
+// vinculada (ej. una para el piso y otra aparte para una columna o un
+// zócalo revestido en piedra) — se guardan todas en `presupuesto.cotizaciones`
+// y el total es la suma de todas más los ítems agregados a mano. Docs
+// viejos (de antes de este cambio) tienen los datos de la única cotización
+// sueltos en el nivel de arriba (`presupuesto.cotizacionId`, etc.) en vez
+// de en el array — este helper normaliza los dos formatos a uno solo, así
+// el resto del código no tiene que preocuparse por cuál es cuál.
+function cotizacionesDePresupuesto(presupuesto) {
+  if (!presupuesto || presupuesto.tipo !== 'cotizador') return [];
+  if (Array.isArray(presupuesto.cotizaciones)) return presupuesto.cotizaciones;
+  if (presupuesto.cotizacionId) {
+    return [{
+      cotizacionId: presupuesto.cotizacionId,
+      storeId: presupuesto.storeId,
+      tipoObraId: presupuesto.tipoObraId,
+      tipoObraNombre: presupuesto.tipoObraNombre,
+      baseTotal: presupuesto.baseTotal,
+      fecha: presupuesto.fecha
+    }];
+  }
+  return [];
+}
+
 // Presupuesto armado con el cotizador ya existente: el vendedor lo guarda
 // ahí (con el botón "Abrir cotizador") y acá solo se engancha por id a la
-// visita — no se duplica ni se recalcula nada de cotizador.js.
+// visita — no se duplica ni se recalcula nada de cotizador.js. Se puede
+// llamar varias veces con cotizaciones distintas para ir sumando más de un
+// presupuesto a la misma visita (columnas, zócalos, etc. cotizados aparte);
+// si se llama de nuevo con una cotización ya vinculada (ej. el botón
+// "Actualizar total"), esa entrada se refresca en el lugar en vez de
+// duplicarse.
 router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (req, res) => {
   try {
     const { cotizacionId, storeId } = req.body || {};
@@ -883,28 +912,83 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
       const cot = await db.collection('cotizaciones').findOne({ _id: cotId, store_id: Number(storeId) });
       if (!cot) throw err(404, 'No se encontró esa cotización en el cotizador');
 
-      // Si esta visita ya tenía ítems agregados a mano por encima del
-      // cotizador (ver /presupuesto-cotizador/items-extra), se conservan al
-      // vincular una cotización nueva o al actualizar el total de la
-      // vigente — así no se pierden por volver a abrir el cotizador o por
-      // tocar "Actualizar total desde el cotizador".
+      // Si esta visita ya tenía otras cotizaciones vinculadas y/o ítems
+      // agregados a mano por encima (ver /presupuesto-cotizador/items-extra),
+      // se conservan al vincular una cotización más — así no se pierden por
+      // volver a abrir el cotizador o por tocar "Actualizar total".
+      const existentes = cotizacionesDePresupuesto(visita.presupuesto);
       const itemsExtra = Array.isArray(visita.presupuesto && visita.presupuesto.itemsExtra)
         ? visita.presupuesto.itemsExtra : [];
-      const extraTotal = itemsExtra.reduce((s, it) => s + (Number(it.total) || 0), 0);
 
-      const presupuesto = {
-        tipo: 'cotizador',
+      const entrada = {
         cotizacionId: cot._id,
         storeId: Number(storeId),
         tipoObraId: cot.tipoObraId,
         tipoObraNombre: cot.tipoObraNombre,
         baseTotal: cot.total,
+        fecha: new Date()
+      };
+      const idxExistente = existentes.findIndex(c => String(c.cotizacionId) === String(cot._id));
+      const cotizaciones = idxExistente >= 0
+        ? existentes.map((c, i) => (i === idxExistente ? entrada : c))
+        : existentes.concat([entrada]);
+
+      const baseTotal = cotizaciones.reduce((s, c) => s + (Number(c.baseTotal) || 0), 0);
+      const extraTotal = itemsExtra.reduce((s, it) => s + (Number(it.total) || 0), 0);
+
+      const presupuesto = {
+        tipo: 'cotizador',
+        cotizaciones,
         itemsExtra,
-        total: Math.round((cot.total + extraTotal) * 100) / 100,
+        total: Math.round((baseTotal + extraTotal) * 100) / 100,
         fecha: new Date()
       };
       const set = { presupuesto, updatedAt: new Date() };
       if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
+      await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
+      return db.collection('visitas').findOne({ _id: visita._id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Quita una cotización puntual de las vinculadas a esta visita (ej. se
+// marcó por error, o se decidió no cotizarla más). Si después de quitarla
+// no queda ninguna otra cotización ni ítem agregado a mano, la visita
+// vuelve a quedar sin presupuesto (mismo estado que si nunca se hubiera
+// cargado nada).
+router.delete('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/:cotizacionId', async (req, res) => {
+  try {
+    const cotId = toObjectId(req.params.cotizacionId);
+    if (!cotId) throw err(400, 'cotizacionId inválido');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const visita = await visitaDelVendedor(db, req.params.id, req.params.vendedorId);
+      if (!visita.presupuesto || visita.presupuesto.tipo !== 'cotizador') {
+        throw err(400, 'Esta visita no tiene presupuestos del cotizador vinculados');
+      }
+      const cotizaciones = cotizacionesDePresupuesto(visita.presupuesto)
+        .filter(c => String(c.cotizacionId) !== String(cotId));
+      const itemsExtra = Array.isArray(visita.presupuesto.itemsExtra) ? visita.presupuesto.itemsExtra : [];
+
+      let set;
+      if (!cotizaciones.length && !itemsExtra.length) {
+        set = { presupuesto: null, updatedAt: new Date() };
+      } else {
+        const baseTotal = cotizaciones.reduce((s, c) => s + (Number(c.baseTotal) || 0), 0);
+        const extraTotal = itemsExtra.reduce((s, it) => s + (Number(it.total) || 0), 0);
+        set = {
+          presupuesto: {
+            tipo: 'cotizador',
+            cotizaciones,
+            itemsExtra,
+            total: Math.round((baseTotal + extraTotal) * 100) / 100,
+            fecha: visita.presupuesto.fecha || new Date()
+          },
+          updatedAt: new Date()
+        };
+      }
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });
@@ -945,23 +1029,21 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/items-extra
       if (!visita.presupuesto || visita.presupuesto.tipo !== 'cotizador') {
         throw err(400, 'Esta visita no tiene un presupuesto armado con el cotizador');
       }
-      // "baseTotal" es el subtotal que calculó el cotizador — se guarda
-      // desde que se vincula la cotización (ver /presupuesto-cotizador).
-      // Si esta visita tiene un presupuesto de cotizador vinculado de ANTES
-      // de que existiera ese campo, no estaría guardado — en vez de asumir
-      // 0 (lo que hacía que el total terminara siendo solo el de los ítems
-      // agregados a mano, como si el presupuesto del cotizador hubiera
-      // "desaparecido"), se lo recupera de la cotización original.
-      let baseTotal = Number(visita.presupuesto.baseTotal);
-      if (!(baseTotal > 0) && visita.presupuesto.cotizacionId) {
-        const cot = await db.collection('cotizaciones').findOne({
-          _id: visita.presupuesto.cotizacionId,
-          store_id: Number(visita.presupuesto.storeId)
-        });
-        baseTotal = cot ? Number(cot.total) || 0 : 0;
-      }
+      // "baseTotal" de cada cotización es el subtotal que calculó el
+      // cotizador — se guarda desde que se vincula (ver
+      // /presupuesto-cotizador). Si alguna quedó sin ese campo (vinculada de
+      // antes de que existiera, o del formato viejo de una sola cotización),
+      // en vez de asumir 0 se lo recupera de la cotización original, una
+      // por una.
+      const cotizacionesOriginales = cotizacionesDePresupuesto(visita.presupuesto);
+      const cotizaciones = await Promise.all(cotizacionesOriginales.map(async c => {
+        if (Number(c.baseTotal) > 0) return c;
+        const cot = await db.collection('cotizaciones').findOne({ _id: c.cotizacionId, store_id: Number(c.storeId) });
+        return Object.assign({}, c, { baseTotal: cot ? Number(cot.total) || 0 : 0 });
+      }));
+      const baseTotal = cotizaciones.reduce((s, c) => s + (Number(c.baseTotal) || 0), 0);
       const set = {
-        'presupuesto.baseTotal': baseTotal,
+        'presupuesto.cotizaciones': cotizaciones,
         'presupuesto.itemsExtra': itemsExtra,
         'presupuesto.total': Math.round((baseTotal + extraTotal) * 100) / 100,
         updatedAt: new Date()
@@ -1172,30 +1254,40 @@ function dibujarPdfPresupuestoManualDetalle(pdf, visita) {
   dibujarFotosVisita(pdf, visita.fotos);
 }
 
+// El PDF combinado (armado acá, no el propio del cotizador) hace falta
+// cuando hay más de una fuente que combinar: varias cotizaciones vinculadas,
+// y/o ítems agregados a mano por encima. Con una sola cotización y sin
+// agregados, alcanza con mandar al PDF propio del cotizador (tiene el
+// detalle línea por línea que este no reconstruye).
+function necesitaPdfCombinado(p) {
+  if (p.tipo === 'manual') return true;
+  const tieneExtra = Array.isArray(p.itemsExtra) && p.itemsExtra.length > 0;
+  return tieneExtra || cotizacionesDePresupuesto(p).length > 1;
+}
+
 function validarPresupuestoManualParaPdf(visita) {
   if (!visita.presupuesto) throw err(400, 'Esta visita todavía no tiene presupuesto cargado.');
-  const p = visita.presupuesto;
-  if (p.tipo === 'cotizador' && !(Array.isArray(p.itemsExtra) && p.itemsExtra.length)) {
+  if (!necesitaPdfCombinado(visita.presupuesto)) {
     throw err(400, 'Este presupuesto se armó con el cotizador: generá el PDF desde ahí (vista llave en mano).');
   }
 }
 
 // Ítems a listar en el PDF: si el presupuesto es manual, los suyos tal
-// cual; si es del cotizador con ítems agregados a mano por encima, un
-// renglón resumen con el subtotal del cotizador (el detalle línea por línea
-// de ESO sigue estando en el PDF propio del cotizador) más esos ítems
-// extra — así el PDF de acá muestra el presupuesto completo, no solo lo
-// agregado a mano.
+// cual; si es del cotizador (una o varias cotizaciones vinculadas, con o
+// sin ítems agregados a mano por encima), un renglón resumen por cada
+// cotización con su subtotal (el detalle línea por línea de CADA UNA sigue
+// estando en su propio PDF del cotizador) más esos ítems extra — así el PDF
+// de acá muestra el presupuesto completo, no solo lo agregado a mano.
 function itemsParaPdf(p) {
   if (p.tipo === 'manual') return p.items || [];
-  const base = {
-    tipoTrabajo: p.tipoObraNombre || 'Presupuesto (cotizador)',
+  const base = cotizacionesDePresupuesto(p).map(c => ({
+    tipoTrabajo: c.tipoObraNombre || 'Presupuesto (cotizador)',
     descripcion: 'Detalle completo en el PDF del cotizador',
     cantidad: 1,
-    valor: Number(p.baseTotal) || 0,
-    total: Number(p.baseTotal) || 0
-  };
-  return [base, ...(p.itemsExtra || [])];
+    valor: Number(c.baseTotal) || 0,
+    total: Number(c.baseTotal) || 0
+  }));
+  return [...base, ...(p.itemsExtra || [])];
 }
 
 function enviarPdfPresupuestoManual(res, visita, vistaDetalle) {
@@ -1249,20 +1341,34 @@ router.post('/vendedor/:vendedorId/visitas/:id/confirmar', async (req, res) => {
 // Confirmación de visita -> genera la Obra automáticamente
 // ---------------------------------------------------------------------
 
-// A partir del presupuesto.obra de una cotización, arma las tareas usando
-// el mapeo tipo de obra -> tipo(s) de trabajo definido en el panel.
+// A partir del presupuesto.obra de cada cotización vinculada, arma las
+// tareas usando el mapeo tipo de obra -> tipo(s) de trabajo definido en el
+// panel. Si hay más de una cotización (ver cotizacionesDePresupuesto) se
+// procesan todas y se suman: dos cotizaciones que mapean al mismo tipo de
+// trabajo (ej. dos presupuestos de Piso por separado) terminan en una sola
+// tarea con los m² de las dos juntos, en vez de dos tareas duplicadas.
 async function tareasDesdeMapeo(db, presupuesto) {
-  const mapeo = await db.collection('visitas_mapeo_tipo_obra').findOne({ tipoObraId: String(presupuesto.tipoObraId) });
-  if (!mapeo) {
-    throw err(400, `Definí el mapeo de tipos de trabajo para "${presupuesto.tipoObraNombre || presupuesto.tipoObraId}" antes de confirmar (panel de Visitas → Mapeo).`);
+  const cotizaciones = cotizacionesDePresupuesto(presupuesto);
+  if (!cotizaciones.length) throw err(400, 'Este presupuesto no tiene ninguna cotización vinculada.');
+
+  const m2PorTipoTrabajo = new Map();
+  for (const c of cotizaciones) {
+    const mapeo = await db.collection('visitas_mapeo_tipo_obra').findOne({ tipoObraId: String(c.tipoObraId) });
+    if (!mapeo) {
+      throw err(400, `Definí el mapeo de tipos de trabajo para "${c.tipoObraNombre || c.tipoObraId}" antes de confirmar (panel de Visitas → Mapeo).`);
+    }
+    const cot = await db.collection('cotizaciones').findOne({ _id: c.cotizacionId });
+    const obraCot = (cot && cot.obra) || {};
+    mapeo.reglas
+      .filter(r => Number(obraCot[r.campoObra]) > 0)
+      .forEach(r => {
+        const previo = m2PorTipoTrabajo.get(r.tipoTrabajo) || 0;
+        m2PorTipoTrabajo.set(r.tipoTrabajo, previo + Number(obraCot[r.campoObra]));
+      });
   }
-  const cot = await db.collection('cotizaciones').findOne({ _id: presupuesto.cotizacionId });
-  const obraCot = (cot && cot.obra) || {};
-  const tareas = mapeo.reglas
-    .filter(r => Number(obraCot[r.campoObra]) > 0)
-    .map(r => ({ tipoTrabajo: r.tipoTrabajo, m2Presupuestados: Number(obraCot[r.campoObra]) }));
+  const tareas = [...m2PorTipoTrabajo.entries()].map(([tipoTrabajo, m2Presupuestados]) => ({ tipoTrabajo, m2Presupuestados }));
   if (!tareas.length) {
-    throw err(400, 'La cotización no tiene cantidades que coincidan con el mapeo definido para este tipo de obra.');
+    throw err(400, 'Las cotizaciones vinculadas no tienen cantidades que coincidan con el mapeo definido para su tipo de obra.');
   }
   return tareas;
 }
@@ -1392,13 +1498,16 @@ async function tiposTrabajoDePresupuesto(db, presupuesto) {
       return [...new Set((presupuesto.items || []).map(it => it.tipoTrabajo).filter(Boolean))];
     }
     if (presupuesto.tipo === 'cotizador') {
-      const mapeo = await db.collection('visitas_mapeo_tipo_obra').findOne({ tipoObraId: String(presupuesto.tipoObraId) });
-      if (!mapeo || !Array.isArray(mapeo.reglas)) return [];
-      const cot = await db.collection('cotizaciones').findOne({ _id: presupuesto.cotizacionId });
-      const obraCot = (cot && cot.obra) || {};
-      const tiposDelMapeo = mapeo.reglas
-        .filter(r => Number(obraCot[r.campoObra]) > 0)
-        .map(r => r.tipoTrabajo);
+      const tiposDelMapeo = [];
+      for (const c of cotizacionesDePresupuesto(presupuesto)) {
+        const mapeo = await db.collection('visitas_mapeo_tipo_obra').findOne({ tipoObraId: String(c.tipoObraId) });
+        if (!mapeo || !Array.isArray(mapeo.reglas)) continue;
+        const cot = await db.collection('cotizaciones').findOne({ _id: c.cotizacionId });
+        const obraCot = (cot && cot.obra) || {};
+        mapeo.reglas
+          .filter(r => Number(obraCot[r.campoObra]) > 0)
+          .forEach(r => tiposDelMapeo.push(r.tipoTrabajo));
+      }
       const tiposExtra = (presupuesto.itemsExtra || []).map(it => it.tipoTrabajo).filter(Boolean);
       return [...new Set([...tiposDelMapeo, ...tiposExtra])];
     }

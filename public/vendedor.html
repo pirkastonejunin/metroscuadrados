@@ -119,6 +119,22 @@ function api(path, opts={}) {
   });
 }
 function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{weekday:'short', day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
+// Un presupuesto tipo "cotizador" puede tener más de una cotización
+// vinculada (ver visitas.js/cotizacionesDePresupuesto) — acá se normaliza
+// igual, así el resto de este archivo siempre trabaja con la lista, nunca
+// con el formato viejo de una sola cotización suelta en presupuesto.*.
+function cotizacionesDeVisita(v){
+  if (!v.presupuesto || v.presupuesto.tipo !== 'cotizador') return [];
+  if (Array.isArray(v.presupuesto.cotizaciones)) return v.presupuesto.cotizaciones;
+  if (v.presupuesto.cotizacionId) {
+    return [{
+      cotizacionId: v.presupuesto.cotizacionId, storeId: v.presupuesto.storeId,
+      tipoObraId: v.presupuesto.tipoObraId, tipoObraNombre: v.presupuesto.tipoObraNombre,
+      baseTotal: v.presupuesto.baseTotal, fecha: v.presupuesto.fecha
+    }];
+  }
+  return [];
+}
 const ESTADOS = {sin_visita:'Sin visita', presupuestada:'Presupuestada', vendido:'Vendido', instalado:'Instalado', cancelada:'Cancelada',
   // alias por compatibilidad con nombres de estado viejos
   agendada:'Sin visita', confirmada:'Vendido'};
@@ -222,28 +238,32 @@ async function mostrarDetalleVisita(id){
           <button class="btn small secondary" type="button" onclick="compartirPresupuestoWhatsapp(false)">💬 Compartir por WhatsApp</button>
         </div>`;
     } else {
-      const paramsSimple = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID, vista: 'simple' });
-      const paramsDetalle = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
+      const cotizaciones = cotizacionesDeVisita(v);
       const itemsExtra = v.presupuesto.itemsExtra || [];
       const tieneExtra = itemsExtra.length > 0;
-      const subtotalCotizador = v.presupuesto.baseTotal != null ? v.presupuesto.baseTotal : v.presupuesto.total;
+      // Con una sola cotización vinculada y sin agregados a mano, se sigue
+      // usando el PDF propio del cotizador (tiene el detalle línea por
+      // línea). En cuanto hay más de una cotización y/o agregados, el PDF
+      // pasa a generarse acá mismo (visitas.js), combinando todo.
+      const combinar = tieneExtra || cotizaciones.length > 1;
+      const listaCotizacionesHtml = cotizaciones
+        .map(c => `${c.tipoObraNombre||''}: $${Number(c.baseTotal||0).toLocaleString('es-AR')}`)
+        .join('<br>');
       const extraHtml = tieneExtra
         ? '<div class="muted" style="margin-top:6px"><b>Agregado a mano:</b><br>' +
           itemsExtra.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
           '</div>'
         : '';
-      // Si hay ítems agregados a mano, el PDF pasa a generarse acá mismo
-      // (visitas.js), combinando el subtotal del cotizador con esos ítems —
-      // el PDF propio del cotizador se quedó sin verlos. Sin agregados, se
-      // sigue usando el PDF del cotizador de toda la vida.
-      const pdfSimpleHref = tieneExtra
+      const primeraCot = cotizaciones[0] || {};
+      const paramsSimple = new URLSearchParams({ store_id: primeraCot.storeId || STORE_ID, vista: 'simple' });
+      const paramsDetalle = new URLSearchParams({ store_id: primeraCot.storeId || STORE_ID });
+      const pdfSimpleHref = combinar
         ? `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf`
-        : `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsSimple.toString()}`;
-      const pdfDetalleHref = tieneExtra
+        : `/api/cotizador/pdf/${primeraCot.cotizacionId}?${paramsSimple.toString()}`;
+      const pdfDetalleHref = combinar
         ? `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf?vista=detalle`
-        : `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${paramsDetalle.toString()}`;
-      resumen = `<b>Presupuesto (cotizador)</b><br>${v.presupuesto.tipoObraNombre||''}` +
-        (tieneExtra ? `<br>Subtotal cotizador: $${subtotalCotizador.toLocaleString('es-AR')}` : '') +
+        : `/api/cotizador/pdf/${primeraCot.cotizacionId}?${paramsDetalle.toString()}`;
+      resumen = `<b>Presupuesto (cotizador)</b><br>${listaCotizacionesHtml}` +
         extraHtml +
         `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` +
         `<div class="botonera-pdf">
@@ -343,13 +363,18 @@ async function mostrarElegirPresupuesto(visitaId){
     cont.innerHTML = '<div id="formManual"></div>';
     mostrarFormManual(visitaId, v.presupuesto);
   } else if (v.presupuesto && v.presupuesto.tipo === 'cotizador'){
-    BASE_TOTAL_COTIZADOR = Number(v.presupuesto.baseTotal != null ? v.presupuesto.baseTotal : v.presupuesto.total) || 0;
+    const cotizaciones = cotizacionesDeVisita(v);
+    BASE_TOTAL_COTIZADOR = cotizaciones.reduce((s,c)=> s + (Number(c.baseTotal)||0), 0);
     cont.innerHTML = `
-      <p class="muted">Este presupuesto se armó con el cotizador.</p>
-      <button class="btn secondary" onclick="abrirCotizadorParaEditar('${visitaId}')">Editar en el cotizador</button>
-      <div style="margin-top:8px"><button class="btn small secondary" type="button" onclick="vincularCotizacion('${visitaId}','${v.presupuesto.cotizacionId}')">🔄 Actualizar total desde el cotizador</button></div>
+      <p class="muted">Presupuestos traídos del cotizador — se pueden vincular varios a la misma visita (ej. el piso y aparte una columna o un zócalo en piedra) y se suman todos al total.</p>
+      <div id="listaCotizacionesEditar">${cotizaciones.map(c => filaCotizacionEditar(visitaId, c)).join('')}</div>
+      <div style="margin-top:10px">
+        <button class="btn secondary" onclick="abrirCotizador('${visitaId}')">+ Agregar otra cotización</button>
+        <div style="margin-top:8px"><button class="btn small secondary" onclick="mostrarVincularCotizacion('${visitaId}')">Ya guardé la cotización, vincularla</button></div>
+        <div id="vincularCotizacion"></div>
+      </div>
       <div class="divider">
-        <p class="muted" style="margin-top:10px">Agregar productos a mano — se suman al total del cotizador, no lo reemplazan:</p>
+        <p class="muted" style="margin-top:10px">Agregar productos a mano — se suman al total de todas las cotizaciones, no las reemplazan:</p>
         <div id="itemsExtra"></div>
         <button class="btn small secondary" type="button" onclick="agregarFilaItemExtra()">+ Agregar producto</button>
         <div class="muted" id="totalGeneralExtra" style="margin-top:8px;font-weight:700"></div>
@@ -398,21 +423,36 @@ function abrirCotizador(visitaId){
 // Reabre la MISMA cotización ya guardada en modo edición (en vez de una
 // nueva en blanco), usando el mismo flujo que ya tiene el cotizador para
 // reabrir una cotización de su historial — solo que arrancado por link en
-// vez de tener que ir a buscarla a mano en la pestaña Historial.
-function abrirCotizadorParaEditar(visitaId){
-  // Mismo motivo que en abrirCotizador: si el presupuesto de esta visita se
-  // vinculó o actualizó hace un momento (dentro de esta misma sesión), la
-  // copia en VISITAS puede no tener todavía el cotizacionId — buscando ahí
-  // en vez de en VISITA_ACTUAL, el botón directamente no hacía nada, sin
-  // avisar por qué.
+// vez de tener que ir a buscarla a mano en la pestaña Historial. Ahora que
+// una visita puede tener varias cotizaciones vinculadas, recibe cuál de
+// ellas editar en vez de asumir que hay una sola.
+function abrirCotizadorParaEditar(visitaId, cotizacionId, storeId){
   const v = (VISITA_ACTUAL && VISITA_ACTUAL._id === visitaId) ? VISITA_ACTUAL : (VISITAS.find(x => x._id === visitaId) || {});
-  if (!v.presupuesto || !v.presupuesto.cotizacionId) { alert('Esta visita todavía no tiene una cotización vinculada.'); return; }
   const params = new URLSearchParams();
-  params.set('editarCotizacionId', v.presupuesto.cotizacionId);
-  params.set('store_id', v.presupuesto.storeId || STORE_ID || '');
+  params.set('editarCotizacionId', cotizacionId);
+  params.set('store_id', storeId || STORE_ID || '');
   if (v.cliente && v.cliente.nombre) params.set('cliente', v.cliente.nombre);
   if (v.cliente && v.cliente.direccion) params.set('direccion', v.cliente.direccion);
   abrirEnNuevaPestana('/cotizador.html?' + params.toString());
+}
+
+// Una fila del listado de cotizaciones ya vinculadas, con acciones para
+// editarla en el cotizador, refrescar su total, o quitarla de la visita.
+function filaCotizacionEditar(visitaId, c){
+  return `<div class="item-row" style="flex-wrap:wrap">
+    <span style="flex:2;min-width:140px">${c.tipoObraNombre||''}</span>
+    <span class="muted" style="flex:1;min-width:90px;align-self:center">$${Number(c.baseTotal||0).toLocaleString('es-AR')}</span>
+    <button class="btn small secondary" type="button" onclick="abrirCotizadorParaEditar('${visitaId}','${c.cotizacionId}','${c.storeId||''}')">Editar</button>
+    <button class="btn small secondary" type="button" onclick="vincularCotizacion('${visitaId}','${c.cotizacionId}')">🔄 Actualizar</button>
+    <button class="btn small secondary" type="button" onclick="quitarCotizacion('${visitaId}','${c.cotizacionId}')">Quitar</button>
+  </div>`;
+}
+async function quitarCotizacion(visitaId, cotizacionId){
+  if (!confirm('¿Quitar esta cotización del presupuesto de la visita?')) return;
+  try{
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-cotizador/${cotizacionId}`, {method:'DELETE'});
+    mostrarDetalleVisita(visitaId);
+  }catch(e){ alert(e.message); }
 }
 
 async function mostrarVincularCotizacion(visitaId){
@@ -594,13 +634,14 @@ function normalizarTelefonoWA(telefono){
 function urlPdfPresupuestoActual(vistaDetalle){
   const v = VISITA_ACTUAL;
   if (!v || !v.presupuesto) return null;
+  const cotizaciones = cotizacionesDeVisita(v);
   const tieneExtra = v.presupuesto.tipo === 'cotizador' && v.presupuesto.itemsExtra && v.presupuesto.itemsExtra.length;
-  if (v.presupuesto.tipo === 'manual' || tieneExtra){
+  if (v.presupuesto.tipo === 'manual' || tieneExtra || cotizaciones.length > 1){
     return `/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf` + (vistaDetalle ? '?vista=detalle' : '');
   }
-  const params = new URLSearchParams({ store_id: v.presupuesto.storeId || STORE_ID });
+  const params = new URLSearchParams({ store_id: (cotizaciones[0] && cotizaciones[0].storeId) || STORE_ID });
   if (!vistaDetalle) params.set('vista', 'simple');
-  return `/api/cotizador/pdf/${v.presupuesto.cotizacionId}?${params.toString()}`;
+  return `/api/cotizador/pdf/${cotizaciones[0].cotizacionId}?${params.toString()}`;
 }
 
 async function compartirPresupuestoWhatsapp(vistaDetalle){

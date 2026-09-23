@@ -388,6 +388,23 @@ function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Un presupuesto tipo "cotizador" puede tener más de una cotización
+// vinculada (ver visitas.js/cotizacionesDePresupuesto) — acá se normaliza
+// igual, así el resto de este archivo siempre trabaja con la lista, nunca
+// con el formato viejo de una sola cotización suelta en presupuesto.*.
+function cotizacionesDeVisita(v){
+  if (!v.presupuesto || v.presupuesto.tipo !== 'cotizador') return [];
+  if (Array.isArray(v.presupuesto.cotizaciones)) return v.presupuesto.cotizaciones;
+  if (v.presupuesto.cotizacionId) {
+    return [{
+      cotizacionId: v.presupuesto.cotizacionId, storeId: v.presupuesto.storeId,
+      tipoObraId: v.presupuesto.tipoObraId, tipoObraNombre: v.presupuesto.tipoObraNombre,
+      baseTotal: v.presupuesto.baseTotal, fecha: v.presupuesto.fecha
+    }];
+  }
+  return [];
+}
+
 // Para precargar un <input type="datetime-local"> con la fecha guardada
 // (formato local, sin zona horaria ni segundos).
 function toDatetimeLocal(fechaISO){
@@ -772,31 +789,36 @@ function renderDetalleVisita(v, editando){
           <button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}', true)">📄 Ver PDF completo</button>
         </div>`;
     } else {
+      const cotizaciones = cotizacionesDeVisita(v);
       const itemsExtra = v.presupuesto.itemsExtra || [];
       const tieneExtra = itemsExtra.length > 0;
-      const subtotalCotizador = v.presupuesto.baseTotal != null ? v.presupuesto.baseTotal : v.presupuesto.total;
+      const listaCotizacionesHtml = cotizaciones
+        .map(c => `${escapeHtml(c.tipoObraNombre||'')}: $${Number(c.baseTotal||0).toLocaleString('es-AR')}`)
+        .join('<br>');
       const extraHtml = tieneExtra
         ? '<div style="margin-top:6px"><b>Agregado a mano:</b><br>' +
           itemsExtra.map(it=>`${escapeHtml(it.tipoTrabajo)}${it.descripcion?' ('+escapeHtml(it.descripcion)+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
           '</div>'
         : '';
-      // Con ítems agregados a mano, el PDF combinado se genera desde acá
-      // (visitas.js, mismo endpoint que el presupuesto manual, protegido
-      // con el token de admin) en vez del PDF propio del cotizador, que se
-      // quedó sin verlos — mismo criterio que usa vendedor.html.
-      const linkPdf = tieneExtra
+      // Con ítems agregados a mano, o con más de una cotización vinculada,
+      // el PDF combinado se genera desde acá (visitas.js, mismo endpoint
+      // que el presupuesto manual, protegido con el token de admin) en vez
+      // del PDF propio del cotizador (que solo puede mostrar una cotización
+      // a la vez) — mismo criterio que usa vendedor.html.
+      const combinar = tieneExtra || cotizaciones.length > 1;
+      const primeraCot = cotizaciones[0] || {};
+      const linkPdf = combinar
         ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}')">📄 Ver PDF llave en mano</button>
             <button class="btn small secondary" onclick="verPdfPresupuestoManual('${v._id}', true)">📄 Ver PDF completo</button>
           </div>`
-        : (v.presupuesto.cotizacionId && v.presupuesto.storeId)
+        : (primeraCot.cotizacionId && primeraCot.storeId)
         ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?store_id=${v.presupuesto.storeId}&vista=simple" target="_blank">📄 Ver PDF llave en mano</a>
-            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${v.presupuesto.cotizacionId}?store_id=${v.presupuesto.storeId}" target="_blank">📄 Ver PDF completo</a>
+            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${primeraCot.cotizacionId}?store_id=${primeraCot.storeId}&vista=simple" target="_blank">📄 Ver PDF llave en mano</a>
+            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${primeraCot.cotizacionId}?store_id=${primeraCot.storeId}" target="_blank">📄 Ver PDF completo</a>
           </div>`
         : '';
-      presupuestoHtml = `<b>Presupuesto del cotizador</b> — ${escapeHtml(v.presupuesto.tipoObraNombre||'')}` +
-        (tieneExtra ? ` — Subtotal cotizador: $${subtotalCotizador.toLocaleString('es-AR')}` : '') +
+      presupuestoHtml = `<b>Presupuesto del cotizador</b><br>${listaCotizacionesHtml}` +
         ` — Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}` + extraHtml + linkPdf;
     }
   }
