@@ -56,14 +56,16 @@ const API_BASE = 'https://api.tiendanube.com/v1';
 // en tipos de obra "piso") para no mezclar etiquetas/catálogos entre los
 // dos flujos aunque ambos se guarden en la misma colección tipo_obra_items
 // (ya vienen scopeados por tipoObraId, así que no hay choque de datos).
-const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta', 'pegamento', 'pegamentoPiedra', 'laca'];
+const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta', 'pegamento', 'pegamentoPiedra', 'laca', 'pegamentoPlacas', 'masilla'];
 const ETIQUETA_CATEGORIA = {
   puerta: 'Niveladores de puerta',
   nivelacion: 'Nivelantes de piso',
   manta: 'Manta',
   pegamento: 'Silicona/pegamento para zócalo',
   pegamentoPiedra: 'Pegamento para piedra',
-  laca: 'Laca'
+  laca: 'Laca',
+  pegamentoPlacas: 'Pegamento para placas',
+  masilla: 'Masilla'
 };
 
 // Descripción corta y legible del alcance de la obra, en base a los datos
@@ -77,11 +79,15 @@ function descripcionObra(o) {
   if (o.cantidadPuertas) datos.push(o.cantidadPuertas + ' puerta(s)');
   if (o.requiereNivelacion) datos.push('con nivelación');
   if (o.utilizaManta) datos.push('con manta');
-  // Piedra: la obra se mide en superficies sueltas (largo x alto cada una),
-  // no en un único m2Pisos, así que se suman acá para la descripción corta.
+  // Piedra y Placas: la obra se mide en superficies sueltas (largo x alto
+  // cada una), no en un único m2Pisos, así que se suman acá para la
+  // descripción corta. Ambas comparten la misma forma de "obra"
+  // ({superficies, manoObra, ...}) — o.categoria (guardado desde el
+  // frontend, ver leerObra()) es lo único que distingue cuál de las dos es.
   if (Array.isArray(o.superficies) && o.superficies.length) {
-    const m2PiedraTotal = o.superficies.reduce((s, x) => s + (Number(x.largo) || 0) * (Number(x.alto) || 0), 0);
-    if (m2PiedraTotal > 0) datos.push(round2(m2PiedraTotal) + ' m2 de piedra (' + o.superficies.length + ' superficie' + (o.superficies.length === 1 ? '' : 's') + ')');
+    const m2Total = o.superficies.reduce((s, x) => s + (Number(x.largo) || 0) * (Number(x.alto) || 0), 0);
+    const etiqueta = o.categoria === 'placas' ? 'placas' : 'piedra';
+    if (m2Total > 0) datos.push(round2(m2Total) + ' m2 de ' + etiqueta + ' (' + o.superficies.length + ' superficie' + (o.superficies.length === 1 ? '' : 's') + ')');
   }
   if (o.manoObra) datos.push('con mano de obra');
   return datos.join(' · ');
@@ -158,6 +164,7 @@ const TARIFA_DEFAULT = {
   puertas_unidad: 0,
   nivelacion_m2: 0,
   piedra_m2: 0,
+  placas_m2: 0,
   minimoM2Cotizable: 0
 };
 
@@ -181,6 +188,7 @@ async function setTarifas(storeId, tipoObraId, tarifas) {
     puertas_unidad: Number(tarifas.puertas_unidad) || 0,
     nivelacion_m2: Number(tarifas.nivelacion_m2) || 0,
     piedra_m2: Number(tarifas.piedra_m2) || 0,
+    placas_m2: Number(tarifas.placas_m2) || 0,
     minimoM2Cotizable: Number(tarifas.minimoM2Cotizable) || 0
   };
   await conReintento(async () => {
@@ -381,20 +389,22 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPc
 
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 
-// productos: { piso, zocalo, puerta, nivelacion, manta, pegamento, piedra, pegamentoPiedra, laca } -> cada uno (si aplica)
+// productos: { piso, zocalo, puerta, nivelacion, manta, pegamento, piedra, pegamentoPiedra, laca, placas, pegamentoPlacas, masilla } -> cada uno (si aplica)
 // obra (piso): { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, utilizaManta, manoObra, desperdicioPctPiso }
 // obra (piedra): { superficies: [{largo, alto}, ...], desperdicioPctPiedra, manoObra }
-// tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2, piedra_m2, minimoM2Cotizable }
+// obra (placas): { superficies: [{largo, alto}, ...], desperdicioPctPlacas, manoObra }
+// tarifas: { pisos_m2, zocalos_ml, puertas_unidad, nivelacion_m2, piedra_m2, placas_m2, minimoM2Cotizable }
 // formasPago: [{ nombre, tipo: 'descuento'|'recargo', porcentaje }]
 // categoria: 'piso' (default, retrocompatible con tipos de obra viejos sin
-// el campo) | 'piedra' — determina qué rama de cálculo correr. Se resuelve
-// server-side a partir del tipo de obra (no se confía en lo que mande el
-// front), ver router.post('/calcular').
+// el campo) | 'piedra' | 'placas' — determina qué rama de cálculo correr.
+// Se resuelve server-side a partir del tipo de obra (no se confía en lo que
+// mande el front), ver router.post('/calcular').
 function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago }) {
   const t = Object.assign({}, TARIFA_DEFAULT, tarifas || {});
-  const { items, faltantes, totalProductos: tp, totalManoObra: tm } = categoria === 'piedra'
-    ? calcularItemsPiedra({ obra, productos, tarifas: t })
-    : calcularItemsPiso({ obra, productos, tarifas: t });
+  const calcularItems = categoria === 'piedra' ? calcularItemsPiedra
+    : categoria === 'placas' ? calcularItemsPlacas
+    : calcularItemsPiso;
+  const { items, faltantes, totalProductos: tp, totalManoObra: tm } = calcularItems({ obra, productos, tarifas: t });
 
   const totalProductos = round2(tp);
   const totalManoObra = round2(tm);
@@ -555,7 +565,59 @@ function calcularItemsPiedra({ obra, productos, tarifas: t }) {
   return { items, faltantes, totalProductos, totalManoObra };
 }
 
-// ---------- Helper: resuelve un item de catálogo por SKU (puerta/nivelacion/manta/pegamento/pegamentoPiedra/laca) ----------
+// ---- Placas: igual que Piedra (superficies sueltas largo x alto, pegamento
+// de catálogo) pero con masilla en vez de laca — Mato no quiere hidrolaca
+// acá, usa masilla para las juntas entre placas. Misma estructura de
+// cálculo, tarifa propia (placas_m2). ----
+function calcularItemsPlacas({ obra, productos, tarifas: t }) {
+  const items = [];
+  const faltantes = [];
+  let totalProductos = 0;
+  let totalManoObra = 0;
+
+  const manoObra = !!obra.manoObra;
+  const desperdicioPctPlacas = Number(obra.desperdicioPctPlacas) || 0;
+  const superficies = Array.isArray(obra.superficies) ? obra.superficies : [];
+  const m2Placas = superficies.reduce((s, x) => {
+    const largo = Number(x && x.largo) || 0;
+    const alto = Number(x && x.alto) || 0;
+    return s + (largo > 0 && alto > 0 ? largo * alto : 0);
+  }, 0);
+
+  const minimoM2 = Number(t.minimoM2Cotizable) || 0;
+  const m2CotizableManoObra = m2Placas > 0 ? Math.max(m2Placas, minimoM2) : 0;
+
+  if (m2Placas > 0) {
+    if (!productos.placas) faltantes.push('placas');
+    else {
+      const it = calcularItem({
+        rubro: 'Placas', unidadObra: 'm2', cantidadObra: m2Placas,
+        producto: productos.placas, desperdicioPct: desperdicioPctPlacas
+      });
+      items.push(it);
+      totalProductos += it.subtotal;
+      if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.placas_m2);
+    }
+
+    if (!productos.pegamentoPlacas) faltantes.push('pegamentoPlacas');
+    else {
+      const it = calcularItem({ rubro: 'Pegamento para placas', unidadObra: 'm2', cantidadObra: m2Placas, producto: productos.pegamentoPlacas });
+      items.push(it);
+      totalProductos += it.subtotal;
+    }
+
+    if (!productos.masilla) faltantes.push('masilla');
+    else {
+      const it = calcularItem({ rubro: 'Masilla', unidadObra: 'm2', cantidadObra: m2Placas, producto: productos.masilla });
+      items.push(it);
+      totalProductos += it.subtotal;
+    }
+  }
+
+  return { items, faltantes, totalProductos, totalManoObra };
+}
+
+// ---------- Helper: resuelve un item de catálogo por SKU (puerta/nivelacion/manta/pegamento/pegamentoPiedra/laca/pegamentoPlacas/masilla) ----------
 
 async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
   const col = await getTipoObraItemsCollection();
@@ -595,7 +657,7 @@ async function resolverProductosElegidos(store, seleccion, tipoObraId) {
   // Piso y zócalo: se piden por id, uno por uno EN PARALELO, en vez de traer
   // el catálogo entero de la tienda (eso ya se hizo una vez para pintar el
   // paso 3 y volver a hacerlo acá era puro tiempo perdido).
-  const claves = ['piso', 'zocalo', 'piedra'].filter((k) => seleccion[k]);
+  const claves = ['piso', 'zocalo', 'piedra', 'placas'].filter((k) => seleccion[k]);
   if (claves.length) {
     const rendimientos = await getRendimientosDeTienda(store.store_id);
     const porProductId = {};
@@ -768,129 +830,165 @@ router.post('/simular-piso', async (req, res) => {
   }
 });
 
+// Compone, sobre una copia de fotoBuffer, un marcador rojo (relleno +
+// borde) por cada área de la lista — rectángulo o polígono a mano alzada,
+// mismo estilo para que la IA los trate igual — y devuelve esa copia lista
+// para mandar a Gemini más cuántas zonas se marcaron (para el prompt).
+// Comparten esto /simular-piedra y /simular-placas: la única diferencia
+// entre ambas es el material que se le pide a la IA, no cómo se marca el
+// área sobre la foto.
+async function marcarAreasSobreFoto(fotoBuffer, areas) {
+  const metadata = await sharp(fotoBuffer).metadata();
+  const anchoImg = metadata.width || 0;
+  const altoImg = metadata.height || 0;
+  if (!anchoImg || !altoImg) throw Object.assign(new Error('No se pudo leer la foto.'), { status: 400 });
+
+  // Clamp de cada forma a los límites reales de la imagen, por si el dibujo
+  // en el navegador se pasó un poco del borde.
+  const grosorBorde = Math.max(3, Math.round(anchoImg * 0.006));
+  const estiloForma = 'fill="rgba(255,0,0,0.16)" stroke="#ff0000" stroke-width="' + grosorBorde + '" stroke-linejoin="round"';
+  const formasSvg = [];
+  (areas || []).forEach((area) => {
+    if (!area) return;
+    if (area.type === 'mano' && Array.isArray(area.puntosPct) && area.puntosPct.length >= 3) {
+      const puntos = area.puntosPct
+        .filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+        .map((p) => {
+          const px = Math.max(0, Math.min(anchoImg, Math.round((Number(p.x) / 100) * anchoImg)));
+          const py = Math.max(0, Math.min(altoImg, Math.round((Number(p.y) / 100) * altoImg)));
+          return px + ',' + py;
+        })
+        .join(' ');
+      if (puntos) formasSvg.push('<polygon points="' + puntos + '" ' + estiloForma + ' />');
+      return;
+    }
+    const xPct = Number(area.xPct), yPct = Number(area.yPct), wPct = Number(area.wPct), hPct = Number(area.hPct);
+    if (![xPct, yPct, wPct, hPct].every((n) => Number.isFinite(n)) || wPct <= 0 || hPct <= 0) return;
+    const rx = Math.max(0, Math.min(anchoImg, Math.round((xPct / 100) * anchoImg)));
+    const ry = Math.max(0, Math.min(altoImg, Math.round((yPct / 100) * altoImg)));
+    const rw = Math.max(1, Math.min(anchoImg - rx, Math.round((wPct / 100) * anchoImg)));
+    const rh = Math.max(1, Math.min(altoImg - ry, Math.round((hPct / 100) * altoImg)));
+    formasSvg.push('<rect x="' + rx + '" y="' + ry + '" width="' + rw + '" height="' + rh + '" ' + estiloForma + ' />');
+  });
+  if (!formasSvg.length) {
+    throw Object.assign(new Error('Falta marcar el área (o áreas) de la pared a revestir.'), { status: 400 });
+  }
+
+  const svgMarca = '<svg width="' + anchoImg + '" height="' + altoImg + '" xmlns="http://www.w3.org/2000/svg">' + formasSvg.join('') + '</svg>';
+  const fotoMarcadaBuffer = await sharp(fotoBuffer)
+    .composite([{ input: Buffer.from(svgMarca), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+
+  return {
+    fotoMarcadaParte: { mimeType: 'image/png', data: fotoMarcadaBuffer.toString('base64') },
+    cuantasZonas: formasSvg.length
+  };
+}
+
+// El prompt de marcado-de-área insiste varias veces en cubrir el área
+// COMPLETA (Mato reportó que con zonas grandes la IA a veces dejaba un
+// margen de pared original sin revestir cerca de los bordes) y, si hay más
+// de una zona marcada, en tratarlas todas por igual sin tocar el resto de
+// la pared. "material" es la descripción del revestimiento (p.ej. "material
+// de revestimiento de piedra" o "placa de revestimiento"), y se arma igual
+// para /simular-piedra y /simular-placas.
+function promptMarcarArea(cuantasZonas, material) {
+  return 'La primera imagen es una foto real de una pared, con ' +
+    (cuantasZonas === 1 ? 'una zona marcada en rojo' : cuantasZonas + ' zonas separadas marcadas en rojo') +
+    ' indicando el área EXACTA a revestir. Reemplazá SOLO lo que está dentro de esa marca (o esas marcas) por el ' + material + ' de la segunda imagen (foto real de un producto), como si estuviera realmente instalado ahí. ' +
+    'IMPORTANTE: cubrí el 100% de cada zona marcada, de borde a borde y hasta las esquinas, sin dejar ninguna franja ni parte de esa zona con la pared original visible, sin importar qué tan grande sea el área marcada — no reduzcas ni centres el revestimiento dentro del contorno, tiene que llenarlo por completo. ' +
+    (cuantasZonas > 1 ? 'Tratá cada una de las ' + cuantasZonas + ' zonas marcadas por separado, revistiendo todas con el mismo material, y no revistas nada fuera de las zonas marcadas. ' : '') +
+    'La marca roja (relleno y borde) es solo una guía: NO debe aparecer en el resultado final, ni ningún resto de color o línea roja — el revestimiento tiene que cubrir esa zona de forma natural y prolija, con un borde limpio contra el resto de la pared. Conservá la perspectiva, la iluminación, las sombras y el resto de la imagen (fuera de las zonas marcadas) sin cambios. El resultado debe verse fotorrealista.';
+}
+
+async function llamarGeminiMarcado(prompt, fotoMarcadaParte, productoParte) {
+  const geminiResp = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: [{
+        parts: [
+          { text: prompt },
+          { inlineData: fotoMarcadaParte },
+          { inlineData: productoParte }
+        ]
+      }],
+      generationConfig: { responseModalities: ['IMAGE'] }
+    })
+  });
+  if (!geminiResp.ok) {
+    const detalle = await geminiResp.text();
+    throw Object.assign(new Error('La IA de imagenes no pudo procesar la foto (' + geminiResp.status + ').'), { status: 502, detalle });
+  }
+  const geminiData = await geminiResp.json();
+  const partes = (geminiData.candidates && geminiData.candidates[0] && geminiData.candidates[0].content && geminiData.candidates[0].content.parts) || [];
+  const parteImagen = partes.find((p) => p.inlineData && p.inlineData.data);
+  if (!parteImagen) throw Object.assign(new Error('La IA no devolvio una imagen.'), { status: 502 });
+  return parteImagen;
+}
+
+// Body común a /simular-piedra y /simular-placas: valida productId/foto/areas,
+// resuelve el producto, marca la foto y llama a Gemini con el prompt armado
+// para "material". Devuelve la respuesta ya en el formato que espera el
+// frontend, o lanza con .status para que el caller la mande al catch.
+async function simularRevestimiento(req, material) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw Object.assign(new Error('Falta configurar GEMINI_API_KEY en el servidor.'), { status: 500 });
+  }
+  const store = await getStoreFromQuery(req);
+  const { productId, foto, areas } = req.body || {};
+  if (!productId) throw Object.assign(new Error('Falta productId.'), { status: 400 });
+  const fotoParte = dataUrlAPartes(foto);
+  if (!fotoParte) throw Object.assign(new Error('Falta la foto de la pared (o no es una imagen valida).'), { status: 400 });
+  if (fotoParte.data.length > 8_000_000) {
+    throw Object.assign(new Error('La foto es demasiado pesada.'), { status: 400 });
+  }
+  if (!Array.isArray(areas) || !areas.length) {
+    throw Object.assign(new Error('Falta marcar el área (o áreas) de la pared a revestir.'), { status: 400 });
+  }
+
+  const productos = await productosConfigurados(store);
+  const producto = productos.find((p) => String(p.id) === String(productId));
+  if (!producto) throw Object.assign(new Error('Producto no encontrado.'), { status: 404 });
+  if (!producto.imagen) throw Object.assign(new Error('Ese producto no tiene foto cargada en Tiendanube.'), { status: 400 });
+
+  const fotoBuffer = Buffer.from(fotoParte.data, 'base64');
+  const { fotoMarcadaParte, cuantasZonas } = await marcarAreasSobreFoto(fotoBuffer, areas);
+  const productoParte = await descargarImagenComoParte(producto.imagen);
+  const prompt = promptMarcarArea(cuantasZonas, material);
+  const parteImagen = await llamarGeminiMarcado(prompt, fotoMarcadaParte, productoParte);
+
+  return {
+    imagen: 'data:' + (parteImagen.inlineData.mimeType || 'image/png') + ';base64,' + parteImagen.inlineData.data,
+    productId: producto.id,
+    producto: producto.nombre
+  };
+}
+
 // Igual que /simular-piso pero para revestimientos de piedra: acá SÍ hay que
 // decirle a la IA qué parte de la pared revestir (con piso alcanza con
 // "reemplazá el piso", pero una pared puede tener zonas que no van
 // revestidas). El frontend manda una lista de áreas (podés marcar varias
 // zonas separadas, por ejemplo columnas o zócalos, y cada una puede ser un
 // rectángulo o una forma libre dibujada a mano alzada), todo en % (0-100)
-// relativo al ancho/alto de la foto elegida por el vendedor — acá se
-// dibujan esas formas en rojo sobre una COPIA de la foto (con sharp,
-// componiendo un SVG encima) y se le pide a la IA que revista solo lo
-// marcado, cubriendo cada zona por completo, y no deje el marcador en el
-// resultado final. La foto original (sin marcar) es la que el frontend ya
-// guarda como "antes".
+// relativo al ancho/alto de la foto elegida por el vendedor. La foto
+// original (sin marcar) es la que el frontend ya guarda como "antes".
 router.post('/simular-piedra', async (req, res) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw Object.assign(new Error('Falta configurar GEMINI_API_KEY en el servidor.'), { status: 500 });
-    }
-    const store = await getStoreFromQuery(req);
-    const { productId, foto, areas } = req.body || {};
-    if (!productId) throw Object.assign(new Error('Falta productId.'), { status: 400 });
-    const fotoParte = dataUrlAPartes(foto);
-    if (!fotoParte) throw Object.assign(new Error('Falta la foto de la pared (o no es una imagen valida).'), { status: 400 });
-    if (fotoParte.data.length > 8_000_000) {
-      throw Object.assign(new Error('La foto es demasiado pesada.'), { status: 400 });
-    }
-    if (!Array.isArray(areas) || !areas.length) {
-      throw Object.assign(new Error('Falta marcar el área (o áreas) de la pared a revestir.'), { status: 400 });
-    }
+    res.json(await simularRevestimiento(req, 'material de revestimiento de piedra'));
+  } catch (err) {
+    if (err.detalle) console.error('Gemini error:', err.detalle);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
-    const productos = await productosConfigurados(store);
-    const producto = productos.find((p) => String(p.id) === String(productId));
-    if (!producto) throw Object.assign(new Error('Producto no encontrado.'), { status: 404 });
-    if (!producto.imagen) throw Object.assign(new Error('Ese producto no tiene foto cargada en Tiendanube.'), { status: 400 });
-
-    const fotoBuffer = Buffer.from(fotoParte.data, 'base64');
-    const metadata = await sharp(fotoBuffer).metadata();
-    const anchoImg = metadata.width || 0;
-    const altoImg = metadata.height || 0;
-    if (!anchoImg || !altoImg) throw Object.assign(new Error('No se pudo leer la foto.'), { status: 400 });
-
-    // Clamp de cada forma a los límites reales de la imagen, por si el
-    // dibujo en el navegador se pasó un poco del borde. Rectángulo y mano
-    // alzada se dibujan con el mismo estilo (mismo rojo, mismo grosor) para
-    // que la IA los trate igual.
-    const grosorBorde = Math.max(3, Math.round(anchoImg * 0.006));
-    const estiloForma = 'fill="rgba(255,0,0,0.16)" stroke="#ff0000" stroke-width="' + grosorBorde + '" stroke-linejoin="round"';
-    const formasSvg = [];
-    areas.forEach((area) => {
-      if (!area) return;
-      if (area.type === 'mano' && Array.isArray(area.puntosPct) && area.puntosPct.length >= 3) {
-        const puntos = area.puntosPct
-          .filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
-          .map((p) => {
-            const px = Math.max(0, Math.min(anchoImg, Math.round((Number(p.x) / 100) * anchoImg)));
-            const py = Math.max(0, Math.min(altoImg, Math.round((Number(p.y) / 100) * altoImg)));
-            return px + ',' + py;
-          })
-          .join(' ');
-        if (puntos) formasSvg.push('<polygon points="' + puntos + '" ' + estiloForma + ' />');
-        return;
-      }
-      const xPct = Number(area.xPct), yPct = Number(area.yPct), wPct = Number(area.wPct), hPct = Number(area.hPct);
-      if (![xPct, yPct, wPct, hPct].every((n) => Number.isFinite(n)) || wPct <= 0 || hPct <= 0) return;
-      const rx = Math.max(0, Math.min(anchoImg, Math.round((xPct / 100) * anchoImg)));
-      const ry = Math.max(0, Math.min(altoImg, Math.round((yPct / 100) * altoImg)));
-      const rw = Math.max(1, Math.min(anchoImg - rx, Math.round((wPct / 100) * anchoImg)));
-      const rh = Math.max(1, Math.min(altoImg - ry, Math.round((hPct / 100) * altoImg)));
-      formasSvg.push('<rect x="' + rx + '" y="' + ry + '" width="' + rw + '" height="' + rh + '" ' + estiloForma + ' />');
-    });
-    if (!formasSvg.length) {
-      throw Object.assign(new Error('Falta marcar el área (o áreas) de la pared a revestir.'), { status: 400 });
-    }
-
-    const svgMarca = '<svg width="' + anchoImg + '" height="' + altoImg + '" xmlns="http://www.w3.org/2000/svg">' + formasSvg.join('') + '</svg>';
-
-    const fotoMarcadaBuffer = await sharp(fotoBuffer)
-      .composite([{ input: Buffer.from(svgMarca), top: 0, left: 0 }])
-      .png()
-      .toBuffer();
-    const fotoMarcadaParte = { mimeType: 'image/png', data: fotoMarcadaBuffer.toString('base64') };
-
-    const productoParte = await descargarImagenComoParte(producto.imagen);
-
-    // El prompt insiste varias veces en cubrir el área COMPLETA (Mato
-    // reportó que con zonas grandes la IA a veces dejaba un margen de pared
-    // original sin revestir cerca de los bordes) y, si hay más de una zona
-    // marcada, en tratarlas todas por igual sin tocar el resto de la pared.
-    const cuantasZonas = formasSvg.length;
-    const prompt = 'La primera imagen es una foto real de una pared, con ' +
-      (cuantasZonas === 1 ? 'una zona marcada en rojo' : cuantasZonas + ' zonas separadas marcadas en rojo') +
-      ' indicando el área EXACTA a revestir. Reemplazá SOLO lo que está dentro de esa marca (o esas marcas) por el material de revestimiento de piedra de la segunda imagen (foto real de un producto), como si estuviera realmente instalado ahí. ' +
-      'IMPORTANTE: cubrí el 100% de cada zona marcada, de borde a borde y hasta las esquinas, sin dejar ninguna franja ni parte de esa zona con la pared original visible, sin importar qué tan grande sea el área marcada — no reduzcas ni centres el revestimiento dentro del contorno, tiene que llenarlo por completo. ' +
-      (cuantasZonas > 1 ? 'Tratá cada una de las ' + cuantasZonas + ' zonas marcadas por separado, revistiendo todas con el mismo material, y no revistas nada fuera de las zonas marcadas. ' : '') +
-      'La marca roja (relleno y borde) es solo una guía: NO debe aparecer en el resultado final, ni ningún resto de color o línea roja — el revestimiento tiene que cubrir esa zona de forma natural y prolija, con un borde limpio contra el resto de la pared. Conservá la perspectiva, la iluminación, las sombras y el resto de la imagen (fuera de las zonas marcadas) sin cambios. El resultado debe verse fotorrealista.';
-
-    const geminiResp = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inlineData: fotoMarcadaParte },
-            { inlineData: productoParte }
-          ]
-        }],
-        generationConfig: { responseModalities: ['IMAGE'] }
-      })
-    });
-    if (!geminiResp.ok) {
-      const detalle = await geminiResp.text();
-      throw Object.assign(new Error('La IA de imagenes no pudo procesar la foto (' + geminiResp.status + ').'), { status: 502, detalle });
-    }
-    const geminiData = await geminiResp.json();
-    const partes = (geminiData.candidates && geminiData.candidates[0] && geminiData.candidates[0].content && geminiData.candidates[0].content.parts) || [];
-    const parteImagen = partes.find((p) => p.inlineData && p.inlineData.data);
-    if (!parteImagen) throw Object.assign(new Error('La IA no devolvio una imagen.'), { status: 502 });
-
-    res.json({
-      imagen: 'data:' + (parteImagen.inlineData.mimeType || 'image/png') + ';base64,' + parteImagen.inlineData.data,
-      productId: producto.id,
-      producto: producto.nombre
-    });
+// Igual que /simular-piedra pero para Placas (mismo flujo de marcado de
+// área — ver arriba). El material se describe distinto en el prompt para
+// que la IA no confunda una placa con una veta de piedra.
+router.post('/simular-placas', async (req, res) => {
+  try {
+    res.json(await simularRevestimiento(req, 'material de revestimiento en placas'));
   } catch (err) {
     if (err.detalle) console.error('Gemini error:', err.detalle);
     res.status(err.status || 500).json({ error: err.message });
@@ -905,12 +1003,13 @@ function normalizarTipoObra(doc) {
   return {
     id: doc._id,
     nombre: doc.nombre,
-    // 'piso' por defecto: los tipos de obra creados antes de que existiera
-    // Piedra no tienen este campo guardado en Mongo y siguen siendo Piso.
-    categoria: doc.categoria === 'piedra' ? 'piedra' : 'piso',
+    // 'piso' por defecto: los tipos de obra creados antes de que existieran
+    // Piedra/Placas no tienen este campo guardado en Mongo y siguen siendo Piso.
+    categoria: (doc.categoria === 'piedra' || doc.categoria === 'placas') ? doc.categoria : 'piso',
     rubroPiso: doc.rubroPiso || '',
     rubroZocalo: doc.rubroZocalo || '',
     rubroPiedra: doc.rubroPiedra || '',
+    rubroPlacas: doc.rubroPlacas || '',
     desperdicioDefaultPct: doc.desperdicioDefaultPct || 0
   };
 }
@@ -929,8 +1028,8 @@ router.get('/tipos-obra', async (req, res) => {
 router.post('/tipos-obra', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { id, nombre, categoria, rubroPiso, rubroZocalo, rubroPiedra, desperdicioDefaultPct } = req.body || {};
-    const categoriaNorm = categoria === 'piedra' ? 'piedra' : 'piso';
+    const { id, nombre, categoria, rubroPiso, rubroZocalo, rubroPiedra, rubroPlacas, desperdicioDefaultPct } = req.body || {};
+    const categoriaNorm = (categoria === 'piedra' || categoria === 'placas') ? categoria : 'piso';
     if (!nombre) {
       return res.status(400).json({ error: 'Falta el nombre.' });
     }
@@ -944,6 +1043,19 @@ router.post('/tipos-obra', async (req, res) => {
         rubroPiedra: String(rubroPiedra).trim(),
         rubroPiso: '',
         rubroZocalo: '',
+        rubroPlacas: '',
+        desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
+      };
+    } else if (categoriaNorm === 'placas') {
+      if (!rubroPlacas) return res.status(400).json({ error: 'Falta el rubro de placas.' });
+      datos = {
+        store_id: store.store_id,
+        nombre: String(nombre).trim(),
+        categoria: 'placas',
+        rubroPlacas: String(rubroPlacas).trim(),
+        rubroPiso: '',
+        rubroZocalo: '',
+        rubroPiedra: '',
         desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
       };
     } else {
@@ -955,6 +1067,7 @@ router.post('/tipos-obra', async (req, res) => {
         rubroPiso: String(rubroPiso).trim(),
         rubroZocalo: rubroZocalo ? String(rubroZocalo).trim() : '',
         rubroPiedra: '',
+        rubroPlacas: '',
         desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
       };
     }
@@ -1154,7 +1267,9 @@ router.post('/calcular', async (req, res) => {
     // La categoría se resuelve del lado del servidor (no de lo que mande el
     // front) para que el cálculo sea siempre consistente con cómo se
     // configuró el tipo de obra, no con lo que la pantalla crea que es.
-    const categoria = tipoObraDoc && tipoObraDoc.categoria === 'piedra' ? 'piedra' : 'piso';
+    const categoria = (tipoObraDoc && (tipoObraDoc.categoria === 'piedra' || tipoObraDoc.categoria === 'placas'))
+      ? tipoObraDoc.categoria
+      : 'piso';
 
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, productos, tipoObraId),
