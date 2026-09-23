@@ -9,14 +9,22 @@
 // el panel de Usuarios (public/admin-usuarios.html) permite crear los roles
 // que hagan falta y tildar a qué módulos entra cada uno.
 //
-// Vendedores y colocadores NO pasan por acá — siguen como estaban (el
-// vendedor se elige de una lista, el colocador entra con su PIN), decisión
-// tomada explícitamente al armar esto: son flujos rápidos desde el celular
-// en obra, no personal de oficina.
+// Colocadores NO pasan por acá — siguen entrando con su PIN (ver
+// authColocador en obras.js), que ya es en sí un mecanismo de login propio.
+//
+// Vendedores SÍ pasan por acá (a partir de la ronda "sistema completo"):
+// cada vendedor tiene su propio usuario/contraseña, vinculado a su registro
+// de la colección visitas_vendedores mediante el campo `vendedorId` del
+// usuario. Reemplaza la selección de una lista sin contraseña que se usaba
+// antes en public/vendedor.html — las rutas /api/visitas/vendedor/:vendedorId/*
+// ahora exigen [authUsuario, requiereVendedorPropio] (ver más abajo), en vez
+// de confiar ciegamente en el vendedorId que venga en la URL.
 //
 // Colecciones nuevas:
 //   - usuarios : { nombre, usuario (login, único, en minúsculas), passwordHash,
-//                  rolId, activo, createdAt, updatedAt }
+//                  rolId, activo, vendedorId (ObjectId opcional, si esta
+//                  cuenta es de un vendedor — referencia a visitas_vendedores),
+//                  createdAt, updatedAt }
 //   - roles    : { nombre, modulos: [String], protegido (bool), createdAt,
 //                  updatedAt }
 //
@@ -79,6 +87,7 @@ function err(status, message) { const e = new Error(message); e.status = status;
 const MODULOS = [
   { key: 'visitas', label: 'Visitas', descripcion: 'Alta de visitas, presupuestos, confirmar obra, reportes de embudo.' },
   { key: 'obras', label: 'Obras', descripcion: 'Asignar colocador, seguimiento de tareas, reportes de m² y pago.' },
+  { key: 'cotizador', label: 'Cotizador', descripcion: 'Armar presupuestos con el cotizador y, si además tiene el rol para eso, configurar tipos de obra, catálogos y tarifas. Aplica solo a la tienda real de Piedra Negra — las demás tiendas que usan la app siguen sin login.' },
   { key: 'usuarios', label: 'Usuarios y roles', descripcion: 'Crear usuarios y roles, y elegir a qué módulos entra cada uno. Dárselo con cuidado.' }
 ];
 const MODULOS_KEYS = MODULOS.map(m => m.key);
@@ -187,6 +196,7 @@ async function authUsuario(req, res, next) {
       _id: datos.usuario._id,
       nombre: datos.usuario.nombre,
       usuario: datos.usuario.usuario,
+      vendedorId: datos.usuario.vendedorId ? datos.usuario.vendedorId.toString() : null,
       rol: { _id: datos.rol._id, nombre: datos.rol.nombre, modulos: datos.rol.modulos || [], protegido: !!datos.rol.protegido }
     };
     next();
@@ -204,6 +214,23 @@ function requiereModulo(moduloKey) {
     }
     next();
   };
+}
+
+// Gatea las rutas /api/visitas/vendedor/:vendedorId/* — permite pasar si el
+// usuario logueado ES ese vendedor (usuario.vendedorId coincide con el de la
+// URL), o si es personal de oficina con acceso al módulo Visitas (para poder
+// dar una mano o revisar algo desde admin-visitas.html si hiciera falta).
+// Reemplaza el comportamiento anterior, que confiaba ciegamente en el
+// vendedorId que viniera en la URL sin pedir ninguna credencial.
+function requiereVendedorPropio(req, res, next) {
+  const vendedorIdRuta = req.params.vendedorId;
+  const u = req.usuario;
+  const esPropio = !!(u && u.vendedorId && vendedorIdRuta && u.vendedorId === String(vendedorIdRuta));
+  const esOficina = tieneModulo(u, 'visitas');
+  if (!esPropio && !esOficina) {
+    return res.status(403).json({ error: 'No tenés acceso a las visitas de este vendedor.' });
+  }
+  next();
 }
 
 // Cuántos usuarios ACTIVOS (además de excluirId, si se pasa) tienen acceso
@@ -245,8 +272,27 @@ router.post('/login', async (req, res) => {
 // por un código de error) si el usuario logueado tiene el módulo que ese
 // panel necesita, y para pintar su nombre.
 router.get('/me', authUsuario, (req, res) => {
-  res.json({ usuario: { nombre: req.usuario.nombre, usuario: req.usuario.usuario }, rol: req.usuario.rol, modulos: MODULOS });
+  res.json({
+    usuario: { nombre: req.usuario.nombre, usuario: req.usuario.usuario, vendedorId: req.usuario.vendedorId },
+    rol: req.usuario.rol,
+    modulos: MODULOS
+  });
 });
+
+// Valida un vendedorId contra visitas_vendedores y que ningún OTRO usuario
+// activo ya esté vinculado a ese mismo vendedor (una cuenta por vendedor).
+async function validarVendedorId(db, vendedorIdRaw, excluirUsuarioId) {
+  if (vendedorIdRaw === undefined || vendedorIdRaw === null || vendedorIdRaw === '') return null;
+  const vId = toObjectId(vendedorIdRaw);
+  if (!vId) throw err(400, 'vendedorId inválido');
+  const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
+  if (!vendedor) throw err(400, 'Ese vendedor no existe');
+  const filtroDuplicado = { vendedorId: vId };
+  if (excluirUsuarioId) filtroDuplicado._id = { $ne: excluirUsuarioId };
+  const yaVinculado = await db.collection('usuarios').findOne(filtroDuplicado);
+  if (yaVinculado) throw err(400, `Ese vendedor ya tiene una cuenta (${yaVinculado.usuario})`);
+  return vId;
+}
 
 const authAdmin = [authUsuario, requiereModulo('usuarios')];
 
@@ -335,17 +381,21 @@ router.delete('/roles/:id', authAdmin, async (req, res) => {
 // ---------------------------------------------------------------------
 router.get('/', authAdmin, async (req, res) => {
   try {
-    const [usuarios, roles] = await conReintento(async () => {
+    const [usuarios, roles, vendedores] = await conReintento(async () => {
       const db = await getDb();
       return Promise.all([
         db.collection('usuarios').find({}).sort({ nombre: 1 }).project({ passwordHash: 0 }).toArray(),
-        db.collection('roles').find({}).toArray()
+        db.collection('roles').find({}).toArray(),
+        db.collection('visitas_vendedores').find({}).project({ nombre: 1 }).toArray()
       ]);
     });
     const rolesPorId = {};
     roles.forEach(r => { rolesPorId[r._id.toString()] = r; });
+    const vendedoresPorId = {};
+    vendedores.forEach(v => { vendedoresPorId[v._id.toString()] = v; });
     const listaConRol = usuarios.map(u => Object.assign({}, u, {
-      rolNombre: (rolesPorId[u.rolId && u.rolId.toString()] || {}).nombre || '(sin rol)'
+      rolNombre: (rolesPorId[u.rolId && u.rolId.toString()] || {}).nombre || '(sin rol)',
+      vendedorNombre: u.vendedorId ? ((vendedoresPorId[u.vendedorId.toString()] || {}).nombre || '(vendedor borrado)') : null
     }));
     res.json(listaConRol);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -353,7 +403,7 @@ router.get('/', authAdmin, async (req, res) => {
 
 router.post('/', authAdmin, async (req, res) => {
   try {
-    const { nombre, usuario, password, rolId } = req.body || {};
+    const { nombre, usuario, password, rolId, vendedorId } = req.body || {};
     if (!nombre || !usuario || !password || !rolId) throw err(400, 'Nombre, usuario, contraseña y rol son obligatorios');
     if (String(password).length < 6) throw err(400, 'La contraseña tiene que tener al menos 6 caracteres');
     const rId = toObjectId(rolId);
@@ -369,11 +419,13 @@ router.post('/', authAdmin, async (req, res) => {
       if (!rol) throw err(400, 'Rol no encontrado');
       const existente = await db.collection('usuarios').findOne({ usuario: usuarioNorm });
       if (existente) throw err(400, 'Ya existe un usuario con ese nombre de usuario');
+      const vId = await validarVendedorId(db, vendedorId, null);
       const nuevo = {
         nombre: String(nombre).trim(),
         usuario: usuarioNorm,
         passwordHash: hashPassword(password),
         rolId: rId,
+        vendedorId: vId,
         activo: true,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -391,7 +443,7 @@ router.put('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { nombre, rolId, activo, password } = req.body || {};
+    const { nombre, rolId, activo, password, vendedorId } = req.body || {};
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const actual = await db.collection('usuarios').findOne({ _id: id });
@@ -401,6 +453,10 @@ router.put('/:id', authAdmin, async (req, res) => {
       if (nombre !== undefined) {
         if (!String(nombre).trim()) throw err(400, 'El nombre no puede quedar vacío');
         set.nombre = String(nombre).trim();
+      }
+
+      if (vendedorId !== undefined) {
+        set.vendedorId = await validarVendedorId(db, vendedorId, id);
       }
 
       let nuevoRolId = actual.rolId;
@@ -462,4 +518,6 @@ router.delete('/:id', authAdmin, async (req, res) => {
 module.exports = router;
 module.exports.authUsuario = authUsuario;
 module.exports.requiereModulo = requiereModulo;
+module.exports.requiereVendedorPropio = requiereVendedorPropio;
+module.exports.tieneModulo = tieneModulo;
 module.exports.MODULOS = MODULOS;

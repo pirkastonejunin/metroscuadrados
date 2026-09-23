@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cotizador de obra — Piedra Negra</title>
+<script>
+// Cuando esta pantalla corre embebida dentro de panel.html (un <iframe>,
+// mismo origen — panel.html ya valida el mismo login compartido), oculta
+// el encabezado propio (logo, título, "Menú"): panel.html ya pone sus
+// propios controles de navegación una sola vez para las cinco pantallas.
+// No afecta a las demás tiendas que instalaron la app: panel.html solo
+// embebe cotizador.html para la tienda real de Piedra Negra.
+if (window.self !== window.top) document.documentElement.classList.add('embebido');
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -35,7 +44,7 @@
   .card h3{margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
   .card p.hint{color:var(--muted);font-size:13px;margin-top:-6px;}
   label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;}
-  input[type=text],input[type=number],select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;background:#fff;color:var(--text);}
+  input[type=text],input[type=number],input[type=password],select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;background:#fff;color:var(--text);}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;}
   .field{margin-bottom:2px;}
   .check{display:flex;align-items:center;gap:8px;padding:10px 0;font-size:14px;}
@@ -172,6 +181,7 @@
   .msg.error{background:#fdecea;color:var(--warn);}
   .msg.ok{background:#eaf5ec;color:var(--ok);}
   .hidden{display:none !important;}
+  html.embebido #cotHeader{display:none !important;}
   .hist-row{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
   .hist-row:last-child{border-bottom:none;}
   .hist-row .d{color:var(--muted);font-size:12px;}
@@ -222,7 +232,39 @@
 </head>
 <body>
 
-<header class="brand-header">
+<!-- ======================================================================
+     Login — solo se muestra cuando esta pantalla corre para la tienda real
+     de Piedra Negra (ver cotizador.js: el resto de las tiendas que
+     instalaron la app siguen entrando directo, como toda la vida). Mismo
+     sistema de usuarios y mismo token (localStorage "obras_admin_token")
+     que ya usan admin-visitas.html, admin-obras.html, admin-usuarios.html
+     y vendedor.html — si ya iniciaste sesión en cualquiera de esas
+     pantallas en este navegador, entrás acá derecho.
+     ====================================================================== -->
+<div id="cotLoginOverlay" class="hidden" style="position:fixed;inset:0;z-index:500;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;">
+  <div class="card" style="width:100%;max-width:320px;text-align:center;">
+    <img src="/assets/logo-piedra-negra.png" alt="Piedra Negra" style="height:26px;width:auto;margin:0 auto 16px;display:block;">
+    <h2 style="margin-top:0;margin-bottom:14px">Cotizador</h2>
+    <div style="text-align:left">
+      <label for="cotLoginUser">Usuario</label>
+      <input type="text" id="cotLoginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('cotLoginPass').focus()">
+      <label for="cotLoginPass" style="margin-top:8px">Contraseña</label>
+      <input type="password" id="cotLoginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')cotLogin()">
+    </div>
+    <div id="cotLoginMsg"></div>
+    <button class="primary" style="width:100%;margin-top:12px" onclick="cotLogin()">Entrar</button>
+  </div>
+</div>
+
+<div id="cotSinAccesoOverlay" class="hidden" style="position:fixed;inset:0;z-index:500;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;">
+  <div class="card" style="width:100%;max-width:340px;text-align:center;">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="hint">Tu usuario no tiene habilitado el módulo Cotizador. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="secondary" onclick="cotLogout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<header class="brand-header hidden" id="cotHeader">
   <div class="brand-header-inner">
     <img class="brand-logo" alt="Piedra Negra" src="/assets/logo-piedra-negra.png">
     <div class="brand-title">
@@ -236,7 +278,7 @@
   </div>
 </header>
 
-<div class="wrap">
+<div class="wrap hidden" id="cotWrap">
 
   <div class="grid" style="margin-bottom:14px;">
     <div class="field">
@@ -2654,7 +2696,115 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
   if (res.ok) mostrarMsg('Tarifas guardadas.', 'ok'); else mostrarMsg('Error al guardar tarifas.');
 });
 
-cargarTiendas().then(abrirEdicionDesdeQuery);
+// ---------------------------------------------------------------------
+// LOGIN — ver el comentario junto al overlay más arriba. cotArrancar()
+// decide, recién con storeId ya resuelto por cargarTiendas(), si esta
+// pantalla quedó parada en la tienda real (en cuyo caso hay que loguearse
+// antes de mostrar nada) o en cualquier otra tienda (sigue igual que
+// siempre, sin pedir nada).
+// ---------------------------------------------------------------------
+let COT_TOKEN = '';
+try { COT_TOKEN = localStorage.getItem('obras_admin_token') || ''; } catch (e) { /* sin acceso a localStorage */ }
+
+// De acá para abajo hay decenas de fetch() sueltos, uno por cada acción del
+// cotizador — en vez de tocarlos uno por uno para mandar el header de
+// sesión, se intercepta window.fetch una sola vez acá y se lo agrega
+// automáticamente a cualquier pedido, en cuanto haya un token guardado. En
+// las tiendas que no son la real, cotizador.js ignora el header sin
+// problema (ver la nota al principio de ese archivo).
+(function interceptarFetchConToken(){
+  const fetchOriginal = window.fetch.bind(window);
+  window.fetch = function(input, init){
+    if (!COT_TOKEN) return fetchOriginal(input, init);
+    init = Object.assign({}, init);
+    init.headers = Object.assign({}, init.headers, {'x-admin-token': COT_TOKEN});
+    return fetchOriginal(input, init);
+  };
+})();
+
+function cotLogout(){
+  try { localStorage.removeItem('obras_admin_token'); } catch (e) { /* sin acceso a localStorage */ }
+  location.reload();
+}
+
+async function cotLogin(){
+  const usuario = document.getElementById('cotLoginUser').value;
+  const pass = document.getElementById('cotLoginPass').value;
+  const msgEl = document.getElementById('cotLoginMsg');
+  msgEl.innerHTML = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    COT_TOKEN = data.token;
+    try { localStorage.setItem('obras_admin_token', COT_TOKEN); } catch (e) { /* sin acceso a localStorage */ }
+    await cotValidarSesionYArrancar();
+  }catch(e){
+    msgEl.innerHTML = '<div class="msg error">' + e.message + '</div>';
+  }
+}
+
+// Valida el token guardado (si hay uno) contra /api/usuarios/me y recién
+// ahí muestra la app — recarga cargarTiendas() para traer los datos ya
+// autenticado (la primera pasada, antes de saber si hacía falta login,
+// pudo haberse quedado sin nada por el 401).
+async function cotValidarSesionYArrancar(){
+  if (!COT_TOKEN){
+    document.getElementById('cotLoginOverlay').classList.remove('hidden');
+    return;
+  }
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers:{'x-admin-token':COT_TOKEN}});
+    if (!r.ok){
+      try { localStorage.removeItem('obras_admin_token'); } catch (e) { /* sin acceso a localStorage */ }
+      COT_TOKEN = '';
+      document.getElementById('cotLoginOverlay').classList.remove('hidden');
+      return;
+    }
+    me = await r.json();
+  }catch(e){
+    document.getElementById('cotLoginOverlay').classList.remove('hidden');
+    document.getElementById('cotLoginMsg').innerHTML = '<div class="msg error">No se pudo validar la sesión.</div>';
+    return;
+  }
+  const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('cotizador'));
+  if (!tieneAcceso){
+    document.getElementById('cotLoginOverlay').classList.add('hidden');
+    document.getElementById('cotSinAccesoOverlay').classList.remove('hidden');
+    return;
+  }
+  document.getElementById('cotLoginOverlay').classList.add('hidden');
+  document.getElementById('cotSinAccesoOverlay').classList.add('hidden');
+  document.getElementById('cotHeader').classList.remove('hidden');
+  document.getElementById('cotWrap').classList.remove('hidden');
+  await cargarTiendas();
+  abrirEdicionDesdeQuery();
+}
+
+async function cotArrancar(){
+  // Primera pasada sin saber todavía si hace falta login: resuelve
+  // storeId igual que siempre (URL, o el recordado en este navegador, o el
+  // primero de /api/stores). Si termina siendo la tienda real, estos
+  // pedidos van a volver vacíos por el 401 — no importa, es cosmético,
+  // cotValidarSesionYArrancar() los vuelve a pedir ya logueado.
+  await cargarTiendas();
+  let storeReal = null;
+  try{
+    const r = await fetch('/api/visitas/config');
+    const cfg = await r.json();
+    storeReal = cfg.storeId;
+  }catch(e){ /* si falla, seguimos sin gatear — mismo comportamiento que siempre */ }
+
+  if (storeReal && storeId && String(storeId) === String(storeReal)){
+    await cotValidarSesionYArrancar();
+  } else {
+    document.getElementById('cotHeader').classList.remove('hidden');
+    document.getElementById('cotWrap').classList.remove('hidden');
+    abrirEdicionDesdeQuery();
+  }
+}
+cotArrancar();
 </script>
 </body>
 </html>

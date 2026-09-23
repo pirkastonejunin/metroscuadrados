@@ -46,7 +46,7 @@ const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
 const googleCalendar = require('./google-calendar');
-const { authUsuario, requiereModulo } = require('./usuarios');
+const { authUsuario, requiereModulo, requiereVendedorPropio } = require('./usuarios');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -180,6 +180,12 @@ async function siguienteNumeroObra() {
 // lugar de este archivo que usa `authAdmin` necesita cambios.
 const authAdmin = [authUsuario, requiereModulo('visitas')];
 
+// Rutas /vendedor/:vendedorId/... (antes sin ninguna autenticación, confiaban
+// en el vendedorId que viniera en la URL). Ahora el vendedor tiene su propio
+// usuario/contraseña (ver usuarios.js) y requiereVendedorPropio verifica que
+// sea el suyo (o que sea alguien de oficina con acceso a Visitas).
+const authVendedor = [authUsuario, requiereVendedorPropio];
+
 // Duración por defecto de una visita en el calendario, cuando no tenemos
 // otra forma de saber cuánto va a durar.
 const DURACION_VISITA_MS = 60 * 60 * 1000; // 1 hora
@@ -238,20 +244,9 @@ router.get('/config', (req, res) => {
 // VENDEDORES
 // ---------------------------------------------------------------------
 
-// Lista pública (sin login): el vendedor se identifica eligiéndose acá.
-router.get('/vendedores/publico', async (req, res) => {
-  try {
-    const lista = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('visitas_vendedores')
-        .find({ activo: { $ne: false } })
-        .project({ nombre: 1 })
-        .sort({ nombre: 1 })
-        .toArray();
-    });
-    res.json(lista);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+// (Ya no hay una ruta pública "/vendedores/publico" para elegirse de una
+// lista sin login — desde la ronda "sistema completo" cada vendedor entra
+// con su propio usuario/contraseña, ver usuarios.js y public/vendedor.html.)
 
 router.get('/vendedores', authAdmin, async (req, res) => {
   try {
@@ -741,7 +736,7 @@ async function visitaDelVendedor(db, visitaIdStr, vendedorIdStr) {
   return visita;
 }
 
-router.get('/vendedor/:vendedorId/visitas', async (req, res) => {
+router.get('/vendedor/:vendedorId/visitas', authVendedor, async (req, res) => {
   try {
     const vId = toObjectId(req.params.vendedorId);
     if (!vId) throw err(400, 'vendedorId inválido');
@@ -758,7 +753,7 @@ router.get('/vendedor/:vendedorId/visitas', async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-router.get('/vendedor/:vendedorId/visitas/:id', async (req, res) => {
+router.get('/vendedor/:vendedorId/visitas/:id', authVendedor, async (req, res) => {
   try {
     const visita = await conReintento(async () => {
       const db = await getDb();
@@ -770,7 +765,7 @@ router.get('/vendedor/:vendedorId/visitas/:id', async (req, res) => {
 
 // Agrega fotos del lugar (base64 data URLs), función propia de la visita,
 // separada del simulador de piso con IA del cotizador.
-router.post('/vendedor/:vendedorId/visitas/:id/fotos', async (req, res) => {
+router.post('/vendedor/:vendedorId/visitas/:id/fotos', authVendedor, async (req, res) => {
   try {
     const { fotos } = req.body || {};
     if (!Array.isArray(fotos) || !fotos.length) throw err(400, 'No llegaron fotos');
@@ -790,7 +785,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/fotos', async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-router.delete('/vendedor/:vendedorId/visitas/:id/fotos/:index', async (req, res) => {
+router.delete('/vendedor/:vendedorId/visitas/:id/fotos/:index', authVendedor, async (req, res) => {
   try {
     const idx = Number(req.params.index);
     const resultado = await conReintento(async () => {
@@ -816,7 +811,7 @@ router.delete('/vendedor/:vendedorId/visitas/:id/fotos/:index', async (req, res)
 // que ya carga Mato para el cotizador) y acá se recalcula el total de cada
 // una, mismo cálculo que cotizador.js usa en /guardar, para que quede
 // consistente con lo que ya conoce del cotizador.
-router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', async (req, res) => {
+router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', authVendedor, async (req, res) => {
   try {
     const { items, notas, formasPagoSeleccionadas } = req.body || {};
     if (!Array.isArray(items) || !items.length) throw err(400, 'Agregá al menos un producto');
@@ -890,7 +885,7 @@ function cotizacionesDePresupuesto(presupuesto) {
 // si se llama de nuevo con una cotización ya vinculada (ej. el botón
 // "Actualizar total"), esa entrada se refresca en el lugar en vez de
 // duplicarse.
-router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (req, res) => {
+router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', authVendedor, async (req, res) => {
   try {
     const { cotizacionId, storeId } = req.body || {};
     if (!cotizacionId || !storeId) throw err(400, 'Falta cotizacionId o storeId');
@@ -955,7 +950,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', async (re
 // no queda ninguna otra cotización ni ítem agregado a mano, la visita
 // vuelve a quedar sin presupuesto (mismo estado que si nunca se hubiera
 // cargado nada).
-router.delete('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/:cotizacionId', async (req, res) => {
+router.delete('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/:cotizacionId', authVendedor, async (req, res) => {
   try {
     const cotId = toObjectId(req.params.cotizacionId);
     if (!cotId) throw err(400, 'cotizacionId inválido');
@@ -1000,7 +995,7 @@ router.delete('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/:cotizaci
 // completa de "itemsExtra" cada vez (igual que el form de presupuesto
 // manual reemplaza toda la lista de items) — mandar un array vacío los
 // quita a todos.
-router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/items-extra', async (req, res) => {
+router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/items-extra', authVendedor, async (req, res) => {
   try {
     const { items } = req.body || {};
     if (!Array.isArray(items)) throw err(400, 'Formato inválido');
@@ -1298,7 +1293,7 @@ function enviarPdfPresupuestoManual(res, visita, vistaDetalle) {
   pdf.end();
 }
 
-router.get('/vendedor/:vendedorId/visitas/:id/presupuesto-pdf', async (req, res) => {
+router.get('/vendedor/:vendedorId/visitas/:id/presupuesto-pdf', authVendedor, async (req, res) => {
   try {
     const visita = await conReintento(async () => {
       const db = await getDb();
@@ -1325,7 +1320,7 @@ router.get('/:id/presupuesto-pdf', authAdmin, async (req, res) => {
 
 // Confirmación en el momento, por el vendedor. cotizacionesIds (opcional):
 // ver confirmarVisita.
-router.post('/vendedor/:vendedorId/visitas/:id/confirmar', async (req, res) => {
+router.post('/vendedor/:vendedorId/visitas/:id/confirmar', authVendedor, async (req, res) => {
   try {
     await conReintento(async () => {
       const db = await getDb();

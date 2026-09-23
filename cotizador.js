@@ -30,8 +30,30 @@ const fs = require('fs');
 const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
 const sharp = require('sharp');
+const { authUsuario, requiereModulo } = require('./usuarios');
 
 const router = express.Router();
+
+// Este router es infraestructura multi-tenant: lo usan otras tiendas de
+// Tiendanube, no solo Piedra Negra (cada request llega con su propio
+// store_id en query o body). Por eso NO podemos exigir login para todas
+// las tiendas — solo para la tienda real de Piedra Negra, que es la única
+// que pasó a requerir que Visitas/Obras/Cotizador entren por Usuarios y
+// roles. Para cualquier otra tienda (o si todavía no llegó store_id, cosa
+// que ya validan las rutas más abajo) seguimos exactamente igual que antes:
+// sin login.
+const authCotizadorSiEsTiendaReal = (req, res, next) => {
+  const storeId = req.query.store_id || (req.body && req.body.store_id);
+  const storeReal = process.env.TIENDA_REAL_STORE_ID;
+  if (storeId && storeReal && String(storeId) === String(storeReal)) {
+    return authUsuario(req, res, (authErr) => {
+      if (authErr) return next(authErr);
+      requiereModulo('cotizador')(req, res, next);
+    });
+  }
+  next();
+};
+router.use(authCotizadorSiEsTiendaReal);
 
 // Logo de Piedra Negra (PNG con fondo transparente), para el encabezado del
 // PDF y para el header de las páginas HTML (servido como estático en
