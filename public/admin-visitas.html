@@ -4,13 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Visitas - Piedra Negra</title>
-<script>
-// Cuando esta pantalla corre embebida dentro de panel.html (un <iframe>,
-// mismo origen — panel.html ya valida el mismo login compartido), oculta
-// el encabezado propio (logo, "← Menú", "Cerrar sesión"): panel.html ya
-// pone esos controles una sola vez para las cinco pantallas.
-if (window.self !== window.top) document.documentElement.classList.add('embebido');
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -26,7 +19,6 @@ if (window.self !== window.top) document.documentElement.classList.add('embebido
   *{box-sizing:border-box;}
   body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
   header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
-  html.embebido header{display:none !important;}
   header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
   header .logo{height:22px;width:auto;display:block;flex-shrink:0;}
   header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

@@ -4,13 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Piedra Negra — Calendario</title>
-<script>
-// Cuando esta pantalla corre embebida dentro de panel.html (un <iframe>,
-// mismo origen — panel.html ya valida el mismo login compartido), oculta
-// el link "Inicio": panel.html ya pone sus propios controles de navegación
-// una sola vez para las cinco pantallas.
-if (window.self !== window.top) document.documentElement.classList.add('embebido');
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -43,7 +36,6 @@ if (window.self !== window.top) document.documentElement.classList.add('embebido
   .volver { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 600; margin-bottom: 18px; }
   .volver:hover { color: var(--accent); }
   .volver svg { width: 15px; height: 15px; }
-  html.embebido .volver { display: none !important; }
 
   h1 { font-size: 1.35rem; font-weight: 800; margin: 0 0 2px; letter-spacing: -0.01em; }
   .sub { margin: 0 0 22px; color: var(--muted); font-size: 0.88rem; }

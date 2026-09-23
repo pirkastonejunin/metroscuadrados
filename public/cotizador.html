@@ -4,15 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cotizador de obra — Piedra Negra</title>
-<script>
-// Cuando esta pantalla corre embebida dentro de panel.html (un <iframe>,
-// mismo origen — panel.html ya valida el mismo login compartido), oculta
-// el encabezado propio (logo, título, "Menú"): panel.html ya pone sus
-// propios controles de navegación una sola vez para las cinco pantallas.
-// No afecta a las demás tiendas que instalaron la app: panel.html solo
-// embebe cotizador.html para la tienda real de Piedra Negra.
-if (window.self !== window.top) document.documentElement.classList.add('embebido');
-</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -181,7 +172,6 @@ if (window.self !== window.top) document.documentElement.classList.add('embebido
   .msg.error{background:#fdecea;color:var(--warn);}
   .msg.ok{background:#eaf5ec;color:var(--ok);}
   .hidden{display:none !important;}
-  html.embebido #cotHeader{display:none !important;}
   .hist-row{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid var(--border);font-size:13.5px;}
   .hist-row:last-child{border-bottom:none;}
   .hist-row .d{color:var(--muted);font-size:12px;}

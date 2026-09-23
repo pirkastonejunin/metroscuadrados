@@ -85,6 +85,38 @@
   footer { margin-top: 40px; text-align: center; color: var(--muted); font-size: 0.78rem; }
 
   .hidden { display: none !important; }
+  .card-login {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 16px; box-shadow: var(--shadow); max-width: 300px;
+  }
+  .card-login label { display: block; font-size: 0.76rem; font-weight: 700; color: var(--muted); margin: 10px 0 4px; }
+  .card-login label:first-child { margin-top: 0; }
+  .card-login input {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px;
+    font-size: 0.9rem; background: var(--bg); color: var(--ink); font-family: inherit;
+  }
+  .card-login input:focus { outline: none; border-color: var(--accent); }
+  .card-login .err { color: #c53030; font-size: 0.8rem; margin: 6px 0 0; min-height: 1em; }
+  .card-login .btn {
+    width: 100%; margin-top: 12px; background: var(--accent); color: var(--accent-ink);
+    border: none; padding: 10px; border-radius: 9px; font-weight: 700; font-size: 0.87rem;
+    cursor: pointer; font-family: inherit;
+  }
+  .card-login .btn:hover { filter: brightness(0.95); }
+  .sesion-info {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 12px; font-size: 0.82rem; color: var(--muted);
+  }
+  .sesion-info button {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 0.78rem;
+    font-family: inherit; font-weight: 600;
+  }
+  .sesion-info button:hover { border-color: #c53030; color: #c53030; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .card-login .err { color: #ff8080; }
+  }
+  :root[data-theme="dark"] .card-login .err { color: #ff8080; }
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -121,16 +153,63 @@
       <p>Accesos a las herramientas de obras y visitas</p>
     </header>
 
-    <div class="grupo">
+    <div class="grupo" id="grupoOficina">
       <h2>Oficina</h2>
-      <div class="lista">
-        <a class="acceso" href="/panel.html">
+
+      <div class="card-login" id="oficinaLogin">
+        <label>Usuario</label>
+        <input id="oficinaUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('oficinaPass').focus()">
+        <label>Contraseña</label>
+        <input type="password" id="oficinaPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')oficinaLogin()">
+        <div class="err" id="oficinaErr"></div>
+        <button class="btn" onclick="oficinaLogin()">Entrar</button>
+      </div>
+
+      <div class="sesion-info hidden" id="oficinaSesion">
+        <span id="oficinaNombre"></span>
+        <button onclick="oficinaLogout()">Cerrar sesión</button>
+      </div>
+
+      <p class="muted hidden" id="oficinaSinModulos" style="margin:0 0 12px;font-size:0.83rem">Tu usuario no tiene ningún módulo de Oficina habilitado todavía. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+
+      <div class="lista hidden" id="oficinaLista">
+        <a class="acceso" href="/admin-visitas.html" data-modulo="visitas">
           <div class="icono">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2.3"/><line x1="3" y1="9.3" x2="21" y2="9.3"/><line x1="8" y1="4" x2="8" y2="9.3"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6.5"/><line x1="16" y1="2.5" x2="16" y2="6.5"/><line x1="7.5" y1="13.5" x2="7.5" y2="13.5"/><line x1="12" y1="13.5" x2="12" y2="13.5"/><line x1="16.5" y1="13.5" x2="16.5" y2="13.5"/><line x1="7.5" y1="17" x2="7.5" y2="17"/><line x1="12" y1="17" x2="12" y2="17"/></svg>
           </div>
           <div class="texto">
-            <strong>Panel de Oficina</strong>
-            <span>Visitas, calendario, obras, cotizador y usuarios — un solo login</span>
+            <strong>Panel de Visitas</strong>
+            <span>Agendar visitas, vendedores, mapeo de tipos de trabajo</span>
+          </div>
+          <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+        </a>
+        <a class="acceso" href="/calendario.html" data-modulo="visitas,obras">
+          <div class="icono">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6.5"/><line x1="16" y1="2.5" x2="16" y2="6.5"/><circle cx="12" cy="14.5" r="2.2"/></svg>
+          </div>
+          <div class="texto">
+            <strong>Calendario</strong>
+            <span>Visitas y tareas de obra con fecha, mes a mes</span>
+          </div>
+          <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+        </a>
+        <a class="acceso" href="/admin-obras.html" data-modulo="obras">
+          <div class="icono">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V9.5L12 4l8 5.5V21"/><path d="M9 21v-6h6v6"/><line x1="4" y1="21" x2="20" y2="21"/><line x1="9" y1="11" x2="9" y2="11.01"/><line x1="15" y1="11" x2="15" y2="11.01"/></svg>
+          </div>
+          <div class="texto">
+            <strong>Panel de Obras</strong>
+            <span>Colocadores, tipos de trabajo, asignaciones, reportes de m² y pago</span>
+          </div>
+          <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+        </a>
+        <a class="acceso" href="/admin-usuarios.html" data-modulo="usuarios">
+          <div class="icono">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          </div>
+          <div class="texto">
+            <strong>Usuarios y roles</strong>
+            <span>Crear usuarios y elegir a qué módulos entra cada uno</span>
           </div>
           <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
         </a>
@@ -183,15 +262,90 @@
   </div>
 
 <script>
-// El Panel de Oficina (visitas/calendario/obras/cotizador/usuarios) ahora
-// vive en panel.html, con su propio login único — acá ya no hace falta
-// nada de eso, es un link más como los de Vendedores/Colocadores.
-//
-// El único detalle es el link de Cotizador: sin un store_id explícito en
-// la URL, cotizador.html arranca en la tienda que haya quedado recordada
-// en este navegador (o en la primera que devuelva /api/stores), que puede
-// no ser la tienda real de Piedra Negra — y por lo tanto no pedir login.
-// Para que este acceso vaya siempre a la tienda real (y por lo tanto pida
+const TOKEN_KEY = 'obras_admin_token';
+let TOKEN = localStorage.getItem(TOKEN_KEY) || '';
+
+function tieneModulo(rol, claveCombinada){
+  if (!rol) return false;
+  if (rol.protegido) return true;
+  const requeridos = claveCombinada.split(',');
+  const modulos = rol.modulos || [];
+  return requeridos.every(k => modulos.includes(k));
+}
+
+async function oficinaLogin(){
+  const usuario = document.getElementById('oficinaUser').value;
+  const password = document.getElementById('oficinaPass').value;
+  const errEl = document.getElementById('oficinaErr');
+  errEl.textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem(TOKEN_KEY, TOKEN);
+    await revisarSesionOficina();
+  }catch(e){
+    errEl.textContent = e.message;
+  }
+}
+
+function oficinaLogout(){
+  localStorage.removeItem(TOKEN_KEY);
+  TOKEN = '';
+  revisarSesionOficina();
+}
+
+async function revisarSesionOficina(){
+  const loginBox = document.getElementById('oficinaLogin');
+  const sesionBox = document.getElementById('oficinaSesion');
+  const lista = document.getElementById('oficinaLista');
+  const sinModulos = document.getElementById('oficinaSinModulos');
+
+  if (!TOKEN){
+    loginBox.classList.remove('hidden');
+    sesionBox.classList.add('hidden');
+    lista.classList.add('hidden');
+    sinModulos.classList.add('hidden');
+    return;
+  }
+
+  try{
+    const r = await fetch('/api/usuarios/me', {headers:{'x-admin-token':TOKEN}});
+    if (!r.ok) throw new Error('Sesión inválida o vencida');
+    const me = await r.json();
+
+    document.getElementById('oficinaNombre').textContent = (me.usuario && me.usuario.nombre) ? ('Hola, ' + me.usuario.nombre) : '';
+
+    let algunoVisible = false;
+    lista.querySelectorAll('a.acceso').forEach(a => {
+      const visible = tieneModulo(me.rol, a.dataset.modulo);
+      a.classList.toggle('hidden', !visible);
+      if (visible) algunoVisible = true;
+    });
+
+    loginBox.classList.add('hidden');
+    sesionBox.classList.remove('hidden');
+    lista.classList.remove('hidden');
+    sinModulos.classList.toggle('hidden', algunoVisible);
+  }catch(e){
+    // Token vencido o inválido: pedimos login de nuevo, sin dejar rastro.
+    localStorage.removeItem(TOKEN_KEY);
+    TOKEN = '';
+    loginBox.classList.remove('hidden');
+    sesionBox.classList.add('hidden');
+    lista.classList.add('hidden');
+    sinModulos.classList.add('hidden');
+  }
+}
+
+revisarSesionOficina();
+
+// El link de Cotizador (grupo Vendedores): sin un store_id explícito en la
+// URL, cotizador.html arranca en la tienda que haya quedado recordada en
+// este navegador (o en la primera que devuelva /api/stores), que puede no
+// ser la tienda real de Piedra Negra — y por lo tanto no pedir login. Para
+// que este acceso vaya siempre a la tienda real (y por lo tanto pida
 // login), se completa acá con el store_id real apenas se conoce.
 (async function fijarStoreIdCotizador(){
   try{
