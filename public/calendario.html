@@ -169,9 +169,18 @@
   <div id="loginScreen">
     <div class="card">
       <h2>Calendario</h2>
-      <input type="password" id="loginPass" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
+      <input id="loginUser" placeholder="Usuario" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+      <input type="password" id="loginPass" placeholder="Contraseña" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
       <div class="err" id="loginErr"></div>
       <button class="btn" onclick="login()">Entrar</button>
+    </div>
+  </div>
+
+  <div id="sinAccesoScreen" class="hidden">
+    <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+      <h2 style="margin-top:0">Sin acceso</h2>
+      <p class="sub">El calendario combina Visitas y Obras — tu usuario necesita acceso a los dos módulos. Pedile a un administrador que te los habilite desde Usuarios y roles.</p>
+      <button class="btn" onclick="logout()">Cerrar sesión</button>
     </div>
   </div>
 
@@ -230,11 +239,14 @@ async function api(base, path, opts = {}) {
 }
 
 async function login() {
+  const usuario = document.getElementById('loginUser').value;
   const pass = document.getElementById('loginPass').value;
   document.getElementById('loginErr').textContent = '';
   try {
-    const r = await api(BASE_VISITAS, '/login', { method: 'POST', body: JSON.stringify({ password: pass }) });
-    TOKEN = r.token;
+    const r = await fetch('/api/usuarios/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario, password: pass }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
     localStorage.setItem('obras_admin_token', TOKEN);
     await entrar();
   } catch (e) {
@@ -242,9 +254,26 @@ async function login() {
   }
 }
 
+function logout() {
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
 async function entrar() {
-  await cargarColocadores(); // primera llamada autenticada: valida el token
+  const r = await fetch('/api/usuarios/me', { headers: { 'x-admin-token': TOKEN } });
+  if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN = ''; throw new Error('Sesión inválida'); }
+  const me = await r.json();
+  // El calendario combina Visitas y Obras (ver usuarios.js) — hace falta
+  // tener los dos módulos habilitados para verlo completo.
+  const tieneAcceso = me.rol && (me.rol.protegido || ((me.rol.modulos||[]).includes('visitas') && (me.rol.modulos||[]).includes('obras')));
+  if (!tieneAcceso) {
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('sinAccesoScreen').classList.remove('hidden');
+    return;
+  }
+  await cargarColocadores();
   document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   await renderCalendario();
 }

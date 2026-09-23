@@ -32,6 +32,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const googleCalendar = require('./google-calendar');
+const { authUsuario, requiereModulo } = require('./usuarios');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -109,13 +110,13 @@ function verificarTokenColocador(token) {
   return colocadorId;
 }
 
-function authAdmin(req, res, next) {
-  const pass = process.env.OBRAS_ADMIN_PASSWORD;
-  const token = req.headers['x-admin-token'];
-  if (!pass) return res.status(500).json({ error: 'OBRAS_ADMIN_PASSWORD no está configurada en el servidor' });
-  if (token !== pass) return res.status(401).json({ error: 'No autorizado' });
-  next();
-}
+// Antes: función local que comparaba contra una única contraseña compartida
+// (OBRAS_ADMIN_PASSWORD). Ahora: usuarios y roles configurables — ver
+// usuarios.js. authUsuario valida el token de sesión y carga req.usuario
+// (con su rol); requiereModulo('obras') exige que ese rol tenga acceso al
+// módulo de Obras. Como Express aplana arrays de middlewares, ningún otro
+// lugar de este archivo que usa `authAdmin` necesita cambios.
+const authAdmin = [authUsuario, requiereModulo('obras')];
 
 async function authColocador(req, res, next) {
   const token = req.headers['x-colocador-token'];
@@ -255,13 +256,7 @@ async function sincronizarTareasConEstadoObra(db, obra) {
 // ---------------------------------------------------------------------
 
 // Login admin (oficina)
-router.post('/login', (req, res) => {
-  const { password } = req.body || {};
-  const pass = process.env.OBRAS_ADMIN_PASSWORD;
-  if (!pass) return res.status(500).json({ error: 'OBRAS_ADMIN_PASSWORD no está configurada en el servidor' });
-  if (password !== pass) return res.status(401).json({ error: 'Contraseña incorrecta' });
-  res.json({ ok: true, token: pass });
-});
+// El login de oficina ahora vive en /api/usuarios/login (ver usuarios.js).
 
 // Login colocador (PIN de 4-6 dígitos)
 router.post('/colocador/login', async (req, res) => {
