@@ -771,31 +771,30 @@ router.post('/simular-piso', async (req, res) => {
 // Igual que /simular-piso pero para revestimientos de piedra: acá SÍ hay que
 // decirle a la IA qué parte de la pared revestir (con piso alcanza con
 // "reemplazá el piso", pero una pared puede tener zonas que no van
-// revestidas). El frontend manda un rectángulo relativo (0-100, % del
-// ancho/alto de la foto elegida por el vendedor al dibujarlo con el dedo o
-// el mouse) — acá se dibuja ese rectángulo en rojo sobre una COPIA de la
-// foto (con sharp, componiendo un SVG encima) y se le pide a la IA que
-// revista solo lo marcado y no deje el marcador en el resultado final. La
-// foto original (sin marcar) es la que el frontend ya guarda como "antes".
+// revestidas). El frontend manda una lista de áreas (podés marcar varias
+// zonas separadas, por ejemplo columnas o zócalos, y cada una puede ser un
+// rectángulo o una forma libre dibujada a mano alzada), todo en % (0-100)
+// relativo al ancho/alto de la foto elegida por el vendedor — acá se
+// dibujan esas formas en rojo sobre una COPIA de la foto (con sharp,
+// componiendo un SVG encima) y se le pide a la IA que revista solo lo
+// marcado, cubriendo cada zona por completo, y no deje el marcador en el
+// resultado final. La foto original (sin marcar) es la que el frontend ya
+// guarda como "antes".
 router.post('/simular-piedra', async (req, res) => {
   try {
     if (!process.env.GEMINI_API_KEY) {
       throw Object.assign(new Error('Falta configurar GEMINI_API_KEY en el servidor.'), { status: 500 });
     }
     const store = await getStoreFromQuery(req);
-    const { productId, foto, area } = req.body || {};
+    const { productId, foto, areas } = req.body || {};
     if (!productId) throw Object.assign(new Error('Falta productId.'), { status: 400 });
     const fotoParte = dataUrlAPartes(foto);
     if (!fotoParte) throw Object.assign(new Error('Falta la foto de la pared (o no es una imagen valida).'), { status: 400 });
     if (fotoParte.data.length > 8_000_000) {
       throw Object.assign(new Error('La foto es demasiado pesada.'), { status: 400 });
     }
-    const xPct = Number(area && area.xPct);
-    const yPct = Number(area && area.yPct);
-    const wPct = Number(area && area.wPct);
-    const hPct = Number(area && area.hPct);
-    if (![xPct, yPct, wPct, hPct].every((n) => Number.isFinite(n)) || wPct <= 0 || hPct <= 0) {
-      throw Object.assign(new Error('Falta marcar el área de la pared a revestir.'), { status: 400 });
+    if (!Array.isArray(areas) || !areas.length) {
+      throw Object.assign(new Error('Falta marcar el área (o áreas) de la pared a revestir.'), { status: 400 });
     }
 
     const productos = await productosConfigurados(store);
@@ -809,18 +808,40 @@ router.post('/simular-piedra', async (req, res) => {
     const altoImg = metadata.height || 0;
     if (!anchoImg || !altoImg) throw Object.assign(new Error('No se pudo leer la foto.'), { status: 400 });
 
-    // Clamp del rectángulo a los límites reales de la imagen, por si el
-    // dibujo en el navegador se pasó un poco del borde.
-    const rx = Math.max(0, Math.min(anchoImg, Math.round((xPct / 100) * anchoImg)));
-    const ry = Math.max(0, Math.min(altoImg, Math.round((yPct / 100) * altoImg)));
-    const rw = Math.max(1, Math.min(anchoImg - rx, Math.round((wPct / 100) * anchoImg)));
-    const rh = Math.max(1, Math.min(altoImg - ry, Math.round((hPct / 100) * altoImg)));
+    // Clamp de cada forma a los límites reales de la imagen, por si el
+    // dibujo en el navegador se pasó un poco del borde. Rectángulo y mano
+    // alzada se dibujan con el mismo estilo (mismo rojo, mismo grosor) para
+    // que la IA los trate igual.
     const grosorBorde = Math.max(3, Math.round(anchoImg * 0.006));
+    const estiloForma = 'fill="rgba(255,0,0,0.16)" stroke="#ff0000" stroke-width="' + grosorBorde + '" stroke-linejoin="round"';
+    const formasSvg = [];
+    areas.forEach((area) => {
+      if (!area) return;
+      if (area.type === 'mano' && Array.isArray(area.puntosPct) && area.puntosPct.length >= 3) {
+        const puntos = area.puntosPct
+          .filter((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))
+          .map((p) => {
+            const px = Math.max(0, Math.min(anchoImg, Math.round((Number(p.x) / 100) * anchoImg)));
+            const py = Math.max(0, Math.min(altoImg, Math.round((Number(p.y) / 100) * altoImg)));
+            return px + ',' + py;
+          })
+          .join(' ');
+        if (puntos) formasSvg.push('<polygon points="' + puntos + '" ' + estiloForma + ' />');
+        return;
+      }
+      const xPct = Number(area.xPct), yPct = Number(area.yPct), wPct = Number(area.wPct), hPct = Number(area.hPct);
+      if (![xPct, yPct, wPct, hPct].every((n) => Number.isFinite(n)) || wPct <= 0 || hPct <= 0) return;
+      const rx = Math.max(0, Math.min(anchoImg, Math.round((xPct / 100) * anchoImg)));
+      const ry = Math.max(0, Math.min(altoImg, Math.round((yPct / 100) * altoImg)));
+      const rw = Math.max(1, Math.min(anchoImg - rx, Math.round((wPct / 100) * anchoImg)));
+      const rh = Math.max(1, Math.min(altoImg - ry, Math.round((hPct / 100) * altoImg)));
+      formasSvg.push('<rect x="' + rx + '" y="' + ry + '" width="' + rw + '" height="' + rh + '" ' + estiloForma + ' />');
+    });
+    if (!formasSvg.length) {
+      throw Object.assign(new Error('Falta marcar el área (o áreas) de la pared a revestir.'), { status: 400 });
+    }
 
-    const svgMarca = '<svg width="' + anchoImg + '" height="' + altoImg + '" xmlns="http://www.w3.org/2000/svg">' +
-      '<rect x="' + rx + '" y="' + ry + '" width="' + rw + '" height="' + rh + '" ' +
-      'fill="rgba(255,0,0,0.16)" stroke="#ff0000" stroke-width="' + grosorBorde + '" />' +
-      '</svg>';
+    const svgMarca = '<svg width="' + anchoImg + '" height="' + altoImg + '" xmlns="http://www.w3.org/2000/svg">' + formasSvg.join('') + '</svg>';
 
     const fotoMarcadaBuffer = await sharp(fotoBuffer)
       .composite([{ input: Buffer.from(svgMarca), top: 0, left: 0 }])
@@ -830,7 +851,17 @@ router.post('/simular-piedra', async (req, res) => {
 
     const productoParte = await descargarImagenComoParte(producto.imagen);
 
-    const prompt = 'La primera imagen es una foto real de una pared, con un rectángulo rojo marcando el área exacta a revestir. Reemplazá SOLO lo que está dentro de ese rectángulo por el material de revestimiento de piedra de la segunda imagen (foto real de un producto), como si estuviera realmente instalado ahí. El rectángulo rojo es solo una guía: NO debe aparecer en el resultado final, ni ningún borde o marca roja — el revestimiento tiene que cubrir esa zona de forma natural y prolija, con un borde limpio contra el resto de la pared. Conservá la perspectiva, la iluminación, las sombras y el resto de la imagen (fuera del área marcada) sin cambios. El resultado debe verse fotorrealista.';
+    // El prompt insiste varias veces en cubrir el área COMPLETA (Mato
+    // reportó que con zonas grandes la IA a veces dejaba un margen de pared
+    // original sin revestir cerca de los bordes) y, si hay más de una zona
+    // marcada, en tratarlas todas por igual sin tocar el resto de la pared.
+    const cuantasZonas = formasSvg.length;
+    const prompt = 'La primera imagen es una foto real de una pared, con ' +
+      (cuantasZonas === 1 ? 'una zona marcada en rojo' : cuantasZonas + ' zonas separadas marcadas en rojo') +
+      ' indicando el área EXACTA a revestir. Reemplazá SOLO lo que está dentro de esa marca (o esas marcas) por el material de revestimiento de piedra de la segunda imagen (foto real de un producto), como si estuviera realmente instalado ahí. ' +
+      'IMPORTANTE: cubrí el 100% de cada zona marcada, de borde a borde y hasta las esquinas, sin dejar ninguna franja ni parte de esa zona con la pared original visible, sin importar qué tan grande sea el área marcada — no reduzcas ni centres el revestimiento dentro del contorno, tiene que llenarlo por completo. ' +
+      (cuantasZonas > 1 ? 'Tratá cada una de las ' + cuantasZonas + ' zonas marcadas por separado, revistiendo todas con el mismo material, y no revistas nada fuera de las zonas marcadas. ' : '') +
+      'La marca roja (relleno y borde) es solo una guía: NO debe aparecer en el resultado final, ni ningún resto de color o línea roja — el revestimiento tiene que cubrir esa zona de forma natural y prolija, con un borde limpio contra el resto de la pared. Conservá la perspectiva, la iluminación, las sombras y el resto de la imagen (fuera de las zonas marcadas) sin cambios. El resultado debe verse fotorrealista.';
 
     const geminiResp = await fetch(GEMINI_URL, {
       method: 'POST',

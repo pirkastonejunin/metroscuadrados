@@ -205,6 +205,12 @@
   .marcar-area-wrap img{width:100%;display:block;max-height:70vh;object-fit:contain;pointer-events:none;user-select:none;}
   .marcar-area-wrap canvas{position:absolute;top:0;left:0;width:100%;height:100%;cursor:crosshair;}
   .marcar-area-hint{color:var(--muted);font-size:12.5px;margin:10px 0 0;text-align:center;}
+  .marcar-area-modo{display:flex;gap:8px;justify-content:center;margin-top:10px;}
+  .piedra-opciones{display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;margin-top:6px;}
+  .piedra-opcion{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;background:#fff;text-align:left;}
+  .piedra-opcion:hover{border-color:var(--accent2);}
+  .piedra-opcion img{width:48px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0;}
+  .piedra-opcion .name{font-size:13.5px;font-weight:600;}
   @media print{
     header.brand-header{border-bottom:2px solid #000;}
     .tabs, .subtabs, #selTienda, .actions, .acciones-extra, .vista-toggle, .field label[for="selTienda"], .grid:has(#selTienda), .volver-menu{display:none !important;}
@@ -1324,21 +1330,31 @@ $('#inputFotoSimuladorPiedra').addEventListener('change', async (e) => {
 });
 
 // Muestra la foto elegida con un canvas transparente encima donde el
-// vendedor dibuja (arrastrando, con mouse o touch/pointer) el rectángulo a
-// revestir. Al confirmar, corre la simulación con ese rectángulo.
+// vendedor dibuja (con mouse o touch/pointer) la zona a revestir. Se puede
+// elegir entre dibujar rectángulos o a mano alzada, y se pueden marcar
+// varias zonas separadas en la misma foto (por ejemplo columnas o zócalos
+// que no forman un solo bloque) — cada trazo confirmado queda guardado en
+// "areas" y se manda todo junto al backend. Al confirmar, corre la
+// simulación con esas áreas.
 function mostrarModalMarcarArea(fotoDataUrl){
   if (limpiarMarcarArea){ limpiarMarcarArea(); limpiarMarcarArea = null; }
   $('#simTitulo').textContent = 'Simular piedra con foto';
-  $('#simSubtitulo').textContent = (productoSimulandoPiedra ? productoSimulandoPiedra.nombre + ' — ' : '') + 'marcá la zona de la pared a revestir';
+  $('#simSubtitulo').textContent = (productoSimulandoPiedra ? productoSimulandoPiedra.nombre + ' — ' : '') + 'marcá la zona (o zonas) de la pared a revestir';
   $('#simContenido').innerHTML =
     '<div class="marcar-area-wrap" id="marcarAreaWrap">' +
       '<img id="marcarAreaImg" src="' + fotoDataUrl + '">' +
       '<canvas id="marcarAreaCanvas"></canvas>' +
     '</div>' +
-    '<p class="marcar-area-hint">Arrastrá sobre la foto para dibujar el rectángulo a revestir.</p>';
+    '<div class="marcar-area-modo">' +
+      '<button type="button" class="vista-toggle-btn active" id="btnModoRect">▭ Rectángulo</button>' +
+      '<button type="button" class="vista-toggle-btn" id="btnModoMano">✏️ Mano alzada</button>' +
+    '</div>' +
+    '<p class="marcar-area-hint">Dibujá sobre la foto la zona a revestir. Podés marcar más de un área — por ejemplo columnas o zócalos separados — y elegir "Mano alzada" para formas irregulares.</p>';
   $('#simAcciones').innerHTML =
     '<button class="secondary" onclick="cerrarModalSimulador()">Cancelar</button>' +
     '<button class="secondary" onclick="cambiarFotoSimulador()">🔄 Cambiar foto</button>' +
+    '<button class="secondary" id="btnDeshacerArea" disabled>↩️ Deshacer</button>' +
+    '<button class="secondary" id="btnBorrarAreas" disabled>🗑 Borrar todo</button>' +
     '<button class="primary" id="btnConfirmarArea" disabled>Confirmar área →</button>';
   $('#modalSimulador').classList.remove('hidden');
 
@@ -1346,23 +1362,71 @@ function mostrarModalMarcarArea(fotoDataUrl){
   const canvas = $('#marcarAreaCanvas');
   const wrap = $('#marcarAreaWrap');
   const btnConfirmar = $('#btnConfirmarArea');
-  let rect = null; // { xPct, yPct, wPct, hPct } relativo al tamaño mostrado de la foto
-  let dibujando = false;
-  let inicioX = 0, inicioY = 0;
+  const btnDeshacer = $('#btnDeshacerArea');
+  const btnBorrar = $('#btnBorrarAreas');
+  const btnModoRect = $('#btnModoRect');
+  const btnModoMano = $('#btnModoMano');
 
-  function redibujar(){
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!rect) return;
-    const x = (rect.xPct / 100) * canvas.width;
-    const y = (rect.yPct / 100) * canvas.height;
-    const w = (rect.wPct / 100) * canvas.width;
-    const h = (rect.hPct / 100) * canvas.height;
+  // areas: lista de zonas ya confirmadas — cada una
+  // { type:'rect', xPct,yPct,wPct,hPct } o { type:'mano', puntosPct:[{x,y},...] },
+  // todo en % relativo al tamaño mostrado de la foto.
+  let areas = [];
+  let modo = 'rect'; // 'rect' | 'mano'
+  let dibujando = false;
+  let rectEnCurso = null;   // {x1,y1,x2,y2} en px de canvas, mientras se arrastra en modo rect
+  let trazoEnCurso = null;  // [{x,y}, ...] en px de canvas, mientras se dibuja a mano alzada
+
+  function actualizarBotones(){
+    const hay = areas.length > 0;
+    btnDeshacer.disabled = !hay;
+    btnBorrar.disabled = !hay;
+    btnConfirmar.disabled = !hay;
+    btnConfirmar.textContent = hay
+      ? 'Confirmar ' + (areas.length === 1 ? 'área' : areas.length + ' áreas') + ' →'
+      : 'Confirmar área →';
+  }
+  function pintarForma(ctx, w, h, dibujarFn){
     ctx.fillStyle = 'rgba(255,0,0,0.18)';
     ctx.strokeStyle = '#ff0000';
     ctx.lineWidth = 2;
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeRect(x, y, w, h);
+    dibujarFn(ctx, w, h);
+  }
+  function redibujar(){
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    areas.forEach((forma) => {
+      pintarForma(ctx, w, h, (c) => {
+        if (forma.type === 'rect'){
+          const x = (forma.xPct / 100) * w, y = (forma.yPct / 100) * h;
+          const fw = (forma.wPct / 100) * w, fh = (forma.hPct / 100) * h;
+          c.fillRect(x, y, fw, fh);
+          c.strokeRect(x, y, fw, fh);
+        } else {
+          const pts = forma.puntosPct;
+          if (!pts || pts.length < 2) return;
+          c.beginPath();
+          c.moveTo((pts[0].x / 100) * w, (pts[0].y / 100) * h);
+          for (let i = 1; i < pts.length; i++) c.lineTo((pts[i].x / 100) * w, (pts[i].y / 100) * h);
+          c.closePath();
+          c.fill();
+          c.stroke();
+        }
+      });
+    });
+    if (rectEnCurso){
+      const x1 = Math.min(rectEnCurso.x1, rectEnCurso.x2), x2 = Math.max(rectEnCurso.x1, rectEnCurso.x2);
+      const y1 = Math.min(rectEnCurso.y1, rectEnCurso.y2), y2 = Math.max(rectEnCurso.y1, rectEnCurso.y2);
+      pintarForma(ctx, w, h, (c) => { c.fillRect(x1, y1, x2 - x1, y2 - y1); c.strokeRect(x1, y1, x2 - x1, y2 - y1); });
+    }
+    if (trazoEnCurso && trazoEnCurso.length > 1){
+      pintarForma(ctx, w, h, (c) => {
+        c.beginPath();
+        c.moveTo(trazoEnCurso[0].x, trazoEnCurso[0].y);
+        for (let i = 1; i < trazoEnCurso.length; i++) c.lineTo(trazoEnCurso[i].x, trazoEnCurso[i].y);
+        c.stroke();
+      });
+    }
   }
   function ajustarCanvas(){
     canvas.width = wrap.clientWidth;
@@ -1371,34 +1435,57 @@ function mostrarModalMarcarArea(fotoDataUrl){
   }
   function coordsDesdeEvento(e){
     const r = canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return {
+      x: Math.max(0, Math.min(canvas.width, e.clientX - r.left)),
+      y: Math.max(0, Math.min(canvas.height, e.clientY - r.top))
+    };
   }
   function iniciar(e){
     e.preventDefault();
     canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
     dibujando = true;
     const c = coordsDesdeEvento(e);
-    inicioX = Math.max(0, Math.min(canvas.width, c.x));
-    inicioY = Math.max(0, Math.min(canvas.height, c.y));
+    if (modo === 'rect'){
+      rectEnCurso = { x1: c.x, y1: c.y, x2: c.x, y2: c.y };
+    } else {
+      trazoEnCurso = [c];
+    }
   }
   function mover(e){
     if (!dibujando) return;
     e.preventDefault();
     const c = coordsDesdeEvento(e);
-    const finX = Math.max(0, Math.min(canvas.width, c.x));
-    const finY = Math.max(0, Math.min(canvas.height, c.y));
-    const x1 = Math.min(inicioX, finX), x2 = Math.max(inicioX, finX);
-    const y1 = Math.min(inicioY, finY), y2 = Math.max(inicioY, finY);
-    rect = {
-      xPct: (x1 / canvas.width) * 100,
-      yPct: (y1 / canvas.height) * 100,
-      wPct: ((x2 - x1) / canvas.width) * 100,
-      hPct: ((y2 - y1) / canvas.height) * 100
-    };
+    if (modo === 'rect' && rectEnCurso){
+      rectEnCurso.x2 = c.x; rectEnCurso.y2 = c.y;
+    } else if (modo === 'mano' && trazoEnCurso){
+      trazoEnCurso.push(c);
+    }
     redibujar();
-    btnConfirmar.disabled = !(rect.wPct > 1 && rect.hPct > 1);
   }
-  function terminar(){ dibujando = false; }
+  function terminar(){
+    if (!dibujando) return;
+    dibujando = false;
+    if (modo === 'rect' && rectEnCurso){
+      const x1 = Math.min(rectEnCurso.x1, rectEnCurso.x2), x2 = Math.max(rectEnCurso.x1, rectEnCurso.x2);
+      const y1 = Math.min(rectEnCurso.y1, rectEnCurso.y2), y2 = Math.max(rectEnCurso.y1, rectEnCurso.y2);
+      const wPct = ((x2 - x1) / canvas.width) * 100;
+      const hPct = ((y2 - y1) / canvas.height) * 100;
+      if (wPct > 1 && hPct > 1){
+        areas.push({ type: 'rect', xPct: (x1 / canvas.width) * 100, yPct: (y1 / canvas.height) * 100, wPct, hPct });
+      }
+      rectEnCurso = null;
+    } else if (modo === 'mano' && trazoEnCurso){
+      if (trazoEnCurso.length >= 3){
+        areas.push({
+          type: 'mano',
+          puntosPct: trazoEnCurso.map((p) => ({ x: (p.x / canvas.width) * 100, y: (p.y / canvas.height) * 100 }))
+        });
+      }
+      trazoEnCurso = null;
+    }
+    redibujar();
+    actualizarBotones();
+  }
 
   canvas.addEventListener('pointerdown', iniciar);
   canvas.addEventListener('pointermove', mover);
@@ -1407,11 +1494,31 @@ function mostrarModalMarcarArea(fotoDataUrl){
   if (img.complete && img.naturalWidth) ajustarCanvas();
   else img.addEventListener('load', ajustarCanvas);
 
+  btnModoRect.addEventListener('click', () => {
+    modo = 'rect';
+    btnModoRect.classList.add('active');
+    btnModoMano.classList.remove('active');
+  });
+  btnModoMano.addEventListener('click', () => {
+    modo = 'mano';
+    btnModoMano.classList.add('active');
+    btnModoRect.classList.remove('active');
+  });
+  btnDeshacer.addEventListener('click', () => {
+    areas.pop();
+    redibujar();
+    actualizarBotones();
+  });
+  btnBorrar.addEventListener('click', () => {
+    areas = [];
+    redibujar();
+    actualizarBotones();
+  });
   btnConfirmar.addEventListener('click', () => {
-    if (!rect) return;
-    areaSimuladorPiedraActual = rect;
+    if (!areas.length) return;
+    areaSimuladorPiedraActual = areas;
     if (limpiarMarcarArea){ limpiarMarcarArea(); limpiarMarcarArea = null; }
-    ejecutarSimulacionPiedra(productoSimulandoPiedra, fotoDataUrl, rect);
+    ejecutarSimulacionPiedra(productoSimulandoPiedra, fotoDataUrl, areas);
   });
 
   limpiarMarcarArea = () => {
@@ -1420,7 +1527,7 @@ function mostrarModalMarcarArea(fotoDataUrl){
   };
 }
 
-async function ejecutarSimulacionPiedra(prod, fotoDataUrl, area){
+async function ejecutarSimulacionPiedra(prod, fotoDataUrl, areas){
   productoSimulandoPiedra = prod;
   simuladorModoActual = 'piedra';
   mostrarModalSimulador(prod, 'cargando', fotoDataUrl);
@@ -1428,7 +1535,7 @@ async function ejecutarSimulacionPiedra(prod, fotoDataUrl, area){
     const res = await fetch('/api/cotizador/simular-piedra?store_id=' + storeId, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ productId: prod.id, foto: fotoDataUrl, area })
+      body: JSON.stringify({ productId: prod.id, foto: fotoDataUrl, areas })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'No se pudo generar la simulación.');
@@ -1436,6 +1543,48 @@ async function ejecutarSimulacionPiedra(prod, fotoDataUrl, area){
   }catch(err){
     mostrarModalSimulador(prod, 'error', null, err.message);
   }
+}
+
+// Vuelve a correr la última simulación de piedra (misma foto, mismas áreas
+// marcadas), con el producto que se le pase — si no se pasa ninguno, repite
+// con el mismo. Se usa para "Volver a generar" (por si no convenció el
+// resultado) y para "Probar otra piedra" (cambiar el producto sin tener que
+// volver a marcar el área).
+function reintentarSimulacionPiedra(fotoDataUrl, prodDistinto){
+  if (!fotoSimuladorPiedraActual || !areaSimuladorPiedraActual || !areaSimuladorPiedraActual.length) return;
+  const prod = prodDistinto || productoSimulandoPiedra;
+  if (!prod) return;
+  ejecutarSimulacionPiedra(prod, fotoDataUrl || fotoSimuladorPiedraActual, areaSimuladorPiedraActual);
+}
+
+// Muestra, dentro del modal de resultado, una lista compacta de las demás
+// piedras del catálogo (con foto) para probar la misma área marcada con un
+// producto distinto sin tener que volver a marcar nada.
+function mostrarSelectorOtraPiedra(fotoDataUrl){
+  const rubroPiedra = tipoObraElegido && tipoObraElegido.rubroPiedra;
+  const todas = (catalogoCache && rubroPiedra) ? opcionesRubro({ tipoEsperado: 'm2', rubro: rubroPiedra }) : [];
+  const opciones = todas.filter((p) => p.imagen && (!productoSimulandoPiedra || p.id !== productoSimulandoPiedra.id));
+  if (!opciones.length){
+    mostrarMsg('No hay otras piedras con foto en el catálogo para probar.');
+    return;
+  }
+  $('#simContenido').innerHTML =
+    '<p class="marcar-area-hint" style="margin-top:0;">Elegí otra piedra para probar en la misma área marcada:</p>' +
+    '<div class="piedra-opciones">' +
+      opciones.map((p) =>
+        '<button type="button" class="piedra-opcion" data-id="' + p.id + '">' +
+          '<img src="' + p.imagen + '">' +
+          '<span class="name">' + escapeHtml(p.nombre) + '</span>' +
+        '</button>'
+      ).join('') +
+    '</div>';
+  $('#simAcciones').innerHTML = '<button class="secondary" onclick="cerrarModalSimulador()">Cancelar</button>';
+  $$('#simContenido .piedra-opcion').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const p = opciones.find((o) => String(o.id) === btn.dataset.id);
+      if (p) reintentarSimulacionPiedra(fotoDataUrl, p);
+    });
+  });
 }
 
 // ---------- Comparar varios pisos con la misma foto ----------
@@ -1581,10 +1730,22 @@ function mostrarModalSimulador(prod, estado, imagen, errorMsg, antes){
     acciones.innerHTML = '<button class="secondary" onclick="cerrarModalSimulador()">Cerrar</button>';
   } else {
     contenido.innerHTML = '<img class="sim-preview" src="' + imagen + '">';
+    const esPiedra = simuladorModoActual === 'piedra';
     acciones.innerHTML =
       '<button class="secondary" onclick="cerrarModalSimulador()">Descartar</button>' +
       '<button class="secondary" onclick="cambiarFotoSimulador()">🔄 Cambiar foto</button>' +
+      (esPiedra ? '<button class="secondary" id="btnReintentarPiedra">🔁 No me convenció, reintentar</button>' : '') +
+      (esPiedra ? '<button class="secondary" id="btnOtraPiedra">🪨 Probar otra piedra</button>' : '') +
       '<button class="primary" onclick="guardarSimulacionPendiente()">Guardar en esta cotización</button>';
+    // La foto (antes) puede pesar varios MB en base64 — se pasa por closure,
+    // no por atributo onclick, para no inflar el HTML ni pelear con el
+    // escapado de comillas de un data URL gigante.
+    if (esPiedra){
+      const btnReintentar = $('#btnReintentarPiedra');
+      const btnOtra = $('#btnOtraPiedra');
+      if (btnReintentar) btnReintentar.addEventListener('click', () => reintentarSimulacionPiedra(antes));
+      if (btnOtra) btnOtra.addEventListener('click', () => mostrarSelectorOtraPiedra(antes));
+    }
     // Se guarda también la foto original ("antes") junto con el resultado
     // de la IA ("después"), para poder mostrar el comparativo en el PDF y
     // al reabrir la simulación guardada.
