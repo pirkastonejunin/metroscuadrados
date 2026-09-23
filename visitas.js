@@ -721,9 +721,12 @@ router.delete('/:id', authAdmin, async (req, res) => {
 });
 
 // Confirmación desde oficina (cuando el cliente llama al local más tarde).
+// cotizacionesIds (opcional): si el presupuesto tiene más de una cotización
+// vinculada, el cliente puede aceptar solo algunas — ver confirmarVisita.
 router.post('/:id/confirmar', authAdmin, async (req, res) => {
   try {
-    const resultado = await confirmarVisita(req.params.id, 'oficina');
+    const { cotizacionesIds } = req.body || {};
+    const resultado = await confirmarVisita(req.params.id, 'oficina', cotizacionesIds);
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1325,14 +1328,16 @@ router.get('/:id/presupuesto-pdf', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Confirmación en el momento, por el vendedor.
+// Confirmación en el momento, por el vendedor. cotizacionesIds (opcional):
+// ver confirmarVisita.
 router.post('/vendedor/:vendedorId/visitas/:id/confirmar', async (req, res) => {
   try {
     await conReintento(async () => {
       const db = await getDb();
       await visitaDelVendedor(db, req.params.id, req.params.vendedorId); // valida pertenencia
     });
-    const resultado = await confirmarVisita(req.params.id, 'vendedor');
+    const { cotizacionesIds } = req.body || {};
+    const resultado = await confirmarVisita(req.params.id, 'vendedor', cotizacionesIds);
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1389,7 +1394,17 @@ function tareasDesdeManual(presupuesto) {
   return tareasDesdeItems(presupuesto.items);
 }
 
-async function confirmarVisita(visitaIdStr, confirmadaPor) {
+// cotizacionesIdsSeleccionadas (opcional, solo aplica cuando el presupuesto
+// es tipo 'cotizador'): el cliente puede aceptar solo una parte del trabajo
+// cuando la visita tiene más de una cotización vinculada (ej. el piso sí,
+// la columna en piedra no por ahora) — si se manda, solo esas cotizaciones
+// entran a la Obra; si se omite, se confirman todas (comportamiento de
+// siempre, y lo único posible cuando hay una sola cotización). Los ítems
+// agregados a mano (itemsExtra) no tienen selección propia: siempre se
+// suman completos, sean cuales sean las cotizaciones elegidas. Las
+// cotizaciones NO elegidas no se pierden — siguen en visita.presupuesto tal
+// cual, por si el cliente decide después sumar esa parte a otra obra.
+async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSeleccionadas) {
   const visitaId = toObjectId(visitaIdStr);
   if (!visitaId) throw err(400, 'id inválido');
 
@@ -1403,16 +1418,44 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
 
     // Si el presupuesto es del cotizador PERO además tiene ítems cargados a
     // mano por encima (ver /presupuesto-cotizador/items-extra), las tareas
-    // de la obra se arman con las dos fuentes: las del mapeo (cotizador) y
-    // las de esos ítems extra, una lista sola.
+    // de la obra se arman con las dos fuentes: las de las cotizaciones
+    // elegidas (mapeo) y las de esos ítems extra, una lista sola.
     let tareasBase;
+    let precioVentaCliente;
+    let cotizacionesConfirmadas = null; // se guarda en la Obra para trazabilidad — null si el presupuesto es manual
+    let cotizacionesDeclinadas = null;
+
     if (visita.presupuesto.tipo === 'cotizador') {
-      tareasBase = await tareasDesdeMapeo(db, visita.presupuesto);
-      if (Array.isArray(visita.presupuesto.itemsExtra) && visita.presupuesto.itemsExtra.length) {
-        tareasBase = tareasBase.concat(tareasDesdeItems(visita.presupuesto.itemsExtra));
+      const todas = cotizacionesDePresupuesto(visita.presupuesto);
+      let seleccionadas = todas;
+      if (Array.isArray(cotizacionesIdsSeleccionadas)) {
+        const idsValidos = new Set(todas.map(c => String(c.cotizacionId)));
+        const idsInvalidos = cotizacionesIdsSeleccionadas.filter(id => !idsValidos.has(String(id)));
+        if (idsInvalidos.length) throw err(400, 'Alguno de los presupuestos elegidos no está vinculado a esta visita.');
+        const idsSeleccionados = new Set(cotizacionesIdsSeleccionadas.map(String));
+        seleccionadas = todas.filter(c => idsSeleccionados.has(String(c.cotizacionId)));
       }
+      const itemsExtra = Array.isArray(visita.presupuesto.itemsExtra) ? visita.presupuesto.itemsExtra : [];
+      if (!seleccionadas.length && !itemsExtra.length) {
+        throw err(400, 'Elegí al menos un presupuesto para confirmar.');
+      }
+
+      tareasBase = seleccionadas.length ? await tareasDesdeMapeo(db, { tipo: 'cotizador', cotizaciones: seleccionadas }) : [];
+      if (itemsExtra.length) {
+        tareasBase = tareasBase.concat(tareasDesdeItems(itemsExtra));
+      }
+
+      const baseTotal = seleccionadas.reduce((s, c) => s + (Number(c.baseTotal) || 0), 0);
+      const extraTotal = itemsExtra.reduce((s, it) => s + (Number(it.total) || 0), 0);
+      precioVentaCliente = Math.round((baseTotal + extraTotal) * 100) / 100;
+
+      cotizacionesConfirmadas = seleccionadas.map(c => ({ cotizacionId: c.cotizacionId, tipoObraNombre: c.tipoObraNombre, baseTotal: c.baseTotal }));
+      cotizacionesDeclinadas = todas
+        .filter(c => !seleccionadas.some(s => String(s.cotizacionId) === String(c.cotizacionId)))
+        .map(c => ({ cotizacionId: c.cotizacionId, tipoObraNombre: c.tipoObraNombre, baseTotal: c.baseTotal }));
     } else {
       tareasBase = tareasDesdeManual(visita.presupuesto);
+      precioVentaCliente = visita.presupuesto.total || 0;
     }
 
     const tareas = tareasBase.map(t => ({
@@ -1448,7 +1491,14 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
       fotos: visita.fotos || [],
       visitaId: visita._id,
       origenPresupuesto: visita.presupuesto.tipo,
-      precioVentaCliente: visita.presupuesto.total || 0,
+      precioVentaCliente,
+      // Si el presupuesto era del cotizador y tenía más de una cotización
+      // vinculada, acá queda registro de cuáles aceptó el cliente y cuáles
+      // no (para seguimiento comercial — ej. volver a ofrecer más adelante
+      // lo que declinó). null cuando el presupuesto era manual, o cuando
+      // era del cotizador con una sola cotización (no hubo nada que elegir).
+      cotizacionesConfirmadas,
+      cotizacionesDeclinadas,
       // Evento de Google Calendar de la obra (uno solo, no por producto —
       // ver sincronizarCalendarDeObra en obras.js) y el calendario donde
       // vive. Arranca vacío: recién se crea cuando oficina le asigna
@@ -1467,10 +1517,13 @@ async function confirmarVisita(visitaIdStr, confirmadaPor) {
     // recién cuando se le asigna colocador y fecha de inicio).
     await googleCalendar.eliminarEvento(visita.googleEventId, visita.vendedorGoogleCalendarId);
 
-    await db.collection('visitas').updateOne(
-      { _id: visita._id },
-      { $set: { estado: 'vendido', obraId: r.insertedId, confirmadaPor, googleEventId: null, updatedAt: new Date() } }
-    );
+    const setVisita = { estado: 'vendido', obraId: r.insertedId, confirmadaPor, googleEventId: null, updatedAt: new Date() };
+    // Registro de qué se confirmó y qué no, sin tocar ni borrar las
+    // cotizaciones originales del presupuesto (siguen ahí completas).
+    if (cotizacionesConfirmadas) setVisita['presupuesto.cotizacionesConfirmadas'] = cotizacionesConfirmadas;
+    if (cotizacionesDeclinadas) setVisita['presupuesto.cotizacionesDeclinadas'] = cotizacionesDeclinadas;
+
+    await db.collection('visitas').updateOne({ _id: visita._id }, { $set: setVisita });
 
     return { visita: await db.collection('visitas').findOne({ _id: visita._id }), obra: obraDoc };
   });

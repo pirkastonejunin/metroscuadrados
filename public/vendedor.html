@@ -304,7 +304,7 @@ async function mostrarDetalleVisita(id){
     </div>
     ${presupuestoHtml}
     <div class="err" id="confirmErr"></div>
-    ${puedeConfirmar ? `<button class="btn" onclick="confirmarVisita('${v._id}')">Confirmar obra con el cliente</button>` : ''}
+    ${puedeConfirmar ? `<div class="card" id="confirmarBox"><button class="btn" onclick="iniciarConfirmarVisita('${v._id}')">Confirmar obra con el cliente</button></div>` : ''}
     ${v.obraId ? `<p class="muted" style="text-align:center;margin-top:10px">Esta visita ya generó una obra.</p>` : ''}
   `;
 }
@@ -670,13 +670,59 @@ async function compartirPresupuestoWhatsapp(vistaDetalle){
 
 // ---------------- CONFIRMAR ----------------
 
-async function confirmarVisita(visitaId){
+// Si el presupuesto tiene más de una cotización vinculada (ej. piso +
+// columna en piedra cotizados aparte), el cliente puede aceptar solo una
+// parte del trabajo — hay que preguntar cuáles confirma en vez de asumir
+// que son todas. Con una sola cotización (o presupuesto manual) no hace
+// falta elegir nada, se sigue confirmando directo.
+function iniciarConfirmarVisita(visitaId){
+  const v = VISITA_ACTUAL;
+  const cotizaciones = (v && v._id === visitaId) ? cotizacionesDeVisita(v) : [];
+  if (v && v.presupuesto && v.presupuesto.tipo === 'cotizador' && cotizaciones.length > 1){
+    mostrarSelectorConfirmar(visitaId, cotizaciones);
+    return;
+  }
+  confirmarVisitaTodo(visitaId);
+}
+
+async function confirmarVisitaTodo(visitaId){
   if (!confirm('¿El cliente confirmó la obra?')) return;
   try{
     await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/confirmar`, {method:'POST'});
     alert('¡Obra creada! Ya queda lista para que oficina asigne colocador.');
     mostrarListaVisitas();
   }catch(e){ document.getElementById('confirmErr').textContent = e.message; }
+}
+
+function mostrarSelectorConfirmar(visitaId, cotizaciones){
+  const box = document.getElementById('confirmarBox');
+  if (!box) return;
+  box.innerHTML = `
+    <b>¿Qué presupuestos confirma el cliente?</b>
+    <p class="muted" style="margin:4px 0 0">Puede aceptar todo el trabajo o solo una parte.</p>
+    <div id="checksConfirmar" style="margin-top:6px">
+      ${cotizaciones.map(c => `
+        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal">
+          <input type="checkbox" class="chkCotConfirmar" value="${c.cotizacionId}" checked>
+          ${c.tipoObraNombre||''} — $${Number(c.baseTotal||0).toLocaleString('es-AR')}
+        </label>`).join('')}
+    </div>
+    <div class="err" id="confirmSelErr" style="margin-top:8px"></div>
+    <button class="btn" style="margin-top:10px" onclick="confirmarConSeleccion('${visitaId}')">Confirmar con lo elegido</button>
+  `;
+}
+
+async function confirmarConSeleccion(visitaId){
+  const todas = document.querySelectorAll('.chkCotConfirmar').length;
+  const seleccionadas = [...document.querySelectorAll('.chkCotConfirmar:checked')].map(chk => chk.value);
+  if (!seleccionadas.length){ document.getElementById('confirmSelErr').textContent = 'Elegí al menos un presupuesto.'; return; }
+  const mensaje = seleccionadas.length === todas ? '¿El cliente confirmó todo el trabajo?' : '¿El cliente confirmó solo esta parte del trabajo?';
+  if (!confirm(mensaje)) return;
+  try{
+    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/confirmar`, {method:'POST', body:{cotizacionesIds: seleccionadas}});
+    alert('¡Obra creada! Ya queda lista para que oficina asigne colocador.');
+    mostrarListaVisitas();
+  }catch(e){ document.getElementById('confirmSelErr').textContent = e.message; }
 }
 </script>
 </body>

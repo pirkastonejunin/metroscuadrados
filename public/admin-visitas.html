@@ -885,7 +885,7 @@ function renderDetalleVisita(v, editando){
         </div>
       ` : ''}
 
-      ${puedeConfirmar ? `<div class="estado-row"><button class="btn" onclick="confirmarVisita('${v._id}')">Confirmar obra</button></div>` : ''}
+      ${puedeConfirmar ? `<div class="estado-row" id="confirmarBox"><button class="btn" onclick="iniciarConfirmarVisita('${v._id}')">Confirmar obra</button></div>` : ''}
 
       ${esCancelada ? `
         <div class="estado-row">
@@ -943,7 +943,7 @@ async function cambiarEstadoVisita(id){
   // "Vendido" y "Cancelada" tienen su propio flujo (generar la Obra / pedir
   // confirmación y liberar el evento de Google Calendar) — se reusan esas
   // mismas funciones en vez de duplicar la lógica acá.
-  if (estado === 'vendido') return confirmarVisita(id);
+  if (estado === 'vendido') return iniciarConfirmarVisita(id);
   if (estado === 'cancelada') return cancelarVisita(id);
   const errEl = document.getElementById('visErr');
   if (errEl) errEl.textContent = '';
@@ -954,13 +954,57 @@ async function cambiarEstadoVisita(id){
   }catch(e){ if (errEl) errEl.textContent = e.message; }
 }
 
-async function confirmarVisita(id){
-  const errEl = document.getElementById('visErr');
+// Si el presupuesto tiene más de una cotización vinculada (ej. piso +
+// columna en piedra cotizados aparte), el cliente puede aceptar solo una
+// parte del trabajo — hay que preguntar cuáles confirma en vez de asumir
+// que son todas. Con una sola cotización (o presupuesto manual) se sigue
+// confirmando directo, sin elegir nada.
+function iniciarConfirmarVisita(id){
+  const v = VISITA_DETALLE_ACTUAL;
+  const cotizaciones = (v && String(v._id) === String(id)) ? cotizacionesDeVisita(v) : [];
+  if (v && v.presupuesto && v.presupuesto.tipo === 'cotizador' && cotizaciones.length > 1){
+    mostrarSelectorConfirmar(id, cotizaciones);
+    return;
+  }
+  confirmarVisita(id);
+}
+
+function mostrarSelectorConfirmar(id, cotizaciones){
+  const box = document.getElementById('confirmarBox');
+  if (!box) return;
+  box.innerHTML = `
+    <div>
+      <b>¿Qué presupuestos confirma el cliente?</b>
+      <p class="muted" style="margin:4px 0 0">Puede aceptar todo el trabajo o solo una parte.</p>
+      <div id="checksConfirmarAdmin" style="margin-top:6px">
+        ${cotizaciones.map(c => `
+          <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal">
+            <input type="checkbox" class="chkCotConfirmarAdmin" value="${c.cotizacionId}" checked>
+            ${escapeHtml(c.tipoObraNombre||'')} — $${Number(c.baseTotal||0).toLocaleString('es-AR')}
+          </label>`).join('')}
+      </div>
+      <div class="err" id="confirmSelErrAdmin" style="margin-top:8px"></div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn" onclick="confirmarConSeleccionAdmin('${id}')">Confirmar con lo elegido</button>
+        <button class="btn small secondary" onclick="renderDetalleVisita(VISITA_DETALLE_ACTUAL, false)">Cancelar</button>
+      </div>
+    </div>`;
+}
+
+async function confirmarConSeleccionAdmin(id){
+  const todas = document.querySelectorAll('.chkCotConfirmarAdmin').length;
+  const seleccionadas = [...document.querySelectorAll('.chkCotConfirmarAdmin:checked')].map(chk => chk.value);
+  if (!seleccionadas.length){ document.getElementById('confirmSelErrAdmin').textContent = 'Elegí al menos un presupuesto.'; return; }
+  await confirmarVisita(id, seleccionadas);
+}
+
+async function confirmarVisita(id, cotizacionesIds){
+  const errEl = document.getElementById('confirmSelErrAdmin') || document.getElementById('visErr');
   try{
     // El endpoint devuelve {visita, obra} (la Obra recién creada), no la
     // visita sola — hay que desarmarlo antes de pasárselo a
     // renderDetalleVisita, si no v.cliente queda undefined y explota.
-    const resultado = await api(`/${id}/confirmar`, {method:'POST'});
+    const resultado = await api(`/${id}/confirmar`, {method:'POST', body: cotizacionesIds ? {cotizacionesIds} : undefined});
     cargarVisitas();
     renderDetalleVisita(resultado.visita, false);
   }catch(e){ if (errEl) errEl.textContent = e.message; }
