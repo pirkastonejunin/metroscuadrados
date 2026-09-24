@@ -676,6 +676,25 @@ function urlPdfCotizacion(id, vistaSimple){
   return location.origin + '/api/cotizador/pdf/' + id + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : '');
 }
 
+// Para la tienda real, /api/cotizador/pdf/:id pasó a pedir login (ver la
+// nota junto a authCotizadorSiEsTiendaReal en cotizador.js) — un
+// window.open() directo a esa URL no manda ningún header y tira "Sesión
+// inválida". El window.fetch interceptado más abajo (interceptarFetchConToken)
+// ya le agrega el header x-admin-token a cualquier fetch() normal, así que
+// alcanza con pedir el PDF por fetch y abrir el blob resultante, en vez de
+// abrir la URL de la API directo.
+async function abrirPdfCotizador(id, vistaSimple){
+  try{
+    const r = await fetch('/api/cotizador/pdf/' + id + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : ''));
+    if (!r.ok){
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.error || 'No se pudo generar el PDF');
+    }
+    const blob = await r.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  }catch(e){ alert(e.message); }
+}
+
 // Comparte el PDF del presupuesto (no un link al sistema, para que el
 // cliente no pueda tocar "Ver desglose" y terminar viendo precios y
 // cantidades de cada ítem). En celulares usa el share nativo del navegador
@@ -686,10 +705,19 @@ async function compartirWhatsapp(id, data, vistaSimple){
   const textoBase = 'Hola' + (data.cliente ? ' ' + data.cliente : '') + ', te comparto el presupuesto' +
     (data.tipoObraNombre ? ' de ' + data.tipoObraNombre : '') + ' — Total ' + money(data.total) + '.';
   const urlPdfCompartir = '/api/cotizador/pdf/' + id + '?store_id=' + storeId + (vistaSimple ? '&vista=simple' : '');
+  let blob;
   try{
     const res = await fetch(urlPdfCompartir);
-    if (!res.ok) throw new Error('pdf-fetch-failed');
-    const blob = await res.blob();
+    if (!res.ok){
+      const d = await res.json().catch(()=>({}));
+      throw new Error(d.error || 'No se pudo generar el PDF');
+    }
+    blob = await res.blob();
+  }catch(e){
+    alert(e.message || 'No se pudo generar el PDF del presupuesto.');
+    return;
+  }
+  try{
     const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
     if (navigator.canShare && navigator.canShare({ files: [file] })){
       await navigator.share({ files: [file], text: textoBase });
@@ -698,7 +726,11 @@ async function compartirWhatsapp(id, data, vistaSimple){
     throw new Error('share-unsupported');
   }catch(e){
     if (e && e.name === 'AbortError') return; // el usuario cerró el panel de compartir
-    window.open(urlPdfCompartir, '_blank');
+    // El navegador no soporta compartir archivos (la mayoría de las
+    // notebooks): se abre el PDF ya descargado (como blob, no la URL de la
+    // API directo — esa sigue pidiendo login) para que lo guarden/adjunten
+    // a mano, y se abre WhatsApp aparte con el mensaje.
+    window.open(URL.createObjectURL(blob), '_blank');
     window.open('https://wa.me/?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
   }
 }
@@ -2174,7 +2206,7 @@ $('#btnGuardar').addEventListener('click', async () => {
 
 $('#btnPdf').addEventListener('click', () => {
   if (!ultimaCotizacionGuardadaId) return;
-  window.open('/api/cotizador/pdf/' + ultimaCotizacionGuardadaId + '?store_id=' + storeId + (vistaSimpleResumen ? '&vista=simple' : ''), '_blank');
+  abrirPdfCotizador(ultimaCotizacionGuardadaId, vistaSimpleResumen);
 });
 
 $('#btnImprimirResumen').addEventListener('click', () => window.print());
@@ -2363,7 +2395,7 @@ $$('#vistaToggleHistorial .vista-toggle-btn').forEach(b => {
 
 $('#btnPdfHistorial').addEventListener('click', () => {
   if (!historialVistaId) return;
-  window.open('/api/cotizador/pdf/' + historialVistaId + '?store_id=' + storeId + (vistaSimpleHistorial ? '&vista=simple' : ''), '_blank');
+  abrirPdfCotizador(historialVistaId, vistaSimpleHistorial);
 });
 $('#btnImprimirHistorial').addEventListener('click', () => window.print());
 $('#btnWhatsappHistorial').addEventListener('click', () => {
