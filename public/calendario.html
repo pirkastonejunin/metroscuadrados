@@ -166,7 +166,7 @@
 </head>
 <body>
 
-  <div id="loginScreen">
+  <div id="loginScreen" class="hidden">
     <div class="card">
       <h2>Calendario</h2>
       <input id="loginUser" placeholder="Usuario" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
@@ -447,6 +447,7 @@ function mostrarPanel(dia) {
 
 (async function init() {
   if (TOKEN) { try { await entrar(); return; } catch (e) { /* token vencido, pedir login de nuevo */ } }
+  document.getElementById('loginScreen').classList.remove('hidden');
 })();
 </script>
 </body>
