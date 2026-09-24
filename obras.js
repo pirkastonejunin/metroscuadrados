@@ -32,7 +32,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const googleCalendar = require('./google-calendar');
-const { authUsuario, requiereModulo } = require('./usuarios');
+const { authUsuario, requiereModulo, tieneModulo } = require('./usuarios');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -129,6 +129,24 @@ async function authColocador(req, res, next) {
   if (!colocador) return res.status(401).json({ error: 'Colocador no encontrado o inactivo' });
   req.colocador = colocador;
   next();
+}
+
+// Deja pasar a un colocador real (token PIN, como siempre) o a una cuenta de
+// oficina/admin con acceso al módulo Obras — así el rol protegido
+// (Administrador) puede entrar a "Mis obras" (colocador.html) y operar
+// exactamente igual que un colocador, pero viendo/marcando TODAS las obras
+// de todos los colocadores en vez de solo las propias. req.esAdminObras
+// marca cuál de los dos casos es, para que las rutas de abajo sepan si
+// tienen que filtrar por un colocador puntual o no.
+async function authColocadorOAdmin(req, res, next) {
+  if (req.headers['x-colocador-token']) return authColocador(req, res, next);
+  return authUsuario(req, res, () => {
+    if (!tieneModulo(req.usuario, 'obras')) {
+      return res.status(403).json({ error: 'Tu usuario no tiene acceso al módulo de Obras.' });
+    }
+    req.esAdminObras = true;
+    next();
+  });
 }
 
 const ESTADOS_TAREA_VALIDOS = ['pendiente', 'en_curso', 'terminada'];
@@ -777,10 +795,45 @@ router.delete('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
 // panel "Historial" de colocador.html); sin ese parámetro trae solo las que
 // todavía tiene en curso (ni terminadas ni canceladas), que es la pantalla
 // principal — así no se le acumulan para siempre las obras ya cerradas.
-router.get('/colocador/mis-obras', authColocador, async (req, res) => {
+router.get('/colocador/mis-obras', authColocadorOAdmin, async (req, res) => {
   try {
-    const colocadorId = req.colocador._id;
     const historial = req.query.historial === '1' || req.query.historial === 'true';
+
+    // Vista de admin (rol protegido, sin token de colocador): todas las
+    // obras de todos los colocadores juntas, no filtradas a una sola
+    // persona — mismo formato que ve un colocador normal, con el nombre de
+    // colocador agregado a cada tarea para que se entienda de quién es cada
+    // una, así el resto de esta pantalla (marcar en curso/terminada, subir
+    // fotos) se reutiliza sin cambios.
+    if (req.esAdminObras) {
+      const { obras, nombrePorId } = await conReintento(async () => {
+        const db = await getDb();
+        const match = {};
+        match.estado = historial ? 'terminada' : { $nin: ESTADOS_OBRA_NO_EN_CURSO };
+        const obras = await db.collection('obras').find(match).sort({ numero: -1 }).toArray();
+        const colocadorIds = [...new Set(
+          obras.flatMap(o => (o.tareas || []).map(t => t.colocadorId).filter(Boolean).map(String))
+        )].map(toObjectId);
+        const colocadores = await db.collection('obras_colocadores').find({ _id: { $in: colocadorIds } }).toArray();
+        const nombrePorId = Object.fromEntries(colocadores.map(c => [String(c._id), c.nombre]));
+        return { obras, nombrePorId };
+      });
+      const resultado = obras.map(o => ({
+        obraId: o._id,
+        numero: o.numero,
+        cliente: o.cliente,
+        estado: o.estado,
+        notasColocador: o.notasColocador || '',
+        fotos: o.fotos || [],
+        tareas: (o.tareas || []).map(t => ({
+          ...t,
+          colocadorNombre: t.colocadorId ? (nombrePorId[String(t.colocadorId)] || '(desconocido)') : '(sin asignar)'
+        }))
+      }));
+      return res.json(resultado);
+    }
+
+    const colocadorId = req.colocador._id;
     const obras = await conReintento(async () => {
       const db = await getDb();
       const match = { 'tareas.colocadorId': colocadorId };
@@ -805,7 +858,7 @@ router.get('/colocador/mis-obras', authColocador, async (req, res) => {
 // se maneja como una sola obra aunque tenga varios productos adentro. Al
 // terminar, puede mandar una observación (ej: "quedó pendiente colocar el
 // zócalo del pasillo, faltó material") que queda como notas para el asesor.
-router.post('/colocador/obras/:obraId/estado', authColocador, async (req, res) => {
+router.post('/colocador/obras/:obraId/estado', authColocadorOAdmin, async (req, res) => {
   try {
     const obraId = toObjectId(req.params.obraId);
     if (!obraId) return res.status(400).json({ error: 'id inválido' });
@@ -817,8 +870,13 @@ router.post('/colocador/obras/:obraId/estado', authColocador, async (req, res) =
       const db = await getDb();
       const obra = await db.collection('obras').findOne({ _id: obraId });
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
-      const tieneTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
-      if (!tieneTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+      // El admin (rol protegido) puede marcar cualquier obra, no solo las
+      // propias — mismo criterio que ya usa requiereVendedorPropio del lado
+      // de Visitas.
+      if (!req.esAdminObras) {
+        const tieneTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
+        if (!tieneTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+      }
 
       const set = { estado, updatedAt: new Date() };
       if (estado === 'en_curso' && !obra.fechaInicio) set.fechaInicio = new Date();
@@ -842,7 +900,7 @@ router.post('/colocador/obras/:obraId/estado', authColocador, async (req, res) =
 // Fotos del trabajo terminado, sacadas por el colocador — quedan en el mismo
 // arreglo obra.fotos que las "antes" heredadas de la visita (sacadas por el
 // vendedor), etiquetadas con origen para poder separarlas en el panel.
-router.post('/colocador/obras/:obraId/fotos', authColocador, async (req, res) => {
+router.post('/colocador/obras/:obraId/fotos', authColocadorOAdmin, async (req, res) => {
   try {
     const obraId = toObjectId(req.params.obraId);
     if (!obraId) return res.status(400).json({ error: 'id inválido' });
@@ -850,15 +908,17 @@ router.post('/colocador/obras/:obraId/fotos', authColocador, async (req, res) =>
     if (!Array.isArray(fotos) || !fotos.length) return res.status(400).json({ error: 'No llegaron fotos' });
     const nuevas = fotos
       .filter(f => typeof f === 'string' && f.indexOf('data:image/') === 0)
-      .map(f => ({ data: f, fecha: new Date(), origen: 'colocador', colocadorNombre: req.colocador.nombre }));
+      .map(f => ({ data: f, fecha: new Date(), origen: 'colocador', colocadorNombre: req.esAdminObras ? 'Oficina' : req.colocador.nombre }));
     if (!nuevas.length) return res.status(400).json({ error: 'Formato de foto inválido' });
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const obra = await db.collection('obras').findOne({ _id: obraId });
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
-      const tienenTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
-      if (!tienenTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+      if (!req.esAdminObras) {
+        const tienenTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
+        if (!tienenTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+      }
       const totales = (obra.fotos || []).concat(nuevas).slice(0, MAX_FOTOS_OBRA);
       await db.collection('obras').updateOne({ _id: obraId }, { $set: { fotos: totales, updatedAt: new Date() } });
       return totales;

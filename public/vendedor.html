@@ -117,6 +117,7 @@ const BASE = '/api/visitas'; // coincide con app.use('/api/visitas', visitasRout
 let TOKEN = localStorage.getItem('obras_admin_token') || ''; // misma clave que admin-visitas.html/admin-obras.html: un solo login para toda la app
 let VENDEDOR_ID = '';
 let VENDEDOR_NOMBRE = '';
+let ADMIN_MODE = false; // rol protegido sin vendedorId propio: ve TODAS las visitas de todos los vendedores, no solo las suyas
 let STORE_ID = null;
 let TIPOS_TRABAJO = [];
 let VISITAS = [];
@@ -199,17 +200,22 @@ async function iniciarApp(){
     document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
     return;
   }
-  if (!me.usuario.vendedorId) {
+  // Un rol protegido (Administrador) entra aunque no tenga vendedorId
+  // propio vinculado — en ese caso ve TODAS las visitas de todos los
+  // vendedores en vez de las de una sola persona (ADMIN_MODE). Cualquier
+  // otra cuenta de oficina sin vendedorId sigue viendo el aviso de siempre.
+  if (!me.usuario.vendedorId && !(me.rol && me.rol.protegido)) {
     document.getElementById('vendedorScreen').classList.add('hidden');
     document.getElementById('sinVendedorScreen').classList.remove('hidden');
     return;
   }
-  VENDEDOR_ID = me.usuario.vendedorId;
+  ADMIN_MODE = !me.usuario.vendedorId;
+  VENDEDOR_ID = me.usuario.vendedorId || '';
   VENDEDOR_NOMBRE = me.usuario.nombre;
   document.getElementById('vendedorScreen').classList.add('hidden');
   document.getElementById('sinVendedorScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
-  document.getElementById('saludo').textContent = 'Hola, ' + VENDEDOR_NOMBRE;
+  document.getElementById('saludo').textContent = ADMIN_MODE ? 'Todas las visitas' : ('Hola, ' + VENDEDOR_NOMBRE);
   try{
     const cfg = await api('/config');
     STORE_ID = cfg.storeId;
@@ -225,7 +231,12 @@ async function mostrarListaVisitas(){
   const pant = document.getElementById('pantalla');
   pant.innerHTML = '<p class="muted">Cargando…</p>';
   try{
-    VISITAS = await api(`/vendedor/${VENDEDOR_ID}/visitas`);
+    // Admin: mismo listado que ya usa Panel de Visitas (todas, sin filtrar
+    // por vendedor), excluyendo canceladas como hace el listado propio del
+    // vendedor. Vendedor normal: sin cambios, solo las suyas.
+    VISITAS = ADMIN_MODE
+      ? (await api('')).filter(v => v.estado !== 'cancelada')
+      : await api(`/vendedor/${VENDEDOR_ID}/visitas`);
   }catch(e){
     pant.innerHTML = `<p class="err">${e.message}</p>`;
     return;
@@ -235,11 +246,12 @@ async function mostrarListaVisitas(){
     return;
   }
   pant.innerHTML = VISITAS.map(v => `
-    <div class="card" onclick="mostrarDetalleVisita('${v._id}')" style="cursor:pointer">
+    <div class="card" onclick="${ADMIN_MODE ? `VENDEDOR_ID='${v.vendedorId||''}';` : ''}mostrarDetalleVisita('${v._id}')" style="cursor:pointer">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div class="visita-titulo">${v.cliente.nombre}</div>
         <span class="pill ${v.estado}">${ESTADOS[v.estado]||v.estado}</span>
       </div>
+      ${ADMIN_MODE ? `<div class="muted">Vendedor: ${v.vendedorNombre||'(sin asignar)'}</div>` : ''}
       <div class="muted">${v.cliente.direccion||''}</div>
       <div class="muted">${fmtFecha(v.fechaHora)}</div>
     </div>
