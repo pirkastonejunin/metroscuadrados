@@ -538,54 +538,64 @@ router.get('/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Extraído a una función aparte (en vez de dejarlo todo inline en el POST
+// '/' de acá abajo) para que crm.js también la pueda usar al convertir una
+// oportunidad en una visita agendada, sin duplicar esta lógica (validación,
+// numeración, alta en Google Calendar). Tira errores con `err()` (con
+// `.status`), igual que el resto del archivo — quien la llama los deja
+// propagar tal cual.
+async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada }) {
+  if (!cliente || !cliente.nombre) throw err(400, 'Falta el nombre del cliente');
+  if (!cliente.direccion) throw err(400, 'Falta el domicilio de la visita');
+  if (!vendedorId) throw err(400, 'Falta asignar un vendedor');
+  if (!fechaHora) throw err(400, 'Falta la fecha y hora de la visita');
+  const fechaHoraParsed = parsearFechaHoraLocal(fechaHora);
+  if (isNaN(fechaHoraParsed.getTime())) throw err(400, 'La fecha y hora no son válidas.');
+  const vId = toObjectId(vendedorId);
+  if (!vId) throw err(400, 'vendedorId inválido');
+
+  return conReintento(async () => {
+    const db = await getDb();
+    const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
+    if (!vendedor) throw err(400, 'Vendedor no encontrado');
+    const numero = await siguienteNumeroVisita();
+    const doc = {
+      numero,
+      cliente: {
+        nombre: cliente.nombre,
+        telefono: cliente.telefono || '',
+        direccion: cliente.direccion,
+        localidad: cliente.localidad || ''
+      },
+      vendedorId: vId,
+      vendedorNombre: vendedor.nombre,
+      // Calendario propio del vendedor al momento de crear la visita —
+      // se guarda junto con el evento (no solo en la ficha del vendedor)
+      // para saber de qué calendario borrar/mover si el vendedor cambia
+      // de calendario o la visita se reasigna a otro vendedor más tarde.
+      vendedorGoogleCalendarId: vendedor.googleCalendarId || null,
+      fechaHora: fechaHoraParsed,
+      notasEmpleada: notasEmpleada || '',
+      estado: 'sin_visita',
+      fotos: [],
+      presupuesto: null,
+      obraId: null,
+      confirmadaPor: null,
+      googleEventId: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    doc.googleEventId = await googleCalendar.upsertEvento(null, eventoDeVisita(doc), doc.vendedorGoogleCalendarId);
+    const r = await db.collection('visitas').insertOne(doc);
+    doc._id = r.insertedId;
+    return doc;
+  });
+}
+
 router.post('/', authAdmin, async (req, res) => {
   try {
     const { cliente, vendedorId, fechaHora, notasEmpleada } = req.body || {};
-    if (!cliente || !cliente.nombre) throw err(400, 'Falta el nombre del cliente');
-    if (!cliente.direccion) throw err(400, 'Falta el domicilio de la visita');
-    if (!vendedorId) throw err(400, 'Falta asignar un vendedor');
-    if (!fechaHora) throw err(400, 'Falta la fecha y hora de la visita');
-    const fechaHoraParsed = parsearFechaHoraLocal(fechaHora);
-    if (isNaN(fechaHoraParsed.getTime())) throw err(400, 'La fecha y hora no son válidas.');
-    const vId = toObjectId(vendedorId);
-    if (!vId) throw err(400, 'vendedorId inválido');
-
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
-      const vendedor = await db.collection('visitas_vendedores').findOne({ _id: vId });
-      if (!vendedor) throw err(400, 'Vendedor no encontrado');
-      const numero = await siguienteNumeroVisita();
-      const doc = {
-        numero,
-        cliente: {
-          nombre: cliente.nombre,
-          telefono: cliente.telefono || '',
-          direccion: cliente.direccion,
-          localidad: cliente.localidad || ''
-        },
-        vendedorId: vId,
-        vendedorNombre: vendedor.nombre,
-        // Calendario propio del vendedor al momento de crear la visita —
-        // se guarda junto con el evento (no solo en la ficha del vendedor)
-        // para saber de qué calendario borrar/mover si el vendedor cambia
-        // de calendario o la visita se reasigna a otro vendedor más tarde.
-        vendedorGoogleCalendarId: vendedor.googleCalendarId || null,
-        fechaHora: fechaHoraParsed,
-        notasEmpleada: notasEmpleada || '',
-        estado: 'sin_visita',
-        fotos: [],
-        presupuesto: null,
-        obraId: null,
-        confirmadaPor: null,
-        googleEventId: null,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      doc.googleEventId = await googleCalendar.upsertEvento(null, eventoDeVisita(doc), doc.vendedorGoogleCalendarId);
-      const r = await db.collection('visitas').insertOne(doc);
-      doc._id = r.insertedId;
-      return doc;
-    });
+    const resultado = await crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1606,3 +1616,7 @@ router.get('/reportes/embudo', authAdmin, async (req, res) => {
 });
 
 module.exports = router;
+// Exportada aparte para que crm.js pueda crear una Visita al convertir una
+// oportunidad, sin duplicar la lógica de alta (ver el comentario junto a la
+// función más arriba).
+module.exports.crearVisita = crearVisita;

@@ -49,6 +49,10 @@
   .pill.vendido,.pill.confirmada{background:var(--ok-soft);color:var(--ok);}
   .pill.instalado{background:var(--info-soft);color:var(--info);}
   .pill.cancelada{background:var(--danger-soft);color:var(--danger);}
+  .pill.activa{background:var(--accent-soft);color:var(--accent);}
+  .pill.convertida{background:var(--ok-soft);color:var(--ok);}
+  .pill.descartada{background:var(--danger-soft);color:var(--danger);}
+  .venc{color:var(--danger);font-weight:700;}
   .muted{color:var(--muted);font-size:12px;}
   th.sortable{cursor:pointer;user-select:none;white-space:nowrap;}
   th.sortable:hover{color:var(--text);}
@@ -154,12 +158,46 @@
     </div>
   </header>
   <nav>
+    <button data-tab="crm" onclick="showTab('crm')">CRM</button>
     <button data-tab="visitas" class="active" onclick="showTab('visitas')">Visitas</button>
     <button data-tab="vendedores" onclick="showTab('vendedores')">Vendedores</button>
     <button data-tab="mapeo" onclick="showTab('mapeo')">Mapeo tipo de obra → tipo de trabajo</button>
     <button data-tab="reportes" onclick="showTab('reportes')">Reportes</button>
   </nav>
   <main>
+
+    <!-- CRM: oportunidades, ANTES de que exista una visita -->
+    <section id="tab-crm" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div style="flex:1;min-width:160px"><label>Buscar cliente, teléfono o email</label><input id="fCrmQ" oninput="cargarOportunidades()"></div>
+          <div style="min-width:160px"><label>Vendedor</label><select id="fCrmVendedor" onchange="cargarOportunidades()"><option value="">Todos</option></select></div>
+          <div style="min-width:160px"><label>Estado</label>
+            <select id="fCrmEstado" onchange="cargarOportunidades()">
+              <option value="activa" selected>Activa</option>
+              <option value="convertida">Convertida</option>
+              <option value="descartada">Descartada</option>
+              <option value="">Todas</option>
+            </select>
+          </div>
+          <div><button class="btn" onclick="abrirNuevaOportunidad()">+ Nueva oportunidad</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr>
+            <th>#</th>
+            <th>Cliente</th>
+            <th>Contacto</th>
+            <th>Vendedor</th>
+            <th>Próxima acción</th>
+            <th>Estado</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="oportunidadesBody"></tbody>
+        </table>
+      </div>
+    </section>
 
     <!-- VISITAS -->
     <section id="tab-visitas">
@@ -371,6 +409,259 @@ function showTab(tab){
   document.getElementById('tab-'+tab).classList.remove('hidden');
   if (tab==='mapeo') cargarMapeo();
   if (tab==='reportes') cargarEmbudo();
+  if (tab==='crm') cargarOportunidades();
+}
+
+// ---------------- CRM: oportunidades (antes de que exista una visita) ----------------
+// Pestaña nueva dentro de este mismo panel — usa el mismo login/token que
+// Visitas (decisión con Mato: mismo módulo, no hace falta uno nuevo), pero
+// pega contra /api/crm en vez de /api/visitas. Ver crm.js para el detalle
+// del modelo y la conversión a Visita.
+
+const BASE_CRM = '/api/crm';
+function apiCrm(path, opts={}) {
+  opts.headers = Object.assign({'Content-Type':'application/json','x-admin-token':TOKEN}, opts.headers||{});
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch(BASE_CRM+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+const TIPOS_PROXIMA_ACCION = { rellamar: 'Rellamar', recontactar: 'Recontactar', enviar_info: 'Enviar información', otro: 'Otro' };
+const ESTADOS_OPORTUNIDAD = { activa: 'Activa', convertida: 'Convertida', descartada: 'Descartada' };
+
+let OPORTUNIDADES_ACTUALES = [];
+let OPORTUNIDAD_DETALLE_ACTUAL = null;
+
+async function cargarOportunidades(){
+  const params = new URLSearchParams();
+  const q = document.getElementById('fCrmQ').value;
+  const vendedorId = document.getElementById('fCrmVendedor').value;
+  const estado = document.getElementById('fCrmEstado').value;
+  if (q) params.set('q', q);
+  if (vendedorId) params.set('vendedorId', vendedorId);
+  if (estado) params.set('estado', estado);
+  OPORTUNIDADES_ACTUALES = await apiCrm('?' + params.toString());
+  renderOportunidadesTabla();
+}
+
+// Compara contra la medianoche local del navegador — funciona porque el
+// panel se usa desde Argentina; misma lógica que ya usa el resto de la app
+// para fechas sin hora asociada.
+function esProximaAccionVencida(pa){
+  if (!pa || !pa.fecha) return false;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  return new Date(pa.fecha) < hoy;
+}
+function fmtProximaAccion(pa){
+  if (!pa || !pa.fecha) return '<span class="muted">Sin definir</span>';
+  const vencida = esProximaAccionVencida(pa);
+  const fechaTxt = new Date(pa.fecha).toLocaleDateString('es-AR');
+  return `<span class="${vencida?'venc':''}">${vencida?'⚠ ':''}${fechaTxt} — ${TIPOS_PROXIMA_ACCION[pa.tipo]||pa.tipo}</span>`;
+}
+
+function renderOportunidadesTabla(){
+  // Vencidas primero, después por fecha de próxima acción más próxima; las
+  // que no tienen una próxima acción cargada quedan al final.
+  const lista = OPORTUNIDADES_ACTUALES.slice().sort((a,b) => {
+    const fa = a.proximaAccion ? new Date(a.proximaAccion.fecha).getTime() : Infinity;
+    const fb = b.proximaAccion ? new Date(b.proximaAccion.fecha).getTime() : Infinity;
+    return fa - fb;
+  });
+  document.getElementById('oportunidadesBody').innerHTML = lista.map(o => `
+    <tr>
+      <td>#${o.numero}</td>
+      <td>${escapeHtml(o.cliente.nombre)}</td>
+      <td>${escapeHtml(o.cliente.telefono || o.cliente.email || '') || '<span class="muted">—</span>'}${o.cliente.telefono && o.cliente.email ? '<div class="muted">'+escapeHtml(o.cliente.email)+'</div>' : ''}</td>
+      <td>${o.vendedorNombre ? escapeHtml(o.vendedorNombre) : '<span class="muted">—</span>'}</td>
+      <td>${fmtProximaAccion(o.proximaAccion)}</td>
+      <td><span class="pill ${o.estado}">${ESTADOS_OPORTUNIDAD[o.estado]||o.estado}</span></td>
+      <td style="white-space:nowrap"><button class="btn small secondary" onclick="abrirOportunidad('${o._id}')">Ver</button></td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Sin oportunidades para este filtro</td></tr>';
+}
+
+function formProximaAccionHtml(pa, prefijo){
+  pa = pa || {};
+  const opciones = Object.entries(TIPOS_PROXIMA_ACCION).map(([k,l]) => `<option value="${k}" ${pa.tipo===k?'selected':''}>${l}</option>`).join('');
+  const fechaVal = pa.fecha ? new Date(pa.fecha).toISOString().slice(0,10) : '';
+  return `
+    <div class="grid2">
+      <div><label>Fecha de próxima acción</label><input type="date" id="${prefijo}Fecha" value="${fechaVal}"></div>
+      <div><label>Tipo</label><select id="${prefijo}Tipo">${opciones}</select></div>
+      <div style="grid-column:1/-1"><label>Nota (opcional)</label><input id="${prefijo}Nota" value="${escapeHtml(pa.nota||'')}"></div>
+    </div>`;
+}
+function leerProximaAccionForm(prefijo){
+  const fecha = document.getElementById(prefijo+'Fecha').value;
+  if (!fecha) return null;
+  return {
+    fecha,
+    tipo: document.getElementById(prefijo+'Tipo').value,
+    nota: document.getElementById(prefijo+'Nota').value.trim()
+  };
+}
+
+function abrirNuevaOportunidad(){
+  const opcionesVend = '<option value="">Sin asignar</option>' + VENDEDORES.filter(v=>v.activo!==false).map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Nueva oportunidad</h2>
+    <div class="grid2">
+      <div><label>Cliente</label><input id="nOpCliente"></div>
+      <div><label>Teléfono</label><input id="nOpTelefono"></div>
+      <div><label>Email</label><input id="nOpEmail"></div>
+      <div><label>Vendedor asignado</label><select id="nOpVendedor">${opcionesVend}</select></div>
+      <div style="grid-column:1/-1"><label>¿Cómo llegó? (opcional)</label><input id="nOpOrigen" placeholder="Ej: showroom, recomendación, redes"></div>
+    </div>
+    <div style="margin-top:10px"><label>Notas</label><textarea id="nOpNotas" placeholder="Qué le interesa, en qué quedaron..."></textarea></div>
+    <div style="margin-top:10px">${formProximaAccionHtml(null, 'nOp')}</div>
+    <div class="err" id="nOpErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="guardarOportunidadNueva()">Crear oportunidad</button>
+      <button class="btn secondary" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  `);
+}
+async function guardarOportunidadNueva(){
+  const body = {
+    cliente: {
+      nombre: document.getElementById('nOpCliente').value.trim(),
+      telefono: document.getElementById('nOpTelefono').value.trim(),
+      email: document.getElementById('nOpEmail').value.trim()
+    },
+    vendedorId: document.getElementById('nOpVendedor').value,
+    origen: document.getElementById('nOpOrigen').value.trim(),
+    notas: document.getElementById('nOpNotas').value.trim(),
+    proximaAccion: leerProximaAccionForm('nOp')
+  };
+  try{
+    await apiCrm('', {method:'POST', body});
+    cerrarModal();
+    cargarOportunidades();
+  }catch(e){ document.getElementById('nOpErr').textContent = e.message; }
+}
+
+async function abrirOportunidad(id){
+  const o = await apiCrm('/'+id);
+  renderDetalleOportunidad(o);
+}
+
+function renderDetalleOportunidad(o){
+  OPORTUNIDAD_DETALLE_ACTUAL = o;
+  const opcionesVend = '<option value="">Sin asignar</option>' + VENDEDORES.filter(v=>v.activo!==false).map(v=>`<option value="${v._id}" ${String(o.vendedorId||'')===v._id?'selected':''}>${v.nombre}</option>`).join('');
+
+  const accionesEstado = o.estado === 'activa'
+    ? `<button class="btn" onclick="abrirAsignarVisita()">Asignar visita</button>
+       <button class="btn secondary" onclick="descartarOportunidadUI('${o._id}')">Descartar</button>`
+    : o.estado === 'descartada'
+    ? `<button class="btn secondary" onclick="reactivarOportunidadUI('${o._id}')">Reactivar</button>
+       <p class="muted" style="width:100%">Motivo del descarte: ${escapeHtml(o.motivoDescarte||'—')}</p>`
+    : `<p class="muted" style="width:100%">Convertida en visita — <a href="#" onclick="cerrarModal();showTab('visitas');abrirVisita('${o.visitaId}');return false;">Ver la visita</a></p>`;
+
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Oportunidad #${o.numero} <span class="pill ${o.estado}">${ESTADOS_OPORTUNIDAD[o.estado]||o.estado}</span></h2>
+    <div class="grid2">
+      <div><label>Cliente</label><input id="dOpCliente" value="${escapeHtml(o.cliente.nombre)}"></div>
+      <div><label>Teléfono</label><input id="dOpTelefono" value="${escapeHtml(o.cliente.telefono||'')}"></div>
+      <div><label>Email</label><input id="dOpEmail" value="${escapeHtml(o.cliente.email||'')}"></div>
+      <div><label>Vendedor asignado</label><select id="dOpVendedor">${opcionesVend}</select></div>
+      <div style="grid-column:1/-1"><label>Domicilio (si ya lo tenés)</label><input id="dOpDireccion" value="${escapeHtml(o.cliente.direccion||'')}"></div>
+      <div><label>Localidad</label><input id="dOpLocalidad" value="${escapeHtml(o.cliente.localidad||'')}"></div>
+      <div><label>¿Cómo llegó?</label><input id="dOpOrigen" value="${escapeHtml(o.origen||'')}"></div>
+    </div>
+    <div style="margin-top:10px"><label>Notas</label><textarea id="dOpNotas">${escapeHtml(o.notas||'')}</textarea></div>
+    <div style="margin-top:10px">${formProximaAccionHtml(o.proximaAccion, 'dOp')}</div>
+    <div class="err" id="dOpErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="guardarOportunidadEditada('${o._id}')">Guardar cambios</button>
+      ${accionesEstado}
+    </div>
+  `);
+}
+
+async function guardarOportunidadEditada(id){
+  const body = {
+    cliente: {
+      nombre: document.getElementById('dOpCliente').value.trim(),
+      telefono: document.getElementById('dOpTelefono').value.trim(),
+      email: document.getElementById('dOpEmail').value.trim(),
+      direccion: document.getElementById('dOpDireccion').value.trim(),
+      localidad: document.getElementById('dOpLocalidad').value.trim()
+    },
+    vendedorId: document.getElementById('dOpVendedor').value,
+    origen: document.getElementById('dOpOrigen').value.trim(),
+    notas: document.getElementById('dOpNotas').value.trim(),
+    proximaAccion: leerProximaAccionForm('dOp')
+  };
+  try{
+    await apiCrm('/'+id, {method:'PUT', body});
+    cerrarModal();
+    cargarOportunidades();
+  }catch(e){ document.getElementById('dOpErr').textContent = e.message; }
+}
+
+async function descartarOportunidadUI(id){
+  const motivo = prompt('¿Por qué se descarta? (opcional)') || '';
+  try{
+    await apiCrm('/'+id+'/descartar', {method:'POST', body:{motivo}});
+    cerrarModal();
+    cargarOportunidades();
+  }catch(e){ alert(e.message); }
+}
+async function reactivarOportunidadUI(id){
+  try{
+    await apiCrm('/'+id+'/reactivar', {method:'POST'});
+    cerrarModal();
+    cargarOportunidades();
+  }catch(e){ alert(e.message); }
+}
+
+function abrirAsignarVisita(){
+  const o = OPORTUNIDAD_DETALLE_ACTUAL;
+  const opcionesVend = VENDEDORES.filter(v=>v.activo!==false).map(v=>`<option value="${v._id}" ${String(o.vendedorId||'')===v._id?'selected':''}>${v.nombre}</option>`).join('');
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Asignar visita — ${escapeHtml(o.cliente.nombre)}</h2>
+    <p class="muted">Esto crea una visita nueva con estos datos y marca la oportunidad como convertida.</p>
+    <div class="grid2">
+      <div style="grid-column:1/-1"><label>Domicilio</label><input id="avDireccion" value="${escapeHtml(o.cliente.direccion||'')}"></div>
+      <div><label>Localidad</label><input id="avLocalidad" value="${escapeHtml(o.cliente.localidad||'')}"></div>
+      <div><label>Vendedor</label><select id="avVendedor" onchange="verAgendaVendedor(this.value,'avAgenda')"><option value="">Elegir…</option>${opcionesVend}</select></div>
+      <div style="grid-column:1/-1"><label>Fecha y hora de la visita</label><input type="datetime-local" id="avFecha"></div>
+    </div>
+    <div id="avAgenda" style="margin-top:10px"></div>
+    <div style="margin-top:10px"><label>Notas para el vendedor</label><textarea id="avNotas">${escapeHtml(o.notas||'')}</textarea></div>
+    <div class="err" id="avErr"></div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="btn" onclick="guardarAsignarVisita('${o._id}')">Crear visita</button>
+      <button class="btn secondary" onclick="cerrarModal()">Cancelar</button>
+    </div>
+  `);
+}
+async function guardarAsignarVisita(id){
+  const body = {
+    direccion: document.getElementById('avDireccion').value.trim(),
+    localidad: document.getElementById('avLocalidad').value.trim(),
+    vendedorId: document.getElementById('avVendedor').value,
+    fechaHora: document.getElementById('avFecha').value,
+    notasEmpleada: document.getElementById('avNotas').value.trim()
+  };
+  try{
+    const visita = await apiCrm('/'+id+'/asignar-visita', {method:'POST', body});
+    cargarOportunidades();
+    modal(`
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>¡Visita #${visita.numero} creada!</h2>
+      <p class="muted">La oportunidad quedó marcada como convertida.</p>
+      <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="cerrarModal();showTab('visitas');abrirVisita('${visita._id}');">Ver la visita</button>
+        <button class="btn secondary" onclick="cerrarModal()">Cerrar</button>
+      </div>
+    `);
+  }catch(e){ document.getElementById('avErr').textContent = e.message; }
 }
 
 // ---------------- REPORTES: embudo de ventas ----------------
@@ -534,6 +825,7 @@ async function cargarVendedores(){
     </tr>`).join('');
   const opciones = '<option value="">Todos</option>' + VENDEDORES.map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
   document.getElementById('fVisVendedor').innerHTML = opciones;
+  document.getElementById('fCrmVendedor').innerHTML = opciones;
 }
 function celdaCalendario(persona){
   if (persona.googleCalendarId) {
