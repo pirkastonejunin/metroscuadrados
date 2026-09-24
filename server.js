@@ -25,6 +25,9 @@ app.use('/api/usuarios', usuariosRouter);
 const crmRouter = require('./crm');
 app.use('/api/crm', crmRouter);
 
+const notificacionesRouter = require('./notificaciones');
+app.use('/api/notificaciones', notificacionesRouter);
+
 const API_BASE = 'https://api.tiendanube.com/v1';
 const NAMESPACE = process.env.METAFIELD_NAMESPACE || 'calculadora_m2';
 const KEY_COBERTURA = 'cobertura_m2_caja';

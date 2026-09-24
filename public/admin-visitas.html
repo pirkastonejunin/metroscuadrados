@@ -121,6 +121,20 @@
     --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
   }
   :root[data-theme="dark"] .logo{filter:invert(1);}
+  .notif-wrap{position:relative;}
+  .notif-btn{position:relative;background:transparent;border:1px solid var(--border);border-radius:8px;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);flex-shrink:0;}
+  .notif-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .notif-btn svg{width:18px;height:18px;}
+  .notif-badge{position:absolute;top:-5px;right:-5px;background:var(--danger);color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;}
+  .notif-panel{position:absolute;top:44px;right:0;width:320px;max-width:calc(100vw - 24px);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);z-index:200;max-height:420px;overflow:auto;}
+  .notif-panel-header{padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center;color:var(--text, var(--ink));}
+  .notif-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
+  .notif-item:last-child{border-bottom:none;}
+  .notif-item:hover{background:var(--bg);}
+  .notif-item-titulo{font-weight:700;font-size:13px;color:var(--text, var(--ink));}
+  .notif-item-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .notif-item-fecha{font-size:11px;color:var(--danger);margin-top:4px;font-weight:700;}
+  .notif-empty{padding:20px 14px;text-align:center;color:var(--muted);font-size:13px;}
 </style>
 </head>
 <body>
@@ -152,7 +166,20 @@
       <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
       <h1>Visitas</h1>
     </div>
-    <div style="display:flex;gap:8px">
+    <div style="display:flex;gap:8px;align-items:center">
+      <div class="notif-wrap" id="notifWrap">
+        <button class="notif-btn" onclick="toggleNotifPanel()" aria-label="Notificaciones" title="Notificaciones">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge hidden" id="notifBadge">0</span>
+        </button>
+        <div class="notif-panel hidden" id="notifPanel">
+          <div class="notif-panel-header">
+            <span>Notificaciones</span>
+            <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;padding:2px 4px" aria-label="Cerrar">✕</button>
+          </div>
+          <div id="notifPanelBody"></div>
+        </div>
+      </div>
       <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
       <button onclick="logout()">Cerrar sesión</button>
     </div>
@@ -400,6 +427,17 @@ async function iniciarApp(){
   await cargarVendedores();
   await cargarTiposTrabajo();
   cargarVisitas();
+  cargarNotificaciones();
+  setInterval(cargarNotificaciones, 5 * 60 * 1000);
+  const abrirParam = new URLSearchParams(location.search).get('abrir');
+  if (abrirParam) {
+    history.replaceState(null, '', location.pathname);
+    const guion = abrirParam.indexOf('-');
+    const tipo = guion === -1 ? abrirParam : abrirParam.slice(0, guion);
+    const id = guion === -1 ? '' : abrirParam.slice(guion + 1);
+    if (tipo === 'crm' && id) { showTab('crm'); abrirOportunidad(id); }
+    else if (tipo === 'visita' && id) { showTab('visitas'); abrirVisita(id); }
+  }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -1466,6 +1504,79 @@ async function borrarMapeo(id){
   await api(`/mapeo/${id}`, {method:'DELETE'});
   cargarMapeo();
 }
+
+// ---------------- Notificaciones (campanita de vencimientos) ----------------
+// Mismo bloque, casi sin cambios, pegado también en admin-obras.html,
+// admin-usuarios.html y calendario.html — la única diferencia real entre
+// archivos es NOTIF_LOCAL, que dice qué tipos de alerta se pueden abrir
+// directo en ESTE panel (sin navegar a otro .html). Esta pantalla (Panel de
+// Visitas) es donde viven CRM y Visitas.
+const BASE_NOTIF = '/api/notificaciones';
+const NOTIF_LOCAL = { crm: true, visita: true, obra: false };
+let NOTIF_ITEMS = [];
+
+function notifEscapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function notifFmtFecha(iso){
+  try { return new Date(iso).toLocaleDateString('es-AR'); } catch(e){ return ''; }
+}
+async function cargarNotificaciones(){
+  try{
+    const r = await fetch(BASE_NOTIF, { headers: { 'x-admin-token': TOKEN } });
+    if (!r.ok) return;
+    const data = await r.json().catch(()=>({}));
+    NOTIF_ITEMS = data.items || [];
+    renderNotifBadge();
+    const panel = document.getElementById('notifPanel');
+    if (panel && !panel.classList.contains('hidden')) renderNotifPanel();
+  }catch(e){ /* que no rompa el panel si falla la campanita */ }
+}
+function renderNotifBadge(){
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  const n = NOTIF_ITEMS.length;
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.classList.toggle('hidden', n === 0);
+}
+function toggleNotifPanel(){
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  const abriendo = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !abriendo);
+  if (abriendo) renderNotifPanel();
+}
+function renderNotifPanel(){
+  const cont = document.getElementById('notifPanelBody');
+  if (!cont) return;
+  if (!NOTIF_ITEMS.length) { cont.innerHTML = '<div class="notif-empty">Sin vencimientos pendientes.</div>'; return; }
+  cont.innerHTML = NOTIF_ITEMS.map(it => `
+    <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
+      <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
+      <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
+      <div class="notif-item-fecha">Venció el ${notifFmtFecha(it.fecha)}</div>
+    </div>
+  `).join('');
+}
+function irANotificacion(tipo, id){
+  toggleNotifPanel();
+  if (tipo === 'crm') {
+    if (NOTIF_LOCAL.crm) { showTab('crm'); abrirOportunidad(id); }
+    else location.href = '/admin-visitas.html?abrir=crm-' + id;
+  } else if (tipo === 'visita') {
+    if (NOTIF_LOCAL.visita) { showTab('visitas'); abrirVisita(id); }
+    else location.href = '/admin-visitas.html?abrir=visita-' + id;
+  } else if (tipo === 'obra') {
+    if (NOTIF_LOCAL.obra) { showTab('obras'); abrirObra(id); }
+    else location.href = '/admin-obras.html?abrir=obra-' + id;
+  }
+}
+document.addEventListener('click', function(e){
+  const wrap = document.getElementById('notifWrap');
+  const panel = document.getElementById('notifPanel');
+  if (!wrap || !panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) panel.classList.add('hidden');
+});
 </script>
 </body>
 </html>
