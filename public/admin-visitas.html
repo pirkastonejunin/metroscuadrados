@@ -301,6 +301,27 @@ async function verPdfPresupuestoManual(id, vistaDetalle){
   }catch(e){ alert(e.message); }
 }
 
+// El PDF propio del cotizador (/api/cotizador/pdf/:id) pasó a pedir login
+// para la tienda real de Piedra Negra (ver cotizador.js) — un <a href>
+// directo no puede mandar el header x-admin-token, así que tira "Sesión
+// inválida" apenas se hace click. Mismo patrón que ya usa
+// verPdfPresupuestoManual de acá arriba (y abrirPdfConAuth en
+// vendedor.html): se pide con fetch + el header, y se abre el PDF
+// resultante como blob.
+async function verPdfCotizador(cotizacionId, storeId, vistaDetalle){
+  try{
+    const params = new URLSearchParams({ store_id: storeId });
+    if (!vistaDetalle) params.set('vista', 'simple');
+    const r = await fetch('/api/cotizador/pdf/'+cotizacionId+'?'+params.toString(), {headers:{'x-admin-token':TOKEN}});
+    if (!r.ok){
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.error || 'No se pudo generar el PDF');
+    }
+    const blob = await r.blob();
+    window.open(URL.createObjectURL(blob), '_blank');
+  }catch(e){ alert(e.message); }
+}
+
 async function login(){
   const usuario = document.getElementById('loginUser').value;
   const pass = document.getElementById('loginPass').value;
@@ -839,8 +860,8 @@ function renderDetalleVisita(v, editando){
           </div>`
         : (primeraCot.cotizacionId && primeraCot.storeId)
         ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${primeraCot.cotizacionId}?store_id=${primeraCot.storeId}&vista=simple" target="_blank">📄 Ver PDF llave en mano</a>
-            <a class="btn small secondary" style="text-decoration:none" href="/api/cotizador/pdf/${primeraCot.cotizacionId}?store_id=${primeraCot.storeId}" target="_blank">📄 Ver PDF completo</a>
+            <button class="btn small secondary" onclick="verPdfCotizador('${primeraCot.cotizacionId}','${primeraCot.storeId}')">📄 Ver PDF llave en mano</button>
+            <button class="btn small secondary" onclick="verPdfCotizador('${primeraCot.cotizacionId}','${primeraCot.storeId}', true)">📄 Ver PDF completo</button>
           </div>`
         : '';
       presupuestoHtml = `<b>Presupuesto del cotizador</b><br>${listaCotizacionesHtml}` +
