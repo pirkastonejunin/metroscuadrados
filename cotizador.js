@@ -1507,6 +1507,15 @@ const PDF_COL_PRECIO_X = 358, PDF_COL_PRECIO_W = 80;
 const PDF_COL_SUBTOTAL_X = 446, PDF_COL_SUBTOTAL_W = 110;
 const PDF_TABLE_RIGHT = 556;
 
+// El PDF armaba los montos a mano con '$ ' + n.toFixed(2), que da algo
+// como "$ 1234567.89" — sin punto de miles y con punto de decimal en vez
+// de coma, distinto a como se ve todo el resto de la app (el money() del
+// frontend usa toLocaleString('es-AR', ...)). Acá espejamos ese mismo
+// formato para el servidor.
+function moneyPdf(n) {
+  return '$ ' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // Encabezado con marca Piedra Negra: usa el logo del archivo si está
 // disponible, y si no dibuja el wordmark en texto como respaldo (para que
 // el PDF nunca se rompa si falta el archivo del logo).
@@ -1653,7 +1662,7 @@ router.get('/pdf/:id', async (req, res) => {
       pdf.moveDown(1);
       await dibujarGaleriaLlaveEnMano(pdf, doc.items);
       pdf.moveDown(0.8);
-      pdf.fontSize(16).text('Total: $ ' + doc.total.toFixed(2), { align: 'right' });
+      pdf.fontSize(16).text('Total: ' + moneyPdf(doc.total), { align: 'right' });
     } else {
       dibujarEncabezadoTabla(pdf);
 
@@ -1710,8 +1719,8 @@ router.get('/pdf/:id', async (req, res) => {
         }
         pdf.fillColor('#000');
 
-        pdf.fontSize(10).text('$ ' + Number(it.precioUnitario).toFixed(2), PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
-        pdf.fontSize(10).text('$ ' + Number(it.subtotal).toFixed(2), PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+        pdf.fontSize(10).text(moneyPdf(it.precioUnitario), PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
+        pdf.fontSize(10).text(moneyPdf(it.subtotal), PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
 
         pdf.y = y0 + filaAlto + 10;
       }
@@ -1721,9 +1730,9 @@ router.get('/pdf/:id', async (req, res) => {
       pdf.moveDown(0.5);
 
       pdf.fontSize(10);
-      pdf.text('Subtotal productos: $ ' + doc.totalProductos.toFixed(2), { align: 'right' });
-      if (doc.totalManoObra) pdf.text('Mano de obra: $ ' + doc.totalManoObra.toFixed(2), { align: 'right' });
-      pdf.fontSize(13).text('Total: $ ' + doc.total.toFixed(2), { align: 'right' });
+      pdf.text('Subtotal productos: ' + moneyPdf(doc.totalProductos), { align: 'right' });
+      if (doc.totalManoObra) pdf.text('Mano de obra: ' + moneyPdf(doc.totalManoObra), { align: 'right' });
+      pdf.fontSize(13).text('Total: ' + moneyPdf(doc.total), { align: 'right' });
     }
 
     if (doc.formasPago && doc.formasPago.length) {
@@ -1733,7 +1742,7 @@ router.get('/pdf/:id', async (req, res) => {
       doc.formasPago.forEach((fp) => {
         const signo = fp.tipo === 'recargo' ? '+' : '-';
         pdf.fontSize(10).text(
-          fp.nombre + (fp.porcentaje ? ' (' + signo + fp.porcentaje + '%)' : '') + ': $ ' + fp.total.toFixed(2),
+          fp.nombre + (fp.porcentaje ? ' (' + signo + fp.porcentaje + '%)' : '') + ': ' + moneyPdf(fp.total),
           { align: 'right' }
         );
       });
