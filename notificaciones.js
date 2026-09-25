@@ -43,7 +43,7 @@
 
 const express = require('express');
 const { MongoClient } = require('mongodb');
-const { authUsuario, tieneModulo } = require('./usuarios');
+const { authUsuario, tieneModulo, resolverOrg, filtroOrg } = require('./usuarios');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -67,13 +67,19 @@ async function conReintento(fn) {
   }
 }
 
-const CONFIG_ID = 'notificaciones';
+const CONFIG_ID_GLOBAL = 'notificaciones';
 const CONFIG_DEFAULT = { crm: true, visitas: true, obras: true };
 
-async function leerConfig() {
+// La configuración pasa a ser por organización (24/9/2026, multi-tenant) —
+// cada franquicia prende/apaga sus propios tipos de alerta sin afectar a
+// las demás. orgId null (un protegido viendo "todas") usa el default fijo,
+// sin pararse en la config de ninguna franquicia puntual.
+function configId(orgId) { return orgId ? `${CONFIG_ID_GLOBAL}:${orgId}` : CONFIG_ID_GLOBAL; }
+
+async function leerConfig(orgId) {
   return conReintento(async () => {
     const db = await getDb();
-    const doc = (await db.collection('configuracion').findOne({ _id: CONFIG_ID })) || {};
+    const doc = (await db.collection('configuracion').findOne({ _id: configId(orgId) })) || {};
     return {
       crm: doc.crm !== undefined ? !!doc.crm : CONFIG_DEFAULT.crm,
       visitas: doc.visitas !== undefined ? !!doc.visitas : CONFIG_DEFAULT.visitas,
@@ -94,9 +100,9 @@ function inicioDeHoyArgentina() {
 
 const TIPOS_PROXIMA_ACCION = { rellamar: 'Rellamar', recontactar: 'Recontactar', enviar_info: 'Enviar información', otro: 'Otro' };
 
-router.get('/', authUsuario, async (req, res) => {
+router.get('/', authUsuario, resolverOrg, async (req, res) => {
   try {
-    const config = await leerConfig();
+    const config = await leerConfig(req.orgId);
     const hoyAR = inicioDeHoyArgentina();
     const ahora = new Date();
     const puedeVisitas = tieneModulo(req.usuario, 'visitas');
@@ -108,7 +114,7 @@ router.get('/', authUsuario, async (req, res) => {
 
       if (config.crm && puedeVisitas) {
         const oportunidades = await db.collection('oportunidades')
-          .find({ estado: 'activa', 'proximaAccion.fecha': { $ne: null, $lt: hoyAR } })
+          .find(Object.assign({ estado: 'activa', 'proximaAccion.fecha': { $ne: null, $lt: hoyAR } }, filtroOrg(req)))
           .sort({ 'proximaAccion.fecha': 1 })
           .limit(50)
           .toArray();
@@ -125,7 +131,7 @@ router.get('/', authUsuario, async (req, res) => {
 
       if (config.visitas && puedeVisitas) {
         const visitas = await db.collection('visitas')
-          .find({ estado: 'sin_visita', fechaHora: { $lt: ahora } })
+          .find(Object.assign({ estado: 'sin_visita', fechaHora: { $lt: ahora } }, filtroOrg(req)))
           .sort({ fechaHora: 1 })
           .limit(50)
           .toArray();
@@ -142,10 +148,10 @@ router.get('/', authUsuario, async (req, res) => {
 
       if (config.obras && puedeObras) {
         const obras = await db.collection('obras')
-          .find({
+          .find(Object.assign({
             estado: { $nin: ['terminada', 'cancelada'] },
             tareas: { $elemMatch: { estado: { $ne: 'terminada' }, fechaFinEstimada: { $ne: null, $lt: hoyAR } } }
-          })
+          }, filtroOrg(req)))
           .limit(50)
           .toArray();
         for (const o of obras) {
@@ -169,15 +175,16 @@ router.get('/', authUsuario, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.get('/config', authUsuario, async (req, res) => {
-  try { res.json(await leerConfig()); } catch (e) { res.status(500).json({ error: e.message }); }
+router.get('/config', authUsuario, resolverOrg, async (req, res) => {
+  try { res.json(await leerConfig(req.orgId)); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.put('/config', authUsuario, async (req, res) => {
+router.put('/config', authUsuario, resolverOrg, async (req, res) => {
   try {
     if (!tieneModulo(req.usuario, 'usuarios')) {
       return res.status(403).json({ error: 'Tu usuario no tiene acceso a Usuarios y roles, que es donde vive esta configuración.' });
     }
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué organización estás trabajando para cambiar su configuración.' });
     const { crm, visitas, obras } = req.body || {};
     const set = {};
     if (crm !== undefined) set.crm = !!crm;
@@ -185,9 +192,9 @@ router.put('/config', authUsuario, async (req, res) => {
     if (obras !== undefined) set.obras = !!obras;
     await conReintento(async () => {
       const db = await getDb();
-      await db.collection('configuracion').updateOne({ _id: CONFIG_ID }, { $set: set }, { upsert: true });
+      await db.collection('configuracion').updateOne({ _id: configId(req.orgId) }, { $set: set }, { upsert: true });
     });
-    res.json(await leerConfig());
+    res.json(await leerConfig(req.orgId));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

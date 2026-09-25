@@ -46,7 +46,7 @@ const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
 const googleCalendar = require('./google-calendar');
-const { authUsuario, requiereModulo, requiereVendedorPropio } = require('./usuarios');
+const { authUsuario, requiereModulo, requiereVendedorPropio, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -178,13 +178,13 @@ async function siguienteNumeroObra() {
 // (con su rol); requiereModulo('visitas') exige que ese rol tenga acceso al
 // módulo de Visitas. Como Express aplana arrays de middlewares, ningún otro
 // lugar de este archivo que usa `authAdmin` necesita cambios.
-const authAdmin = [authUsuario, requiereModulo('visitas')];
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('visitas')];
 
 // Rutas /vendedor/:vendedorId/... (antes sin ninguna autenticación, confiaban
 // en el vendedorId que viniera en la URL). Ahora el vendedor tiene su propio
 // usuario/contraseña (ver usuarios.js) y requiereVendedorPropio verifica que
 // sea el suyo (o que sea alguien de oficina con acceso a Visitas).
-const authVendedor = [authUsuario, requiereVendedorPropio];
+const authVendedor = [authUsuario, resolverOrg, requiereVendedorPropio];
 
 // Duración por defecto de una visita en el calendario, cuando no tenemos
 // otra forma de saber cuánto va a durar.
@@ -252,7 +252,8 @@ router.get('/vendedores', authAdmin, async (req, res) => {
   try {
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('visitas_vendedores').find({}).sort({ nombre: 1 }).toArray();
+      await backfillOrgId(db, 'visitas_vendedores');
+      return db.collection('visitas_vendedores').find(filtroOrg(req)).sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -260,10 +261,12 @@ router.get('/vendedores', authAdmin, async (req, res) => {
 
 router.post('/vendedores', authAdmin, async (req, res) => {
   try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear un vendedor.');
     const { nombre, telefono, googleCalendarId } = req.body || {};
     if (!nombre) throw err(400, 'Nombre obligatorio');
     const doc = {
       nombre, telefono: telefono || '',
+      orgId: req.orgId,
       // Calendario de Google propio de este vendedor, para que sus visitas
       // le lleguen ahí (ver google-calendar.js) — opcional, si lo deja
       // vacío las visitas que se le asignen caen al calendario general de
@@ -292,7 +295,7 @@ router.put('/vendedores/:id', authAdmin, async (req, res) => {
     if (googleCalendarId !== undefined) set.googleCalendarId = googleCalendarId;
     const actualizado = await conReintento(async () => {
       const db = await getDb();
-      await db.collection('visitas_vendedores').updateOne({ _id: id }, { $set: set });
+      await db.collection('visitas_vendedores').updateOne(Object.assign({ _id: id }, filtroOrg(req)), { $set: set });
       return db.collection('visitas_vendedores').findOne({ _id: id });
     });
     res.json(actualizado);
@@ -481,7 +484,7 @@ function proyeccionVisitaLista() {
 router.get('/', authAdmin, async (req, res) => {
   try {
     const { vendedorId, estado, desde, hasta, q } = req.query;
-    const match = {};
+    const match = Object.assign({}, filtroOrg(req));
     if (vendedorId) match.vendedorId = toObjectId(vendedorId);
     if (estado) match.estado = normalizarEstadoVisita(estado);
     if (q) {
@@ -495,6 +498,7 @@ router.get('/', authAdmin, async (req, res) => {
     }
     const lista = await conReintento(async () => {
       const db = await getDb();
+      await backfillOrgId(db, 'visitas');
       const lista = await db.collection('visitas').find(match).sort({ fechaHora: 1 }).toArray();
       return sincronizarInstalacion(db, lista);
     });
@@ -507,7 +511,7 @@ router.get('/', authAdmin, async (req, res) => {
 router.get('/agenda', authAdmin, async (req, res) => {
   try {
     const { vendedorId, desde, hasta } = req.query;
-    const match = { estado: { $ne: 'cancelada' } };
+    const match = Object.assign({ estado: { $ne: 'cancelada' } }, filtroOrg(req));
     if (vendedorId) match.vendedorId = toObjectId(vendedorId);
     if (desde || hasta) {
       match.fechaHora = {};
@@ -528,7 +532,7 @@ router.get('/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const visita = await conReintento(async () => {
       const db = await getDb();
-      const doc = await db.collection('visitas').findOne({ _id: id });
+      const doc = await db.collection('visitas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!doc) return null;
       const [sincronizada] = await sincronizarInstalacion(db, [doc]);
       return sincronizada;
@@ -543,8 +547,9 @@ router.get('/:id', authAdmin, async (req, res) => {
 // oportunidad en una visita agendada, sin duplicar esta lógica (validación,
 // numeración, alta en Google Calendar). Tira errores con `err()` (con
 // `.status`), igual que el resto del archivo — quien la llama los deja
-// propagar tal cual.
-async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada }) {
+// propagar tal cual. `orgId` es opcional para no romper otros llamadores
+// viejos, pero visitas.js y crm.js siempre lo mandan.
+async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgId }) {
   if (!cliente || !cliente.nombre) throw err(400, 'Falta el nombre del cliente');
   if (!cliente.direccion) throw err(400, 'Falta el domicilio de la visita');
   if (!vendedorId) throw err(400, 'Falta asignar un vendedor');
@@ -561,6 +566,7 @@ async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada }) {
     const numero = await siguienteNumeroVisita();
     const doc = {
       numero,
+      orgId: orgId || null,
       cliente: {
         nombre: cliente.nombre,
         telefono: cliente.telefono || '',
@@ -594,8 +600,9 @@ async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada }) {
 
 router.post('/', authAdmin, async (req, res) => {
   try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear una visita.');
     const { cliente, vendedorId, fechaHora, notasEmpleada } = req.body || {};
-    const resultado = await crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada });
+    const resultado = await crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgId: req.orgId });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -627,7 +634,7 @@ router.put('/:id', authAdmin, async (req, res) => {
     }
     const actualizado = await conReintento(async () => {
       const db = await getDb();
-      const actual = await db.collection('visitas').findOne({ _id: id });
+      const actual = await db.collection('visitas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Visita no encontrada');
 
       // "Vendido" es el estado que dispara la creación de la Obra — si
@@ -726,7 +733,7 @@ router.delete('/:id', authAdmin, async (req, res) => {
 router.post('/:id/confirmar', authAdmin, async (req, res) => {
   try {
     const { cotizacionesIds } = req.body || {};
-    const resultado = await confirmarVisita(req.params.id, 'oficina', cotizacionesIds);
+    const resultado = await confirmarVisita(req.params.id, 'oficina', cotizacionesIds, filtroOrg(req));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1320,7 +1327,7 @@ router.get('/:id/presupuesto-pdf', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const visita = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('visitas').findOne({ _id: id });
+      return db.collection('visitas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
     });
     if (!visita) throw err(404, 'Visita no encontrada');
     validarPresupuestoManualParaPdf(visita);
@@ -1404,13 +1411,13 @@ function tareasDesdeManual(presupuesto) {
 // suman completos, sean cuales sean las cotizaciones elegidas. Las
 // cotizaciones NO elegidas no se pierden — siguen en visita.presupuesto tal
 // cual, por si el cliente decide después sumar esa parte a otra obra.
-async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSeleccionadas) {
+async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSeleccionadas, orgFiltro) {
   const visitaId = toObjectId(visitaIdStr);
   if (!visitaId) throw err(400, 'id inválido');
 
   return conReintento(async () => {
     const db = await getDb();
-    const visita = await db.collection('visitas').findOne({ _id: visitaId });
+    const visita = await db.collection('visitas').findOne(Object.assign({ _id: visitaId }, orgFiltro || {}));
     if (!visita) throw err(404, 'Visita no encontrada');
     if (visita.estado === 'vendido' || visita.estado === 'instalado') throw err(400, 'Esta visita ya fue confirmada');
     if (visita.estado === 'cancelada') throw err(400, 'Esta visita está cancelada');
@@ -1474,6 +1481,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSelecc
     const numero = await siguienteNumeroObra();
     const obraDoc = {
       numero,
+      orgId: visita.orgId || null,
       cliente: {
         nombre: visita.cliente.nombre,
         telefono: visita.cliente.telefono || '',
@@ -1573,7 +1581,7 @@ async function tiposTrabajoDePresupuesto(db, presupuesto) {
 router.get('/reportes/embudo', authAdmin, async (req, res) => {
   try {
     const { desde, hasta } = req.query;
-    const match = { estado: { $ne: 'cancelada' } };
+    const match = Object.assign({ estado: { $ne: 'cancelada' } }, filtroOrg(req));
     if (desde || hasta) {
       match.fechaHora = {};
       if (desde) match.fechaHora.$gte = new Date(desde);

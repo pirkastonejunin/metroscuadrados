@@ -146,6 +146,7 @@
   <nav>
     <button data-tab="usuarios" class="active" onclick="showTab('usuarios')">Usuarios</button>
     <button data-tab="roles" onclick="showTab('roles')">Roles</button>
+    <button data-tab="organizaciones" id="navOrganizaciones" class="hidden" onclick="showTab('organizaciones')">Organizaciones</button>
     <button data-tab="config" onclick="showTab('config')">Configuración</button>
   </nav>
   <main>
@@ -159,7 +160,7 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Organización</th><th>Estado</th><th></th></tr></thead>
           <tbody id="usuariosBody"></tbody>
         </table>
       </div>
@@ -177,6 +178,22 @@
         <table>
           <thead><tr><th>Nombre</th><th>Módulos</th><th></th></tr></thead>
           <tbody id="rolesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ORGANIZACIONES (franquicias) — solo visible para el rol protegido -->
+    <section id="tab-organizaciones" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div><button class="btn" onclick="abrirNuevaOrganizacion()">+ Nueva organización</button></div>
+        </div>
+        <p class="muted" style="margin-top:10px;margin-bottom:0">Cada organización es una franquicia con sus propios usuarios, visitas, obras y oportunidades — no se ven entre sí. Por defecto todas comparten el catálogo/tienda de Piedra Negra; "Tienda propia" es solo para la franquicia que necesite la suya.</p>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Tienda propia</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="organizacionesBody"></tbody>
         </table>
       </div>
     </section>
@@ -212,12 +229,21 @@
 
 <script>
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || ''; // organización elegida en inicio.html — se manda como x-org-id
 let MODULOS = [];
 let ROLES = [];
 let USUARIOS = [];
+let ORGANIZACIONES = [];
+let ES_PROTEGIDO = false;
+
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
 
 function api(path, opts={}) {
-  opts.headers = Object.assign({'Content-Type':'application/json','x-admin-token':TOKEN}, opts.headers||{});
+  opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
   return fetch('/api/usuarios'+path, opts).then(async r => {
     const data = await r.json().catch(()=>({}));
@@ -251,10 +277,12 @@ function logout(){
 }
 async function iniciarApp(){
   try{
-    const r = await fetch('/api/usuarios/me', {headers:{'x-admin-token':TOKEN}});
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
     const me = await r.json();
     MODULOS = me.modulos || [];
+    ES_PROTEGIDO = !!(me.rol && me.rol.protegido);
+    document.getElementById('navOrganizaciones').classList.toggle('hidden', !ES_PROTEGIDO);
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('usuarios'));
     if (!tieneAcceso) {
       document.getElementById('loginScreen').classList.add('hidden');
@@ -269,6 +297,7 @@ async function iniciarApp(){
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   await cargarRoles();
+  await cargarOrganizaciones();
   await cargarUsuarios();
   cargarNotificaciones();
   setInterval(cargarNotificaciones, 5 * 60 * 1000);
@@ -280,6 +309,7 @@ function showTab(tab){
   document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
   document.getElementById('tab-'+tab).classList.remove('hidden');
   if (tab === 'config') cargarConfigNotificaciones();
+  if (tab === 'organizaciones') cargarOrganizaciones();
 }
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
@@ -382,10 +412,105 @@ async function borrarRol(id){
 }
 
 // ---------------------------------------------------------------------
+// ORGANIZACIONES (franquicias)
+// ---------------------------------------------------------------------
+async function cargarOrganizaciones(){
+  ORGANIZACIONES = await api('/organizaciones');
+  const tbody = document.getElementById('organizacionesBody');
+  if (tbody) {
+    tbody.innerHTML = ORGANIZACIONES.map(o => `
+      <tr>
+        <td>${escapeHtml(o.nombre)}</td>
+        <td>${o.tiendanubeStoreId ? escapeHtml(o.tiendanubeStoreId) : '<span class="muted">Comparte la de Piedra Negra</span>'}</td>
+        <td><span class="pill ${o.activa===false ? 'off' : 'on'}">${o.activa===false ? 'Inactiva' : 'Activa'}</span></td>
+        <td style="white-space:nowrap">
+          <button class="btn small secondary" onclick="abrirEditarOrganizacion('${o._id}')">Editar</button>
+          <button class="btn small danger" onclick="borrarOrganizacion('${o._id}')">Borrar</button>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">Todavía no hay ninguna organización cargada.</td></tr>';
+  }
+}
+function abrirNuevaOrganizacion(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Nueva organización</h2>
+        <div class="campo-edit"><label>Nombre</label><input id="orgNombre" placeholder="ej: Piedra Negra Rosario"></div>
+        <div class="campo-edit"><label>Tienda propia en Tiendanube (opcional)</label><input id="orgStoreId" placeholder="Dejar vacío para compartir la de Piedra Negra"></div>
+        <div class="err" id="orgErr"></div>
+        <button class="btn" style="width:100%;margin-top:6px" onclick="guardarNuevaOrganizacion()">Crear organización</button>
+      </div>
+    </div>`;
+}
+async function guardarNuevaOrganizacion(){
+  const nombre = document.getElementById('orgNombre').value.trim();
+  const tiendanubeStoreId = document.getElementById('orgStoreId').value.trim() || null;
+  const errEl = document.getElementById('orgErr');
+  errEl.textContent = '';
+  try{
+    await api('/organizaciones', {method:'POST', body:{nombre, tiendanubeStoreId}});
+    cerrarModal();
+    await cargarOrganizaciones();
+  }catch(e){ errEl.textContent = e.message; }
+}
+function abrirEditarOrganizacion(id){
+  const o = ORGANIZACIONES.find(x => x._id === id);
+  if (!o) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Editar organización</h2>
+        <div class="campo-edit"><label>Nombre</label><input id="orgNombre" value="${escapeHtml(o.nombre)}"></div>
+        <div class="campo-edit"><label>Tienda propia en Tiendanube (opcional)</label><input id="orgStoreId" value="${escapeHtml(o.tiendanubeStoreId||'')}" placeholder="Dejar vacío para compartir la de Piedra Negra"></div>
+        <div class="campo-edit"><label><input type="checkbox" id="orgActiva" ${o.activa===false?'':'checked'} style="width:auto;margin-right:6px">Organización activa</label></div>
+        <div class="err" id="orgErr"></div>
+        <button class="btn" style="width:100%;margin-top:6px" onclick="guardarEdicionOrganizacion('${id}')">Guardar cambios</button>
+      </div>
+    </div>`;
+}
+async function guardarEdicionOrganizacion(id){
+  const nombre = document.getElementById('orgNombre').value.trim();
+  const tiendanubeStoreId = document.getElementById('orgStoreId').value.trim() || null;
+  const activa = document.getElementById('orgActiva').checked;
+  const errEl = document.getElementById('orgErr');
+  errEl.textContent = '';
+  try{
+    await api('/organizaciones/'+id, {method:'PUT', body:{nombre, tiendanubeStoreId, activa}});
+    cerrarModal();
+    await cargarOrganizaciones();
+  }catch(e){ errEl.textContent = e.message; }
+}
+async function borrarOrganizacion(id){
+  if (!confirm('¿Borrar esta organización? Solo se puede si no tiene ningún usuario asignado.')) return;
+  try{
+    await api('/organizaciones/'+id, {method:'DELETE'});
+    await cargarOrganizaciones();
+  }catch(e){ alert(e.message); }
+}
+
+// ---------------------------------------------------------------------
 // USUARIOS
 // ---------------------------------------------------------------------
 function opcionesRoles(seleccionado){
   return ROLES.map(r => `<option value="${r._id}" ${r._id===seleccionado?'selected':''}>${escapeHtml(r.nombre)}</option>`).join('');
+}
+
+// Checkboxes de organizaciones para el modal de usuario — un usuario puede
+// pertenecer a más de una (normalmente una sola, salvo alguien de oficina
+// que dé soporte a más de una franquicia). No se muestra para el rol
+// protegido: ese ve todas las organizaciones siempre, no hace falta elegir.
+function checkboxesOrganizaciones(seleccionadas){
+  const sel = new Set((seleccionadas||[]).map(String));
+  if (!ORGANIZACIONES.length) return '<p class="muted" style="margin:4px 0">Todavía no hay ninguna organización creada — creá una en la pestaña Organizaciones.</p>';
+  return ORGANIZACIONES.map(o => `
+    <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:4px 0">
+      <input type="checkbox" class="usrOrgCheck" value="${o._id}" style="width:auto" ${sel.has(o._id)?'checked':''}> ${escapeHtml(o.nombre)}
+    </label>`).join('');
+}
+function orgIdsSeleccionados(){
+  return Array.from(document.querySelectorAll('.usrOrgCheck:checked')).map(el => el.value);
 }
 
 async function cargarUsuarios(){
@@ -396,12 +521,13 @@ async function cargarUsuarios(){
       <td>${escapeHtml(u.nombre)}</td>
       <td>${escapeHtml(u.usuario)}</td>
       <td>${escapeHtml(u.rolNombre)}</td>
+      <td>${(u.orgNombres&&u.orgNombres.length) ? u.orgNombres.map(n=>escapeHtml(n)).join(', ') : '<span class="muted">—</span>'}</td>
       <td><span class="pill ${u.activo ? 'on' : 'off'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
       <td style="white-space:nowrap">
         <button class="btn small secondary" onclick="abrirEditarUsuario('${u._id}')">Editar</button>
         <button class="btn small danger" onclick="borrarUsuario('${u._id}')">Borrar</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">Todavía no hay usuarios cargados.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">Todavía no hay usuarios cargados.</td></tr>';
 }
 
 function abrirNuevoUsuario(){
@@ -415,6 +541,7 @@ function abrirNuevoUsuario(){
         <div class="campo-edit"><label>Usuario (para iniciar sesión)</label><input id="usrUsuario" autocapitalize="off" placeholder="ej: maria.perez"></div>
         <div class="campo-edit"><label>Contraseña</label><input type="password" id="usrPassword" placeholder="Mínimo 6 caracteres"></div>
         <div class="campo-edit"><label>Rol</label><select id="usrRol">${opcionesRoles()}</select></div>
+        <div class="campo-edit"><label>Organizaciones</label>${checkboxesOrganizaciones()}</div>
         <div class="err" id="usrErr"></div>
         <button class="btn" style="width:100%;margin-top:6px" onclick="guardarNuevoUsuario()">Crear usuario</button>
       </div>
@@ -425,10 +552,11 @@ async function guardarNuevoUsuario(){
   const usuario = document.getElementById('usrUsuario').value.trim();
   const password = document.getElementById('usrPassword').value;
   const rolId = document.getElementById('usrRol').value;
+  const orgIds = orgIdsSeleccionados();
   const errEl = document.getElementById('usrErr');
   errEl.textContent = '';
   try{
-    await api('/', {method:'POST', body:{nombre, usuario, password, rolId}});
+    await api('/', {method:'POST', body:{nombre, usuario, password, rolId, orgIds}});
     cerrarModal();
     await cargarUsuarios();
   }catch(e){ errEl.textContent = e.message; }
@@ -445,6 +573,7 @@ function abrirEditarUsuario(id){
         <div class="campo-edit"><label>Nombre y apellido</label><input id="usrNombre" value="${escapeHtml(u.nombre)}"></div>
         <div class="campo-edit"><label>Usuario</label><input value="${escapeHtml(u.usuario)}" disabled></div>
         <div class="campo-edit"><label>Rol</label><select id="usrRol">${opcionesRoles(u.rolId)}</select></div>
+        <div class="campo-edit"><label>Organizaciones</label>${checkboxesOrganizaciones(u.orgIds)}</div>
         <div class="campo-edit">
           <label><input type="checkbox" id="usrActivo" ${u.activo ? 'checked' : ''} style="width:auto;margin-right:6px">Usuario activo</label>
         </div>
@@ -459,9 +588,10 @@ async function guardarEdicionUsuario(id){
   const rolId = document.getElementById('usrRol').value;
   const activo = document.getElementById('usrActivo').checked;
   const password = document.getElementById('usrPassword').value;
+  const orgIds = orgIdsSeleccionados();
   const errEl = document.getElementById('usrErr');
   errEl.textContent = '';
-  const body = {nombre, rolId, activo};
+  const body = {nombre, rolId, activo, orgIds};
   if (password) body.password = password;
   try{
     await api('/'+id, {method:'PUT', body});
@@ -484,7 +614,7 @@ async function cargarConfigNotificaciones(){
   const msg = document.getElementById('cfgNotifMsg');
   msg.textContent = '';
   try{
-    const r = await fetch(BASE_NOTIF + '/config', { headers: { 'x-admin-token': TOKEN } });
+    const r = await fetch(BASE_NOTIF + '/config', { headers: headersAuth() });
     const cfg = await r.json();
     document.getElementById('cfgNotifCrm').checked = !!cfg.crm;
     document.getElementById('cfgNotifVisitas').checked = !!cfg.visitas;
@@ -500,7 +630,7 @@ async function guardarConfigNotificaciones(){
       visitas: document.getElementById('cfgNotifVisitas').checked,
       obras: document.getElementById('cfgNotifObras').checked
     };
-    const r = await fetch(BASE_NOTIF + '/config', { method:'PUT', headers:{'Content-Type':'application/json','x-admin-token':TOKEN}, body: JSON.stringify(body) });
+    const r = await fetch(BASE_NOTIF + '/config', { method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify(body) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'No se pudo guardar');
   }catch(e){ msg.textContent = e.message; }
@@ -524,7 +654,7 @@ function notifFmtFecha(iso){
 }
 async function cargarNotificaciones(){
   try{
-    const r = await fetch(BASE_NOTIF, { headers: { 'x-admin-token': TOKEN } });
+    const r = await fetch(BASE_NOTIF, { headers: headersAuth() });
     if (!r.ok) return;
     const data = await r.json().catch(()=>({}));
     NOTIF_ITEMS = data.items || [];

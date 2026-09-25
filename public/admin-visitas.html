@@ -332,6 +332,12 @@
 <script>
 const BASE = '/api/visitas'; // coincide con app.use('/api/visitas', visitasRouter) en server.js
 let TOKEN = localStorage.getItem('obras_admin_token') || ''; // misma clave que admin-obras.html: comparten contraseña
+let ORG = localStorage.getItem('obras_org_activo') || ''; // organización elegida en inicio.html — se manda como x-org-id
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
 let VENDEDORES = [];
 let TIPOS_TRABAJO = [];
 let TIPOS_OBRA = [];
@@ -344,7 +350,7 @@ const CAMPOS_OBRA = [
 ];
 
 function api(path, opts={}) {
-  opts.headers = Object.assign({'Content-Type':'application/json','x-admin-token':TOKEN}, opts.headers||{});
+  opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
   return fetch(BASE+path, opts).then(async r => {
     const data = await r.json().catch(()=>({}));
@@ -356,7 +362,7 @@ function api(path, opts={}) {
 async function verPdfPresupuestoManual(id, vistaDetalle){
   try{
     const qs = vistaDetalle ? '?vista=detalle' : '';
-    const r = await fetch(BASE+'/'+id+'/presupuesto-pdf'+qs, {headers:{'x-admin-token':TOKEN}});
+    const r = await fetch(BASE+'/'+id+'/presupuesto-pdf'+qs, {headers: headersAuth()});
     if (!r.ok){
       const d = await r.json().catch(()=>({}));
       throw new Error(d.error || 'No se pudo generar el PDF');
@@ -377,7 +383,7 @@ async function verPdfCotizador(cotizacionId, storeId, vistaDetalle){
   try{
     const params = new URLSearchParams({ store_id: storeId });
     if (!vistaDetalle) params.set('vista', 'simple');
-    const r = await fetch('/api/cotizador/pdf/'+cotizacionId+'?'+params.toString(), {headers:{'x-admin-token':TOKEN}});
+    const r = await fetch('/api/cotizador/pdf/'+cotizacionId+'?'+params.toString(), {headers: headersAuth()});
     if (!r.ok){
       const d = await r.json().catch(()=>({}));
       throw new Error(d.error || 'No se pudo generar el PDF');
@@ -408,7 +414,7 @@ function logout(){
 }
 async function iniciarApp(){
   try{
-    const r = await fetch('/api/usuarios/me', {headers:{'x-admin-token':TOKEN}});
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
     const me = await r.json();
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('visitas'));
@@ -458,7 +464,7 @@ function showTab(tab){
 
 const BASE_CRM = '/api/crm';
 function apiCrm(path, opts={}) {
-  opts.headers = Object.assign({'Content-Type':'application/json','x-admin-token':TOKEN}, opts.headers||{});
+  opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
   return fetch(BASE_CRM+path, opts).then(async r => {
     const data = await r.json().catch(()=>({}));
@@ -1523,7 +1529,7 @@ function notifFmtFecha(iso){
 }
 async function cargarNotificaciones(){
   try{
-    const r = await fetch(BASE_NOTIF, { headers: { 'x-admin-token': TOKEN } });
+    const r = await fetch(BASE_NOTIF, { headers: headersAuth() });
     if (!r.ok) return;
     const data = await r.json().catch(()=>({}));
     NOTIF_ITEMS = data.items || [];

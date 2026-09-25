@@ -254,6 +254,12 @@
 const BASE_VISITAS = '/api/visitas';
 const BASE_OBRAS = '/api/obras';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || ''; // organización elegida en inicio.html — se manda como x-org-id
+function headersAuth(extra){
+  const h = Object.assign({ 'x-admin-token': TOKEN }, extra || {});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
 
 let mesActual = new Date(); mesActual.setDate(1); mesActual.setHours(0,0,0,0);
 let diaSeleccionado = null;
@@ -262,7 +268,7 @@ let obrasCache = null;
 let eventosPorDia = {};
 
 async function api(base, path, opts = {}) {
-  opts.headers = Object.assign({ 'Content-Type': 'application/json', 'x-admin-token': TOKEN }, opts.headers || {});
+  opts.headers = headersAuth(Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {}));
   const r = await fetch(base + path, opts);
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('Error ' + r.status)); }
   return r.json();
@@ -290,7 +296,7 @@ function logout() {
 }
 
 async function entrar() {
-  const r = await fetch('/api/usuarios/me', { headers: { 'x-admin-token': TOKEN } });
+  const r = await fetch('/api/usuarios/me', { headers: headersAuth() });
   if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN = ''; throw new Error('Sesión inválida'); }
   const me = await r.json();
   // El calendario combina Visitas y Obras (ver usuarios.js) — hace falta
@@ -500,7 +506,7 @@ function notifFmtFecha(iso){
 }
 async function cargarNotificaciones(){
   try{
-    const r = await fetch(BASE_NOTIF, { headers: { 'x-admin-token': TOKEN } });
+    const r = await fetch(BASE_NOTIF, { headers: headersAuth() });
     if (!r.ok) return;
     const data = await r.json().catch(()=>({}));
     NOTIF_ITEMS = data.items || [];

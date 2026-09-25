@@ -170,6 +170,11 @@
         <button onclick="oficinaLogout()">Cerrar sesión</button>
       </div>
 
+      <div class="card-login hidden" id="orgSelectorBox" style="margin-bottom:12px">
+        <label>Organización</label>
+        <select id="orgSelector" onchange="elegirOrganizacion(this.value)"></select>
+      </div>
+
       <p class="muted hidden" id="oficinaSinModulos" style="margin:0 0 12px;font-size:0.83rem">Tu usuario no tiene ningún módulo de Oficina habilitado todavía. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
 
       <div class="lista hidden" id="oficinaLista">
@@ -258,6 +263,14 @@
 <script>
 const TOKEN_KEY = 'obras_admin_token';
 let TOKEN = localStorage.getItem(TOKEN_KEY) || '';
+const ORG_KEY = 'obras_org_activo'; // organización elegida, mandada como header x-org-id en el resto de los paneles
+let ORG_ACTIVA = localStorage.getItem(ORG_KEY) || '';
+
+function elegirOrganizacion(orgId){
+  ORG_ACTIVA = orgId;
+  if (orgId) localStorage.setItem(ORG_KEY, orgId);
+  else localStorage.removeItem(ORG_KEY);
+}
 
 function tieneModulo(rol, claveCombinada){
   if (!rol) return false;
@@ -286,7 +299,9 @@ async function oficinaLogin(){
 
 function oficinaLogout(){
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ORG_KEY);
   TOKEN = '';
+  ORG_ACTIVA = '';
   revisarSesionOficina();
 }
 
@@ -313,6 +328,37 @@ async function revisarSesionOficina(){
     const me = await r.json();
 
     document.getElementById('oficinaNombre').textContent = (me.usuario && me.usuario.nombre) ? ('Hola, ' + me.usuario.nombre) : '';
+
+    // Selector de organización: si tiene una sola, se elige sola y ni se
+    // muestra el selector (caso normal de un franquiciado). Si tiene más
+    // de una (típicamente alguien de Piedra Negra dando soporte a otra
+    // franquicia), o es rol protegido (que además puede "ver todas"), se
+    // muestra para elegir con cuál está trabajando.
+    const orgs = me.organizaciones || [];
+    const orgBox = document.getElementById('orgSelectorBox');
+    const orgSelect = document.getElementById('orgSelector');
+    const haySeleccionValida = orgs.some(o => o._id === ORG_ACTIVA) || (me.puedeVerTodas && ORG_ACTIVA === 'todas');
+    if (!haySeleccionValida) {
+      // Importante: al rol protegido (Administrador general) NUNCA se lo
+      // hace arrancar viendo "todas" por default, aunque pueda elegirlo.
+      // Si aparece una organización nueva (p.ej. una de pruebas), el
+      // administrador actual debe seguir viendo su organización real
+      // ("Piedra Negra") como si nada hubiera cambiado. "Todas" es una
+      // opción que el propio administrador puede elegir a mano.
+      const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+      elegirOrganizacion(
+        orgs.length === 1 ? orgs[0]._id
+        : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')))
+      );
+    }
+    if (orgs.length > 1 || me.puedeVerTodas) {
+      orgSelect.innerHTML = orgs.map(o => `<option value="${o._id}">${o.nombre}</option>`).join('')
+        + (me.puedeVerTodas ? '<option value="todas">Todas las organizaciones</option>' : '');
+      orgSelect.value = ORG_ACTIVA;
+      orgBox.classList.remove('hidden');
+    } else {
+      orgBox.classList.add('hidden');
+    }
 
     let algunoVisible = false;
     lista.querySelectorAll('a.acceso').forEach(a => {

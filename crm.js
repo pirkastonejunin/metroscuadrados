@@ -33,7 +33,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 const { crearVisita } = require('./visitas');
 
 const router = express.Router();
@@ -92,7 +92,7 @@ async function siguienteNumeroOportunidad() {
 // Se reusa el módulo 'visitas' existente en vez de sumar una clave de
 // módulo nueva — decisión tomada con Mato: el CRM lo ve el mismo equipo
 // que ya carga visitas.
-const authAdmin = [authUsuario, requiereModulo('visitas')];
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('visitas')];
 
 function normalizarProximaAccion(pa) {
   if (!pa || !pa.fecha) return null;
@@ -131,7 +131,7 @@ function normalizarCliente(cliente, { requerirContacto } = {}) {
 router.get('/', authAdmin, async (req, res) => {
   try {
     const { vendedorId, estado, q } = req.query;
-    const match = {};
+    const match = Object.assign({}, filtroOrg(req));
     if (vendedorId) match.vendedorId = toObjectId(vendedorId);
     if (estado) {
       if (!ESTADOS_VALIDOS.includes(estado)) throw err(400, 'Estado inválido');
@@ -143,6 +143,7 @@ router.get('/', authAdmin, async (req, res) => {
     }
     const lista = await conReintento(async () => {
       const db = await getDb();
+      await backfillOrgId(db, 'oportunidades');
       return db.collection('oportunidades').find(match).sort({ createdAt: -1 }).toArray();
     });
     res.json(lista);
@@ -155,7 +156,7 @@ router.get('/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const doc = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('oportunidades').findOne({ _id: id });
+      return db.collection('oportunidades').findOne(Object.assign({ _id: id }, filtroOrg(req)));
     });
     if (!doc) throw err(404, 'Oportunidad no encontrada');
     res.json(doc);
@@ -168,6 +169,7 @@ router.get('/:id', authAdmin, async (req, res) => {
 
 router.post('/', authAdmin, async (req, res) => {
   try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear una oportunidad.');
     const { cliente, vendedorId, notas, proximaAccion, origen } = req.body || {};
     const clienteNorm = normalizarCliente(cliente, { requerirContacto: true });
     const vId = vendedorId ? toObjectId(vendedorId) : null;
@@ -185,6 +187,7 @@ router.post('/', authAdmin, async (req, res) => {
       const numero = await siguienteNumeroOportunidad();
       const doc = {
         numero,
+        orgId: req.orgId,
         cliente: clienteNorm,
         origen: (origen || '').trim(),
         vendedorId: vId,
@@ -219,7 +222,7 @@ router.put('/:id', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const actual = await db.collection('oportunidades').findOne({ _id: id });
+      const actual = await db.collection('oportunidades').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Oportunidad no encontrada');
 
       if (vendedorId !== undefined) {
@@ -250,7 +253,7 @@ router.post('/:id/descartar', authAdmin, async (req, res) => {
     const motivo = (req.body && req.body.motivo) || '';
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const actual = await db.collection('oportunidades').findOne({ _id: id });
+      const actual = await db.collection('oportunidades').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Oportunidad no encontrada');
       if (actual.estado === 'convertida') throw err(400, 'Esta oportunidad ya se convirtió en visita, no se puede descartar.');
       await db.collection('oportunidades').updateOne(
@@ -269,7 +272,7 @@ router.post('/:id/reactivar', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const actual = await db.collection('oportunidades').findOne({ _id: id });
+      const actual = await db.collection('oportunidades').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Oportunidad no encontrada');
       if (actual.estado !== 'descartada') throw err(400, 'Esta oportunidad no está descartada.');
       await db.collection('oportunidades').updateOne(
@@ -299,7 +302,7 @@ router.post('/:id/asignar-visita', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const oportunidad = await db.collection('oportunidades').findOne({ _id: id });
+      const oportunidad = await db.collection('oportunidades').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!oportunidad) throw err(404, 'Oportunidad no encontrada');
       if (oportunidad.estado === 'convertida') throw err(400, 'Esta oportunidad ya se convirtió en visita.');
 
@@ -319,7 +322,8 @@ router.post('/:id/asignar-visita', authAdmin, async (req, res) => {
         cliente: clienteParaVisita,
         vendedorId: vendedorIdFinal,
         fechaHora,
-        notasEmpleada: notasEmpleada || oportunidad.notas || ''
+        notasEmpleada: notasEmpleada || oportunidad.notas || '',
+        orgId: oportunidad.orgId
       });
 
       await db.collection('oportunidades').updateOne(

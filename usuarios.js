@@ -47,6 +47,46 @@
 // resto del personal con su propio usuario y contraseña, y renombrar o
 // desactivar "admin" si quiere (el sistema no deja desactivar/borrar al
 // último usuario activo que administra usuarios y roles).
+//
+// --------------------------------------------------------------------------
+// ORGANIZACIONES (multi-tenant, 24/9/2026) — soporte para franquiciados que
+// usan el mismo sistema con los mismos módulos, pero con sus propios datos
+// (visitas, obras, oportunidades CRM, etc) sin verse entre sí.
+//
+// Colección nueva:
+//   - organizaciones : { nombre, tiendanubeStoreId (String opcional — si no
+//                        está, esa organización usa la tienda real de
+//                        Piedra Negra para el Cotizador), activa,
+//                        createdAt, updatedAt }
+//
+// El usuario pasa a tener `orgIds: [ObjectId]` (antes no existía el
+// concepto) — normalmente uno solo, pero soporta varios por si una misma
+// persona necesita operar más de una organización (ej. alguien de Piedra
+// Negra dando soporte a un franquiciado). Solo el rol protegido
+// (Administrador general de Piedra Negra) puede crear/editar organizaciones
+// y puede además "ver todas" sin elegir una — cualquier otro usuario
+// necesita al menos una organización asignada para poder usar el resto de
+// la app.
+//
+// Cómo se elige CON QUÉ organización se está trabajando en cada request:
+// el frontend manda el id elegido en el header `x-org-id` (mismo patrón que
+// ya usa `x-admin-token`), guardado en localStorage junto al token. Si el
+// usuario tiene una sola organización, el frontend ni pregunta — la manda
+// siempre. Si tiene varias, muestra un selector. El rol protegido puede
+// mandar `x-org-id: todas` para ver todo sin filtrar (reportes globales),
+// o el id de una organización puntual para pararse "adentro" de esa
+// franquicia. `resolverOrg` (más abajo) valida todo esto y deja el
+// resultado en `req.orgId` (un ObjectId, o null si es protegido viendo
+// "todas"); `filtroOrg(req)` da el objeto para mezclar en cualquier query
+// de Mongo de los otros módulos (visitas.js, obras.js, crm.js,
+// notificaciones.js).
+//
+// Migración de datos viejos: los documentos creados antes de esto no tienen
+// `orgId`. En vez de una migración manual, cada módulo de datos hace un
+// backfill perezoso (una sola vez por proceso) que les asigna la
+// organización por defecto ("Piedra Negra", creada sola si no existe —
+// ver `asegurarOrgPorDefecto`) — así nada queda "sin organización" sin
+// tocar nada a mano.
 // --------------------------------------------------------------------------
 
 const express = require('express');
@@ -175,6 +215,30 @@ async function asegurarBootstrap(db) {
   });
 }
 
+// ---------------------------------------------------------------------
+// Organizaciones — creada sola la primera vez que hace falta (mismo
+// espíritu que asegurarBootstrap), así ningún dato viejo queda "sin
+// organización" y no hace falta un script de migración aparte.
+// ---------------------------------------------------------------------
+const NOMBRE_ORG_POR_DEFECTO = 'Piedra Negra';
+let orgPorDefectoIdCache = null;
+async function asegurarOrgPorDefecto(db) {
+  if (orgPorDefectoIdCache) return orgPorDefectoIdCache;
+  let org = await db.collection('organizaciones').findOne({ nombre: NOMBRE_ORG_POR_DEFECTO });
+  if (!org) {
+    const r = await db.collection('organizaciones').insertOne({
+      nombre: NOMBRE_ORG_POR_DEFECTO,
+      tiendanubeStoreId: null,
+      activa: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+    org = { _id: r.insertedId };
+  }
+  orgPorDefectoIdCache = org._id;
+  return org._id;
+}
+
 async function usuarioConRol(db, usuarioId) {
   const usuario = await db.collection('usuarios').findOne({ _id: toObjectId(usuarioId) });
   if (!usuario) return null;
@@ -197,6 +261,7 @@ async function authUsuario(req, res, next) {
       nombre: datos.usuario.nombre,
       usuario: datos.usuario.usuario,
       vendedorId: datos.usuario.vendedorId ? datos.usuario.vendedorId.toString() : null,
+      orgIds: (datos.usuario.orgIds || []).map(id => id.toString()),
       rol: { _id: datos.rol._id, nombre: datos.rol.nombre, modulos: datos.rol.modulos || [], protegido: !!datos.rol.protegido }
     };
     next();
@@ -214,6 +279,63 @@ function requiereModulo(moduloKey) {
     }
     next();
   };
+}
+
+// Resuelve con qué organización está trabajando este request y la deja en
+// req.orgId (un ObjectId, o null solo cuando un usuario protegido pidió
+// explícitamente "todas"). Usar SIEMPRE después de authUsuario, y antes de
+// cualquier ruta de visitas.js/obras.js/crm.js/notificaciones.js que lea o
+// escriba datos — filtroOrg(req) da el objeto listo para mezclar en la
+// query de Mongo.
+function resolverOrg(req, res, next) {
+  const header = req.headers['x-org-id'];
+  const u = req.usuario;
+  if (u.rol.protegido) {
+    if (!header || header === 'todas') { req.orgId = null; return next(); }
+    const oid = toObjectId(header);
+    if (!oid) return res.status(400).json({ error: 'x-org-id inválido' });
+    req.orgId = oid;
+    return next();
+  }
+  if (!u.orgIds.length) {
+    return res.status(403).json({ error: 'Tu usuario no tiene ninguna organización asignada. Pedile a un administrador que te asigne una.' });
+  }
+  const elegido = header || u.orgIds[0];
+  if (!u.orgIds.includes(String(elegido))) {
+    return res.status(403).json({ error: 'No tenés acceso a esa organización.' });
+  }
+  req.orgId = toObjectId(elegido);
+  next();
+}
+function filtroOrg(req) {
+  return req.orgId ? { orgId: req.orgId } : {};
+}
+// Backfill perezoso, una sola vez por proceso: le pone la organización por
+// defecto a los documentos viejos de `coleccion` que no tienen orgId
+// todavía. Cada módulo de datos (visitas.js, obras.js, crm.js,
+// notificaciones.js) lo llama una vez antes de su primera query de lista.
+const backfillHecho = {};
+async function backfillOrgId(db, coleccion) {
+  if (backfillHecho[coleccion]) return;
+  const orgId = await asegurarOrgPorDefecto(db);
+  await db.collection(coleccion).updateMany({ orgId: { $exists: false } }, { $set: { orgId } });
+  backfillHecho[coleccion] = true;
+}
+
+// Valida un array de ids de organización contra la colección real, y que
+// no venga vacío (salvo que sea protegido, que no necesita ninguna — ve
+// todas siempre).
+async function validarOrgIds(db, orgIdsRaw, esProtegido) {
+  const ids = Array.isArray(orgIdsRaw) ? orgIdsRaw : [];
+  const objectIds = ids.map(toObjectId).filter(Boolean);
+  if (!objectIds.length) {
+    if (esProtegido) return [];
+    throw err(400, 'Asignale al menos una organización a este usuario');
+  }
+  const encontradas = await db.collection('organizaciones')
+    .find({ _id: { $in: objectIds } }, { projection: { _id: 1 } }).toArray();
+  if (encontradas.length !== objectIds.length) throw err(400, 'Alguna organización no existe');
+  return objectIds;
 }
 
 // Gatea las rutas /api/visitas/vendedor/:vendedorId/* — permite pasar si el
@@ -271,12 +393,107 @@ router.post('/login', async (req, res) => {
 // Quién soy — para que cada panel sepa de entrada (sin tener que adivinar
 // por un código de error) si el usuario logueado tiene el módulo que ese
 // panel necesita, y para pintar su nombre.
-router.get('/me', authUsuario, (req, res) => {
-  res.json({
-    usuario: { nombre: req.usuario.nombre, usuario: req.usuario.usuario, vendedorId: req.usuario.vendedorId },
-    rol: req.usuario.rol,
-    modulos: MODULOS
-  });
+router.get('/me', authUsuario, async (req, res) => {
+  try {
+    const db = await getDb();
+    let organizaciones;
+    if (req.usuario.rol.protegido) {
+      organizaciones = await conReintento(() => db.collection('organizaciones').find({}).sort({ nombre: 1 }).toArray());
+    } else {
+      const ids = req.usuario.orgIds.map(toObjectId).filter(Boolean);
+      organizaciones = await conReintento(() => db.collection('organizaciones').find({ _id: { $in: ids } }).sort({ nombre: 1 }).toArray());
+    }
+    res.json({
+      usuario: { nombre: req.usuario.nombre, usuario: req.usuario.usuario, vendedorId: req.usuario.vendedorId, orgIds: req.usuario.orgIds },
+      rol: req.usuario.rol,
+      modulos: MODULOS,
+      organizaciones,
+      // El protegido puede además "ver todas" (sin pararse en una sola) —
+      // el frontend lo ofrece como una opción más del selector.
+      puedeVerTodas: !!req.usuario.rol.protegido
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Gatea la administración de organizaciones — solo el rol protegido
+// (Administrador general de Piedra Negra) puede dar de alta o modificar
+// franquicias; un administrador normal de una franquicia solo puede
+// listarlas (para el selector), no crear ninguna nueva.
+function requiereSuperAdmin(req, res, next) {
+  if (!req.usuario.rol.protegido) {
+    return res.status(403).json({ error: 'Solo el Administrador general puede administrar organizaciones.' });
+  }
+  next();
+}
+
+// ---------------------------------------------------------------------
+// ORGANIZACIONES
+// ---------------------------------------------------------------------
+router.get('/organizaciones', authUsuario, async (req, res) => {
+  try {
+    const db = await getDb();
+    if (req.usuario.rol.protegido) {
+      return res.json(await conReintento(() => db.collection('organizaciones').find({}).sort({ nombre: 1 }).toArray()));
+    }
+    const ids = req.usuario.orgIds.map(toObjectId).filter(Boolean);
+    res.json(await conReintento(() => db.collection('organizaciones').find({ _id: { $in: ids } }).sort({ nombre: 1 }).toArray()));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/organizaciones', authUsuario, requiereSuperAdmin, async (req, res) => {
+  try {
+    const { nombre, tiendanubeStoreId } = req.body || {};
+    if (!nombre || !String(nombre).trim()) throw err(400, 'La organización necesita un nombre');
+    const doc = {
+      nombre: String(nombre).trim(),
+      tiendanubeStoreId: tiendanubeStoreId ? String(tiendanubeStoreId).trim() : null,
+      activa: true,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    const r = await conReintento(async () => (await getDb()).collection('organizaciones').insertOne(doc));
+    doc._id = r.insertedId;
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/organizaciones/:id', authUsuario, requiereSuperAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const { nombre, tiendanubeStoreId, activa } = req.body || {};
+    const set = { updatedAt: new Date() };
+    if (nombre !== undefined) {
+      if (!String(nombre).trim()) throw err(400, 'La organización necesita un nombre');
+      set.nombre = String(nombre).trim();
+    }
+    if (tiendanubeStoreId !== undefined) set.tiendanubeStoreId = tiendanubeStoreId ? String(tiendanubeStoreId).trim() : null;
+    if (activa !== undefined) set.activa = !!activa;
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const actual = await db.collection('organizaciones').findOne({ _id: id });
+      if (!actual) throw err(404, 'Organización no encontrada');
+      await db.collection('organizaciones').updateOne({ _id: id }, { $set: set });
+      return db.collection('organizaciones').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.delete('/organizaciones/:id', authUsuario, requiereSuperAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const org = await db.collection('organizaciones').findOne({ _id: id });
+      if (!org) throw err(404, 'Organización no encontrada');
+      const enUso = await db.collection('usuarios').countDocuments({ orgIds: id });
+      if (enUso) throw err(400, `Hay ${enUso} usuario(s) en esta organización — reasignalos antes de borrarla.`);
+      await db.collection('organizaciones').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 // Valida un vendedorId contra visitas_vendedores y que ningún OTRO usuario
@@ -381,21 +598,25 @@ router.delete('/roles/:id', authAdmin, async (req, res) => {
 // ---------------------------------------------------------------------
 router.get('/', authAdmin, async (req, res) => {
   try {
-    const [usuarios, roles, vendedores] = await conReintento(async () => {
+    const [usuarios, roles, vendedores, organizaciones] = await conReintento(async () => {
       const db = await getDb();
       return Promise.all([
         db.collection('usuarios').find({}).sort({ nombre: 1 }).project({ passwordHash: 0 }).toArray(),
         db.collection('roles').find({}).toArray(),
-        db.collection('visitas_vendedores').find({}).project({ nombre: 1 }).toArray()
+        db.collection('visitas_vendedores').find({}).project({ nombre: 1 }).toArray(),
+        db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()
       ]);
     });
     const rolesPorId = {};
     roles.forEach(r => { rolesPorId[r._id.toString()] = r; });
     const vendedoresPorId = {};
     vendedores.forEach(v => { vendedoresPorId[v._id.toString()] = v; });
+    const orgsPorId = {};
+    organizaciones.forEach(o => { orgsPorId[o._id.toString()] = o; });
     const listaConRol = usuarios.map(u => Object.assign({}, u, {
       rolNombre: (rolesPorId[u.rolId && u.rolId.toString()] || {}).nombre || '(sin rol)',
-      vendedorNombre: u.vendedorId ? ((vendedoresPorId[u.vendedorId.toString()] || {}).nombre || '(vendedor borrado)') : null
+      vendedorNombre: u.vendedorId ? ((vendedoresPorId[u.vendedorId.toString()] || {}).nombre || '(vendedor borrado)') : null,
+      orgNombres: (u.orgIds || []).map(id => (orgsPorId[id.toString()] || {}).nombre || '(organización borrada)')
     }));
     res.json(listaConRol);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -403,7 +624,7 @@ router.get('/', authAdmin, async (req, res) => {
 
 router.post('/', authAdmin, async (req, res) => {
   try {
-    const { nombre, usuario, password, rolId, vendedorId } = req.body || {};
+    const { nombre, usuario, password, rolId, vendedorId, orgIds } = req.body || {};
     if (!nombre || !usuario || !password || !rolId) throw err(400, 'Nombre, usuario, contraseña y rol son obligatorios');
     if (String(password).length < 6) throw err(400, 'La contraseña tiene que tener al menos 6 caracteres');
     const rId = toObjectId(rolId);
@@ -420,12 +641,14 @@ router.post('/', authAdmin, async (req, res) => {
       const existente = await db.collection('usuarios').findOne({ usuario: usuarioNorm });
       if (existente) throw err(400, 'Ya existe un usuario con ese nombre de usuario');
       const vId = await validarVendedorId(db, vendedorId, null);
+      const orgIdsValidados = await validarOrgIds(db, orgIds, !!rol.protegido);
       const nuevo = {
         nombre: String(nombre).trim(),
         usuario: usuarioNorm,
         passwordHash: hashPassword(password),
         rolId: rId,
         vendedorId: vId,
+        orgIds: orgIdsValidados,
         activo: true,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -443,7 +666,7 @@ router.put('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { nombre, rolId, activo, password, vendedorId } = req.body || {};
+    const { nombre, rolId, activo, password, vendedorId, orgIds } = req.body || {};
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const actual = await db.collection('usuarios').findOne({ _id: id });
@@ -466,6 +689,11 @@ router.put('/:id', authAdmin, async (req, res) => {
         const rol = await db.collection('roles').findOne({ _id: nuevoRolId });
         if (!rol) throw err(400, 'Rol no encontrado');
         set.rolId = nuevoRolId;
+      }
+
+      if (orgIds !== undefined) {
+        const rolParaValidar = await db.collection('roles').findOne({ _id: nuevoRolId });
+        set.orgIds = await validarOrgIds(db, orgIds, !!(rolParaValidar && rolParaValidar.protegido));
       }
 
       const nuevoActivo = activo !== undefined ? !!activo : actual.activo;
@@ -521,3 +749,7 @@ module.exports.requiereModulo = requiereModulo;
 module.exports.requiereVendedorPropio = requiereVendedorPropio;
 module.exports.tieneModulo = tieneModulo;
 module.exports.MODULOS = MODULOS;
+module.exports.resolverOrg = resolverOrg;
+module.exports.filtroOrg = filtroOrg;
+module.exports.backfillOrgId = backfillOrgId;
+module.exports.asegurarOrgPorDefecto = asegurarOrgPorDefecto;

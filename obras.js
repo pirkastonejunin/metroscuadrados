@@ -32,7 +32,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const googleCalendar = require('./google-calendar');
-const { authUsuario, requiereModulo, tieneModulo } = require('./usuarios');
+const { authUsuario, requiereModulo, tieneModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -116,7 +116,7 @@ function verificarTokenColocador(token) {
 // (con su rol); requiereModulo('obras') exige que ese rol tenga acceso al
 // módulo de Obras. Como Express aplana arrays de middlewares, ningún otro
 // lugar de este archivo que usa `authAdmin` necesita cambios.
-const authAdmin = [authUsuario, requiereModulo('obras')];
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('obras')];
 
 async function authColocador(req, res, next) {
   const token = req.headers['x-colocador-token'];
@@ -145,7 +145,7 @@ async function authColocadorOAdmin(req, res, next) {
       return res.status(403).json({ error: 'Tu usuario no tiene acceso al módulo de Obras.' });
     }
     req.esAdminObras = true;
-    next();
+    resolverOrg(req, res, next);
   });
 }
 
@@ -301,7 +301,8 @@ router.get('/colocadores', authAdmin, async (req, res) => {
   try {
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('obras_colocadores').find({}).sort({ nombre: 1 }).toArray();
+      await backfillOrgId(db, 'obras_colocadores');
+      return db.collection('obras_colocadores').find(filtroOrg(req)).sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -309,15 +310,20 @@ router.get('/colocadores', authAdmin, async (req, res) => {
 
 router.post('/colocadores', authAdmin, async (req, res) => {
   try {
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué organización estás trabajando antes de crear un colocador.' });
     const { nombre, telefono, pin, costos, googleCalendarId } = req.body || {};
     if (!nombre || !pin) return res.status(400).json({ error: 'Nombre y PIN son obligatorios' });
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const col = db.collection('obras_colocadores');
+      // El PIN es único en TODO el sistema, no solo dentro de la
+      // organización — así el login por PIN (sin elegir organización) no
+      // tiene ambigüedad posible entre franquicias.
       const existePin = await col.findOne({ pin: String(pin) });
       if (existePin) throw Object.assign(new Error('Ese PIN ya está en uso por otro colocador'), { status: 400 });
       const doc = {
         nombre, telefono: telefono || '', pin: String(pin),
+        orgId: req.orgId,
         costos: Array.isArray(costos) ? costos : [],
         // Calendario de Google propio de este colocador, para que sus obras
         // le lleguen ahí (ver google-calendar.js) — opcional, si lo deja
@@ -522,13 +528,14 @@ router.delete('/tipos-trabajo/:id', authAdmin, async (req, res) => {
 router.get('/', authAdmin, async (req, res) => {
   try {
     const { estado, excluirEstado, colocadorId, q } = req.query;
-    const match = {};
+    const match = Object.assign({}, filtroOrg(req));
     if (estado) match.estado = estado;
     else if (excluirEstado) match.estado = { $ne: excluirEstado };
     if (colocadorId) match['tareas.colocadorId'] = toObjectId(colocadorId);
     if (q) match['cliente.nombre'] = { $regex: q, $options: 'i' };
     const lista = await conReintento(async () => {
       const db = await getDb();
+      await backfillOrgId(db, 'obras');
       return db.collection('obras').find(match).sort({ numero: -1 }).toArray();
     });
     res.json(lista);
@@ -541,7 +548,7 @@ router.get('/:id', authAdmin, async (req, res) => {
     if (!id) return res.status(400).json({ error: 'id inválido' });
     const obra = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('obras').findOne({ _id: id });
+      return db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
     });
     if (!obra) return res.status(404).json({ error: 'Obra no encontrada' });
     res.json(obra);
@@ -551,6 +558,7 @@ router.get('/:id', authAdmin, async (req, res) => {
 // Crear obra (al vender). tareas: [{tipoTrabajo, m2Presupuestados}]
 router.post('/', authAdmin, async (req, res) => {
   try {
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué organización estás trabajando antes de crear una obra.' });
     const { cliente, fechaVenta, vendedor, tareas, notasGenerales } = req.body || {};
     if (!cliente || !cliente.nombre) return res.status(400).json({ error: 'Falta el nombre del cliente' });
     const numero = await siguienteNumeroObra();
@@ -568,6 +576,7 @@ router.post('/', authAdmin, async (req, res) => {
     }));
     const doc = {
       numero,
+      orgId: req.orgId,
       cliente: {
         nombre: cliente.nombre,
         telefono: cliente.telefono || '',
@@ -607,7 +616,7 @@ router.put('/:id', authAdmin, async (req, res) => {
 
     const actualizado = await conReintento(async () => {
       const db = await getDb();
-      const obra = await db.collection('obras').findOne({ _id: id });
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
 
       const set = { updatedAt: new Date() };
@@ -662,7 +671,7 @@ router.post('/:id/tareas', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const obra = await db.collection('obras').findOne({ _id: id });
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
       const estadoInicial = estadoTareaParaObra(obra.estado) || 'pendiente';
       const ahora = new Date();
@@ -709,7 +718,7 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const obra = await db.collection('obras').findOne({ _id: obraId });
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: obraId }, filtroOrg(req)));
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
       const tarea = (obra.tareas || []).find(t => String(t._id) === String(tareaId));
       if (!tarea) throw Object.assign(new Error('Tarea no encontrada'), { status: 404 });
@@ -771,7 +780,7 @@ router.delete('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
     if (!obraId || !tareaId) return res.status(400).json({ error: 'id inválido' });
     await conReintento(async () => {
       const db = await getDb();
-      const obra = await db.collection('obras').findOne({ _id: obraId });
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: obraId }, filtroOrg(req)));
       if (!obra) return;
       // Se saca el producto ANTES de resincronizar: si era el único con
       // colocador asignado, el evento de la obra tiene que borrarse; si no,
@@ -808,7 +817,7 @@ router.get('/colocador/mis-obras', authColocadorOAdmin, async (req, res) => {
     if (req.esAdminObras) {
       const { obras, nombrePorId } = await conReintento(async () => {
         const db = await getDb();
-        const match = {};
+        const match = Object.assign({}, filtroOrg(req));
         match.estado = historial ? 'terminada' : { $nin: ESTADOS_OBRA_NO_EN_CURSO };
         const obras = await db.collection('obras').find(match).sort({ numero: -1 }).toArray();
         const colocadorIds = [...new Set(
@@ -868,9 +877,8 @@ router.post('/colocador/obras/:obraId/estado', authColocadorOAdmin, async (req, 
     }
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const obra = await db.collection('obras').findOne({ _id: obraId });
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: obraId }, req.esAdminObras ? filtroOrg(req) : {}));
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
-      // El admin (rol protegido) puede marcar cualquier obra, no solo las
       // propias — mismo criterio que ya usa requiereVendedorPropio del lado
       // de Visitas.
       if (!req.esAdminObras) {
@@ -913,7 +921,7 @@ router.post('/colocador/obras/:obraId/fotos', authColocadorOAdmin, async (req, r
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const obra = await db.collection('obras').findOne({ _id: obraId });
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: obraId }, req.esAdminObras ? filtroOrg(req) : {}));
       if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
       if (!req.esAdminObras) {
         const tienenTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
@@ -939,7 +947,7 @@ router.get('/reportes/m2', authAdmin, async (req, res) => {
   try {
     const { desde, hasta, colocadorId, tipoTrabajo } = req.query;
 
-    const match = { 'tareas.colocadorId': { $ne: null }, 'tareas.estado': 'terminada' };
+    const match = Object.assign({ 'tareas.colocadorId': { $ne: null }, 'tareas.estado': 'terminada' }, filtroOrg(req));
     if (desde || hasta) {
       match['tareas.fechaFinReal'] = {};
       if (desde) match['tareas.fechaFinReal'].$gte = new Date(desde);
