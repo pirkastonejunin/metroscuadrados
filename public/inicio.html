@@ -144,6 +144,21 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 20px -12px rgba(0, 0, 0, 0.5);
   }
   :root[data-theme="dark"] header .logo { filter: invert(1); }
+
+  .notif-wrap{position:relative;}
+  .notif-btn{position:relative;background:transparent;border:1px solid var(--border);border-radius:8px;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);flex-shrink:0;}
+  .notif-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .notif-btn svg{width:18px;height:18px;}
+  .notif-badge{position:absolute;top:-5px;right:-5px;background:#c53030;color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;}
+  .notif-panel{position:absolute;top:44px;right:0;width:300px;max-width:calc(100vw - 24px);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);z-index:200;max-height:420px;overflow:auto;}
+  .notif-panel-header{padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center;color:var(--ink);}
+  .notif-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
+  .notif-item:last-child{border-bottom:none;}
+  .notif-item:hover{background:var(--bg);}
+  .notif-item-titulo{font-weight:700;font-size:13px;color:var(--ink);}
+  .notif-item-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+  .notif-item-fecha{font-size:11px;color:#c53030;margin-top:4px;font-weight:700;}
+  .notif-empty{padding:20px 14px;text-align:center;color:var(--muted);font-size:13px;}
 </style>
 </head>
 <body>
@@ -167,7 +182,22 @@
 
       <div class="sesion-info hidden" id="oficinaSesion">
         <span id="oficinaNombre"></span>
-        <button onclick="oficinaLogout()">Cerrar sesión</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="notif-wrap" id="notifWrap">
+            <button class="notif-btn" onclick="toggleNotifPanel()" aria-label="Notificaciones" title="Notificaciones">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              <span class="notif-badge hidden" id="notifBadge">0</span>
+            </button>
+            <div class="notif-panel hidden" id="notifPanel">
+              <div class="notif-panel-header">
+                <span>Notificaciones</span>
+                <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;padding:2px 4px" aria-label="Cerrar">✕</button>
+              </div>
+              <div id="notifPanelBody"></div>
+            </div>
+          </div>
+          <button onclick="oficinaLogout()">Cerrar sesión</button>
+        </div>
       </div>
 
       <div class="card-login hidden" id="orgSelectorBox" style="margin-bottom:12px">
@@ -213,8 +243,8 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
           </div>
           <div class="texto">
-            <strong>Usuarios y roles</strong>
-            <span>Crear usuarios y elegir a qué módulos entra cada uno</span>
+            <strong>Configuración</strong>
+            <span>Usuarios, roles, organizaciones, vendedores, colocadores y notificaciones</span>
           </div>
           <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
         </a>
@@ -270,6 +300,12 @@ function elegirOrganizacion(orgId){
   ORG_ACTIVA = orgId;
   if (orgId) localStorage.setItem(ORG_KEY, orgId);
   else localStorage.removeItem(ORG_KEY);
+}
+
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG_ACTIVA) h['x-org-id'] = ORG_ACTIVA;
+  return h;
 }
 
 function tieneModulo(rol, claveCombinada){
@@ -391,6 +427,12 @@ async function revisarSesionOficina(){
     sesionBox.classList.remove('hidden');
     lista.classList.remove('hidden');
     sinModulos.classList.toggle('hidden', algunoVisible);
+
+    cargarNotificaciones();
+    if (!notifIntervalIniciado) {
+      notifIntervalIniciado = true;
+      setInterval(cargarNotificaciones, 5 * 60 * 1000);
+    }
   }catch(e){
     // Token vencido o inválido: pedimos login de nuevo, sin dejar rastro.
     localStorage.removeItem(TOKEN_KEY);
@@ -420,6 +462,71 @@ revisarSesionOficina();
     }
   }catch(e){ /* si falla, el link se queda como estaba */ }
 })();
+
+// ---------------- Notificaciones (campanita de vencimientos) ----------------
+// Única instancia de la campanita en toda la app — vive acá (menú de
+// inicio) porque desde acá se puede navegar a cualquier panel. Un click en
+// una notificación siempre navega a otro panel (?abrir=tipo-id), nunca
+// muestra nada en esta misma pantalla.
+const BASE_NOTIF = '/api/notificaciones';
+let NOTIF_ITEMS = [];
+let notifIntervalIniciado = false;
+
+function notifEscapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function notifFmtFecha(iso){
+  try { return new Date(iso).toLocaleDateString('es-AR'); } catch(e){ return ''; }
+}
+async function cargarNotificaciones(){
+  try{
+    const r = await fetch(BASE_NOTIF, { headers: headersAuth() });
+    if (!r.ok) return;
+    const data = await r.json().catch(()=>({}));
+    NOTIF_ITEMS = data.items || [];
+    renderNotifBadge();
+    const panel = document.getElementById('notifPanel');
+    if (panel && !panel.classList.contains('hidden')) renderNotifPanel();
+  }catch(e){ /* que no rompa la pantalla si falla la campanita */ }
+}
+function renderNotifBadge(){
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  const n = NOTIF_ITEMS.length;
+  badge.textContent = n > 9 ? '9+' : String(n);
+  badge.classList.toggle('hidden', n === 0);
+}
+function toggleNotifPanel(){
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  const abriendo = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !abriendo);
+  if (abriendo) renderNotifPanel();
+}
+function renderNotifPanel(){
+  const cont = document.getElementById('notifPanelBody');
+  if (!cont) return;
+  if (!NOTIF_ITEMS.length) { cont.innerHTML = '<div class="notif-empty">Sin vencimientos pendientes.</div>'; return; }
+  cont.innerHTML = NOTIF_ITEMS.map(it => `
+    <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
+      <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
+      <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
+      <div class="notif-item-fecha">Venció el ${notifFmtFecha(it.fecha)}</div>
+    </div>
+  `).join('');
+}
+function irANotificacion(tipo, id){
+  toggleNotifPanel();
+  if (tipo === 'crm') location.href = '/admin-visitas.html?abrir=crm-' + id;
+  else if (tipo === 'visita') location.href = '/admin-visitas.html?abrir=visita-' + id;
+  else if (tipo === 'obra') location.href = '/admin-obras.html?abrir=obra-' + id;
+}
+document.addEventListener('click', function(e){
+  const wrap = document.getElementById('notifWrap');
+  const panel = document.getElementById('notifPanel');
+  if (!wrap || !panel || panel.classList.contains('hidden')) return;
+  if (!wrap.contains(e.target)) panel.classList.add('hidden');
+});
 </script>
 </body>
 </html>

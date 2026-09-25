@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Usuarios y roles - Piedra Negra</title>
+<title>Configuración - Piedra Negra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -80,20 +80,7 @@
     --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
   }
   :root[data-theme="dark"] .logo{filter:invert(1);}
-  .notif-wrap{position:relative;}
-  .notif-btn{position:relative;background:transparent;border:1px solid var(--border);border-radius:8px;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);flex-shrink:0;}
-  .notif-btn:hover{border-color:var(--accent);color:var(--accent);}
-  .notif-btn svg{width:18px;height:18px;}
-  .notif-badge{position:absolute;top:-5px;right:-5px;background:var(--danger);color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;}
-  .notif-panel{position:absolute;top:44px;right:0;width:320px;max-width:calc(100vw - 24px);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);z-index:200;max-height:420px;overflow:auto;}
-  .notif-panel-header{padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center;color:var(--text, var(--ink));}
-  .notif-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
-  .notif-item:last-child{border-bottom:none;}
-  .notif-item:hover{background:var(--bg);}
-  .notif-item-titulo{font-weight:700;font-size:13px;color:var(--text, var(--ink));}
-  .notif-item-sub{font-size:12px;color:var(--muted);margin-top:2px;}
-  .notif-item-fecha{font-size:11px;color:var(--danger);margin-top:4px;font-weight:700;}
-  .notif-empty{padding:20px 14px;text-align:center;color:var(--muted);font-size:13px;}
+  .costo-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
 </style>
 </head>
 <body>
@@ -101,7 +88,7 @@
 <div id="loginScreen" class="hidden">
   <div class="card">
     <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
-    <h2 style="margin-top:0;margin-bottom:14px">Usuarios y roles</h2>
+    <h2 style="margin-top:0;margin-bottom:14px">Configuración</h2>
     <label>Usuario</label>
     <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     <label style="margin-top:8px">Contraseña</label>
@@ -114,7 +101,7 @@
 <div id="sinAccesoScreen" class="hidden">
   <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
     <h2 style="margin-top:0">Sin acceso</h2>
-    <p class="muted">Tu usuario no tiene habilitado el módulo de Usuarios y roles. Pedile a un administrador que te lo habilite.</p>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Configuración. Pedile a un administrador que te lo habilite.</p>
     <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
   </div>
 </div>
@@ -123,22 +110,10 @@
   <header>
     <div class="brand">
       <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
-      <h1>Usuarios y roles</h1>
+      <h1>Configuración</h1>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <div class="notif-wrap" id="notifWrap">
-        <button class="notif-btn" onclick="toggleNotifPanel()" aria-label="Notificaciones" title="Notificaciones">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-          <span class="notif-badge hidden" id="notifBadge">0</span>
-        </button>
-        <div class="notif-panel hidden" id="notifPanel">
-          <div class="notif-panel-header">
-            <span>Notificaciones</span>
-            <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;padding:2px 4px" aria-label="Cerrar">✕</button>
-          </div>
-          <div id="notifPanelBody"></div>
-        </div>
-      </div>
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
       <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
       <button onclick="logout()">Cerrar sesión</button>
     </div>
@@ -147,7 +122,9 @@
     <button data-tab="usuarios" class="active" onclick="showTab('usuarios')">Usuarios</button>
     <button data-tab="roles" onclick="showTab('roles')">Roles</button>
     <button data-tab="organizaciones" id="navOrganizaciones" class="hidden" onclick="showTab('organizaciones')">Organizaciones</button>
-    <button data-tab="config" onclick="showTab('config')">Configuración</button>
+    <button data-tab="vendedores" id="navVendedores" class="hidden" onclick="showTab('vendedores')">Vendedores</button>
+    <button data-tab="colocadores" id="navColocadores" class="hidden" onclick="showTab('colocadores')">Colocadores</button>
+    <button data-tab="config" onclick="showTab('config')">Notificaciones</button>
   </nav>
   <main>
 
@@ -198,6 +175,37 @@
       </div>
     </section>
 
+    <!-- VENDEDORES -->
+    <section id="tab-vendedores" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div style="flex:1"><label>Nombre</label><input id="nuevoVendNombre" placeholder="Nombre y apellido"></div>
+          <div style="flex:1"><label>Teléfono</label><input id="nuevoVendTelefono"></div>
+          <button class="btn" onclick="crearVendedor()">Agregar</button>
+        </div>
+      </div>
+      <div class="card">
+        <p class="muted">Calendario Google: poné el mail de la cuenta de Google del vendedor y tocá "Crear calendario" — la app crea un calendario propio para esa persona y se lo comparte sola (no hace falta entrar a Google Calendar a mano). A partir de ahí sus visitas le llegan ahí. Si nadie tiene calendario propio cargado, las visitas caen al calendario general de respaldo (si hay uno configurado).</p>
+        <table>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="vendedoresBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- COLOCADORES -->
+    <section id="tab-colocadores" class="hidden">
+      <div class="card">
+        <button class="btn" onclick="abrirNuevoColocador()">+ Nuevo colocador</button>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th>PIN</th><th>Costos por m²</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="colocadoresBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- CONFIGURACIÓN -->
     <!-- Primer rincón de lo que puede terminar siendo un menú de
          Configuración más grande (calendarios, accesos y demás, a medida
@@ -235,6 +243,9 @@ let ROLES = [];
 let USUARIOS = [];
 let ORGANIZACIONES = [];
 let ES_PROTEGIDO = false;
+let VENDEDORES = [];
+let COLOCADORES = [];
+let TIPOS_TRABAJO = [];
 
 function headersAuth(extra){
   const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
@@ -246,6 +257,26 @@ function api(path, opts={}) {
   opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
   return fetch('/api/usuarios'+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+function apiVisitas(path, opts={}) {
+  opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch('/api/visitas'+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+function apiObras(path, opts={}) {
+  opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch('/api/obras'+path, opts).then(async r => {
     const data = await r.json().catch(()=>({}));
     if (!r.ok) throw new Error(data.error || 'Error de red');
     return data;
@@ -275,6 +306,9 @@ function logout(){
   localStorage.removeItem('obras_admin_token');
   location.reload();
 }
+let NOMBRE_USUARIO = '';
+let PUEDE_VENDEDORES = false;
+let PUEDE_COLOCADORES = false;
 async function iniciarApp(){
   try{
     const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
@@ -282,7 +316,13 @@ async function iniciarApp(){
     const me = await r.json();
     MODULOS = me.modulos || [];
     ES_PROTEGIDO = !!(me.rol && me.rol.protegido);
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
     document.getElementById('navOrganizaciones').classList.toggle('hidden', !ES_PROTEGIDO);
+    const modulosRol = (me.rol && me.rol.modulos) || [];
+    PUEDE_VENDEDORES = ES_PROTEGIDO || modulosRol.includes('visitas');
+    PUEDE_COLOCADORES = ES_PROTEGIDO || modulosRol.includes('obras');
+    document.getElementById('navVendedores').classList.toggle('hidden', !PUEDE_VENDEDORES);
+    document.getElementById('navColocadores').classList.toggle('hidden', !PUEDE_COLOCADORES);
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('usuarios'));
     if (!tieneAcceso) {
       document.getElementById('loginScreen').classList.add('hidden');
@@ -296,11 +336,10 @@ async function iniciarApp(){
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarRoles();
   await cargarOrganizaciones();
   await cargarUsuarios();
-  cargarNotificaciones();
-  setInterval(cargarNotificaciones, 5 * 60 * 1000);
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -310,6 +349,8 @@ function showTab(tab){
   document.getElementById('tab-'+tab).classList.remove('hidden');
   if (tab === 'config') cargarConfigNotificaciones();
   if (tab === 'organizaciones') cargarOrganizaciones();
+  if (tab === 'vendedores') cargarVendedores();
+  if (tab === 'colocadores') { cargarColocadores(); cargarTiposTrabajoObra(); }
 }
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
@@ -608,6 +649,190 @@ async function borrarUsuario(id){
 }
 
 // ---------------------------------------------------------------------
+// VENDEDORES
+// ---------------------------------------------------------------------
+async function cargarVendedores(){
+  VENDEDORES = await apiVisitas('/vendedores');
+  document.getElementById('vendedoresBody').innerHTML = VENDEDORES.map(v=>`
+    <tr>
+      <td>${escapeHtml(v.nombre)}</td><td>${escapeHtml(v.telefono||'')}</td>
+      <td>${celdaCalendarioVendedor(v)}</td>
+      <td>${v.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="toggleVendedor('${v._id}', ${v.activo===false})">${v.activo===false?'Reactivar':'Desactivar'}</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">Todavía no hay vendedores cargados.</td></tr>';
+}
+function celdaCalendarioVendedor(persona){
+  if (persona.googleCalendarId) {
+    return `<div>📅 Activo${persona.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(persona.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" onclick="resincronizarCalendarioVendedor('${persona._id}', this)" title="Por si hay visitas creadas antes de tener el calendario configurado, o algún evento que quedó desincronizado">🔄 Resincronizar</button>
+      <button class="btn small secondary" onclick="darDeBajaCalendarioVendedor('${persona._id}', this)">Dar de baja</button>`;
+  }
+  return `<input class="calEmailInput" data-id="${persona._id}" placeholder="mail@gmail.com" style="min-width:180px">
+    <button class="btn small secondary" onclick="crearCalendarioVendedor('${persona._id}', this)">Crear calendario</button>`;
+}
+async function resincronizarCalendarioVendedor(id, btn){
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = 'Resincronizando...';
+  try{
+    await apiVisitas(`/vendedores/${id}/calendario/resincronizar`, {method:'POST'});
+    btn.textContent = 'Listo ✓';
+    setTimeout(()=>{ btn.disabled = false; btn.textContent = textoOriginal; }, 1500);
+  }catch(e){ alert('No se pudo resincronizar: ' + e.message); btn.disabled = false; btn.textContent = textoOriginal; }
+}
+async function crearVendedor(){
+  const nombre = document.getElementById('nuevoVendNombre').value.trim();
+  const telefono = document.getElementById('nuevoVendTelefono').value.trim();
+  if (!nombre) return;
+  await apiVisitas('/vendedores', {method:'POST', body:{nombre, telefono}});
+  document.getElementById('nuevoVendNombre').value='';
+  document.getElementById('nuevoVendTelefono').value='';
+  cargarVendedores();
+}
+async function toggleVendedor(id, activar){
+  await apiVisitas(`/vendedores/${id}`, {method:'PUT', body:{activo: activar}});
+  cargarVendedores();
+}
+async function crearCalendarioVendedor(id, btn){
+  const input = btn.parentElement.querySelector('.calEmailInput');
+  const email = input.value.trim();
+  if (!email) { alert('Ingresá el mail de la cuenta de Google del vendedor'); return; }
+  btn.disabled = true; btn.textContent = 'Creando...';
+  try{
+    await apiVisitas(`/vendedores/${id}/calendario`, {method:'POST', body:{email}});
+    await cargarVendedores();
+  }catch(e){
+    alert('No se pudo crear el calendario: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Crear calendario';
+  }
+}
+async function darDeBajaCalendarioVendedor(id, btn){
+  if (!confirm('¿Dar de baja el calendario de este vendedor? Sus próximas visitas van a dejar de sincronizarse ahí (no se borra el calendario ni el historial ya sincronizado).')) return;
+  btn.disabled = true;
+  try{
+    await apiVisitas(`/vendedores/${id}/calendario`, {method:'DELETE'});
+    await cargarVendedores();
+  }catch(e){ alert('No se pudo dar de baja: ' + e.message); btn.disabled = false; }
+}
+
+// ---------------------------------------------------------------------
+// COLOCADORES
+// ---------------------------------------------------------------------
+async function cargarColocadores(){
+  COLOCADORES = await apiObras('/colocadores');
+  const body = document.getElementById('colocadoresBody');
+  body.innerHTML = COLOCADORES.map(c => `
+    <tr>
+      <td>${escapeHtml(c.nombre)}</td>
+      <td>${escapeHtml(c.telefono||'')}</td>
+      <td>${escapeHtml(c.pin||'')}</td>
+      <td>${(c.costos||[]).map(x=>`${escapeHtml(x.tipoTrabajo)}: $${x.costoPorM2}/m²`).join('<br>') || '<span class="muted">sin costos cargados</span>'}</td>
+      <td>${c.activo!==false ? 'Activo' : '<span class="muted">Inactivo</span>'}</td>
+      <td><button class="btn small secondary" onclick="abrirEditarColocador('${c._id}')">Editar</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">Todavía no hay colocadores cargados.</td></tr>';
+}
+
+async function cargarTiposTrabajoObra(){
+  TIPOS_TRABAJO = await apiObras('/tipos-trabajo');
+}
+
+function filaCosto(tipoTrabajo='', costoPorM2=''){
+  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${escapeHtml(t.nombre)}" ${t.nombre===tipoTrabajo?'selected':''}>${escapeHtml(t.nombre)}</option>`).join('');
+  return `<div class="costo-row">
+    <select class="costoTipo" style="flex:2">${opciones}</select>
+    <input class="costoValor" type="number" step="0.01" placeholder="$/m²" value="${costoPorM2}" style="flex:1">
+    <button class="btn small secondary" type="button" onclick="this.parentElement.remove()">Quitar</button>
+  </div>`;
+}
+
+function abrirNuevoColocador(){ abrirFormColocador(null); }
+function abrirEditarColocador(id){ abrirFormColocador(COLOCADORES.find(c=>c._id===id)); }
+
+function abrirFormColocador(c){
+  const costosHtml = (c && c.costos && c.costos.length) ? c.costos.map(x=>filaCosto(x.tipoTrabajo,x.costoPorM2)).join('') : filaCosto();
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>${c ? 'Editar colocador' : 'Nuevo colocador'}</h2>
+        <div class="campo-edit"><label>Nombre</label><input id="colNombre" value="${c?escapeHtml(c.nombre):''}"></div>
+        <div class="campo-edit"><label>Teléfono</label><input id="colTelefono" value="${c?escapeHtml(c.telefono||''):''}"></div>
+        <div class="campo-edit"><label>PIN (para que ingrese desde el celular)</label><input id="colPin" value="${c?escapeHtml(c.pin||''):''}"></div>
+        <div class="campo-edit"><label>Estado</label><select id="colActivo"><option value="true" ${!c||c.activo!==false?'selected':''}>Activo</option><option value="false" ${c&&c.activo===false?'selected':''}>Inactivo</option></select></div>
+        <div class="campo-edit">
+          <label>Calendario Google</label>
+          ${c ? celdaCalendarioColocador(c) : '<div class="muted">Guardá el colocador primero — después de creado vas a poder darle de alta su calendario desde "Editar".</div>'}
+          <div class="muted" style="margin-top:2px">Sus obras (una fecha por obra, no por producto) le van a llegar a este calendario. Sin calendario propio = calendario general de respaldo, si hay uno configurado.</div>
+        </div>
+        <div class="campo-edit">
+          <label>Costo por m² según tipo de trabajo</label>
+          <div id="costosContainer">${costosHtml}</div>
+          <button class="btn small secondary" type="button" onclick="document.getElementById('costosContainer').insertAdjacentHTML('beforeend', filaCosto())">+ Agregar tipo de trabajo</button>
+        </div>
+        <div class="err" id="colErr"></div>
+        <button class="btn" style="width:100%;margin-top:6px" onclick="guardarColocador(${c?`'${c._id}'`:'null'})">Guardar</button>
+      </div>
+    </div>`;
+}
+
+async function guardarColocador(id){
+  const nombre = document.getElementById('colNombre').value.trim();
+  const telefono = document.getElementById('colTelefono').value.trim();
+  const pin = document.getElementById('colPin').value.trim();
+  const activo = document.getElementById('colActivo').value === 'true';
+  const costos = [...document.querySelectorAll('#costosContainer .costo-row')].map(row=>({
+    tipoTrabajo: row.querySelector('.costoTipo').value,
+    costoPorM2: Number(row.querySelector('.costoValor').value)||0
+  })).filter(c=>c.tipoTrabajo);
+  const errEl = document.getElementById('colErr');
+  errEl.textContent = '';
+  try{
+    if (id) await apiObras(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo}});
+    else await apiObras('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos}});
+    cerrarModal();
+    cargarColocadores();
+  }catch(e){ errEl.textContent = e.message; }
+}
+
+function celdaCalendarioColocador(c){
+  if (c.googleCalendarId) {
+    return `<div>📅 Activo${c.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(c.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" type="button" onclick="resincronizarCalendarioColocador('${c._id}')" title="Por si hay obras con colocador y fecha ya asignados desde antes de tener el calendario configurado">🔄 Resincronizar</button>
+      <button class="btn small secondary" type="button" onclick="darDeBajaCalendarioColocador('${c._id}')">Dar de baja</button>`;
+  }
+  return `<div style="display:flex;gap:8px;align-items:center">
+      <input id="colCalEmail" placeholder="mail@gmail.com" style="flex:1">
+      <button class="btn small secondary" type="button" onclick="crearCalendarioColocador('${c._id}')">Crear calendario</button>
+    </div>`;
+}
+async function resincronizarCalendarioColocador(id){
+  try{
+    await apiObras(`/colocadores/${id}/calendario/resincronizar`, {method:'POST'});
+    alert('Calendario resincronizado.');
+    await cargarColocadores();
+    abrirEditarColocador(id);
+  }catch(e){ alert('No se pudo resincronizar: ' + e.message); }
+}
+async function crearCalendarioColocador(id){
+  const input = document.getElementById('colCalEmail');
+  const email = input.value.trim();
+  if (!email) { alert('Ingresá el mail de la cuenta de Google del colocador'); return; }
+  try{
+    await apiObras(`/colocadores/${id}/calendario`, {method:'POST', body:{email}});
+    await cargarColocadores();
+    abrirEditarColocador(id);
+  }catch(e){ alert('No se pudo crear el calendario: ' + e.message); }
+}
+async function darDeBajaCalendarioColocador(id){
+  if (!confirm('¿Dar de baja el calendario de este colocador? Sus próximas obras van a dejar de sincronizarse ahí (no se borra el calendario ni el historial ya sincronizado).')) return;
+  try{
+    await apiObras(`/colocadores/${id}/calendario`, {method:'DELETE'});
+    await cargarColocadores();
+    abrirEditarColocador(id);
+  }catch(e){ alert('No se pudo dar de baja: ' + e.message); }
+}
+
+// ---------------------------------------------------------------------
 // CONFIGURACIÓN — por ahora, solo los toggles de notificaciones.
 // ---------------------------------------------------------------------
 async function cargarConfigNotificaciones(){
@@ -636,78 +861,9 @@ async function guardarConfigNotificaciones(){
   }catch(e){ msg.textContent = e.message; }
 }
 
-// ---------------- Notificaciones (campanita de vencimientos) ----------------
-// Mismo bloque pegado en admin-visitas.html, admin-obras.html y
-// calendario.html — ver el comentario completo en admin-visitas.html. Acá
-// (Usuarios y roles) ninguna alerta se puede abrir directo, así que
-// NOTIF_LOCAL queda todo en false: cualquier click navega al panel que
-// corresponda.
+// La campanita de notificaciones vive ahora solo en inicio.html. Este panel
+// (Configuración) solo guarda qué tipos de vencimiento la alimentan.
 const BASE_NOTIF = '/api/notificaciones';
-const NOTIF_LOCAL = { crm: false, visita: false, obra: false };
-let NOTIF_ITEMS = [];
-
-function notifEscapeHtml(s){
-  return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function notifFmtFecha(iso){
-  try { return new Date(iso).toLocaleDateString('es-AR'); } catch(e){ return ''; }
-}
-async function cargarNotificaciones(){
-  try{
-    const r = await fetch(BASE_NOTIF, { headers: headersAuth() });
-    if (!r.ok) return;
-    const data = await r.json().catch(()=>({}));
-    NOTIF_ITEMS = data.items || [];
-    renderNotifBadge();
-    const panel = document.getElementById('notifPanel');
-    if (panel && !panel.classList.contains('hidden')) renderNotifPanel();
-  }catch(e){ /* que no rompa el panel si falla la campanita */ }
-}
-function renderNotifBadge(){
-  const badge = document.getElementById('notifBadge');
-  if (!badge) return;
-  const n = NOTIF_ITEMS.length;
-  badge.textContent = n > 9 ? '9+' : String(n);
-  badge.classList.toggle('hidden', n === 0);
-}
-function toggleNotifPanel(){
-  const panel = document.getElementById('notifPanel');
-  if (!panel) return;
-  const abriendo = panel.classList.contains('hidden');
-  panel.classList.toggle('hidden', !abriendo);
-  if (abriendo) renderNotifPanel();
-}
-function renderNotifPanel(){
-  const cont = document.getElementById('notifPanelBody');
-  if (!cont) return;
-  if (!NOTIF_ITEMS.length) { cont.innerHTML = '<div class="notif-empty">Sin vencimientos pendientes.</div>'; return; }
-  cont.innerHTML = NOTIF_ITEMS.map(it => `
-    <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
-      <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
-      <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
-      <div class="notif-item-fecha">Venció el ${notifFmtFecha(it.fecha)}</div>
-    </div>
-  `).join('');
-}
-function irANotificacion(tipo, id){
-  toggleNotifPanel();
-  if (tipo === 'crm') {
-    if (NOTIF_LOCAL.crm) { showTab('crm'); abrirOportunidad(id); }
-    else location.href = '/admin-visitas.html?abrir=crm-' + id;
-  } else if (tipo === 'visita') {
-    if (NOTIF_LOCAL.visita) { showTab('visitas'); abrirVisita(id); }
-    else location.href = '/admin-visitas.html?abrir=visita-' + id;
-  } else if (tipo === 'obra') {
-    if (NOTIF_LOCAL.obra) { showTab('obras'); abrirObra(id); }
-    else location.href = '/admin-obras.html?abrir=obra-' + id;
-  }
-}
-document.addEventListener('click', function(e){
-  const wrap = document.getElementById('notifWrap');
-  const panel = document.getElementById('notifPanel');
-  if (!wrap || !panel || panel.classList.contains('hidden')) return;
-  if (!wrap.contains(e.target)) panel.classList.add('hidden');
-});
 </script>
 </body>
 </html>
