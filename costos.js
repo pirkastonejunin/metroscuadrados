@@ -22,12 +22,17 @@
 //     unidad/m²) como 1/rendimiento.
 //
 // Colecciones nuevas (en la misma base `calculadora_m2`):
-//   - costos_insumos   : { nombre, unidad, costoActual, historial:
-//                          [{costo, fecha, nota, usuario}], activo, orgId,
-//                          createdAt, updatedAt }
-//   - costos_productos : { nombre, tipoCosteo ('unidad'|'m2'),
-//                          receta: [{insumoId, cantidad, rendimiento?}],
-//                          activo, orgId, createdAt, updatedAt }
+//   - costos_insumos       : { nombre, unidad, costoActual, historial:
+//                              [{costo, fecha, nota, usuario}], activo,
+//                              orgId, createdAt, updatedAt }
+//   - costos_productos     : { nombre, tipoCosteo ('unidad'|'m2'),
+//                              receta: [{insumoId, cantidad, rendimiento?}],
+//                              unidadesPorPaquete?, rendimientoPorPaquete?,
+//                              activo, orgId, createdAt, updatedAt }
+//   - costos_listas_precio : { nombre, porcentaje, activa, orgId,
+//                              createdAt, updatedAt } — precio de lista =
+//                              costo actual del producto * (1+porcentaje/100),
+//                              calculado al vuelo, nunca guardado congelado.
 //
 // V1 — a propósito afuera de esta primera versión:
 //   - No hay evolución histórica del costo CALCULADO de un producto (solo
@@ -76,6 +81,15 @@ function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return nu
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 
 const TIPOS_COSTEO_VALIDOS = ['unidad', 'm2'];
+
+// Número opcional (>0) para los datos de empaque del producto — se guarda
+// `null` si no se cargó nada, nunca 0 ni NaN.
+function normalizarNumeroOpcional(v, etiqueta) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw err(400, `${etiqueta} tiene que ser un número mayor a 0`);
+  return n;
+}
 const UNIDAD_MANO_DE_OBRA = 'jornal';
 
 // Módulo con clave propia — decisión tomada con Mato (28/9/2026): datos
@@ -404,7 +418,7 @@ router.get('/productos/:id', authAdmin, async (req, res) => {
 router.post('/productos', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear un producto.');
-    const { nombre, tipoCosteo, receta } = req.body || {};
+    const { nombre, tipoCosteo, receta, unidadesPorPaquete, rendimientoPorPaquete } = req.body || {};
     if (!nombre || !String(nombre).trim()) throw err(400, 'Falta el nombre del producto');
     if (!TIPOS_COSTEO_VALIDOS.includes(tipoCosteo)) throw err(400, 'tipoCosteo tiene que ser "unidad" o "m2"');
 
@@ -416,6 +430,11 @@ router.post('/productos', authAdmin, async (req, res) => {
         nombre: String(nombre).trim(),
         tipoCosteo,
         receta: recetaNorm,
+        // Datos de empaque (opcionales): cuántas unidades físicas trae un
+        // paquete/caja/bolsón, y cuánto rinde ese paquete (en la misma
+        // unidad del producto — m² si tipoCosteo='m2', unidades si no).
+        unidadesPorPaquete: normalizarNumeroOpcional(unidadesPorPaquete, 'Unidades por paquete'),
+        rendimientoPorPaquete: normalizarNumeroOpcional(rendimientoPorPaquete, 'Rendimiento por paquete'),
         activo: true,
         orgId: req.orgId,
         createdAt: ahora,
@@ -435,7 +454,7 @@ router.put('/productos/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { nombre, tipoCosteo, receta, activo } = req.body || {};
+    const { nombre, tipoCosteo, receta, activo, unidadesPorPaquete, rendimientoPorPaquete } = req.body || {};
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -453,6 +472,8 @@ router.put('/productos/:id', authAdmin, async (req, res) => {
       }
       if (receta !== undefined) set.receta = await normalizarReceta(db, req, receta);
       if (activo !== undefined) set.activo = !!activo;
+      if (unidadesPorPaquete !== undefined) set.unidadesPorPaquete = normalizarNumeroOpcional(unidadesPorPaquete, 'Unidades por paquete');
+      if (rendimientoPorPaquete !== undefined) set.rendimientoPorPaquete = normalizarNumeroOpcional(rendimientoPorPaquete, 'Rendimiento por paquete');
 
       await db.collection('costos_productos').updateOne({ _id: id }, { $set: set });
       return db.collection('costos_productos').findOne({ _id: id });
@@ -474,6 +495,118 @@ router.delete('/productos/:id', authAdmin, async (req, res) => {
       await db.collection('costos_productos').deleteOne({ _id: id });
     });
     res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------
+// Listas de precio — un % de markup fijo sobre el costo ACTUAL de cada
+// producto (ej: "Mayorista" +30%, "Consumidor final" +60%). No guardan un
+// precio congelado por producto: el detalle siempre se recalcula con el
+// costo de hoy, así que subir el costo de un insumo actualiza todas las
+// listas solas, sin tener que tocarlas una por una.
+//
+// Colección nueva: costos_listas_precio : { nombre, porcentaje, activa,
+//                                            orgId, createdAt, updatedAt }
+// ---------------------------------------------------------------------
+
+router.get('/listas-precio', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('costos_listas_precio').find(match).sort({ nombre: 1 }).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/listas-precio', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear una lista de precio.');
+    const { nombre, porcentaje } = req.body || {};
+    if (!nombre || !String(nombre).trim()) throw err(400, 'Falta el nombre de la lista (ej: Mayorista, Consumidor final)');
+    const pct = Number(porcentaje);
+    if (!Number.isFinite(pct)) throw err(400, 'El porcentaje tiene que ser un número (puede ser 0)');
+
+    const ahora = new Date();
+    const doc = {
+      nombre: String(nombre).trim(),
+      porcentaje: pct,
+      activa: true,
+      orgId: req.orgId,
+      createdAt: ahora,
+      updatedAt: ahora
+    };
+    const r = await conReintento(async () => (await getDb()).collection('costos_listas_precio').insertOne(doc));
+    doc._id = r.insertedId;
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/listas-precio/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const { nombre, porcentaje, activa } = req.body || {};
+    const set = { updatedAt: new Date() };
+    if (nombre !== undefined) {
+      if (!String(nombre).trim()) throw err(400, 'La lista necesita un nombre');
+      set.nombre = String(nombre).trim();
+    }
+    if (porcentaje !== undefined) {
+      const pct = Number(porcentaje);
+      if (!Number.isFinite(pct)) throw err(400, 'El porcentaje tiene que ser un número (puede ser 0)');
+      set.porcentaje = pct;
+    }
+    if (activa !== undefined) set.activa = !!activa;
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const actual = await db.collection('costos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!actual) throw err(404, 'Lista de precio no encontrada');
+      await db.collection('costos_listas_precio').updateOne({ _id: id }, { $set: set });
+      return db.collection('costos_listas_precio').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.delete('/listas-precio/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const actual = await db.collection('costos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!actual) throw err(404, 'Lista de precio no encontrada');
+      await db.collection('costos_listas_precio').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Detalle: la lista + el precio de cada producto activo, calculado con el
+// costo de HOY — precio = costoActual * (1 + porcentaje/100).
+router.get('/listas-precio/:id/detalle', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const { lista, productos, insumosPorId } = await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('costos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista de precio no encontrada');
+      const productos = await db.collection('costos_productos')
+        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .sort({ nombre: 1 }).toArray();
+      const insumosPorId = await traerInsumosDeProductos(db, req, productos);
+      return { lista, productos, insumosPorId };
+    });
+    const filas = productos.map(p => {
+      const { costoTotal } = calcularCostoProducto(p, insumosPorId);
+      const precio = costoTotal * (1 + lista.porcentaje / 100);
+      return { productoId: p._id, nombre: p.nombre, tipoCosteo: p.tipoCosteo, costoActual: costoTotal, precio };
+    });
+    res.json({ lista, productos: filas });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
