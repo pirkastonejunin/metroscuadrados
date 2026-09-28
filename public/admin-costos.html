@@ -114,6 +114,7 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <span class="muted" id="topbarOrg" style="font-size:12px;white-space:nowrap"></span>
       <a href="/admin-usuarios.html" class="btn small secondary" style="text-decoration:none">Configuración</a>
       <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
       <button onclick="logout()">Cerrar sesión</button>
@@ -198,11 +199,30 @@ function logout(){
   location.reload();
 }
 let NOMBRE_USUARIO = '';
+const ORG_KEY = 'obras_org_activo'; // misma clave que inicio.html — así lo que se resuelve acá también sirve para el resto de los paneles
+// Resuelve con qué organización trabajar, igual que inicio.html: si ya hay
+// una selección guardada y sigue siendo válida, se respeta tal cual. Si no
+// hay ninguna (ej: se entró directo a este panel sin pasar por inicio.html
+// en esta sesión), nunca se cae en "todas" por default para un rol
+// protegido — se elige su organización real ("Piedra Negra") o, si no
+// existe, la primera disponible.
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
 async function iniciarApp(){
+  let me;
   try{
     const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
-    const me = await r.json();
+    me = await r.json();
     NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('costos'));
     if (!tieneAcceso) {
@@ -214,10 +234,13 @@ async function iniciarApp(){
     document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
     return;
   }
+  resolverOrgActiva(me);
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  const orgActiva = (me.organizaciones||[]).find(o => o._id === ORG);
+  document.getElementById('topbarOrg').textContent = orgActiva ? ('· ' + orgActiva.nombre) : (ORG === 'todas' ? '· Todas las organizaciones' : '');
   await cargarInsumos();
   await cargarProductos();
 }
