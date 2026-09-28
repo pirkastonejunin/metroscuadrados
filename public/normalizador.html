@@ -310,13 +310,23 @@ function extraerCampos(descripcionOriginal, reglas) {
     advertencias.push('categoría no reconocida');
   }
 
-  // 5. m² por caja: el número (con decimales) que quede suelto en el texto restante
-  const reNumero = /\d+[.,]\d+|\d+/;
-  const mNumero = texto.match(reNumero);
-  if (mNumero) {
-    campos.m2xcaja = parseNumeroAR(mNumero[0]);
+  // 5. m² por caja: si el texto trae explícita la sigla "M2" (ej. "31,2X39 (7.5X7.5)
+  // 1.59 M2"), el m²/caja real es el número que está justo antes de "M2" — no el primer
+  // número suelto del texto, que puede ser una segunda medida entre paréntesis (el tamaño
+  // de cada pastilla de un mosaico, por ejemplo) y no el m²/caja. Si no hay "M2" explícito,
+  // se usa como antes el primer número (con decimales) que quede suelto en el texto restante.
+  const reNumeroM2 = /(\d+(?:[.,]\d+)?)\s*M2\b/i;
+  const mNumeroM2 = texto.match(reNumeroM2);
+  if (mNumeroM2) {
+    campos.m2xcaja = parseNumeroAR(mNumeroM2[1]);
   } else {
-    advertencias.push('m² por caja no encontrado');
+    const reNumero = /\d+[.,]\d+|\d+/;
+    const mNumero = texto.match(reNumero);
+    if (mNumero) {
+      campos.m2xcaja = parseNumeroAR(mNumero[0]);
+    } else {
+      advertencias.push('m² por caja no encontrado');
+    }
   }
 
   return { campos, advertencias };
