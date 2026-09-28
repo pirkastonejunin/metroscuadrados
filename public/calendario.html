@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
 <style>
   :root {
     --bg: #f3f4f6;
@@ -186,12 +187,6 @@
   </div>
 
   <div class="wrap hidden" id="app">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px">
-      <a class="volver" href="/inicio.html" style="margin-bottom:0">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 6 9 12 15 18"/></svg>
-        Inicio
-      </a>
-    </div>
     <h1>Calendario</h1>
     <p class="sub">Visitas agendadas y tareas de obra con fecha estimada, en un solo lugar.</p>
 
@@ -280,6 +275,7 @@ async function entrar() {
     document.getElementById('sinAccesoScreen').classList.remove('hidden');
     return;
   }
+  PiedraSidebar.render(me, 'calendario');
   await cargarColocadores();
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
