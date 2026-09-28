@@ -262,7 +262,7 @@
     </div>
 
     <div class="grupo hidden" id="grupoVendedores">
-      <h2>Vendedores</h2>
+      <h2>Accesos de campo</h2>
       <div class="lista" id="vendedoresLista">
         <a class="acceso" href="/vendedor.html" data-requiere-vendedor="1">
           <div class="icono">
@@ -291,6 +291,16 @@
           <div class="texto">
             <strong>Mis obras</strong>
             <span>Todas las obras — marcar en curso/terminada, subir fotos</span>
+          </div>
+          <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
+        </a>
+        <a class="acceso" href="/fabrica.html" data-modulo-alguno="fabrica,costos">
+          <div class="icono">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V10l6 4v-4l6 4v-4l6 4v7z"/><line x1="3" y1="21" x2="21" y2="21"/></svg>
+          </div>
+          <div class="texto">
+            <strong>Producción</strong>
+            <span>Cargar lo fabricado en el día (fábrica)</span>
           </div>
           <div class="flecha"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></div>
         </a>
@@ -427,6 +437,7 @@ async function revisarSesionOficina(){
       let visible;
       if (a.dataset.soloAdmin) visible = esProtegido;
       else if (a.dataset.requiereVendedor) visible = !!(me.usuario && me.usuario.vendedorId) || esProtegido;
+      else if (a.dataset.moduloAlguno) visible = esProtegido || a.dataset.moduloAlguno.split(',').some(k => tieneModulo(me.rol, k));
       else visible = tieneModulo(me.rol, a.dataset.modulo);
       a.classList.toggle('hidden', !visible);
       if (visible) algunoVendedorVisible = true;

@@ -33,7 +33,8 @@
     menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>',
     cerrar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
     salir: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
-    chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>'
+    chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
+    fabrica: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V10l6 4v-4l6 4v-4l6 4v7z"/><line x1="3" y1="21" x2="21" y2="21"/></svg>'
   };
 
   function slug(s) {
@@ -42,7 +43,8 @@
 
   const GRUPOS = [
     { nombre: 'Producción', items: [
-      { key: 'costos', href: '/admin-costos.html', modulo: 'costos', label: 'Costos de Producción', icon: ICONOS.costos }
+      { key: 'costos', href: '/admin-costos.html', modulo: 'costos', label: 'Costos de Producción', icon: ICONOS.costos },
+      { key: 'fabrica', href: '/fabrica.html', moduloAlguno: ['fabrica', 'costos'], label: 'Registrar producción', icon: ICONOS.fabrica }
     ]},
     { nombre: 'Comercial', items: [
       { key: 'visitas', href: '/admin-visitas.html', modulo: 'visitas', label: 'Panel de Visitas', icon: ICONOS.visitas },
@@ -67,6 +69,7 @@
   function itemVisible(item, me) {
     if (item.soloAdmin) return !!(me.rol && me.rol.protegido);
     if (item.requiereVendedor) return !!(me.usuario && me.usuario.vendedorId) || !!(me.rol && me.rol.protegido);
+    if (item.moduloAlguno) return !!(me.rol && me.rol.protegido) || item.moduloAlguno.some(k => tieneModulo(me.rol, k));
     return tieneModulo(me.rol, item.modulo);
   }
   function escapeHtml(s) {

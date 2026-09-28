@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Producción - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --warn:#b7791f; --warn-soft:#fdf3d9;
+    --danger:#c53030;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding-bottom:30px;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);color:var(--text);padding:14px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5;gap:10px;}
+  header .brand{display:flex;align-items:center;gap:9px;min-width:0;}
+  header .logo{height:19px;width:auto;display:block;flex-shrink:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 12px;border-radius:8px;font-size:12px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  main{padding:14px;max-width:480px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:var(--shadow);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select{padding:10px;border:1px solid var(--border);border-radius:8px;font-size:16px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:11px 16px;border-radius:8px;font-size:15px;font-weight:700;width:100%;font-family:inherit;display:inline-block;text-decoration:none;text-align:center;box-sizing:border-box;cursor:pointer;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.small{width:auto;padding:8px 12px;font-size:13px;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .muted{color:var(--muted);font-size:12.5px;}
+  .err{color:var(--danger);font-size:13px;margin:8px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:8px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;}
+  #loginScreen .card{width:100%;max-width:340px;text-align:center;}
+  #loginScreen .logo{height:24px;width:auto;margin:0 auto 16px;display:block;}
+  .hidden{display:none !important;}
+  .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;}
+  .fila-item .campo-producto{flex:2;min-width:0;}
+  .fila-item .campo-paquetes{flex:1;min-width:0;}
+  .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:38px;height:38px;font-size:16px;font-weight:700;cursor:pointer;}
+  .conversion-preview{font-size:12px;color:var(--muted);margin-top:-4px;margin-bottom:8px;}
+  .aviso-sku{background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:12px;}
+  .aviso-sku b{display:block;margin-bottom:2px;}
+  .resumen-box{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;white-space:pre-wrap;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.5;}
+  .acciones{display:flex;gap:8px;margin-top:10px;}
+  .acciones .btn{flex:1;}
+  h2.titulo-seccion{font-size:14px;margin:0 0 10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --warn:#e0b64a; --warn-soft:#3a2f14; --danger:#ff8080;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+    :root:not([data-theme="light"]) .logo{filter:invert(1);}
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
+    <h2 style="margin-top:0;margin-bottom:6px">Producción</h2>
+    <p class="muted" style="text-align:center">Ingresá con tu usuario y contraseña</p>
+    <label>Usuario</label>
+    <input id="loginUser" autofocus onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <div style="height:8px"></div>
+    <label>Contraseña</label>
+    <input id="loginPass" type="password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="margin-top:10px" onclick="login()">Ingresar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden" style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;">
+  <div class="card" style="max-width:340px;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene el módulo de Producción habilitado. Pedile a un administrador que te lo asigne.</p>
+    <button class="btn secondary" onclick="logout()">Volver a intentar</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
+      <h1>Producción</h1>
+    </div>
+    <button onclick="logout()">Salir</button>
+  </header>
+  <main>
+    <div class="card">
+      <label>Fecha</label>
+      <input id="fecha" type="date" onchange="cargarProduccion()">
+    </div>
+
+    <div class="card">
+      <h2 class="titulo-seccion">Lo fabricado hoy</h2>
+      <div id="avisoSku" class="aviso-sku hidden"></div>
+      <div id="filasItems"></div>
+      <button class="btn secondary" style="margin-bottom:10px" onclick="agregarFila()">+ Agregar producto</button>
+      <div class="err" id="formErr"></div>
+      <div class="ok-msg" id="formOk"></div>
+      <button class="btn" onclick="guardarProduccion()">Guardar carga del día</button>
+      <p class="muted" id="ultimaActualizacion" style="margin-top:8px"></p>
+    </div>
+
+    <div class="card" id="cardResumen">
+      <h2 class="titulo-seccion">Para mandar por WhatsApp</h2>
+      <div class="resumen-box" id="resumenTexto">Cargá y guardá al menos un producto para generar el resumen.</div>
+      <div class="acciones">
+        <button class="btn secondary" onclick="copiarResumen()">Copiar texto</button>
+        <button class="btn" id="btnDux" onclick="descargarDux()">Generar archivo para Dux</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const BASE = '/api/costos';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+function headersAuth(extra){ return Object.assign({'x-admin-token':TOKEN}, extra||{}); }
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+let PRODUCTOS = [];
+let NOMBRE_USUARIO = '';
+
+function hoyISO(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+}
+
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('fabrica') || (me.rol.modulos||[]).includes('costos'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('fecha').value = hoyISO();
+  await cargarProductos();
+  await cargarProduccion();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+async function cargarProductos(){
+  const r = await fetch(BASE + '/productos-produccion', {headers: headersAuth()});
+  if (!r.ok) return;
+  PRODUCTOS = await r.json();
+}
+
+function opcionesProductos(seleccionadoId){
+  return '<option value="">Elegí un producto...</option>' + PRODUCTOS.map(p =>
+    `<option value="${p._id}" ${String(p._id)===String(seleccionadoId)?'selected':''}>${escapeHtml(p.nombre)}${p.sku ? '' : ' (sin SKU)'}</option>`
+  ).join('');
+}
+
+function agregarFila(productoId, paquetes){
+  const cont = document.getElementById('filasItems');
+  const fila = document.createElement('div');
+  fila.className = 'fila-item-wrap';
+  fila.innerHTML = `
+    <div class="fila-item">
+      <div class="campo-producto">
+        <label>Producto</label>
+        <select onchange="actualizarPreview(this)">${opcionesProductos(productoId)}</select>
+      </div>
+      <div class="campo-paquetes">
+        <label>Paquetes</label>
+        <input type="number" min="0" step="1" value="${paquetes||''}" oninput="actualizarPreview(this)">
+      </div>
+      <button class="btn-quitar" onclick="this.closest('.fila-item-wrap').remove()">×</button>
+    </div>
+    <div class="conversion-preview"></div>
+  `;
+  cont.appendChild(fila);
+  if (productoId) actualizarPreview(fila.querySelector('select'));
+}
+
+function actualizarPreview(el){
+  const wrap = el.closest('.fila-item-wrap');
+  const select = wrap.querySelector('select');
+  const input = wrap.querySelector('input');
+  const preview = wrap.querySelector('.conversion-preview');
+  const producto = PRODUCTOS.find(p => String(p._id) === select.value);
+  const paquetes = Number(input.value);
+  if (!producto || !paquetes || paquetes <= 0) { preview.textContent = ''; return; }
+  const rinde = producto.rendimientoPorPaquete || null;
+  if (!rinde) { preview.textContent = 'Este producto no tiene rendimiento por paquete configurado — se va a guardar en paquetes.'; return; }
+  const total = paquetes * rinde;
+  const unidad = producto.tipoCosteo === 'm2' ? 'm²' : 'unidades';
+  preview.textContent = `= ${total.toLocaleString('es-AR', {maximumFractionDigits:2})} ${unidad}`;
+}
+
+function juntarItems(){
+  const filas = document.querySelectorAll('#filasItems .fila-item-wrap');
+  const items = [];
+  filas.forEach(fila => {
+    const select = fila.querySelector('select');
+    const input = fila.querySelector('input');
+    const paquetes = Number(input.value);
+    if (select.value && paquetes > 0) items.push({ productoId: select.value, paquetes });
+  });
+  return items;
+}
+
+function mostrarAvisoSku(sinSku){
+  const div = document.getElementById('avisoSku');
+  if (sinSku && sinSku.length) {
+    div.innerHTML = '<b>Sin SKU asignado (no van a entrar en el archivo de Dux):</b>' + sinSku.map(escapeHtml).join(', ');
+    div.classList.remove('hidden');
+  } else {
+    div.classList.add('hidden');
+  }
+}
+
+function generarResumenTexto(fecha, items){
+  if (!items.length) return 'Cargá y guardá al menos un producto para generar el resumen.';
+  const lineas = items.map(it => {
+    const unidad = it.unidadConvertida === 'm2' ? 'm²' : (it.unidadConvertida === 'unidad' ? 'unidades' : 'paquetes');
+    const cant = Number(it.cantidadConvertida).toLocaleString('es-AR', {maximumFractionDigits:2});
+    return `• ${it.nombre}: ${it.paquetes} paquete${it.paquetes===1?'':'s'} = ${cant} ${unidad}`;
+  });
+  return `Producción del ${fecha}\n` + lineas.join('\n');
+}
+
+async function cargarProduccion(){
+  const fecha = document.getElementById('fecha').value || hoyISO();
+  document.getElementById('formErr').textContent = '';
+  document.getElementById('formOk').textContent = '';
+  const r = await fetch(BASE + '/produccion?fecha=' + encodeURIComponent(fecha), {headers: headersAuth()});
+  const data = await r.json();
+  if (!r.ok) { document.getElementById('formErr').textContent = data.error || 'No se pudo cargar.'; return; }
+  document.getElementById('filasItems').innerHTML = '';
+  if (data.items && data.items.length) {
+    data.items.forEach(it => agregarFila(it.productoId, it.paquetes));
+  } else {
+    agregarFila();
+  }
+  mostrarAvisoSku(data.sinSku);
+  document.getElementById('ultimaActualizacion').textContent = data.actualizadoPor
+    ? `Última carga: ${data.actualizadoPor.nombre}${data.updatedAt ? ' — ' + new Date(data.updatedAt).toLocaleString('es-AR') : ''}`
+    : '';
+  document.getElementById('resumenTexto').textContent = generarResumenTexto(fecha, data.items || []);
+  document.getElementById('btnDux').disabled = !(data.items && data.items.some(it => it.sku));
+}
+
+async function guardarProduccion(){
+  const fecha = document.getElementById('fecha').value || hoyISO();
+  const items = juntarItems();
+  document.getElementById('formErr').textContent = '';
+  document.getElementById('formOk').textContent = '';
+  if (!items.length) { document.getElementById('formErr').textContent = 'Cargá al menos un producto con paquetes mayores a 0.'; return; }
+  try{
+    const r = await fetch(BASE + '/produccion', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({fecha, items})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    document.getElementById('formOk').textContent = 'Guardado.';
+    mostrarAvisoSku(data.sinSku);
+    document.getElementById('ultimaActualizacion').textContent = data.actualizadoPor
+      ? `Última carga: ${data.actualizadoPor.nombre}${data.updatedAt ? ' — ' + new Date(data.updatedAt).toLocaleString('es-AR') : ''}`
+      : '';
+    document.getElementById('resumenTexto').textContent = generarResumenTexto(fecha, data.items || []);
+    document.getElementById('btnDux').disabled = !(data.items && data.items.some(it => it.sku));
+  }catch(e){
+    document.getElementById('formErr').textContent = e.message;
+  }
+}
+
+function copiarResumen(){
+  const texto = document.getElementById('resumenTexto').textContent;
+  navigator.clipboard.writeText(texto).then(() => {
+    document.getElementById('formOk').textContent = 'Texto copiado.';
+    setTimeout(() => { document.getElementById('formOk').textContent = ''; }, 2000);
+  }).catch(() => {});
+}
+
+async function descargarDux(){
+  const fecha = document.getElementById('fecha').value || hoyISO();
+  document.getElementById('formErr').textContent = '';
+  try{
+    const r = await fetch(BASE + '/produccion/' + encodeURIComponent(fecha) + '/dux', {headers: headersAuth()});
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.error || 'No se pudo generar el archivo.');
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'ingreso-stock-dux-' + fecha + '.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){
+    document.getElementById('formErr').textContent = e.message;
+  }
+}
+</script>
+</body>
+</html>

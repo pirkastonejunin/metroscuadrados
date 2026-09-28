@@ -53,7 +53,7 @@ const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const XLSX = require('xlsx');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId, tieneModulo } = require('./usuarios');
 
 const router = express.Router();
 
@@ -127,9 +127,39 @@ function normalizarNumeroOpcional(v, etiqueta) {
 }
 const UNIDAD_MANO_DE_OBRA = 'jornal';
 
+// SKU (código) del producto — vincula un producto de Costos con el mismo
+// producto en Tiendanube/Cotizador (rubro "Revestimientos Piedra") y con su
+// CÓDIGO en Dux, para el ingreso de stock generado por Producción. No es
+// obligatorio, pero si se carga tiene que ser único dentro de la
+// organización (si no, el archivo para Dux quedaría ambiguo).
+function normalizarSkuOpcional(v) {
+  if (v === undefined || v === null || !String(v).trim()) return null;
+  return String(v).trim();
+}
+async function validarSkuUnico(db, req, sku, idExcluir) {
+  if (!sku) return;
+  const match = Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req));
+  if (idExcluir) match._id = { $ne: idExcluir };
+  const existente = await db.collection('costos_productos').findOne(match);
+  if (existente) throw err(400, `Ya hay otro producto activo con el SKU "${sku}" (${existente.nombre}).`);
+}
+
 // Módulo con clave propia — decisión tomada con Mato (28/9/2026): datos
 // separados por organización, mismo mecanismo que visitas/obras/CRM.
 const authAdmin = [authUsuario, resolverOrg, requiereModulo('costos')];
+
+// La carga diaria de producción la puede hacer tanto el personal de fábrica
+// (módulo 'fabrica', y NADA MÁS del resto de este router) como alguien de
+// oficina con el módulo 'costos' — de ahí este segundo gate, que acepta
+// cualquiera de los dos en vez de exigir uno puntual como requiereModulo().
+function requiereModuloAlguno(...claves) {
+  return (req, res, next) => {
+    const ok = claves.some(k => tieneModulo(req.usuario, k));
+    if (!ok) return res.status(403).json({ error: 'Tu usuario no tiene acceso a este módulo. Pedile a un administrador que te lo habilite.' });
+    next();
+  };
+}
+const authProduccion = [authUsuario, resolverOrg, requiereModuloAlguno('fabrica', 'costos')];
 
 // ---------------------------------------------------------------------
 // Insumos por defecto — se crean solos la primera vez que una
@@ -453,16 +483,21 @@ router.get('/productos/:id', authAdmin, async (req, res) => {
 router.post('/productos', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear un producto.');
-    const { nombre, tipoCosteo, receta, unidadesPorPaquete, rendimientoPorPaquete } = req.body || {};
+    const { nombre, sku, tipoCosteo, receta, unidadesPorPaquete, rendimientoPorPaquete } = req.body || {};
     if (!nombre || !String(nombre).trim()) throw err(400, 'Falta el nombre del producto');
     if (!TIPOS_COSTEO_VALIDOS.includes(tipoCosteo)) throw err(400, 'tipoCosteo tiene que ser "unidad" o "m2"');
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
+      const skuNorm = normalizarSkuOpcional(sku);
+      await validarSkuUnico(db, req, skuNorm, null);
       const recetaNorm = await normalizarReceta(db, req, receta);
       const ahora = new Date();
       const doc = {
         nombre: String(nombre).trim(),
+        // Código que vincula este producto con Tiendanube/Cotizador (rubro
+        // "Revestimientos Piedra") y con el CÓDIGO del producto en Dux.
+        sku: skuNorm,
         tipoCosteo,
         receta: recetaNorm,
         // Datos de empaque (opcionales): cuántas unidades físicas trae un
@@ -489,7 +524,7 @@ router.put('/productos/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { nombre, tipoCosteo, receta, activo, unidadesPorPaquete, rendimientoPorPaquete } = req.body || {};
+    const { nombre, sku, tipoCosteo, receta, activo, unidadesPorPaquete, rendimientoPorPaquete } = req.body || {};
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -500,6 +535,11 @@ router.put('/productos/:id', authAdmin, async (req, res) => {
       if (nombre !== undefined) {
         if (!String(nombre).trim()) throw err(400, 'El producto necesita un nombre');
         set.nombre = String(nombre).trim();
+      }
+      if (sku !== undefined) {
+        const skuNorm = normalizarSkuOpcional(sku);
+        await validarSkuUnico(db, req, skuNorm, id);
+        set.sku = skuNorm;
       }
       if (tipoCosteo !== undefined) {
         if (!TIPOS_COSTEO_VALIDOS.includes(tipoCosteo)) throw err(400, 'tipoCosteo tiene que ser "unidad" o "m2"');
@@ -530,6 +570,171 @@ router.delete('/productos/:id', authAdmin, async (req, res) => {
       await db.collection('costos_productos').deleteOne({ _id: id });
     });
     res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------
+// Producción — carga diaria de fábrica: el personal de fábrica indica qué
+// productos hizo hoy y cuántos PAQUETES de cada uno, y acá se convierte
+// solo a la cantidad real (m² o unidades) usando el rendimiento por
+// paquete ya configurado en cada producto. Con esa carga se genera un
+// archivo listo para importar como INGRESO de stock en Dux (mismo formato
+// que la plantilla de "Importar stock" del panel de importación de Dux:
+// CODIGO, TALLE, COLOR, CANTIDAD DISPONIBLE, CANTIDAD MÍNIMA, TIPO
+// MOVIMIENTO, NÚMERO IDENTIFICACIÓN TRAZABLE — ver instructivo de Dux).
+//
+// Colección nueva: costos_produccion_diaria : { orgId, fecha ('AAAA-MM-DD'),
+//   items: [{ productoId, nombre, sku, tipoCosteo, paquetes,
+//             unidadesPorPaquete, rendimientoPorPaquete, cantidadConvertida,
+//             unidadConvertida }], actualizadoPor: {usuarioId, nombre},
+//   createdAt, updatedAt }
+//
+// Rol dedicado: el módulo 'fabrica' (ver MODULOS en usuarios.js) da acceso
+// SOLO a esto (público en public/fabrica.html) — no al resto de Costos de
+// Producción. Alguien de oficina con el módulo 'costos' también puede
+// entrar acá (authProduccion acepta cualquiera de los dos).
+// ---------------------------------------------------------------------
+
+function validarFecha(v) {
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(String(v))) throw err(400, 'Fecha inválida (formato AAAA-MM-DD)');
+  return String(v);
+}
+
+// Recalcula, a partir de los productos ACTUALES (no de lo que haya guardado
+// una carga anterior), cuánto representa "N paquetes" de cada ítem. Si el
+// producto no tiene rendimiento por paquete cargado, no hay forma de
+// convertir — se guarda tal cual en paquetes, para no inventar un número.
+function convertirItemProduccion(producto, paquetes) {
+  const rinde = producto.rendimientoPorPaquete || null;
+  const cantidadConvertida = rinde ? paquetes * rinde : paquetes;
+  const unidadConvertida = rinde ? (producto.tipoCosteo === 'm2' ? 'm2' : 'unidad') : 'paquete';
+  return {
+    productoId: producto._id,
+    nombre: producto.nombre,
+    sku: producto.sku || null,
+    tipoCosteo: producto.tipoCosteo,
+    paquetes,
+    unidadesPorPaquete: producto.unidadesPorPaquete || null,
+    rendimientoPorPaquete: rinde,
+    cantidadConvertida,
+    unidadConvertida
+  };
+}
+
+// Lista liviana de productos activos para la pantalla de fábrica — no hace
+// falta el costo (por eso no reusa GET /productos, que además exige el
+// módulo 'costos' específicamente en vez de 'fabrica' o 'costos').
+router.get('/productos-produccion', authProduccion, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const productos = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('costos_productos')
+        .find(match, { projection: { nombre: 1, sku: 1, tipoCosteo: 1, unidadesPorPaquete: 1, rendimientoPorPaquete: 1 } })
+        .sort({ nombre: 1 }).toArray();
+    });
+    res.json(productos);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/produccion', authProduccion, async (req, res) => {
+  try {
+    const fecha = validarFecha(req.query.fecha);
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('costos_produccion_diaria').findOne(Object.assign({ fecha }, filtroOrg(req)));
+    });
+    const items = (doc && doc.items) || [];
+    res.json({
+      fecha,
+      items,
+      actualizadoPor: doc ? doc.actualizadoPor : null,
+      updatedAt: doc ? doc.updatedAt : null,
+      // Sin SKU no hay CÓDIGO posible para la fila de Dux — se avisa acá para
+      // que la pantalla de fábrica lo muestre ANTES de generar el archivo.
+      sinSku: items.filter(it => !it.sku).map(it => it.nombre)
+    });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/produccion', authProduccion, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar producción.');
+    const fecha = validarFecha(req.body && req.body.fecha);
+    const itemsRaw = Array.isArray(req.body && req.body.items) ? req.body.items : [];
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const items = [];
+      for (const it of itemsRaw) {
+        const productoId = toObjectId(it.productoId);
+        if (!productoId) throw err(400, 'productoId inválido');
+        const paquetes = Number(it.paquetes);
+        if (!Number.isFinite(paquetes) || paquetes <= 0) throw err(400, 'La cantidad de paquetes tiene que ser un número mayor a 0');
+        const producto = await db.collection('costos_productos').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
+        if (!producto) throw err(400, 'Uno de los productos cargados no existe (o no pertenece a esta organización)');
+        items.push(convertirItemProduccion(producto, paquetes));
+      }
+      const ahora = new Date();
+      const set = {
+        items,
+        actualizadoPor: { usuarioId: req.usuario._id, nombre: req.usuario.nombre },
+        orgId: req.orgId,
+        fecha,
+        updatedAt: ahora
+      };
+      await db.collection('costos_produccion_diaria').updateOne(
+        { orgId: req.orgId, fecha },
+        { $set: set, $setOnInsert: { createdAt: ahora } },
+        { upsert: true }
+      );
+      return db.collection('costos_produccion_diaria').findOne({ orgId: req.orgId, fecha });
+    });
+    res.json({
+      fecha: resultado.fecha,
+      items: resultado.items,
+      actualizadoPor: resultado.actualizadoPor,
+      updatedAt: resultado.updatedAt,
+      sinSku: resultado.items.filter(it => !it.sku).map(it => it.nombre)
+    });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Archivo de ingreso de stock para Dux, con las columnas EXACTAS de su
+// plantilla de importación (mismo orden — Dux no publica que el orden
+// importe, pero para no arriesgar se respeta el de la plantilla real).
+// Solo entran las filas con SKU cargado (sin código no hay forma de
+// identificar el producto en Dux); TIPO MOVIMIENTO fijo en "INGRESO" (suma
+// a lo que ya había en stock, no lo pisa) y el resto de las columnas
+// (talle/color/cantidad mínima/trazabilidad) van vacías — estos productos
+// no tienen variantes ni son trazables.
+router.get('/produccion/:fecha/dux', authProduccion, async (req, res) => {
+  try {
+    const fecha = validarFecha(req.params.fecha);
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('costos_produccion_diaria').findOne(Object.assign({ fecha }, filtroOrg(req)));
+    });
+    const items = (doc && doc.items) || [];
+    const conSku = items.filter(it => it.sku);
+    if (!conSku.length) throw err(400, 'Ninguno de los productos cargados ese día tiene SKU asignado — no se puede generar el archivo para Dux.');
+
+    const filas = [
+      ['CODIGO', 'TALLE', 'COLOR', 'CANTIDAD DISPONIBLE', 'CANTIDAD MÍNIMA', 'TIPO MOVIMIENTO', 'NUMERO IDENTIFICACION TRAZABLE']
+    ];
+    conSku.forEach(it => filas.push([
+      it.sku, '', '', Number(it.cantidadConvertida.toFixed(4)), '', 'INGRESO', ''
+    ]));
+
+    const hoja = XLSX.utils.aoa_to_sheet(filas);
+    hoja['!cols'] = [{ wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 24 }];
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Stock');
+    const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="ingreso-stock-dux-' + fecha + '.xlsx"');
+    res.send(buffer);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

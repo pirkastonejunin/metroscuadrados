@@ -163,7 +163,7 @@
       <div class="card">
         <table>
           <thead><tr>
-            <th>Producto</th><th>Se costea por</th><th>Insumos en receta</th><th>Costo actual</th><th></th>
+            <th>Producto</th><th>SKU</th><th>Se costea por</th><th>Insumos en receta</th><th>Costo actual</th><th></th>
           </tr></thead>
           <tbody id="productosBody"></tbody>
         </table>
@@ -495,6 +495,7 @@ function renderProductos(){
   document.getElementById('productosBody').innerHTML = PRODUCTOS.map(p => `
     <tr>
       <td><strong>${escapeHtml(p.nombre)}</strong></td>
+      <td class="muted">${p.sku ? escapeHtml(p.sku) : '—'}</td>
       <td>${p.tipoCosteo === 'm2' ? 'm²' : 'Unidad'}</td>
       <td class="muted">${(p.receta||[]).length}</td>
       <td>${money(p.costoActual)}</td>
@@ -505,7 +506,7 @@ function renderProductos(){
         <button class="btn small danger" onclick="eliminarProducto('${p._id}')">Borrar</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="5" class="muted">Todavía no hay productos cargados.</td></tr>';
+  `).join('') || '<tr><td colspan="6" class="muted">Todavía no hay productos cargados.</td></tr>';
 }
 
 function opcionesInsumoSelect(seleccionado){
@@ -580,6 +581,7 @@ function abrirNuevoProducto(){
       <div class="campo-edit"><label>Nombre</label><input id="fpNombre" placeholder="Ej: Adoquín 40x40"></div>
       <div class="campo-edit"><label>Se costea por</label><select id="fpTipoCosteo" onchange="cambiarTipoCosteoTemp(this.value)"><option value="unidad">Unidad</option><option value="m2">m²</option></select></div>
     </div>
+    <div class="campo-edit"><label>SKU (opcional)</label><input id="fpSku" placeholder="Igual al código de Tiendanube/Dux, para vincularlo"></div>
     ${camposPaqueteHtml()}
     <div class="section-title" style="margin-top:10px">Receta (por 1 ${window.TIPO_COSTEO_TEMP==='m2'?'m²':'unidad'})</div>
     <div id="recetaFilas"></div>
@@ -598,9 +600,10 @@ function leerRecetaTemp(){
 }
 async function guardarNuevoProducto(){
   const nombre = document.getElementById('fpNombre').value.trim();
+  const sku = document.getElementById('fpSku').value.trim();
   const tipoCosteo = document.getElementById('fpTipoCosteo').value;
   try{
-    const r = await fetch(BASE + '/productos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(Object.assign({nombre, tipoCosteo, receta: leerRecetaTemp()}, leerCamposPaquete()))});
+    const r = await fetch(BASE + '/productos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(Object.assign({nombre, sku, tipoCosteo, receta: leerRecetaTemp()}, leerCamposPaquete()))});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
@@ -628,6 +631,7 @@ function duplicarProducto(id){
         <option value="m2" ${p.tipoCosteo==='m2'?'selected':''}>m²</option>
       </select></div>
     </div>
+    <div class="campo-edit"><label>SKU (opcional)</label><input id="fpSku" placeholder="El SKU no se copia — cada producto necesita el suyo"></div>
     ${camposPaqueteHtml(p.unidadesPorPaquete, p.rendimientoPorPaquete)}
     <div class="section-title" style="margin-top:10px">Receta (por 1 ${p.tipoCosteo==='m2'?'m²':'unidad'})</div>
     <div id="recetaFilas"></div>
@@ -652,6 +656,7 @@ function abrirEditarProducto(id){
         <option value="m2" ${p.tipoCosteo==='m2'?'selected':''}>m²</option>
       </select></div>
     </div>
+    <div class="campo-edit"><label>SKU (opcional)</label><input id="fpSku" value="${escapeHtml(p.sku||'')}" placeholder="Igual al código de Tiendanube/Dux, para vincularlo"></div>
     ${camposPaqueteHtml(p.unidadesPorPaquete, p.rendimientoPorPaquete)}
     <div class="section-title" style="margin-top:10px">Receta (por 1 ${p.tipoCosteo==='m2'?'m²':'unidad'})</div>
     <div id="recetaFilas"></div>
@@ -663,9 +668,10 @@ function abrirEditarProducto(id){
 }
 async function guardarEdicionProducto(id){
   const nombre = document.getElementById('fpNombre').value.trim();
+  const sku = document.getElementById('fpSku').value.trim();
   const tipoCosteo = document.getElementById('fpTipoCosteo').value;
   try{
-    const r = await fetch(BASE + '/productos/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(Object.assign({nombre, tipoCosteo, receta: leerRecetaTemp()}, leerCamposPaquete()))});
+    const r = await fetch(BASE + '/productos/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(Object.assign({nombre, sku, tipoCosteo, receta: leerRecetaTemp()}, leerCamposPaquete()))});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
@@ -679,7 +685,7 @@ async function verDetalleProducto(id){
   const p = await r.json();
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2>${escapeHtml(p.nombre)}</h2>
+    <h2>${escapeHtml(p.nombre)} ${p.sku ? `<span class="muted" style="font-weight:600;font-size:13px">SKU: ${escapeHtml(p.sku)}</span>` : ''}</h2>
     <p class="muted">Costeado por ${p.tipoCosteo==='m2'?'m²':'unidad'} — costo calculado con los precios ACTUALES de cada insumo.</p>
     <table>
       <thead><tr><th>Insumo</th><th>Cantidad</th><th>Costo unitario</th><th>Subtotal</th></tr></thead>
