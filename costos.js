@@ -689,8 +689,9 @@ router.get('/listas-precio/:id/pdf', authAdmin, async (req, res) => {
       dibujarMarcaCostos(pdf);
       pdf.fontSize(16).fillColor('#000').text('Lista de precios — ' + lista.nombre, { align: 'left' });
       pdf.moveDown(0.2);
-      pdf.fontSize(10).fillColor('#555')
-        .text('Fecha: ' + fecha + '  ·  +' + Number(lista.porcentaje).toLocaleString('es-AR') + '% sobre costo');
+      // Ojo: esta lista se manda a clientes, así que ni el costo interno ni
+      // el % de margen aplicado tienen que aparecer acá — solo la fecha.
+      pdf.fontSize(10).fillColor('#555').text('Fecha: ' + fecha);
       pdf.fillColor('#000');
       pdf.moveDown(0.6);
       const y0 = pdf.y;
@@ -744,9 +745,11 @@ router.get('/listas-precio/:id/xlsx', authAdmin, async (req, res) => {
     const { lista, productos } = await obtenerDetalleLista(req, id);
 
     const fecha = new Date().toLocaleDateString('es-AR');
+    // Esta lista se manda a clientes: ni el costo interno ni el % de margen
+    // aplicado van acá, solo la fecha.
     const filas = [
       ['Lista de precios — ' + lista.nombre],
-      ['Fecha: ' + fecha + '  ·  +' + Number(lista.porcentaje).toLocaleString('es-AR') + '% sobre costo'],
+      ['Fecha: ' + fecha],
       [],
       ['Producto', 'Unidades por caja', 'Rinde por caja', 'Precio de lista']
     ];
