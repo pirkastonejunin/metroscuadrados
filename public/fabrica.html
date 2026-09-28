@@ -96,6 +96,8 @@
   </header>
   <main>
     <div class="card">
+      <label id="labelOrg" class="hidden">Organización</label>
+      <select id="orgSelector" class="hidden" style="margin-bottom:10px" onchange="elegirOrganizacion(this.value)"></select>
       <label>Fecha</label>
       <input id="fecha" type="date" onchange="cargarProduccion()">
     </div>
@@ -125,7 +127,13 @@
 <script>
 const BASE = '/api/costos';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
-function headersAuth(extra){ return Object.assign({'x-admin-token':TOKEN}, extra||{}); }
+const ORG_KEY = 'obras_org_activo'; // misma clave que inicio.html/admin-costos.html
+let ORG = localStorage.getItem(ORG_KEY) || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -151,6 +159,45 @@ function logout(){
 
 let PRODUCTOS = [];
 let NOMBRE_USUARIO = '';
+let ORGANIZACIONES = [];
+let PUEDE_VER_TODAS = false;
+
+// Igual criterio que admin-costos.html/inicio.html: si ya hay una
+// selección guardada y sigue siendo válida, se respeta. Si no, un usuario
+// del rol Fábrica (no protegido) normalmente tiene una sola organización
+// y se elige sola; un Administrador (protegido) sin selección previa no
+// puede cargar producción en "todas" a la vez, así que se le elige una
+// real por defecto.
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas' && orgs.length !== 1);
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : ''));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+function renderOrgSelector(){
+  const select = document.getElementById('orgSelector');
+  const label = document.getElementById('labelOrg');
+  if (ORGANIZACIONES.length > 1) {
+    select.innerHTML = ORGANIZACIONES.map(o => `<option value="${o._id}">${escapeHtml(o.nombre)}</option>`).join('');
+    select.value = ORG;
+    select.classList.remove('hidden');
+    label.classList.remove('hidden');
+  } else {
+    select.classList.add('hidden');
+    label.classList.add('hidden');
+  }
+}
+
+function elegirOrganizacion(orgId){
+  ORG = orgId;
+  if (orgId) localStorage.setItem(ORG_KEY, orgId); else localStorage.removeItem(ORG_KEY);
+  cargarProductos().then(cargarProduccion);
+}
 
 function hoyISO(){
   const d = new Date();
@@ -175,6 +222,10 @@ async function iniciarApp(){
     document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
     return;
   }
+  ORGANIZACIONES = me.organizaciones || [];
+  PUEDE_VER_TODAS = !!me.puedeVerTodas;
+  resolverOrgActiva(me);
+  renderOrgSelector();
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
