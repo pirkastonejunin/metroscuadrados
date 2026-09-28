@@ -444,6 +444,7 @@ function renderProductos(){
       <td style="white-space:nowrap">
         <button class="btn small" onclick="verDetalleProducto('${p._id}')">Detalle</button>
         <button class="btn small secondary" onclick="abrirEditarProducto('${p._id}')">Editar</button>
+        <button class="btn small secondary btn-crear-org" onclick="duplicarProducto('${p._id}')">Duplicar</button>
         <button class="btn small danger" onclick="eliminarProducto('${p._id}')">Borrar</button>
       </td>
     </tr>
@@ -532,6 +533,34 @@ async function guardarNuevoProducto(){
   }catch(e){ document.getElementById('fpErr').textContent = e.message; }
 }
 
+// Duplicar: precarga la misma receta y tipo de costeo en el formulario de
+// alta (no de edición) — al guardar queda como un producto NUEVO e
+// independiente, listo para ajustarle el nombre y las proporciones que
+// cambien sin tocar el original.
+function duplicarProducto(id){
+  const p = PRODUCTOS.find(x=>x._id===id);
+  if (!p) return;
+  RECETA_TEMP = (p.receta||[]).map(f => ({insumoId: (f.insumoId._id||f.insumoId).toString(), cantidad: f.rendimiento?undefined:f.cantidad, rendimiento: f.rendimiento}));
+  window.TIPO_COSTEO_TEMP = p.tipoCosteo;
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Duplicar producto</h2>
+    <p class="muted">Se copia la receta de "${escapeHtml(p.nombre)}" — cambiá el nombre y lo que necesites antes de guardar. Queda como un producto nuevo, el original no se toca.</p>
+    <div class="grid2">
+      <div class="campo-edit"><label>Nombre</label><input id="fpNombre" value="${escapeHtml(p.nombre + ' (copia)')}"></div>
+      <div class="campo-edit"><label>Se costea por</label><select id="fpTipoCosteo" onchange="cambiarTipoCosteoTemp(this.value)">
+        <option value="unidad" ${p.tipoCosteo==='unidad'?'selected':''}>Unidad</option>
+        <option value="m2" ${p.tipoCosteo==='m2'?'selected':''}>m²</option>
+      </select></div>
+    </div>
+    <div class="section-title" style="margin-top:10px">Receta (por 1 ${p.tipoCosteo==='m2'?'m²':'unidad'})</div>
+    <div id="recetaFilas"></div>
+    <button type="button" class="btn secondary small" onclick="agregarFilaReceta()">+ Agregar insumo</button>
+    <div class="err" id="fpErr" style="margin-top:10px"></div>
+    <button class="btn" style="margin-top:6px" onclick="guardarNuevoProducto()">Guardar como producto nuevo</button>
+  `, 'wide');
+  renderRecetaTemp();
+}
 function abrirEditarProducto(id){
   const p = PRODUCTOS.find(x=>x._id===id);
   if (!p) return;
