@@ -35,6 +35,7 @@
   textarea{min-height:50px;font-family:inherit;}
   .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
   .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
   .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
   .btn.danger{background:var(--danger);}
   .btn.small{padding:5px 10px;font-size:12px;}
@@ -114,7 +115,7 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
-      <span class="muted" id="topbarOrg" style="font-size:12px;white-space:nowrap"></span>
+      <select id="orgSelector" class="hidden" style="width:auto;padding:6px 8px;font-size:12px" onchange="elegirOrganizacion(this.value)"></select>
       <a href="/admin-usuarios.html" class="btn small secondary" style="text-decoration:none">Configuración</a>
       <a href="/inicio.html" class="btn small secondary" style="text-decoration:none">← Menú</a>
       <button onclick="logout()">Cerrar sesión</button>
@@ -126,13 +127,18 @@
   </nav>
   <main>
 
+    <div class="card hidden" id="avisoTodasOrgs" style="border-color:var(--accent);background:var(--accent-soft)">
+      <strong>Estás viendo "Todas las organizaciones".</strong>
+      <span class="muted">Elegí una organización puntual arriba a la derecha para poder crear o editar insumos y productos — un insumo siempre pertenece a una sola organización.</span>
+    </div>
+
     <!-- INSUMOS -->
     <section id="tab-insumos">
       <div class="card">
         <div class="row">
           <p class="muted" style="flex:1;min-width:200px;margin:0">Cada insumo tiene un costo actual y un historial — al actualizar el costo se guarda un punto nuevo, no se pierde el anterior.</p>
           <label style="display:flex;align-items:center;gap:6px;width:auto;font-weight:600;color:var(--text)"><input type="checkbox" style="width:auto" id="fIncluirInactivos" onchange="cargarInsumos()"> Ver inactivos</label>
-          <button class="btn" onclick="abrirNuevoInsumo()">+ Nuevo insumo</button>
+          <button class="btn btn-crear-org" onclick="abrirNuevoInsumo()">+ Nuevo insumo</button>
         </div>
       </div>
       <div class="card">
@@ -150,7 +156,7 @@
       <div class="card">
         <div class="row">
           <p class="muted" style="flex:1;min-width:200px;margin:0">El costo de cada producto se calcula con los costos ACTUALES de los insumos de su receta.</p>
-          <button class="btn" onclick="abrirNuevoProducto()">+ Nuevo producto</button>
+          <button class="btn btn-crear-org" onclick="abrirNuevoProducto()">+ Nuevo producto</button>
         </div>
       </div>
       <div class="card">
@@ -217,6 +223,33 @@ function resolverOrgActiva(me){
   if (elegido) localStorage.setItem(ORG_KEY, elegido);
   else localStorage.removeItem(ORG_KEY);
 }
+
+// Selector de organización propio de este panel — mismo criterio que
+// inicio.html (se muestra si hay más de una organización, o si el usuario
+// puede ver "todas"), para no depender de volver al menú para cambiarla.
+let ORGANIZACIONES = [];
+let PUEDE_VER_TODAS = false;
+function renderOrgSelector(){
+  const select = document.getElementById('orgSelector');
+  if (ORGANIZACIONES.length > 1 || PUEDE_VER_TODAS) {
+    select.innerHTML = ORGANIZACIONES.map(o => `<option value="${o._id}">${escapeHtml(o.nombre)}</option>`).join('')
+      + (PUEDE_VER_TODAS ? '<option value="todas">Todas las organizaciones</option>' : '');
+    select.value = ORG;
+    select.classList.remove('hidden');
+  } else {
+    select.classList.add('hidden');
+  }
+  const enTodas = (ORG === 'todas');
+  document.getElementById('avisoTodasOrgs').classList.toggle('hidden', !enTodas);
+  document.querySelectorAll('.btn-crear-org').forEach(b => b.disabled = enTodas);
+}
+function elegirOrganizacion(orgId){
+  ORG = orgId;
+  if (orgId) localStorage.setItem(ORG_KEY, orgId); else localStorage.removeItem(ORG_KEY);
+  renderOrgSelector();
+  cargarInsumos();
+  cargarProductos();
+}
 async function iniciarApp(){
   let me;
   try{
@@ -239,8 +272,9 @@ async function iniciarApp(){
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
-  const orgActiva = (me.organizaciones||[]).find(o => o._id === ORG);
-  document.getElementById('topbarOrg').textContent = orgActiva ? ('· ' + orgActiva.nombre) : (ORG === 'todas' ? '· Todas las organizaciones' : '');
+  ORGANIZACIONES = me.organizaciones || [];
+  PUEDE_VER_TODAS = !!me.puedeVerTodas;
+  renderOrgSelector();
   await cargarInsumos();
   await cargarProductos();
 }
