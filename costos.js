@@ -48,12 +48,47 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const PDFDocument = require('pdfkit');
+const XLSX = require('xlsx');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 
 const router = express.Router();
 
 const DB_NAME = 'calculadora_m2';
+
+// Logo para los PDF brandeados de listas de precio — mismo archivo que usa
+// cotizador.js. Si no existe, dibujarMarcaCostos() cae a un wordmark en
+// texto para que el PDF nunca se rompa por faltar el logo.
+const LOGO_PNG_PATH = path.join(__dirname, 'public', 'assets', 'logo-piedra-negra.png');
+
+function moneyPdfCostos(n) {
+  return '$ ' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Encabezado con marca Piedra Negra para los PDF de este módulo (copiado del
+// mismo patrón que usa cotizador.js, ver dibujarMarca() ahí).
+function dibujarMarcaCostos(pdf) {
+  const y0 = pdf.y;
+  let dibujoLogo = false;
+  try {
+    pdf.image(LOGO_PNG_PATH, 50, y0, { height: 30 });
+    pdf.y = y0 + 34;
+    dibujoLogo = true;
+  } catch (e) { dibujoLogo = false; }
+  if (!dibujoLogo) {
+    pdf.fontSize(15).fillColor('#000').font('Helvetica-Bold').text('PIEDRA NEGRA', 50, y0, { characterSpacing: 1.2 });
+    pdf.font('Helvetica');
+    pdf.y = y0 + 20;
+  }
+  pdf.moveDown(0.3);
+  pdf.moveTo(50, pdf.y).lineTo(545, pdf.y).strokeColor('#1f2937').lineWidth(1.4).stroke();
+  pdf.strokeColor('#ddd').lineWidth(1);
+  pdf.moveDown(0.6);
+  pdf.fillColor('#000');
+}
 
 let mongoClient;
 async function getDb() {
@@ -585,36 +620,155 @@ router.delete('/listas-precio/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Arma { lista, productos: filas } — reutilizado por el JSON de detalle y
+// por los exports PDF/Excel, para no tener la misma lógica tres veces.
+async function obtenerDetalleLista(req, id) {
+  const { lista, productos, insumosPorId } = await conReintento(async () => {
+    const db = await getDb();
+    const lista = await db.collection('costos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+    if (!lista) throw err(404, 'Lista de precio no encontrada');
+    const productos = await db.collection('costos_productos')
+      .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+      .sort({ nombre: 1 }).toArray();
+    const insumosPorId = await traerInsumosDeProductos(db, req, productos);
+    return { lista, productos, insumosPorId };
+  });
+  const filas = productos.map(p => {
+    const { costoTotal } = calcularCostoProducto(p, insumosPorId);
+    const precio = costoTotal * (1 + lista.porcentaje / 100);
+    return {
+      productoId: p._id,
+      nombre: p.nombre,
+      tipoCosteo: p.tipoCosteo,
+      costoActual: costoTotal,
+      precio,
+      unidadesPorPaquete: p.unidadesPorPaquete || null,
+      rendimientoPorPaquete: p.rendimientoPorPaquete || null
+    };
+  });
+  return { lista, productos: filas };
+}
+
 // Detalle: la lista + el precio de cada producto activo, calculado con el
 // costo de HOY — precio = costoActual * (1 + porcentaje/100).
 router.get('/listas-precio/:id/detalle', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { lista, productos, insumosPorId } = await conReintento(async () => {
-      const db = await getDb();
-      const lista = await db.collection('costos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
-      if (!lista) throw err(404, 'Lista de precio no encontrada');
-      const productos = await db.collection('costos_productos')
-        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
-        .sort({ nombre: 1 }).toArray();
-      const insumosPorId = await traerInsumosDeProductos(db, req, productos);
-      return { lista, productos, insumosPorId };
+    const data = await obtenerDetalleLista(req, id);
+    res.json(data);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+const LEYENDA_LISTA_PRECIO = 'Los precios pueden variar sin previo aviso.';
+
+// PDF brandeado de la lista de precio: logo, fecha, tabla (sin costo interno)
+// y la leyenda legal al pie.
+router.get('/listas-precio/:id/pdf', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const { lista, productos } = await obtenerDetalleLista(req, id);
+
+    const nombreArchivo = String(lista.nombre).replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="lista-precio-' + nombreArchivo + '.pdf"');
+
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const COL_PRODUCTO_X = 50, COL_PRODUCTO_W = 250;
+    const COL_UNID_X = 300, COL_UNID_W = 80;
+    const COL_RINDE_X = 380, COL_RINDE_W = 80;
+    const COL_PRECIO_X = 460, COL_PRECIO_W = 85;
+    const TABLE_RIGHT = 545;
+    const PAGE_BOTTOM = () => pdf.page.height - pdf.page.margins.bottom;
+
+    const pdf = new PDFDocument({ margin: 50 });
+    pdf.pipe(res);
+
+    function dibujarEncabezado() {
+      dibujarMarcaCostos(pdf);
+      pdf.fontSize(16).fillColor('#000').text('Lista de precios — ' + lista.nombre, { align: 'left' });
+      pdf.moveDown(0.2);
+      pdf.fontSize(10).fillColor('#555')
+        .text('Fecha: ' + fecha + '  ·  +' + Number(lista.porcentaje).toLocaleString('es-AR') + '% sobre costo');
+      pdf.fillColor('#000');
+      pdf.moveDown(0.6);
+      const y0 = pdf.y;
+      pdf.fontSize(9).fillColor('#555');
+      pdf.text('Producto', COL_PRODUCTO_X, y0, { width: COL_PRODUCTO_W });
+      pdf.text('Unid./caja', COL_UNID_X, y0, { width: COL_UNID_W });
+      pdf.text('Rinde/caja', COL_RINDE_X, y0, { width: COL_RINDE_W });
+      pdf.text('Precio', COL_PRECIO_X, y0, { width: COL_PRECIO_W, align: 'right' });
+      pdf.fillColor('#000');
+      pdf.y = y0 + 14;
+      pdf.moveDown(0.3);
+      pdf.moveTo(50, pdf.y).lineTo(TABLE_RIGHT, pdf.y).strokeColor('#ddd').stroke();
+      pdf.moveDown(0.3);
+    }
+
+    dibujarEncabezado();
+
+    productos.forEach(p => {
+      if (pdf.y + 20 > PAGE_BOTTOM()) {
+        pdf.addPage();
+        dibujarEncabezado();
+      }
+      const y0 = pdf.y;
+      pdf.fontSize(10).fillColor('#000');
+      pdf.text(p.nombre, COL_PRODUCTO_X, y0, { width: COL_PRODUCTO_W });
+      pdf.text(p.unidadesPorPaquete ? Number(p.unidadesPorPaquete).toLocaleString('es-AR') : '—', COL_UNID_X, y0, { width: COL_UNID_W });
+      pdf.text(p.rendimientoPorPaquete ? Number(p.rendimientoPorPaquete).toLocaleString('es-AR') + (p.tipoCosteo === 'm2' ? ' m²' : ' u') : '—', COL_RINDE_X, y0, { width: COL_RINDE_W });
+      pdf.text(moneyPdfCostos(p.precio), COL_PRECIO_X, y0, { width: COL_PRECIO_W, align: 'right' });
+      pdf.y = Math.max(pdf.y, y0 + 16);
     });
-    const filas = productos.map(p => {
-      const { costoTotal } = calcularCostoProducto(p, insumosPorId);
-      const precio = costoTotal * (1 + lista.porcentaje / 100);
-      return {
-        productoId: p._id,
-        nombre: p.nombre,
-        tipoCosteo: p.tipoCosteo,
-        costoActual: costoTotal,
-        precio,
-        unidadesPorPaquete: p.unidadesPorPaquete || null,
-        rendimientoPorPaquete: p.rendimientoPorPaquete || null
-      };
-    });
-    res.json({ lista, productos: filas });
+
+    pdf.moveDown(1);
+    if (pdf.y + 20 > PAGE_BOTTOM()) pdf.addPage();
+    pdf.fontSize(9).fillColor('#777').font('Helvetica-Oblique')
+      .text(LEYENDA_LISTA_PRECIO, 50, pdf.y, { width: TABLE_RIGHT - 50 });
+    pdf.font('Helvetica').fillColor('#000');
+
+    pdf.end();
+  } catch (e) {
+    if (!res.headersSent) res.status(e.status || 500).json({ error: e.message });
+    else res.end();
+  }
+});
+
+// Excel de la lista de precio: mismas columnas que el PDF/CSV (sin costo
+// interno), con la fecha y la leyenda legal como filas al pie.
+router.get('/listas-precio/:id/xlsx', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const { lista, productos } = await obtenerDetalleLista(req, id);
+
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const filas = [
+      ['Lista de precios — ' + lista.nombre],
+      ['Fecha: ' + fecha + '  ·  +' + Number(lista.porcentaje).toLocaleString('es-AR') + '% sobre costo'],
+      [],
+      ['Producto', 'Unidades por caja', 'Rinde por caja', 'Precio de lista']
+    ];
+    productos.forEach(p => filas.push([
+      p.nombre,
+      p.unidadesPorPaquete || '',
+      p.rendimientoPorPaquete ? p.rendimientoPorPaquete + (p.tipoCosteo === 'm2' ? ' m²' : ' u') : '',
+      Number(p.precio.toFixed(2))
+    ]));
+    filas.push([]);
+    filas.push([LEYENDA_LISTA_PRECIO]);
+
+    const hoja = XLSX.utils.aoa_to_sheet(filas);
+    hoja['!cols'] = [{ wch: 38 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Lista de precios');
+    const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
+
+    const nombreArchivo = String(lista.nombre).replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="lista-precio-' + nombreArchivo + '.xlsx"');
+    res.send(buffer);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

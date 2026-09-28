@@ -862,9 +862,11 @@ async function verListaPrecio(id){
   if (!r.ok) return;
   const data = await r.json();
   window.LISTA_DETALLE_ACTUAL = data;
+  const fechaLista = new Date().toLocaleDateString('es-AR');
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>${escapeHtml(data.lista.nombre)} <span class="muted" style="font-weight:600;font-size:13px">(+${Number(data.lista.porcentaje).toLocaleString('es-AR')}% sobre costo)</span></h2>
+    <div class="muted" style="font-size:13px;margin-bottom:8px">Fecha: ${fechaLista}</div>
     <table>
       <thead><tr><th>Producto</th><th>Unidades/caja</th><th>Rinde/caja</th><th>Precio de lista</th></tr></thead>
       <tbody>
@@ -878,7 +880,12 @@ async function verListaPrecio(id){
         `).join('') || '<tr><td colspan="4" class="muted">No hay productos activos todavía.</td></tr>'}
       </tbody>
     </table>
-    <button class="btn secondary" style="margin-top:10px" onclick="exportarListaPrecio()">Exportar CSV</button>
+    <div class="muted" style="font-size:12px;font-style:italic;margin-top:10px">Los precios pueden variar sin previo aviso.</div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn secondary" onclick="exportarListaPrecio()">Exportar CSV</button>
+      <button class="btn secondary" onclick="exportarListaPdf('${id}')">Exportar PDF</button>
+      <button class="btn secondary" onclick="exportarListaExcel('${id}')">Exportar Excel</button>
+    </div>
   `, 'wide');
 }
 function exportarListaPrecio(){
@@ -886,6 +893,7 @@ function exportarListaPrecio(){
   if (!data) return;
   const filasCsv = [
     ['Lista de precio', data.lista.nombre],
+    ['Fecha', new Date().toLocaleDateString('es-AR')],
     [],
     ['Producto', 'Unidades por caja', 'Rinde por caja', 'Precio de lista']
   ];
@@ -895,7 +903,29 @@ function exportarListaPrecio(){
     p.rendimientoPorPaquete ? p.rendimientoPorPaquete + (p.tipoCosteo==='m2'?' m²':' u') : '',
     Number(p.precio).toFixed(2)
   ]));
+  filasCsv.push([]);
+  filasCsv.push(['Los precios pueden variar sin previo aviso.']);
   descargarCSV('lista_precio_' + data.lista.nombre.replace(/[^a-z0-9]+/gi,'_') + '.csv', filasCsv);
+}
+async function exportarListaPdf(id){
+  const r = await fetch(BASE + '/listas-precio/' + id + '/pdf', {headers: headersAuth()});
+  if (!r.ok) { alert('No se pudo generar el PDF.'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+async function exportarListaExcel(id){
+  const r = await fetch(BASE + '/listas-precio/' + id + '/xlsx', {headers: headersAuth()});
+  if (!r.ok) { alert('No se pudo generar el Excel.'); return; }
+  const blob = await r.blob();
+  const data = window.LISTA_DETALLE_ACTUAL;
+  const nombreArchivo = 'lista_precio_' + (data ? data.lista.nombre.replace(/[^a-z0-9]+/gi,'_') : id) + '.xlsx';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombreArchivo;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 </script>
 </body>
