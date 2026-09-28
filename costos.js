@@ -105,13 +105,20 @@ const INSUMOS_POR_DEFECTO = [
   { nombre: 'Mano de obra', unidad: UNIDAD_MANO_DE_OBRA }
 ];
 
-const seedHecho = {}; // por orgId (string) o 'null' para "sin organización" — una vez por proceso
+const seedHecho = {}; // por orgId (string) — una vez por proceso
 async function seedInsumosPorDefecto(db, orgId) {
-  const clave = orgId ? orgId.toString() : 'null';
+  // Nunca sembrar sin una organización puntual — si no hay orgId (viendo
+  // "todas") no hay forma de saber a quién pertenecerían estos insumos por
+  // defecto. Bug corregido el 28/9/2026: antes esto creaba insumos con
+  // orgId=null la primera vez que alguien entraba viendo "todas", y esos
+  // insumos quedaban invisibles (huérfanos) en cuanto se elegía una
+  // organización puntual — ver reconciliarHuerfanosInsumos más abajo, que
+  // recupera los que ya se crearon así.
+  if (!orgId) return;
+  const clave = orgId.toString();
   if (seedHecho[clave]) return;
   seedHecho[clave] = true;
-  const filtro = orgId ? { orgId } : {};
-  const hayAlguno = await db.collection('costos_insumos').countDocuments(filtro, { limit: 1 });
+  const hayAlguno = await db.collection('costos_insumos').countDocuments({ orgId }, { limit: 1 });
   if (hayAlguno) return;
   const ahora = new Date();
   const docs = INSUMOS_POR_DEFECTO.map(i => ({
@@ -120,11 +127,43 @@ async function seedInsumosPorDefecto(db, orgId) {
     costoActual: 0,
     historial: [],
     activo: true,
-    orgId: orgId || null,
+    orgId,
     createdAt: ahora,
     updatedAt: ahora
   }));
   await db.collection('costos_insumos').insertMany(docs);
+}
+
+// ---------------------------------------------------------------------
+// Recuperación de insumos huérfanos (orgId: null) — corrige el bug de
+// seedInsumosPorDefecto de más arriba, que hasta el 28/9/2026 podía crear
+// insumos sin organización asignada. Al entrar a una organización puntual
+// por primera vez, si existen insumos huérfanos se les asigna esa
+// organización — si ya existe un insumo con el mismo nombre recién creado
+// por el seed (sin costo ni historial cargado todavía), se borra ese
+// duplicado vacío y se conserva el huérfano (que tiene los datos reales).
+// Una sola vez por proceso y por organización — después de la primera
+// reconciliación ya no quedan huérfanos con ese nombre.
+const reconciliacionHecha = {};
+async function reconciliarHuerfanosInsumos(db, orgId) {
+  if (!orgId) return;
+  const clave = orgId.toString();
+  if (reconciliacionHecha[clave]) return;
+  reconciliacionHecha[clave] = true;
+  const huerfanos = await db.collection('costos_insumos').find({ orgId: null }).toArray();
+  if (!huerfanos.length) return;
+  for (const h of huerfanos) {
+    const duplicado = await db.collection('costos_insumos').findOne({ orgId, nombre: h.nombre, _id: { $ne: h._id } });
+    if (duplicado && !(duplicado.historial || []).length && !duplicado.costoActual) {
+      await db.collection('costos_insumos').deleteOne({ _id: duplicado._id });
+      await db.collection('costos_insumos').updateOne({ _id: h._id }, { $set: { orgId, updatedAt: new Date() } });
+    } else if (!duplicado) {
+      await db.collection('costos_insumos').updateOne({ _id: h._id }, { $set: { orgId, updatedAt: new Date() } });
+    }
+    // Si hay un duplicado CON datos propios (caso raro), no se toca nada acá
+    // — queda el huérfano sin asignar para revisar a mano, en vez de arriesgar
+    // pisar datos reales de los dos lados.
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -138,6 +177,7 @@ router.get('/insumos', authAdmin, async (req, res) => {
     const lista = await conReintento(async () => {
       const db = await getDb();
       await backfillOrgId(db, 'costos_insumos');
+      await reconciliarHuerfanosInsumos(db, req.orgId);
       await seedInsumosPorDefecto(db, req.orgId);
       return db.collection('costos_insumos').find(match).sort({ nombre: 1 }).toArray();
     });
