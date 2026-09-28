@@ -604,7 +604,15 @@ router.get('/listas-precio/:id/detalle', authAdmin, async (req, res) => {
     const filas = productos.map(p => {
       const { costoTotal } = calcularCostoProducto(p, insumosPorId);
       const precio = costoTotal * (1 + lista.porcentaje / 100);
-      return { productoId: p._id, nombre: p.nombre, tipoCosteo: p.tipoCosteo, costoActual: costoTotal, precio };
+      return {
+        productoId: p._id,
+        nombre: p.nombre,
+        tipoCosteo: p.tipoCosteo,
+        costoActual: costoTotal,
+        precio,
+        unidadesPorPaquete: p.unidadesPorPaquete || null,
+        rendimientoPorPaquete: p.rendimientoPorPaquete || null
+      };
     });
     res.json({ lista, productos: filas });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

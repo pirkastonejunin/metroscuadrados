@@ -866,11 +866,16 @@ async function verListaPrecio(id){
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>${escapeHtml(data.lista.nombre)} <span class="muted" style="font-weight:600;font-size:13px">(+${Number(data.lista.porcentaje).toLocaleString('es-AR')}% sobre costo)</span></h2>
     <table>
-      <thead><tr><th>Producto</th><th>Costo</th><th>Precio de lista</th></tr></thead>
+      <thead><tr><th>Producto</th><th>Unidades/caja</th><th>Rinde/caja</th><th>Precio de lista</th></tr></thead>
       <tbody>
         ${data.productos.map(p => `
-          <tr><td>${escapeHtml(p.nombre)}</td><td class="muted">${money(p.costoActual)}</td><td><strong>${money(p.precio)}</strong></td></tr>
-        `).join('') || '<tr><td colspan="3" class="muted">No hay productos activos todavía.</td></tr>'}
+          <tr>
+            <td>${escapeHtml(p.nombre)}</td>
+            <td class="muted">${p.unidadesPorPaquete ? Number(p.unidadesPorPaquete).toLocaleString('es-AR') : '—'}</td>
+            <td class="muted">${p.rendimientoPorPaquete ? Number(p.rendimientoPorPaquete).toLocaleString('es-AR') + ' ' + (p.tipoCosteo==='m2'?'m²':'u') : '—'}</td>
+            <td><strong>${money(p.precio)}</strong></td>
+          </tr>
+        `).join('') || '<tr><td colspan="4" class="muted">No hay productos activos todavía.</td></tr>'}
       </tbody>
     </table>
     <button class="btn secondary" style="margin-top:10px" onclick="exportarListaPrecio()">Exportar CSV</button>
@@ -881,11 +886,15 @@ function exportarListaPrecio(){
   if (!data) return;
   const filasCsv = [
     ['Lista de precio', data.lista.nombre],
-    ['% sobre costo', data.lista.porcentaje],
     [],
-    ['Producto', 'Costo', 'Precio de lista']
+    ['Producto', 'Unidades por caja', 'Rinde por caja', 'Precio de lista']
   ];
-  data.productos.forEach(p => filasCsv.push([p.nombre, Number(p.costoActual).toFixed(2), Number(p.precio).toFixed(2)]));
+  data.productos.forEach(p => filasCsv.push([
+    p.nombre,
+    p.unidadesPorPaquete || '',
+    p.rendimientoPorPaquete ? p.rendimientoPorPaquete + (p.tipoCosteo==='m2'?' m²':' u') : '',
+    Number(p.precio).toFixed(2)
+  ]));
   descargarCSV('lista_precio_' + data.lista.nombre.replace(/[^a-z0-9]+/gi,'_') + '.csv', filasCsv);
 }
 </script>
