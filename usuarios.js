@@ -127,6 +127,7 @@ function err(status, message) { const e = new Error(message); e.status = status;
 const MODULOS = [
   { key: 'visitas', label: 'Visitas', descripcion: 'Alta de visitas, presupuestos, confirmar obra, reportes de embudo.' },
   { key: 'obras', label: 'Obras', descripcion: 'Asignar colocador, seguimiento de tareas, reportes de m² y pago.' },
+  { key: 'costos', label: 'Costos de Producción', descripcion: 'Insumos con costo variable en el tiempo, recetas por producto (por unidad o por m²) y cálculo de costo de producción.' },
   { key: 'cotizador', label: 'Cotizador', descripcion: 'Armar presupuestos con el cotizador y, si además tiene el rol para eso, configurar tipos de obra, catálogos y tarifas. Aplica solo a la tienda real de Piedra Negra — las demás tiendas que usan la app siguen sin login.' },
   { key: 'usuarios', label: 'Configuración', descripcion: 'Usuarios, roles, organizaciones, vendedores, colocadores y notificaciones. Dárselo con cuidado.' }
 ];

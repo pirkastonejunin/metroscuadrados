@@ -25,6 +25,9 @@ app.use('/api/usuarios', usuariosRouter);
 const crmRouter = require('./crm');
 app.use('/api/crm', crmRouter);
 
+const costosRouter = require('./costos');
+app.use('/api/costos', costosRouter);
+
 const notificacionesRouter = require('./notificaciones');
 app.use('/api/notificaciones', notificacionesRouter);
 
