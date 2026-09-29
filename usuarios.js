@@ -131,6 +131,7 @@ const MODULOS = [
   { key: 'fabrica', label: 'Producción — Carga de fábrica', descripcion: 'Carga diaria de lo fabricado (productos y paquetes) para generar el ingreso de stock a Dux. Pensado para el personal de fábrica — no da acceso al resto de Costos de Producción.' },
   { key: 'productos', label: 'Productos', descripcion: 'Catálogo maestro de productos (nombre, SKU, rubro, precio) — base para ir migrando Ventas, Stock, Compras y Facturación desde Dux a este sistema.' },
   { key: 'clientes', label: 'Clientes', descripcion: 'Registro maestro de clientes (datos personales, facturación y contacto) — base para ir migrando Ventas, Cta. Cte. y Facturación desde Dux a este sistema.' },
+  { key: 'proveedores', label: 'Proveedores', descripcion: 'Registro maestro de proveedores (datos generales, fiscales, bancarios y de contacto) — base para ir migrando Compras y Cta. Cte. desde Dux a este sistema.' },
   { key: 'cotizador', label: 'Cotizador', descripcion: 'Armar presupuestos con el cotizador y, si además tiene el rol para eso, configurar tipos de obra, catálogos y tarifas. Aplica solo a la tienda real de Piedra Negra — las demás tiendas que usan la app siguen sin login.' },
   { key: 'usuarios', label: 'Configuración', descripcion: 'Usuarios, roles, organizaciones, vendedores, colocadores y notificaciones. Dárselo con cuidado.' }
 ];

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Clientes - Piedra Negra</title>
+<title>Proveedores - Piedra Negra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -80,7 +80,7 @@
 
 <div id="loginScreen" class="hidden">
   <div class="card">
-    <h2 style="margin-top:0;margin-bottom:14px">Clientes</h2>
+    <h2 style="margin-top:0;margin-bottom:14px">Proveedores</h2>
     <label>Usuario</label>
     <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     <label style="margin-top:8px">Contraseña</label>
@@ -93,7 +93,7 @@
 <div id="sinAccesoScreen" class="hidden">
   <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
     <h2 style="margin-top:0">Sin acceso</h2>
-    <p class="muted">Tu usuario no tiene habilitado el módulo de Clientes. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Proveedores. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
     <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
   </div>
 </div>
@@ -101,7 +101,7 @@
 <div id="app" class="hidden">
   <header>
     <div class="brand">
-      <h1>Clientes</h1>
+      <h1>Proveedores</h1>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
@@ -113,23 +113,23 @@
       <div class="row" style="justify-content:space-between">
         <div class="row" style="flex:1">
           <div style="min-width:220px;flex:1">
-            <label>Buscar (nombre, código, CUIT o documento)</label>
-            <input id="fBusqueda" oninput="cargarClientes()" placeholder="Ej: Pérez, 20-12345678-9">
+            <label>Buscar (razón social, código, CUIT o documento)</label>
+            <input id="fBusqueda" oninput="cargarProveedores()" placeholder="Ej: Cerámica del Sur, 30-12345678-9">
           </div>
           <div>
             <label style="visibility:hidden">.</label>
             <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);white-space:nowrap">
-              <input type="checkbox" id="fInactivos" style="width:auto" onchange="cargarClientes()"> Ver inactivos
+              <input type="checkbox" id="fInactivos" style="width:auto" onchange="cargarProveedores()"> Ver inactivos
             </label>
           </div>
         </div>
-        <button class="btn" onclick="abrirNuevoCliente()">+ Nuevo cliente</button>
+        <button class="btn" onclick="abrirNuevoProveedor()">+ Nuevo proveedor</button>
       </div>
     </div>
     <div class="card">
       <table>
-        <thead><tr><th>Código</th><th>Cliente</th><th>Categoría fiscal</th><th>CUIT / Doc.</th><th>Contacto</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="clientesBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
+        <thead><tr><th>Código</th><th>Proveedor</th><th>Rubro</th><th>CUIT / Doc.</th><th>Contacto</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="proveedoresBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
       </table>
     </div>
   </main>
@@ -138,7 +138,7 @@
 <div id="modalRoot"></div>
 
 <script>
-const BASE = '/api/clientes';
+const BASE = '/api/proveedores';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
 function headersAuth(extra){
@@ -190,7 +190,7 @@ async function iniciarApp(){
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
     me = await r.json();
     NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
-    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('clientes'));
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('proveedores'));
     if (!tieneAcceso) {
       document.getElementById('loginScreen').classList.add('hidden');
       document.getElementById('sinAccesoScreen').classList.remove('hidden');
@@ -201,25 +201,25 @@ async function iniciarApp(){
     return;
   }
   resolverOrgActiva(me);
-  PiedraSidebar.render(me, 'clientes', { ocultarOrg: true });
+  PiedraSidebar.render(me, 'proveedores', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
-  await cargarClientes();
+  await cargarProveedores();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
-let clientesCache = [];
-async function cargarClientes(){
+let proveedoresCache = [];
+async function cargarProveedores(){
   const params = new URLSearchParams();
   if (document.getElementById('fBusqueda').value.trim()) params.set('q', document.getElementById('fBusqueda').value.trim());
   if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
-  const body = document.getElementById('clientesBody');
+  const body = document.getElementById('proveedoresBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
-  clientesCache = await r.json();
-  renderClientes();
+  proveedoresCache = await r.json();
+  renderProveedores();
 }
 
 const CATEGORIA_FISCAL_LABEL = {
@@ -228,45 +228,42 @@ const CATEGORIA_FISCAL_LABEL = {
 };
 const TIPO_DOCUMENTO_LABEL = { cuil: 'CUIL', cuit: 'CUIT', dni: 'DNI', pasaporte: 'Pasaporte' };
 
-function renderClientes(){
-  const body = document.getElementById('clientesBody');
-  if (!clientesCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay clientes todavía.</td></tr>'; return; }
-  body.innerHTML = clientesCache.map(c => `
+function renderProveedores(){
+  const body = document.getElementById('proveedoresBody');
+  if (!proveedoresCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay proveedores todavía.</td></tr>'; return; }
+  body.innerHTML = proveedoresCache.map(p => `
     <tr>
-      <td><strong>${escapeHtml(c.codigo || '—')}</strong></td>
-      <td>${escapeHtml(c.apellidoRazonSocial)}${c.nombre ? ' ' + escapeHtml(c.nombre) : ''}${c.nombreFantasia ? `<div class="muted">${escapeHtml(c.nombreFantasia)}</div>` : ''}</td>
-      <td class="muted">${CATEGORIA_FISCAL_LABEL[c.categoriaFiscal] || '—'}</td>
-      <td class="muted">${c.cuit ? escapeHtml(c.cuit) : (c.numeroDocumento ? `${TIPO_DOCUMENTO_LABEL[c.tipoDocumento]||'Doc.'} ${escapeHtml(c.numeroDocumento)}` : '—')}</td>
-      <td class="muted">${[c.telefono || c.celular, c.email].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
-      <td><span class="pill ${c.activo === false ? 'inactivo' : 'activo'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span></td>
+      <td><strong>${escapeHtml(p.codigo || '—')}</strong></td>
+      <td>${escapeHtml(p.razonSocial)}${p.nombreFantasia ? `<div class="muted">${escapeHtml(p.nombreFantasia)}</div>` : ''}</td>
+      <td class="muted">${escapeHtml(p.rubro || '—')}</td>
+      <td class="muted">${p.cuit ? escapeHtml(p.cuit) : (p.numeroDocumento ? `${TIPO_DOCUMENTO_LABEL[p.tipoDocumento]||'Doc.'} ${escapeHtml(p.numeroDocumento)}` : '—')}</td>
+      <td class="muted">${[p.telefono || p.celular, p.email].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
+      <td><span class="pill ${p.activo === false ? 'inactivo' : 'activo'}">${p.activo === false ? 'Inactivo' : 'Activo'}</span></td>
       <td>
-        <button class="btn small secondary" onclick="abrirEditarCliente('${c._id}')">Editar</button>
-        ${c.activo === false ? '' : `<button class="btn small danger" onclick="desactivarCliente('${c._id}', '${escapeHtml(c.apellidoRazonSocial).replace(/'/g,"\\'")}')">Desactivar</button>`}
+        <button class="btn small secondary" onclick="abrirEditarProveedor('${p._id}')">Editar</button>
+        ${p.activo === false ? '' : `<button class="btn small danger" onclick="desactivarProveedor('${p._id}', '${escapeHtml(p.razonSocial).replace(/'/g,"\\'")}')">Desactivar</button>`}
       </td>
     </tr>
   `).join('');
 }
 
-const SEXOS = [{v:'', l:'Sin especificar'}, {v:'femenino', l:'Femenino'}, {v:'masculino', l:'Masculino'}];
 const CATEGORIAS_FISCALES = [
-  {v:'consumidor_final', l:'Consumidor final'}, {v:'exento', l:'Exento'}, {v:'monotributista', l:'Monotributista'},
+  {v:'', l:'Sin especificar'}, {v:'consumidor_final', l:'Consumidor final'}, {v:'exento', l:'Exento'}, {v:'monotributista', l:'Monotributista'},
   {v:'responsable_inscripto', l:'Responsable Inscripto'}, {v:'exterior', l:'Exterior'}, {v:'iva_no_alcanzado', l:'IVA no alcanzado'}
 ];
 const TIPOS_DOCUMENTO = [{v:'', l:'Sin especificar'}, {v:'dni', l:'DNI'}, {v:'cuit', l:'CUIT'}, {v:'cuil', l:'CUIL'}, {v:'pasaporte', l:'Pasaporte'}];
-const TIPOS_COMPROBANTE = [{v:'', l:'Sin especificar'}, {v:'comprobante_venta', l:'Comprobante de venta'}, {v:'factura', l:'Factura'}];
+const MONEDAS = [{v:'ARS', l:'Pesos ($)'}, {v:'USD', l:'Dólares (US$)'}];
 
 function opciones(lista, seleccionada){
   return lista.map(u => `<option value="${u.v}" ${u.v===(seleccionada||'')?'selected':''}>${u.l}</option>`).join('');
 }
 
-// Tipo de cliente: desplegable con algunos valores fijos + los que ya se
-// hayan cargado antes (así queda "abierto" sin volver a ser texto libre).
-// La opción "+ Agregar nuevo…" (ver listenerTipoCliente) permite sumar uno
-// nuevo al vuelo, que a partir de ahí queda disponible para el resto.
-const TIPOS_CLIENTE_BASE = ['Consumidor final', 'Mayorista', 'Colocador'];
-function opcionesTipoCliente(seleccionado){
-  const usados = clientesCache.map(c => c.tipoCliente).filter(Boolean);
-  const todos = [...new Set([...TIPOS_CLIENTE_BASE, ...usados])];
+// Rubro de proveedor: desplegable con algunos valores fijos + los que ya
+// se hayan cargado antes, mismo patrón que Tipo de cliente en Clientes.
+const RUBROS_PROVEEDOR_BASE = ['Insumos', 'Fletes / Transporte', 'Servicios'];
+function opcionesRubroProveedor(seleccionado){
+  const usados = proveedoresCache.map(p => p.rubro).filter(Boolean);
+  const todos = [...new Set([...RUBROS_PROVEEDOR_BASE, ...usados])];
   let html = '<option value="">Sin especificar</option>' +
     todos.map(t => `<option value="${escapeHtml(t)}" ${t===seleccionado?'selected':''}>${escapeHtml(t)}</option>`).join('');
   if (seleccionado && !todos.includes(seleccionado)) {
@@ -275,12 +272,12 @@ function opcionesTipoCliente(seleccionado){
   html += '<option value="__nuevo__">+ Agregar nuevo…</option>';
   return html;
 }
-function listenerTipoCliente(){
-  const select = document.getElementById('fcTipoCliente');
+function listenerRubroProveedor(){
+  const select = document.getElementById('fpRubro');
   const valorPrevio = select.value;
   select.addEventListener('change', function(){
     if (this.value !== '__nuevo__') return;
-    const nuevo = (prompt('Nuevo tipo de cliente:') || '').trim();
+    const nuevo = (prompt('Nuevo rubro de proveedor:') || '').trim();
     if (nuevo) {
       const opt = document.createElement('option');
       opt.value = nuevo; opt.textContent = nuevo; opt.selected = true;
@@ -293,197 +290,172 @@ function listenerTipoCliente(){
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 
-// Campos alineados con la ficha de cliente de Dux (ver clientes.js) para que
-// migrar sea directo — se cargan los mismos datos y de ahí en más se sacan o
-// agregan según haga falta. A diferencia de Productos, acá solo Apellido/
-// Razón social y Categoría fiscal son obligatorios, igual que en Dux.
-function formularioCliente(c){
-  c = c || {};
+// Esquema por analogía con Clientes (ver proveedores.js — el artículo
+// real de Proveedores en Dux dio 403 al intentar relevarlo). Solo razón
+// social es obligatoria.
+function formularioProveedor(p){
+  p = p || {};
   return `
-    <div class="section-title">Datos personales</div>
+    <div class="section-title">Datos generales</div>
     <div class="grid3">
-      <div style="grid-column:span 2"><label>Apellido / Razón social *</label><input id="fcApellidoRazonSocial" value="${escapeHtml(c.apellidoRazonSocial||'')}"></div>
-      <div><label>Código</label><input id="fcCodigo" value="${escapeHtml(c.codigo||'')}" placeholder="Igual al Código en Dux"></div>
+      <div style="grid-column:span 2"><label>Razón social *</label><input id="fpRazonSocial" value="${escapeHtml(p.razonSocial||'')}"></div>
+      <div><label>Código</label><input id="fpCodigo" value="${escapeHtml(p.codigo||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div><label>Nombre</label><input id="fcNombre" value="${escapeHtml(c.nombre||'')}"></div>
-      <div><label>Nombre de fantasía</label><input id="fcNombreFantasia" value="${escapeHtml(c.nombreFantasia||'')}"></div>
-      <div><label>Sexo</label><select id="fcSexo">${opciones(SEXOS, c.sexo)}</select></div>
-    </div>
-    <div class="grid3" style="margin-top:10px">
-      <div><label>Tipo de cliente</label><select id="fcTipoCliente">${opcionesTipoCliente(c.tipoCliente)}</select></div>
-      <div><label>Origen del cliente</label><input id="fcOrigenCliente" value="${escapeHtml(c.origenCliente||'')}" placeholder="Ej: Showroom, Referido"></div>
-      <div><label>Fecha de nacimiento</label><input id="fcFechaNacimiento" type="date" value="${c.fechaNacimiento ? String(c.fechaNacimiento).slice(0,10) : ''}"></div>
-    </div>
-    <div class="grid3" style="margin-top:10px">
-      <div><label>Límite cta. cte. en facturación</label><input id="fcLimiteCtaCteFacturacion" type="number" min="0" step="0.01" value="${c.limiteCtaCteFacturacion!=null?c.limiteCtaCteFacturacion:''}"></div>
-      <div><label>Límite cta. cte. en pedido</label><input id="fcLimiteCtaCtePedido" type="number" min="0" step="0.01" value="${c.limiteCtaCtePedido!=null?c.limiteCtaCtePedido:''}"></div>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);margin-top:18px"><input type="checkbox" id="fcNoEditable" style="width:auto" ${c.noEditable?'checked':''}> No editable</label>
+      <div><label>Nombre de fantasía</label><input id="fpNombreFantasia" value="${escapeHtml(p.nombreFantasia||'')}"></div>
+      <div><label>Rubro</label><select id="fpRubro">${opcionesRubroProveedor(p.rubro)}</select></div>
+      <div><label>Persona de contacto</label><input id="fpPersonaContacto" value="${escapeHtml(p.personaContacto||'')}"></div>
     </div>
 
-    <div class="section-title" style="margin-top:16px">Datos de facturación</div>
+    <div class="section-title" style="margin-top:16px">Datos fiscales y comerciales</div>
     <div class="grid3">
-      <div><label>Categoría fiscal *</label><select id="fcCategoriaFiscal">${opciones(CATEGORIAS_FISCALES, c.categoriaFiscal)}</select></div>
-      <div><label>Tipo documento</label><select id="fcTipoDocumento">${opciones(TIPOS_DOCUMENTO, c.tipoDocumento)}</select></div>
-      <div><label>Número documento</label><input id="fcNumeroDocumento" value="${escapeHtml(c.numeroDocumento||'')}"></div>
+      <div><label>Categoría fiscal</label><select id="fpCategoriaFiscal">${opciones(CATEGORIAS_FISCALES, p.categoriaFiscal)}</select></div>
+      <div><label>Tipo documento</label><select id="fpTipoDocumento">${opciones(TIPOS_DOCUMENTO, p.tipoDocumento)}</select></div>
+      <div><label>Número documento</label><input id="fpNumeroDocumento" value="${escapeHtml(p.numeroDocumento||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div><label>CUIT / CUIL</label><input id="fcCuit" value="${escapeHtml(c.cuit||'')}" placeholder="20-12345678-9"></div>
-      <div><label>Lista de precio por defecto</label><input id="fcListaPrecioPorDefecto" value="${escapeHtml(c.listaPrecioPorDefecto||'')}"></div>
-      <div><label>Condición de pago</label><input id="fcCondicionPago" value="${escapeHtml(c.condicionPago||'')}"></div>
+      <div><label>CUIT / CUIL</label><input id="fpCuit" value="${escapeHtml(p.cuit||'')}" placeholder="30-12345678-9"></div>
+      <div><label>Condición de pago</label><input id="fpCondicionPago" value="${escapeHtml(p.condicionPago||'')}" placeholder="Ej: 30 días fecha factura"></div>
+      <div><label>Días de pago</label><input id="fpDiasPago" type="number" min="0" step="1" value="${p.diasPago!=null?p.diasPago:''}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div><label>% de descuento</label><input id="fcPorcentajeDescuento" type="number" min="0" step="0.01" value="${c.porcentajeDescuento!=null?c.porcentajeDescuento:''}"></div>
-      <div><label>Vendedor</label><input id="fcVendedor" value="${escapeHtml(c.vendedor||'')}"></div>
-      <div><label>Tipo de comprobante por defecto</label><select id="fcTipoComprobantePorDefecto">${opciones(TIPOS_COMPROBANTE, c.tipoComprobantePorDefecto)}</select></div>
+      <div><label>Moneda</label><select id="fpMoneda">${opciones(MONEDAS, p.moneda||'ARS')}</select></div>
     </div>
-    <div class="grid2" style="margin-top:10px">
-      <div><label>Transporte de entrega por defecto</label><input id="fcTransporteEntregaPorDefecto" value="${escapeHtml(c.transporteEntregaPorDefecto||'')}"></div>
-      <div><label>Lugar de entrega por defecto</label><input id="fcLugarEntregaPorDefecto" value="${escapeHtml(c.lugarEntregaPorDefecto||'')}"></div>
+
+    <div class="section-title" style="margin-top:16px">Datos bancarios (para pagos)</div>
+    <div class="grid3">
+      <div><label>Banco</label><input id="fpBanco" value="${escapeHtml(p.banco||'')}"></div>
+      <div><label>CBU</label><input id="fpCbu" value="${escapeHtml(p.cbu||'')}"></div>
+      <div><label>Alias CBU</label><input id="fpAliasCbu" value="${escapeHtml(p.aliasCbu||'')}"></div>
     </div>
+    <div style="margin-top:10px"><label>Cuenta bancaria (número)</label><input id="fpCuentaBancaria" value="${escapeHtml(p.cuentaBancaria||'')}"></div>
 
     <div class="section-title" style="margin-top:16px">Datos de contacto</div>
     <div class="grid3">
-      <div><label>Provincia</label><input id="fcProvincia" value="${escapeHtml(c.provincia||'')}"></div>
-      <div><label>Localidad</label><input id="fcLocalidad" value="${escapeHtml(c.localidad||'')}"></div>
-      <div><label>Código postal</label><input id="fcCodigoPostal" value="${escapeHtml(c.codigoPostal||'')}"></div>
+      <div><label>Provincia</label><input id="fpProvincia" value="${escapeHtml(p.provincia||'')}"></div>
+      <div><label>Localidad</label><input id="fpLocalidad" value="${escapeHtml(p.localidad||'')}"></div>
+      <div><label>Código postal</label><input id="fpCodigoPostal" value="${escapeHtml(p.codigoPostal||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div style="grid-column:span 2"><label>Domicilio</label><input id="fcDomicilio" value="${escapeHtml(c.domicilio||'')}"></div>
-      <div><label>Barrio</label><input id="fcBarrio" value="${escapeHtml(c.barrio||'')}"></div>
+      <div style="grid-column:span 2"><label>Domicilio</label><input id="fpDomicilio" value="${escapeHtml(p.domicilio||'')}"></div>
+      <div><label>Barrio</label><input id="fpBarrio" value="${escapeHtml(p.barrio||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div><label>Zona</label><input id="fcZona" value="${escapeHtml(c.zona||'')}"></div>
-      <div><label>Teléfono</label><input id="fcTelefono" value="${escapeHtml(c.telefono||'')}"></div>
-      <div><label>Fax</label><input id="fcFax" value="${escapeHtml(c.fax||'')}"></div>
-    </div>
-    <div class="grid3" style="margin-top:10px">
-      <div><label>Compañía celular</label><input id="fcCompaniaCelular" value="${escapeHtml(c.companiaCelular||'')}"></div>
-      <div><label>Celular</label><input id="fcCelular" value="${escapeHtml(c.celular||'')}"></div>
-      <div><label>Persona de contacto</label><input id="fcPersonaContacto" value="${escapeHtml(c.personaContacto||'')}"></div>
+      <div><label>Zona</label><input id="fpZona" value="${escapeHtml(p.zona||'')}"></div>
+      <div><label>Teléfono</label><input id="fpTelefono" value="${escapeHtml(p.telefono||'')}"></div>
+      <div><label>Celular</label><input id="fpCelular" value="${escapeHtml(p.celular||'')}"></div>
     </div>
     <div class="grid2" style="margin-top:10px">
-      <div><label>Correo electrónico</label><input id="fcEmail" type="email" value="${escapeHtml(c.email||'')}"></div>
-      <div><label>Página web</label><input id="fcPaginaWeb" value="${escapeHtml(c.paginaWeb||'')}"></div>
+      <div><label>Correo electrónico</label><input id="fpEmail" type="email" value="${escapeHtml(p.email||'')}"></div>
+      <div><label>Página web</label><input id="fpPaginaWeb" value="${escapeHtml(p.paginaWeb||'')}"></div>
     </div>
-    <div style="margin-top:10px"><label>Observaciones (internas)</label><textarea id="fcObservaciones">${escapeHtml(c.observaciones||'')}</textarea></div>
-    <div style="margin-top:10px"><label>Descripción (interna)</label><textarea id="fcDescripcion">${escapeHtml(c.descripcion||'')}</textarea></div>
-    <div style="margin-top:10px"><label>Notas internas</label><textarea id="fcNotas">${escapeHtml(c.notas||'')}</textarea></div>
+    <div style="margin-top:10px"><label>Observaciones (internas)</label><textarea id="fpObservaciones">${escapeHtml(p.observaciones||'')}</textarea></div>
+    <div style="margin-top:10px"><label>Descripción (interna)</label><textarea id="fpDescripcion">${escapeHtml(p.descripcion||'')}</textarea></div>
+    <div style="margin-top:10px"><label>Notas internas</label><textarea id="fpNotas">${escapeHtml(p.notas||'')}</textarea></div>
   `;
 }
 
-function abrirNuevoCliente(){
+function abrirNuevoProveedor(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Nuevo cliente</h2>
-        ${formularioCliente()}
-        <div class="err" id="fcErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarNuevoCliente()">Guardar</button>
+        <h2>Nuevo proveedor</h2>
+        ${formularioProveedor()}
+        <div class="err" id="fpErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarNuevoProveedor()">Guardar</button>
       </div>
     </div>
   `;
-  listenerTipoCliente();
+  listenerRubroProveedor();
 }
 
-function leerFormularioCliente(){
+function leerFormularioProveedor(){
   return {
-    codigo: document.getElementById('fcCodigo').value.trim(),
-    apellidoRazonSocial: document.getElementById('fcApellidoRazonSocial').value.trim(),
-    nombre: document.getElementById('fcNombre').value.trim(),
-    nombreFantasia: document.getElementById('fcNombreFantasia').value.trim(),
-    sexo: document.getElementById('fcSexo').value,
-    tipoCliente: document.getElementById('fcTipoCliente').value === '__nuevo__' ? '' : document.getElementById('fcTipoCliente').value.trim(),
-    origenCliente: document.getElementById('fcOrigenCliente').value.trim(),
-    fechaNacimiento: document.getElementById('fcFechaNacimiento').value,
-    noEditable: document.getElementById('fcNoEditable').checked,
-    limiteCtaCteFacturacion: document.getElementById('fcLimiteCtaCteFacturacion').value,
-    limiteCtaCtePedido: document.getElementById('fcLimiteCtaCtePedido').value,
-    categoriaFiscal: document.getElementById('fcCategoriaFiscal').value,
-    tipoDocumento: document.getElementById('fcTipoDocumento').value,
-    numeroDocumento: document.getElementById('fcNumeroDocumento').value.trim(),
-    cuit: document.getElementById('fcCuit').value.trim(),
-    listaPrecioPorDefecto: document.getElementById('fcListaPrecioPorDefecto').value.trim(),
-    condicionPago: document.getElementById('fcCondicionPago').value.trim(),
-    porcentajeDescuento: document.getElementById('fcPorcentajeDescuento').value,
-    vendedor: document.getElementById('fcVendedor').value.trim(),
-    tipoComprobantePorDefecto: document.getElementById('fcTipoComprobantePorDefecto').value,
-    transporteEntregaPorDefecto: document.getElementById('fcTransporteEntregaPorDefecto').value.trim(),
-    lugarEntregaPorDefecto: document.getElementById('fcLugarEntregaPorDefecto').value.trim(),
-    provincia: document.getElementById('fcProvincia').value.trim(),
-    localidad: document.getElementById('fcLocalidad').value.trim(),
-    domicilio: document.getElementById('fcDomicilio').value.trim(),
-    barrio: document.getElementById('fcBarrio').value.trim(),
-    codigoPostal: document.getElementById('fcCodigoPostal').value.trim(),
-    zona: document.getElementById('fcZona').value.trim(),
-    telefono: document.getElementById('fcTelefono').value.trim(),
-    fax: document.getElementById('fcFax').value.trim(),
-    companiaCelular: document.getElementById('fcCompaniaCelular').value.trim(),
-    celular: document.getElementById('fcCelular').value.trim(),
-    personaContacto: document.getElementById('fcPersonaContacto').value.trim(),
-    email: document.getElementById('fcEmail').value.trim(),
-    paginaWeb: document.getElementById('fcPaginaWeb').value.trim(),
-    observaciones: document.getElementById('fcObservaciones').value.trim(),
-    descripcion: document.getElementById('fcDescripcion').value.trim(),
-    notas: document.getElementById('fcNotas').value.trim()
+    codigo: document.getElementById('fpCodigo').value.trim(),
+    razonSocial: document.getElementById('fpRazonSocial').value.trim(),
+    nombreFantasia: document.getElementById('fpNombreFantasia').value.trim(),
+    rubro: document.getElementById('fpRubro').value === '__nuevo__' ? '' : document.getElementById('fpRubro').value.trim(),
+    personaContacto: document.getElementById('fpPersonaContacto').value.trim(),
+    categoriaFiscal: document.getElementById('fpCategoriaFiscal').value,
+    tipoDocumento: document.getElementById('fpTipoDocumento').value,
+    numeroDocumento: document.getElementById('fpNumeroDocumento').value.trim(),
+    cuit: document.getElementById('fpCuit').value.trim(),
+    condicionPago: document.getElementById('fpCondicionPago').value.trim(),
+    diasPago: document.getElementById('fpDiasPago').value,
+    moneda: document.getElementById('fpMoneda').value,
+    banco: document.getElementById('fpBanco').value.trim(),
+    cbu: document.getElementById('fpCbu').value.trim(),
+    aliasCbu: document.getElementById('fpAliasCbu').value.trim(),
+    cuentaBancaria: document.getElementById('fpCuentaBancaria').value.trim(),
+    provincia: document.getElementById('fpProvincia').value.trim(),
+    localidad: document.getElementById('fpLocalidad').value.trim(),
+    domicilio: document.getElementById('fpDomicilio').value.trim(),
+    barrio: document.getElementById('fpBarrio').value.trim(),
+    codigoPostal: document.getElementById('fpCodigoPostal').value.trim(),
+    zona: document.getElementById('fpZona').value.trim(),
+    telefono: document.getElementById('fpTelefono').value.trim(),
+    celular: document.getElementById('fpCelular').value.trim(),
+    email: document.getElementById('fpEmail').value.trim(),
+    paginaWeb: document.getElementById('fpPaginaWeb').value.trim(),
+    observaciones: document.getElementById('fpObservaciones').value.trim(),
+    descripcion: document.getElementById('fpDescripcion').value.trim(),
+    notas: document.getElementById('fpNotas').value.trim()
   };
 }
 
-async function guardarNuevoCliente(){
-  const body = leerFormularioCliente();
-  if (!body.apellidoRazonSocial) { document.getElementById('fcErr').textContent = 'El apellido / razón social es obligatorio'; return; }
-  if (!body.categoriaFiscal) { document.getElementById('fcErr').textContent = 'La categoría fiscal es obligatoria'; return; }
+async function guardarNuevoProveedor(){
+  const body = leerFormularioProveedor();
+  if (!body.razonSocial) { document.getElementById('fpErr').textContent = 'La razón social es obligatoria'; return; }
   try{
     const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
-    await cargarClientes();
+    await cargarProveedores();
   }catch(e){
-    document.getElementById('fcErr').textContent = e.message;
+    document.getElementById('fpErr').textContent = e.message;
   }
 }
 
-function abrirEditarCliente(id){
-  const c = clientesCache.find(x => x._id === id);
-  if (!c) return;
+function abrirEditarProveedor(id){
+  const p = proveedoresCache.find(x => x._id === id);
+  if (!p) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Editar cliente</h2>
-        ${formularioCliente(c)}
-        <div class="err" id="fcErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarEdicionCliente('${id}')">Guardar cambios</button>
+        <h2>Editar proveedor</h2>
+        ${formularioProveedor(p)}
+        <div class="err" id="fpErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarEdicionProveedor('${id}')">Guardar cambios</button>
       </div>
     </div>
   `;
-  listenerTipoCliente();
+  listenerRubroProveedor();
 }
 
-async function guardarEdicionCliente(id){
-  const body = leerFormularioCliente();
-  if (!body.apellidoRazonSocial) { document.getElementById('fcErr').textContent = 'El apellido / razón social es obligatorio'; return; }
-  if (!body.categoriaFiscal) { document.getElementById('fcErr').textContent = 'La categoría fiscal es obligatoria'; return; }
+async function guardarEdicionProveedor(id){
+  const body = leerFormularioProveedor();
+  if (!body.razonSocial) { document.getElementById('fpErr').textContent = 'La razón social es obligatoria'; return; }
   try{
     const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
-    await cargarClientes();
+    await cargarProveedores();
   }catch(e){
-    document.getElementById('fcErr').textContent = e.message;
+    document.getElementById('fpErr').textContent = e.message;
   }
 }
 
-async function desactivarCliente(id, nombre){
+async function desactivarProveedor(id, nombre){
   if (!confirm(`¿Desactivar "${nombre}"? No se borra, pero deja de aparecer en las listas normales.`)) return;
   try{
     const r = await fetch(BASE + '/' + id, {method:'DELETE', headers: headersAuth()});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
-    await cargarClientes();
+    await cargarProveedores();
   }catch(e){
     alert(e.message);
   }
