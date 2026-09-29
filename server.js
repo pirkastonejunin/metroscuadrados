@@ -43,6 +43,9 @@ app.use('/api/proveedores', proveedoresRouter);
 const stockRouter = require('./stock');
 app.use('/api/stock', stockRouter);
 
+const ventasRouter = require('./ventas');
+app.use('/api/ventas', ventasRouter);
+
 const API_BASE = 'https://api.tiendanube.com/v1';
 const NAMESPACE = process.env.METAFIELD_NAMESPACE || 'calculadora_m2';
 const KEY_COBERTURA = 'cobertura_m2_caja';

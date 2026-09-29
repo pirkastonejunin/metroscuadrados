@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ventas - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --warn:#b7791f; --warn-soft:#fdf3d9;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{min-height:50px;font-family:inherit;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.pendiente{background:var(--warn-soft);color:var(--warn);}
+  .pill.entregada{background:var(--ok-soft);color:var(--ok);}
+  .pill.anulada{background:var(--danger-soft);color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
+  .modal.wide{max-width:860px;}
+  .modal h2{margin-top:0;font-size:16px;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
+  .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
+  .fila-item .campo-producto{flex:2;min-width:0;}
+  .fila-item .campo-cant{flex:1;min-width:0;}
+  .fila-item .campo-precio{flex:1;min-width:0;}
+  .fila-item .campo-subtotal{flex:1;min-width:0;text-align:right;font-weight:700;padding-top:8px;}
+  .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
+  .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
+  .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
+  .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
+  .detalle-pago{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --warn:#e0b64a; --warn-soft:#3a2f14;
+      --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --warn:#e0b64a; --warn-soft:#3a2f14;
+    --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Ventas</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Ventas. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <h1>Ventas</h1>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="flex:1">
+          <div style="min-width:180px">
+            <label>Cliente</label>
+            <select id="fvCliente" onchange="cargarVentas()"><option value="">Todos</option></select>
+          </div>
+          <div style="min-width:150px">
+            <label>Estado</label>
+            <select id="fvEstado" onchange="cargarVentas()">
+              <option value="">Todos</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="entregada">Entregada</option>
+              <option value="anulada">Anulada</option>
+            </select>
+          </div>
+          <div style="min-width:140px">
+            <label>Desde</label>
+            <input id="fvDesde" type="date" onchange="cargarVentas()">
+          </div>
+          <div style="min-width:140px">
+            <label>Hasta</label>
+            <input id="fvHasta" type="date" onchange="cargarVentas()">
+          </div>
+        </div>
+        <button class="btn" onclick="abrirNuevaVenta()">+ Nueva venta</button>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Nº</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="ventasBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/ventas';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
+function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+let NOMBRE_USUARIO = '';
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('ventas'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'ventas', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  await cargarListasBase();
+  await cargarVentas();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+// -------------------------------------------------------------------
+// Clientes, productos y depósitos — se cargan una sola vez al entrar
+// -------------------------------------------------------------------
+let clientesCache = [];
+let productosCache = [];
+let depositosCache = [];
+async function cargarListasBase(){
+  const [rc, rp, rd] = await Promise.all([
+    fetch(BASE + '/clientes', {headers: headersAuth()}),
+    fetch(BASE + '/productos', {headers: headersAuth()}),
+    fetch(BASE + '/depositos', {headers: headersAuth()})
+  ]);
+  clientesCache = rc.ok ? await rc.json() : [];
+  productosCache = rp.ok ? await rp.json() : [];
+  depositosCache = rd.ok ? await rd.json() : [];
+  document.getElementById('fvCliente').innerHTML = '<option value="">Todos</option>' +
+    clientesCache.map(c => `<option value="${c._id}">${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`).join('');
+}
+
+// -------------------------------------------------------------------
+// Listado de ventas
+// -------------------------------------------------------------------
+const ESTADO_LABEL = { pendiente: 'Pendiente', entregada: 'Entregada', anulada: 'Anulada' };
+let ventasCache = [];
+
+async function cargarVentas(){
+  const params = new URLSearchParams();
+  if (document.getElementById('fvCliente').value) params.set('clienteId', document.getElementById('fvCliente').value);
+  if (document.getElementById('fvEstado').value) params.set('estado', document.getElementById('fvEstado').value);
+  if (document.getElementById('fvDesde').value) params.set('desde', document.getElementById('fvDesde').value);
+  if (document.getElementById('fvHasta').value) params.set('hasta', document.getElementById('fvHasta').value);
+  const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
+  const body = document.getElementById('ventasBody');
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
+  ventasCache = await r.json();
+  if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
+  body.innerHTML = ventasCache.map(v => `
+    <tr>
+      <td><strong>#${v.numero}</strong></td>
+      <td class="muted">${fechaCorta(v.fecha)}</td>
+      <td>${escapeHtml(v.clienteNombre)}</td>
+      <td>${money(v.total)}</td>
+      <td class="muted">${money(v.totalCobrado)}</td>
+      <td>${v.saldoPendiente > 0 ? money(v.saldoPendiente) : '<span class="muted">—</span>'}</td>
+      <td><span class="pill ${v.estado}">${ESTADO_LABEL[v.estado]||v.estado}</span></td>
+      <td><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button></td>
+    </tr>
+  `).join('');
+}
+
+// -------------------------------------------------------------------
+// Nueva venta
+// -------------------------------------------------------------------
+function opcionesClientesSelect(seleccionado){
+  return '<option value="">Elegí un cliente…</option>' + clientesCache.map(c =>
+    `<option value="${c._id}" ${c._id===seleccionado?'selected':''}>${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`
+  ).join('');
+}
+function opcionesProductosVenta(seleccionado){
+  return '<option value="">Elegí un producto…</option>' + productosCache.map(p =>
+    `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.sku||'')} — ${escapeHtml(p.nombre)}</option>`
+  ).join('');
+}
+function opcionesDepositosVenta(seleccionado){
+  return '<option value="">Elegí un depósito…</option>' + depositosCache.filter(d => d.activo !== false).map(d =>
+    `<option value="${d._id}" ${d._id===seleccionado?'selected':''}>${escapeHtml(d.nombre)}</option>`
+  ).join('');
+}
+
+function abrirNuevaVenta(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Nueva venta</h2>
+        <div class="grid3">
+          <div><label>Cliente *</label><select id="nvCliente">${opcionesClientesSelect()}</select></div>
+          <div><label>Vendedor</label><input id="nvVendedor" value="${escapeHtml(NOMBRE_USUARIO)}"></div>
+          <div><label>Fecha</label><input id="nvFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Moneda</label><select id="nvMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
+          <div><label>Tipo de entrega *</label><select id="nvTipoEntrega" onchange="actualizarVisibilidadDeposito()"><option value="inmediata">Entrega inmediata (descuenta stock ahora)</option><option value="pendiente">Sin entrega (pendiente, sin descontar stock)</option></select></div>
+          <div id="nvDepositoWrap"><label>Depósito *</label><select id="nvDeposito">${opcionesDepositosVenta()}</select></div>
+        </div>
+
+        <div class="section-title">Productos</div>
+        <div id="nvFilasItems"></div>
+        <button class="btn secondary small" onclick="agregarFilaVenta()">+ Agregar producto</button>
+
+        <div class="grid2" style="margin-top:14px">
+          <div><label>Descuento (%)</label><input id="nvDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()"></div>
+          <div><label>Descuento ($)</label><input id="nvDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="nvObservaciones"></textarea></div>
+
+        <div class="totales-box" id="nvTotales"></div>
+        <div class="err" id="nvErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarNuevaVenta()">Guardar venta</button>
+      </div>
+    </div>
+  `;
+  agregarFilaVenta();
+  actualizarVisibilidadDeposito();
+}
+
+function actualizarVisibilidadDeposito(){
+  const esInmediata = document.getElementById('nvTipoEntrega').value === 'inmediata';
+  document.getElementById('nvDepositoWrap').classList.toggle('hidden', !esInmediata);
+}
+
+function agregarFilaVenta(){
+  const cont = document.getElementById('nvFilasItems');
+  const fila = document.createElement('div');
+  fila.className = 'fila-item';
+  fila.innerHTML = `
+    <div class="campo-producto">
+      <label>Producto</label>
+      <select onchange="actualizarFilaVenta(this)">${opcionesProductosVenta()}</select>
+    </div>
+    <div class="campo-cant">
+      <label>Cantidad</label>
+      <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarFilaVenta(this)">
+    </div>
+    <div class="campo-precio">
+      <label>Precio unit.</label>
+      <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()">
+    </div>
+    <div class="campo-subtotal"><span class="subtotal-valor">$ 0,00</span></div>
+    <button class="btn-quitar" onclick="this.closest('.fila-item').remove(); actualizarTotalesVenta()">×</button>
+  `;
+  cont.appendChild(fila);
+}
+
+function actualizarFilaVenta(el){
+  const fila = el.closest('.fila-item');
+  const select = fila.querySelector('select');
+  const precioInput = fila.querySelector('.campo-precio input');
+  if (el.tagName === 'SELECT') {
+    const producto = productosCache.find(p => String(p._id) === select.value);
+    precioInput.value = producto ? (producto.precio || 0) : 0;
+  }
+  actualizarTotalesVenta();
+}
+
+function juntarItemsVenta(){
+  const filas = document.querySelectorAll('#nvFilasItems .fila-item');
+  const items = [];
+  filas.forEach(fila => {
+    const select = fila.querySelector('select');
+    const cantidad = Number(fila.querySelector('.campo-cant input').value);
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
+    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
+  });
+  return items;
+}
+
+function actualizarTotalesVenta(){
+  const filas = document.querySelectorAll('#nvFilasItems .fila-item');
+  let subtotal = 0;
+  filas.forEach(fila => {
+    const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const sub = cantidad * precioUnitario;
+    subtotal += sub;
+    fila.querySelector('.subtotal-valor').textContent = money(sub);
+  });
+  const descPorc = Number(document.getElementById('nvDescuentoPorcentaje').value) || 0;
+  const descMonto = Number(document.getElementById('nvDescuentoMonto').value) || 0;
+  let total = subtotal;
+  if (descPorc) total -= total * (descPorc / 100);
+  if (descMonto) total -= descMonto;
+  total = Math.max(0, total);
+  document.getElementById('nvTotales').innerHTML = `
+    <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+  `;
+}
+
+async function guardarNuevaVenta(){
+  const items = juntarItemsVenta();
+  const tipoEntrega = document.getElementById('nvTipoEntrega').value;
+  const body = {
+    clienteId: document.getElementById('nvCliente').value,
+    vendedor: document.getElementById('nvVendedor').value.trim(),
+    fecha: document.getElementById('nvFecha').value,
+    moneda: document.getElementById('nvMoneda').value,
+    tipoEntrega,
+    depositoId: tipoEntrega === 'inmediata' ? document.getElementById('nvDeposito').value : null,
+    items,
+    descuentoPorcentaje: Number(document.getElementById('nvDescuentoPorcentaje').value) || 0,
+    descuentoMonto: Number(document.getElementById('nvDescuentoMonto').value) || 0,
+    observaciones: document.getElementById('nvObservaciones').value.trim()
+  };
+  document.getElementById('nvErr').textContent = '';
+  if (!body.clienteId) { document.getElementById('nvErr').textContent = 'Elegí un cliente'; return; }
+  if (!items.length) { document.getElementById('nvErr').textContent = 'Agregá al menos un producto'; return; }
+  if (tipoEntrega === 'inmediata' && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a descontar el stock'; return; }
+  try{
+    const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    cerrarModal();
+    await cargarVentas();
+  }catch(e){
+    document.getElementById('nvErr').textContent = e.message;
+  }
+}
+
+// -------------------------------------------------------------------
+// Detalle de una venta — entregar / anular / registrar cobro
+// -------------------------------------------------------------------
+function verDetalle(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  const filasItems = v.items.map(it => `
+    <tr>
+      <td>${escapeHtml(it.sku||'')}</td>
+      <td>${escapeHtml(it.nombre)}</td>
+      <td>${it.cantidad}</td>
+      <td>${money(it.precioUnitario)}</td>
+      <td>${money(it.subtotal)}</td>
+    </tr>
+  `).join('');
+  const filasPagos = (v.pagos||[]).length
+    ? v.pagos.map(p => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)}</span></div>`).join('')
+    : '<p class="muted">Sin cobros registrados.</p>';
+
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Venta #${v.numero} <span class="pill ${v.estado}">${ESTADO_LABEL[v.estado]||v.estado}</span></h2>
+        <p class="muted" style="margin-top:-8px">
+          ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''}
+        </p>
+        <table>
+          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+          <tbody>${filasItems}</tbody>
+        </table>
+        <div class="totales-box">
+          <div class="fila-total"><span>Subtotal</span><span>${money(v.subtotal)}</span></div>
+          ${v.descuentoPorcentaje ? `<div class="fila-total"><span>Descuento (${v.descuentoPorcentaje}%)</span><span>-${money(v.subtotal*v.descuentoPorcentaje/100)}</span></div>` : ''}
+          ${v.descuentoMonto ? `<div class="fila-total"><span>Descuento</span><span>-${money(v.descuentoMonto)}</span></div>` : ''}
+          <div class="fila-total grande"><span>Total</span><span>${money(v.total)}</span></div>
+          <div class="fila-total"><span>Cobrado</span><span>${money(v.totalCobrado)}</span></div>
+          <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(v.saldoPendiente)}</span></div>
+        </div>
+
+        ${v.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(v.observaciones)}</p>` : ''}
+
+        <div class="section-title">Cobros</div>
+        <div id="dvPagos">${filasPagos}</div>
+        <div class="err" id="dvErr"></div>
+
+        <div class="row" style="margin-top:14px">
+          ${v.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Entregar (descontar stock)</button>` : ''}
+          ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
+          ${v.estado !== 'anulada' ? `<button class="btn danger" onclick="anularVenta('${v._id}')">Anular venta</button>` : ''}
+        </div>
+        ${v.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${v.anuladaPor ? ' por ' + escapeHtml(v.anuladaPor) : ''}${v.anuladaEn ? ' — ' + fechaHora(v.anuladaEn) : ''}${v.anuladaMotivo ? ': ' + escapeHtml(v.anuladaMotivo) : ''}</p>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
+
+function abrirEntregar(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Entregar venta #${v.numero}</h2>
+        <p class="muted">Esto va a descontar el stock de los productos de la venta. No se puede deshacer — si hace falta corregir, se anula la venta.</p>
+        <label>Depósito *</label>
+        <select id="ntDeposito">${opcionesDepositosVenta(v.depositoId)}</select>
+        <div class="err" id="ntErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarEntregar('${id}')">Confirmar entrega</button>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmarEntregar(id){
+  const depositoId = document.getElementById('ntDeposito').value;
+  if (!depositoId) { document.getElementById('ntErr').textContent = 'Elegí un depósito'; return; }
+  try{
+    const r = await fetch(BASE + '/' + id + '/entregar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({depositoId})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas();
+    verDetalle(id);
+  }catch(e){
+    document.getElementById('ntErr').textContent = e.message;
+  }
+}
+
+function abrirCobro(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Registrar cobro — venta #${v.numero}</h2>
+        <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
+        <div class="grid2">
+          <div><label>Tipo de valor *</label><select id="ncTipoValor"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Monto *</label><input id="ncMonto" type="number" min="0.01" step="0.01" value="${v.saldoPendiente}"></div>
+        </div>
+        <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
+        <div class="err" id="ncErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarCobro('${id}')">Registrar</button>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmarCobro(id){
+  const body = {
+    tipoValor: document.getElementById('ncTipoValor').value,
+    monto: Number(document.getElementById('ncMonto').value),
+    nota: document.getElementById('ncNota').value.trim()
+  };
+  if (!body.monto || body.monto <= 0) { document.getElementById('ncErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
+  try{
+    const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas();
+    verDetalle(id);
+  }catch(e){
+    document.getElementById('ncErr').textContent = e.message;
+  }
+}
+
+async function anularVenta(id){
+  const v = ventasCache.find(x => x._id === id);
+  const motivo = prompt('¿Por qué se anula esta venta? (opcional)') || '';
+  if (motivo === null) return;
+  if (!confirm(`¿Anular la venta #${v.numero}?${v.stockDescontado ? ' Se va a reingresar el stock descontado.' : ''}`)) return;
+  try{
+    const r = await fetch(BASE + '/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas();
+    verDetalle(id);
+  }catch(e){
+    alert(e.message);
+  }
+}
+</script>
+</body>
+</html>
