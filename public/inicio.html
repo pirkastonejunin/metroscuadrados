@@ -160,8 +160,24 @@
   .notif-item-sub{font-size:12px;color:var(--muted);margin-top:2px;}
   .notif-item-fecha{font-size:11px;color:#c53030;margin-top:4px;font-weight:700;}
   .notif-empty{padding:20px 14px;text-align:center;color:var(--muted);font-size:13px;}
-  .venc-card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);}
+  .venc-card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);padding:14px;}
   .venc-card .notif-item-fecha{margin-top:4px;}
+  .venc-card .notif-item{padding:10px 0;}
+  .venc-cal-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+  .venc-cal-nav{display:flex;align-items:center;gap:8px;}
+  .venc-cal-nav button{background:var(--bg);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);font-size:14px;font-family:inherit;}
+  .venc-cal-mes{font-weight:800;font-size:0.88rem;min-width:120px;text-align:center;text-transform:capitalize;}
+  .venc-hoy-btn{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:0.75rem;font-weight:700;cursor:pointer;color:var(--ink);font-family:inherit;}
+  .venc-cal-head,.venc-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);}
+  .venc-cal-head div{text-align:center;font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding-bottom:4px;}
+  .venc-cal-grid{gap:3px;margin-bottom:10px;}
+  .venc-dia{background:var(--bg);border:1px solid var(--border);border-radius:8px;min-height:38px;padding:3px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;}
+  .venc-dia.fuera{opacity:.35;}
+  .venc-dia.hoy{border-color:var(--accent);}
+  .venc-dia.sel{box-shadow:0 0 0 2px var(--accent) inset;}
+  .venc-dia-num{font-size:0.72rem;font-weight:700;}
+  .venc-dia-dot{width:6px;height:6px;border-radius:50%;background:#c53030;}
+  .venc-detalle-vacio{padding:10px 2px;text-align:center;color:var(--muted);font-size:12.5px;}
 </style>
 </head>
 <body>
@@ -173,7 +189,19 @@
 
     <div class="grupo hidden" id="grupoVencimientos">
       <h2>Vencimientos</h2>
-      <div class="venc-card" id="vencimientosLista"></div>
+      <div class="venc-card">
+        <div class="venc-cal-toolbar">
+          <div class="venc-cal-nav">
+            <button onclick="vencCambiarMes(-1)" aria-label="Mes anterior">‹</button>
+            <div class="venc-cal-mes" id="vencMesLabel">—</div>
+            <button onclick="vencCambiarMes(1)" aria-label="Mes siguiente">›</button>
+          </div>
+          <button class="venc-hoy-btn" onclick="vencIrHoy()">Hoy</button>
+        </div>
+        <div class="venc-cal-head"><div>L</div><div>M</div><div>M</div><div>J</div><div>V</div><div>S</div><div>D</div></div>
+        <div class="venc-cal-grid" id="vencCalGrid"></div>
+        <div id="vencimientosLista"></div>
+      </div>
     </div>
 
     <div class="grupo" id="grupoOficina">
@@ -537,20 +565,83 @@ async function cargarNotificaciones(){
   }catch(e){ /* que no rompa la pantalla si falla la campanita */ }
 }
 // Mismos datos que la campanita (GET /api/notificaciones), pero mostrados
-// de entrada en la pantalla principal en vez de esconderlos en un dropdown
-// — pedido de Mato (28/9/2026) para tener los vencimientos a la vista sin
-// tener que abrir la campanita.
-function renderVencimientosPrincipal(){
-  const cont = document.getElementById('vencimientosLista');
-  if (!cont) return;
-  if (!NOTIF_ITEMS.length) { cont.innerHTML = '<div class="notif-empty">Sin vencimientos pendientes 🎉</div>'; return; }
-  cont.innerHTML = NOTIF_ITEMS.map(it => `
-    <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
-      <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
-      <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
-      <div class="notif-item-fecha">Venció el ${notifFmtFecha(it.fecha)}</div>
-    </div>
-  `).join('');
+// de entrada en la pantalla principal como un calendario de mes en vez de
+// escondidos en un dropdown — pedido de Mato (28/9/2026): primero se probó
+// como lista simple, después pidió que sea un calendario con los
+// vencimientos marcados en los días.
+let vencMesActual = new Date(); vencMesActual.setDate(1); vencMesActual.setHours(0, 0, 0, 0);
+let vencDiaSeleccionado = null;
+
+function vencFechaClave(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function vencCambiarMes(delta) {
+  vencMesActual.setMonth(vencMesActual.getMonth() + delta);
+  vencDiaSeleccionado = null;
+  renderVencimientosPrincipal();
+}
+function vencIrHoy() {
+  const hoy = new Date();
+  vencMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  vencDiaSeleccionado = vencFechaClave(hoy);
+  renderVencimientosPrincipal();
+}
+function vencVerDia(clave) {
+  vencDiaSeleccionado = (vencDiaSeleccionado === clave) ? null : clave;
+  renderVencimientosPrincipal();
+}
+function renderVencimientosPrincipal() {
+  const gridEl = document.getElementById('vencCalGrid');
+  const labelEl = document.getElementById('vencMesLabel');
+  const listaEl = document.getElementById('vencimientosLista');
+  if (!gridEl) return;
+
+  const porDia = {};
+  NOTIF_ITEMS.forEach(it => {
+    const d = new Date(it.fecha);
+    if (isNaN(d.getTime())) return;
+    const clave = vencFechaClave(d);
+    (porDia[clave] = porDia[clave] || []).push(it);
+  });
+
+  labelEl.textContent = vencMesActual.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+
+  const primerDiaSemana = (vencMesActual.getDay() + 6) % 7; // lunes=0
+  const inicioGrid = new Date(vencMesActual);
+  inicioGrid.setDate(1 - primerDiaSemana);
+  const hoyClave = vencFechaClave(new Date());
+
+  let celdas = '';
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(inicioGrid);
+    d.setDate(inicioGrid.getDate() + i);
+    const clave = vencFechaClave(d);
+    const fuera = d.getMonth() !== vencMesActual.getMonth();
+    const items = porDia[clave] || [];
+    celdas += `
+      <div class="venc-dia ${fuera ? 'fuera' : ''} ${clave === hoyClave ? 'hoy' : ''} ${clave === vencDiaSeleccionado ? 'sel' : ''}" onclick="vencVerDia('${clave}')">
+        <div class="venc-dia-num">${d.getDate()}</div>
+        ${items.length ? `<div class="venc-dia-dot" title="${items.length} vencimiento(s)"></div>` : ''}
+      </div>
+    `;
+    // Corta filas completas ya afuera del mes, después de completar al menos 5 semanas.
+    if (i >= 34 && (i + 1) % 7 === 0 && new Date(inicioGrid.getTime() + (i + 1) * 86400000).getMonth() !== vencMesActual.getMonth()) break;
+  }
+  gridEl.innerHTML = celdas;
+
+  if (vencDiaSeleccionado) {
+    const items = porDia[vencDiaSeleccionado] || [];
+    listaEl.innerHTML = items.length ? items.map(it => `
+      <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
+        <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
+        <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
+      </div>
+    `).join('') : '<div class="venc-detalle-vacio">Sin vencimientos ese día.</div>';
+  } else {
+    listaEl.innerHTML = NOTIF_ITEMS.length
+      ? `<div class="venc-detalle-vacio">Tocá un día marcado para ver el detalle — hay ${NOTIF_ITEMS.length} vencimiento${NOTIF_ITEMS.length===1?'':'s'} en total.</div>`
+      : '<div class="venc-detalle-vacio">Sin vencimientos pendientes 🎉</div>';
+  }
 }
 function renderNotifBadge(){
   const badge = document.getElementById('notifBadge');

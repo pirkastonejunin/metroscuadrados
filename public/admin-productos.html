@@ -130,8 +130,8 @@
     </div>
     <div class="card">
       <table>
-        <thead><tr><th>Producto</th><th>SKU</th><th>Rubro</th><th>Unidad</th><th>Precio</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="productosBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
+        <thead><tr><th>SKU</th><th>Producto</th><th>Rubro / Marca</th><th>Unidad</th><th>Precio</th><th>Tipo</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="productosBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
       </table>
     </div>
   </main>
@@ -232,20 +232,24 @@ async function cargarProductos(){
   if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
   const body = document.getElementById('productosBody');
-  if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
   productosCache = await r.json();
   renderProductos();
 }
+
+const TIPO_PRODUCTO_LABEL = { simple: 'Simple', combo: 'Combo', produccion: 'De producción' };
+
 function renderProductos(){
   const body = document.getElementById('productosBody');
-  if (!productosCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay productos todavía.</td></tr>'; return; }
+  if (!productosCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay productos todavía.</td></tr>'; return; }
   body.innerHTML = productosCache.map(p => `
     <tr>
-      <td><strong>${escapeHtml(p.nombre)}</strong>${p.notas ? `<div class="muted">${escapeHtml(p.notas)}</div>` : ''}</td>
-      <td class="muted">${p.sku ? escapeHtml(p.sku) : '—'}</td>
-      <td class="muted">${p.rubro ? escapeHtml(p.rubro) : '—'}</td>
+      <td><strong>${escapeHtml(p.sku)}</strong></td>
+      <td>${escapeHtml(p.nombre)}${p.descripcion ? `<div class="muted">${escapeHtml(p.descripcion)}</div>` : ''}</td>
+      <td class="muted">${[p.rubro, p.marca].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
       <td class="muted">${escapeHtml(p.unidad)}</td>
       <td>${money(p.precio)}</td>
+      <td class="muted">${TIPO_PRODUCTO_LABEL[p.tipoProducto] || 'Simple'}</td>
       <td><span class="pill ${p.activo === false ? 'inactivo' : 'activo'}">${p.activo === false ? 'Inactivo' : 'Activo'}</span></td>
       <td>
         <button class="btn small secondary" onclick="abrirEditarProducto('${p._id}')">Editar</button>
@@ -259,25 +263,80 @@ const UNIDADES = [
   {v:'unidad', l:'Unidad'}, {v:'m2', l:'m²'}, {v:'ml', l:'Metro lineal'},
   {v:'kg', l:'Kilo'}, {v:'litro', l:'Litro'}, {v:'paquete', l:'Paquete'}, {v:'jornal', l:'Jornal'}
 ];
-function opcionesUnidad(seleccionada){
-  return UNIDADES.map(u => `<option value="${u.v}" ${u.v===seleccionada?'selected':''}>${u.l}</option>`).join('');
+const TIPOS_UNIDAD = [
+  {v:'unidad', l:'Unidad'}, {v:'peso', l:'Peso'}, {v:'longitud', l:'Longitud'},
+  {v:'capacidad', l:'Capacidad'}, {v:'superficie', l:'Superficie'}, {v:'tiempo', l:'Tiempo'}, {v:'volumen', l:'Volumen'}
+];
+const DISPONIBLE_PARA = [{v:'todos', l:'Ventas y compras'}, {v:'ventas', l:'Solo ventas'}, {v:'compras', l:'Solo compras'}];
+const MONEDAS = [{v:'ARS', l:'Pesos ($)'}, {v:'USD', l:'Dólares (US$)'}];
+const TIPOS_PRODUCTO = [{v:'simple', l:'Simple'}, {v:'combo', l:'Combo'}, {v:'produccion', l:'De producción'}];
+
+function opciones(lista, seleccionada){
+  return lista.map(u => `<option value="${u.v}" ${u.v===seleccionada?'selected':''}>${u.l}</option>`).join('');
 }
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 
+// Campos alineados con la ficha de producto de Dux (ver productos.js) para
+// que migrar sea directo — se cargan los mismos datos y de ahí en más se
+// sacan o agregan según haga falta.
 function formularioProducto(p){
   p = p || {};
   return `
-    <div class="grid2">
-      <div><label>Nombre *</label><input id="fpNombre" value="${escapeHtml(p.nombre||'')}"></div>
-      <div><label>SKU (opcional)</label><input id="fpSku" value="${escapeHtml(p.sku||'')}" placeholder="Vincula con Tiendanube/Cotizador/Dux"></div>
+    <div class="section-title">Datos básicos</div>
+    <div class="grid3">
+      <div><label>SKU / Código *</label><input id="fpSku" value="${escapeHtml(p.sku||'')}" placeholder="Igual al Código en Dux"></div>
+      <div style="grid-column:span 2"><label>Nombre / Producto *</label><input id="fpNombre" value="${escapeHtml(p.nombre||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
       <div><label>Rubro</label><input id="fpRubro" list="listaRubros" value="${escapeHtml(p.rubro||'')}" placeholder="Ej: Revestimientos Piedra"></div>
-      <div><label>Unidad</label><select id="fpUnidad">${opcionesUnidad(p.unidad||'unidad')}</select></div>
-      <div><label>Precio de venta</label><input id="fpPrecio" type="number" min="0" step="0.01" value="${p.precio!=null?p.precio:''}"></div>
+      <div><label>Subrubro</label><input id="fpSubrubro" value="${escapeHtml(p.subrubro||'')}"></div>
+      <div><label>Marca</label><input id="fpMarca" value="${escapeHtml(p.marca||'')}"></div>
     </div>
-    <div style="margin-top:10px"><label>Notas</label><textarea id="fpNotas">${escapeHtml(p.notas||'')}</textarea></div>
+    <div style="margin-top:10px"><label>Descripción</label><textarea id="fpDescripcion">${escapeHtml(p.descripcion||'')}</textarea></div>
+
+    <div class="section-title" style="margin-top:16px">Unidad y precio</div>
+    <div class="grid3">
+      <div><label>Tipo de unidad</label><select id="fpTipoUnidad">${opciones(TIPOS_UNIDAD, p.tipoUnidad||'unidad')}</select></div>
+      <div><label>Unidad de medida</label><select id="fpUnidad">${opciones(UNIDADES, p.unidad||'unidad')}</select></div>
+      <div><label>Moneda</label><select id="fpMoneda">${opciones(MONEDAS, p.moneda||'ARS')}</select></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Precio de venta</label><input id="fpPrecio" type="number" min="0" step="0.01" value="${p.precio!=null?p.precio:''}"></div>
+      <div><label>Costo</label><input id="fpCosto" type="number" min="0" step="0.01" value="${p.costo!=null?p.costo:''}"></div>
+      <div><label>% IVA</label><input id="fpPorcentajeIva" type="number" min="0" step="0.01" value="${p.porcentajeIva!=null?p.porcentajeIva:21}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Impuesto interno</label><input id="fpImpuestoInterno" type="number" min="0" step="0.01" value="${p.impuestoInterno!=null?p.impuestoInterno:''}"></div>
+      <div><label>Disponible para</label><select id="fpDisponiblePara">${opciones(DISPONIBLE_PARA, p.disponiblePara||'todos')}</select></div>
+      <div><label>Tipo de producto</label><select id="fpTipoProducto">${opciones(TIPOS_PRODUCTO, p.tipoProducto||'simple')}</select></div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px">Código, proveedor y empaque</div>
+    <div class="grid3">
+      <div><label>Código de barra</label><input id="fpCodigoBarra" value="${escapeHtml(p.codigoBarra||'')}"></div>
+      <div><label>Código externo (proveedor)</label><input id="fpCodigoExterno" value="${escapeHtml(p.codigoExterno||'')}"></div>
+      <div><label>Proveedor</label><input id="fpProveedor" value="${escapeHtml(p.proveedor||'')}" placeholder="Texto libre por ahora"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Vencimiento (informativo)</label><input id="fpFechaVencimiento" type="date" value="${p.fechaVencimiento ? String(p.fechaVencimiento).slice(0,10) : ''}"></div>
+      <div><label>Unidades por bulto</label><input id="fpUnidadesPorBulto" type="number" min="0" step="1" value="${p.unidadesPorBulto!=null?p.unidadesPorBulto:''}"></div>
+      <div><label>Mostrar embalaje</label><input id="fpEmbalaje" value="${escapeHtml(p.embalaje||'')}"></div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px">Opciones</div>
+    <div class="grid3">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text)"><input type="checkbox" id="fpStockeable" style="width:auto" ${p.stockeable!==false?'checked':''}> Stockeable</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text)"><input type="checkbox" id="fpAceptaStockNegativo" style="width:auto" ${p.aceptaStockNegativo?'checked':''}> Acepta stock negativo</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text)"><input type="checkbox" id="fpTrazable" style="width:auto" ${p.trazable?'checked':''}> Trazable</label>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text)"><input type="checkbox" id="fpUtilizaVariantes" style="width:auto" ${p.utilizaVariantes?'checked':''}> Usa variantes (talle/color)</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text)"><input type="checkbox" id="fpIndicaCtdBultos" style="width:auto" ${p.indicaCtdBultos?'checked':''}> Indica cantidad de bultos</label>
+    </div>
+    <p class="muted" id="avisoVariantes" style="${p.utilizaVariantes?'':'display:none'}">Los atributos de variante (talle, color, etc.) todavía no se cargan acá — se suman en una próxima etapa. Por ahora este checkbox solo queda guardado como referencia.</p>
+
+    <div style="margin-top:10px"><label>Notas internas</label><textarea id="fpNotas">${escapeHtml(p.notas||'')}</textarea></div>
     <datalist id="listaRubros">${[...new Set(productosCache.map(x=>x.rubro).filter(Boolean))].map(rb=>`<option value="${escapeHtml(rb)}">`).join('')}</datalist>
   `;
 }
@@ -285,7 +344,7 @@ function formularioProducto(p){
 function abrirNuevoProducto(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
-      <div class="modal">
+      <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo producto</h2>
         ${formularioProducto()}
@@ -294,21 +353,46 @@ function abrirNuevoProducto(){
       </div>
     </div>
   `;
+  document.getElementById('fpUtilizaVariantes').addEventListener('change', function(){
+    document.getElementById('avisoVariantes').style.display = this.checked ? '' : 'none';
+  });
 }
 
 function leerFormularioProducto(){
   return {
-    nombre: document.getElementById('fpNombre').value.trim(),
     sku: document.getElementById('fpSku').value.trim(),
+    nombre: document.getElementById('fpNombre').value.trim(),
     rubro: document.getElementById('fpRubro').value.trim(),
+    subrubro: document.getElementById('fpSubrubro').value.trim(),
+    marca: document.getElementById('fpMarca').value.trim(),
+    descripcion: document.getElementById('fpDescripcion').value.trim(),
+    tipoUnidad: document.getElementById('fpTipoUnidad').value,
     unidad: document.getElementById('fpUnidad').value,
+    moneda: document.getElementById('fpMoneda').value,
     precio: document.getElementById('fpPrecio').value,
+    costo: document.getElementById('fpCosto').value,
+    porcentajeIva: document.getElementById('fpPorcentajeIva').value,
+    impuestoInterno: document.getElementById('fpImpuestoInterno').value,
+    disponiblePara: document.getElementById('fpDisponiblePara').value,
+    tipoProducto: document.getElementById('fpTipoProducto').value,
+    codigoBarra: document.getElementById('fpCodigoBarra').value.trim(),
+    codigoExterno: document.getElementById('fpCodigoExterno').value.trim(),
+    proveedor: document.getElementById('fpProveedor').value.trim(),
+    fechaVencimiento: document.getElementById('fpFechaVencimiento').value,
+    unidadesPorBulto: document.getElementById('fpUnidadesPorBulto').value,
+    embalaje: document.getElementById('fpEmbalaje').value.trim(),
+    stockeable: document.getElementById('fpStockeable').checked,
+    aceptaStockNegativo: document.getElementById('fpAceptaStockNegativo').checked,
+    trazable: document.getElementById('fpTrazable').checked,
+    utilizaVariantes: document.getElementById('fpUtilizaVariantes').checked,
+    indicaCtdBultos: document.getElementById('fpIndicaCtdBultos').checked,
     notas: document.getElementById('fpNotas').value.trim()
   };
 }
 
 async function guardarNuevoProducto(){
   const body = leerFormularioProducto();
+  if (!body.sku) { document.getElementById('fpErr').textContent = 'El SKU (código) es obligatorio'; return; }
   if (!body.nombre) { document.getElementById('fpErr').textContent = 'El nombre es obligatorio'; return; }
   try{
     const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
@@ -327,7 +411,7 @@ function abrirEditarProducto(id){
   if (!p) return;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
-      <div class="modal">
+      <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar producto</h2>
         ${formularioProducto(p)}
@@ -336,10 +420,14 @@ function abrirEditarProducto(id){
       </div>
     </div>
   `;
+  document.getElementById('fpUtilizaVariantes').addEventListener('change', function(){
+    document.getElementById('avisoVariantes').style.display = this.checked ? '' : 'none';
+  });
 }
 
 async function guardarEdicionProducto(id){
   const body = leerFormularioProducto();
+  if (!body.sku) { document.getElementById('fpErr').textContent = 'El SKU (código) es obligatorio'; return; }
   if (!body.nombre) { document.getElementById('fpErr').textContent = 'El nombre es obligatorio'; return; }
   try{
     const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
