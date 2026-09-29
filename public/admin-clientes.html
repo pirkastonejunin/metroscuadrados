@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clientes - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{min-height:50px;font-family:inherit;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.activo{background:var(--ok-soft);color:var(--ok);}
+  .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
+  .modal.wide{max-width:920px;}
+  .modal h2{margin-top:0;font-size:16px;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Clientes</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Clientes. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <h1>Clientes</h1>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="flex:1">
+          <div style="min-width:220px;flex:1">
+            <label>Buscar (nombre, código, CUIT o documento)</label>
+            <input id="fBusqueda" oninput="cargarClientes()" placeholder="Ej: Pérez, 20-12345678-9">
+          </div>
+          <div>
+            <label style="visibility:hidden">.</label>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);white-space:nowrap">
+              <input type="checkbox" id="fInactivos" style="width:auto" onchange="cargarClientes()"> Ver inactivos
+            </label>
+          </div>
+        </div>
+        <button class="btn" onclick="abrirNuevoCliente()">+ Nuevo cliente</button>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Código</th><th>Cliente</th><th>Categoría fiscal</th><th>CUIT / Doc.</th><th>Contacto</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="clientesBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/clientes';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+let NOMBRE_USUARIO = '';
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('clientes'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'clientes', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  await cargarClientes();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+let clientesCache = [];
+async function cargarClientes(){
+  const params = new URLSearchParams();
+  if (document.getElementById('fBusqueda').value.trim()) params.set('q', document.getElementById('fBusqueda').value.trim());
+  if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
+  const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
+  const body = document.getElementById('clientesBody');
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
+  clientesCache = await r.json();
+  renderClientes();
+}
+
+const CATEGORIA_FISCAL_LABEL = {
+  consumidor_final: 'Consumidor final', exento: 'Exento', monotributista: 'Monotributista',
+  responsable_inscripto: 'Responsable Inscripto', exterior: 'Exterior', iva_no_alcanzado: 'IVA no alcanzado'
+};
+const TIPO_DOCUMENTO_LABEL = { cuil: 'CUIL', cuit: 'CUIT', dni: 'DNI', pasaporte: 'Pasaporte' };
+
+function renderClientes(){
+  const body = document.getElementById('clientesBody');
+  if (!clientesCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay clientes todavía.</td></tr>'; return; }
+  body.innerHTML = clientesCache.map(c => `
+    <tr>
+      <td><strong>${escapeHtml(c.codigo || '—')}</strong></td>
+      <td>${escapeHtml(c.apellidoRazonSocial)}${c.nombre ? ' ' + escapeHtml(c.nombre) : ''}${c.nombreFantasia ? `<div class="muted">${escapeHtml(c.nombreFantasia)}</div>` : ''}</td>
+      <td class="muted">${CATEGORIA_FISCAL_LABEL[c.categoriaFiscal] || '—'}</td>
+      <td class="muted">${c.cuit ? escapeHtml(c.cuit) : (c.numeroDocumento ? `${TIPO_DOCUMENTO_LABEL[c.tipoDocumento]||'Doc.'} ${escapeHtml(c.numeroDocumento)}` : '—')}</td>
+      <td class="muted">${[c.telefono || c.celular, c.email].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
+      <td><span class="pill ${c.activo === false ? 'inactivo' : 'activo'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span></td>
+      <td>
+        <button class="btn small secondary" onclick="abrirEditarCliente('${c._id}')">Editar</button>
+        ${c.activo === false ? '' : `<button class="btn small danger" onclick="desactivarCliente('${c._id}', '${escapeHtml(c.apellidoRazonSocial).replace(/'/g,"\\'")}')">Desactivar</button>`}
+      </td>
+    </tr>
+  `).join('');
+}
+
+const SEXOS = [{v:'', l:'Sin especificar'}, {v:'femenino', l:'Femenino'}, {v:'masculino', l:'Masculino'}];
+const CATEGORIAS_FISCALES = [
+  {v:'consumidor_final', l:'Consumidor final'}, {v:'exento', l:'Exento'}, {v:'monotributista', l:'Monotributista'},
+  {v:'responsable_inscripto', l:'Responsable Inscripto'}, {v:'exterior', l:'Exterior'}, {v:'iva_no_alcanzado', l:'IVA no alcanzado'}
+];
+const TIPOS_DOCUMENTO = [{v:'', l:'Sin especificar'}, {v:'dni', l:'DNI'}, {v:'cuit', l:'CUIT'}, {v:'cuil', l:'CUIL'}, {v:'pasaporte', l:'Pasaporte'}];
+const TIPOS_COMPROBANTE = [{v:'', l:'Sin especificar'}, {v:'comprobante_venta', l:'Comprobante de venta'}, {v:'factura', l:'Factura'}];
+
+function opciones(lista, seleccionada){
+  return lista.map(u => `<option value="${u.v}" ${u.v===(seleccionada||'')?'selected':''}>${u.l}</option>`).join('');
+}
+
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+// Campos alineados con la ficha de cliente de Dux (ver clientes.js) para que
+// migrar sea directo — se cargan los mismos datos y de ahí en más se sacan o
+// agregan según haga falta. A diferencia de Productos, acá solo Apellido/
+// Razón social y Categoría fiscal son obligatorios, igual que en Dux.
+function formularioCliente(c){
+  c = c || {};
+  return `
+    <div class="section-title">Datos personales</div>
+    <div class="grid3">
+      <div style="grid-column:span 2"><label>Apellido / Razón social *</label><input id="fcApellidoRazonSocial" value="${escapeHtml(c.apellidoRazonSocial||'')}"></div>
+      <div><label>Código</label><input id="fcCodigo" value="${escapeHtml(c.codigo||'')}" placeholder="Igual al Código en Dux"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Nombre</label><input id="fcNombre" value="${escapeHtml(c.nombre||'')}"></div>
+      <div><label>Nombre de fantasía</label><input id="fcNombreFantasia" value="${escapeHtml(c.nombreFantasia||'')}"></div>
+      <div><label>Sexo</label><select id="fcSexo">${opciones(SEXOS, c.sexo)}</select></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Tipo de cliente</label><input id="fcTipoCliente" value="${escapeHtml(c.tipoCliente||'')}" placeholder="Ej: Minorista, Mayorista"></div>
+      <div><label>Origen del cliente</label><input id="fcOrigenCliente" value="${escapeHtml(c.origenCliente||'')}" placeholder="Ej: Showroom, Referido"></div>
+      <div><label>Fecha de nacimiento</label><input id="fcFechaNacimiento" type="date" value="${c.fechaNacimiento ? String(c.fechaNacimiento).slice(0,10) : ''}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Límite cta. cte. en facturación</label><input id="fcLimiteCtaCteFacturacion" type="number" min="0" step="0.01" value="${c.limiteCtaCteFacturacion!=null?c.limiteCtaCteFacturacion:''}"></div>
+      <div><label>Límite cta. cte. en pedido</label><input id="fcLimiteCtaCtePedido" type="number" min="0" step="0.01" value="${c.limiteCtaCtePedido!=null?c.limiteCtaCtePedido:''}"></div>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);margin-top:18px"><input type="checkbox" id="fcNoEditable" style="width:auto" ${c.noEditable?'checked':''}> No editable</label>
+    </div>
+
+    <div class="section-title" style="margin-top:16px">Datos de facturación</div>
+    <div class="grid3">
+      <div><label>Categoría fiscal *</label><select id="fcCategoriaFiscal">${opciones(CATEGORIAS_FISCALES, c.categoriaFiscal)}</select></div>
+      <div><label>Tipo documento</label><select id="fcTipoDocumento">${opciones(TIPOS_DOCUMENTO, c.tipoDocumento)}</select></div>
+      <div><label>Número documento</label><input id="fcNumeroDocumento" value="${escapeHtml(c.numeroDocumento||'')}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>CUIT / CUIL</label><input id="fcCuit" value="${escapeHtml(c.cuit||'')}" placeholder="20-12345678-9"></div>
+      <div><label>Lista de precio por defecto</label><input id="fcListaPrecioPorDefecto" value="${escapeHtml(c.listaPrecioPorDefecto||'')}"></div>
+      <div><label>Condición de pago</label><input id="fcCondicionPago" value="${escapeHtml(c.condicionPago||'')}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>% de descuento</label><input id="fcPorcentajeDescuento" type="number" min="0" step="0.01" value="${c.porcentajeDescuento!=null?c.porcentajeDescuento:''}"></div>
+      <div><label>Vendedor</label><input id="fcVendedor" value="${escapeHtml(c.vendedor||'')}"></div>
+      <div><label>Tipo de comprobante por defecto</label><select id="fcTipoComprobantePorDefecto">${opciones(TIPOS_COMPROBANTE, c.tipoComprobantePorDefecto)}</select></div>
+    </div>
+    <div class="grid2" style="margin-top:10px">
+      <div><label>Transporte de entrega por defecto</label><input id="fcTransporteEntregaPorDefecto" value="${escapeHtml(c.transporteEntregaPorDefecto||'')}"></div>
+      <div><label>Lugar de entrega por defecto</label><input id="fcLugarEntregaPorDefecto" value="${escapeHtml(c.lugarEntregaPorDefecto||'')}"></div>
+    </div>
+
+    <div class="section-title" style="margin-top:16px">Datos de contacto</div>
+    <div class="grid3">
+      <div><label>Provincia</label><input id="fcProvincia" value="${escapeHtml(c.provincia||'')}"></div>
+      <div><label>Localidad</label><input id="fcLocalidad" value="${escapeHtml(c.localidad||'')}"></div>
+      <div><label>Código postal</label><input id="fcCodigoPostal" value="${escapeHtml(c.codigoPostal||'')}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div style="grid-column:span 2"><label>Domicilio</label><input id="fcDomicilio" value="${escapeHtml(c.domicilio||'')}"></div>
+      <div><label>Barrio</label><input id="fcBarrio" value="${escapeHtml(c.barrio||'')}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Zona</label><input id="fcZona" value="${escapeHtml(c.zona||'')}"></div>
+      <div><label>Teléfono</label><input id="fcTelefono" value="${escapeHtml(c.telefono||'')}"></div>
+      <div><label>Fax</label><input id="fcFax" value="${escapeHtml(c.fax||'')}"></div>
+    </div>
+    <div class="grid3" style="margin-top:10px">
+      <div><label>Compañía celular</label><input id="fcCompaniaCelular" value="${escapeHtml(c.companiaCelular||'')}"></div>
+      <div><label>Celular</label><input id="fcCelular" value="${escapeHtml(c.celular||'')}"></div>
+      <div><label>Persona de contacto</label><input id="fcPersonaContacto" value="${escapeHtml(c.personaContacto||'')}"></div>
+    </div>
+    <div class="grid2" style="margin-top:10px">
+      <div><label>Correo electrónico</label><input id="fcEmail" type="email" value="${escapeHtml(c.email||'')}"></div>
+      <div><label>Página web</label><input id="fcPaginaWeb" value="${escapeHtml(c.paginaWeb||'')}"></div>
+    </div>
+    <div style="margin-top:10px"><label>Observaciones (internas)</label><textarea id="fcObservaciones">${escapeHtml(c.observaciones||'')}</textarea></div>
+    <div style="margin-top:10px"><label>Descripción (interna)</label><textarea id="fcDescripcion">${escapeHtml(c.descripcion||'')}</textarea></div>
+    <div style="margin-top:10px"><label>Notas internas</label><textarea id="fcNotas">${escapeHtml(c.notas||'')}</textarea></div>
+  `;
+}
+
+function abrirNuevoCliente(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Nuevo cliente</h2>
+        ${formularioCliente()}
+        <div class="err" id="fcErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarNuevoCliente()">Guardar</button>
+      </div>
+    </div>
+  `;
+}
+
+function leerFormularioCliente(){
+  return {
+    codigo: document.getElementById('fcCodigo').value.trim(),
+    apellidoRazonSocial: document.getElementById('fcApellidoRazonSocial').value.trim(),
+    nombre: document.getElementById('fcNombre').value.trim(),
+    nombreFantasia: document.getElementById('fcNombreFantasia').value.trim(),
+    sexo: document.getElementById('fcSexo').value,
+    tipoCliente: document.getElementById('fcTipoCliente').value.trim(),
+    origenCliente: document.getElementById('fcOrigenCliente').value.trim(),
+    fechaNacimiento: document.getElementById('fcFechaNacimiento').value,
+    noEditable: document.getElementById('fcNoEditable').checked,
+    limiteCtaCteFacturacion: document.getElementById('fcLimiteCtaCteFacturacion').value,
+    limiteCtaCtePedido: document.getElementById('fcLimiteCtaCtePedido').value,
+    categoriaFiscal: document.getElementById('fcCategoriaFiscal').value,
+    tipoDocumento: document.getElementById('fcTipoDocumento').value,
+    numeroDocumento: document.getElementById('fcNumeroDocumento').value.trim(),
+    cuit: document.getElementById('fcCuit').value.trim(),
+    listaPrecioPorDefecto: document.getElementById('fcListaPrecioPorDefecto').value.trim(),
+    condicionPago: document.getElementById('fcCondicionPago').value.trim(),
+    porcentajeDescuento: document.getElementById('fcPorcentajeDescuento').value,
+    vendedor: document.getElementById('fcVendedor').value.trim(),
+    tipoComprobantePorDefecto: document.getElementById('fcTipoComprobantePorDefecto').value,
+    transporteEntregaPorDefecto: document.getElementById('fcTransporteEntregaPorDefecto').value.trim(),
+    lugarEntregaPorDefecto: document.getElementById('fcLugarEntregaPorDefecto').value.trim(),
+    provincia: document.getElementById('fcProvincia').value.trim(),
+    localidad: document.getElementById('fcLocalidad').value.trim(),
+    domicilio: document.getElementById('fcDomicilio').value.trim(),
+    barrio: document.getElementById('fcBarrio').value.trim(),
+    codigoPostal: document.getElementById('fcCodigoPostal').value.trim(),
+    zona: document.getElementById('fcZona').value.trim(),
+    telefono: document.getElementById('fcTelefono').value.trim(),
+    fax: document.getElementById('fcFax').value.trim(),
+    companiaCelular: document.getElementById('fcCompaniaCelular').value.trim(),
+    celular: document.getElementById('fcCelular').value.trim(),
+    personaContacto: document.getElementById('fcPersonaContacto').value.trim(),
+    email: document.getElementById('fcEmail').value.trim(),
+    paginaWeb: document.getElementById('fcPaginaWeb').value.trim(),
+    observaciones: document.getElementById('fcObservaciones').value.trim(),
+    descripcion: document.getElementById('fcDescripcion').value.trim(),
+    notas: document.getElementById('fcNotas').value.trim()
+  };
+}
+
+async function guardarNuevoCliente(){
+  const body = leerFormularioCliente();
+  if (!body.apellidoRazonSocial) { document.getElementById('fcErr').textContent = 'El apellido / razón social es obligatorio'; return; }
+  if (!body.categoriaFiscal) { document.getElementById('fcErr').textContent = 'La categoría fiscal es obligatoria'; return; }
+  try{
+    const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal();
+    await cargarClientes();
+  }catch(e){
+    document.getElementById('fcErr').textContent = e.message;
+  }
+}
+
+function abrirEditarCliente(id){
+  const c = clientesCache.find(x => x._id === id);
+  if (!c) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Editar cliente</h2>
+        ${formularioCliente(c)}
+        <div class="err" id="fcErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarEdicionCliente('${id}')">Guardar cambios</button>
+      </div>
+    </div>
+  `;
+}
+
+async function guardarEdicionCliente(id){
+  const body = leerFormularioCliente();
+  if (!body.apellidoRazonSocial) { document.getElementById('fcErr').textContent = 'El apellido / razón social es obligatorio'; return; }
+  if (!body.categoriaFiscal) { document.getElementById('fcErr').textContent = 'La categoría fiscal es obligatoria'; return; }
+  try{
+    const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal();
+    await cargarClientes();
+  }catch(e){
+    document.getElementById('fcErr').textContent = e.message;
+  }
+}
+
+async function desactivarCliente(id, nombre){
+  if (!confirm(`¿Desactivar "${nombre}"? No se borra, pero deja de aparecer en las listas normales.`)) return;
+  try{
+    const r = await fetch(BASE + '/' + id, {method:'DELETE', headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarClientes();
+  }catch(e){
+    alert(e.message);
+  }
+}
+</script>
+</body>
+</html>

@@ -35,7 +35,8 @@
     salir: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
     chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>',
     fabrica: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V10l6 4v-4l6 4v-4l6 4v7z"/><line x1="3" y1="21" x2="21" y2="21"/></svg>',
-    productos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>'
+    productos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>',
+    clientes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M22 21v-2a4 4 0 00-3-3.87"/><path d="M15 3.13a4 4 0 010 7.75"/></svg>'
   };
 
   function slug(s) {
@@ -49,6 +50,7 @@
     ]},
     { nombre: 'Comercial', items: [
       { key: 'visitas', href: '/admin-visitas.html', modulo: 'visitas', label: 'Panel de Visitas', icon: ICONOS.visitas },
+      { key: 'clientes', href: '/admin-clientes.html', modulo: 'clientes', label: 'Clientes', icon: ICONOS.clientes },
       { key: 'calendario', href: '/calendario.html', modulo: 'visitas,obras', label: 'Calendario', icon: ICONOS.calendario },
       { key: 'obras', href: '/admin-obras.html', modulo: 'obras', label: 'Panel de Obras', icon: ICONOS.obras },
       { key: 'mis-visitas', href: '/vendedor.html', requiereVendedor: true, label: 'Mis visitas', icon: ICONOS.misVisitas },
