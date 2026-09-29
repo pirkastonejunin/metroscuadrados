@@ -59,7 +59,9 @@
       { key: 'mis-obras', href: '/colocador.html', soloAdmin: true, label: 'Mis obras', icon: ICONOS.obras }
     ]},
     { nombre: 'Inventario', items: [
-      { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos },
+      { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos }
+    ]},
+    { nombre: 'Proveedores', items: [
       { key: 'proveedores', href: '/admin-proveedores.html', modulo: 'proveedores', label: 'Proveedores', icon: ICONOS.proveedores }
     ]},
     { nombre: 'Configuración', items: [
