@@ -324,6 +324,12 @@ function formularioProducto(p){
       <div><label>Mostrar embalaje</label><input id="fpEmbalaje" value="${escapeHtml(p.embalaje||'')}"></div>
     </div>
 
+    <div class="section-title" style="margin-top:16px">Stock</div>
+    <div class="grid3">
+      <div><label>Cantidad mínima</label><input id="fpCantidadMinima" type="number" min="0" step="0.01" value="${p.cantidadMinima!=null?p.cantidadMinima:''}" placeholder="Avisa cuando el stock baja de acá"></div>
+      <div><label>Stock ideal</label><input id="fpStockIdeal" type="number" min="0" step="0.01" value="${p.stockIdeal!=null?p.stockIdeal:''}"></div>
+    </div>
+
     <div class="section-title" style="margin-top:16px">Opciones</div>
     <div class="grid3">
       <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text)"><input type="checkbox" id="fpStockeable" style="width:auto" ${p.stockeable!==false?'checked':''}> Stockeable</label>
@@ -381,6 +387,8 @@ function leerFormularioProducto(){
     fechaVencimiento: document.getElementById('fpFechaVencimiento').value,
     unidadesPorBulto: document.getElementById('fpUnidadesPorBulto').value,
     embalaje: document.getElementById('fpEmbalaje').value.trim(),
+    cantidadMinima: document.getElementById('fpCantidadMinima').value,
+    stockIdeal: document.getElementById('fpStockIdeal').value,
     stockeable: document.getElementById('fpStockeable').checked,
     aceptaStockNegativo: document.getElementById('fpAceptaStockNegativo').checked,
     trazable: document.getElementById('fpTrazable').checked,

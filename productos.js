@@ -33,15 +33,24 @@
 //
 // V1 — a propósito afuera de esta primera versión (se suma después, sin
 // romper lo de acá):
-//   - Sin atributos/variantes (talle, color) — Mato pidió sumarlos
-//     después; `utilizaVariantes` queda como flag preparado, pero sin
-//     sub-esquema de variantes todavía.
-//   - Sin stock/depósitos ni movimientos ni "otros costos" (necesitan
-//     configuración previa en Dux) — eso es la siguiente etapa ("Stock").
+//   - Sin atributos/variantes (talle, color) — Mato decidió (29/9/2026)
+//     que esto no hace falta, Piedra Negra no vende por talle/color, así
+//     que esto queda descartado (no solo pospuesto). `utilizaVariantes`
+//     sigue existiendo como flag por si algún día hiciera falta, pero no
+//     se va a construir el sub-esquema de variantes.
+//   - Sin "otros costos" (necesitan configuración previa en Dux).
 //   - Sin vínculo real con proveedores (`proveedor` es texto libre) — el
-//     módulo de Proveedores todavía no existe.
+//     módulo de Proveedores ya existe (`proveedores.js`) pero todavía no
+//     se conectó acá con un `proveedorId`.
 //   - Sin listas de precio propias (a diferencia de Costos de
 //     Producción) — un solo precio de venta por producto por ahora.
+//
+// Actualización (29/9/2026, módulo Stock): se suman `cantidadMinima` y
+// `stockIdeal` — son campos que Dux ya trae en la ficha de producto y que
+// se habían dejado afuera a propósito en la v1 porque son del dominio de
+// Stock. Quedan acá (a nivel producto, no por depósito — simplificación
+// de v1, ver stock.js) para poder marcar "bajo mínimo" en la vista de
+// Stock actual sin duplicar el concepto en otra colección.
 //
 // Relación con costos_productos (Costos de Producción, módulo 'costos'):
 // SON DOS COSAS DISTINTAS a propósito. costos_productos es el costeo
@@ -59,8 +68,8 @@
 //     costo, impuestoInterno, precio, stockeable, aceptaStockNegativo,
 //     trazable, utilizaVariantes, tipoProducto, costoProductoId,
 //     codigoExterno, proveedor, fechaVencimiento, indicaCtdBultos,
-//     unidadesPorBulto, embalaje, descripcion, notas, activo, orgId,
-//     createdAt, updatedAt }
+//     unidadesPorBulto, embalaje, descripcion, notas, cantidadMinima,
+//     stockIdeal, activo, orgId, createdAt, updatedAt }
 //
 // Módulo con clave propia ('productos'), datos separados por organización
 // (mismo mecanismo orgId/resolverOrg/filtroOrg que el resto de la app).
@@ -179,6 +188,8 @@ function validarProducto(body) {
   const porcentajeIva = normalizarPrecioOpcional(body.porcentajeIva, 'El porcentaje de IVA');
   const impuestoInterno = normalizarPrecioOpcional(body.impuestoInterno, 'El impuesto interno');
   const unidadesPorBulto = normalizarPrecioOpcional(body.unidadesPorBulto, 'Las unidades por bulto');
+  const cantidadMinima = normalizarPrecioOpcional(body.cantidadMinima, 'La cantidad mínima');
+  const stockIdeal = normalizarPrecioOpcional(body.stockIdeal, 'El stock ideal');
 
   const fechaVencimiento = normalizarFechaOpcional(body.fechaVencimiento, 'La fecha de vencimiento');
 
@@ -196,7 +207,7 @@ function validarProducto(body) {
     rubro, subrubro, marca, codigoBarra, codigoExterno, proveedor, embalaje, descripcion, notas,
     precio, costo, porcentajeIva, impuestoInterno, unidadesPorBulto, fechaVencimiento,
     stockeable, aceptaStockNegativo, trazable, utilizaVariantes, indicaCtdBultos,
-    costoProductoId
+    costoProductoId, cantidadMinima, stockIdeal
   };
 }
 
