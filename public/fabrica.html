@@ -46,6 +46,8 @@
   .conversion-preview{font-size:12px;color:var(--muted);margin-top:-4px;margin-bottom:8px;}
   .aviso-sku{background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:12px;}
   .aviso-sku b{display:block;margin-bottom:2px;}
+  .aviso-ok{background:var(--ok-soft);color:var(--ok);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:12px;}
+  .aviso-ok b{display:block;margin-bottom:2px;}
   .resumen-box{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;white-space:pre-wrap;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.5;}
   .acciones{display:flex;gap:8px;margin-top:10px;}
   .acciones .btn{flex:1;}
@@ -111,6 +113,16 @@
       <div class="ok-msg" id="formOk"></div>
       <button class="btn" onclick="guardarProduccion()">Guardar carga del día</button>
       <p class="muted" id="ultimaActualizacion" style="margin-top:8px"></p>
+    </div>
+
+    <div class="card" id="cardStock">
+      <h2 class="titulo-seccion">Ingresar a Stock</h2>
+      <div id="avisoStockOk" class="aviso-ok hidden"></div>
+      <div id="avisoStockAvisos" class="aviso-sku hidden"></div>
+      <div class="err" id="stockErr"></div>
+      <label>Depósito</label>
+      <select id="depositoSelect"></select>
+      <button class="btn" id="btnIngresarStock" style="margin-top:10px" onclick="ingresarAStock()">Ingresar producción a stock</button>
     </div>
 
     <div class="card" id="cardResumen">
@@ -196,7 +208,7 @@ function renderOrgSelector(){
 function elegirOrganizacion(orgId){
   ORG = orgId;
   if (orgId) localStorage.setItem(ORG_KEY, orgId); else localStorage.removeItem(ORG_KEY);
-  cargarProductos().then(cargarProduccion);
+  Promise.all([cargarProductos(), cargarDepositos()]).then(cargarProduccion);
 }
 
 function hoyISO(){
@@ -231,6 +243,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('fecha').value = hoyISO();
   await cargarProductos();
+  await cargarDepositos();
   await cargarProduccion();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
@@ -239,6 +252,24 @@ async function cargarProductos(){
   const r = await fetch(BASE + '/productos-produccion', {headers: headersAuth()});
   if (!r.ok) return;
   PRODUCTOS = await r.json();
+}
+
+let DEPOSITOS = [];
+const DEPOSITO_KEY = 'fabrica_deposito_elegido'; // recordado por dispositivo, no por org
+
+async function cargarDepositos(){
+  const r = await fetch(BASE + '/produccion/depositos', {headers: headersAuth()});
+  if (!r.ok) return;
+  DEPOSITOS = await r.json();
+  const select = document.getElementById('depositoSelect');
+  if (!DEPOSITOS.length) {
+    select.innerHTML = '<option value="">No hay depósitos creados — pedile a un administrador que cree uno en Stock.</option>';
+    return;
+  }
+  const recordado = localStorage.getItem(DEPOSITO_KEY);
+  const porDefecto = DEPOSITOS.some(d => String(d._id) === recordado) ? recordado : DEPOSITOS[0]._id;
+  select.innerHTML = DEPOSITOS.map(d => `<option value="${d._id}">${escapeHtml(d.nombre)}</option>`).join('');
+  select.value = porDefecto;
 }
 
 function opcionesProductos(seleccionadoId){
@@ -316,10 +347,39 @@ function generarResumenTexto(fecha, items){
   return `Producción del ${fecha}\n` + lineas.join('\n');
 }
 
+// Refleja en la tarjeta "Ingresar a Stock" el estado que viene de
+// GET/POST /produccion (stockIngresado, depositoId, quién y cuándo).
+function actualizarEstadoStock(data){
+  const okDiv = document.getElementById('avisoStockOk');
+  const btn = document.getElementById('btnIngresarStock');
+  const select = document.getElementById('depositoSelect');
+  const hayItems = !!(data.items && data.items.length);
+  if (data.stockIngresado) {
+    const cuando = data.stockIngresadoEn ? new Date(data.stockIngresadoEn).toLocaleString('es-AR') : '';
+    const quien = data.stockIngresadoPor ? data.stockIngresadoPor.nombre : '';
+    okDiv.innerHTML = '<b>Ya ingresado a stock.</b>' + [quien, cuando].filter(Boolean).join(' — ') +
+      '. Si hace falta corregir, cargá un movimiento de ajuste en el módulo Stock.';
+    okDiv.classList.remove('hidden');
+    btn.disabled = true;
+    btn.textContent = 'Ya ingresado a stock';
+    select.disabled = true;
+  } else {
+    okDiv.classList.add('hidden');
+    btn.disabled = !hayItems;
+    btn.textContent = 'Ingresar producción a stock';
+    select.disabled = false;
+  }
+  if (data.depositoId && DEPOSITOS.some(d => String(d._id) === String(data.depositoId))) {
+    select.value = data.depositoId;
+  }
+}
+
 async function cargarProduccion(){
   const fecha = document.getElementById('fecha').value || hoyISO();
   document.getElementById('formErr').textContent = '';
   document.getElementById('formOk').textContent = '';
+  document.getElementById('stockErr').textContent = '';
+  document.getElementById('avisoStockAvisos').classList.add('hidden');
   const r = await fetch(BASE + '/produccion?fecha=' + encodeURIComponent(fecha), {headers: headersAuth()});
   const data = await r.json();
   if (!r.ok) { document.getElementById('formErr').textContent = data.error || 'No se pudo cargar.'; return; }
@@ -335,6 +395,7 @@ async function cargarProduccion(){
     : '';
   document.getElementById('resumenTexto').textContent = generarResumenTexto(fecha, data.items || []);
   document.getElementById('btnDux').disabled = !(data.items && data.items.some(it => it.sku));
+  actualizarEstadoStock(data);
 }
 
 async function guardarProduccion(){
@@ -354,8 +415,40 @@ async function guardarProduccion(){
       : '';
     document.getElementById('resumenTexto').textContent = generarResumenTexto(fecha, data.items || []);
     document.getElementById('btnDux').disabled = !(data.items && data.items.some(it => it.sku));
+    actualizarEstadoStock(data);
   }catch(e){
     document.getElementById('formErr').textContent = e.message;
+  }
+}
+
+async function ingresarAStock(){
+  const fecha = document.getElementById('fecha').value || hoyISO();
+  const depositoId = document.getElementById('depositoSelect').value;
+  document.getElementById('stockErr').textContent = '';
+  document.getElementById('avisoStockAvisos').classList.add('hidden');
+  if (!depositoId) { document.getElementById('stockErr').textContent = 'Elegí un depósito.'; return; }
+  if (!confirm(`¿Ingresar a stock lo fabricado el ${fecha}? Esta acción no se puede deshacer — una corrección después se hace con un movimiento a mano en Stock.`)) return;
+  const btn = document.getElementById('btnIngresarStock');
+  btn.disabled = true;
+  try{
+    const r = await fetch(BASE + '/produccion/' + encodeURIComponent(fecha) + '/ingresar-stock', {
+      method: 'POST', headers: headersAuthJson(), body: JSON.stringify({ depositoId })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo ingresar a stock.');
+    localStorage.setItem(DEPOSITO_KEY, depositoId);
+    const avisos = [];
+    if (data.sinCatalogo && data.sinCatalogo.length) avisos.push('Sin producto correspondiente en el catálogo de Stock (revisá el SKU): ' + data.sinCatalogo.join(', '));
+    if (data.sinConvertir && data.sinConvertir.length) avisos.push('Sin rendimiento por paquete configurado, no se pudo convertir a stock: ' + data.sinConvertir.join(', '));
+    if (avisos.length) {
+      const div = document.getElementById('avisoStockAvisos');
+      div.innerHTML = '<b>Ingresado con avisos:</b>' + avisos.join(' · ');
+      div.classList.remove('hidden');
+    }
+    await cargarProduccion();
+  }catch(e){
+    document.getElementById('stockErr').textContent = e.message;
+    btn.disabled = false;
   }
 }
 

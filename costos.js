@@ -587,12 +587,41 @@ router.delete('/productos/:id', authAdmin, async (req, res) => {
 //   items: [{ productoId, nombre, sku, tipoCosteo, paquetes,
 //             unidadesPorPaquete, rendimientoPorPaquete, cantidadConvertida,
 //             unidadConvertida }], actualizadoPor: {usuarioId, nombre},
+//   depositoId, stockIngresado, stockIngresadoEn, stockIngresadoPor,
 //   createdAt, updatedAt }
 //
 // Rol dedicado: el módulo 'fabrica' (ver MODULOS en usuarios.js) da acceso
 // SOLO a esto (público en public/fabrica.html) — no al resto de Costos de
 // Producción. Alguien de oficina con el módulo 'costos' también puede
 // entrar acá (authProduccion acepta cualquiera de los dos).
+//
+// Conexión con Stock (pedido de Mato, 29/9/2026, inmediatamente después de
+// construir el módulo Stock): "fábrica debería estar conectado con stock de
+// tal manera que cuando se ingresa el stock fabricado impacte en las
+// cantidades de stock del producto terminado". Reemplaza (para el flujo
+// normal) el archivo de importación manual a Dux, que se deja igual como
+// respaldo por si hace falta.
+//
+// Se implementa como una acción EXPLÍCITA y separada de "Guardar carga del
+// día" — POST /produccion/:fecha/ingresar-stock — en vez de aplicar el
+// impacto en cada guardado. Motivo: la carga del día se puede guardar
+// (POST /produccion) varias veces mientras se va completando/corrigiendo
+// antes de cerrarla, y los movimientos de Stock son un LIBRO INMUTABLE (ver
+// stock.js) — aplicar en cada guardado duplicaría el ingreso. Por eso:
+//   - "Ingresar a stock" se hace una sola vez por día (se guarda
+//     `stockIngresado: true` en el documento de producción del día, y un
+//     segundo intento se rechaza con el detalle de quién y cuándo ya lo
+//     hizo — si hace falta corregir, se carga un movimiento de ajuste a
+//     mano en el módulo Stock, igual que cualquier otra corrección).
+//   - Solo entran los ítems con SKU (sin SKU no hay forma de saber a qué
+//     producto del catálogo de Stock corresponde) Y con conversión real a
+//     m²/unidad (si el producto no tiene `rendimientoPorPaquete` cargado,
+//     la cantidad quedó en "paquetes" y no es una cantidad de stock
+//     confiable — se avisa y se deja afuera, igual que ya pasaba con el
+//     archivo de Dux).
+//   - El vínculo entre un producto de Costos/Fábrica (`costos_productos`) y
+//     su equivalente en el catálogo de Stock (`productos_catalogo`) es el
+//     SKU — mismo criterio que ya usaba el archivo de Dux.
 // ---------------------------------------------------------------------
 
 function validarFecha(v) {
@@ -652,7 +681,11 @@ router.get('/produccion', authProduccion, async (req, res) => {
       updatedAt: doc ? doc.updatedAt : null,
       // Sin SKU no hay CÓDIGO posible para la fila de Dux — se avisa acá para
       // que la pantalla de fábrica lo muestre ANTES de generar el archivo.
-      sinSku: items.filter(it => !it.sku).map(it => it.nombre)
+      sinSku: items.filter(it => !it.sku).map(it => it.nombre),
+      depositoId: doc ? doc.depositoId : null,
+      stockIngresado: !!(doc && doc.stockIngresado),
+      stockIngresadoEn: doc ? doc.stockIngresadoEn : null,
+      stockIngresadoPor: doc ? doc.stockIngresadoPor : null
     });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -662,6 +695,7 @@ router.post('/produccion', authProduccion, async (req, res) => {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar producción.');
     const fecha = validarFecha(req.body && req.body.fecha);
     const itemsRaw = Array.isArray(req.body && req.body.items) ? req.body.items : [];
+    const depositoIdBody = req.body && req.body.depositoId ? toObjectId(req.body.depositoId) : null;
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -683,6 +717,10 @@ router.post('/produccion', authProduccion, async (req, res) => {
         fecha,
         updatedAt: ahora
       };
+      // El depósito elegido se recuerda en el documento del día (para que
+      // "Ingresar a stock" lo tenga precargado), pero solo si vino en el
+      // body — no se pisa con null si la pantalla todavía no cargó ninguno.
+      if (depositoIdBody) set.depositoId = depositoIdBody;
       await db.collection('costos_produccion_diaria').updateOne(
         { orgId: req.orgId, fecha },
         { $set: set, $setOnInsert: { createdAt: ahora } },
@@ -695,8 +733,105 @@ router.post('/produccion', authProduccion, async (req, res) => {
       items: resultado.items,
       actualizadoPor: resultado.actualizadoPor,
       updatedAt: resultado.updatedAt,
-      sinSku: resultado.items.filter(it => !it.sku).map(it => it.nombre)
+      sinSku: resultado.items.filter(it => !it.sku).map(it => it.nombre),
+      depositoId: resultado.depositoId || null,
+      stockIngresado: !!resultado.stockIngresado,
+      stockIngresadoEn: resultado.stockIngresadoEn || null,
+      stockIngresadoPor: resultado.stockIngresadoPor || null
     });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Depósitos activos de la organización, para que la pantalla de fábrica
+// (rol 'fabrica', sin acceso al módulo 'stock') pueda elegir a cuál
+// depósito va a impactar la producción del día — misma colección que usa
+// el módulo Stock (`depositos`), pero expuesta acá bajo el gate de
+// producción (authProduccion) en vez del de Stock (authAdmin de stock.js).
+router.get('/produccion/depositos', authProduccion, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('depositos').find(match).sort({ nombre: 1 }).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Ingresa a Stock, de una sola vez, lo fabricado ese día — ver el comentario
+// grande más arriba ("Conexión con Stock") para el porqué del diseño.
+router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de ingresar a stock.');
+    const fecha = validarFecha(req.params.fecha);
+    const depositoId = toObjectId(req.body && req.body.depositoId);
+    if (!depositoId) throw err(400, 'Elegí a qué depósito va a ingresar lo fabricado.');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const doc = await db.collection('costos_produccion_diaria').findOne(Object.assign({ fecha }, filtroOrg(req)));
+      if (!doc || !doc.items || !doc.items.length) throw err(400, 'No hay producción cargada ese día.');
+      if (doc.stockIngresado) {
+        const cuando = doc.stockIngresadoEn ? new Date(doc.stockIngresadoEn).toLocaleString('es-AR') : '';
+        const quien = doc.stockIngresadoPor ? doc.stockIngresadoPor.nombre : '';
+        const detalle = [quien, cuando].filter(Boolean).join(', ');
+        throw err(400, `La producción de este día ya se ingresó a stock${detalle ? ' (' + detalle + ')' : ''}. Si hace falta corregir, cargá un movimiento de ajuste a mano en el módulo Stock.`);
+      }
+      const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
+      if (!deposito) throw err(404, 'Depósito no encontrado');
+
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const fechaMovimiento = new Date(fecha + 'T12:00:00');
+      const aplicados = [];
+      const sinCatalogo = [];
+      const sinConvertir = [];
+
+      for (const it of doc.items) {
+        if (!it.sku) continue; // ya se avisa por separado como "sinSku"
+        if (it.unidadConvertida === 'paquete') { sinConvertir.push(it.nombre); continue; }
+        const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku: it.sku, activo: { $ne: false } }, filtroOrg(req)));
+        if (!producto) { sinCatalogo.push(`${it.nombre} (SKU ${it.sku})`); continue; }
+
+        const cantidad = Number(it.cantidadConvertida);
+        if (!Number.isFinite(cantidad) || cantidad <= 0) continue;
+
+        const movimiento = {
+          productoId: producto._id,
+          depositoId,
+          tipo: 'ingreso',
+          cantidad,
+          motivo: 'Producción de fábrica',
+          sucursal: '',
+          codigoExterno: '',
+          observaciones: `Carga de producción del ${fecha}`,
+          usuarioNombre,
+          fecha: fechaMovimiento,
+          orgId: req.orgId,
+          createdAt: new Date()
+        };
+        await db.collection('stock_movimientos').insertOne(movimiento);
+        await db.collection('stock_actual').findOneAndUpdate(
+          Object.assign({ productoId: producto._id, depositoId }, filtroOrg(req)),
+          {
+            $inc: { cantidad },
+            $set: { actualizadoEn: new Date() },
+            $setOnInsert: Object.assign({ productoId: producto._id, depositoId }, filtroOrg(req))
+          },
+          { upsert: true }
+        );
+        aplicados.push({ nombre: it.nombre, sku: it.sku, cantidad, unidad: it.unidadConvertida, deposito: deposito.nombre });
+      }
+
+      const ahora = new Date();
+      const stockIngresadoPor = { usuarioId: req.usuario._id, nombre: usuarioNombre };
+      await db.collection('costos_produccion_diaria').updateOne(
+        { _id: doc._id },
+        { $set: { depositoId, stockIngresado: true, stockIngresadoEn: ahora, stockIngresadoPor } }
+      );
+
+      return { aplicados, sinCatalogo, sinConvertir, stockIngresadoEn: ahora, stockIngresadoPor };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
