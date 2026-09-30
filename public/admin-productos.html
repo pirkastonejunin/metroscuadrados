@@ -500,24 +500,33 @@ function abrirImportar(){
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar productos desde Excel</h2>
-        <p class="muted">Tiene que tener las mismas columnas que el export de este módulo (los títulos de columna, no el orden). Si el SKU ya existe, se actualiza ese producto; si no, se crea uno nuevo.</p>
+        <p class="muted">Tiene que tener las mismas columnas que el export de este módulo (los títulos de columna, no el orden) — también acepta el archivo tal cual lo exporta Dux. Si el SKU ya existe, se actualiza ese producto; si no, se crea uno nuevo.</p>
         <p><a href="#" onclick="descargarBlob(BASE + '/plantilla-import', 'plantilla-productos.xlsx'); return false;">Descargar plantilla en blanco</a></p>
-        <label>Archivo (.xlsx)</label>
-        <input type="file" id="impArchivo" accept=".xlsx">
+        <label>Archivo (.xlsx o .xls)</label>
+        <input type="file" id="impArchivo" accept=".xlsx,.xls">
         <div class="err" id="impErr"></div>
         <div id="impResultado"></div>
-        <button class="btn" style="margin-top:10px" onclick="confirmarImportar()">Importar</button>
+        <button class="btn" id="impBtn" style="margin-top:10px" onclick="confirmarImportar()">Importar</button>
       </div>
     </div>
   `;
 }
 
+// Import asincrónico (30/9/2026): con catálogos grandes (el de Dux trae
+// 20.000+ productos) el procesamiento puede tardar bastante — el POST
+// ahora devuelve enseguida un `jobId` y esta función va consultando el
+// progreso con GET /import/estado/:id cada 1,5s, mostrando "Procesando
+// X / total" para que quede claro que sigue trabajando y no que se
+// colgó. Antes esto no mostraba ningún mensaje mientras esperaba.
 async function confirmarImportar(){
   const input = document.getElementById('impArchivo');
   const file = input.files[0];
+  const btn = document.getElementById('impBtn');
   document.getElementById('impErr').textContent = '';
   document.getElementById('impResultado').innerHTML = '';
-  if (!file) { document.getElementById('impErr').textContent = 'Elegí un archivo .xlsx'; return; }
+  if (!file) { document.getElementById('impErr').textContent = 'Elegí un archivo .xlsx o .xls'; return; }
+  btn.disabled = true;
+  document.getElementById('impResultado').innerHTML = '<p class="muted">Subiendo archivo...</p>';
   try{
     const base64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -528,16 +537,42 @@ async function confirmarImportar(){
     const r = await fetch(BASE + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al importar');
-    let html = `<p class="ok-msg">Creados: ${data.creados} — Actualizados: ${data.actualizados}</p>`;
-    if (data.errores && data.errores.length) {
-      html += `<p class="err">${data.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
-        data.errores.map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') + '</ul>';
+
+    document.getElementById('impResultado').innerHTML =
+      `<p class="muted">Procesando 0 / ${data.total}...</p>`;
+    const job = await esperarJobImport(data.jobId);
+
+    let html = `<p class="ok-msg">Creados: ${job.creados} — Actualizados: ${job.actualizados}</p>`;
+    if (job.errores && job.errores.length) {
+      html += `<p class="err">${job.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        job.errores.slice(0, 200).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
+        (job.errores.length > 200 ? `<li>... y ${job.errores.length - 200} más</li>` : '') + '</ul>';
     }
     document.getElementById('impResultado').innerHTML = html;
     await cargarRubros();
     await cargarProductos();
   }catch(e){
     document.getElementById('impErr').textContent = e.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// Consulta GET /import/estado/:id cada 1,5s hasta que el job termine
+// ('listo' o 'error'). Devuelve el job final.
+async function esperarJobImport(jobId){
+  while (true) {
+    await new Promise(res => setTimeout(res, 1500));
+    const r = await fetch(BASE + '/import/estado/' + jobId, {headers: headersAuthJson()});
+    const job = await r.json();
+    if (!r.ok) throw new Error(job.error || 'Error consultando el progreso del import');
+    if (job.estado === 'procesando') {
+      document.getElementById('impResultado').innerHTML =
+        `<p class="muted">Procesando ${job.procesados} / ${job.total}...</p>`;
+      continue;
+    }
+    if (job.estado === 'error') throw new Error(job.errorGeneral || 'El import falló de forma inesperada');
+    return job;
   }
 }
 </script>

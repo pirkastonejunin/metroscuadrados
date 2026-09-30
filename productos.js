@@ -358,12 +358,18 @@ router.get('/plantilla-import', authAdmin, (req, res) => {
 // producto; si no existe, lo crea. Nunca aborta el archivo entero por una
 // fila con error — esa fila se saltea y se informa en `errores`.
 //
-// Escrito en bulk (30/9/2026, adaptando el import al archivo REAL de Dux,
-// 20.327 filas): la versión anterior hacía un findOne + insertOne/updateOne
-// POR FILA (hasta ~40.000 viajes a Mongo para un catálogo grande), lo que
-// para un archivo de este tamaño corría real riesgo de timeout en Render.
-// Ahora se arma un `bulkWrite` de upserts por SKU, en tandas de 500 —
-// Mongo resuelve cada tanda en una sola ida y vuelta.
+// Asincrónico, en segundo plano (30/9/2026, 3ra vuelta — con el archivo
+// real de Dux, 20.327 filas, la primera versión en bulk dejaba la
+// request HTTP abierta el tiempo que tardaran todas las tandas, y en
+// algún punto la conexión se cortaba antes de terminar — al navegador le
+// llegaba una respuesta vacía ("Unexpected end of JSON input"), aparte de
+// que la UI no mostraba ningún indicio de que algo estuviera pasando).
+// Ahora el POST devuelve ENSEGUIDA un `jobId` apenas termina de leer el
+// archivo, y el trabajo pesado (validar fila por fila + bulkWrite por
+// tandas de 500) sigue corriendo en el servidor sin que el navegador
+// tenga que sostener la conexión — el progreso se guarda en
+// `productos_import_jobs` y el frontend lo consulta con
+// GET /import/estado/:id cada par de segundos hasta que termina.
 const TANDA_IMPORT = 500;
 
 router.post('/import', authAdmin, async (req, res) => {
@@ -372,58 +378,105 @@ router.post('/import', authAdmin, async (req, res) => {
     const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_PRODUCTOS);
     if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
-      const proveedoresActivos = await db.collection('proveedores')
-        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
-        .project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
-      const proveedorIdPorNombre = new Map();
-      proveedoresActivos.forEach(p => {
-        if (p.razonSocial) proveedorIdPorNombre.set(p.razonSocial.trim().toLowerCase(), p._id);
-        if (p.nombreFantasia) proveedorIdPorNombre.set(p.nombreFantasia.trim().toLowerCase(), p._id);
-      });
-
-      const errores = [];
-      const skusVistos = new Set();
-      const ops = [];
-      const ahora = new Date();
-      for (const fila of filas) {
-        try {
-          if (!fila.sku) throw err(400, 'Falta el SKU');
-          if (skusVistos.has(fila.sku)) throw err(400, `SKU "${fila.sku}" repetido en el archivo (se usó la primera aparición)`);
-          const datos = validarProducto(fila);
-          if (fila.proveedor) {
-            const pid = proveedorIdPorNombre.get(String(fila.proveedor).trim().toLowerCase());
-            if (pid) datos.proveedorId = pid;
-          }
-          skusVistos.add(fila.sku);
-          const match = Object.assign({ sku: datos.sku, activo: { $ne: false } }, filtroOrg(req));
-          ops.push({
-            updateOne: {
-              filter: match,
-              update: {
-                $set: Object.assign({}, datos, { updatedAt: ahora }),
-                $setOnInsert: { activo: true, orgId: req.orgId, createdAt: ahora }
-              },
-              upsert: true
-            }
-          });
-        } catch (e) {
-          errores.push({ fila: fila.__fila, motivo: e.message });
-        }
-      }
-
-      let creados = 0, actualizados = 0;
-      for (let i = 0; i < ops.length; i += TANDA_IMPORT) {
-        const tanda = ops.slice(i, i + TANDA_IMPORT);
-        if (!tanda.length) continue;
-        const r = await db.collection('productos_catalogo').bulkWrite(tanda, { ordered: false });
-        creados += r.upsertedCount || 0;
-        actualizados += r.matchedCount || 0;
-      }
-      return { creados, actualizados, errores };
+    const db = await conReintento(getDb);
+    const ahora = new Date();
+    const { insertedId: jobId } = await db.collection('productos_import_jobs').insertOne({
+      orgId: req.orgId, total: filas.length, procesados: 0, creados: 0, actualizados: 0,
+      errores: [], estado: 'procesando', creadoEn: ahora, terminadoEn: null
     });
-    res.json(resultado);
+    res.json({ jobId, total: filas.length });
+
+    // A partir de acá la respuesta ya se mandó — todo esto corre en
+    // segundo plano. Si algo inesperado revienta acá (no los errores de
+    // fila, que ya se manejan adentro), se deja constancia en el job para
+    // que no quede "procesando" para siempre sin explicación.
+    procesarImportProductos(db, req, jobId, filas).catch(async (e) => {
+      try {
+        await db.collection('productos_import_jobs').updateOne(
+          { _id: jobId },
+          { $set: { estado: 'error', errorGeneral: e.message, terminadoEn: new Date() } }
+        );
+      } catch (e2) { /* si esto también falla, no hay más para hacer del lado del servidor */ }
+    });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+async function procesarImportProductos(db, req, jobId, filas) {
+  const proveedoresActivos = await db.collection('proveedores')
+    .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+    .project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+  const proveedorIdPorNombre = new Map();
+  proveedoresActivos.forEach(p => {
+    if (p.razonSocial) proveedorIdPorNombre.set(p.razonSocial.trim().toLowerCase(), p._id);
+    if (p.nombreFantasia) proveedorIdPorNombre.set(p.nombreFantasia.trim().toLowerCase(), p._id);
+  });
+
+  const errores = [];
+  const skusVistos = new Set();
+  const ahora = new Date();
+  let tanda = [];
+  let creados = 0, actualizados = 0, procesados = 0;
+
+  async function vaciarTanda() {
+    if (tanda.length) {
+      const r = await db.collection('productos_catalogo').bulkWrite(tanda, { ordered: false });
+      creados += r.upsertedCount || 0;
+      actualizados += r.matchedCount || 0;
+      tanda = [];
+    }
+    await db.collection('productos_import_jobs').updateOne(
+      { _id: jobId },
+      { $set: { procesados, creados, actualizados, errores } }
+    );
+  }
+
+  for (const fila of filas) {
+    procesados++;
+    try {
+      if (!fila.sku) throw err(400, 'Falta el SKU');
+      if (skusVistos.has(fila.sku)) throw err(400, `SKU "${fila.sku}" repetido en el archivo (se usó la primera aparición)`);
+      const datos = validarProducto(fila);
+      if (fila.proveedor) {
+        const pid = proveedorIdPorNombre.get(String(fila.proveedor).trim().toLowerCase());
+        if (pid) datos.proveedorId = pid;
+      }
+      skusVistos.add(fila.sku);
+      const match = Object.assign({ sku: datos.sku, activo: { $ne: false } }, filtroOrg(req));
+      tanda.push({
+        updateOne: {
+          filter: match,
+          update: {
+            $set: Object.assign({}, datos, { updatedAt: ahora }),
+            $setOnInsert: { activo: true, orgId: req.orgId, createdAt: ahora }
+          },
+          upsert: true
+        }
+      });
+    } catch (e) {
+      errores.push({ fila: fila.__fila, motivo: e.message });
+    }
+    if (tanda.length >= TANDA_IMPORT) await vaciarTanda();
+  }
+  await vaciarTanda();
+
+  await db.collection('productos_import_jobs').updateOne(
+    { _id: jobId },
+    { $set: { estado: 'listo', procesados, creados, actualizados, errores, terminadoEn: new Date() } }
+  );
+}
+
+// Progreso de un import en curso (o terminado) — el frontend lo consulta
+// cada par de segundos mientras `estado` es 'procesando'.
+router.get('/import/estado/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const job = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_import_jobs').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+    });
+    if (!job) throw err(404, 'No se encontró ese import');
+    res.json(job);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
