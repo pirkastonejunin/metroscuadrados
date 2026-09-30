@@ -134,6 +134,7 @@ const MODULOS = [
   { key: 'proveedores', label: 'Proveedores', descripcion: 'Registro maestro de proveedores (datos generales, fiscales, bancarios y de contacto) — base para ir migrando Compras y Cta. Cte. desde Dux a este sistema.' },
   { key: 'stock', label: 'Stock', descripcion: 'Depósitos, movimientos de stock (ingresos, egresos, transferencias) y existencias actuales por producto, sobre el catálogo de Productos.' },
   { key: 'ventas', label: 'Ventas', descripcion: 'Registro interno de ventas (sin facturación electrónica AFIP todavía): cliente, productos, entrega con descuento de stock y cobros. Base para ir migrando Ventas desde Dux a este sistema.' },
+  { key: 'compras', label: 'Compras', descripcion: 'Registro interno de compras a proveedores (sin facturación electrónica AFIP todavía): proveedor, productos, recepción con ingreso de stock y pagos. Base para ir migrando Compras desde Dux a este sistema.' },
   { key: 'cotizador', label: 'Cotizador', descripcion: 'Armar presupuestos con el cotizador y, si además tiene el rol para eso, configurar tipos de obra, catálogos y tarifas. Aplica solo a la tienda real de Piedra Negra — las demás tiendas que usan la app siguen sin login.' },
   { key: 'usuarios', label: 'Configuración', descripcion: 'Usuarios, roles, organizaciones, vendedores, colocadores y notificaciones. Dárselo con cuidado.' }
 ];

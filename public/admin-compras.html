@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Compras - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --warn:#b7791f; --warn-soft:#fdf3d9;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{min-height:50px;font-family:inherit;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.pendiente{background:var(--warn-soft);color:var(--warn);}
+  .pill.recibida{background:var(--ok-soft);color:var(--ok);}
+  .pill.anulada{background:var(--danger-soft);color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
+  .modal.wide{max-width:860px;}
+  .modal h2{margin-top:0;font-size:16px;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
+  .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
+  .fila-item .campo-producto{flex:2;min-width:0;}
+  .fila-item .campo-cant{flex:1;min-width:0;}
+  .fila-item .campo-precio{flex:1;min-width:0;}
+  .fila-item .campo-subtotal{flex:1;min-width:0;text-align:right;font-weight:700;padding-top:8px;}
+  .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
+  .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
+  .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
+  .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
+  .detalle-pago{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --warn:#e0b64a; --warn-soft:#3a2f14;
+      --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --warn:#e0b64a; --warn-soft:#3a2f14;
+    --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Compras</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Compras. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <h1>Compras</h1>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="row" style="flex:1">
+          <div style="min-width:180px">
+            <label>Proveedor</label>
+            <select id="fcProveedor" onchange="cargarCompras()"><option value="">Todos</option></select>
+          </div>
+          <div style="min-width:150px">
+            <label>Estado</label>
+            <select id="fcEstado" onchange="cargarCompras()">
+              <option value="">Todos</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="recibida">Recibida</option>
+              <option value="anulada">Anulada</option>
+            </select>
+          </div>
+          <div style="min-width:140px">
+            <label>Desde</label>
+            <input id="fcDesde" type="date" onchange="cargarCompras()">
+          </div>
+          <div style="min-width:140px">
+            <label>Hasta</label>
+            <input id="fcHasta" type="date" onchange="cargarCompras()">
+          </div>
+        </div>
+        <button class="btn" onclick="abrirNuevaCompra()">+ Nueva compra</button>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="comprasBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/compras';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
+function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+let NOMBRE_USUARIO = '';
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('compras'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'compras', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  await cargarListasBase();
+  await cargarCompras();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+// -------------------------------------------------------------------
+// Proveedores, productos y depósitos — se cargan una sola vez al entrar
+// -------------------------------------------------------------------
+let proveedoresCache = [];
+let productosCache = [];
+let depositosCache = [];
+async function cargarListasBase(){
+  const [rp2, rp, rd] = await Promise.all([
+    fetch(BASE + '/proveedores', {headers: headersAuth()}),
+    fetch(BASE + '/productos', {headers: headersAuth()}),
+    fetch(BASE + '/depositos', {headers: headersAuth()})
+  ]);
+  proveedoresCache = rp2.ok ? await rp2.json() : [];
+  productosCache = rp.ok ? await rp.json() : [];
+  depositosCache = rd.ok ? await rd.json() : [];
+  document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
+    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
+}
+
+// -------------------------------------------------------------------
+// Listado de compras
+// -------------------------------------------------------------------
+const ESTADO_LABEL = { pendiente: 'Pendiente', recibida: 'Recibida', anulada: 'Anulada' };
+let comprasCache = [];
+
+async function cargarCompras(){
+  const params = new URLSearchParams();
+  if (document.getElementById('fcProveedor').value) params.set('proveedorId', document.getElementById('fcProveedor').value);
+  if (document.getElementById('fcEstado').value) params.set('estado', document.getElementById('fcEstado').value);
+  if (document.getElementById('fcDesde').value) params.set('desde', document.getElementById('fcDesde').value);
+  if (document.getElementById('fcHasta').value) params.set('hasta', document.getElementById('fcHasta').value);
+  const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
+  const body = document.getElementById('comprasBody');
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
+  comprasCache = await r.json();
+  if (!comprasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay compras cargadas todavía.</td></tr>'; return; }
+  body.innerHTML = comprasCache.map(c => `
+    <tr>
+      <td><strong>#${c.numero}</strong></td>
+      <td class="muted">${fechaCorta(c.fecha)}</td>
+      <td>${escapeHtml(c.proveedorNombre)}</td>
+      <td>${money(c.total)}</td>
+      <td class="muted">${money(c.totalPagado)}</td>
+      <td>${c.saldoPendiente > 0 ? money(c.saldoPendiente) : '<span class="muted">—</span>'}</td>
+      <td><span class="pill ${c.estado}">${ESTADO_LABEL[c.estado]||c.estado}</span></td>
+      <td><button class="btn small secondary" onclick="verDetalle('${c._id}')">Ver</button></td>
+    </tr>
+  `).join('');
+}
+
+// -------------------------------------------------------------------
+// Nueva compra
+// -------------------------------------------------------------------
+function opcionesProveedoresSelect(seleccionado){
+  return '<option value="">Elegí un proveedor…</option>' + proveedoresCache.map(p =>
+    `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`
+  ).join('');
+}
+function opcionesProductosCompra(seleccionado){
+  return '<option value="">Elegí un producto…</option>' + productosCache.map(p =>
+    `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.sku||'')} — ${escapeHtml(p.nombre)}</option>`
+  ).join('');
+}
+function opcionesDepositosCompra(seleccionado){
+  return '<option value="">Elegí un depósito…</option>' + depositosCache.filter(d => d.activo !== false).map(d =>
+    `<option value="${d._id}" ${d._id===seleccionado?'selected':''}>${escapeHtml(d.nombre)}</option>`
+  ).join('');
+}
+
+function abrirNuevaCompra(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Nueva compra</h2>
+        <div class="grid3">
+          <div><label>Proveedor *</label><select id="ncProveedor" onchange="actualizarCondicionPago()">${opcionesProveedoresSelect()}</select></div>
+          <div><label>Condición de pago</label><input id="ncCondicionPago" placeholder="Se autocompleta del proveedor"></div>
+          <div><label>Fecha</label><input id="ncFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Moneda</label><select id="ncMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
+          <div><label>Tipo de recepción *</label><select id="ncTipoRecepcion" onchange="actualizarVisibilidadDepositoCompra()"><option value="inmediata">Recepción inmediata (ingresa stock ahora)</option><option value="pendiente">Sin recepción (pendiente, sin ingresar stock)</option></select></div>
+          <div id="ncDepositoWrap"><label>Depósito *</label><select id="ncDeposito">${opcionesDepositosCompra()}</select></div>
+        </div>
+
+        <div class="section-title">Productos</div>
+        <div id="ncFilasItems"></div>
+        <button class="btn secondary small" onclick="agregarFilaCompra()">+ Agregar producto</button>
+
+        <div class="grid2" style="margin-top:14px">
+          <div><label>Descuento (%)</label><input id="ncDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()"></div>
+          <div><label>Descuento ($)</label><input id="ncDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="ncObservaciones"></textarea></div>
+
+        <div class="totales-box" id="ncTotales"></div>
+        <div class="err" id="ncErrNueva"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarNuevaCompra()">Guardar compra</button>
+      </div>
+    </div>
+  `;
+  agregarFilaCompra();
+  actualizarVisibilidadDepositoCompra();
+}
+
+function actualizarCondicionPago(){
+  const prov = proveedoresCache.find(p => String(p._id) === document.getElementById('ncProveedor').value);
+  document.getElementById('ncCondicionPago').value = prov ? (prov.condicionPago || '') : '';
+}
+
+function actualizarVisibilidadDepositoCompra(){
+  const esInmediata = document.getElementById('ncTipoRecepcion').value === 'inmediata';
+  document.getElementById('ncDepositoWrap').classList.toggle('hidden', !esInmediata);
+}
+
+function agregarFilaCompra(){
+  const cont = document.getElementById('ncFilasItems');
+  const fila = document.createElement('div');
+  fila.className = 'fila-item';
+  fila.innerHTML = `
+    <div class="campo-producto">
+      <label>Producto</label>
+      <select onchange="actualizarFilaCompra(this)">${opcionesProductosCompra()}</select>
+    </div>
+    <div class="campo-cant">
+      <label>Cantidad</label>
+      <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarFilaCompra(this)">
+    </div>
+    <div class="campo-precio">
+      <label>Precio unit.</label>
+      <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()">
+    </div>
+    <div class="campo-subtotal"><span class="subtotal-valor">$ 0,00</span></div>
+    <button class="btn-quitar" onclick="this.closest('.fila-item').remove(); actualizarTotalesCompra()">×</button>
+  `;
+  cont.appendChild(fila);
+}
+
+function actualizarFilaCompra(el){
+  const fila = el.closest('.fila-item');
+  const select = fila.querySelector('select');
+  const precioInput = fila.querySelector('.campo-precio input');
+  if (el.tagName === 'SELECT') {
+    const producto = productosCache.find(p => String(p._id) === select.value);
+    precioInput.value = producto ? (producto.costo || 0) : 0;
+  }
+  actualizarTotalesCompra();
+}
+
+function juntarItemsCompra(){
+  const filas = document.querySelectorAll('#ncFilasItems .fila-item');
+  const items = [];
+  filas.forEach(fila => {
+    const select = fila.querySelector('select');
+    const cantidad = Number(fila.querySelector('.campo-cant input').value);
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
+    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
+  });
+  return items;
+}
+
+function actualizarTotalesCompra(){
+  const filas = document.querySelectorAll('#ncFilasItems .fila-item');
+  let subtotal = 0;
+  filas.forEach(fila => {
+    const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const sub = cantidad * precioUnitario;
+    subtotal += sub;
+    fila.querySelector('.subtotal-valor').textContent = money(sub);
+  });
+  const descPorc = Number(document.getElementById('ncDescuentoPorcentaje').value) || 0;
+  const descMonto = Number(document.getElementById('ncDescuentoMonto').value) || 0;
+  let total = subtotal;
+  if (descPorc) total -= total * (descPorc / 100);
+  if (descMonto) total -= descMonto;
+  total = Math.max(0, total);
+  document.getElementById('ncTotales').innerHTML = `
+    <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+  `;
+}
+
+async function guardarNuevaCompra(){
+  const items = juntarItemsCompra();
+  const tipoRecepcion = document.getElementById('ncTipoRecepcion').value;
+  const body = {
+    proveedorId: document.getElementById('ncProveedor').value,
+    condicionPago: document.getElementById('ncCondicionPago').value.trim(),
+    fecha: document.getElementById('ncFecha').value,
+    moneda: document.getElementById('ncMoneda').value,
+    tipoRecepcion,
+    depositoId: tipoRecepcion === 'inmediata' ? document.getElementById('ncDeposito').value : null,
+    items,
+    descuentoPorcentaje: Number(document.getElementById('ncDescuentoPorcentaje').value) || 0,
+    descuentoMonto: Number(document.getElementById('ncDescuentoMonto').value) || 0,
+    observaciones: document.getElementById('ncObservaciones').value.trim()
+  };
+  document.getElementById('ncErrNueva').textContent = '';
+  if (!body.proveedorId) { document.getElementById('ncErrNueva').textContent = 'Elegí un proveedor'; return; }
+  if (!items.length) { document.getElementById('ncErrNueva').textContent = 'Agregá al menos un producto'; return; }
+  if (tipoRecepcion === 'inmediata' && !body.depositoId) { document.getElementById('ncErrNueva').textContent = 'Elegí a qué depósito le vas a ingresar el stock'; return; }
+  try{
+    const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    cerrarModal();
+    await cargarCompras();
+  }catch(e){
+    document.getElementById('ncErrNueva').textContent = e.message;
+  }
+}
+
+// -------------------------------------------------------------------
+// Detalle de una compra — recibir / anular / registrar pago
+// -------------------------------------------------------------------
+function verDetalle(id){
+  const c = comprasCache.find(x => x._id === id);
+  if (!c) return;
+  const filasItems = c.items.map(it => `
+    <tr>
+      <td>${escapeHtml(it.sku||'')}</td>
+      <td>${escapeHtml(it.nombre)}</td>
+      <td>${it.cantidad}</td>
+      <td>${money(it.precioUnitario)}</td>
+      <td>${money(it.subtotal)}</td>
+    </tr>
+  `).join('');
+  const filasPagos = (c.pagos||[]).length
+    ? c.pagos.map(p => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)}</span></div>`).join('')
+    : '<p class="muted">Sin pagos registrados.</p>';
+
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Compra #${c.numero} <span class="pill ${c.estado}">${ESTADO_LABEL[c.estado]||c.estado}</span></h2>
+        <p class="muted" style="margin-top:-8px">
+          ${escapeHtml(c.proveedorNombre)} — ${fechaCorta(c.fecha)}${c.condicionPago ? ' — Condición: ' + escapeHtml(c.condicionPago) : ''}
+        </p>
+        <table>
+          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+          <tbody>${filasItems}</tbody>
+        </table>
+        <div class="totales-box">
+          <div class="fila-total"><span>Subtotal</span><span>${money(c.subtotal)}</span></div>
+          ${c.descuentoPorcentaje ? `<div class="fila-total"><span>Descuento (${c.descuentoPorcentaje}%)</span><span>-${money(c.subtotal*c.descuentoPorcentaje/100)}</span></div>` : ''}
+          ${c.descuentoMonto ? `<div class="fila-total"><span>Descuento</span><span>-${money(c.descuentoMonto)}</span></div>` : ''}
+          <div class="fila-total grande"><span>Total</span><span>${money(c.total)}</span></div>
+          <div class="fila-total"><span>Pagado</span><span>${money(c.totalPagado)}</span></div>
+          <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(c.saldoPendiente)}</span></div>
+        </div>
+
+        ${c.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(c.observaciones)}</p>` : ''}
+
+        <div class="section-title">Pagos</div>
+        <div id="dcPagos">${filasPagos}</div>
+        <div class="err" id="dcErr"></div>
+
+        <div class="row" style="margin-top:14px">
+          ${c.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirRecibir('${c._id}')">Recibir (ingresar stock)</button>` : ''}
+          ${c.estado !== 'anulada' && c.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirPago('${c._id}')">Registrar pago</button>` : ''}
+          ${c.estado !== 'anulada' ? `<button class="btn danger" onclick="anularCompra('${c._id}')">Anular compra</button>` : ''}
+        </div>
+        ${c.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${c.anuladaPor ? ' por ' + escapeHtml(c.anuladaPor) : ''}${c.anuladaEn ? ' — ' + fechaHora(c.anuladaEn) : ''}${c.anuladaMotivo ? ': ' + escapeHtml(c.anuladaMotivo) : ''}</p>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
+
+function abrirRecibir(id){
+  const c = comprasCache.find(x => x._id === id);
+  if (!c) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Recibir compra #${c.numero}</h2>
+        <p class="muted">Esto va a ingresar el stock de los productos de la compra. No se puede deshacer — si hace falta corregir, se anula la compra.</p>
+        <label>Depósito *</label>
+        <select id="nrDeposito">${opcionesDepositosCompra(c.depositoId)}</select>
+        <div class="err" id="nrErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarRecibir('${id}')">Confirmar recepción</button>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmarRecibir(id){
+  const depositoId = document.getElementById('nrDeposito').value;
+  if (!depositoId) { document.getElementById('nrErr').textContent = 'Elegí un depósito'; return; }
+  try{
+    const r = await fetch(BASE + '/' + id + '/recibir', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({depositoId})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCompras();
+    verDetalle(id);
+  }catch(e){
+    document.getElementById('nrErr').textContent = e.message;
+  }
+}
+
+function abrirPago(id){
+  const c = comprasCache.find(x => x._id === id);
+  if (!c) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Registrar pago — compra #${c.numero}</h2>
+        <p class="muted">Saldo pendiente: ${money(c.saldoPendiente)}</p>
+        <div class="grid2">
+          <div><label>Tipo de valor *</label><select id="npTipoValor"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Monto *</label><input id="npMonto" type="number" min="0.01" step="0.01" value="${c.saldoPendiente}"></div>
+        </div>
+        <div style="margin-top:10px"><label>Nota</label><input id="npNota" placeholder="Opcional"></div>
+        <div class="err" id="npErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarPago('${id}')">Registrar</button>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmarPago(id){
+  const body = {
+    tipoValor: document.getElementById('npTipoValor').value,
+    monto: Number(document.getElementById('npMonto').value),
+    nota: document.getElementById('npNota').value.trim()
+  };
+  if (!body.monto || body.monto <= 0) { document.getElementById('npErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
+  try{
+    const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCompras();
+    verDetalle(id);
+  }catch(e){
+    document.getElementById('npErr').textContent = e.message;
+  }
+}
+
+async function anularCompra(id){
+  const c = comprasCache.find(x => x._id === id);
+  const motivo = prompt('¿Por qué se anula esta compra? (opcional)') || '';
+  if (motivo === null) return;
+  if (!confirm(`¿Anular la compra #${c.numero}?${c.stockIngresado ? ' Se va a revertir el stock ingresado.' : ''}`)) return;
+  try{
+    const r = await fetch(BASE + '/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCompras();
+    verDetalle(id);
+  }catch(e){
+    alert(e.message);
+  }
+}
+</script>
+</body>
+</html>
