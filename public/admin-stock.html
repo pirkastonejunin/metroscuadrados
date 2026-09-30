@@ -141,6 +141,7 @@
               </label>
             </div>
           </div>
+          <button class="btn secondary" onclick="descargarBlob(BASE + '/actual/export', 'stock-actual.xlsx')">Exportar</button>
         </div>
       </div>
       <div class="card">
@@ -181,6 +182,8 @@
             </div>
           </div>
           <div class="row">
+            <button class="btn secondary" onclick="descargarBlob(BASE + '/movimientos/export', 'movimientos-stock.xlsx')">Exportar</button>
+            <button class="btn secondary" onclick="abrirImportarMovimientos()">Carga inicial de stock</button>
             <button class="btn secondary" onclick="abrirNuevaTransferencia()">Transferencia</button>
             <button class="btn" onclick="abrirNuevoMovimiento()">+ Nuevo movimiento</button>
           </div>
@@ -198,7 +201,11 @@
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <div></div>
-          <button class="btn" onclick="abrirNuevoDeposito()">+ Nuevo depósito</button>
+          <div class="row" style="gap:8px">
+            <button class="btn secondary" onclick="descargarBlob(BASE + '/depositos/export', 'depositos.xlsx')">Exportar</button>
+            <button class="btn secondary" onclick="abrirImportarDepositos()">Importar</button>
+            <button class="btn" onclick="abrirNuevoDeposito()">+ Nuevo depósito</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -604,6 +611,88 @@ async function desactivarDeposito(id, nombre){
   }catch(e){
     alert(e.message);
   }
+}
+
+// -------------------------------------------------------------------
+// Import / export en Excel (.xlsx) — ver importExport.js en el backend.
+// Stock tiene tres planillas: depósitos (import/export), stock actual
+// (solo export, es un caché calculado) y movimientos (export de
+// historial + "carga inicial de stock", que importa filas como
+// movimientos de ingreso reales).
+// -------------------------------------------------------------------
+async function descargarBlob(url, nombreArchivo){
+  const r = await fetch(url, {headers: headersAuth()});
+  if (!r.ok) { alert('No se pudo descargar el archivo'); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = nombreArchivo;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+async function importarGenerico(url, archivoInputId, mensajeExito, recargar){
+  const input = document.getElementById(archivoInputId);
+  const file = input.files[0];
+  document.getElementById('impErr').textContent = '';
+  document.getElementById('impResultado').innerHTML = '';
+  if (!file) { document.getElementById('impErr').textContent = 'Elegí un archivo .xlsx'; return; }
+  try{
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+      reader.readAsDataURL(file);
+    });
+    const r = await fetch(url, {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al importar');
+    let html = `<p class="ok-msg">${mensajeExito(data)}</p>`;
+    if (data.errores && data.errores.length) {
+      html += `<p class="err">${data.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        data.errores.map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') + '</ul>';
+    }
+    document.getElementById('impResultado').innerHTML = html;
+    await recargar();
+  }catch(e){
+    document.getElementById('impErr').textContent = e.message;
+  }
+}
+
+function abrirImportarDepositos(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar depósitos desde Excel</h2>
+        <p class="muted">Si el nombre del depósito ya existe, se actualiza (dirección y notas); si no, se crea uno nuevo.</p>
+        <p><a href="#" onclick="descargarBlob(BASE + '/depositos/plantilla-import', 'plantilla-depositos.xlsx'); return false;">Descargar plantilla en blanco</a></p>
+        <label>Archivo (.xlsx)</label>
+        <input type="file" id="impArchivo" accept=".xlsx">
+        <div class="err" id="impErr"></div>
+        <div id="impResultado"></div>
+        <button class="btn" style="margin-top:10px" onclick="importarGenerico(BASE + '/depositos/import', 'impArchivo', d => 'Creados: ' + d.creados + ' — Actualizados: ' + d.actualizados, cargarDepositos)">Importar</button>
+      </div>
+    </div>
+  `;
+}
+
+function abrirImportarMovimientos(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Carga inicial de stock desde Excel</h2>
+        <p class="muted">Cada fila con SKU + Depósito + Cantidad genera un movimiento real de stock (ingreso por defecto, o egreso si lo indicás en la columna Tipo) — pasa por la misma validación que cargar un movimiento a mano. Pensado para migrar el stock inicial desde Dux.</p>
+        <p><a href="#" onclick="descargarBlob(BASE + '/movimientos/plantilla-import', 'plantilla-carga-inicial-stock.xlsx'); return false;">Descargar plantilla en blanco</a></p>
+        <label>Archivo (.xlsx)</label>
+        <input type="file" id="impArchivo" accept=".xlsx">
+        <div class="err" id="impErr"></div>
+        <div id="impResultado"></div>
+        <button class="btn" style="margin-top:10px" onclick="importarGenerico(BASE + '/movimientos/import', 'impArchivo', d => 'Movimientos creados: ' + d.creados, async () => { await cargarMovimientos(); if (tabActiva === 'actual') await cargarStockActual(); })">Importar</button>
+      </div>
+    </div>
+  `;
 }
 </script>
 </body>

@@ -67,6 +67,7 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { exportarXlsx } = require('./importExport');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -99,6 +100,30 @@ function normalizarTexto(v) { return (v === undefined || v === null) ? '' : Stri
 
 const TIPOS_ENTREGA_VALIDOS = ['inmediata', 'pendiente'];
 const ESTADOS_VALIDOS = ['pendiente', 'entregada', 'anulada'];
+
+// Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
+// bases tengo que tener la posibilidad de importar y exportar") — ver
+// importExport.js. Solo EXPORT: una venta se genera operativamente desde
+// la pantalla (entrega/cobros descuentan stock y quedan ligados a un
+// movimiento real), no tiene sentido cargarla masiva desde Excel como sí
+// lo tiene un catálogo — si en algún momento hace falta importar ventas
+// históricas de Dux, es una decisión aparte con Mato, no algo genérico.
+const COLUMNAS_VENTAS_EXPORT = [
+  { clave: 'numero', titulo: 'Nº' },
+  { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
+  { clave: 'clienteNombre', titulo: 'Cliente' },
+  { clave: 'vendedor', titulo: 'Vendedor' },
+  { clave: 'tipoEntrega', titulo: 'Tipo de entrega' },
+  { clave: 'estado', titulo: 'Estado' },
+  { clave: 'moneda', titulo: 'Moneda' },
+  { clave: 'subtotal', titulo: 'Subtotal', tipo: 'numero' },
+  { clave: 'descuentoPorcentaje', titulo: 'Descuento %', tipo: 'numero' },
+  { clave: 'descuentoMonto', titulo: 'Descuento $', tipo: 'numero' },
+  { clave: 'total', titulo: 'Total', tipo: 'numero' },
+  { clave: 'totalCobrado', titulo: 'Cobrado', tipo: 'numero' },
+  { clave: 'saldoPendiente', titulo: 'Saldo', tipo: 'numero' },
+  { clave: 'observaciones', titulo: 'Observaciones' }
+];
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
 
@@ -308,6 +333,29 @@ router.get('/', authAdmin, async (req, res) => {
       return db.collection('ventas').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
     });
     res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Export en Excel (.xlsx) — mismos filtros que GET /, hasta 2000 filas
+// (una fila por venta, no por ítem — ver comentario de COLUMNAS_VENTAS_EXPORT).
+router.get('/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.clienteId) {
+      const cid = toObjectId(req.query.clienteId);
+      if (cid) match.clienteId = cid;
+    }
+    if (req.query.estado && ESTADOS_VALIDOS.includes(req.query.estado)) match.estado = req.query.estado;
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
+    }
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('ventas').find(match).sort({ fecha: -1, numero: -1 }).limit(2000).toArray();
+    });
+    exportarXlsx(res, 'ventas.xlsx', COLUMNAS_VENTAS_EXPORT, lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

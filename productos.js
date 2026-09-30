@@ -89,6 +89,7 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -127,6 +128,38 @@ const TIPOS_UNIDAD_VALIDOS = ['unidad', 'peso', 'longitud', 'capacidad', 'superf
 const DISPONIBLE_PARA_VALIDOS = ['ventas', 'compras', 'todos'];
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_PRODUCTO_VALIDOS = ['simple', 'combo', 'produccion'];
+
+// Columnas del Excel de import/export (30/9/2026, pedido de Mato: "todas
+// las bases tengo que tener la posibilidad de importar y exportar") — ver
+// importExport.js para el formato de esta lista y cómo se usa.
+const COLUMNAS_PRODUCTOS = [
+  { clave: 'sku', titulo: 'SKU (Código)' },
+  { clave: 'nombre', titulo: 'Nombre' },
+  { clave: 'rubro', titulo: 'Rubro' },
+  { clave: 'subrubro', titulo: 'Subrubro' },
+  { clave: 'marca', titulo: 'Marca' },
+  { clave: 'unidad', titulo: 'Unidad' },
+  { clave: 'tipoUnidad', titulo: 'Tipo de unidad' },
+  { clave: 'disponiblePara', titulo: 'Disponible para' },
+  { clave: 'tipoProducto', titulo: 'Tipo de producto' },
+  { clave: 'moneda', titulo: 'Moneda' },
+  { clave: 'precio', titulo: 'Precio', tipo: 'numero' },
+  { clave: 'costo', titulo: 'Costo', tipo: 'numero' },
+  { clave: 'porcentajeIva', titulo: 'IVA %', tipo: 'numero' },
+  { clave: 'impuestoInterno', titulo: 'Impuesto interno', tipo: 'numero' },
+  { clave: 'codigoBarra', titulo: 'Código de barra' },
+  { clave: 'codigoExterno', titulo: 'Código externo (proveedor)' },
+  { clave: 'proveedor', titulo: 'Proveedor' },
+  { clave: 'unidadesPorBulto', titulo: 'Unidades por bulto', tipo: 'numero' },
+  { clave: 'cantidadMinima', titulo: 'Cantidad mínima', tipo: 'numero' },
+  { clave: 'stockIdeal', titulo: 'Stock ideal', tipo: 'numero' },
+  { clave: 'stockeable', titulo: 'Stockeable', tipo: 'booleano' },
+  { clave: 'aceptaStockNegativo', titulo: 'Acepta stock negativo', tipo: 'booleano' },
+  { clave: 'trazable', titulo: 'Trazable', tipo: 'booleano' },
+  { clave: 'embalaje', titulo: 'Embalaje' },
+  { clave: 'descripcion', titulo: 'Descripción' },
+  { clave: 'notas', titulo: 'Notas' }
+];
 
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function normalizarBooleano(v) { return !!v; }
@@ -265,6 +298,80 @@ router.get('/', authAdmin, async (req, res) => {
       return db.collection('productos_catalogo').find(match).sort({ nombre: 1 }).toArray();
     });
     res.json(productos);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Import / export en Excel (.xlsx) — ver importExport.js.
+// -----------------------------------------------------------------------
+
+router.get('/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const productos = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_catalogo').find(match).sort({ nombre: 1 }).toArray();
+    });
+    exportarXlsx(res, 'productos.xlsx', COLUMNAS_PRODUCTOS, productos);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/plantilla-import', authAdmin, (req, res) => {
+  exportarPlantillaXlsx(res, 'plantilla-productos.xlsx', COLUMNAS_PRODUCTOS);
+});
+
+// Importa filas de un Excel: si el SKU ya existe (activo), actualiza ese
+// producto; si no existe, lo crea. Nunca aborta el archivo entero por una
+// fila con error — esa fila se saltea y se informa en `errores`.
+router.post('/import', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_PRODUCTOS);
+    if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const proveedoresActivos = await db.collection('proveedores')
+        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+      const proveedorIdPorNombre = new Map();
+      proveedoresActivos.forEach(p => {
+        if (p.razonSocial) proveedorIdPorNombre.set(p.razonSocial.trim().toLowerCase(), p._id);
+        if (p.nombreFantasia) proveedorIdPorNombre.set(p.nombreFantasia.trim().toLowerCase(), p._id);
+      });
+
+      let creados = 0, actualizados = 0;
+      const errores = [];
+      for (const fila of filas) {
+        try {
+          if (!fila.sku) throw err(400, 'Falta el SKU');
+          const datos = validarProducto(fila);
+          if (fila.proveedor) {
+            const pid = proveedorIdPorNombre.get(String(fila.proveedor).trim().toLowerCase());
+            if (pid) datos.proveedorId = pid;
+          }
+          const match = Object.assign({ sku: datos.sku, activo: { $ne: false } }, filtroOrg(req));
+          const existente = await db.collection('productos_catalogo').findOne(match);
+          const ahora = new Date();
+          if (existente) {
+            await db.collection('productos_catalogo').updateOne(
+              { _id: existente._id },
+              { $set: Object.assign({}, datos, { updatedAt: ahora }) }
+            );
+            actualizados++;
+          } else {
+            await db.collection('productos_catalogo').insertOne(
+              Object.assign({}, datos, { activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora })
+            );
+            creados++;
+          }
+        } catch (e) {
+          errores.push({ fila: fila.__fila, motivo: e.message });
+        }
+      }
+      return { creados, actualizados, errores };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

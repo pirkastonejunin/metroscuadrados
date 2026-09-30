@@ -45,6 +45,12 @@
 // Integración (en server.js):
 //   const costosRouter = require('./costos');
 //   app.use('/api/costos', costosRouter);
+//
+// Actualización (30/9/2026, sincronización con Productos): al crear o
+// actualizar un producto de Costos CON SKU, se crea/actualiza automática
+// su ficha en productos_catalogo (mismo SKU) — ver
+// `sincronizarProductoEnCatalogo` más abajo. Productos sigue siendo la
+// fuente de verdad de precio y demás datos comerciales.
 // ---------------------------------------------------------------------------
 
 const express = require('express');
@@ -142,6 +148,52 @@ async function validarSkuUnico(db, req, sku, idExcluir) {
   if (idExcluir) match._id = { $ne: idExcluir };
   const existente = await db.collection('costos_productos').findOne(match);
   if (existente) throw err(400, `Ya hay otro producto activo con el SKU "${sku}" (${existente.nombre}).`);
+}
+
+// Sincronización Producción→Productos (30/9/2026, pedido de Mato: "los
+// productos de produccion deberian aparecer en productos tal cual con el
+// mismo sku"). Al crear o actualizar un producto de Costos de Producción
+// CON SKU, se crea/actualiza automáticamente su ficha en
+// productos_catalogo (mismo SKU) — así no hay que cargarlo dos veces a
+// mano para que la conexión Fábrica→Stock lo encuentre.
+//
+// Decisión (con Mato, 30/9/2026): Productos sigue siendo la fuente de
+// verdad de precio, rubro, marca y demás datos comerciales — la
+// sincronización SOLO toca nombre y el vínculo `costoProductoId` en una
+// ficha ya existente; el resto de los campos comerciales, una vez
+// creados, los edita Mato desde Productos y no se vuelven a pisar acá.
+// Si la ficha no existe todavía, se crea con datos mínimos razonables
+// (unidad/tipoUnidad según tipoCosteo, tipoProducto:'produccion') para
+// que Mato la complete con precio y demás cuando haga falta. Sin SKU no
+// hay nada que sincronizar — ese caso ya se avisa aparte como "sinSku"
+// en la conexión a Stock.
+async function sincronizarProductoEnCatalogo(db, req, costosProducto) {
+  if (!costosProducto || !costosProducto.sku) return;
+  const match = Object.assign({ sku: costosProducto.sku }, filtroOrg(req));
+  const existente = await db.collection('productos_catalogo').findOne(match);
+  const ahora = new Date();
+  if (existente) {
+    await db.collection('productos_catalogo').updateOne(
+      { _id: existente._id },
+      { $set: { nombre: costosProducto.nombre, costoProductoId: costosProducto._id, updatedAt: ahora } }
+    );
+  } else {
+    const esM2 = costosProducto.tipoCosteo === 'm2';
+    const nuevo = {
+      sku: costosProducto.sku, nombre: costosProducto.nombre,
+      unidad: esM2 ? 'm2' : 'unidad', tipoUnidad: esM2 ? 'superficie' : 'unidad',
+      disponiblePara: 'todos', moneda: 'ARS', tipoProducto: 'produccion',
+      rubro: '', subrubro: '', marca: '', codigoBarra: '', codigoExterno: '',
+      proveedor: '', proveedorId: null, embalaje: '', descripcion: '', notas: '',
+      precio: null, costo: null, porcentajeIva: null, impuestoInterno: null,
+      unidadesPorBulto: null, fechaVencimiento: null,
+      stockeable: true, aceptaStockNegativo: false, trazable: false,
+      utilizaVariantes: false, indicaCtdBultos: false,
+      costoProductoId: costosProducto._id, cantidadMinima: null, stockIdeal: null,
+      activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
+    };
+    await db.collection('productos_catalogo').insertOne(nuevo);
+  }
 }
 
 // Módulo con clave propia — decisión tomada con Mato (28/9/2026): datos
@@ -512,6 +564,7 @@ router.post('/productos', authAdmin, async (req, res) => {
       };
       const r = await db.collection('costos_productos').insertOne(doc);
       doc._id = r.insertedId;
+      await sincronizarProductoEnCatalogo(db, req, doc);
       return doc;
     });
     const insumosPorId = await conReintento(async () => traerInsumosDeProductos(await getDb(), req, [resultado]));
@@ -551,7 +604,9 @@ router.put('/productos/:id', authAdmin, async (req, res) => {
       if (rendimientoPorPaquete !== undefined) set.rendimientoPorPaquete = normalizarNumeroOpcional(rendimientoPorPaquete, 'Rendimiento por paquete');
 
       await db.collection('costos_productos').updateOne({ _id: id }, { $set: set });
-      return db.collection('costos_productos').findOne({ _id: id });
+      const doc = await db.collection('costos_productos').findOne({ _id: id });
+      await sincronizarProductoEnCatalogo(db, req, doc);
+      return doc;
     });
     const insumosPorId = await conReintento(async () => traerInsumosDeProductos(await getDb(), req, [resultado]));
     const { costoTotal, items } = calcularCostoProducto(resultado, insumosPorId);

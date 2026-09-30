@@ -61,6 +61,7 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -93,6 +94,50 @@ function err(status, message) { return Object.assign(new Error(message), { statu
 const authAdmin = [authUsuario, resolverOrg, requiereModulo('stock')];
 
 const TIPOS_MOVIMIENTO_VALIDOS = ['ingreso', 'egreso'];
+
+// Columnas del Excel de import/export (30/9/2026, pedido de Mato: "todas
+// las bases tengo que tener la posibilidad de importar y exportar") — ver
+// importExport.js. Stock tiene TRES planillas distintas: depósitos
+// (import/export), stock actual (solo export, es un caché calculado) y
+// movimientos (export de historial + import para carga inicial de stock,
+// que arma un movimiento de ingreso por cada fila con SKU+Depósito+Cantidad).
+const COLUMNAS_DEPOSITOS = [
+  { clave: 'nombre', titulo: 'Nombre' },
+  { clave: 'direccion', titulo: 'Dirección' },
+  { clave: 'notas', titulo: 'Notas' }
+];
+const COLUMNAS_STOCK_ACTUAL = [
+  { clave: 'sku', titulo: 'SKU' },
+  { clave: 'nombre', titulo: 'Producto' },
+  { clave: 'deposito', titulo: 'Depósito' },
+  { clave: 'cantidad', titulo: 'Cantidad', tipo: 'numero' },
+  { clave: 'unidad', titulo: 'Unidad' },
+  { clave: 'cantidadMinima', titulo: 'Cantidad mínima', tipo: 'numero' },
+  { clave: 'stockIdeal', titulo: 'Stock ideal', tipo: 'numero' }
+];
+const COLUMNAS_MOVIMIENTOS_EXPORT = [
+  { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
+  { clave: 'tipo', titulo: 'Tipo' },
+  { clave: 'sku', titulo: 'SKU' },
+  { clave: 'producto', titulo: 'Producto' },
+  { clave: 'deposito', titulo: 'Depósito' },
+  { clave: 'cantidad', titulo: 'Cantidad', tipo: 'numero' },
+  { clave: 'motivo', titulo: 'Motivo' },
+  { clave: 'sucursal', titulo: 'Sucursal' },
+  { clave: 'codigoExterno', titulo: 'Código externo' },
+  { clave: 'observaciones', titulo: 'Observaciones' },
+  { clave: 'usuarioNombre', titulo: 'Usuario' }
+];
+// Para el import (carga inicial de stock): mismas columnas mínimas que
+// pide el form manual de "Nuevo movimiento".
+const COLUMNAS_MOVIMIENTOS_IMPORT = [
+  { clave: 'sku', titulo: 'SKU' },
+  { clave: 'deposito', titulo: 'Depósito' },
+  { clave: 'tipo', titulo: 'Tipo (ingreso/egreso)' },
+  { clave: 'cantidad', titulo: 'Cantidad', tipo: 'numero' },
+  { clave: 'motivo', titulo: 'Motivo' },
+  { clave: 'observaciones', titulo: 'Observaciones' }
+];
 
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 
@@ -187,6 +232,57 @@ router.delete('/depositos/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Import / export de depósitos en Excel (.xlsx) — ver importExport.js.
+router.get('/depositos/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const depositos = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('depositos').find(match).sort({ nombre: 1 }).toArray();
+    });
+    exportarXlsx(res, 'depositos.xlsx', COLUMNAS_DEPOSITOS, depositos);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/depositos/plantilla-import', authAdmin, (req, res) => {
+  exportarPlantillaXlsx(res, 'plantilla-depositos.xlsx', COLUMNAS_DEPOSITOS);
+});
+
+router.post('/depositos/import', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_DEPOSITOS);
+    if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      let creados = 0, actualizados = 0;
+      const errores = [];
+      for (const fila of filas) {
+        try {
+          const nombre = normalizarTexto(fila.nombre);
+          if (!nombre) throw err(400, 'Falta el nombre del depósito');
+          const direccion = normalizarTexto(fila.direccion);
+          const notas = normalizarTexto(fila.notas);
+          const match = Object.assign({ nombre, activo: { $ne: false } }, filtroOrg(req));
+          const existente = await db.collection('depositos').findOne(match);
+          const ahora = new Date();
+          if (existente) {
+            await db.collection('depositos').updateOne({ _id: existente._id }, { $set: { direccion, notas, updatedAt: ahora } });
+            actualizados++;
+          } else {
+            await db.collection('depositos').insertOne({ nombre, direccion, notas, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora });
+            creados++;
+          }
+        } catch (e) {
+          errores.push({ fila: fila.__fila, motivo: e.message });
+        }
+      }
+      return { creados, actualizados, errores };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // -----------------------------------------------------------------------
 // Stock actual (caché por producto + depósito)
 // -----------------------------------------------------------------------
@@ -250,6 +346,43 @@ router.get('/actual', authAdmin, async (req, res) => {
       return filas;
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Export de stock actual en Excel (.xlsx) — ver importExport.js. Es un
+// caché calculado, no tiene sentido importarlo (se "importa" cargando
+// movimientos, ver /movimientos/import más abajo).
+router.get('/actual/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.depositoId) {
+      const depId = toObjectId(req.query.depositoId);
+      if (depId) match.depositoId = depId;
+    }
+    const filas = await conReintento(async () => {
+      const db = await getDb();
+      const [existencias, productos, depositos] = await Promise.all([
+        db.collection('stock_actual').find(match).toArray(),
+        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray(),
+        db.collection('depositos').find(filtroOrg(req)).toArray()
+      ]);
+      const productosPorId = new Map(productos.map(p => [String(p._id), p]));
+      const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
+      return existencias
+        .filter(e => productosPorId.has(String(e.productoId)))
+        .map(e => {
+          const p = productosPorId.get(String(e.productoId));
+          const d = depositosPorId.get(String(e.depositoId));
+          return {
+            sku: p.sku, nombre: p.nombre, deposito: d ? d.nombre : '(depósito eliminado)',
+            cantidad: e.cantidad, unidad: p.unidad,
+            cantidadMinima: p.cantidadMinima != null ? p.cantidadMinima : null,
+            stockIdeal: p.stockIdeal != null ? p.stockIdeal : null
+          };
+        })
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    });
+    exportarXlsx(res, 'stock-actual.xlsx', COLUMNAS_STOCK_ACTUAL, filas);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -405,6 +538,108 @@ router.post('/transferencias', authAdmin, async (req, res) => {
         egreso: Object.assign({ _id: rEgreso.insertedId }, egreso),
         ingreso: Object.assign({ _id: rIngreso.insertedId }, ingreso)
       };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Export del historial de movimientos en Excel (.xlsx) — mismo filtro que
+// GET /movimientos, hasta 2000 filas (más que el límite de 500 de la
+// vista en pantalla, para que el export sirva como respaldo real).
+router.get('/movimientos/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.depositoId) {
+      const did = toObjectId(req.query.depositoId);
+      if (did) match.depositoId = did;
+    }
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
+    }
+    const filas = await conReintento(async () => {
+      const db = await getDb();
+      const [movimientos, productos, depositos] = await Promise.all([
+        db.collection('stock_movimientos').find(match).sort({ fecha: -1, createdAt: -1 }).limit(2000).toArray(),
+        db.collection('productos_catalogo').find({}).project({ sku: 1, nombre: 1 }).toArray(),
+        db.collection('depositos').find({}).project({ nombre: 1 }).toArray()
+      ]);
+      const productosPorId = new Map(productos.map(p => [String(p._id), p]));
+      const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
+      return movimientos.map(m => {
+        const p = productosPorId.get(String(m.productoId));
+        const d = depositosPorId.get(String(m.depositoId));
+        return Object.assign({}, m, {
+          sku: p ? p.sku : null,
+          producto: p ? p.nombre : '(producto eliminado)',
+          deposito: d ? d.nombre : '(depósito eliminado)'
+        });
+      });
+    });
+    exportarXlsx(res, 'movimientos-stock.xlsx', COLUMNAS_MOVIMIENTOS_EXPORT, filas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/movimientos/plantilla-import', authAdmin, (req, res) => {
+  exportarPlantillaXlsx(res, 'plantilla-carga-inicial-stock.xlsx', COLUMNAS_MOVIMIENTOS_IMPORT);
+});
+
+// Importa una carga inicial (o masiva) de stock: cada fila con SKU +
+// Depósito + Cantidad genera un movimiento real (ingreso por defecto,
+// egreso si se indica) — pasa por la MISMA validación de stock negativo
+// que un movimiento manual. Pensado sobre todo para cargar el stock
+// inicial al migrar un depósito completo desde Dux.
+router.post('/movimientos/import', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_MOVIMIENTOS_IMPORT);
+    if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const [productos, depositos] = await Promise.all([
+        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray(),
+        db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray()
+      ]);
+      const productoPorSku = new Map(productos.filter(p => p.sku).map(p => [p.sku.trim().toLowerCase(), p]));
+      const depositoPorNombre = new Map(depositos.map(d => [d.nombre.trim().toLowerCase(), d]));
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+
+      let creados = 0;
+      const errores = [];
+      for (const fila of filas) {
+        try {
+          if (!fila.sku) throw err(400, 'Falta el SKU');
+          if (!fila.deposito) throw err(400, 'Falta el depósito');
+          const producto = productoPorSku.get(String(fila.sku).trim().toLowerCase());
+          if (!producto) throw err(400, `No existe ningún producto activo con SKU "${fila.sku}"`);
+          const deposito = depositoPorNombre.get(String(fila.deposito).trim().toLowerCase());
+          if (!deposito) throw err(400, `No existe ningún depósito activo llamado "${fila.deposito}"`);
+          const tipo = (normalizarTexto(fila.tipo).toLowerCase() || 'ingreso');
+          if (!TIPOS_MOVIMIENTO_VALIDOS.includes(tipo)) throw err(400, `Tipo inválido (opciones: ${TIPOS_MOVIMIENTO_VALIDOS.join(', ')})`);
+          const cantidad = normalizarCantidad(fila.cantidad, 'La cantidad');
+
+          if (tipo === 'egreso' && !producto.aceptaStockNegativo) {
+            const actual = await db.collection('stock_actual').findOne(Object.assign({ productoId: producto._id, depositoId: deposito._id }, filtroOrg(req)));
+            const cantidadActual = actual ? actual.cantidad : 0;
+            if (cantidad > cantidadActual) throw err(400, `No hay stock suficiente en ${deposito.nombre} (disponible: ${cantidadActual}).`);
+          }
+
+          const nuevo = {
+            productoId: producto._id, depositoId: deposito._id, tipo, cantidad,
+            motivo: normalizarTexto(fila.motivo) || 'Carga por importación de Excel',
+            sucursal: '', codigoExterno: '', observaciones: normalizarTexto(fila.observaciones),
+            usuarioNombre, fecha: new Date(), orgId: req.orgId, createdAt: new Date()
+          };
+          await db.collection('stock_movimientos').insertOne(nuevo);
+          await aplicarAlStockActual(db, req, producto._id, deposito._id, tipo, cantidad);
+          creados++;
+        } catch (e) {
+          errores.push({ fila: fila.__fila, motivo: e.message });
+        }
+      }
+      return { creados, errores };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

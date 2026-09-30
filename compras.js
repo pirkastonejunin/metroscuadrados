@@ -64,6 +64,7 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { exportarXlsx } = require('./importExport');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -98,6 +99,28 @@ const TIPOS_RECEPCION_VALIDOS = ['inmediata', 'pendiente'];
 const ESTADOS_VALIDOS = ['pendiente', 'recibida', 'anulada'];
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
+
+// Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
+// bases tengo que tener la posibilidad de importar y exportar") — ver
+// importExport.js. Solo EXPORT, mismo motivo que en Ventas: una compra se
+// genera operativamente (recepción/pagos ligados a movimientos reales de
+// stock), no se carga masiva desde Excel.
+const COLUMNAS_COMPRAS_EXPORT = [
+  { clave: 'numero', titulo: 'Nº' },
+  { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
+  { clave: 'proveedorNombre', titulo: 'Proveedor' },
+  { clave: 'condicionPago', titulo: 'Condición de pago' },
+  { clave: 'tipoRecepcion', titulo: 'Tipo de recepción' },
+  { clave: 'estado', titulo: 'Estado' },
+  { clave: 'moneda', titulo: 'Moneda' },
+  { clave: 'subtotal', titulo: 'Subtotal', tipo: 'numero' },
+  { clave: 'descuentoPorcentaje', titulo: 'Descuento %', tipo: 'numero' },
+  { clave: 'descuentoMonto', titulo: 'Descuento $', tipo: 'numero' },
+  { clave: 'total', titulo: 'Total', tipo: 'numero' },
+  { clave: 'totalPagado', titulo: 'Pagado', tipo: 'numero' },
+  { clave: 'saldoPendiente', titulo: 'Saldo', tipo: 'numero' },
+  { clave: 'observaciones', titulo: 'Observaciones' }
+];
 
 const authAdmin = [authUsuario, resolverOrg, requiereModulo('compras')];
 
@@ -306,6 +329,29 @@ router.get('/', authAdmin, async (req, res) => {
       return db.collection('compras').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
     });
     res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Export en Excel (.xlsx) — mismos filtros que GET /, hasta 2000 filas
+// (una fila por compra, no por ítem — ver comentario de COLUMNAS_COMPRAS_EXPORT).
+router.get('/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.proveedorId) {
+      const pid = toObjectId(req.query.proveedorId);
+      if (pid) match.proveedorId = pid;
+    }
+    if (req.query.estado && ESTADOS_VALIDOS.includes(req.query.estado)) match.estado = req.query.estado;
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
+    }
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('compras').find(match).sort({ fecha: -1, numero: -1 }).limit(2000).toArray();
+    });
+    exportarXlsx(res, 'compras.xlsx', COLUMNAS_COMPRAS_EXPORT, lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

@@ -42,6 +42,7 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -77,6 +78,35 @@ const CATEGORIAS_FISCALES_VALIDAS = ['consumidor_final', 'exento', 'monotributis
 const TIPOS_DOCUMENTO_VALIDOS = ['cuil', 'cuit', 'dni', 'pasaporte'];
 const SEXOS_VALIDOS = ['femenino', 'masculino'];
 const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_venta', 'factura'];
+
+// Columnas del Excel de import/export (30/9/2026, pedido de Mato: "todas
+// las bases tengo que tener la posibilidad de importar y exportar") — ver
+// importExport.js para el formato de esta lista y cómo se usa.
+const COLUMNAS_CLIENTES = [
+  { clave: 'codigo', titulo: 'Código' },
+  { clave: 'apellidoRazonSocial', titulo: 'Apellido / Razón social' },
+  { clave: 'nombre', titulo: 'Nombre' },
+  { clave: 'nombreFantasia', titulo: 'Nombre de fantasía' },
+  { clave: 'categoriaFiscal', titulo: 'Categoría fiscal' },
+  { clave: 'tipoDocumento', titulo: 'Tipo de documento' },
+  { clave: 'numeroDocumento', titulo: 'Número de documento' },
+  { clave: 'cuit', titulo: 'CUIT/CUIL' },
+  { clave: 'tipoCliente', titulo: 'Tipo de cliente' },
+  { clave: 'vendedor', titulo: 'Vendedor' },
+  { clave: 'condicionPago', titulo: 'Condición de pago' },
+  { clave: 'porcentajeDescuento', titulo: 'Descuento %', tipo: 'numero' },
+  { clave: 'provincia', titulo: 'Provincia' },
+  { clave: 'localidad', titulo: 'Localidad' },
+  { clave: 'domicilio', titulo: 'Domicilio' },
+  { clave: 'barrio', titulo: 'Barrio' },
+  { clave: 'codigoPostal', titulo: 'Código postal' },
+  { clave: 'telefono', titulo: 'Teléfono' },
+  { clave: 'celular', titulo: 'Celular' },
+  { clave: 'email', titulo: 'Email' },
+  { clave: 'personaContacto', titulo: 'Persona de contacto' },
+  { clave: 'observaciones', titulo: 'Observaciones' },
+  { clave: 'notas', titulo: 'Notas' }
+];
 
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function normalizarBooleano(v) { return !!v; }
@@ -197,6 +227,72 @@ router.get('/', authAdmin, async (req, res) => {
       return db.collection('clientes').find(match).sort({ apellidoRazonSocial: 1 }).toArray();
     });
     res.json(clientes);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Import / export en Excel (.xlsx) — ver importExport.js.
+// -----------------------------------------------------------------------
+
+router.get('/export', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const clientes = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('clientes').find(match).sort({ apellidoRazonSocial: 1 }).toArray();
+    });
+    exportarXlsx(res, 'clientes.xlsx', COLUMNAS_CLIENTES, clientes);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/plantilla-import', authAdmin, (req, res) => {
+  exportarPlantillaXlsx(res, 'plantilla-clientes.xlsx', COLUMNAS_CLIENTES);
+});
+
+// Importa filas de un Excel: si viene Código o CUIT y ya existe un
+// cliente activo con ese mismo dato, lo actualiza; si no, lo crea. Nunca
+// aborta el archivo entero por una fila con error — esa fila se saltea y
+// se informa en `errores`.
+router.post('/import', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_CLIENTES);
+    if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      let creados = 0, actualizados = 0;
+      const errores = [];
+      for (const fila of filas) {
+        try {
+          const datos = validarCliente(fila);
+          let existente = null;
+          if (datos.codigo) {
+            existente = await db.collection('clientes').findOne(Object.assign({ codigo: datos.codigo, activo: { $ne: false } }, filtroOrg(req)));
+          }
+          if (!existente && datos.cuit) {
+            existente = await db.collection('clientes').findOne(Object.assign({ cuit: datos.cuit, activo: { $ne: false } }, filtroOrg(req)));
+          }
+          const ahora = new Date();
+          if (existente) {
+            await db.collection('clientes').updateOne(
+              { _id: existente._id },
+              { $set: Object.assign({}, datos, { updatedAt: ahora }) }
+            );
+            actualizados++;
+          } else {
+            await db.collection('clientes').insertOne(
+              Object.assign({}, datos, { activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora })
+            );
+            creados++;
+          }
+        } catch (e) {
+          errores.push({ fila: fila.__fila, motivo: e.message });
+        }
+      }
+      return { creados, actualizados, errores };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
