@@ -497,6 +497,32 @@ async function traerInsumosDeProductos(db, req, productos) {
   return porId;
 }
 
+// Sincronización masiva Producción→Productos (30/9/2026, pedido de Mato:
+// "podes incluirme todo lo que ya esta en el modulo de produccion en
+// productos?"). La sincronización automática de `sincronizarProductoEnCatalogo`
+// (ver arriba) solo corre cuando se crea o edita un producto de Costos DE
+// ACÁ EN ADELANTE — esta ruta es el "backfill" de una sola vez para los
+// productos de Costos que ya existían antes de esa conexión.
+router.post('/productos/sincronizar-catalogo', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de sincronizar.');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+      const productos = await db.collection('costos_productos').find(match).toArray();
+      let sincronizados = 0;
+      const sinSku = [];
+      for (const p of productos) {
+        if (!p.sku) { sinSku.push(p.nombre); continue; }
+        await sincronizarProductoEnCatalogo(db, req, p);
+        sincronizados++;
+      }
+      return { total: productos.length, sincronizados, sinSku };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/productos', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));

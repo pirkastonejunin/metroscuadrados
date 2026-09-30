@@ -157,8 +157,10 @@
       <div class="card">
         <div class="row">
           <p class="muted" style="flex:1;min-width:200px;margin:0">El costo de cada producto se calcula con los costos ACTUALES de los insumos de su receta.</p>
+          <button class="btn secondary" onclick="sincronizarConProductos()">Sincronizar con Productos</button>
           <button class="btn btn-crear-org" onclick="abrirNuevoProducto()">+ Nuevo producto</button>
         </div>
+        <p class="muted" style="margin:8px 0 0">Cada producto con SKU se guarda también como ficha en el módulo Productos (mismo SKU) — "Sincronizar con Productos" lo hace de una para los que ya existían antes de esta conexión; los nuevos y los que edites de acá en más se sincronizan solos.</p>
       </div>
       <div class="card">
         <table>
@@ -932,6 +934,24 @@ async function exportarListaExcel(id){
   a.href = url; a.download = nombreArchivo;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Sincronización masiva Producción→Productos (30/9/2026) — ver
+// costos.js: POST /productos/sincronizar-catalogo. Los productos nuevos
+// y los que se editen de acá en más se sincronizan solos; este botón es
+// el "de una" para los que ya existían antes de la conexión.
+async function sincronizarConProductos(){
+  if (!confirm('Esto va a crear/actualizar en Productos la ficha de cada producto de Costos que tenga SKU. ¿Continuar?')) return;
+  try{
+    const r = await fetch(BASE + '/productos/sincronizar-catalogo', {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    let msg = `Sincronizados: ${data.sincronizados} de ${data.total} productos de Costos.`;
+    if (data.sinSku && data.sinSku.length) msg += `\n\nSin SKU (no se pudieron vincular): ${data.sinSku.join(', ')}`;
+    alert(msg);
+  }catch(e){
+    alert('No se pudo sincronizar: ' + e.message);
+  }
 }
 </script>
 </body>
