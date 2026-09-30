@@ -39,11 +39,18 @@
 //     sigue existiendo como flag por si algún día hiciera falta, pero no
 //     se va a construir el sub-esquema de variantes.
 //   - Sin "otros costos" (necesitan configuración previa en Dux).
-//   - Sin vínculo real con proveedores (`proveedor` es texto libre) — el
-//     módulo de Proveedores ya existe (`proveedores.js`) pero todavía no
-//     se conectó acá con un `proveedorId`.
 //   - Sin listas de precio propias (a diferencia de Costos de
 //     Producción) — un solo precio de venta por producto por ahora.
+//
+// Actualización (30/9/2026, prerrequisito para Compras): se suma
+// `proveedorId` (vínculo real con la colección `proveedores`), que
+// convive con el viejo campo `proveedor` (texto libre, se deja para no
+// romper productos ya cargados sin proveedor vinculado — Dux en su ficha
+// real solo tiene un campo de texto "PROVEEDOR", este `proveedorId` es
+// una mejora propia para que Compras pueda autocompletar). Se expone
+// `GET /proveedores-lite` (bajo el mismo gate de Productos, no el de
+// Proveedores) para que el formulario de producto pueda armar el
+// desplegable sin exigir también el módulo 'proveedores'.
 //
 // Actualización (29/9/2026, módulo Stock): se suman `cantidadMinima` y
 // `stockIdeal` — son campos que Dux ya trae en la ficha de producto y que
@@ -67,9 +74,9 @@
 //     tipoUnidad, unidad, rubro, subrubro, marca, codigoBarra, moneda,
 //     costo, impuestoInterno, precio, stockeable, aceptaStockNegativo,
 //     trazable, utilizaVariantes, tipoProducto, costoProductoId,
-//     codigoExterno, proveedor, fechaVencimiento, indicaCtdBultos,
-//     unidadesPorBulto, embalaje, descripcion, notas, cantidadMinima,
-//     stockIdeal, activo, orgId, createdAt, updatedAt }
+//     codigoExterno, proveedor, proveedorId, fechaVencimiento,
+//     indicaCtdBultos, unidadesPorBulto, embalaje, descripcion, notas,
+//     cantidadMinima, stockIdeal, activo, orgId, createdAt, updatedAt }
 //
 // Módulo con clave propia ('productos'), datos separados por organización
 // (mismo mecanismo orgId/resolverOrg/filtroOrg que el resto de la app).
@@ -179,6 +186,8 @@ function validarProducto(body) {
   const codigoBarra = normalizarTexto(body.codigoBarra);
   const codigoExterno = normalizarTexto(body.codigoExterno);
   const proveedor = normalizarTexto(body.proveedor);
+  const proveedorId = body.proveedorId ? toObjectId(body.proveedorId) : null;
+  if (body.proveedorId && !proveedorId) throw err(400, 'proveedorId inválido');
   const embalaje = normalizarTexto(body.embalaje);
   const descripcion = normalizarTexto(body.descripcion);
   const notas = normalizarTexto(body.notas);
@@ -204,7 +213,7 @@ function validarProducto(body) {
 
   return {
     sku, nombre, unidad, tipoUnidad, disponiblePara, moneda, tipoProducto,
-    rubro, subrubro, marca, codigoBarra, codigoExterno, proveedor, embalaje, descripcion, notas,
+    rubro, subrubro, marca, codigoBarra, codigoExterno, proveedor, proveedorId, embalaje, descripcion, notas,
     precio, costo, porcentajeIva, impuestoInterno, unidadesPorBulto, fechaVencimiento,
     stockeable, aceptaStockNegativo, trazable, utilizaVariantes, indicaCtdBultos,
     costoProductoId, cantidadMinima, stockIdeal
@@ -222,6 +231,22 @@ router.get('/rubros', authAdmin, async (req, res) => {
       return db.collection('productos_catalogo').distinct('rubro', match);
     });
     res.json(rubros.sort((a, b) => a.localeCompare(b, 'es')));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Lista liviana de proveedores activos, para el desplegable de Proveedor
+// en el formulario de producto — bajo el gate de Productos, no el de
+// Proveedores (ver comentario de cabecera).
+router.get('/proveedores-lite', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('proveedores')
+        .find(match, { projection: { razonSocial: 1, nombreFantasia: 1 } })
+        .sort({ razonSocial: 1 }).toArray();
+    });
+    res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

@@ -210,9 +210,22 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarRubros();
+  await cargarProveedoresLite();
   await cargarProductos();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+let proveedoresCache = [];
+async function cargarProveedoresLite(){
+  const r = await fetch(BASE + '/proveedores-lite', {headers: headersAuth()});
+  if (!r.ok) return;
+  proveedoresCache = await r.json();
+}
+function opcionesProveedor(seleccionadoId){
+  return '<option value="">Sin proveedor asignado</option>' + proveedoresCache.map(p =>
+    `<option value="${p._id}" ${String(p._id)===String(seleccionadoId)?'selected':''}>${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`
+  ).join('');
+}
 
 async function cargarRubros(){
   const r = await fetch(BASE + '/rubros', {headers: headersAuth()});
@@ -316,7 +329,7 @@ function formularioProducto(p){
     <div class="grid3">
       <div><label>Código de barra</label><input id="fpCodigoBarra" value="${escapeHtml(p.codigoBarra||'')}"></div>
       <div><label>Código externo (proveedor)</label><input id="fpCodigoExterno" value="${escapeHtml(p.codigoExterno||'')}"></div>
-      <div><label>Proveedor</label><input id="fpProveedor" value="${escapeHtml(p.proveedor||'')}" placeholder="Texto libre por ahora"></div>
+      <div><label>Proveedor</label><select id="fpProveedorId">${opcionesProveedor(p.proveedorId)}</select></div>
     </div>
     <div class="grid3" style="margin-top:10px">
       <div><label>Vencimiento (informativo)</label><input id="fpFechaVencimiento" type="date" value="${p.fechaVencimiento ? String(p.fechaVencimiento).slice(0,10) : ''}"></div>
@@ -383,7 +396,8 @@ function leerFormularioProducto(){
     tipoProducto: document.getElementById('fpTipoProducto').value,
     codigoBarra: document.getElementById('fpCodigoBarra').value.trim(),
     codigoExterno: document.getElementById('fpCodigoExterno').value.trim(),
-    proveedor: document.getElementById('fpProveedor').value.trim(),
+    proveedorId: document.getElementById('fpProveedorId').value || null,
+    proveedor: (proveedoresCache.find(p => String(p._id) === document.getElementById('fpProveedorId').value) || {}).razonSocial || '',
     fechaVencimiento: document.getElementById('fpFechaVencimiento').value,
     unidadesPorBulto: document.getElementById('fpUnidadesPorBulto').value,
     embalaje: document.getElementById('fpEmbalaje').value.trim(),
