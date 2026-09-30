@@ -132,23 +132,37 @@ const TIPOS_PRODUCTO_VALIDOS = ['simple', 'combo', 'produccion'];
 // Columnas del Excel de import/export (30/9/2026, pedido de Mato: "todas
 // las bases tengo que tener la posibilidad de importar y exportar") — ver
 // importExport.js para el formato de esta lista y cómo se usa.
+//
+// `aliases` (30/9/2026, 2da vuelta: Mato subió el archivo REAL que
+// exporta Dux de productos) — Dux usa sus propios títulos de columna
+// (ALGO DISTINTO a los nuestros, ej. "CODIGO" en vez de "SKU (Código)"),
+// así que cada columna que aparece en ese export lista también el título
+// real de Dux como alias, para poder importar el archivo tal cual sale
+// de Dux sin pedirle a Mato que edite encabezados a mano. Confirmado
+// contra el archivo real (20.327 filas): Dux NO trae columna de precio de
+// venta (maneja precios aparte, en listas de precio) — por eso `precio`
+// sigue sin alias, va a quedar vacío en los productos importados de Dux
+// y Mato lo tiene que completar o importar aparte.
 const COLUMNAS_PRODUCTOS = [
-  { clave: 'sku', titulo: 'SKU (Código)' },
-  { clave: 'nombre', titulo: 'Nombre' },
+  { clave: 'sku', titulo: 'SKU (Código)', aliases: ['Codigo'] },
+  { clave: 'nombre', titulo: 'Nombre', aliases: ['Producto'] },
   { clave: 'rubro', titulo: 'Rubro' },
-  { clave: 'subrubro', titulo: 'Subrubro' },
+  { clave: 'subrubro', titulo: 'Subrubro', aliases: ['Sub Rubro'] },
   { clave: 'marca', titulo: 'Marca' },
-  { clave: 'unidad', titulo: 'Unidad' },
-  { clave: 'tipoUnidad', titulo: 'Tipo de unidad' },
+  { clave: 'unidad', titulo: 'Unidad', aliases: ['Unidad Medida'] },
+  { clave: 'tipoUnidad', titulo: 'Tipo de unidad', aliases: ['Tipo Unidad'] },
   { clave: 'disponiblePara', titulo: 'Disponible para' },
   { clave: 'tipoProducto', titulo: 'Tipo de producto' },
-  { clave: 'moneda', titulo: 'Moneda' },
+  {
+    clave: 'moneda', titulo: 'Moneda',
+    mapaValores: { PESOS: 'ARS', DOLARES: 'USD', ARS: 'ARS', USD: 'USD' }
+  },
   { clave: 'precio', titulo: 'Precio', tipo: 'numero' },
   { clave: 'costo', titulo: 'Costo', tipo: 'numero' },
-  { clave: 'porcentajeIva', titulo: 'IVA %', tipo: 'numero' },
+  { clave: 'porcentajeIva', titulo: 'IVA %', tipo: 'numero', aliases: ['Porcentaje Iva'] },
   { clave: 'impuestoInterno', titulo: 'Impuesto interno', tipo: 'numero' },
-  { clave: 'codigoBarra', titulo: 'Código de barra' },
-  { clave: 'codigoExterno', titulo: 'Código externo (proveedor)' },
+  { clave: 'codigoBarra', titulo: 'Código de barra', aliases: ['Cod Barra'] },
+  { clave: 'codigoExterno', titulo: 'Código externo (proveedor)', aliases: ['Codigo Externo'] },
   { clave: 'proveedor', titulo: 'Proveedor' },
   { clave: 'unidadesPorBulto', titulo: 'Unidades por bulto', tipo: 'numero' },
   { clave: 'cantidadMinima', titulo: 'Cantidad mínima', tipo: 'numero' },
@@ -156,8 +170,10 @@ const COLUMNAS_PRODUCTOS = [
   { clave: 'stockeable', titulo: 'Stockeable', tipo: 'booleano' },
   { clave: 'aceptaStockNegativo', titulo: 'Acepta stock negativo', tipo: 'booleano' },
   { clave: 'trazable', titulo: 'Trazable', tipo: 'booleano' },
+  { clave: 'indicaCtdBultos', titulo: 'Indica ctd. bultos', tipo: 'booleano', aliases: ['Indica Ctd Bultos'] },
   { clave: 'embalaje', titulo: 'Embalaje' },
   { clave: 'descripcion', titulo: 'Descripción' },
+  { clave: 'fechaVencimiento', titulo: 'Fecha de vencimiento', tipo: 'fecha', aliases: ['Fecha Vencimiento'] },
   { clave: 'notas', titulo: 'Notas' }
 ];
 
@@ -180,6 +196,21 @@ function normalizarEnum(v, opciones, etiqueta, porDefecto) {
   const s = normalizarTexto(v).toLowerCase();
   if (!s) return porDefecto;
   if (!opciones.includes(s)) throw err(400, `${etiqueta} inválido (opciones: ${opciones.join(', ')})`);
+  return s;
+}
+
+// Corrección (30/9/2026, detectado al adaptar el import del export real de
+// Dux): a diferencia de los demás enums de este módulo, MONEDAS_VALIDAS
+// se guarda en MAYÚSCULAS ('ARS'/'USD') porque así la usan ventas.js y
+// proveedores.js. Usar `normalizarEnum` acá (que compara en minúsculas)
+// hacía que CUALQUIER valor de moneda no vacío fallara la validación
+// siempre — es decir, romper el guardado de productos desde el
+// formulario para cualquier producto, porque el <select> de moneda
+// siempre manda un valor. Se resuelve con una función propia, igual al
+// patrón ya usado en ventas.js.
+function normalizarMoneda(v) {
+  const s = normalizarTexto(v).toUpperCase() || 'ARS';
+  if (!MONEDAS_VALIDAS.includes(s)) throw err(400, `Moneda inválida (opciones: ${MONEDAS_VALIDAS.join(', ')})`);
   return s;
 }
 
@@ -206,11 +237,14 @@ function validarProducto(body) {
   const nombre = normalizarTexto(body.nombre);
   if (!nombre) throw err(400, 'El nombre es obligatorio');
 
-  const unidad = normalizarTexto(body.unidad) || 'unidad';
+  // .toLowerCase() acá (además de en UNIDADES_VALIDAS) para que un
+  // import de Dux con "M2"/"KG"/"UNIDAD" en mayúsculas valide igual que
+  // si viniera del formulario, que ya manda minúsculas.
+  const unidad = normalizarTexto(body.unidad).toLowerCase() || 'unidad';
   if (!UNIDADES_VALIDAS.includes(unidad)) throw err(400, `Unidad inválida (opciones: ${UNIDADES_VALIDAS.join(', ')})`);
   const tipoUnidad = normalizarEnum(body.tipoUnidad, TIPOS_UNIDAD_VALIDOS, 'Tipo de unidad', 'unidad');
   const disponiblePara = normalizarEnum(body.disponiblePara, DISPONIBLE_PARA_VALIDOS, 'Disponible para', 'todos');
-  const moneda = normalizarEnum(body.moneda, MONEDAS_VALIDAS, 'Moneda', 'ARS');
+  const moneda = normalizarMoneda(body.moneda);
   const tipoProducto = normalizarEnum(body.tipoProducto, TIPOS_PRODUCTO_VALIDOS, 'Tipo de producto', 'simple');
 
   const rubro = normalizarTexto(body.rubro);
@@ -323,6 +357,15 @@ router.get('/plantilla-import', authAdmin, (req, res) => {
 // Importa filas de un Excel: si el SKU ya existe (activo), actualiza ese
 // producto; si no existe, lo crea. Nunca aborta el archivo entero por una
 // fila con error — esa fila se saltea y se informa en `errores`.
+//
+// Escrito en bulk (30/9/2026, adaptando el import al archivo REAL de Dux,
+// 20.327 filas): la versión anterior hacía un findOne + insertOne/updateOne
+// POR FILA (hasta ~40.000 viajes a Mongo para un catálogo grande), lo que
+// para un archivo de este tamaño corría real riesgo de timeout en Render.
+// Ahora se arma un `bulkWrite` de upserts por SKU, en tandas de 500 —
+// Mongo resuelve cada tanda en una sola ida y vuelta.
+const TANDA_IMPORT = 500;
+
 router.post('/import', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
@@ -340,34 +383,43 @@ router.post('/import', authAdmin, async (req, res) => {
         if (p.nombreFantasia) proveedorIdPorNombre.set(p.nombreFantasia.trim().toLowerCase(), p._id);
       });
 
-      let creados = 0, actualizados = 0;
       const errores = [];
+      const skusVistos = new Set();
+      const ops = [];
+      const ahora = new Date();
       for (const fila of filas) {
         try {
           if (!fila.sku) throw err(400, 'Falta el SKU');
+          if (skusVistos.has(fila.sku)) throw err(400, `SKU "${fila.sku}" repetido en el archivo (se usó la primera aparición)`);
           const datos = validarProducto(fila);
           if (fila.proveedor) {
             const pid = proveedorIdPorNombre.get(String(fila.proveedor).trim().toLowerCase());
             if (pid) datos.proveedorId = pid;
           }
+          skusVistos.add(fila.sku);
           const match = Object.assign({ sku: datos.sku, activo: { $ne: false } }, filtroOrg(req));
-          const existente = await db.collection('productos_catalogo').findOne(match);
-          const ahora = new Date();
-          if (existente) {
-            await db.collection('productos_catalogo').updateOne(
-              { _id: existente._id },
-              { $set: Object.assign({}, datos, { updatedAt: ahora }) }
-            );
-            actualizados++;
-          } else {
-            await db.collection('productos_catalogo').insertOne(
-              Object.assign({}, datos, { activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora })
-            );
-            creados++;
-          }
+          ops.push({
+            updateOne: {
+              filter: match,
+              update: {
+                $set: Object.assign({}, datos, { updatedAt: ahora }),
+                $setOnInsert: { activo: true, orgId: req.orgId, createdAt: ahora }
+              },
+              upsert: true
+            }
+          });
         } catch (e) {
           errores.push({ fila: fila.__fila, motivo: e.message });
         }
+      }
+
+      let creados = 0, actualizados = 0;
+      for (let i = 0; i < ops.length; i += TANDA_IMPORT) {
+        const tanda = ops.slice(i, i + TANDA_IMPORT);
+        if (!tanda.length) continue;
+        const r = await db.collection('productos_catalogo').bulkWrite(tanda, { ordered: false });
+        creados += r.upsertedCount || 0;
+        actualizados += r.matchedCount || 0;
       }
       return { creados, actualizados, errores };
     });

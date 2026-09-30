@@ -4,7 +4,12 @@ const path = require('path');
 const { MongoClient } = require('mongodb');
 
 const app = express();
-app.use(express.json({ limit: '15mb' }));
+// Límite subido a 30mb (30/9/2026): el import de módulos (Productos,
+// Clientes, etc.) manda el Excel como base64 dentro del JSON, y el
+// export real de Dux (catálogo completo, ~20.000 productos) ya pesa
+// ~14mb en base64 — 15mb dejaba casi sin margen para catálogos así de
+// grandes.
+app.use(express.json({ limit: '30mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const cotizadorRouter = require('./cotizador');

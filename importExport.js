@@ -10,11 +10,18 @@
 //     evita sumar la dependencia `multer` solo para esto, y se reusa el
 //     mismo `express.json({limit:'15mb'})` que ya tiene toda la app.
 //     15mb alcanza de sobra para una planilla de productos/clientes.
-//   - `columnas` es un array de { clave, titulo, tipo? } que define, EN
-//     ORDEN, las columnas del Excel tanto al exportar como al importar.
-//     `tipo` puede ser 'texto' (default si se omite), 'numero', 'fecha' o
-//     'booleano' — controla cómo se formatea al exportar y cómo se
-//     convierte el valor crudo de la celda al importar.
+//   - `columnas` es un array de { clave, titulo, tipo?, aliases?,
+//     mapaValores? } que define, EN ORDEN, las columnas del Excel tanto
+//     al exportar como al importar. `tipo` puede ser 'texto' (default si
+//     se omite), 'numero', 'fecha' o 'booleano' — controla cómo se
+//     formatea al exportar y cómo se convierte el valor crudo de la
+//     celda al importar. `aliases` (opcional) es una lista de otros
+//     títulos de encabezado que también matchean esa columna — para
+//     poder importar directo un Excel de otro sistema (Dux) sin que Mato
+//     tenga que renombrar columnas a mano. `mapaValores` (opcional) es un
+//     objeto { VALOR_CRUDO_EN_MAYUSCULAS: valorInterno } para traducir
+//     valores que vienen distintos en el archivo de origen (ej: Dux usa
+//     "PESOS"/"DOLARES" en vez de "ARS"/"USD").
 //   - Al importar, el emparejamiento de columnas es por TÍTULO de
 //     encabezado (normalizado: sin tildes, sin mayúsculas, sin espacios
 //     de más), no por posición — así un Excel exportado de acá mismo (o
@@ -52,7 +59,21 @@ function formatearValorExport(v, tipo) {
   return v;
 }
 
-function convertirValorImport(v, tipo) {
+// `mapaValores` (opcional, por columna): traduce valores crudos del Excel
+// a los valores internos de la app ANTES de aplicar `tipo` — pensado para
+// poder importar un Excel que ya viene de otro sistema (ej: Dux) con sus
+// propios textos ("PESOS"/"DOLARES", "S"/"N") sin tener que pedirle a
+// Mato que edite el archivo a mano. La clave de `mapaValores` se compara
+// en MAYÚSCULAS y sin espacios extra (no hace falta sacar tildes: los
+// valores enum que usamos hoy no las llevan).
+function convertirValorImport(v, tipo, mapaValores) {
+  if (v === '' || v === undefined || v === null) return null;
+  if (mapaValores) {
+    const clave = String(v).trim().toUpperCase();
+    if (Object.prototype.hasOwnProperty.call(mapaValores, clave)) {
+      v = mapaValores[clave];
+    }
+  }
   if (v === '' || v === undefined || v === null) return null;
   if (tipo === 'numero') {
     const n = Number(String(v).replace(',', '.'));
@@ -60,7 +81,9 @@ function convertirValorImport(v, tipo) {
   }
   if (tipo === 'booleano') {
     const s = String(v).trim().toLowerCase();
-    return ['si', 'sí', 'true', '1', 'x'].includes(s);
+    // 's'/'n' sueltas: así vienen los checkbox de Dux en su export
+    // ("STOCKEABLE", "ACEPTA STOCK NEGATIVO", etc. son S/N, no SI/NO).
+    return ['si', 'sí', 's', 'true', '1', 'x'].includes(s);
   }
   if (tipo === 'fecha') {
     const d = new Date(v);
@@ -118,13 +141,23 @@ function parsearXlsxBase64(base64, columnas) {
   if (!nombreHoja) throw err(400, 'El Excel no tiene ninguna hoja');
   const hoja = wb.Sheets[nombreHoja];
   const filasCrudas = XLSX.utils.sheet_to_json(hoja, { defval: '', raw: false });
-  const columnaPorTitulo = new Map(columnas.map(c => [normalizarEncabezado(c.titulo), c]));
+  // `aliases` (opcional, por columna): otros títulos de encabezado que
+  // también deben reconocerse como esa misma columna — para poder
+  // importar directamente un Excel que viene de otro sistema (ej: el
+  // export de productos de Dux trae "CODIGO"/"PRODUCTO"/"UNIDAD MEDIDA"
+  // en vez de nuestros títulos "SKU (Código)"/"Nombre"/"Unidad") sin
+  // pedirle a Mato que renombre columnas a mano.
+  const columnaPorTitulo = new Map();
+  columnas.forEach(c => {
+    columnaPorTitulo.set(normalizarEncabezado(c.titulo), c);
+    (c.aliases || []).forEach(a => columnaPorTitulo.set(normalizarEncabezado(a), c));
+  });
   return filasCrudas.map((filaCruda, idx) => {
     const fila = {};
     for (const [encabezado, valor] of Object.entries(filaCruda)) {
       const columna = columnaPorTitulo.get(normalizarEncabezado(encabezado));
       if (!columna) continue; // columna no reconocida — se ignora, no es error
-      fila[columna.clave] = convertirValorImport(valor, columna.tipo);
+      fila[columna.clave] = convertirValorImport(valor, columna.tipo, columna.mapaValores);
     }
     Object.defineProperty(fila, '__fila', { value: idx + 2, enumerable: false });
     return fila;
