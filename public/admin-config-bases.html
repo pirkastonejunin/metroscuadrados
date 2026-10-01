@@ -50,6 +50,12 @@
   #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
   #loginScreen .card{width:300px;text-align:center;}
   .section-title{font-size:13px;font-weight:700;margin-bottom:8px;}
+  /* Secciones plegables (1/10/2026, pedido de Mato: "poder desplegarlos y
+     replegarlos para ordenar la pantalla") — mismo criterio visual que el
+     acordeón del menú lateral. */
+  .section-title.seccion-toggle{background:none;border:none;width:100%;display:flex;justify-content:space-between;align-items:center;padding:0;font-family:inherit;color:inherit;cursor:pointer;}
+  .section-title.seccion-toggle .chev{transition:transform .15s ease;color:var(--muted);}
+  .section-title.seccion-toggle.colapsada .chev{transform:rotate(-90deg);}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
@@ -108,30 +114,38 @@
     </div>
 
     <div class="card">
-      <div class="section-title">Rubros</div>
-      <div class="row" style="margin-bottom:12px">
-        <div style="flex:1"><label>Nuevo rubro</label><input id="nrNombre" placeholder="Ej: Revestimientos" onkeydown="if(event.key==='Enter')crearRubro()"></div>
-        <div><button class="btn" onclick="crearRubro()">Agregar</button></div>
+      <button type="button" class="section-title seccion-toggle" id="toggleRubros" onclick="toggleSeccion('Rubros')">
+        <span>Rubros</span><span class="chev">▾</span>
+      </button>
+      <div id="contRubros">
+        <div class="row" style="margin-bottom:12px;margin-top:8px">
+          <div style="flex:1"><label>Nuevo rubro</label><input id="nrNombre" placeholder="Ej: Revestimientos" onkeydown="if(event.key==='Enter')crearRubro()"></div>
+          <div><button class="btn" onclick="crearRubro()">Agregar</button></div>
+        </div>
+        <div class="err" id="rubrosErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="rubrosBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+        </table>
       </div>
-      <div class="err" id="rubrosErr"></div>
-      <table>
-        <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="rubrosBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
-      </table>
     </div>
 
     <div class="card">
-      <div class="section-title">Subrubros</div>
-      <div class="row" style="margin-bottom:12px">
-        <div style="min-width:200px"><label>Rubro</label><select id="srRubroId" onchange="renderSubrubros()"></select></div>
-        <div style="flex:1"><label>Nuevo subrubro</label><input id="srNombre" placeholder="Ej: Piedra" onkeydown="if(event.key==='Enter')crearSubrubro()"></div>
-        <div><button class="btn" onclick="crearSubrubro()">Agregar</button></div>
+      <button type="button" class="section-title seccion-toggle" id="toggleSubrubros" onclick="toggleSeccion('Subrubros')">
+        <span>Subrubros</span><span class="chev">▾</span>
+      </button>
+      <div id="contSubrubros">
+        <div class="row" style="margin-bottom:12px;margin-top:8px">
+          <div style="min-width:200px"><label>Rubro</label><select id="srRubroId" onchange="renderSubrubros()"></select></div>
+          <div style="flex:1"><label>Nuevo subrubro</label><input id="srNombre" placeholder="Ej: Piedra" onkeydown="if(event.key==='Enter')crearSubrubro()"></div>
+          <div><button class="btn" onclick="crearSubrubro()">Agregar</button></div>
+        </div>
+        <div class="err" id="subrubrosErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="subrubrosBody"><tr><td colspan="4" class="muted">Cargando...</td></tr></tbody>
+        </table>
       </div>
-      <div class="err" id="subrubrosErr"></div>
-      <table>
-        <thead><tr><th>Nombre</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="subrubrosBody"><tr><td colspan="4" class="muted">Cargando...</td></tr></tbody>
-      </table>
     </div>
   </main>
 </div>
@@ -213,8 +227,32 @@ async function iniciarApp(){
   // si no hay nada nuevo no cambia nada — así que no molesta hacerlo cada
   // vez que se abre esta pantalla.
   await importarExistentes(true);
+  restaurarSecciones();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+// Secciones plegables (1/10/2026) — recuerda cómo las dejó el usuario,
+// igual que el acordeón del menú lateral.
+function toggleSeccion(nombre){
+  const cont = document.getElementById('cont' + nombre);
+  const btn = document.getElementById('toggle' + nombre);
+  const colapsada = cont.classList.toggle('hidden');
+  btn.classList.toggle('colapsada', colapsada);
+  try { localStorage.setItem('pn_bases_seccion_' + nombre, colapsada ? '0' : '1'); } catch(e){}
+}
+function restaurarSecciones(){
+  ['Rubros', 'Subrubros'].forEach(nombre => {
+    let abierta = true;
+    try {
+      const guardado = localStorage.getItem('pn_bases_seccion_' + nombre);
+      if (guardado !== null) abierta = guardado === '1';
+    } catch(e){}
+    if (!abierta) {
+      document.getElementById('cont' + nombre).classList.add('hidden');
+      document.getElementById('toggle' + nombre).classList.add('colapsada');
+    }
+  });
+}
 
 // -------------------------------------------------------------------
 // Rubros

@@ -46,7 +46,9 @@
 //     volver a anular ni entregar.
 //   - Sin devoluciones parciales todavía (anular es todo o nada).
 //
-// Colección nueva: ventas : { numero (correlativo interno, NO fiscal),
+// Colección nueva: ventas : { numero (correlativo interno, NO fiscal,
+//   separado por tipoComprobante), tipoComprobante (comprobante_x/fiscal —
+//   1/10/2026, preparación para el módulo de ARCA, ver más abajo),
 //   clienteId, clienteNombre, vendedor, fecha, moneda (ARS/USD),
 //   cotizacionDolar, tipoEntrega (inmediata/pendiente), depositoId,
 //   estado (pendiente/entregada/anulada), items: [{ productoId, sku,
@@ -100,6 +102,14 @@ function normalizarTexto(v) { return (v === undefined || v === null) ? '' : Stri
 
 const TIPOS_ENTREGA_VALIDOS = ['inmediata', 'pendiente'];
 const ESTADOS_VALIDOS = ['pendiente', 'entregada', 'anulada'];
+// Tipo de comprobante (1/10/2026, pedido de Mato: preparar el terreno para
+// cuando esté el módulo de ARCA/facturación electrónica). Por ahora NINGUNO
+// de los dos es un comprobante fiscal de verdad — "fiscal" es un rótulo
+// para separar esas ventas de entrada, con su propia numeración, de las de
+// "Comprobante X" (lo que ya se venía usando) — el día que se conecte
+// ARCA, esas ventas marcadas "fiscal" van a ser las candidatas a facturar,
+// con CAE y numeración real de AFIP/ARCA en vez de este correlativo interno.
+const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_x', 'fiscal'];
 
 // Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
 // bases tengo que tener la posibilidad de importar y exportar") — ver
@@ -110,6 +120,7 @@ const ESTADOS_VALIDOS = ['pendiente', 'entregada', 'anulada'];
 // históricas de Dux, es una decisión aparte con Mato, no algo genérico.
 const COLUMNAS_VENTAS_EXPORT = [
   { clave: 'numero', titulo: 'Nº' },
+  { clave: 'tipoComprobante', titulo: 'Tipo de comprobante' },
   { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
   { clave: 'clienteNombre', titulo: 'Cliente' },
   { clave: 'vendedor', titulo: 'Vendedor' },
@@ -170,8 +181,12 @@ router.get('/productos', authAdmin, async (req, res) => {
       // lista de precio elegida (ver Productos: productos_catalogo guarda
       // `preciosPorLista: [{listaId, precio}]` como override puntual sobre
       // costo + % de cada lista).
+      // unidadesPorBulto se agrega acá (1/10/2026, pedido de Mato) para que
+      // el ítem de la venta se pueda cargar en bultos y convertir solo a la
+      // unidad real del producto (ver normalizarItems más abajo — la
+      // conversión la hace el frontend antes de mandar la cantidad).
       return db.collection('productos_catalogo')
-        .find(match, { projection: { sku: 1, nombre: 1, precio: 1, costo: 1, preciosPorLista: 1, unidad: 1, stockeable: 1, aceptaStockNegativo: 1 } })
+        .find(match, { projection: { sku: 1, nombre: 1, precio: 1, costo: 1, preciosPorLista: 1, unidad: 1, unidadesPorBulto: 1, stockeable: 1, aceptaStockNegativo: 1 } })
         .sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
@@ -265,14 +280,33 @@ async function reingresarStockDeVenta(db, req, venta) {
 // en `ventas_contadores` para no tener que escanear toda la colección.
 // -----------------------------------------------------------------------
 
-async function proximoNumero(db, orgId) {
+// Numeración separada por tipo de comprobante (1/10/2026) — antes había un
+// solo contador por organización ({orgId}, sin tipo). Para no reiniciar la
+// numeración de las ventas que ya existen, "comprobante_x" sigue ESE mismo
+// contador viejo (se migra la primera vez que se pide un número nuevo);
+// "fiscal" arranca de cero, es un tipo nuevo.
+async function proximoNumero(db, orgId, tipoComprobante) {
+  const filtro = { orgId, tipoComprobante };
   const r = await db.collection('ventas_contadores').findOneAndUpdate(
-    { orgId },
+    filtro,
     { $inc: { ultimo: 1 } },
+    { returnDocument: 'after' }
+  );
+  let doc = r && r.value !== undefined ? r.value : r;
+  if (doc) return doc.ultimo;
+
+  let desde = 0;
+  if (tipoComprobante === 'comprobante_x') {
+    const legacy = await db.collection('ventas_contadores').findOne({ orgId, tipoComprobante: { $exists: false } });
+    if (legacy) desde = legacy.ultimo;
+  }
+  const r2 = await db.collection('ventas_contadores').findOneAndUpdate(
+    filtro,
+    { $setOnInsert: { orgId, tipoComprobante }, $inc: { ultimo: desde + 1 } },
     { upsert: true, returnDocument: 'after' }
   );
-  const doc = r && r.value !== undefined ? r.value : r;
-  return doc ? doc.ultimo : 1;
+  doc = r2 && r2.value !== undefined ? r2.value : r2;
+  return doc.ultimo;
 }
 
 // Valida y normaliza los ítems de una venta contra el catálogo de
@@ -385,6 +419,8 @@ router.post('/', authAdmin, async (req, res) => {
     if (!clienteId) throw err(400, 'Elegí un cliente');
     const tipoEntrega = normalizarTexto(body.tipoEntrega).toLowerCase();
     if (!TIPOS_ENTREGA_VALIDOS.includes(tipoEntrega)) throw err(400, `Tipo de entrega inválido (opciones: ${TIPOS_ENTREGA_VALIDOS.join(', ')})`);
+    const tipoComprobante = normalizarTexto(body.tipoComprobante).toLowerCase() || 'comprobante_x';
+    if (!TIPOS_COMPROBANTE_VALIDOS.includes(tipoComprobante)) throw err(400, `Tipo de comprobante inválido (opciones: ${TIPOS_COMPROBANTE_VALIDOS.join(', ')})`);
     const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
     if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
     const depositoId = body.depositoId ? toObjectId(body.depositoId) : null;
@@ -401,7 +437,7 @@ router.post('/', authAdmin, async (req, res) => {
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
-      const numero = await proximoNumero(db, req.orgId);
+      const numero = await proximoNumero(db, req.orgId, tipoComprobante);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
 
@@ -413,6 +449,7 @@ router.post('/', authAdmin, async (req, res) => {
 
       const venta = {
         numero,
+        tipoComprobante,
         clienteId,
         clienteNombre: cliente.apellidoRazonSocial || cliente.nombre || '',
         vendedor,

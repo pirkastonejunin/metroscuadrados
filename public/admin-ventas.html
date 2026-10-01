@@ -60,12 +60,14 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
-  .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
-  .fila-item .campo-producto{flex:2;min-width:0;}
-  .fila-item .campo-cant{flex:1;min-width:0;}
-  .fila-item .campo-precio{flex:1;min-width:0;}
-  .fila-item .campo-subtotal{flex:1;min-width:0;text-align:right;font-weight:700;padding-top:8px;}
+  .fila-item{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:8px;}
+  .fila-item .campo-producto{flex:2;min-width:160px;}
+  .fila-item .campo-modo{flex:1;min-width:110px;}
+  .fila-item .campo-cant{flex:1;min-width:100px;}
+  .fila-item .campo-precio{flex:1;min-width:100px;}
+  .fila-item .campo-subtotal{flex:1;min-width:90px;text-align:right;font-weight:700;padding-top:8px;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
+  .fila-item .campo-equivalente{flex-basis:100%;font-size:11px;margin-top:-4px;}
   .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
   .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
   .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
@@ -175,6 +177,16 @@ function headersAuth(extra){
   return h;
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+// Variantes con organización explícita (1/10/2026, selector de Sucursal en
+// Nueva venta) — para pedir datos de OTRA organización sin pisar la que
+// está activa globalmente (ORG/localStorage), que sigue siendo la que usa
+// el resto de la pantalla.
+function headersAuthOrg(orgId, extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  h['x-org-id'] = orgId || ORG;
+  return h;
+}
+function headersAuthJsonOrg(orgId, extra){ return headersAuthOrg(orgId, Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
@@ -214,12 +226,14 @@ function resolverOrgActiva(me){
 }
 
 let NOMBRE_USUARIO = '';
+let meCache = null;
 async function iniciarApp(){
   let me;
   try{
     const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
     me = await r.json();
+    meCache = me;
     NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('ventas'));
     if (!tieneAcceso) {
@@ -256,19 +270,28 @@ let depositosCache = [];
 // precio unitario al armar una venta; el precio de cada ítem sigue siendo
 // editable a mano como siempre.
 let listasPrecioCache = [];
-async function cargarListasBase(){
+// `orgId` opcional (1/10/2026, selector de Sucursal en Nueva venta): sin
+// él, carga todo para la organización activa globalmente y repuebla el
+// filtro de la pantalla de listado. Con él, trae los datos de ESA otra
+// organización sin tocar la activa — se usa al cambiar de sucursal adentro
+// del formulario de carga, donde clientes/productos/depósitos disponibles
+// dependen de qué organización se eligió para esa venta puntual.
+async function cargarListasBase(orgId){
+  const h = orgId ? headersAuthOrg(orgId) : headersAuth();
   const [rc, rp, rd, rl] = await Promise.all([
-    fetch(BASE + '/clientes', {headers: headersAuth()}),
-    fetch(BASE + '/productos', {headers: headersAuth()}),
-    fetch(BASE + '/depositos', {headers: headersAuth()}),
-    fetch('/api/productos/listas-precio', {headers: headersAuth()})
+    fetch(BASE + '/clientes', {headers: h}),
+    fetch(BASE + '/productos', {headers: h}),
+    fetch(BASE + '/depositos', {headers: h}),
+    fetch('/api/productos/listas-precio', {headers: h})
   ]);
   clientesCache = rc.ok ? await rc.json() : [];
   productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
   listasPrecioCache = rl.ok ? await rl.json() : [];
-  document.getElementById('fvCliente').innerHTML = '<option value="">Todos</option>' +
-    clientesCache.map(c => `<option value="${c._id}">${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`).join('');
+  if (!orgId) {
+    document.getElementById('fvCliente').innerHTML = '<option value="">Todos</option>' +
+      clientesCache.map(c => `<option value="${c._id}">${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`).join('');
+  }
 }
 
 // Misma lógica que precioResuelto() en productos.js: un override puntual
@@ -312,7 +335,7 @@ async function cargarVentas(){
   if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
   body.innerHTML = ventasCache.map(v => `
     <tr>
-      <td><strong>#${v.numero}</strong></td>
+      <td><strong>${v.tipoComprobante === 'fiscal' ? 'F' : 'X'}-${String(v.numero).padStart(5,'0')}</strong></td>
       <td class="muted">${fechaCorta(v.fecha)}</td>
       <td>${escapeHtml(v.clienteNombre)}</td>
       <td>${money(v.total)}</td>
@@ -342,25 +365,71 @@ function opcionesDepositosVenta(seleccionado){
     `<option value="${d._id}" ${d._id===seleccionado?'selected':''}>${escapeHtml(d.nombre)}</option>`
   ).join('');
 }
+// Sucursal = organización (1/10/2026, pedido de Mato) — es el mismo
+// concepto que ya usa toda la app (orgId/resolverOrg/filtroOrg), acá
+// expuesto con ese nombre porque es como Mato lo llama en el día a día. Se
+// muestra el selector solo si el usuario tiene acceso a más de una (o es
+// Administrador general) — si solo tiene una, se usa esa sin preguntar,
+// igual que en el resto de la app.
+function opcionesSucursalVenta(seleccionado){
+  const orgs = (meCache && meCache.organizaciones) || [];
+  return orgs.map(o => `<option value="${o._id}" ${String(o._id)===String(seleccionado)?'selected':''}>${escapeHtml(o.nombre)}</option>`).join('');
+}
+function puedeElegirSucursal(){
+  const orgs = (meCache && meCache.organizaciones) || [];
+  return orgs.length > 1 || !!(meCache && meCache.puedeVerTodas);
+}
+
+// Tipo de comprobante (1/10/2026, preparación para el módulo de ARCA —
+// ver ventas.js). Por ahora ninguno de los dos es un comprobante fiscal de
+// verdad, es solo para separar la numeración de antemano.
+const TIPO_COMPROBANTE_LABEL = {
+  comprobante_x: 'Comprobante X (interno, no fiscal)',
+  fiscal: 'Fiscal (para cuando esté ARCA)'
+};
+
+let ventaOrgSeleccionada = '';
 
 function abrirNuevaVenta(){
+  ventaOrgSeleccionada = ORG;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nueva venta</h2>
+        ${puedeElegirSucursal() ? `
         <div class="grid3">
-          <div><label>Cliente *</label><select id="nvCliente">${opcionesClientesSelect()}</select></div>
+          <div><label>Sucursal *</label><select id="nvSucursal" onchange="cambiarSucursalVenta()">${opcionesSucursalVenta(ORG)}</select></div>
+        </div>
+        ` : ''}
+        <div class="grid3" style="margin-top:10px">
+          <div>
+            <label>Cliente *</label>
+            <div class="row" style="gap:6px">
+              <select id="nvCliente" style="flex:1">${opcionesClientesSelect()}</select>
+              <button type="button" class="btn secondary small" onclick="abrirNuevoClienteDesdeVenta()">+ Nuevo</button>
+            </div>
+          </div>
           <div><label>Vendedor</label><input id="nvVendedor" value="${escapeHtml(NOMBRE_USUARIO)}"></div>
           <div><label>Fecha</label><input id="nvFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Moneda</label><select id="nvMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
           <div><label>Tipo de entrega *</label><select id="nvTipoEntrega" onchange="actualizarVisibilidadDeposito()"><option value="inmediata">Entrega inmediata (descuenta stock ahora)</option><option value="pendiente">Sin entrega (pendiente, sin descontar stock)</option></select></div>
-          <div id="nvDepositoWrap"><label>Depósito *</label><select id="nvDeposito">${opcionesDepositosVenta()}</select></div>
+          <div id="nvDepositoWrap">
+            <label>Depósito *</label>
+            <div class="row" style="gap:6px">
+              <select id="nvDeposito" style="flex:1">${opcionesDepositosVenta()}</select>
+              <button type="button" class="btn secondary small" onclick="abrirNuevoDepositoDesdeVenta()">+ Nuevo</button>
+            </div>
+          </div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Lista de precio</label><select id="nvListaPrecio" onchange="recalcularPreciosPorListaVenta()">${opcionesListasPrecioVenta((listasPrecioCache.find(l=>l.predeterminada)||{})._id)}</select></div>
+          <div>
+            <label>Tipo de comprobante</label>
+            <select id="nvTipoComprobante"><option value="comprobante_x">${TIPO_COMPROBANTE_LABEL.comprobante_x}</option><option value="fiscal">${TIPO_COMPROBANTE_LABEL.fiscal}</option></select>
+          </div>
         </div>
 
         <div class="section-title">Productos</div>
@@ -388,6 +457,132 @@ function actualizarVisibilidadDeposito(){
   document.getElementById('nvDepositoWrap').classList.toggle('hidden', !esInmediata);
 }
 
+// Cambiar la sucursal (organización) de la venta que se está cargando trae
+// de nuevo clientes/productos/depósitos/listas de precio de ESA
+// organización (cada una tiene lo suyo) — como lo que ya se había elegido
+// (cliente, ítems) puede no existir ahí, se reinicia el formulario para no
+// dejarlo en un estado inconsistente. No toca la sucursal activa del resto
+// de la pantalla (ORG), solo la de esta venta puntual.
+async function cambiarSucursalVenta(){
+  const nuevaOrg = document.getElementById('nvSucursal').value;
+  if (!nuevaOrg || nuevaOrg === ventaOrgSeleccionada) return;
+  ventaOrgSeleccionada = nuevaOrg;
+  await cargarListasBase(nuevaOrg);
+  document.getElementById('nvCliente').outerHTML = `<select id="nvCliente" style="flex:1">${opcionesClientesSelect()}</select>`;
+  document.getElementById('nvDeposito').outerHTML = `<select id="nvDeposito" style="flex:1">${opcionesDepositosVenta()}</select>`;
+  document.getElementById('nvListaPrecio').innerHTML = opcionesListasPrecioVenta((listasPrecioCache.find(l=>l.predeterminada)||{})._id);
+  document.getElementById('nvFilasItems').innerHTML = '';
+  agregarFilaVenta();
+}
+
+// -------------------------------------------------------------------
+// "+ Nuevo cliente" desde Nueva venta (1/10/2026, pedido de Mato: no
+// tener que salir de la pantalla cuando el cliente todavía no existe).
+// Pide solo lo obligatorio en Clientes (apellido/razón social y categoría
+// fiscal) — lo demás se completa después desde Clientes si hace falta.
+// -------------------------------------------------------------------
+const CATEGORIA_FISCAL_OPCIONES = [
+  {v:'consumidor_final', l:'Consumidor final'}, {v:'exento', l:'Exento'}, {v:'monotributista', l:'Monotributista'},
+  {v:'responsable_inscripto', l:'Responsable Inscripto'}, {v:'exterior', l:'Exterior'}, {v:'iva_no_alcanzado', l:'IVA no alcanzado'}
+];
+function abrirNuevoClienteDesdeVenta(){
+  const sub = document.createElement('div');
+  sub.id = 'ncvModalBg';
+  sub.className = 'modal-bg';
+  sub.style.zIndex = '60';
+  sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  sub.innerHTML = `
+    <div class="modal">
+      <span class="close-x" onclick="this.closest('.modal-bg').remove()">✕</span>
+      <h2>Nuevo cliente</h2>
+      <div><label>Apellido / Razón social *</label><input id="ncvNombre"></div>
+      <div style="margin-top:10px"><label>Categoría fiscal *</label><select id="ncvCategoriaFiscal">${CATEGORIA_FISCAL_OPCIONES.map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}</select></div>
+      <div class="grid2" style="margin-top:10px">
+        <div><label>Teléfono</label><input id="ncvTelefono"></div>
+        <div><label>Email</label><input id="ncvEmail" type="email"></div>
+      </div>
+      <div class="err" id="ncvErr"></div>
+      <button class="btn" style="margin-top:10px" onclick="guardarNuevoClienteDesdeVenta()">Guardar cliente</button>
+    </div>
+  `;
+  document.body.appendChild(sub);
+}
+async function guardarNuevoClienteDesdeVenta(){
+  const body = {
+    apellidoRazonSocial: document.getElementById('ncvNombre').value.trim(),
+    categoriaFiscal: document.getElementById('ncvCategoriaFiscal').value,
+    telefono: document.getElementById('ncvTelefono').value.trim(),
+    email: document.getElementById('ncvEmail').value.trim()
+  };
+  const errDiv = document.getElementById('ncvErr');
+  errDiv.textContent = '';
+  if (!body.apellidoRazonSocial) { errDiv.textContent = 'El apellido / razón social es obligatorio'; return; }
+  try{
+    const r = await fetch('/api/clientes', {method:'POST', headers: headersAuthJsonOrg(ventaOrgSeleccionada), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al crear el cliente');
+    clientesCache.push(data);
+    clientesCache.sort((a,b) => (a.apellidoRazonSocial||'').localeCompare(b.apellidoRazonSocial||'', 'es'));
+    document.getElementById('nvCliente').innerHTML = opcionesClientesSelect(data._id);
+    document.getElementById('ncvModalBg').remove();
+  }catch(e){
+    errDiv.textContent = e.message;
+  }
+}
+
+// -------------------------------------------------------------------
+// "+ Nuevo depósito" desde Nueva venta (1/10/2026, pedido de Mato: lo
+// necesitaba para poder cargar la primera venta porque todavía no había
+// ningún depósito dado de alta). Usa la misma ruta que ya administra
+// Stock (/api/stock/depositos) — si el usuario no tiene el módulo de
+// Stock, esto va a fallar con el mismo mensaje de permiso de siempre; la
+// gestión completa (editar, desactivar) sigue estando en Stock.
+// -------------------------------------------------------------------
+function abrirNuevoDepositoDesdeVenta(){
+  const sub = document.createElement('div');
+  sub.id = 'ndvModalBg';
+  sub.className = 'modal-bg';
+  sub.style.zIndex = '60';
+  sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  sub.innerHTML = `
+    <div class="modal">
+      <span class="close-x" onclick="this.closest('.modal-bg').remove()">✕</span>
+      <h2>Nuevo depósito</h2>
+      <div><label>Nombre *</label><input id="ndvNombre" placeholder="Ej: Depósito Junín"></div>
+      <div style="margin-top:10px"><label>Dirección</label><input id="ndvDireccion"></div>
+      <div style="margin-top:10px"><label>Notas</label><input id="ndvNotas"></div>
+      <div class="err" id="ndvErr"></div>
+      <button class="btn" style="margin-top:10px" onclick="guardarNuevoDepositoDesdeVenta()">Guardar depósito</button>
+    </div>
+  `;
+  document.body.appendChild(sub);
+}
+async function guardarNuevoDepositoDesdeVenta(){
+  const body = {
+    nombre: document.getElementById('ndvNombre').value.trim(),
+    direccion: document.getElementById('ndvDireccion').value.trim(),
+    notas: document.getElementById('ndvNotas').value.trim()
+  };
+  const errDiv = document.getElementById('ndvErr');
+  errDiv.textContent = '';
+  if (!body.nombre) { errDiv.textContent = 'El nombre del depósito es obligatorio'; return; }
+  try{
+    const r = await fetch('/api/stock/depositos', {method:'POST', headers: headersAuthJsonOrg(ventaOrgSeleccionada), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al crear el depósito');
+    depositosCache.push(data);
+    depositosCache.sort((a,b) => (a.nombre||'').localeCompare(b.nombre||'', 'es'));
+    document.getElementById('nvDeposito').innerHTML = opcionesDepositosVenta(data._id);
+    document.getElementById('ndvModalBg').remove();
+  }catch(e){
+    errDiv.textContent = e.message;
+  }
+}
+
+// Etiquetas de unidad (1/10/2026, pedido de Mato: "que identifique la
+// unidad de medida") — mismas unidades que ofrece Productos.
+const UNIDAD_LABEL_VENTA = { unidad:'Unidad', m2:'m²', ml:'Metro lineal', kg:'Kilo', litro:'Litro', paquete:'Paquete', jornal:'Jornal' };
+
 function agregarFilaVenta(){
   const cont = document.getElementById('nvFilasItems');
   const fila = document.createElement('div');
@@ -397,10 +592,18 @@ function agregarFilaVenta(){
       <label>Producto</label>
       <select onchange="actualizarFilaVenta(this)">${opcionesProductosVenta()}</select>
     </div>
+    <div class="campo-modo hidden">
+      <label>Cargar por</label>
+      <select class="modo-carga" onchange="actualizarFilaVenta(this)">
+        <option value="unidad">Unidad</option>
+        <option value="bulto">Bultos</option>
+      </select>
+    </div>
     <div class="campo-cant">
-      <label>Cantidad</label>
+      <label>Cantidad <span class="muted unidad-indicador"></span></label>
       <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarFilaVenta(this)">
     </div>
+    <div class="campo-equivalente muted hidden"></div>
     <div class="campo-precio">
       <label>Precio unit.</label>
       <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()">
@@ -411,18 +614,62 @@ function agregarFilaVenta(){
   cont.appendChild(fila);
 }
 
+// Si el producto elegido tiene "Unidades por bulto" cargado en su ficha
+// (ej: 1 bulto = 1,44 m²), se puede cargar la cantidad directo en bultos
+// en vez de tener que calcular el equivalente a mano — se convierte solo a
+// la unidad real del producto, que es lo que se manda a la venta (precio y
+// stock siguen siendo por unidad real, no por bulto). Sin bultos cargados,
+// el campo "Cargar por" ni aparece (como era antes).
+function cantidadBaseDeFila(fila){
+  const select = fila.querySelector('.campo-producto select');
+  const cantInput = fila.querySelector('.campo-cant input');
+  const modoSelect = fila.querySelector('.modo-carga');
+  const ingresado = Number(cantInput.value) || 0;
+  const producto = productosCache.find(p => String(p._id) === select.value);
+  if (producto && modoSelect && modoSelect.value === 'bulto' && producto.unidadesPorBulto) {
+    return ingresado * producto.unidadesPorBulto;
+  }
+  return ingresado;
+}
+
+function actualizarEquivalenteFila(fila){
+  const select = fila.querySelector('.campo-producto select');
+  const cantInput = fila.querySelector('.campo-cant input');
+  const modoSelect = fila.querySelector('.modo-carga');
+  const equivalenteDiv = fila.querySelector('.campo-equivalente');
+  const producto = productosCache.find(p => String(p._id) === select.value);
+  if (producto && modoSelect && modoSelect.value === 'bulto' && producto.unidadesPorBulto) {
+    const base = (Number(cantInput.value) || 0) * producto.unidadesPorBulto;
+    const unidadLabel = UNIDAD_LABEL_VENTA[producto.unidad] || producto.unidad || '';
+    equivalenteDiv.textContent = `= ${base.toLocaleString('es-AR', {maximumFractionDigits:2})} ${unidadLabel}`;
+    equivalenteDiv.classList.remove('hidden');
+  } else {
+    equivalenteDiv.textContent = '';
+    equivalenteDiv.classList.add('hidden');
+  }
+}
+
 function actualizarFilaVenta(el){
   const fila = el.closest('.fila-item');
-  const select = fila.querySelector('select');
+  const select = fila.querySelector('.campo-producto select');
   const precioInput = fila.querySelector('.campo-precio input');
-  if (el.tagName === 'SELECT') {
-    const producto = productosCache.find(p => String(p._id) === select.value);
+  const modoWrap = fila.querySelector('.campo-modo');
+  const modoSelect = fila.querySelector('.modo-carga');
+  const unidadIndicador = fila.querySelector('.unidad-indicador');
+  const producto = productosCache.find(p => String(p._id) === select.value);
+
+  if (el === select) {
     const lista = listaPrecioSeleccionadaVenta();
     const precio = producto ? precioResueltoVenta(producto, lista) : null;
     // Si no hay lista seleccionada o el producto no tiene costo cargado,
     // se cae al precio general del producto (como antes de esta función).
     precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
+    modoSelect.value = 'unidad';
+    modoWrap.classList.toggle('hidden', !(producto && producto.unidadesPorBulto > 0));
+    unidadIndicador.textContent = producto ? (UNIDAD_LABEL_VENTA[producto.unidad] || producto.unidad || '') : '';
   }
+
+  actualizarEquivalenteFila(fila);
   actualizarTotalesVenta();
 }
 
@@ -431,7 +678,7 @@ function actualizarFilaVenta(el){
 function recalcularPreciosPorListaVenta(){
   const lista = listaPrecioSeleccionadaVenta();
   document.querySelectorAll('#nvFilasItems .fila-item').forEach(fila => {
-    const select = fila.querySelector('select');
+    const select = fila.querySelector('.campo-producto select');
     if (!select.value) return;
     const producto = productosCache.find(p => String(p._id) === select.value);
     const precioInput = fila.querySelector('.campo-precio input');
@@ -445,8 +692,8 @@ function juntarItemsVenta(){
   const filas = document.querySelectorAll('#nvFilasItems .fila-item');
   const items = [];
   filas.forEach(fila => {
-    const select = fila.querySelector('select');
-    const cantidad = Number(fila.querySelector('.campo-cant input').value);
+    const select = fila.querySelector('.campo-producto select');
+    const cantidad = cantidadBaseDeFila(fila);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
     if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
   });
@@ -457,7 +704,7 @@ function actualizarTotalesVenta(){
   const filas = document.querySelectorAll('#nvFilasItems .fila-item');
   let subtotal = 0;
   filas.forEach(fila => {
-    const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
+    const cantidad = cantidadBaseDeFila(fila);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
     const sub = cantidad * precioUnitario;
     subtotal += sub;
@@ -484,6 +731,7 @@ async function guardarNuevaVenta(){
     fecha: document.getElementById('nvFecha').value,
     moneda: document.getElementById('nvMoneda').value,
     tipoEntrega,
+    tipoComprobante: document.getElementById('nvTipoComprobante') ? document.getElementById('nvTipoComprobante').value : 'comprobante_x',
     depositoId: tipoEntrega === 'inmediata' ? document.getElementById('nvDeposito').value : null,
     listaPrecioId: document.getElementById('nvListaPrecio') ? (document.getElementById('nvListaPrecio').value || null) : null,
     items,
@@ -496,11 +744,17 @@ async function guardarNuevaVenta(){
   if (!items.length) { document.getElementById('nvErr').textContent = 'Agregá al menos un producto'; return; }
   if (tipoEntrega === 'inmediata' && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a descontar el stock'; return; }
   try{
-    const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    // La venta se guarda en la sucursal elegida en el formulario (puede ser
+    // distinta de la sucursal activa del resto de la pantalla, ver
+    // cambiarSucursalVenta) — por eso headersAuthJsonOrg en vez de
+    // headersAuthJson acá.
+    const r = await fetch(BASE, {method:'POST', headers: headersAuthJsonOrg(ventaOrgSeleccionada), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
     cerrarModal();
-    await cargarVentas();
+    if (ventaOrgSeleccionada === ORG) await cargarVentas();
+    // Si se guardó en OTRA sucursal, el listado actual (de la sucursal
+    // activa) no la muestra — es esperado, no hace falta recargar nada acá.
   }catch(e){
     document.getElementById('nvErr').textContent = e.message;
   }
@@ -529,9 +783,9 @@ function verDetalle(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Venta #${v.numero} <span class="pill ${v.estado}">${ESTADO_LABEL[v.estado]||v.estado}</span></h2>
+        <h2>Venta ${v.tipoComprobante === 'fiscal' ? 'F' : 'X'}-${String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${ESTADO_LABEL[v.estado]||v.estado}</span></h2>
         <p class="muted" style="margin-top:-8px">
-          ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''}
+          ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''} — ${TIPO_COMPROBANTE_LABEL[v.tipoComprobante] || 'Comprobante X'}
         </p>
         <table>
           <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
