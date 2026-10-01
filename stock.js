@@ -206,9 +206,14 @@ router.put('/depositos/:id', authAdmin, async (req, res) => {
       const existente = await db.collection('depositos').findOne(matchDup);
       if (existente) throw err(400, `Ya hay otro depósito activo llamado "${nombre}".`);
       const match = Object.assign({ _id: id }, filtroOrg(req));
+      const update = { nombre, direccion, notas, updatedAt: new Date() };
+      // Permite reactivar un depósito desactivado desde la misma pantalla
+      // de edición (1/10/2026, pedido de Mato: alta de depósitos en Bases
+      // y catálogos, mismo criterio que rubros/subrubros).
+      if (req.body && req.body.activo !== undefined) update.activo = !!req.body.activo;
       const r = await db.collection('depositos').findOneAndUpdate(
         match,
-        { $set: { nombre, direccion, notas, updatedAt: new Date() } },
+        { $set: update },
         { returnDocument: 'after' }
       );
       return r && r.value !== undefined ? r.value : r;

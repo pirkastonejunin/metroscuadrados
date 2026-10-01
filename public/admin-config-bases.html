@@ -147,6 +147,26 @@
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <button type="button" class="section-title seccion-toggle" id="toggleDepositos" onclick="toggleSeccion('Depositos')">
+        <span>Depósitos</span><span class="chev">▾</span>
+      </button>
+      <div id="contDepositos">
+        <p class="muted" style="margin-top:0">Hace falta tener al menos un depósito dado de alta para poder registrar una venta con entrega inmediata (se usa para descontar el stock). Acá podés crear y administrar los que necesites; la gestión completa de stock (movimientos, existencias) está en el módulo de Stock.</p>
+        <div class="row" style="margin-bottom:12px">
+          <div style="flex:1;min-width:160px"><label>Nombre</label><input id="ndNombre" placeholder="Ej: Depósito Junín" onkeydown="if(event.key==='Enter')crearDeposito()"></div>
+          <div style="flex:1;min-width:160px"><label>Dirección</label><input id="ndDireccion"></div>
+          <div style="flex:1;min-width:160px"><label>Notas</label><input id="ndNotas"></div>
+          <div><button class="btn" onclick="crearDeposito()">Agregar</button></div>
+        </div>
+        <div class="err" id="depositosErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Dirección</th><th>Notas</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="depositosBody"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -221,6 +241,7 @@ async function iniciarApp(){
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarRubros();
   await cargarSubrubros();
+  await cargarDepositos();
   // Sincroniza solo al entrar (1/10/2026, pedido de Mato: que la base
   // quede sincronizada con lo que ya tienen cargado los productos, sin
   // tener que acordarse de apretar un botón). Es rápido e idempotente —
@@ -241,7 +262,7 @@ function toggleSeccion(nombre){
   try { localStorage.setItem('pn_bases_seccion_' + nombre, colapsada ? '0' : '1'); } catch(e){}
 }
 function restaurarSecciones(){
-  ['Rubros', 'Subrubros'].forEach(nombre => {
+  ['Rubros', 'Subrubros', 'Depositos'].forEach(nombre => {
     let abierta = true;
     try {
       const guardado = localStorage.getItem('pn_bases_seccion_' + nombre);
@@ -446,6 +467,97 @@ async function importarExistentes(silencioso){
     if (!silencioso) alert(e.message);
   }finally{
     btn.disabled = false;
+  }
+}
+
+// -------------------------------------------------------------------
+// Depósitos (1/10/2026, pedido de Mato: "falta la parte de alta de
+// depositos ya que no me permite generar una venta si no esta dado de
+// alta el deposito" — y después pidió que viva acá mismo, en Bases y
+// catálogos, con el mismo criterio que Rubros/Subrubros). Usa las mismas
+// rutas que ya administra Stock (/api/stock/depositos) — si el usuario
+// no tiene el módulo de Stock habilitado, esta sección queda con un
+// aviso en vez de romper el resto de la pantalla.
+// -------------------------------------------------------------------
+let depositosCache = [];
+async function cargarDepositos(){
+  const body = document.getElementById('depositosBody');
+  try{
+    const r = await fetch('/api/stock/depositos?incluirInactivos=1', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    depositosCache = data;
+    renderDepositos();
+  }catch(e){
+    body.innerHTML = `<tr><td colspan="5" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderDepositos(){
+  const body = document.getElementById('depositosBody');
+  if (!depositosCache.length) { body.innerHTML = '<tr><td colspan="5" class="muted">Todavía no hay depósitos cargados.</td></tr>'; return; }
+  body.innerHTML = depositosCache.map(d => `
+    <tr>
+      <td><input value="${escapeHtml(d.nombre)}" style="width:auto;min-width:150px" id="dn_${d._id}"></td>
+      <td><input value="${escapeHtml(d.direccion||'')}" style="width:auto;min-width:140px" id="dd_${d._id}"></td>
+      <td><input value="${escapeHtml(d.notas||'')}" style="width:auto;min-width:140px" id="dno_${d._id}"></td>
+      <td><span class="pill ${d.activo!==false?'activo':'inactivo'}">${d.activo!==false?'Activo':'Inactivo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarDeposito('${d._id}')">Guardar</button>
+        <button class="btn small secondary" onclick="toggleActivoDeposito('${d._id}', ${d.activo===false})">${d.activo===false?'Activar':'Desactivar'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function crearDeposito(){
+  const nombre = document.getElementById('ndNombre').value.trim();
+  const direccion = document.getElementById('ndDireccion').value.trim();
+  const notas = document.getElementById('ndNotas').value.trim();
+  document.getElementById('depositosErr').textContent = '';
+  if (!nombre) { document.getElementById('depositosErr').textContent = 'Poné un nombre para el depósito'; return; }
+  try{
+    const r = await fetch('/api/stock/depositos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, direccion, notas})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    document.getElementById('ndNombre').value = '';
+    document.getElementById('ndDireccion').value = '';
+    document.getElementById('ndNotas').value = '';
+    await cargarDepositos();
+  }catch(e){
+    document.getElementById('depositosErr').textContent = e.message;
+  }
+}
+
+async function guardarDeposito(id){
+  const nombre = document.getElementById('dn_' + id).value.trim();
+  const direccion = document.getElementById('dd_' + id).value.trim();
+  const notas = document.getElementById('dno_' + id).value.trim();
+  document.getElementById('depositosErr').textContent = '';
+  if (!nombre) { document.getElementById('depositosErr').textContent = 'El nombre no puede quedar vacío'; return; }
+  try{
+    const r = await fetch('/api/stock/depositos/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre, direccion, notas})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarDepositos();
+  }catch(e){
+    document.getElementById('depositosErr').textContent = e.message;
+  }
+}
+
+async function toggleActivoDeposito(id, activar){
+  const d = depositosCache.find(x => String(x._id) === String(id)) || {};
+  try{
+    const r = await fetch('/api/stock/depositos/' + id, {
+      method: 'PUT',
+      headers: headersAuthJson(),
+      body: JSON.stringify({ nombre: d.nombre, direccion: d.direccion, notas: d.notas, activo: activar })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarDepositos();
+  }catch(e){
+    alert(e.message);
   }
 }
 </script>
