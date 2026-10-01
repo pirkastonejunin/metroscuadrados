@@ -802,7 +802,11 @@ async function abrirListasPrecio(){
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Listas de precio</h2>
-        <p class="muted">Cada lista calcula el precio de cada producto como Costo + % (se puede pisar puntualmente desde la ficha de cada producto, o importando un Excel). "Consumidor Final" es la lista predeterminada — es el mismo valor que el campo "Precio de venta" de la ficha, aplica a todo el catálogo y no se puede eliminar. Las demás listas pueden aplicar a todo el catálogo o solo a una selección de productos (ej: "Mayorista" con los artículos de Producción y algún extra).</p>
+        <p class="muted">Cada lista calcula el precio de cada producto como Costo + % (se puede pisar puntualmente desde la ficha de cada producto, o importando un Excel). "Consumidor Final" es la lista predeterminada — es el mismo valor que el campo "Precio de venta" de la ficha, aplica a todo el catálogo y no se puede eliminar. Las demás listas pueden aplicar a todo el catálogo o solo a una selección de productos (ej: "Mayorista" con los artículos de Producción y algún extra). Un producto con el costo cargado en USD se convierte a pesos con la cotización del dólar de Bases y catálogos.</p>
+        <div class="row" style="margin-bottom:12px">
+          <button class="btn secondary small" onclick="descargarBlob(BASE + '/listas-precio/exportar-todas', 'listas-precio.xlsx')">Exportar todas las listas</button>
+          <button class="btn secondary small" onclick="abrirImportarTodasListas()">Importar todas las listas</button>
+        </div>
         <div id="listasPrecioContenido"><p class="muted">Cargando...</p></div>
         <div class="section-title" style="margin-top:16px">Nueva lista</div>
         <div class="row">
@@ -995,6 +999,69 @@ async function confirmarImportarListaPrecio(listaId){
 }
 
 // -------------------------------------------------------------------
+// Export/import de TODAS las listas de precio en una sola planilla
+// (1/10/2026, pedido de Mato: "esa plantilla estaría buena que tenga
+// moneda y una columna para cada lista de precios"): SKU, Nombre,
+// Moneda, Costo (de referencia, no se reimportan — para eso está el
+// import de Productos) y una columna por lista activa. Útil para ver y
+// ajustar de una los precios de varias listas a la vez; para una lista
+// puntual sigue estando el botón "Importar"/"Exportar" de su fila.
+// -------------------------------------------------------------------
+function abrirImportarTodasListas(){
+  const sub = document.createElement('div');
+  sub.id = 'itlModalBg';
+  sub.className = 'modal-bg';
+  sub.style.zIndex = '70';
+  sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  sub.innerHTML = `
+    <div class="modal">
+      <span class="close-x" onclick="document.getElementById('itlModalBg').remove()">✕</span>
+      <h2>Importar todas las listas</h2>
+      <p class="muted">Mismas columnas que "Exportar todas las listas" (SKU, Nombre, Moneda, Costo y una columna por lista). Moneda y Costo son de referencia — no se actualizan desde acá, se editan desde Productos. Si una lista es de "selección de productos", un SKU nuevo en su columna se agrega solo a esa lista. Una columna de lista que no esté en el archivo queda sin cambios; una celda vacía en una columna que sí está, saca el precio manual.</p>
+      <label>Archivo (.xlsx o .xls)</label>
+      <input type="file" id="itlArchivo" accept=".xlsx,.xls">
+      <div class="err" id="itlErr"></div>
+      <div id="itlResultado"></div>
+      <button class="btn" id="itlBtn" style="margin-top:10px" onclick="confirmarImportarTodasListas()">Importar</button>
+    </div>
+  `;
+  document.body.appendChild(sub);
+}
+
+async function confirmarImportarTodasListas(){
+  const input = document.getElementById('itlArchivo');
+  const file = input.files[0];
+  const btn = document.getElementById('itlBtn');
+  document.getElementById('itlErr').textContent = '';
+  document.getElementById('itlResultado').innerHTML = '';
+  if (!file) { document.getElementById('itlErr').textContent = 'Elegí un archivo .xlsx o .xls'; return; }
+  btn.disabled = true;
+  try{
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+      reader.readAsDataURL(file);
+    });
+    const r = await fetch(BASE + '/listas-precio/importar-todas', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al importar');
+    let html = `<p class="ok-msg">Productos actualizados: ${data.actualizados}${data.nuevosMiembros ? ` (${data.nuevosMiembros} alta(s) nueva(s) en listas de selección)` : ''}</p>`;
+    if (data.errores && data.errores.length) {
+      html += `<p class="err">${data.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        data.errores.slice(0, 100).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
+        (data.errores.length > 100 ? `<li>... y ${data.errores.length - 100} más</li>` : '') + '</ul>';
+    }
+    document.getElementById('itlResultado').innerHTML = html;
+    await cargarListasPrecioModal();
+  }catch(e){
+    document.getElementById('itlErr').textContent = e.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// -------------------------------------------------------------------
 // Gestión de productos de una lista de alcance "selección" (1/10/2026,
 // pedido de Mato: "no todas las listas tienen todos los productos...
 // la de mayorista debe tener los artículos de producción y algún que
@@ -1093,15 +1160,20 @@ async function quitarProductoDeLista(listaId, productoId){
 // puntual, si lo hay) con edición inline.
 // -------------------------------------------------------------------
 let fichaListasPrecioCache = [];
+let cotizacionDolarCache = null;
 async function cargarPreciosPorLista(p){
   const cont = document.getElementById('preciosPorListaInfo');
   if (!cont || !p._id) return;
   cont.innerHTML = '<p class="muted">Cargando listas de precio...</p>';
   try{
-    const r = await fetch(BASE + '/listas-precio', {headers: headersAuthJson()});
+    const [r, rc] = await Promise.all([
+      fetch(BASE + '/listas-precio', {headers: headersAuthJson()}),
+      fetch(BASE + '/config/cotizacion-dolar', {headers: headersAuthJson()})
+    ]);
     const listas = await r.json();
     if (!r.ok) throw new Error(listas.error || 'Error');
     fichaListasPrecioCache = listas;
+    cotizacionDolarCache = rc.ok ? (await rc.json()).valor : null;
     renderPreciosPorLista(p);
   }catch(e){
     cont.innerHTML = '';
@@ -1117,13 +1189,22 @@ function perteneceALista(p, lista){
   return (lista.productosIds || []).some(id => String(id) === String(p._id));
 }
 
+// Si el producto está cargado en USD (1/10/2026, pedido de Mato: "vamos
+// a tener productos en dólares y otros en pesos... que tomando ese valor
+// de dólar calcule el precio en pesos automáticamente"), el costo se
+// convierte a pesos con la cotización configurada en Bases y catálogos
+// antes de aplicarle el % de la lista — sin cotización cargada, no se
+// puede resolver (precio null, igual que sin costo).
 function precioResueltoFicha(p, lista){
   const overrides = p.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return { precio: ov.precio, override: true };
   const costo = Number(document.getElementById('fpCosto').value);
   if (!costo && costo !== 0) return { precio: null, override: false };
-  return { precio: Math.round(costo * (1 + (lista.porcentaje||0)/100) * 100) / 100, override: false };
+  const moneda = document.getElementById('fpMoneda') ? document.getElementById('fpMoneda').value : 'ARS';
+  const costoEnPesos = moneda === 'USD' ? (cotizacionDolarCache ? costo * cotizacionDolarCache : null) : costo;
+  if (costoEnPesos == null) return { precio: null, override: false, sinCotizacion: true };
+  return { precio: Math.round(costoEnPesos * (1 + (lista.porcentaje||0)/100) * 100) / 100, override: false };
 }
 
 function renderPreciosPorLista(p){
@@ -1146,12 +1227,12 @@ function renderPreciosPorLista(p){
                 </tr>
               `;
             }
-            const { precio, override } = precioResueltoFicha(p, l);
+            const { precio, override, sinCotizacion } = precioResueltoFicha(p, l);
             return `
               <tr>
                 <td>${escapeHtml(l.nombre)}${l.predeterminada ? ' <span class="muted">(Consumidor Final)</span>' : ''}</td>
                 <td><input type="number" step="0.01" id="ppl_${l._id}" value="${precio!=null?precio:''}" style="width:110px"></td>
-                <td class="muted">${override ? 'Manual' : `Costo +${l.porcentaje||0}%`}</td>
+                <td class="muted">${override ? 'Manual' : (sinCotizacion ? 'Falta cargar la cotización del dólar' : `Costo +${l.porcentaje||0}%`)}</td>
                 <td style="white-space:nowrap">
                   <button type="button" class="btn small secondary" onclick="guardarPrecioLista('${p._id}','${l._id}')">Guardar</button>
                   ${override ? `<button type="button" class="btn small secondary" onclick="quitarPrecioLista('${p._id}','${l._id}')">Quitar manual</button>` : ''}
@@ -1161,7 +1242,7 @@ function renderPreciosPorLista(p){
           }).join('')}
         </tbody>
       </table>
-      <p class="muted" style="margin-bottom:0">La lista Consumidor Final siempre queda igual al campo "Precio de venta" de arriba.</p>
+      <p class="muted" style="margin-bottom:0">La lista Consumidor Final siempre queda igual al campo "Precio de venta" de arriba.${document.getElementById('fpMoneda') && document.getElementById('fpMoneda').value==='USD' ? ` Este producto está cargado en USD — se convierte a pesos con la cotización de Bases y catálogos${cotizacionDolarCache ? ` (hoy: $${cotizacionDolarCache})` : ' (todavía no está cargada)'}.` : ''}</p>
     </div>
   `;
 }

@@ -167,6 +167,21 @@
         </table>
       </div>
     </div>
+
+    <div class="card">
+      <button type="button" class="section-title seccion-toggle" id="toggleCotizacion" onclick="toggleSeccion('Cotizacion')">
+        <span>Cotización del dólar</span><span class="chev">▾</span>
+      </button>
+      <div id="contCotizacion">
+        <p class="muted" style="margin-top:0">Algunos productos tienen el costo cargado en dólares (campo "Moneda" de la ficha). Para esos, las listas de precio convierten el costo a pesos con esta cotización antes de aplicar el % de margen — el costo y precio del producto quedan tal cual, en su moneda original.</p>
+        <div class="row">
+          <div style="width:180px"><label>1 USD = $ ARS</label><input id="cdValor" type="number" min="0.01" step="0.01" onkeydown="if(event.key==='Enter')guardarCotizacionDolar()"></div>
+          <div><button class="btn" onclick="guardarCotizacionDolar()">Guardar</button></div>
+          <div class="muted" id="cdActualizado" style="padding-bottom:9px"></div>
+        </div>
+        <div class="err" id="cotizacionErr"></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -242,6 +257,7 @@ async function iniciarApp(){
   await cargarRubros();
   await cargarSubrubros();
   await cargarDepositos();
+  await cargarCotizacionDolar();
   // Sincroniza solo al entrar (1/10/2026, pedido de Mato: que la base
   // quede sincronizada con lo que ya tienen cargado los productos, sin
   // tener que acordarse de apretar un botón). Es rápido e idempotente —
@@ -262,7 +278,7 @@ function toggleSeccion(nombre){
   try { localStorage.setItem('pn_bases_seccion_' + nombre, colapsada ? '0' : '1'); } catch(e){}
 }
 function restaurarSecciones(){
-  ['Rubros', 'Subrubros', 'Depositos'].forEach(nombre => {
+  ['Rubros', 'Subrubros', 'Depositos', 'Cotizacion'].forEach(nombre => {
     let abierta = true;
     try {
       const guardado = localStorage.getItem('pn_bases_seccion_' + nombre);
@@ -558,6 +574,42 @@ async function toggleActivoDeposito(id, activar){
     await cargarDepositos();
   }catch(e){
     alert(e.message);
+  }
+}
+
+// -------------------------------------------------------------------
+// Cotización del dólar (1/10/2026, pedido de Mato: "vamos a tener
+// productos en dólares y otros en pesos... tenemos que tener en algún
+// panel de configuración la cotización del dólar... que tomando ese
+// valor calcule el precio en pesos automáticamente"). Un valor por
+// organización — lo usan las listas de precio de Productos para
+// convertir a pesos el costo de los productos cargados en USD.
+// -------------------------------------------------------------------
+async function cargarCotizacionDolar(){
+  try{
+    const r = await fetch(BASE + '/config/cotizacion-dolar', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    document.getElementById('cdValor').value = data.valor != null ? data.valor : '';
+    document.getElementById('cdActualizado').textContent = data.actualizadoEn
+      ? 'Actualizada el ' + new Date(data.actualizadoEn).toLocaleString('es-AR')
+      : 'Todavía no está cargada';
+  }catch(e){
+    document.getElementById('cotizacionErr').textContent = e.message;
+  }
+}
+
+async function guardarCotizacionDolar(){
+  const valor = Number(document.getElementById('cdValor').value);
+  document.getElementById('cotizacionErr').textContent = '';
+  if (!Number.isFinite(valor) || valor <= 0) { document.getElementById('cotizacionErr').textContent = 'Poné un valor mayor a 0'; return; }
+  try{
+    const r = await fetch(BASE + '/config/cotizacion-dolar', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({valor})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCotizacionDolar();
+  }catch(e){
+    document.getElementById('cotizacionErr').textContent = e.message;
   }
 }
 </script>

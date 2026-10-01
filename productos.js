@@ -638,16 +638,39 @@ function perteneceALista(producto, lista) {
   return ids.some(id => String(id) === String(producto._id));
 }
 
+// Costo en pesos de un producto (1/10/2026, pedido de Mato: "hay
+// productos que los vamos a tener en dólares y otros en pesos... que
+// tomando ese valor de dólar calcule el precio en pesos automáticamente").
+// `producto.moneda` (ya existía) dice en qué moneda está cargado el
+// costo; si es USD se convierte con la cotización vigente de la
+// organización (ver /config/cotizacion-dolar más abajo). Sin cotización
+// cargada todavía, no se puede resolver el costo en pesos de un producto
+// en dólares (devuelve null en vez de un número inventado).
+function costoEnPesos(producto, cotizacion) {
+  if (producto.costo == null) return null;
+  if (producto.moneda === 'USD') return cotizacion ? round2(producto.costo * cotizacion) : null;
+  return producto.costo;
+}
+
 // Precio resuelto de un producto en una lista: el override si existe,
-// si no el costo + % de la lista (null si no hay costo cargado, o si el
-// producto no pertenece a una lista de alcance "selección").
-function precioResuelto(producto, lista) {
+// si no el costo (convertido a pesos si está en USD) + % de la lista
+// (null si no hay costo cargado, no hay cotización para convertirlo, o
+// el producto no pertenece a una lista de alcance "selección").
+function precioResuelto(producto, lista, cotizacion) {
   if (!perteneceALista(producto, lista)) return { precio: null, override: false, fueraDeAlcance: true };
   const overrides = producto.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return { precio: ov.precio, override: true };
-  if (producto.costo == null) return { precio: null, override: false };
-  return { precio: round2(producto.costo * (1 + (lista.porcentaje || 0) / 100)), override: false };
+  const costo = costoEnPesos(producto, cotizacion);
+  if (costo == null) return { precio: null, override: false };
+  return { precio: round2(costo * (1 + (lista.porcentaje || 0) / 100)), override: false };
+}
+
+// Lee la cotización del dólar configurada para la organización (null si
+// todavía no se cargó ninguna).
+async function obtenerCotizacionDolar(db, req) {
+  const doc = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+  return doc ? doc.valor : null;
 }
 
 // Trae (y crea si hace falta) la lista "Consumidor Final" de esta
@@ -793,6 +816,47 @@ router.delete('/listas-precio/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// -----------------------------------------------------------------------
+// Cotización del dólar (1/10/2026, pedido de Mato: "vamos a tener
+// productos en dólares y otros en pesos... tenemos que tener en algún
+// panel de configuración la cotización del dólar... que tomando ese
+// valor calcule el precio en pesos automáticamente"). Un valor por
+// organización (colección `config_general`, un documento por orgId +
+// clave) — se usa para convertir a pesos el costo de un producto cargado
+// en USD antes de aplicarle el % de margen de cada lista de precio. El
+// costo/precio "plano" del producto queda tal cual Mato lo cargó, en su
+// moneda original — esto solo afecta el cálculo derivado de las listas.
+// Pantalla: Bases y catálogos.
+// -----------------------------------------------------------------------
+router.get('/config/cotizacion-dolar', authListasPrecio, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+    });
+    res.json({ valor: doc ? doc.valor : null, actualizadoEn: doc ? doc.updatedAt : null });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/config/cotizacion-dolar', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const valor = Number((req.body || {}).valor);
+    if (!Number.isFinite(valor) || valor <= 0) throw err(400, 'La cotización tiene que ser un número mayor a 0');
+    const ahora = new Date();
+    await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('config_general').updateOne(
+        { orgId: req.orgId, clave: 'cotizacionDolar' },
+        { $set: { valor, updatedAt: ahora }, $setOnInsert: { orgId: req.orgId, clave: 'cotizacionDolar', createdAt: ahora } },
+        { upsert: true }
+      );
+    });
+    res.json({ valor, actualizadoEn: ahora });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Filtro de productos de una lista: todo el catálogo activo, salvo que
 // sea una lista de alcance "seleccion", en cuyo caso solo los que están
 // en su `productosIds` (1/10/2026, ver perteneceALista arriba).
@@ -813,14 +877,15 @@ router.get('/listas-precio/:id/precios', authListasPrecio, async (req, res) => {
       const db = await getDb();
       const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!lista) throw err(404, 'Lista no encontrada');
+      const cotizacion = await obtenerCotizacionDolar(db, req);
       const productos = await db.collection('productos_catalogo')
         .find(matchProductosDeLista(req, lista))
-        .project({ sku: 1, nombre: 1, rubro: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
+        .project({ sku: 1, nombre: 1, rubro: 1, moneda: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
       const filas = productos.map(p => {
-        const { precio, override } = precioResuelto(p, lista);
-        return { _id: p._id, sku: p.sku, nombre: p.nombre, rubro: p.rubro, costo: p.costo, precio, override };
+        const { precio, override } = precioResuelto(p, lista, cotizacion);
+        return { _id: p._id, sku: p.sku, nombre: p.nombre, rubro: p.rubro, moneda: p.moneda, costo: p.costo, precio, override };
       });
-      return { lista, filas };
+      return { lista, filas, cotizacion };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -840,14 +905,112 @@ router.get('/listas-precio/:id/export', authListasPrecio, async (req, res) => {
       const db = await getDb();
       const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!lista) throw err(404, 'Lista no encontrada');
+      const cotizacion = await obtenerCotizacionDolar(db, req);
       const productos = await db.collection('productos_catalogo')
         .find(matchProductosDeLista(req, lista))
-        .project({ sku: 1, nombre: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
-      const filas = productos.map(p => Object.assign({ sku: p.sku, nombre: p.nombre }, { precio: precioResuelto(p, lista).precio }));
+        .project({ sku: 1, nombre: 1, moneda: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
+      const filas = productos.map(p => Object.assign({ sku: p.sku, nombre: p.nombre }, { precio: precioResuelto(p, lista, cotizacion).precio }));
       return { lista, filas };
     });
     const nombreArchivo = `lista-precio-${String(lista.nombre).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.xlsx`;
     exportarXlsx(res, nombreArchivo, COLUMNAS_LISTA_PRECIO, filas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Export/import de TODAS las listas activas de una — una sola planilla
+// con SKU, Nombre, Moneda, Costo y una columna por lista (1/10/2026,
+// pedido de Mato: "esa plantilla estaría buena que tenga moneda y una
+// columna para cada lista de precios"). Moneda y Costo viajan como
+// referencia (para saber en qué moneda está cargado cada producto); no
+// se reimportan — para cambiar costo o moneda se usa el import de
+// Productos, que ya tiene esas columnas.
+function columnasTodasLasListas(listas) {
+  return [
+    { clave: 'sku', titulo: 'SKU (Código)' },
+    { clave: 'nombre', titulo: 'Nombre' },
+    { clave: 'moneda', titulo: 'Moneda' },
+    { clave: 'costo', titulo: 'Costo', tipo: 'numero' },
+    ...listas.map(l => ({ clave: 'lista_' + l._id, titulo: l.nombre, tipo: 'numero' }))
+  ];
+}
+
+router.get('/listas-precio/exportar-todas', authListasPrecio, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const { columnas, filas } = await conReintento(async () => {
+      const db = await getDb();
+      const listas = await db.collection('productos_listas_precio')
+        .find(Object.assign({ activa: { $ne: false } }, filtroOrg(req))).sort({ orden: 1, nombre: 1 }).toArray();
+      const cotizacion = await obtenerCotizacionDolar(db, req);
+      const productos = await db.collection('productos_catalogo')
+        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .project({ sku: 1, nombre: 1, moneda: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
+      const columnas = columnasTodasLasListas(listas);
+      const filas = productos.map(p => {
+        const fila = { sku: p.sku, nombre: p.nombre, moneda: p.moneda || 'ARS', costo: p.costo };
+        listas.forEach(l => { fila['lista_' + l._id] = precioResuelto(p, l, cotizacion).precio; });
+        return fila;
+      });
+      return { columnas, filas };
+    });
+    exportarXlsx(res, 'listas-precio.xlsx', columnas, filas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Importa precios de VARIAS listas a la vez, una columna por lista (como
+// las exporta /exportar-todas). Igual que el import de una lista puntual:
+// si una lista es de alcance "selección", un SKU nuevo en su columna se
+// agrega solo como miembro. Una columna de lista que no viene en el
+// archivo (porque se borró al editar) se interpreta como "sin cambios"
+// para esa lista — a diferencia de la celda vacía, que si saca el precio
+// manual cargado.
+router.post('/listas-precio/importar-todas', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const archivoBase64 = (req.body || {}).archivoBase64;
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const listas = await db.collection('productos_listas_precio').find(filtroOrg(req)).toArray();
+      const columnas = columnasTodasLasListas(listas);
+      const filas = parsearXlsxBase64(archivoBase64, columnas);
+      let actualizados = 0;
+      const nuevosMiembrosPorLista = new Map();
+      const errores = [];
+      for (const fila of filas) {
+        const sku = normalizarTexto(fila.sku);
+        if (!sku) { errores.push({ fila: fila.__fila, motivo: 'Falta el SKU' }); continue; }
+        const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)));
+        if (!producto) { errores.push({ fila: fila.__fila, motivo: `No existe ningún producto activo con SKU "${sku}"` }); continue; }
+        let tocoAlgunaLista = false;
+        for (const lista of listas) {
+          const clave = 'lista_' + lista._id;
+          if (!(clave in fila)) continue; // columna no vino en el archivo: sin cambios para esta lista
+          const precio = fila[clave];
+          if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
+            errores.push({ fila: fila.__fila, motivo: `${lista.nombre}: el precio tiene que ser un número mayor o igual a 0` });
+            continue;
+          }
+          const matchProd = { _id: producto._id };
+          await db.collection('productos_catalogo').updateOne(matchProd, { $pull: { preciosPorLista: { listaId: lista._id } } });
+          if (precio !== null) {
+            await db.collection('productos_catalogo').updateOne(matchProd, { $push: { preciosPorLista: { listaId: lista._id, precio } } });
+          }
+          if (lista.predeterminada) await sincronizarPrecioConsumidorFinal(db, req, producto._id, precio);
+          if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(x => String(x) === String(producto._id))) {
+            if (!nuevosMiembrosPorLista.has(String(lista._id))) nuevosMiembrosPorLista.set(String(lista._id), []);
+            nuevosMiembrosPorLista.get(String(lista._id)).push(producto._id);
+          }
+          tocoAlgunaLista = true;
+        }
+        if (tocoAlgunaLista) actualizados++;
+      }
+      for (const [listaId, ids] of nuevosMiembrosPorLista) {
+        await db.collection('productos_listas_precio').updateOne({ _id: toObjectId(listaId) }, { $addToSet: { productosIds: { $each: ids } } });
+      }
+      const nuevosMiembros = [...nuevosMiembrosPorLista.values()].reduce((acc, ids) => acc + ids.length, 0);
+      return { actualizados, nuevosMiembros, errores };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
