@@ -180,8 +180,15 @@ const COLUMNAS_PRODUCTOS = [
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function normalizarBooleano(v) { return !!v; }
 
+// .toUpperCase() acá (30/9/2026, bug detectado por Mato): antes el SKU se
+// guardaba tal cual venía escrito, así que "fibra1" y "FIBRA1" quedaban
+// como dos productos distintos — justo lo que pasó al importar el
+// archivo de Dux (en mayúsculas) contra productos que Producción ya
+// había sincronizado con otro casing. De acá en más el SKU siempre se
+// guarda en MAYÚSCULAS (acá y en costos.js) para que la comparación sea
+// consistente en todos lados.
 function normalizarSku(v) {
-  const s = normalizarTexto(v);
+  const s = normalizarTexto(v).toUpperCase();
   return s ? s : null;
 }
 
@@ -434,13 +441,18 @@ async function procesarImportProductos(db, req, jobId, filas) {
     procesados++;
     try {
       if (!fila.sku) throw err(400, 'Falta el SKU');
-      if (skusVistos.has(fila.sku)) throw err(400, `SKU "${fila.sku}" repetido en el archivo (se usó la primera aparición)`);
+      // .toUpperCase() acá también: dos filas con el mismo SKU pero
+      // distinto casing ("fibra1" / "FIBRA1") son el mismo producto para
+      // validarProducto (que ahora normaliza a mayúsculas), así que
+      // tienen que detectarse como repetidas acá también.
+      const skuMayus = String(fila.sku).trim().toUpperCase();
+      if (skusVistos.has(skuMayus)) throw err(400, `SKU "${fila.sku}" repetido en el archivo (se usó la primera aparición)`);
       const datos = validarProducto(fila);
       if (fila.proveedor) {
         const pid = proveedorIdPorNombre.get(String(fila.proveedor).trim().toLowerCase());
         if (pid) datos.proveedorId = pid;
       }
-      skusVistos.add(fila.sku);
+      skusVistos.add(skuMayus);
       const match = Object.assign({ sku: datos.sku, activo: { $ne: false } }, filtroOrg(req));
       tanda.push({
         updateOne: {
@@ -477,6 +489,145 @@ router.get('/import/estado/:id', authAdmin, async (req, res) => {
     });
     if (!job) throw err(404, 'No se encontró ese import');
     res.json(job);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Consolidación de SKUs duplicados por mayúsculas/minúsculas (30/9/2026,
+// bug que Mato detectó tras importar el archivo de Dux): antes el SKU se
+// guardaba tal cual se escribía, así que el mismo producto que
+// Producción ya sincronizaba con un casing (ej "FIBRA1") quedó duplicado
+// al importar el mismo SKU en otro casing desde Dux. Ya se corrigió para
+// que de acá en más el SKU siempre se guarde en MAYÚSCULAS (acá y en
+// costos.js) — esto es para arreglar lo que ya quedó duplicado.
+//
+// GET /duplicados-sku: solo DETECTA y devuelve una vista previa, no toca
+// nada — para revisar antes de confirmar.
+// POST /consolidar-sku: fusiona SOLO los grupos "seguros" (exactamente 2
+// productos activos con el mismo SKU sin distinguir mayúsculas, a lo
+// sumo uno de los dos vinculado a Producción, y el que se va a
+// desactivar sin movimientos de stock/ventas/compras ya registrados
+// contra su _id) — completa en el que se conserva los campos vacíos con
+// los datos del otro, nunca pisa un dato ya cargado. Cualquier grupo que
+// no cumpla estas condiciones se deja sin tocar y se informa en
+// `revisionManual` para resolver a mano.
+// -----------------------------------------------------------------------
+
+async function detectarDuplicadosSku(db, req) {
+  const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+  const productos = await db.collection('productos_catalogo').find(match).toArray();
+  const porSku = new Map();
+  for (const p of productos) {
+    if (!p.sku) continue;
+    const clave = String(p.sku).trim().toUpperCase();
+    if (!porSku.has(clave)) porSku.set(clave, []);
+    porSku.get(clave).push(p);
+  }
+  const grupos = [];
+  for (const [sku, lista] of porSku.entries()) {
+    if (lista.length > 1) grupos.push({ sku, productos: lista });
+  }
+  return grupos;
+}
+
+router.get('/duplicados-sku', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const grupos = await conReintento(async () => {
+      const db = await getDb();
+      return detectarDuplicadosSku(db, req);
+    });
+    res.json({
+      totalGrupos: grupos.length,
+      grupos: grupos.map(g => ({
+        sku: g.sku,
+        productos: g.productos.map(p => ({
+          _id: p._id, sku: p.sku, nombre: p.nombre, tipoProducto: p.tipoProducto,
+          costoProductoId: p.costoProductoId || null, rubro: p.rubro, marca: p.marca,
+          costo: p.costo, precio: p.precio, proveedor: p.proveedor, createdAt: p.createdAt
+        }))
+      }))
+    });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+const CAMPOS_A_COMPLETAR_FUSION = [
+  'rubro', 'subrubro', 'marca', 'unidad', 'tipoUnidad', 'disponiblePara', 'moneda',
+  'precio', 'costo', 'porcentajeIva', 'impuestoInterno', 'codigoBarra', 'codigoExterno',
+  'proveedor', 'proveedorId', 'unidadesPorBulto', 'cantidadMinima', 'stockIdeal',
+  'embalaje', 'descripcion', 'fechaVencimiento', 'notas'
+];
+
+router.post('/consolidar-sku', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const grupos = await detectarDuplicadosSku(db, req);
+      let fusionados = 0;
+      const revisionManual = [];
+      const detalle = [];
+
+      for (const grupo of grupos) {
+        const { sku, productos } = grupo;
+        if (productos.length !== 2) {
+          revisionManual.push({ sku, motivo: `${productos.length} productos activos con este SKU — revisar a mano`, ids: productos.map(p => String(p._id)) });
+          continue;
+        }
+        const conLink = productos.filter(p => p.costoProductoId);
+        if (conLink.length > 1) {
+          revisionManual.push({ sku, motivo: 'Más de un producto vinculado a Producción con este SKU — revisar a mano', ids: productos.map(p => String(p._id)) });
+          continue;
+        }
+        const keeper = conLink[0] || productos[0];
+        const donante = productos.find(p => String(p._id) !== String(keeper._id));
+
+        // Nunca se fusiona si el que se va a desactivar ya tiene
+        // historial real (movimientos de stock, ventas, compras) contra
+        // su _id — ahí se perdería ese historial, mejor resolverlo a
+        // mano.
+        const [movStock, stockActualRef, ventasRef, comprasRef] = await Promise.all([
+          db.collection('stock_movimientos').countDocuments(Object.assign({ productoId: donante._id }, filtroOrg(req))),
+          db.collection('stock_actual').countDocuments(Object.assign({ productoId: donante._id }, filtroOrg(req))),
+          db.collection('ventas').countDocuments(Object.assign({ 'items.productoId': donante._id }, filtroOrg(req))),
+          db.collection('compras').countDocuments(Object.assign({ 'items.productoId': donante._id }, filtroOrg(req)))
+        ]);
+        if (movStock || stockActualRef || ventasRef || comprasRef) {
+          revisionManual.push({ sku, motivo: 'El producto duplicado ya tiene movimientos de stock, ventas, compras o stock actual registrados — fusionar a mano para no perder ese historial', ids: productos.map(p => String(p._id)) });
+          continue;
+        }
+
+        const set = { sku, updatedAt: new Date() };
+        const completados = [];
+        for (const campo of CAMPOS_A_COMPLETAR_FUSION) {
+          const vacio = keeper[campo] === undefined || keeper[campo] === null || keeper[campo] === '';
+          const tieneDato = donante[campo] !== undefined && donante[campo] !== null && donante[campo] !== '';
+          if (vacio && tieneDato) { set[campo] = donante[campo]; completados.push(campo); }
+        }
+        await db.collection('productos_catalogo').updateOne({ _id: keeper._id }, { $set: set });
+        await db.collection('productos_catalogo').updateOne(
+          { _id: donante._id },
+          { $set: {
+            activo: false, updatedAt: new Date(),
+            notas: `${donante.notas || ''}\n[Fusionado en el producto ${keeper._id} el ${new Date().toLocaleDateString('es-AR')} — SKU duplicado por mayúsculas/minúsculas]`.trim()
+          } }
+        );
+        fusionados++;
+        detalle.push({ sku, keeperId: String(keeper._id), donanteDesactivado: String(donante._id), camposCompletados: completados });
+      }
+
+      // De paso, uppercasea el sku de costos_productos para que la
+      // sincronización Producción→Productos quede 100% consistente con
+      // el nuevo criterio (esto es solo normalización de texto, no toca
+      // ningún vínculo ni dato comercial).
+      await db.collection('costos_productos').updateMany(
+        Object.assign({ sku: { $ne: null } }, filtroOrg(req)),
+        [{ $set: { sku: { $toUpper: '$sku' } } }]
+      );
+
+      return { fusionados, revisionManual, detalle };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

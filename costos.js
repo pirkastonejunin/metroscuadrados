@@ -138,9 +138,14 @@ const UNIDAD_MANO_DE_OBRA = 'jornal';
 // CÓDIGO en Dux, para el ingreso de stock generado por Producción. No es
 // obligatorio, pero si se carga tiene que ser único dentro de la
 // organización (si no, el archivo para Dux quedaría ambiguo).
+// .toUpperCase() acá (30/9/2026, bug detectado por Mato): el SKU acá y en
+// productos.js tienen que guardarse con el mismo criterio de mayúsculas,
+// si no la sincronización Producción→Productos (más abajo) y el import
+// de Dux pueden crear un producto duplicado para el mismo SKU con
+// distinto casing. Ver el comentario igual en productos.js.
 function normalizarSkuOpcional(v) {
   if (v === undefined || v === null || !String(v).trim()) return null;
-  return String(v).trim();
+  return String(v).trim().toUpperCase();
 }
 async function validarSkuUnico(db, req, sku, idExcluir) {
   if (!sku) return;
@@ -169,7 +174,12 @@ async function validarSkuUnico(db, req, sku, idExcluir) {
 // en la conexión a Stock.
 async function sincronizarProductoEnCatalogo(db, req, costosProducto) {
   if (!costosProducto || !costosProducto.sku) return;
-  const match = Object.assign({ sku: costosProducto.sku }, filtroOrg(req));
+  // .toUpperCase() acá además de en normalizarSkuOpcional (30/9/2026):
+  // así la sincronización encuentra bien el producto en productos_catalogo
+  // aunque el documento de costos_productos sea viejo y todavía tenga el
+  // SKU guardado con otro casing de antes de este fix.
+  const sku = String(costosProducto.sku).trim().toUpperCase();
+  const match = Object.assign({ sku }, filtroOrg(req));
   const existente = await db.collection('productos_catalogo').findOne(match);
   const ahora = new Date();
   if (existente) {
@@ -180,7 +190,7 @@ async function sincronizarProductoEnCatalogo(db, req, costosProducto) {
   } else {
     const esM2 = costosProducto.tipoCosteo === 'm2';
     const nuevo = {
-      sku: costosProducto.sku, nombre: costosProducto.nombre,
+      sku, nombre: costosProducto.nombre,
       unidad: esM2 ? 'm2' : 'unidad', tipoUnidad: esM2 ? 'superficie' : 'unidad',
       disponiblePara: 'todos', moneda: 'ARS', tipoProducto: 'produccion',
       rubro: '', subrubro: '', marca: '', codigoBarra: '', codigoExterno: '',

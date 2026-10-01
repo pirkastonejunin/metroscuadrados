@@ -128,6 +128,7 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirDuplicadosSku()">Revisar SKUs duplicados</button>
           <button class="btn" onclick="abrirNuevoProducto()">+ Nuevo producto</button>
         </div>
       </div>
@@ -573,6 +574,72 @@ async function esperarJobImport(jobId){
     }
     if (job.estado === 'error') throw new Error(job.errorGeneral || 'El import falló de forma inesperada');
     return job;
+  }
+}
+
+// Revisar/consolidar SKUs duplicados por mayúsculas (30/9/2026) — primero
+// muestra una vista previa (no toca nada), y solo si Mato confirma
+// ejecuta la fusión. Ver productos.js (GET /duplicados-sku, POST
+// /consolidar-sku) para el detalle de qué se considera "seguro" fusionar
+// automáticamente.
+async function abrirDuplicadosSku(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>SKUs duplicados por mayúsculas/minúsculas</h2>
+        <div id="dupContenido"><p class="muted">Buscando...</p></div>
+      </div>
+    </div>
+  `;
+  try{
+    const r = await fetch(BASE + '/duplicados-sku', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error buscando duplicados');
+    renderDuplicadosSku(data);
+  }catch(e){
+    document.getElementById('dupContenido').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function renderDuplicadosSku(data){
+  const cont = document.getElementById('dupContenido');
+  if (!data.totalGrupos) {
+    cont.innerHTML = '<p class="ok-msg">No hay SKUs duplicados 🎉</p>';
+    return;
+  }
+  let html = `<p class="muted">Se encontraron ${data.totalGrupos} SKU(s) con más de un producto activo. Al confirmar, se completan en el producto que se conserva los datos vacíos con los del otro (nunca se pisa un dato ya cargado); el otro queda desactivado, no se borra.</p>`;
+  html += data.grupos.map(g => `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px">
+      <strong>${escapeHtml(g.sku)}</strong>
+      <ul class="muted" style="margin:4px 0 0">
+        ${g.productos.map(p => `<li>${escapeHtml(p.sku)} — ${escapeHtml(p.nombre)}${p.costoProductoId ? ' (vinculado a Producción)' : ''}${p.rubro ? ' — ' + escapeHtml(p.rubro) : ''}</li>`).join('')}
+      </ul>
+    </div>
+  `).join('');
+  html += `<div id="dupResultado"></div><button class="btn" style="margin-top:10px" id="dupBtn" onclick="confirmarConsolidarSku()">Fusionar los que se puedan fusionar solos</button>`;
+  cont.innerHTML = html;
+}
+
+async function confirmarConsolidarSku(){
+  const btn = document.getElementById('dupBtn');
+  btn.disabled = true;
+  document.getElementById('dupResultado').innerHTML = '<p class="muted">Fusionando...</p>';
+  try{
+    const r = await fetch(BASE + '/consolidar-sku', {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al consolidar');
+    let html = `<p class="ok-msg">Fusionados: ${data.fusionados}</p>`;
+    if (data.revisionManual && data.revisionManual.length) {
+      html += `<p class="err">${data.revisionManual.length} grupo(s) necesitan revisión manual:</p><ul class="muted" style="margin-top:0">` +
+        data.revisionManual.map(g => `<li>${escapeHtml(g.sku)}: ${escapeHtml(g.motivo)}</li>`).join('') + '</ul>';
+    }
+    document.getElementById('dupResultado').innerHTML = html;
+    await cargarProductos();
+  }catch(e){
+    document.getElementById('dupResultado').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+  }finally{
+    btn.disabled = false;
   }
 }
 </script>
