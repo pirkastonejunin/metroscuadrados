@@ -1022,7 +1022,7 @@ router.get('/listas-precio/exportar-todas', authListasPrecio, async (req, res) =
 // trabajo de verdad (fila por fila, porque cada una puede tocar varias
 // listas) sigue corriendo en el servidor y el frontend consulta el
 // progreso con el mismo GET /import/estado/:id cada par de segundos.
-const CADA_CUANTO_GUARDAR_PROGRESO = 25;
+const TANDA_IMPORT_LISTAS = 500;
 
 // Importa precios de VARIAS listas a la vez, una columna por lista (como
 // las exporta /exportar-todas). Igual que el import de una lista puntual:
@@ -1057,57 +1057,88 @@ router.post('/listas-precio/importar-todas', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Reescrito en bulk (1/10/2026, 2da vuelta — Mato: "la importación sigue
+// muy lenta"): la versión anterior hacía, POR CADA FILA, un findOne +
+// hasta 2 updateOne por cada lista con columna en el archivo (más el
+// sync de Consumidor Final) — con 5 listas y ~20.000 filas eso eran
+// decenas de miles de viajes secuenciales, uno por uno, a Mongo Atlas.
+// Ahora: 1) se traen de UNA sola vez (en tandas de $in) todos los
+// productos de los SKU del archivo, 2) se calcula en memoria el estado
+// final de preciosPorLista/precio de cada producto tocado (una fila
+// posterior sigue pisando a una anterior para la misma lista, igual que
+// antes), y 3) se manda todo en bulkWrite por tandas — mismo patrón que
+// ya usa el import de Productos.
 async function procesarImportTodasListas(db, req, jobId, listas, filas) {
-  let actualizados = 0, procesados = 0;
-  const nuevosMiembrosPorLista = new Map();
   const errores = [];
-  async function guardarProgreso() {
-    const nuevosMiembros = [...nuevosMiembrosPorLista.values()].reduce((acc, ids) => acc + ids.length, 0);
-    await db.collection('productos_import_jobs').updateOne({ _id: jobId }, { $set: { procesados, actualizados, nuevosMiembros, errores } });
+  const skusArchivo = [...new Set(filas.map(f => normalizarTexto(f.sku)).filter(Boolean))];
+  const productosPorSku = new Map();
+  for (let i = 0; i < skusArchivo.length; i += 1000) {
+    const grupo = skusArchivo.slice(i, i + 1000);
+    const productos = await db.collection('productos_catalogo')
+      .find(Object.assign({ sku: { $in: grupo }, activo: { $ne: false } }, filtroOrg(req)))
+      .project({ sku: 1, preciosPorLista: 1 }).toArray();
+    for (const p of productos) productosPorSku.set(p.sku, p);
   }
+
+  const cambiosPorProducto = new Map(); // id (string) -> {preciosPorLista, precio, _id}
+  const nuevosMiembrosPorLista = new Map();
   for (const fila of filas) {
-    procesados++;
     const sku = normalizarTexto(fila.sku);
-    if (!sku) {
-      errores.push({ fila: fila.__fila, motivo: 'Falta el SKU' });
-    } else {
-      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)));
-      if (!producto) {
-        errores.push({ fila: fila.__fila, motivo: `No existe ningún producto activo con SKU "${sku}"` });
-      } else {
-        let tocoAlgunaLista = false;
-        for (const lista of listas) {
-          const clave = 'lista_' + lista._id;
-          if (!(clave in fila)) continue; // columna no vino en el archivo: sin cambios para esta lista
-          const precio = fila[clave];
-          if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
-            errores.push({ fila: fila.__fila, motivo: `${lista.nombre}: el precio tiene que ser un número mayor o igual a 0` });
-            continue;
-          }
-          const matchProd = { _id: producto._id };
-          await db.collection('productos_catalogo').updateOne(matchProd, { $pull: { preciosPorLista: { listaId: lista._id } } });
-          if (precio !== null) {
-            await db.collection('productos_catalogo').updateOne(matchProd, { $push: { preciosPorLista: { listaId: lista._id, precio } } });
-          }
-          if (lista.predeterminada) await sincronizarPrecioConsumidorFinal(db, req, producto._id, precio);
-          if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(x => String(x) === String(producto._id))) {
-            if (!nuevosMiembrosPorLista.has(String(lista._id))) nuevosMiembrosPorLista.set(String(lista._id), []);
-            nuevosMiembrosPorLista.get(String(lista._id)).push(producto._id);
-          }
-          tocoAlgunaLista = true;
-        }
-        if (tocoAlgunaLista) actualizados++;
+    if (!sku) { errores.push({ fila: fila.__fila, motivo: 'Falta el SKU' }); continue; }
+    const producto = productosPorSku.get(sku);
+    if (!producto) { errores.push({ fila: fila.__fila, motivo: `No existe ningún producto activo con SKU "${sku}"` }); continue; }
+    const idStr = String(producto._id);
+    if (!cambiosPorProducto.has(idStr)) {
+      cambiosPorProducto.set(idStr, { _id: producto._id, preciosPorLista: (producto.preciosPorLista || []).slice(), precio: undefined });
+    }
+    const cambio = cambiosPorProducto.get(idStr);
+    for (const lista of listas) {
+      const clave = 'lista_' + lista._id;
+      if (!(clave in fila)) continue; // columna no vino en el archivo: sin cambios para esta lista
+      const precio = fila[clave];
+      if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
+        errores.push({ fila: fila.__fila, motivo: `${lista.nombre}: el precio tiene que ser un número mayor o igual a 0` });
+        continue;
+      }
+      cambio.preciosPorLista = cambio.preciosPorLista.filter(x => String(x.listaId) !== String(lista._id));
+      if (precio !== null) cambio.preciosPorLista.push({ listaId: lista._id, precio });
+      if (lista.predeterminada) cambio.precio = precio;
+      if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(x => String(x) === idStr)) {
+        if (!nuevosMiembrosPorLista.has(String(lista._id))) nuevosMiembrosPorLista.set(String(lista._id), new Set());
+        nuevosMiembrosPorLista.get(String(lista._id)).add(producto._id);
       }
     }
-    if (procesados % CADA_CUANTO_GUARDAR_PROGRESO === 0) await guardarProgreso();
+  }
+
+  const ahora = new Date();
+  const idsTocados = [...cambiosPorProducto.keys()];
+  let actualizados = 0;
+  await db.collection('productos_import_jobs').updateOne(
+    { _id: jobId }, { $set: { procesados: 0, total: idsTocados.length, actualizados: 0, errores } }
+  );
+  for (let i = 0; i < idsTocados.length; i += TANDA_IMPORT_LISTAS) {
+    const grupo = idsTocados.slice(i, i + TANDA_IMPORT_LISTAS);
+    const tanda = grupo.map(idStr => {
+      const cambio = cambiosPorProducto.get(idStr);
+      const set = { preciosPorLista: cambio.preciosPorLista, updatedAt: ahora };
+      if (cambio.precio !== undefined) set.precio = cambio.precio;
+      return { updateOne: { filter: { _id: cambio._id }, update: { $set: set } } };
+    });
+    if (tanda.length) {
+      const r = await db.collection('productos_catalogo').bulkWrite(tanda, { ordered: false });
+      actualizados += r.matchedCount || 0;
+    }
+    await db.collection('productos_import_jobs').updateOne(
+      { _id: jobId }, { $set: { procesados: Math.min(idsTocados.length, i + TANDA_IMPORT_LISTAS), actualizados, errores } }
+    );
   }
   for (const [listaId, ids] of nuevosMiembrosPorLista) {
-    await db.collection('productos_listas_precio').updateOne({ _id: toObjectId(listaId) }, { $addToSet: { productosIds: { $each: ids } } });
+    await db.collection('productos_listas_precio').updateOne({ _id: toObjectId(listaId) }, { $addToSet: { productosIds: { $each: [...ids] } } });
   }
-  const nuevosMiembros = [...nuevosMiembrosPorLista.values()].reduce((acc, ids) => acc + ids.length, 0);
+  const nuevosMiembros = [...nuevosMiembrosPorLista.values()].reduce((acc, ids) => acc + ids.size, 0);
   await db.collection('productos_import_jobs').updateOne(
     { _id: jobId },
-    { $set: { estado: 'listo', procesados, actualizados, nuevosMiembros, errores, terminadoEn: new Date() } }
+    { $set: { estado: 'listo', procesados: idsTocados.length, total: idsTocados.length, actualizados, nuevosMiembros, errores, terminadoEn: new Date() } }
   );
 }
 
@@ -1151,48 +1182,73 @@ router.post('/listas-precio/:id/import', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Misma reescritura en bulk que procesarImportTodasListas (ver comentario
+// ahí) para el import de una lista puntual.
 async function procesarImportListaPrecio(db, req, jobId, lista, filas) {
-  let actualizados = 0, procesados = 0;
-  const nuevosMiembros = [];
   const errores = [];
-  async function guardarProgreso() {
-    await db.collection('productos_import_jobs').updateOne({ _id: jobId }, { $set: { procesados, actualizados, nuevosMiembros: nuevosMiembros.length, errores } });
+  const skusArchivo = [...new Set(filas.map(f => normalizarTexto(f.sku)).filter(Boolean))];
+  const productosPorSku = new Map();
+  for (let i = 0; i < skusArchivo.length; i += 1000) {
+    const grupo = skusArchivo.slice(i, i + 1000);
+    const productos = await db.collection('productos_catalogo')
+      .find(Object.assign({ sku: { $in: grupo }, activo: { $ne: false } }, filtroOrg(req)))
+      .project({ sku: 1, preciosPorLista: 1 }).toArray();
+    for (const p of productos) productosPorSku.set(p.sku, p);
   }
+
+  const cambiosPorProducto = new Map();
+  const nuevosMiembros = new Set();
   for (const fila of filas) {
-    procesados++;
     const sku = normalizarTexto(fila.sku);
-    if (!sku) {
-      errores.push({ fila: fila.__fila, motivo: 'Falta el SKU' });
-    } else {
-      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)));
-      if (!producto) {
-        errores.push({ fila: fila.__fila, motivo: `No existe ningún producto activo con SKU "${sku}"` });
-      } else {
-        const precio = fila.precio;
-        if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
-          errores.push({ fila: fila.__fila, motivo: 'El precio tiene que ser un número mayor o igual a 0' });
-        } else {
-          const matchProd = { _id: producto._id };
-          await db.collection('productos_catalogo').updateOne(matchProd, { $pull: { preciosPorLista: { listaId: lista._id } } });
-          if (precio !== null) {
-            await db.collection('productos_catalogo').updateOne(matchProd, { $push: { preciosPorLista: { listaId: lista._id, precio } } });
-          }
-          if (lista.predeterminada) await sincronizarPrecioConsumidorFinal(db, req, producto._id, precio);
-          if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(x => String(x) === String(producto._id))) {
-            nuevosMiembros.push(producto._id);
-          }
-          actualizados++;
-        }
-      }
+    if (!sku) { errores.push({ fila: fila.__fila, motivo: 'Falta el SKU' }); continue; }
+    const producto = productosPorSku.get(sku);
+    if (!producto) { errores.push({ fila: fila.__fila, motivo: `No existe ningún producto activo con SKU "${sku}"` }); continue; }
+    const precio = fila.precio;
+    if (precio !== null && (!Number.isFinite(precio) || precio < 0)) {
+      errores.push({ fila: fila.__fila, motivo: 'El precio tiene que ser un número mayor o igual a 0' });
+      continue;
     }
-    if (procesados % CADA_CUANTO_GUARDAR_PROGRESO === 0) await guardarProgreso();
+    const idStr = String(producto._id);
+    const preciosPorLista = (producto.preciosPorLista || []).filter(x => String(x.listaId) !== String(lista._id));
+    if (precio !== null) preciosPorLista.push({ listaId: lista._id, precio });
+    cambiosPorProducto.set(idStr, {
+      _id: producto._id, preciosPorLista,
+      precio: lista.predeterminada ? precio : undefined
+    });
+    if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(x => String(x) === idStr)) {
+      nuevosMiembros.add(idStr);
+    }
   }
-  if (nuevosMiembros.length) {
-    await db.collection('productos_listas_precio').updateOne({ _id: lista._id }, { $addToSet: { productosIds: { $each: nuevosMiembros } } });
+
+  const ahora = new Date();
+  const idsTocados = [...cambiosPorProducto.keys()];
+  let actualizados = 0;
+  await db.collection('productos_import_jobs').updateOne(
+    { _id: jobId }, { $set: { procesados: 0, total: idsTocados.length, actualizados: 0, errores } }
+  );
+  for (let i = 0; i < idsTocados.length; i += TANDA_IMPORT_LISTAS) {
+    const grupo = idsTocados.slice(i, i + TANDA_IMPORT_LISTAS);
+    const tanda = grupo.map(idStr => {
+      const cambio = cambiosPorProducto.get(idStr);
+      const set = { preciosPorLista: cambio.preciosPorLista, updatedAt: ahora };
+      if (cambio.precio !== undefined) set.precio = cambio.precio;
+      return { updateOne: { filter: { _id: cambio._id }, update: { $set: set } } };
+    });
+    if (tanda.length) {
+      const r = await db.collection('productos_catalogo').bulkWrite(tanda, { ordered: false });
+      actualizados += r.matchedCount || 0;
+    }
+    await db.collection('productos_import_jobs').updateOne(
+      { _id: jobId }, { $set: { procesados: Math.min(idsTocados.length, i + TANDA_IMPORT_LISTAS), actualizados, errores } }
+    );
+  }
+  const idsNuevosMiembros = [...nuevosMiembros].map(idStr => cambiosPorProducto.get(idStr)._id);
+  if (idsNuevosMiembros.length) {
+    await db.collection('productos_listas_precio').updateOne({ _id: lista._id }, { $addToSet: { productosIds: { $each: idsNuevosMiembros } } });
   }
   await db.collection('productos_import_jobs').updateOne(
     { _id: jobId },
-    { $set: { estado: 'listo', procesados, actualizados, nuevosMiembros: nuevosMiembros.length, errores, terminadoEn: new Date() } }
+    { $set: { estado: 'listo', procesados: idsTocados.length, total: idsTocados.length, actualizados, nuevosMiembros: idsNuevosMiembros.length, errores, terminadoEn: new Date() } }
   );
 }
 
