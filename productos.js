@@ -90,6 +90,10 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
+// Para mostrar en la ficha de producto el link y las fotos de Tiendanube
+// (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
+// cotizador.js.
+const { buscarProductoTiendanubePorSku } = require('./cotizador');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -308,6 +312,19 @@ router.get('/rubros', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// GET /marcas — igual que /rubros pero de marca, para el filtro (30/9/2026,
+// pedido de Mato: poder filtrar por rubro, marca y proveedor).
+router.get('/marcas', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false }, marca: { $nin: [null, ''] } }, filtroOrg(req));
+    const marcas = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_catalogo').distinct('marca', match);
+    });
+    res.json(marcas.sort((a, b) => a.localeCompare(b, 'es')));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Lista liviana de proveedores activos, para el desplegable de Proveedor
 // en el formulario de producto — bajo el gate de Productos, no el de
 // Proveedores (ver comentario de cabecera).
@@ -324,12 +341,30 @@ router.get('/proveedores-lite', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Info de Tiendanube para la ficha de producto (30/9/2026, pedido de Mato):
+// si ese SKU está publicado en la tienda, devuelve el link a la página
+// pública y las fotos. Si no está configurada la tienda o no se encuentra
+// el SKU, devuelve { encontrado: false } (no es un error) — la ficha
+// simplemente no muestra esa sección.
+router.get('/tiendanube/:sku', authAdmin, async (req, res) => {
+  try {
+    const info = await buscarProductoTiendanubePorSku(req.params.sku);
+    if (!info) return res.json({ encontrado: false });
+    res.json(Object.assign({ encontrado: true }, info));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
     const match = Object.assign({}, filtroOrg(req));
     if (soloActivos) match.activo = { $ne: false };
     if (req.query.rubro) match.rubro = req.query.rubro;
+    if (req.query.marca) match.marca = req.query.marca;
+    if (req.query.proveedorId) {
+      const pid = toObjectId(req.query.proveedorId);
+      if (pid) match.proveedorId = pid;
+    }
     if (req.query.q) {
       const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       match.$or = [{ nombre: re }, { sku: re }];

@@ -354,6 +354,42 @@ async function productoPorSku(store, sku) {
   return null;
 }
 
+// Helper exportado para otros módulos (30/9/2026, pedido de Mato: en la
+// ficha de Productos, si ese producto está publicado en Tiendanube, mostrar
+// un link a su página pública y sus fotos). Busca por SKU exacto en la
+// tienda real de Piedra Negra (TIENDA_REAL_STORE_ID) — si esa tienda no
+// está configurada, no tiene token, o el SKU no se encuentra, devuelve
+// `null` sin tirar error: el que llama simplemente no muestra esa sección.
+async function buscarProductoTiendanubePorSku(sku) {
+  const storeId = process.env.TIENDA_REAL_STORE_ID;
+  if (!storeId || !sku) return null;
+  try {
+    const store = await getStoreById(storeId);
+    if (!store || !store.access_token) return null;
+    const response = await fetch(
+      API_BASE + '/' + store.store_id + '/products?q=' + encodeURIComponent(sku) +
+        '&fields=id,name,handle,variants,images&per_page=10',
+      { headers: apiHeaders(store.access_token) }
+    );
+    if (!response.ok) return null;
+    const productos = await response.json();
+    if (!Array.isArray(productos)) return null;
+    for (const p of productos) {
+      if (!p.variants) continue;
+      const coincide = p.variants.some(v => v.sku && String(v.sku).toLowerCase() === String(sku).toLowerCase());
+      if (!coincide) continue;
+      return {
+        nombre: nombreLocalizado(p.name),
+        url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null,
+        imagenes: (p.images || []).map(img => img.src).filter(Boolean)
+      };
+    }
+    return null;
+  } catch (e) {
+    return null; // cualquier falla de red/API: simplemente "no encontrado"
+  }
+}
+
 // Busca UN producto puntual por id (para piso/zócalo en /calcular, cuando el
 // usuario ya eligió el producto en el paso 3). Antes /calcular volvía a traer
 // TODO el catálogo de la tienda página por página (lo mismo que ya se hizo
@@ -1820,3 +1856,4 @@ router.get('/pdf/:id', async (req, res) => {
 
 module.exports = router;
 module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
+module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js

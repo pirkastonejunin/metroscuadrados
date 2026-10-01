@@ -112,11 +112,19 @@
         <div class="row" style="flex:1">
           <div style="min-width:200px;flex:1">
             <label>Buscar (nombre o SKU)</label>
-            <input id="fBusqueda" oninput="cargarProductos()" placeholder="Ej: revestimiento gris">
+            <input id="fBusqueda" oninput="cargarProductosConPausa()" placeholder="Ej: revestimiento gris">
           </div>
           <div style="min-width:180px">
             <label>Rubro</label>
             <select id="fRubro" onchange="cargarProductos()"><option value="">Todos</option></select>
+          </div>
+          <div style="min-width:180px">
+            <label>Marca</label>
+            <select id="fMarca" onchange="cargarProductos()"><option value="">Todas</option></select>
+          </div>
+          <div style="min-width:200px">
+            <label>Proveedor</label>
+            <select id="fProveedor" onchange="cargarProductos()"><option value="">Todos</option></select>
           </div>
           <div>
             <label style="visibility:hidden">.</label>
@@ -215,6 +223,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarRubros();
+  await cargarMarcas();
   await cargarProveedoresLite();
   await cargarProductos();
 }
@@ -225,6 +234,12 @@ async function cargarProveedoresLite(){
   const r = await fetch(BASE + '/proveedores-lite', {headers: headersAuth()});
   if (!r.ok) return;
   proveedoresCache = await r.json();
+  const select = document.getElementById('fProveedor');
+  const actual = select.value;
+  select.innerHTML = '<option value="">Todos</option>' + proveedoresCache.map(p =>
+    `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`
+  ).join('');
+  select.value = actual;
 }
 function opcionesProveedor(seleccionadoId){
   return '<option value="">Sin proveedor asignado</option>' + proveedoresCache.map(p =>
@@ -242,16 +257,48 @@ async function cargarRubros(){
   select.value = actual;
 }
 
+async function cargarMarcas(){
+  const r = await fetch(BASE + '/marcas', {headers: headersAuth()});
+  if (!r.ok) return;
+  const marcas = await r.json();
+  const select = document.getElementById('fMarca');
+  const actual = select.value;
+  select.innerHTML = '<option value="">Todas</option>' + marcas.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+  select.value = actual;
+}
+
 let productosCache = [];
+// `cargarPedido` numera cada llamado a cargarProductos() — como la caja de
+// búsqueda dispara un pedido por cada letra tipeada (oninput), las
+// respuestas del servidor pueden volver en otro orden (la de una búsqueda
+// vieja y más amplia puede tardar más y llegar DESPUÉS que la de la
+// búsqueda nueva), y antes esa respuesta vieja pisaba el resultado bueno
+// — por eso "encuentra el producto y después borra el filtro". Ahora cada
+// respuesta se descarta si ya no es la última que se pidió.
+let cargarPedido = 0;
+let cargarPausaTimer = null;
+// Espera un toque antes de buscar mientras se sigue tipeando, para no
+// disparar un pedido por cada letra — el guard de `cargarPedido` de
+// cargarProductos() ya corrige el resultado aunque esto no estuviera,
+// pero así hay menos pedidos de sobra.
+function cargarProductosConPausa(){
+  clearTimeout(cargarPausaTimer);
+  cargarPausaTimer = setTimeout(cargarProductos, 300);
+}
 async function cargarProductos(){
+  const pedido = ++cargarPedido;
   const params = new URLSearchParams();
   if (document.getElementById('fBusqueda').value.trim()) params.set('q', document.getElementById('fBusqueda').value.trim());
   if (document.getElementById('fRubro').value) params.set('rubro', document.getElementById('fRubro').value);
+  if (document.getElementById('fMarca').value) params.set('marca', document.getElementById('fMarca').value);
+  if (document.getElementById('fProveedor').value) params.set('proveedorId', document.getElementById('fProveedor').value);
   if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
+  if (pedido !== cargarPedido) return; // ya se pidió algo más nuevo, descartar esta respuesta
   const body = document.getElementById('productosBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
   productosCache = await r.json();
+  if (pedido !== cargarPedido) return; // por si se disparó otro pedido mientras se leía el body
   renderProductos();
 }
 
@@ -301,6 +348,8 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 function formularioProducto(p){
   p = p || {};
   return `
+    ${p._id ? '<div id="costeoProduccionInfo"></div>' : ''}
+    ${p._id ? '<div id="tiendanubeInfo"></div>' : ''}
     <div class="section-title">Datos básicos</div>
     <div class="grid3">
       <div><label>SKU / Código *</label><input id="fpSku" value="${escapeHtml(p.sku||'')}" placeholder="Igual al Código en Dux"></div>
@@ -450,6 +499,52 @@ function abrirEditarProducto(id){
   document.getElementById('fpUtilizaVariantes').addEventListener('change', function(){
     document.getElementById('avisoVariantes').style.display = this.checked ? '' : 'none';
   });
+  cargarCosteoProduccion(p);
+  cargarInfoTiendanube(p);
+}
+
+// Si el producto está vinculado a Producción (costoProductoId), trae el
+// costo calculado AHORA según la receta vigente (30/9/2026, pedido de
+// Mato) — es solo informativo: Productos sigue siendo el que manda en el
+// campo "Costo" de acá arriba, nada se pisa solo. Si el usuario logueado
+// no tiene acceso al módulo de Costos, o el producto de Producción ya no
+// existe, la sección simplemente no se muestra (sin error visible).
+async function cargarCosteoProduccion(p){
+  const cont = document.getElementById('costeoProduccionInfo');
+  if (!cont || !p.costoProductoId) return;
+  try{
+    const r = await fetch('/api/costos/productos/' + p.costoProductoId, {headers: headersAuthJson()});
+    if (!r.ok) { cont.innerHTML = ''; return; }
+    const prod = await r.json();
+    cont.innerHTML = `
+      <div class="card" style="background:var(--bg-soft,#f6f6f6);margin-bottom:12px">
+        <strong>Costeado en Producción:</strong> ${money(prod.costoActual)}
+        <span class="muted">(según receta vigente, puede cambiar si cambia el costo de los insumos)</span>
+        <button type="button" class="btn small secondary" style="margin-left:8px" onclick="document.getElementById('fpCosto').value='${prod.costoActual}'">Usar como Costo</button>
+      </div>
+    `;
+  }catch(e){ cont.innerHTML = ''; }
+}
+
+// Si el producto está publicado en Tiendanube (mismo SKU), muestra un link
+// a la página pública y sus fotos (30/9/2026, pedido de Mato).
+async function cargarInfoTiendanube(p){
+  const cont = document.getElementById('tiendanubeInfo');
+  if (!cont || !p.sku) return;
+  try{
+    const r = await fetch(BASE + '/tiendanube/' + encodeURIComponent(p.sku), {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok || !data.encontrado) { cont.innerHTML = ''; return; }
+    const fotos = (data.imagenes || []).slice(0, 6)
+      .map(src => `<img src="${escapeHtml(src)}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">`).join('');
+    cont.innerHTML = `
+      <div class="card" style="margin-bottom:12px">
+        <strong>En Tiendanube:</strong>
+        ${data.url ? `<a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">Ver página del producto ↗</a>` : escapeHtml(data.nombre || '')}
+        ${fotos ? `<div class="row" style="gap:6px;margin-top:8px">${fotos}</div>` : ''}
+      </div>
+    `;
+  }catch(e){ cont.innerHTML = ''; }
 }
 
 async function guardarEdicionProducto(id){
