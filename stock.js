@@ -67,6 +67,24 @@ const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 
 let mongoClient;
+// Índices (1/10/2026, mismo motivo que en productos.js: "que ande más
+// fluido" — depósitos y stock también se cargan seguido desde Nueva
+// Venta/Stock sin índices).
+let indicesListos = false;
+async function asegurarIndices(db) {
+  if (indicesListos) return;
+  indicesListos = true;
+  try {
+    await Promise.all([
+      db.collection('depositos').createIndex({ orgId: 1, activo: 1, nombre: 1 }),
+      db.collection('stock_actual').createIndex({ orgId: 1, productoId: 1, depositoId: 1 }),
+      db.collection('stock_movimientos').createIndex({ orgId: 1, fecha: -1, createdAt: -1 })
+    ]);
+  } catch (e) {
+    indicesListos = false;
+    console.error('No se pudieron crear los índices de stock:', e.message);
+  }
+}
 async function getDb() {
   if (!mongoClient) {
     mongoClient = new MongoClient(process.env.MONGODB_URI);
@@ -77,7 +95,9 @@ async function getDb() {
       throw e;
     }
   }
-  return mongoClient.db(DB_NAME);
+  const db = mongoClient.db(DB_NAME);
+  asegurarIndices(db).catch(() => {});
+  return db;
 }
 async function conReintento(fn) {
   try {

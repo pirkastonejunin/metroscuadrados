@@ -48,6 +48,25 @@ const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 
 let mongoClient;
+// Índices (1/10/2026, mismo motivo que en productos.js: "que ande más
+// fluido" — la búsqueda de clientes de Nueva Venta recorría la colección
+// entera en cada letra tipeada).
+let indicesListos = false;
+async function asegurarIndices(db) {
+  if (indicesListos) return;
+  indicesListos = true;
+  try {
+    const col = db.collection('clientes');
+    await Promise.all([
+      col.createIndex({ orgId: 1, activo: 1, apellidoRazonSocial: 1 }),
+      col.createIndex({ orgId: 1, cuit: 1 }),
+      col.createIndex({ orgId: 1, codigo: 1 })
+    ]);
+  } catch (e) {
+    indicesListos = false;
+    console.error('No se pudieron crear los índices de clientes:', e.message);
+  }
+}
 async function getDb() {
   if (!mongoClient) {
     mongoClient = new MongoClient(process.env.MONGODB_URI);
@@ -58,7 +77,9 @@ async function getDb() {
       throw e;
     }
   }
-  return mongoClient.db(DB_NAME);
+  const db = mongoClient.db(DB_NAME);
+  asegurarIndices(db).catch(() => {});
+  return db;
 }
 async function conReintento(fn) {
   try {

@@ -99,6 +99,34 @@ const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 
 let mongoClient;
+// Índices (1/10/2026, pedido de Mato: "que ande más fluido... tarda
+// mucho cuando tiene que cargar las bases e ir a buscar un producto").
+// El catálogo real tiene ~20.000 productos (el export de Dux) y nunca se
+// habían creado índices: cada búsqueda (por nombre/SKU, por rubro, por
+// marca) y cada distinct() de /rubros y /marcas recorría la colección
+// entera. createIndex es no-op si el índice ya existe, así que es seguro
+// llamarlo en cada arranque; se dispara una sola vez por proceso (recién
+// conectado), no en cada request.
+let indicesListos = false;
+async function asegurarIndices(db) {
+  if (indicesListos) return;
+  indicesListos = true;
+  try {
+    const col = db.collection('productos_catalogo');
+    await Promise.all([
+      col.createIndex({ orgId: 1, activo: 1, nombre: 1 }),
+      col.createIndex({ orgId: 1, sku: 1 }),
+      col.createIndex({ orgId: 1, activo: 1, rubro: 1 }),
+      col.createIndex({ orgId: 1, activo: 1, marca: 1 }),
+      col.createIndex({ orgId: 1, proveedorId: 1 })
+    ]);
+    await db.collection('productos_listas_precio').createIndex({ orgId: 1 });
+    await db.collection('productos_import_jobs').createIndex({ orgId: 1, creadoEn: -1 });
+  } catch (e) {
+    indicesListos = false; // si falló, reintentar en la próxima conexión
+    console.error('No se pudieron crear los índices de productos:', e.message);
+  }
+}
 async function getDb() {
   if (!mongoClient) {
     mongoClient = new MongoClient(process.env.MONGODB_URI);
@@ -109,7 +137,9 @@ async function getDb() {
       throw e;
     }
   }
-  return mongoClient.db(DB_NAME);
+  const db = mongoClient.db(DB_NAME);
+  asegurarIndices(db).catch(() => {});
+  return db;
 }
 async function conReintento(fn) {
   try {
