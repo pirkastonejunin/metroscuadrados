@@ -62,12 +62,11 @@
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
   .fila-item{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:8px;}
   .fila-item .campo-producto{flex:2;min-width:160px;}
-  .fila-item .campo-modo{flex:1;min-width:110px;}
   .fila-item .campo-cant{flex:1;min-width:100px;}
+  .fila-item .campo-cant-bulto{flex:1;min-width:100px;}
   .fila-item .campo-precio{flex:1;min-width:100px;}
   .fila-item .campo-subtotal{flex:1;min-width:90px;text-align:right;font-weight:700;padding-top:8px;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
-  .fila-item .campo-equivalente{flex-basis:100%;font-size:11px;margin-top:-4px;}
   .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
   .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
   .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
@@ -592,18 +591,14 @@ function agregarFilaVenta(){
       <label>Producto</label>
       <select onchange="actualizarFilaVenta(this)">${opcionesProductosVenta()}</select>
     </div>
-    <div class="campo-modo hidden">
-      <label>Cargar por</label>
-      <select class="modo-carga" onchange="actualizarFilaVenta(this)">
-        <option value="unidad">Unidad</option>
-        <option value="bulto">Bultos</option>
-      </select>
-    </div>
     <div class="campo-cant">
       <label>Cantidad <span class="muted unidad-indicador"></span></label>
-      <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarFilaVenta(this)">
+      <input type="number" min="0.01" step="0.01" value="1" class="cant-unidad" oninput="sincronizarCantidadVenta(this,'unidad')">
     </div>
-    <div class="campo-equivalente muted hidden"></div>
+    <div class="campo-cant-bulto hidden">
+      <label>Bultos</label>
+      <input type="number" min="0.01" step="0.01" class="cant-bulto" oninput="sincronizarCantidadVenta(this,'bulto')">
+    </div>
     <div class="campo-precio">
       <label>Precio unit.</label>
       <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()">
@@ -615,46 +610,42 @@ function agregarFilaVenta(){
 }
 
 // Si el producto elegido tiene "Unidades por bulto" cargado en su ficha
-// (ej: 1 bulto = 1,44 m²), se puede cargar la cantidad directo en bultos
-// en vez de tener que calcular el equivalente a mano — se convierte solo a
-// la unidad real del producto, que es lo que se manda a la venta (precio y
-// stock siguen siendo por unidad real, no por bulto). Sin bultos cargados,
-// el campo "Cargar por" ni aparece (como era antes).
-function cantidadBaseDeFila(fila){
+// (ej: 1 bulto = 1,44 m²), se muestran los dos campos (unidad real y
+// bultos) al mismo tiempo, sincronizados en vivo en los dos sentidos
+// (1/10/2026, pedido de Mato: "que me muestre ambas medidas... de esa
+// manera veo la conversión en el momento, no quiero que me haga
+// desplegar y elegir uno u otro"). El valor que se manda a la venta
+// (precio y stock) siempre es en la unidad real del producto — el campo
+// de bultos es solo una ayuda para cargar más rápido. Sin bultos
+// cargados en la ficha, el campo de bultos ni aparece (como antes).
+function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+
+function sincronizarCantidadVenta(el, origen){
+  const fila = el.closest('.fila-item');
   const select = fila.querySelector('.campo-producto select');
-  const cantInput = fila.querySelector('.campo-cant input');
-  const modoSelect = fila.querySelector('.modo-carga');
-  const ingresado = Number(cantInput.value) || 0;
   const producto = productosCache.find(p => String(p._id) === select.value);
-  if (producto && modoSelect && modoSelect.value === 'bulto' && producto.unidadesPorBulto) {
-    return ingresado * producto.unidadesPorBulto;
+  const unidadInput = fila.querySelector('.cant-unidad');
+  const bultoInput = fila.querySelector('.cant-bulto');
+  if (producto && producto.unidadesPorBulto) {
+    if (origen === 'unidad') {
+      bultoInput.value = redondear2((Number(unidadInput.value) || 0) / producto.unidadesPorBulto);
+    } else {
+      unidadInput.value = redondear2((Number(bultoInput.value) || 0) * producto.unidadesPorBulto);
+    }
   }
-  return ingresado;
+  actualizarTotalesVenta();
 }
 
-function actualizarEquivalenteFila(fila){
-  const select = fila.querySelector('.campo-producto select');
-  const cantInput = fila.querySelector('.campo-cant input');
-  const modoSelect = fila.querySelector('.modo-carga');
-  const equivalenteDiv = fila.querySelector('.campo-equivalente');
-  const producto = productosCache.find(p => String(p._id) === select.value);
-  if (producto && modoSelect && modoSelect.value === 'bulto' && producto.unidadesPorBulto) {
-    const base = (Number(cantInput.value) || 0) * producto.unidadesPorBulto;
-    const unidadLabel = UNIDAD_LABEL_VENTA[producto.unidad] || producto.unidad || '';
-    equivalenteDiv.textContent = `= ${base.toLocaleString('es-AR', {maximumFractionDigits:2})} ${unidadLabel}`;
-    equivalenteDiv.classList.remove('hidden');
-  } else {
-    equivalenteDiv.textContent = '';
-    equivalenteDiv.classList.add('hidden');
-  }
+function cantidadBaseDeFila(fila){
+  return Number(fila.querySelector('.cant-unidad').value) || 0;
 }
 
 function actualizarFilaVenta(el){
   const fila = el.closest('.fila-item');
   const select = fila.querySelector('.campo-producto select');
   const precioInput = fila.querySelector('.campo-precio input');
-  const modoWrap = fila.querySelector('.campo-modo');
-  const modoSelect = fila.querySelector('.modo-carga');
+  const bultoWrap = fila.querySelector('.campo-cant-bulto');
+  const unidadInput = fila.querySelector('.cant-unidad');
   const unidadIndicador = fila.querySelector('.unidad-indicador');
   const producto = productosCache.find(p => String(p._id) === select.value);
 
@@ -664,12 +655,13 @@ function actualizarFilaVenta(el){
     // Si no hay lista seleccionada o el producto no tiene costo cargado,
     // se cae al precio general del producto (como antes de esta función).
     precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
-    modoSelect.value = 'unidad';
-    modoWrap.classList.toggle('hidden', !(producto && producto.unidadesPorBulto > 0));
     unidadIndicador.textContent = producto ? (UNIDAD_LABEL_VENTA[producto.unidad] || producto.unidad || '') : '';
+    bultoWrap.classList.toggle('hidden', !(producto && producto.unidadesPorBulto > 0));
+    if (producto && producto.unidadesPorBulto) {
+      sincronizarCantidadVenta(unidadInput, 'unidad');
+    }
   }
 
-  actualizarEquivalenteFila(fila);
   actualizarTotalesVenta();
 }
 
