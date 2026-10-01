@@ -250,17 +250,47 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 let clientesCache = [];
 let productosCache = [];
 let depositosCache = [];
+// Listas de precio de Productos (30/9/2026) — se piden acá también porque
+// GET /api/productos/listas-precio acepta acceso de 'productos' O 'ventas'
+// (ver authListasPrecio en productos.js). Se usan solo para sugerir el
+// precio unitario al armar una venta; el precio de cada ítem sigue siendo
+// editable a mano como siempre.
+let listasPrecioCache = [];
 async function cargarListasBase(){
-  const [rc, rp, rd] = await Promise.all([
+  const [rc, rp, rd, rl] = await Promise.all([
     fetch(BASE + '/clientes', {headers: headersAuth()}),
     fetch(BASE + '/productos', {headers: headersAuth()}),
-    fetch(BASE + '/depositos', {headers: headersAuth()})
+    fetch(BASE + '/depositos', {headers: headersAuth()}),
+    fetch('/api/productos/listas-precio', {headers: headersAuth()})
   ]);
   clientesCache = rc.ok ? await rc.json() : [];
   productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
+  listasPrecioCache = rl.ok ? await rl.json() : [];
   document.getElementById('fvCliente').innerHTML = '<option value="">Todos</option>' +
     clientesCache.map(c => `<option value="${c._id}">${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`).join('');
+}
+
+// Misma lógica que precioResuelto() en productos.js: un override puntual
+// manda; si no hay, se calcula costo + % de la lista.
+function precioResueltoVenta(producto, lista){
+  if (!producto || !lista) return null;
+  const overrides = producto.preciosPorLista || [];
+  const ov = overrides.find(x => String(x.listaId) === String(lista._id));
+  if (ov) return ov.precio;
+  if (producto.costo == null) return null;
+  return Math.round(producto.costo * (1 + (lista.porcentaje || 0) / 100) * 100) / 100;
+}
+function opcionesListasPrecioVenta(seleccionada){
+  const activas = listasPrecioCache.filter(l => l.activa !== false);
+  return activas.map(l =>
+    `<option value="${l._id}" ${String(l._id)===String(seleccionada)?'selected':''}>${escapeHtml(l.nombre)}</option>`
+  ).join('');
+}
+function listaPrecioSeleccionadaVenta(){
+  const select = document.getElementById('nvListaPrecio');
+  const id = select ? select.value : '';
+  return listasPrecioCache.find(l => String(l._id) === String(id)) || null;
 }
 
 // -------------------------------------------------------------------
@@ -329,6 +359,9 @@ function abrirNuevaVenta(){
           <div><label>Tipo de entrega *</label><select id="nvTipoEntrega" onchange="actualizarVisibilidadDeposito()"><option value="inmediata">Entrega inmediata (descuenta stock ahora)</option><option value="pendiente">Sin entrega (pendiente, sin descontar stock)</option></select></div>
           <div id="nvDepositoWrap"><label>Depósito *</label><select id="nvDeposito">${opcionesDepositosVenta()}</select></div>
         </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Lista de precio</label><select id="nvListaPrecio" onchange="recalcularPreciosPorListaVenta()">${opcionesListasPrecioVenta((listasPrecioCache.find(l=>l.predeterminada)||{})._id)}</select></div>
+        </div>
 
         <div class="section-title">Productos</div>
         <div id="nvFilasItems"></div>
@@ -384,8 +417,27 @@ function actualizarFilaVenta(el){
   const precioInput = fila.querySelector('.campo-precio input');
   if (el.tagName === 'SELECT') {
     const producto = productosCache.find(p => String(p._id) === select.value);
-    precioInput.value = producto ? (producto.precio || 0) : 0;
+    const lista = listaPrecioSeleccionadaVenta();
+    const precio = producto ? precioResueltoVenta(producto, lista) : null;
+    // Si no hay lista seleccionada o el producto no tiene costo cargado,
+    // se cae al precio general del producto (como antes de esta función).
+    precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
   }
+  actualizarTotalesVenta();
+}
+
+// Al cambiar la lista de precio elegida, recalcula el precio sugerido de
+// cada fila YA cargada (30/9/2026) — sigue siendo editable a mano después.
+function recalcularPreciosPorListaVenta(){
+  const lista = listaPrecioSeleccionadaVenta();
+  document.querySelectorAll('#nvFilasItems .fila-item').forEach(fila => {
+    const select = fila.querySelector('select');
+    if (!select.value) return;
+    const producto = productosCache.find(p => String(p._id) === select.value);
+    const precioInput = fila.querySelector('.campo-precio input');
+    const precio = producto ? precioResueltoVenta(producto, lista) : null;
+    precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
+  });
   actualizarTotalesVenta();
 }
 
@@ -433,6 +485,7 @@ async function guardarNuevaVenta(){
     moneda: document.getElementById('nvMoneda').value,
     tipoEntrega,
     depositoId: tipoEntrega === 'inmediata' ? document.getElementById('nvDeposito').value : null,
+    listaPrecioId: document.getElementById('nvListaPrecio') ? (document.getElementById('nvListaPrecio').value || null) : null,
     items,
     descuentoPorcentaje: Number(document.getElementById('nvDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('nvDescuentoMonto').value) || 0,

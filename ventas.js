@@ -165,8 +165,13 @@ router.get('/productos', authAdmin, async (req, res) => {
     const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
     const lista = await conReintento(async () => {
       const db = await getDb();
+      // costo y preciosPorLista se agregan acá (30/9/2026) para que la
+      // pantalla de Ventas pueda resolver el precio de cada ítem según la
+      // lista de precio elegida (ver Productos: productos_catalogo guarda
+      // `preciosPorLista: [{listaId, precio}]` como override puntual sobre
+      // costo + % de cada lista).
       return db.collection('productos_catalogo')
-        .find(match, { projection: { sku: 1, nombre: 1, precio: 1, unidad: 1, stockeable: 1, aceptaStockNegativo: 1 } })
+        .find(match, { projection: { sku: 1, nombre: 1, precio: 1, costo: 1, preciosPorLista: 1, unidad: 1, stockeable: 1, aceptaStockNegativo: 1 } })
         .sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
@@ -400,6 +405,12 @@ router.post('/', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
 
+      // listaPrecioId es solo informativo (30/9/2026): qué lista de precio
+      // de Productos se usó para sugerir los precios al cargar la venta.
+      // No afecta nada del cálculo — cada ítem ya trae su precioUnitario
+      // resuelto por el frontend, editable como siempre.
+      const listaPrecioId = body.listaPrecioId ? toObjectId(body.listaPrecioId) : null;
+
       const venta = {
         numero,
         clienteId,
@@ -407,6 +418,7 @@ router.post('/', authAdmin, async (req, res) => {
         vendedor,
         fecha,
         moneda,
+        listaPrecioId,
         cotizacionDolar: body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null,
         tipoEntrega,
         depositoId,

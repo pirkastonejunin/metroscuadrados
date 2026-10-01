@@ -88,7 +88,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, tieneModulo } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 // Para mostrar en la ficha de producto el link y las fotos de Tiendanube
 // (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
@@ -124,6 +124,20 @@ function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return nu
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 
 const authAdmin = [authUsuario, resolverOrg, requiereModulo('productos')];
+
+// Las listas de precio (30/9/2026, pedido de Mato) se LEEN también desde
+// Ventas (para elegir qué lista aplica a una venta), así que el gate de
+// lectura acepta 'productos' O 'ventas' — pero crear/editar/borrar listas
+// y overrides de precio sigue exigiendo 'productos' (authAdmin), como
+// cualquier otro dato maestro de este módulo.
+function requiereModuloAlguno(...claves) {
+  return (req, res, next) => {
+    const ok = claves.some(k => tieneModulo(req.usuario, k));
+    if (!ok) return res.status(403).json({ error: 'Tu usuario no tiene acceso a este módulo. Pedile a un administrador que te lo habilite.' });
+    next();
+  };
+}
+const authListasPrecio = [authUsuario, resolverOrg, requiereModuloAlguno('productos', 'ventas')];
 
 const UNIDADES_VALIDAS = ['unidad', 'm2', 'ml', 'kg', 'litro', 'paquete', 'jornal'];
 // "Tipo de unidad" de Dux — una categoría más amplia que la unidad de
@@ -351,6 +365,253 @@ router.get('/tiendanube/:sku', authAdmin, async (req, res) => {
     const info = await buscarProductoTiendanubePorSku(req.params.sku);
     if (!info) return res.json({ encontrado: false });
     res.json(Object.assign({ encontrado: true }, info));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Listas de precio (30/9/2026, pedido de Mato: "agregarle precios a los
+// productos, con varias listas configurables"). Decisiones (confirmadas
+// con Mato):
+//   - El precio de cada producto en cada lista sale de un % de margen
+//     sobre el Costo, configurable por lista — pero se puede pisar a mano
+//     el precio de un producto puntual en una lista puntual (override).
+//   - Las listas aplican a TODO el catálogo (no solo a Producción, que ya
+//     tenía esto mismo por separado en costos_listas_precio — eso se deja
+//     como está, es otra cosa).
+//   - El viejo campo único "precio" de cada producto PASA A SER el
+//     override de una lista especial "Consumidor Final" (predeterminada,
+//     no se puede borrar) — así no se pierde nada de lo ya cargado, y
+//     cualquier código que todavía lea `producto.precio` directamente
+//     (Ventas, Cotizador, la tabla de Productos) sigue andando igual,
+//     porque ese campo se mantiene sincronizado con el override de esa
+//     lista en los dos sentidos (ver sincronizarPrecioConsumidorFinal).
+//
+// Colección nueva: productos_listas_precio : { nombre, porcentaje,
+//   predeterminada, activa, orden, orgId, createdAt, updatedAt }
+// Campo nuevo en productos_catalogo: preciosPorLista : [{ listaId, precio }]
+// -----------------------------------------------------------------------
+
+function round2(n) { return Math.round(n * 100) / 100; }
+
+// Precio resuelto de un producto en una lista: el override si existe,
+// si no el costo + % de la lista (null si no hay costo cargado).
+function precioResuelto(producto, lista) {
+  const overrides = producto.preciosPorLista || [];
+  const ov = overrides.find(x => String(x.listaId) === String(lista._id));
+  if (ov) return { precio: ov.precio, override: true };
+  if (producto.costo == null) return { precio: null, override: false };
+  return { precio: round2(producto.costo * (1 + (lista.porcentaje || 0) / 100)), override: false };
+}
+
+// Trae (y crea si hace falta) la lista "Consumidor Final" de esta
+// organización. La primera vez que se crea, hace el backfill: copia el
+// `precio` actual de cada producto activo como override de esta lista,
+// así ningún precio ya cargado se pierde.
+async function obtenerListaPredeterminada(db, req) {
+  const match = Object.assign({ predeterminada: true }, filtroOrg(req));
+  let lista = await db.collection('productos_listas_precio').findOne(match);
+  if (lista) return lista;
+
+  const ahora = new Date();
+  const nueva = {
+    nombre: 'Consumidor Final', porcentaje: 0, predeterminada: true, activa: true, orden: 0,
+    orgId: req.orgId, createdAt: ahora, updatedAt: ahora
+  };
+  const r = await db.collection('productos_listas_precio').insertOne(nueva);
+  lista = Object.assign({ _id: r.insertedId }, nueva);
+
+  // Backfill: todo producto activo con `precio` cargado pasa a tener ese
+  // valor como override de esta lista recién creada.
+  const productosConPrecio = await db.collection('productos_catalogo')
+    .find(Object.assign({ activo: { $ne: false }, precio: { $ne: null } }, filtroOrg(req)))
+    .project({ precio: 1 }).toArray();
+  if (productosConPrecio.length) {
+    const ops = productosConPrecio.map(p => ({
+      updateOne: {
+        filter: { _id: p._id },
+        update: { $push: { preciosPorLista: { listaId: lista._id, precio: p.precio } } }
+      }
+    }));
+    for (let i = 0; i < ops.length; i += 500) {
+      await db.collection('productos_catalogo').bulkWrite(ops.slice(i, i + 500), { ordered: false });
+    }
+  }
+  return lista;
+}
+
+// Cuando se guarda/edita el override de la lista Consumidor Final, se
+// refleja también en el campo plano `producto.precio` — así Ventas,
+// Cotizador y la tabla de Productos (que leen ese campo directo) ven el
+// precio actualizado sin que haya que tocar esos módulos.
+async function sincronizarPrecioConsumidorFinal(db, req, productoId, precio) {
+  await db.collection('productos_catalogo').updateOne(
+    Object.assign({ _id: productoId }, filtroOrg(req)),
+    { $set: { precio, updatedAt: new Date() } }
+  );
+}
+
+router.get('/listas-precio', authListasPrecio, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const listas = await conReintento(async () => {
+      const db = await getDb();
+      await obtenerListaPredeterminada(db, req); // se asegura que exista
+      return db.collection('productos_listas_precio').find(filtroOrg(req)).sort({ orden: 1, nombre: 1 }).toArray();
+    });
+    res.json(listas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/listas-precio', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const nombre = normalizarTexto((req.body || {}).nombre);
+    if (!nombre) throw err(400, 'Falta el nombre de la lista (ej: Mayorista, Pintores)');
+    const porcentaje = Number((req.body || {}).porcentaje);
+    if (!Number.isFinite(porcentaje)) throw err(400, 'El % de margen tiene que ser un número');
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const ahora = new Date();
+      const nueva = {
+        nombre, porcentaje, predeterminada: false, activa: true,
+        orden: 100, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
+      };
+      const r = await db.collection('productos_listas_precio').insertOne(nueva);
+      return Object.assign({ _id: r.insertedId }, nueva);
+    });
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/listas-precio/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    const set = { updatedAt: new Date() };
+    if (body.nombre !== undefined) {
+      const nombre = normalizarTexto(body.nombre);
+      if (!nombre) throw err(400, 'La lista necesita un nombre');
+      set.nombre = nombre;
+    }
+    if (body.porcentaje !== undefined) {
+      const porcentaje = Number(body.porcentaje);
+      if (!Number.isFinite(porcentaje)) throw err(400, 'El % de margen tiene que ser un número');
+      set.porcentaje = porcentaje;
+    }
+    if (body.activa !== undefined) set.activa = !!body.activa;
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const match = Object.assign({ _id: id }, filtroOrg(req));
+      const r = await db.collection('productos_listas_precio').findOneAndUpdate(
+        match, { $set: set }, { returnDocument: 'after' }
+      );
+      return r && r.value !== undefined ? r.value : r;
+    });
+    if (!doc) throw err(404, 'Lista no encontrada');
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.delete('/listas-precio/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const match = Object.assign({ _id: id }, filtroOrg(req));
+      const lista = await db.collection('productos_listas_precio').findOne(match);
+      if (!lista) throw err(404, 'Lista no encontrada');
+      if (lista.predeterminada) throw err(400, 'La lista "Consumidor Final" no se puede borrar.');
+      await db.collection('productos_listas_precio').deleteOne({ _id: id });
+      await db.collection('productos_catalogo').updateMany(
+        Object.assign({ 'preciosPorLista.listaId': id }, filtroOrg(req)),
+        { $pull: { preciosPorLista: { listaId: id } } }
+      );
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Precio resuelto de cada producto activo en una lista puntual — para la
+// pantalla de "ver/editar precios" de esa lista.
+router.get('/listas-precio/:id/precios', authListasPrecio, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista no encontrada');
+      const productos = await db.collection('productos_catalogo')
+        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .project({ sku: 1, nombre: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
+      const filas = productos.map(p => {
+        const { precio, override } = precioResuelto(p, lista);
+        return { _id: p._id, sku: p.sku, nombre: p.nombre, costo: p.costo, precio, override };
+      });
+      return { lista, filas };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+const COLUMNAS_LISTA_PRECIO = [
+  { clave: 'sku', titulo: 'SKU (Código)' },
+  { clave: 'nombre', titulo: 'Nombre' },
+  { clave: 'precio', titulo: 'Precio', tipo: 'numero' }
+];
+
+router.get('/listas-precio/:id/export', authListasPrecio, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const { lista, filas } = await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista no encontrada');
+      const productos = await db.collection('productos_catalogo')
+        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .project({ sku: 1, nombre: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
+      const filas = productos.map(p => Object.assign({ sku: p.sku, nombre: p.nombre }, { precio: precioResuelto(p, lista).precio }));
+      return { lista, filas };
+    });
+    const nombreArchivo = `lista-precio-${String(lista.nombre).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.xlsx`;
+    exportarXlsx(res, nombreArchivo, COLUMNAS_LISTA_PRECIO, filas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Fija o quita (precio:null) el override de un producto puntual en una
+// lista puntual. Si la lista es la predeterminada (Consumidor Final),
+// además sincroniza producto.precio (ver comentario de cabecera).
+router.put('/listas-precio/:listaId/precio/:productoId', authAdmin, async (req, res) => {
+  try {
+    const listaId = toObjectId(req.params.listaId);
+    const productoId = toObjectId(req.params.productoId);
+    if (!listaId || !productoId) throw err(400, 'id inválido');
+    const precioBody = (req.body || {}).precio;
+    const precio = (precioBody === null || precioBody === undefined || precioBody === '') ? null : Number(precioBody);
+    if (precio !== null && (!Number.isFinite(precio) || precio < 0)) throw err(400, 'El precio tiene que ser un número mayor o igual a 0');
+
+    await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: listaId }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista no encontrada');
+      const match = Object.assign({ _id: productoId }, filtroOrg(req));
+      const producto = await db.collection('productos_catalogo').findOne(match);
+      if (!producto) throw err(404, 'Producto no encontrado');
+
+      if (precio === null) {
+        await db.collection('productos_catalogo').updateOne(match, { $pull: { preciosPorLista: { listaId } } });
+      } else {
+        await db.collection('productos_catalogo').updateOne(match, { $pull: { preciosPorLista: { listaId } } });
+        await db.collection('productos_catalogo').updateOne(match, { $push: { preciosPorLista: { listaId, precio } } });
+      }
+      if (lista.predeterminada) {
+        await sincronizarPrecioConsumidorFinal(db, req, productoId, precio);
+      }
+    });
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
