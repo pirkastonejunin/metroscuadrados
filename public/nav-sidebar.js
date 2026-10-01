@@ -52,15 +52,22 @@
       { key: 'costos', href: '/admin-costos.html', modulo: 'costos', label: 'Costos de Producción', icon: ICONOS.costos },
       { key: 'fabrica', href: '/fabrica.html', moduloAlguno: ['fabrica', 'costos'], label: 'Registrar producción', icon: ICONOS.fabrica }
     ]},
-    { nombre: 'Comercial', items: [
+    // Grupo CRM (1/10/2026, pedido de Mato): todo lo que es seguimiento de
+    // visitas y obras en sí (no facturación) queda acá, separado de
+    // Comercial. Calendario se vino también para acá porque es agenda de
+    // visitas/obras, no algo de ventas — si Mato prefiere que quede en
+    // Comercial, es mover una línea.
+    { nombre: 'CRM', items: [
       { key: 'visitas', href: '/admin-visitas.html', modulo: 'visitas', label: 'Panel de Visitas', icon: ICONOS.visitas },
-      { key: 'clientes', href: '/admin-clientes.html', modulo: 'clientes', label: 'Clientes', icon: ICONOS.clientes },
-      { key: 'ventas', href: '/admin-ventas.html', modulo: 'ventas', label: 'Ventas', icon: ICONOS.ventas },
+      { key: 'mis-visitas', href: '/vendedor.html', requiereVendedor: true, label: 'Mis visitas', icon: ICONOS.misVisitas },
       { key: 'calendario', href: '/calendario.html', modulo: 'visitas,obras', label: 'Calendario', icon: ICONOS.calendario },
       { key: 'obras', href: '/admin-obras.html', modulo: 'obras', label: 'Panel de Obras', icon: ICONOS.obras },
-      { key: 'mis-visitas', href: '/vendedor.html', requiereVendedor: true, label: 'Mis visitas', icon: ICONOS.misVisitas },
-      { key: 'cotizador', href: '/cotizador.html', modulo: 'cotizador', label: 'Cotizador', icon: ICONOS.cotizador },
       { key: 'mis-obras', href: '/colocador.html', soloAdmin: true, label: 'Mis obras', icon: ICONOS.obras }
+    ]},
+    { nombre: 'Comercial', items: [
+      { key: 'clientes', href: '/admin-clientes.html', modulo: 'clientes', label: 'Clientes', icon: ICONOS.clientes },
+      { key: 'ventas', href: '/admin-ventas.html', modulo: 'ventas', label: 'Ventas', icon: ICONOS.ventas },
+      { key: 'cotizador', href: '/cotizador.html', modulo: 'cotizador', label: 'Cotizador', icon: ICONOS.cotizador }
     ]},
     { nombre: 'Inventario', items: [
       { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos },
