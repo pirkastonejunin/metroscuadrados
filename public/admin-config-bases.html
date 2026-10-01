@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bases y catálogos - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1000px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.activo{background:var(--ok-soft);color:var(--ok);}
+  .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .section-title{font-size:13px;font-weight:700;margin-bottom:8px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Bases y catálogos</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Productos (de ahí cuelga esta pantalla). Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <h1>Bases y catálogos</h1>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <p class="muted" style="margin-top:0">Acá se administran las listas de valores que antes se tipeaban a mano en la ficha de producto (rubro y subrubro), para que queden siempre iguales y no se dupliquen por errores de tipeo. Se usan en Productos al cargar o editar un producto.</p>
+      <button class="btn secondary" id="btnImportar" onclick="importarExistentes()">Importar rubros/subrubros ya usados en Productos</button>
+      <span class="muted" id="importarResultado" style="margin-left:10px"></span>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Rubros</div>
+      <div class="row" style="margin-bottom:12px">
+        <div style="flex:1"><label>Nuevo rubro</label><input id="nrNombre" placeholder="Ej: Revestimientos" onkeydown="if(event.key==='Enter')crearRubro()"></div>
+        <div><button class="btn" onclick="crearRubro()">Agregar</button></div>
+      </div>
+      <div class="err" id="rubrosErr"></div>
+      <table>
+        <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="rubrosBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Subrubros</div>
+      <div class="row" style="margin-bottom:12px">
+        <div style="min-width:200px"><label>Rubro</label><select id="srRubroId" onchange="renderSubrubros()"></select></div>
+        <div style="flex:1"><label>Nuevo subrubro</label><input id="srNombre" placeholder="Ej: Piedra" onkeydown="if(event.key==='Enter')crearSubrubro()"></div>
+        <div><button class="btn" onclick="crearSubrubro()">Agregar</button></div>
+      </div>
+      <div class="err" id="subrubrosErr"></div>
+      <table>
+        <thead><tr><th>Nombre</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="subrubrosBody"><tr><td colspan="4" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script>
+const BASE = '/api/productos';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+let NOMBRE_USUARIO = '';
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('productos'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'bases', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  await cargarRubros();
+  await cargarSubrubros();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+// -------------------------------------------------------------------
+// Rubros
+// -------------------------------------------------------------------
+let rubrosCache = [];
+async function cargarRubros(){
+  const body = document.getElementById('rubrosBody');
+  try{
+    const r = await fetch(BASE + '/config/rubros?incluirInactivos=1', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    rubrosCache = data;
+    renderRubros();
+    renderSelectRubroSubrubro();
+  }catch(e){
+    body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderRubros(){
+  const body = document.getElementById('rubrosBody');
+  if (!rubrosCache.length) { body.innerHTML = '<tr><td colspan="3" class="muted">Todavía no hay rubros cargados.</td></tr>'; return; }
+  body.innerHTML = rubrosCache.map(r => `
+    <tr>
+      <td>
+        <input value="${escapeHtml(r.nombre)}" style="width:auto;min-width:220px" id="rn_${r._id}" onkeydown="if(event.key==='Enter')guardarNombreRubro('${r._id}')">
+      </td>
+      <td><span class="pill ${r.activo!==false?'activo':'inactivo'}">${r.activo!==false?'Activo':'Inactivo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarNombreRubro('${r._id}')">Guardar nombre</button>
+        <button class="btn small secondary" onclick="toggleActivoRubro('${r._id}', ${r.activo===false})">${r.activo===false?'Activar':'Desactivar'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function crearRubro(){
+  const input = document.getElementById('nrNombre');
+  const nombre = input.value.trim();
+  document.getElementById('rubrosErr').textContent = '';
+  if (!nombre) { document.getElementById('rubrosErr').textContent = 'Poné un nombre para el rubro'; return; }
+  try{
+    const r = await fetch(BASE + '/config/rubros', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    input.value = '';
+    await cargarRubros();
+  }catch(e){
+    document.getElementById('rubrosErr').textContent = e.message;
+  }
+}
+
+async function guardarNombreRubro(id){
+  const nombre = document.getElementById('rn_' + id).value.trim();
+  document.getElementById('rubrosErr').textContent = '';
+  if (!nombre) { document.getElementById('rubrosErr').textContent = 'El nombre no puede quedar vacío'; return; }
+  try{
+    const r = await fetch(BASE + '/config/rubros/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarRubros();
+    await cargarSubrubros();
+  }catch(e){
+    document.getElementById('rubrosErr').textContent = e.message;
+  }
+}
+
+async function toggleActivoRubro(id, activar){
+  try{
+    const r = await fetch(BASE + '/config/rubros/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarRubros();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// -------------------------------------------------------------------
+// Subrubros (cuelgan de un rubro)
+// -------------------------------------------------------------------
+let subrubrosCache = [];
+async function cargarSubrubros(){
+  try{
+    const r = await fetch(BASE + '/config/subrubros?incluirInactivos=1', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    subrubrosCache = data;
+    renderSubrubros();
+  }catch(e){
+    document.getElementById('subrubrosBody').innerHTML = `<tr><td colspan="4" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderSelectRubroSubrubro(){
+  const select = document.getElementById('srRubroId');
+  const actual = select.value;
+  const activos = rubrosCache.filter(r => r.activo !== false);
+  select.innerHTML = '<option value="">Todos los rubros</option>' + activos.map(r =>
+    `<option value="${r._id}" ${r._id===actual?'selected':''}>${escapeHtml(r.nombre)}</option>`
+  ).join('');
+}
+
+function renderSubrubros(){
+  const body = document.getElementById('subrubrosBody');
+  const filtroId = document.getElementById('srRubroId').value;
+  const lista = filtroId ? subrubrosCache.filter(s => String(s.rubroId) === String(filtroId)) : subrubrosCache;
+  if (!lista.length) { body.innerHTML = '<tr><td colspan="4" class="muted">No hay subrubros cargados todavía.</td></tr>'; return; }
+  body.innerHTML = lista.map(s => `
+    <tr>
+      <td><input value="${escapeHtml(s.nombre)}" style="width:auto;min-width:200px" id="sn_${s._id}" onkeydown="if(event.key==='Enter')guardarNombreSubrubro('${s._id}')"></td>
+      <td class="muted">${escapeHtml(s.rubroNombre)}</td>
+      <td><span class="pill ${s.activo!==false?'activo':'inactivo'}">${s.activo!==false?'Activo':'Inactivo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarNombreSubrubro('${s._id}')">Guardar nombre</button>
+        <button class="btn small secondary" onclick="toggleActivoSubrubro('${s._id}', ${s.activo===false})">${s.activo===false?'Activar':'Desactivar'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function crearSubrubro(){
+  const rubroId = document.getElementById('srRubroId').value;
+  const input = document.getElementById('srNombre');
+  const nombre = input.value.trim();
+  document.getElementById('subrubrosErr').textContent = '';
+  if (!rubroId) { document.getElementById('subrubrosErr').textContent = 'Elegí a qué rubro pertenece'; return; }
+  if (!nombre) { document.getElementById('subrubrosErr').textContent = 'Poné un nombre para el subrubro'; return; }
+  try{
+    const r = await fetch(BASE + '/config/subrubros', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, rubroId})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    input.value = '';
+    await cargarSubrubros();
+  }catch(e){
+    document.getElementById('subrubrosErr').textContent = e.message;
+  }
+}
+
+async function guardarNombreSubrubro(id){
+  const nombre = document.getElementById('sn_' + id).value.trim();
+  document.getElementById('subrubrosErr').textContent = '';
+  if (!nombre) { document.getElementById('subrubrosErr').textContent = 'El nombre no puede quedar vacío'; return; }
+  try{
+    const r = await fetch(BASE + '/config/subrubros/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarSubrubros();
+  }catch(e){
+    document.getElementById('subrubrosErr').textContent = e.message;
+  }
+}
+
+async function toggleActivoSubrubro(id, activar){
+  try{
+    const r = await fetch(BASE + '/config/subrubros/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarSubrubros();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// -------------------------------------------------------------------
+// Importar rubros/subrubros que ya están en uso en Productos (1/10/2026)
+// -------------------------------------------------------------------
+async function importarExistentes(){
+  const btn = document.getElementById('btnImportar');
+  const resultado = document.getElementById('importarResultado');
+  btn.disabled = true;
+  resultado.textContent = 'Importando...';
+  try{
+    const r = await fetch(BASE + '/config/rubros/importar-existentes', {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    resultado.textContent = `Listo: ${data.rubrosCreados} rubro(s) y ${data.subrubrosCreados} subrubro(s) nuevos.`;
+    await cargarRubros();
+    await cargarSubrubros();
+  }catch(e){
+    resultado.textContent = '';
+    alert(e.message);
+  }finally{
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

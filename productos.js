@@ -339,6 +339,238 @@ router.get('/marcas', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// -----------------------------------------------------------------------
+// Base de Rubros y Subrubros (1/10/2026, pedido de Mato: que en
+// Configuración se puedan dar de alta "distintas bases" — se arranca con
+// ésta — para que rubro/subrubro dejen de ser texto libre en la ficha de
+// producto y pasen a elegirse de una lista, así se evita que el mismo
+// rubro quede duplicado por tipeo ("Revestimientos" vs "revestimiento").
+//
+// El producto SIGUE guardando `rubro`/`subrubro` como texto (no se tocan
+// los filtros, el export ni los reportes que ya dependen de eso) — lo que
+// cambia es de dónde sale ese texto: antes se tipeaba a mano, ahora se
+// elige de `productos_rubros_base` / `productos_subrubros_base`. Si se
+// renombra un rubro/subrubro acá, se actualiza en cascada en los
+// productos que ya lo tenían cargado, para que no quede desincronizado.
+//
+// Subrubro cuelga de un rubro (rubroId) porque así es como se usa en la
+// práctica (ej: Revestimientos > Piedra, Pisos > Cerámica) — no son dos
+// listas sueltas sin relación.
+// -----------------------------------------------------------------------
+
+router.get('/config/rubros', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.incluirInactivos !== '1') match.activo = { $ne: false };
+    const rubros = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_rubros_base').find(match).sort({ nombre: 1 }).toArray();
+    });
+    res.json(rubros);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/config/rubros', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const nombre = normalizarTexto(req.body.nombre);
+    if (!nombre) throw err(400, 'El nombre del rubro es obligatorio');
+    const db = await conReintento(getDb);
+    const dupMatch = Object.assign(
+      { nombre: new RegExp('^' + nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
+      filtroOrg(req)
+    );
+    const existente = await db.collection('productos_rubros_base').findOne(dupMatch);
+    if (existente) throw err(400, 'Ya existe un rubro con ese nombre');
+    const ahora = new Date();
+    const doc = { nombre, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora };
+    const r = await db.collection('productos_rubros_base').insertOne(doc);
+    res.json(Object.assign({ _id: r.insertedId }, doc));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/config/rubros/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'Id inválido');
+    const db = await conReintento(getDb);
+    const match = Object.assign({ _id: id }, filtroOrg(req));
+    const rubro = await db.collection('productos_rubros_base').findOne(match);
+    if (!rubro) throw err(404, 'No encontrado');
+    const update = { updatedAt: new Date() };
+    if (req.body.nombre !== undefined) {
+      const nombre = normalizarTexto(req.body.nombre);
+      if (!nombre) throw err(400, 'El nombre no puede quedar vacío');
+      update.nombre = nombre;
+    }
+    if (req.body.activo !== undefined) update.activo = !!req.body.activo;
+    await db.collection('productos_rubros_base').updateOne(match, { $set: update });
+    // Si se le cambió el nombre, se actualiza en cascada en los productos
+    // y subrubros que ya lo tenían cargado con el nombre viejo.
+    if (update.nombre && update.nombre !== rubro.nombre) {
+      await db.collection('productos_catalogo').updateMany(
+        Object.assign({ rubro: rubro.nombre }, filtroOrg(req)),
+        { $set: { rubro: update.nombre, updatedAt: new Date() } }
+      );
+      await db.collection('productos_subrubros_base').updateMany(
+        Object.assign({ rubroId: id }, filtroOrg(req)),
+        { $set: { rubroNombre: update.nombre, updatedAt: new Date() } }
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// No se borra nunca de verdad (soft delete) — así no se pierde el dato en
+// productos que ya lo tengan cargado, y no revienta nada si algo todavía
+// lo referencia; simplemente deja de aparecer para elegir en productos nuevos.
+router.delete('/config/rubros/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'Id inválido');
+    const db = await conReintento(getDb);
+    const match = Object.assign({ _id: id }, filtroOrg(req));
+    const r = await db.collection('productos_rubros_base').updateOne(match, { $set: { activo: false, updatedAt: new Date() } });
+    if (!r.matchedCount) throw err(404, 'No encontrado');
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/config/subrubros', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.incluirInactivos !== '1') match.activo = { $ne: false };
+    if (req.query.rubroId) {
+      const rid = toObjectId(req.query.rubroId);
+      if (rid) match.rubroId = rid;
+    }
+    const subrubros = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_subrubros_base').find(match).sort({ nombre: 1 }).toArray();
+    });
+    res.json(subrubros);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/config/subrubros', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const nombre = normalizarTexto(req.body.nombre);
+    if (!nombre) throw err(400, 'El nombre del subrubro es obligatorio');
+    const rubroId = toObjectId(req.body.rubroId);
+    if (!rubroId) throw err(400, 'Elegí a qué rubro pertenece');
+    const db = await conReintento(getDb);
+    const rubro = await db.collection('productos_rubros_base').findOne(Object.assign({ _id: rubroId }, filtroOrg(req)));
+    if (!rubro) throw err(400, 'El rubro elegido no existe');
+    const dupMatch = Object.assign(
+      { rubroId, nombre: new RegExp('^' + nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
+      filtroOrg(req)
+    );
+    const existente = await db.collection('productos_subrubros_base').findOne(dupMatch);
+    if (existente) throw err(400, 'Ese rubro ya tiene un subrubro con ese nombre');
+    const ahora = new Date();
+    const doc = { nombre, rubroId, rubroNombre: rubro.nombre, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora };
+    const r = await db.collection('productos_subrubros_base').insertOne(doc);
+    res.json(Object.assign({ _id: r.insertedId }, doc));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/config/subrubros/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'Id inválido');
+    const db = await conReintento(getDb);
+    const match = Object.assign({ _id: id }, filtroOrg(req));
+    const subrubro = await db.collection('productos_subrubros_base').findOne(match);
+    if (!subrubro) throw err(404, 'No encontrado');
+    const update = { updatedAt: new Date() };
+    if (req.body.nombre !== undefined) {
+      const nombre = normalizarTexto(req.body.nombre);
+      if (!nombre) throw err(400, 'El nombre no puede quedar vacío');
+      update.nombre = nombre;
+    }
+    if (req.body.activo !== undefined) update.activo = !!req.body.activo;
+    await db.collection('productos_subrubros_base').updateOne(match, { $set: update });
+    if (update.nombre && update.nombre !== subrubro.nombre) {
+      await db.collection('productos_catalogo').updateMany(
+        Object.assign({ rubro: subrubro.rubroNombre, subrubro: subrubro.nombre }, filtroOrg(req)),
+        { $set: { subrubro: update.nombre, updatedAt: new Date() } }
+      );
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.delete('/config/subrubros/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'Id inválido');
+    const db = await conReintento(getDb);
+    const match = Object.assign({ _id: id }, filtroOrg(req));
+    const r = await db.collection('productos_subrubros_base').updateOne(match, { $set: { activo: false, updatedAt: new Date() } });
+    if (!r.matchedCount) throw err(404, 'No encontrado');
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Carga inicial de la base (1/10/2026): escanea los productos ya cargados
+// y crea en la base cualquier rubro/subrubro que todavía no esté — así
+// Mato no tiene que volver a tipear a mano lo que ya estaba en uso. Se
+// puede correr más de una vez sin duplicar (salta lo que ya existe).
+router.post('/config/rubros/importar-existentes', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const db = await conReintento(getDb);
+    const matchProd = Object.assign({}, filtroOrg(req));
+    const productos = await db.collection('productos_catalogo')
+      .find(matchProd, { projection: { rubro: 1, subrubro: 1 } }).toArray();
+
+    const rubrosEncontrados = new Map(); // key minúscula -> nombre original
+    const subrubrosPorRubro = new Map(); // key rubro -> Map(key sub -> nombre original)
+    productos.forEach(p => {
+      const rubro = normalizarTexto(p.rubro);
+      if (!rubro) return;
+      const rubroKey = rubro.toLowerCase();
+      if (!rubrosEncontrados.has(rubroKey)) rubrosEncontrados.set(rubroKey, rubro);
+      const subrubro = normalizarTexto(p.subrubro);
+      if (!subrubro) return;
+      if (!subrubrosPorRubro.has(rubroKey)) subrubrosPorRubro.set(rubroKey, new Map());
+      const subMap = subrubrosPorRubro.get(rubroKey);
+      if (!subMap.has(subrubro.toLowerCase())) subMap.set(subrubro.toLowerCase(), subrubro);
+    });
+
+    const existentesRubros = await db.collection('productos_rubros_base').find(filtroOrg(req)).toArray();
+    const rubrosPorKey = new Map(existentesRubros.map(r => [r.nombre.toLowerCase(), r]));
+    const ahora = new Date();
+    let rubrosCreados = 0, subrubrosCreados = 0;
+
+    for (const [rubroKey, nombreRubro] of rubrosEncontrados) {
+      let rubroDoc = rubrosPorKey.get(rubroKey);
+      if (!rubroDoc) {
+        const doc = { nombre: nombreRubro, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora };
+        const r = await db.collection('productos_rubros_base').insertOne(doc);
+        rubroDoc = Object.assign({ _id: r.insertedId }, doc);
+        rubrosPorKey.set(rubroKey, rubroDoc);
+        rubrosCreados++;
+      }
+      const subMap = subrubrosPorRubro.get(rubroKey);
+      if (!subMap) continue;
+      const existentesSub = await db.collection('productos_subrubros_base')
+        .find(Object.assign({ rubroId: rubroDoc._id }, filtroOrg(req))).toArray();
+      const subKeysExistentes = new Set(existentesSub.map(s => s.nombre.toLowerCase()));
+      for (const [subKey, nombreSub] of subMap) {
+        if (subKeysExistentes.has(subKey)) continue;
+        await db.collection('productos_subrubros_base').insertOne({
+          nombre: nombreSub, rubroId: rubroDoc._id, rubroNombre: rubroDoc.nombre,
+          activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
+        });
+        subrubrosCreados++;
+      }
+    }
+    res.json({ rubrosCreados, subrubrosCreados });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Lista liviana de proveedores activos, para el desplegable de Proveedor
 // en el formulario de producto — bajo el gate de Productos, no el de
 // Proveedores (ver comentario de cabecera).
