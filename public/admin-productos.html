@@ -718,6 +718,26 @@ async function esperarJobImport(jobId){
   }
 }
 
+// Igual que esperarJobImport, pero para los imports de listas de precio
+// (1/10/2026, pedido de Mato: "que lo haga en segundo plano o que me vaya
+// avisando el progreso porque no puedo ver si esta trabado o no"):
+// actualiza el contenedor de resultado indicado mientras el job corre.
+async function esperarJobImportListaPrecio(jobId, contenedorId){
+  while (true) {
+    await new Promise(res => setTimeout(res, 1500));
+    const r = await fetch(BASE + '/import/estado/' + jobId, {headers: headersAuthJson()});
+    const job = await r.json();
+    if (!r.ok) throw new Error(job.error || 'Error consultando el progreso del import');
+    if (job.estado === 'procesando') {
+      const cont = document.getElementById(contenedorId);
+      if (cont) cont.innerHTML = `<p class="muted">Procesando ${job.procesados} / ${job.total}...</p>`;
+      continue;
+    }
+    if (job.estado === 'error') throw new Error(job.errorGeneral || 'El import falló de forma inesperada');
+    return job;
+  }
+}
+
 // Revisar/consolidar SKUs duplicados por mayúsculas (30/9/2026) — primero
 // muestra una vista previa (no toca nada), y solo si Mato confirma
 // ejecuta la fusión. Ver productos.js (GET /duplicados-sku, POST
@@ -813,6 +833,7 @@ async function abrirListasPrecio(){
           <div style="flex:1"><label>Nombre</label><input id="nlpNombre" placeholder="Ej: Mayorista"></div>
           <div style="width:140px"><label>% sobre costo</label><input id="nlpPorcentaje" type="number" step="0.01" value="0"></div>
           <div style="width:180px"><label>Aplica a</label><select id="nlpAlcance"><option value="todos">Todo el catálogo</option><option value="seleccion">Selección de productos</option></select></div>
+          <div style="width:220px"><label>Cálculo</label><select id="nlpFormula"><option value="costo_porcentaje">Costo + %</option><option value="cf_x_bulto">Consumidor Final × Unidades por bulto</option></select></div>
           <div><label style="visibility:hidden">.</label><button class="btn" onclick="crearListaPrecio()">Crear</button></div>
         </div>
         <div class="err" id="listasPrecioErr"></div>
@@ -839,18 +860,26 @@ function renderListasPrecioModal(){
   const cont = document.getElementById('listasPrecioContenido');
   cont.innerHTML = `
     <table>
-      <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Aplica a</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Aplica a</th><th>Cálculo</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         ${listasPrecioModalCache.map(l => `
           <tr>
             <td>${escapeHtml(l.nombre)}${l.predeterminada ? ' <span class="muted">(predeterminada)</span>' : ''}</td>
-            <td><input type="number" step="0.01" value="${l.porcentaje||0}" style="width:90px" onchange="editarPorcentajeLista('${l._id}', this.value)"></td>
+            <td>${l.formula==='cf_x_bulto' ? '<span class="muted">—</span>' : `<input type="number" step="0.01" value="${l.porcentaje||0}" style="width:90px" onchange="editarPorcentajeLista('${l._id}', this.value)">`}</td>
             <td>
               ${l.predeterminada
                 ? '<span class="muted">Todo el catálogo</span>'
                 : `<select style="width:150px" onchange="cambiarAlcanceLista('${l._id}', this.value)">
                      <option value="todos" ${l.alcance!=='seleccion'?'selected':''}>Todo el catálogo</option>
                      <option value="seleccion" ${l.alcance==='seleccion'?'selected':''}>Selección de productos</option>
+                   </select>`}
+            </td>
+            <td>
+              ${l.predeterminada
+                ? '<span class="muted">Costo + %</span>'
+                : `<select style="width:200px" onchange="cambiarFormulaLista('${l._id}', this.value)">
+                     <option value="costo_porcentaje" ${l.formula!=='cf_x_bulto'?'selected':''}>Costo + %</option>
+                     <option value="cf_x_bulto" ${l.formula==='cf_x_bulto'?'selected':''}>Consumidor Final × bulto</option>
                    </select>`}
             </td>
             <td><span class="pill ${l.activa!==false?'activo':'inactivo'}">${l.activa!==false?'Activa':'Inactiva'}</span></td>
@@ -872,18 +901,32 @@ async function crearListaPrecio(){
   const nombre = document.getElementById('nlpNombre').value.trim();
   const porcentaje = Number(document.getElementById('nlpPorcentaje').value) || 0;
   const alcance = document.getElementById('nlpAlcance').value;
+  const formula = document.getElementById('nlpFormula').value;
   document.getElementById('listasPrecioErr').textContent = '';
   if (!nombre) { document.getElementById('listasPrecioErr').textContent = 'Poné un nombre para la lista'; return; }
   try{
-    const r = await fetch(BASE + '/listas-precio', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, porcentaje, alcance})});
+    const r = await fetch(BASE + '/listas-precio', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, porcentaje, alcance, formula})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     document.getElementById('nlpNombre').value = '';
     document.getElementById('nlpPorcentaje').value = '0';
     document.getElementById('nlpAlcance').value = 'todos';
+    document.getElementById('nlpFormula').value = 'costo_porcentaje';
     await cargarListasPrecioModal();
   }catch(e){
     document.getElementById('listasPrecioErr').textContent = e.message;
+  }
+}
+
+async function cambiarFormulaLista(id, valor){
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({formula: valor})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarListasPrecioModal();
+  }catch(e){
+    alert(e.message);
+    await cargarListasPrecioModal();
   }
 }
 
@@ -982,11 +1025,13 @@ async function confirmarImportarListaPrecio(listaId){
     const r = await fetch(BASE + '/listas-precio/' + listaId + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al importar');
-    let html = `<p class="ok-msg">Actualizados: ${data.actualizados}${data.nuevosMiembros ? ` (${data.nuevosMiembros} nuevo(s) agregado(s) a la lista)` : ''}</p>`;
-    if (data.errores && data.errores.length) {
-      html += `<p class="err">${data.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
-        data.errores.slice(0, 100).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
-        (data.errores.length > 100 ? `<li>... y ${data.errores.length - 100} más</li>` : '') + '</ul>';
+    document.getElementById('ilpResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
+    const job = await esperarJobImportListaPrecio(data.jobId, 'ilpResultado');
+    let html = `<p class="ok-msg">Actualizados: ${job.actualizados||0}${job.nuevosMiembros ? ` (${job.nuevosMiembros} nuevo(s) agregado(s) a la lista)` : ''}</p>`;
+    if (job.errores && job.errores.length) {
+      html += `<p class="err">${job.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        job.errores.slice(0, 100).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
+        (job.errores.length > 100 ? `<li>... y ${job.errores.length - 100} más</li>` : '') + '</ul>';
     }
     document.getElementById('ilpResultado').innerHTML = html;
     await cargarListasPrecioModal();
@@ -1046,11 +1091,13 @@ async function confirmarImportarTodasListas(){
     const r = await fetch(BASE + '/listas-precio/importar-todas', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al importar');
-    let html = `<p class="ok-msg">Productos actualizados: ${data.actualizados}${data.nuevosMiembros ? ` (${data.nuevosMiembros} alta(s) nueva(s) en listas de selección)` : ''}</p>`;
-    if (data.errores && data.errores.length) {
-      html += `<p class="err">${data.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
-        data.errores.slice(0, 100).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
-        (data.errores.length > 100 ? `<li>... y ${data.errores.length - 100} más</li>` : '') + '</ul>';
+    document.getElementById('itlResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
+    const job = await esperarJobImportListaPrecio(data.jobId, 'itlResultado');
+    let html = `<p class="ok-msg">Productos actualizados: ${job.actualizados||0}${job.nuevosMiembros ? ` (${job.nuevosMiembros} alta(s) nueva(s) en listas de selección)` : ''}</p>`;
+    if (job.errores && job.errores.length) {
+      html += `<p class="err">${job.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        job.errores.slice(0, 100).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
+        (job.errores.length > 100 ? `<li>... y ${job.errores.length - 100} más</li>` : '') + '</ul>';
     }
     document.getElementById('itlResultado').innerHTML = html;
     await cargarListasPrecioModal();
@@ -1199,6 +1246,13 @@ function precioResueltoFicha(p, lista){
   const overrides = p.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return { precio: ov.precio, override: true };
+  if (lista.formula === 'cf_x_bulto') {
+    const cf = Number(document.getElementById('fpPrecio') ? document.getElementById('fpPrecio').value : NaN);
+    if (!cf && cf !== 0) return { precio: null, override: false };
+    const unidadesPorBultoEl = document.getElementById('fpUnidadesPorBulto');
+    const bultos = (unidadesPorBultoEl && Number(unidadesPorBultoEl.value) > 0) ? Number(unidadesPorBultoEl.value) : 1;
+    return { precio: Math.round(cf * bultos * 100) / 100, override: false };
+  }
   const costo = Number(document.getElementById('fpCosto').value);
   if (!costo && costo !== 0) return { precio: null, override: false };
   const moneda = document.getElementById('fpMoneda') ? document.getElementById('fpMoneda').value : 'ARS';

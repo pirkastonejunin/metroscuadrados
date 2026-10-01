@@ -305,6 +305,11 @@ function precioResueltoVenta(producto, lista){
   const overrides = producto.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return ov.precio;
+  if (lista.formula === 'cf_x_bulto') {
+    if (producto.precio == null) return null;
+    const bultos = (producto.unidadesPorBulto && producto.unidadesPorBulto > 0) ? producto.unidadesPorBulto : 1;
+    return Math.round(producto.precio * bultos * 100) / 100;
+  }
   if (producto.costo == null) return null;
   return Math.round(producto.costo * (1 + (lista.porcentaje || 0) / 100) * 100) / 100;
 }
