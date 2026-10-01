@@ -802,12 +802,13 @@ async function abrirListasPrecio(){
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Listas de precio</h2>
-        <p class="muted">Cada lista calcula el precio de cada producto como Costo + % (se puede pisar puntualmente desde la ficha de cada producto). "Consumidor Final" es la lista predeterminada — es el mismo valor que el campo "Precio de venta" de la ficha, y no se puede eliminar.</p>
+        <p class="muted">Cada lista calcula el precio de cada producto como Costo + % (se puede pisar puntualmente desde la ficha de cada producto, o importando un Excel). "Consumidor Final" es la lista predeterminada — es el mismo valor que el campo "Precio de venta" de la ficha, aplica a todo el catálogo y no se puede eliminar. Las demás listas pueden aplicar a todo el catálogo o solo a una selección de productos (ej: "Mayorista" con los artículos de Producción y algún extra).</p>
         <div id="listasPrecioContenido"><p class="muted">Cargando...</p></div>
         <div class="section-title" style="margin-top:16px">Nueva lista</div>
         <div class="row">
           <div style="flex:1"><label>Nombre</label><input id="nlpNombre" placeholder="Ej: Mayorista"></div>
           <div style="width:140px"><label>% sobre costo</label><input id="nlpPorcentaje" type="number" step="0.01" value="0"></div>
+          <div style="width:180px"><label>Aplica a</label><select id="nlpAlcance"><option value="todos">Todo el catálogo</option><option value="seleccion">Selección de productos</option></select></div>
           <div><label style="visibility:hidden">.</label><button class="btn" onclick="crearListaPrecio()">Crear</button></div>
         </div>
         <div class="err" id="listasPrecioErr"></div>
@@ -834,15 +835,25 @@ function renderListasPrecioModal(){
   const cont = document.getElementById('listasPrecioContenido');
   cont.innerHTML = `
     <table>
-      <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Aplica a</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         ${listasPrecioModalCache.map(l => `
           <tr>
             <td>${escapeHtml(l.nombre)}${l.predeterminada ? ' <span class="muted">(predeterminada)</span>' : ''}</td>
             <td><input type="number" step="0.01" value="${l.porcentaje||0}" style="width:90px" onchange="editarPorcentajeLista('${l._id}', this.value)"></td>
+            <td>
+              ${l.predeterminada
+                ? '<span class="muted">Todo el catálogo</span>'
+                : `<select style="width:150px" onchange="cambiarAlcanceLista('${l._id}', this.value)">
+                     <option value="todos" ${l.alcance!=='seleccion'?'selected':''}>Todo el catálogo</option>
+                     <option value="seleccion" ${l.alcance==='seleccion'?'selected':''}>Selección de productos</option>
+                   </select>`}
+            </td>
             <td><span class="pill ${l.activa!==false?'activo':'inactivo'}">${l.activa!==false?'Activa':'Inactiva'}</span></td>
             <td style="white-space:nowrap">
+              ${l.alcance==='seleccion' ? `<button class="btn small secondary" onclick="abrirGestionProductosLista('${l._id}')">Productos</button>` : ''}
               <button class="btn small secondary" onclick="descargarBlob(BASE + '/listas-precio/${l._id}/export', 'lista-precio-${String(l.nombre||'').toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx')">Exportar</button>
+              <button class="btn small secondary" onclick="abrirImportarListaPrecio('${l._id}', '${escapeHtml(l.nombre).replace(/'/g,"\\'")}')">Importar</button>
               <button class="btn small secondary" onclick="toggleActivaLista('${l._id}', ${l.activa===false})">${l.activa===false?'Activar':'Desactivar'}</button>
               ${l.predeterminada ? '' : `<button class="btn small danger" onclick="eliminarListaPrecio('${l._id}', '${escapeHtml(l.nombre).replace(/'/g,"\\'")}')">Eliminar</button>`}
             </td>
@@ -856,14 +867,16 @@ function renderListasPrecioModal(){
 async function crearListaPrecio(){
   const nombre = document.getElementById('nlpNombre').value.trim();
   const porcentaje = Number(document.getElementById('nlpPorcentaje').value) || 0;
+  const alcance = document.getElementById('nlpAlcance').value;
   document.getElementById('listasPrecioErr').textContent = '';
   if (!nombre) { document.getElementById('listasPrecioErr').textContent = 'Poné un nombre para la lista'; return; }
   try{
-    const r = await fetch(BASE + '/listas-precio', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, porcentaje})});
+    const r = await fetch(BASE + '/listas-precio', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, porcentaje, alcance})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     document.getElementById('nlpNombre').value = '';
     document.getElementById('nlpPorcentaje').value = '0';
+    document.getElementById('nlpAlcance').value = 'todos';
     await cargarListasPrecioModal();
   }catch(e){
     document.getElementById('listasPrecioErr').textContent = e.message;
@@ -875,6 +888,18 @@ async function editarPorcentajeLista(id, valor){
     const r = await fetch(BASE + '/listas-precio/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({porcentaje: Number(valor)||0})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
+  }catch(e){
+    alert(e.message);
+    await cargarListasPrecioModal();
+  }
+}
+
+async function cambiarAlcanceLista(id, valor){
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({alcance: valor})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarListasPrecioModal();
   }catch(e){
     alert(e.message);
     await cargarListasPrecioModal();
@@ -905,6 +930,164 @@ async function eliminarListaPrecio(id, nombre){
 }
 
 // -------------------------------------------------------------------
+// Importar precios de una lista puntual desde Excel (1/10/2026, pedido
+// de Mato: "deberia tener la posibilidad de elegir y de importar una o
+// varias listas" — se elige la lista desde el botón "Importar" de su
+// fila, y se puede repetir para varias listas). Usa las mismas columnas
+// que el export de esa lista (SKU, Nombre, Precio). Si la lista es de
+// alcance "selección", cualquier SKU del archivo que todavía no fuera
+// miembro se agrega solo — así, exportando/completando/importando un
+// Excel se arma de una la lista con sus productos y precios.
+// -------------------------------------------------------------------
+function abrirImportarListaPrecio(listaId, listaNombre){
+  const sub = document.createElement('div');
+  sub.id = 'ilpModalBg';
+  sub.className = 'modal-bg';
+  sub.style.zIndex = '70';
+  sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  sub.innerHTML = `
+    <div class="modal">
+      <span class="close-x" onclick="document.getElementById('ilpModalBg').remove()">✕</span>
+      <h2>Importar precios — ${escapeHtml(listaNombre)}</h2>
+      <p class="muted">Mismas columnas que el export de esta lista (SKU, Nombre, Precio) — la forma más simple es exportar, editar en Excel y volver a subir. Precio vacío saca el precio manual (vuelve a Costo + %). Si la lista es de "selección de productos", un SKU nuevo del archivo se agrega solo a la lista.</p>
+      <label>Archivo (.xlsx o .xls)</label>
+      <input type="file" id="ilpArchivo" accept=".xlsx,.xls">
+      <div class="err" id="ilpErr"></div>
+      <div id="ilpResultado"></div>
+      <button class="btn" id="ilpBtn" style="margin-top:10px" onclick="confirmarImportarListaPrecio('${listaId}')">Importar</button>
+    </div>
+  `;
+  document.body.appendChild(sub);
+}
+
+async function confirmarImportarListaPrecio(listaId){
+  const input = document.getElementById('ilpArchivo');
+  const file = input.files[0];
+  const btn = document.getElementById('ilpBtn');
+  document.getElementById('ilpErr').textContent = '';
+  document.getElementById('ilpResultado').innerHTML = '';
+  if (!file) { document.getElementById('ilpErr').textContent = 'Elegí un archivo .xlsx o .xls'; return; }
+  btn.disabled = true;
+  try{
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+      reader.readAsDataURL(file);
+    });
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al importar');
+    let html = `<p class="ok-msg">Actualizados: ${data.actualizados}${data.nuevosMiembros ? ` (${data.nuevosMiembros} nuevo(s) agregado(s) a la lista)` : ''}</p>`;
+    if (data.errores && data.errores.length) {
+      html += `<p class="err">${data.errores.length} fila(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        data.errores.slice(0, 100).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('') +
+        (data.errores.length > 100 ? `<li>... y ${data.errores.length - 100} más</li>` : '') + '</ul>';
+    }
+    document.getElementById('ilpResultado').innerHTML = html;
+    await cargarListasPrecioModal();
+    if (document.getElementById('gplModalBg')) await cargarGestionProductosLista(listaId);
+  }catch(e){
+    document.getElementById('ilpErr').textContent = e.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// -------------------------------------------------------------------
+// Gestión de productos de una lista de alcance "selección" (1/10/2026,
+// pedido de Mato: "no todas las listas tienen todos los productos...
+// la de mayorista debe tener los artículos de producción y algún que
+// otro producto adicional"). Permite sumar todo un rubro de una, ver
+// quiénes están y sacar uno puntual — sumar de a uno puntual se hace
+// completando el Excel de import con el SKU que falte.
+// -------------------------------------------------------------------
+async function abrirGestionProductosLista(listaId){
+  const sub = document.createElement('div');
+  sub.id = 'gplModalBg';
+  sub.className = 'modal-bg';
+  sub.style.zIndex = '70';
+  sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  sub.innerHTML = `
+    <div class="modal">
+      <span class="close-x" onclick="document.getElementById('gplModalBg').remove()">✕</span>
+      <h2 id="gplTitulo">Productos de la lista</h2>
+      <p class="muted">Esta lista solo aplica a los productos que tiene agregados acá (no a todo el catálogo). Sumá un rubro entero, o un SKU puntual importando un Excel con ese SKU agregado.</p>
+      <div class="row" style="margin-bottom:10px">
+        <div style="flex:1"><label>Agregar todo un rubro</label><select id="gplRubro">${opcionesRubroSelect('')}</select></div>
+        <div><label style="visibility:hidden">.</label><button class="btn secondary" onclick="agregarRubroALista('${listaId}')">Agregar rubro</button></div>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn secondary small" onclick="descargarBlob(BASE + '/listas-precio/${listaId}/export', 'lista-precio.xlsx')">Exportar esta lista</button>
+        <button class="btn secondary small" onclick="abrirImportarListaPrecio('${listaId}', (gestionListaCache&&gestionListaCache.lista.nombre)||'')">Importar precios / productos</button>
+      </div>
+      <div class="err" id="gplErr"></div>
+      <div id="gplContenido"><p class="muted">Cargando...</p></div>
+    </div>
+  `;
+  document.body.appendChild(sub);
+  await cargarGestionProductosLista(listaId);
+}
+
+let gestionListaCache = null;
+async function cargarGestionProductosLista(listaId){
+  const cont = document.getElementById('gplContenido');
+  if (!cont) return;
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/precios', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    gestionListaCache = data;
+    const titulo = document.getElementById('gplTitulo');
+    if (titulo) titulo.textContent = 'Productos de "' + data.lista.nombre + '"';
+    if (!data.filas.length) { cont.innerHTML = '<p class="muted">Todavía no tiene productos agregados.</p>'; return; }
+    cont.innerHTML = `
+      <table>
+        <thead><tr><th>SKU</th><th>Nombre</th><th>Rubro</th><th>Precio</th><th></th></tr></thead>
+        <tbody>
+          ${data.filas.map(f => `
+            <tr>
+              <td>${escapeHtml(f.sku||'')}</td>
+              <td>${escapeHtml(f.nombre||'')}</td>
+              <td class="muted">${escapeHtml(f.rubro||'')}</td>
+              <td>${f.precio!=null ? money(f.precio) : '<span class="muted">—</span>'}</td>
+              <td><button class="btn small secondary" onclick="quitarProductoDeLista('${listaId}','${f._id}')">Quitar</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }catch(e){
+    cont.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function agregarRubroALista(listaId){
+  const rubro = document.getElementById('gplRubro').value;
+  document.getElementById('gplErr').textContent = '';
+  if (!rubro) { document.getElementById('gplErr').textContent = 'Elegí un rubro'; return; }
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/productos/por-rubro', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({rubro})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarGestionProductosLista(listaId);
+  }catch(e){
+    document.getElementById('gplErr').textContent = e.message;
+  }
+}
+
+async function quitarProductoDeLista(listaId, productoId){
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/productos/' + productoId, {method:'DELETE', headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarGestionProductosLista(listaId);
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// -------------------------------------------------------------------
 // "Precios por lista" dentro de la ficha de un producto: muestra el
 // precio resuelto para cada lista activa (costo + % o el override
 // puntual, si lo hay) con edición inline.
@@ -923,6 +1106,15 @@ async function cargarPreciosPorLista(p){
   }catch(e){
     cont.innerHTML = '';
   }
+}
+
+// No todas las listas tienen todo el catálogo (1/10/2026) — una lista de
+// alcance "selección" solo resuelve precio para los productos que tiene
+// en `productosIds`; para las demás (y siempre la predeterminada)
+// aplica a cualquier producto, como antes.
+function perteneceALista(p, lista){
+  if (!lista || lista.alcance !== 'seleccion') return true;
+  return (lista.productosIds || []).some(id => String(id) === String(p._id));
 }
 
 function precioResueltoFicha(p, lista){
@@ -945,6 +1137,15 @@ function renderPreciosPorLista(p){
         <thead><tr><th>Lista</th><th>Precio</th><th>Origen</th><th></th></tr></thead>
         <tbody>
           ${activas.map(l => {
+            if (!perteneceALista(p, l)) {
+              return `
+                <tr>
+                  <td>${escapeHtml(l.nombre)}</td>
+                  <td colspan="2" class="muted">No pertenece a esta lista (es de selección de productos)</td>
+                  <td><button type="button" class="btn small secondary" onclick="agregarProductoAListaDesdeFicha('${p._id}','${l._id}')">Agregar a esta lista</button></td>
+                </tr>
+              `;
+            }
             const { precio, override } = precioResueltoFicha(p, l);
             return `
               <tr>
@@ -963,6 +1164,20 @@ function renderPreciosPorLista(p){
       <p class="muted" style="margin-bottom:0">La lista Consumidor Final siempre queda igual al campo "Precio de venta" de arriba.</p>
     </div>
   `;
+}
+
+async function agregarProductoAListaDesdeFicha(productoId, listaId){
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/productos/' + productoId, {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    const lista = fichaListasPrecioCache.find(l => String(l._id) === String(listaId));
+    if (lista) { lista.productosIds = lista.productosIds || []; lista.productosIds.push(productoId); }
+    const p = productosCache.find(x => String(x._id) === String(productoId)) || {_id: productoId};
+    renderPreciosPorLista(p);
+  }catch(e){
+    alert(e.message);
+  }
 }
 
 async function guardarPrecioLista(productoId, listaId){

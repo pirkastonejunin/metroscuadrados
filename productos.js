@@ -625,9 +625,24 @@ router.get('/tiendanube/:sku', authAdmin, async (req, res) => {
 
 function round2(n) { return Math.round(n * 100) / 100; }
 
+// No todas las listas tienen todo el catálogo (1/10/2026, pedido de
+// Mato: "no todas las listas tienen todos los productos, ejemplo la de
+// mayorista debe tener los artículos de producción y algún que otro
+// producto adicional"). Una lista con alcance 'seleccion' solo aplica a
+// los productos que tiene en `productosIds` — las demás ('todos', y
+// siempre la predeterminada "Consumidor Final") siguen aplicando a todo
+// el catálogo activo, como antes.
+function perteneceALista(producto, lista) {
+  if (!lista || lista.alcance !== 'seleccion') return true;
+  const ids = lista.productosIds || [];
+  return ids.some(id => String(id) === String(producto._id));
+}
+
 // Precio resuelto de un producto en una lista: el override si existe,
-// si no el costo + % de la lista (null si no hay costo cargado).
+// si no el costo + % de la lista (null si no hay costo cargado, o si el
+// producto no pertenece a una lista de alcance "selección").
 function precioResuelto(producto, lista) {
+  if (!perteneceALista(producto, lista)) return { precio: null, override: false, fueraDeAlcance: true };
   const overrides = producto.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return { precio: ov.precio, override: true };
@@ -647,6 +662,7 @@ async function obtenerListaPredeterminada(db, req) {
   const ahora = new Date();
   const nueva = {
     nombre: 'Consumidor Final', porcentaje: 0, predeterminada: true, activa: true, orden: 0,
+    alcance: 'todos', productosIds: [],
     orgId: req.orgId, createdAt: ahora, updatedAt: ahora
   };
   const r = await db.collection('productos_listas_precio').insertOne(nueva);
@@ -701,11 +717,15 @@ router.post('/listas-precio', authAdmin, async (req, res) => {
     if (!nombre) throw err(400, 'Falta el nombre de la lista (ej: Mayorista, Pintores)');
     const porcentaje = Number((req.body || {}).porcentaje);
     if (!Number.isFinite(porcentaje)) throw err(400, 'El % de margen tiene que ser un número');
+    // alcance: 'todos' (default, aplica a todo el catálogo activo) o
+    // 'seleccion' (solo a los productos que se le vayan agregando — ej:
+    // "Mayorista" con los artículos de Producción + algún extra).
+    const alcance = (req.body || {}).alcance === 'seleccion' ? 'seleccion' : 'todos';
     const doc = await conReintento(async () => {
       const db = await getDb();
       const ahora = new Date();
       const nueva = {
-        nombre, porcentaje, predeterminada: false, activa: true,
+        nombre, porcentaje, predeterminada: false, activa: true, alcance, productosIds: [],
         orden: 100, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
       };
       const r = await db.collection('productos_listas_precio').insertOne(nueva);
@@ -735,6 +755,14 @@ router.put('/listas-precio/:id', authAdmin, async (req, res) => {
     const doc = await conReintento(async () => {
       const db = await getDb();
       const match = Object.assign({ _id: id }, filtroOrg(req));
+      const lista = await db.collection('productos_listas_precio').findOne(match);
+      if (!lista) throw err(404, 'Lista no encontrada');
+      // El alcance de la lista predeterminada (Consumidor Final) no se
+      // puede tocar — tiene que seguir cubriendo todo el catálogo, porque
+      // de ahí sale el campo `producto.precio` que usan Ventas/Cotizador.
+      if (body.alcance !== undefined && !lista.predeterminada) {
+        set.alcance = body.alcance === 'seleccion' ? 'seleccion' : 'todos';
+      }
       const r = await db.collection('productos_listas_precio').findOneAndUpdate(
         match, { $set: set }, { returnDocument: 'after' }
       );
@@ -765,8 +793,18 @@ router.delete('/listas-precio/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Precio resuelto de cada producto activo en una lista puntual — para la
-// pantalla de "ver/editar precios" de esa lista.
+// Filtro de productos de una lista: todo el catálogo activo, salvo que
+// sea una lista de alcance "seleccion", en cuyo caso solo los que están
+// en su `productosIds` (1/10/2026, ver perteneceALista arriba).
+function matchProductosDeLista(req, lista) {
+  const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+  if (lista.alcance === 'seleccion') match._id = { $in: lista.productosIds || [] };
+  return match;
+}
+
+// Precio resuelto de cada producto de una lista puntual (todo el
+// catálogo, o solo los que pertenecen a ella si es de alcance
+// "selección") — para la pantalla de "ver/editar precios" de esa lista.
 router.get('/listas-precio/:id/precios', authListasPrecio, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -776,11 +814,11 @@ router.get('/listas-precio/:id/precios', authListasPrecio, async (req, res) => {
       const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!lista) throw err(404, 'Lista no encontrada');
       const productos = await db.collection('productos_catalogo')
-        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
-        .project({ sku: 1, nombre: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
+        .find(matchProductosDeLista(req, lista))
+        .project({ sku: 1, nombre: 1, rubro: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
       const filas = productos.map(p => {
         const { precio, override } = precioResuelto(p, lista);
-        return { _id: p._id, sku: p.sku, nombre: p.nombre, costo: p.costo, precio, override };
+        return { _id: p._id, sku: p.sku, nombre: p.nombre, rubro: p.rubro, costo: p.costo, precio, override };
       });
       return { lista, filas };
     });
@@ -803,13 +841,133 @@ router.get('/listas-precio/:id/export', authListasPrecio, async (req, res) => {
       const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!lista) throw err(404, 'Lista no encontrada');
       const productos = await db.collection('productos_catalogo')
-        .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .find(matchProductosDeLista(req, lista))
         .project({ sku: 1, nombre: 1, costo: 1, preciosPorLista: 1 }).sort({ nombre: 1 }).toArray();
       const filas = productos.map(p => Object.assign({ sku: p.sku, nombre: p.nombre }, { precio: precioResuelto(p, lista).precio }));
       return { lista, filas };
     });
     const nombreArchivo = `lista-precio-${String(lista.nombre).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.xlsx`;
     exportarXlsx(res, nombreArchivo, COLUMNAS_LISTA_PRECIO, filas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/listas-precio/:id/plantilla-import', authListasPrecio, (req, res) => {
+  exportarPlantillaXlsx(res, 'plantilla-lista-precio.xlsx', COLUMNAS_LISTA_PRECIO);
+});
+
+// Importa precios (y, si la lista es de alcance "selección", de paso da
+// de alta como miembros a los SKU que todavía no estaban) desde un Excel
+// con las mismas columnas que el export de esta misma lista (1/10/2026,
+// pedido de Mato: "debería tener la posibilidad de elegir y de importar
+// una o varias listas" — se importa lista por lista, se puede repetir
+// para varias). Fila sin precio (celda vacía) saca el override puntual
+// (vuelve a Costo + %).
+router.post('/listas-precio/:id/import', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const archivoBase64 = (req.body || {}).archivoBase64;
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista no encontrada');
+      const filas = parsearXlsxBase64(archivoBase64, COLUMNAS_LISTA_PRECIO);
+      let actualizados = 0;
+      const nuevosMiembros = [];
+      const errores = [];
+      for (const fila of filas) {
+        const sku = normalizarTexto(fila.sku);
+        if (!sku) { errores.push({ fila: fila.__fila, motivo: 'Falta el SKU' }); continue; }
+        const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)));
+        if (!producto) { errores.push({ fila: fila.__fila, motivo: `No existe ningún producto activo con SKU "${sku}"` }); continue; }
+        const precio = fila.precio;
+        if (precio !== null && (!Number.isFinite(precio) || precio < 0)) { errores.push({ fila: fila.__fila, motivo: 'El precio tiene que ser un número mayor o igual a 0' }); continue; }
+        const matchProd = { _id: producto._id };
+        await db.collection('productos_catalogo').updateOne(matchProd, { $pull: { preciosPorLista: { listaId: id } } });
+        if (precio !== null) {
+          await db.collection('productos_catalogo').updateOne(matchProd, { $push: { preciosPorLista: { listaId: id, precio } } });
+        }
+        if (lista.predeterminada) await sincronizarPrecioConsumidorFinal(db, req, producto._id, precio);
+        if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(x => String(x) === String(producto._id))) {
+          nuevosMiembros.push(producto._id);
+        }
+        actualizados++;
+      }
+      if (nuevosMiembros.length) {
+        await db.collection('productos_listas_precio').updateOne({ _id: id }, { $addToSet: { productosIds: { $each: nuevosMiembros } } });
+      }
+      return { actualizados, nuevosMiembros: nuevosMiembros.length, errores };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Agrega de una todos los productos activos de un rubro a una lista de
+// alcance "selección" (1/10/2026, pedido de Mato: arrancar rápido una
+// lista como "Mayorista" con "los artículos de Producción" y de ahí
+// sumar algún producto extra a mano o por import).
+router.post('/listas-precio/:id/productos/por-rubro', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const rubro = normalizarTexto((req.body || {}).rubro);
+    if (!rubro) throw err(400, 'Elegí un rubro');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista no encontrada');
+      if (lista.alcance !== 'seleccion') throw err(400, 'Esta lista ya aplica a todo el catálogo — no hace falta agregar productos a mano.');
+      const productos = await db.collection('productos_catalogo')
+        .find(Object.assign({ activo: { $ne: false }, rubro }, filtroOrg(req)))
+        .project({ _id: 1 }).toArray();
+      const ids = productos.map(p => p._id);
+      if (ids.length) await db.collection('productos_listas_precio').updateOne({ _id: id }, { $addToSet: { productosIds: { $each: ids } } });
+      return { agregados: ids.length };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Agrega un producto puntual a una lista de alcance "selección" sin
+// fijarle precio manual (queda en Costo + %) — usado desde el botón
+// "Agregar a esta lista" en "Precios por lista" de la ficha del producto.
+router.post('/listas-precio/:id/productos/:productoId', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    const productoId = toObjectId(req.params.productoId);
+    if (!id || !productoId) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!lista) throw err(404, 'Lista no encontrada');
+      if (lista.alcance !== 'seleccion') throw err(400, 'Esta lista ya aplica a todo el catálogo.');
+      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
+      if (!producto) throw err(404, 'Producto no encontrado');
+      await db.collection('productos_listas_precio').updateOne({ _id: id }, { $addToSet: { productosIds: productoId } });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Saca un producto puntual de una lista de alcance "selección" (y de
+// paso su override puntual, si tenía uno cargado en esa lista).
+router.delete('/listas-precio/:id/productos/:productoId', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    const productoId = toObjectId(req.params.productoId);
+    if (!id || !productoId) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('productos_listas_precio').updateOne(
+        Object.assign({ _id: id }, filtroOrg(req)),
+        { $pull: { productosIds: productoId } }
+      );
+      await db.collection('productos_catalogo').updateOne(
+        { _id: productoId },
+        { $pull: { preciosPorLista: { listaId: id } } }
+      );
+    });
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

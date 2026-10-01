@@ -295,8 +295,13 @@ async function cargarListasBase(orgId){
 
 // Misma lógica que precioResuelto() en productos.js: un override puntual
 // manda; si no hay, se calcula costo + % de la lista.
+// No todas las listas tienen todo el catálogo (1/10/2026) — si la lista
+// es de alcance "selección" y el producto no está en sus productosIds, no
+// hay precio sugerido de esa lista: el llamador cae al precio general
+// del producto (ver actualizarFilaVenta), como si no hubiera lista elegida.
 function precioResueltoVenta(producto, lista){
   if (!producto || !lista) return null;
+  if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(id => String(id) === String(producto._id))) return null;
   const overrides = producto.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return ov.precio;
