@@ -130,13 +130,18 @@
          esto ese estilo se filtraba acá y ponía los grupos uno al lado del
          otro en vez de uno debajo del otro. */
       .pn-sidebar-nav { display: block; flex: none; padding: 10px 10px; }
-      .pn-grupo { display: block; margin-bottom: 4px; }
+      .pn-grupo { display: block; margin-bottom: 8px; }
       .pn-grupo-header {
         display: flex; align-items: center; justify-content: space-between; width: 100%;
         background: none; border: none; cursor: pointer; padding: 8px 10px; margin: 2px 0;
-        font-family: inherit; color: var(--muted); text-align: left;
+        font-family: inherit; color: var(--pn-ink); text-align: left;
       }
-      .pn-grupo-header span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+      /* Títulos de grupo más marcados (1/10/2026, pedido de Mato: que se
+         distingan mejor de los módulos de abajo) — antes eran gris clarito
+         y chiquito; ahora van en negro/blanco (según tema), más grandes y
+         con más separación arriba, para que se note que son un encabezado
+         y no otro ítem más. */
+      .pn-grupo-header span { font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
       .pn-grupo-header svg { width: 13px; height: 13px; flex-shrink: 0; transition: transform 0.15s ease; }
       .pn-grupo.pn-colapsado .pn-grupo-header svg { transform: rotate(-90deg); }
       .pn-grupo-items { display: flex; flex-direction: column; gap: 2px; }
