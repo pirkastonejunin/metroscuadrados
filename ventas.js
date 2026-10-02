@@ -755,14 +755,23 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
     if (monto <= 0) throw err(400, 'El monto del cobro tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
+    // Fecha del cobro editable (2/10/2026, pedido de Mato: "la cobranza
+    // deberia dejarnos cambiar la fecha por si en algun momento se pasa y
+    // lo cargamos despues") — por defecto es ahora, como siempre fue.
+    const fecha = body.fecha ? new Date(body.fecha) : new Date();
 
     // Tesorería (2/10/2026): efectivo/cuenta/tarjeta se acredita ya mismo
     // en una caja o banco; cheque crea un cheque de terceros en cartera
     // (no mueve plata todavía — eso pasa al depositarlo, desde Tesorería).
+    // Pedido de Mato: efectivo SOLO puede ir a una caja (no a un banco —
+    // un banco es cuando el cliente hace una transferencia real); cuenta
+    // (transferencia) y tarjeta solo pueden ir a un banco.
     let cuentaTipo = null, cuentaId = null;
     if (tipoValor !== 'cheque') {
       cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
       if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí a qué caja o banco va el cobro.');
+      if (tipoValor === 'efectivo' && cuentaTipo !== 'caja') throw err(400, 'Un cobro en efectivo solo puede ir a una caja.');
+      if ((tipoValor === 'cuenta' || tipoValor === 'tarjeta') && cuentaTipo !== 'banco') throw err(400, 'Un cobro por transferencia o tarjeta solo puede ir a un banco.');
       cuentaId = toObjectId(body.cuentaId);
       if (!cuentaId) throw err(400, 'Caja/banco inválido');
     }
@@ -773,12 +782,31 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         numero: normalizarTexto(body.chequeNumero),
         banco: normalizarTexto(body.chequeBanco),
         librador: normalizarTexto(body.chequeLibrador),
-        fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : new Date(),
+        // CUIT del librador (2/10/2026, pedido de Mato).
+        cuitLibrador: normalizarTexto(body.chequeCuitLibrador),
+        fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : fecha,
         fechaVencimiento: body.chequeFechaVencimiento ? new Date(body.chequeFechaVencimiento) : null,
         observaciones: normalizarTexto(body.chequeObservaciones)
       };
       if (!chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
       if (!chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
+    }
+
+    // Tarjeta (2/10/2026, pedido de Mato: "las tarjetas esta bastante
+    // incompleta" — Dux pide lote y cupón al cobrar con tarjeta; se suman
+    // también entidad/tipo/cuotas/código de autorización, que no están
+    // enumerados en el artículo de Dux pero son los datos habituales de un
+    // cupón de tarjeta real — razonamiento propio, documentado acá).
+    let tarjetaDatos = null;
+    if (tipoValor === 'tarjeta') {
+      tarjetaDatos = {
+        tarjetaEntidad: normalizarTexto(body.tarjetaEntidad),
+        tarjetaTipo: normalizarTexto(body.tarjetaTipo).toLowerCase(),
+        tarjetaCuotas: body.tarjetaCuotas ? Number(body.tarjetaCuotas) : 1,
+        tarjetaLote: normalizarTexto(body.tarjetaLote),
+        tarjetaCupon: normalizarTexto(body.tarjetaCupon),
+        tarjetaCodigoAutorizacion: normalizarTexto(body.tarjetaCodigoAutorizacion)
+      };
     }
 
     const resultado = await conReintento(async () => {
@@ -795,18 +823,26 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
           tipo: 'tercero', moneda: venta.moneda || 'ARS', monto, estado: 'en_cartera',
           clienteId: venta.clienteId || null, clienteNombre: venta.clienteNombre || '',
           ventaId: id, compraId: null, cuentaId: null, depositadoEnCuentaId: null, endosadoA: null,
-          usuarioNombre, fecha: new Date(), orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
+          usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
         }, chequeDatos);
         const { insertedId } = await db.collection('cheques').insertOne(cheque);
         chequeId = insertedId;
       } else {
+        const observacionesMovimiento = tipoValor === 'tarjeta'
+          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
+          : nota;
         await aplicarMovimientoCuenta(db, req, {
           cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda: venta.moneda || 'ARS',
-          motivo: `Cobro venta Nº ${venta.numero}`, observaciones: nota, origen: 'venta', ventaId: id
+          motivo: `Cobro venta Nº ${venta.numero}`, observaciones: observacionesMovimiento, origen: 'venta', ventaId: id, fecha
         });
       }
 
-      const pago = Object.assign({ tipoValor, monto, fecha: new Date(), nota, usuarioNombre }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {});
+      const pago = Object.assign(
+        { tipoValor, monto, fecha, nota, usuarioNombre },
+        cuentaTipo ? { cuentaTipo, cuentaId } : {},
+        chequeId ? { chequeId } : {},
+        tarjetaDatos || {}
+      );
       const totalCobrado = (venta.totalCobrado || 0) + monto;
       const saldoPendiente = Math.max(0, venta.total - totalCobrado);
       await db.collection('ventas').updateOne(

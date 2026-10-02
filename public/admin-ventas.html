@@ -1070,16 +1070,28 @@ async function confirmarEntregar(id){
 // Tesorería (2/10/2026): efectivo/cuenta/tarjeta tienen que decir a qué
 // caja o banco se acredita; cheque pide los datos del cheque de tercero
 // en vez de una cuenta (entra "en cartera", no mueve plata todavía).
-function opcionesCuentaCobro(){
-  const cajas = cajasTesoreriaCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (saldo ${money(c.saldo)})</option>`);
-  const bancos = bancosTesoreriaCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`);
-  const opciones = cajas.concat(bancos).join('');
-  return opciones || '<option value="">No tenés ninguna caja/banco habilitada — pedile a un administrador que te habilite una desde Configuración</option>';
+// Pedido de Mato (2/10/2026): efectivo SOLO puede ir a una caja (un banco
+// es cuando el cliente hace una transferencia real); cuenta (transferencia)
+// y tarjeta solo pueden ir a un banco.
+function opcionesCuentaCobro(tipoValor){
+  if (tipoValor === 'efectivo') {
+    return cajasTesoreriaCache.map(c => `<option value="caja:${c._id}">${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)}, saldo ${money(c.saldo)})</option>`).join('')
+      || '<option value="">No tenés ninguna caja habilitada — pedile a un administrador que te habilite una desde Configuración</option>';
+  }
+  return bancosTesoreriaCache.map(b => `<option value="banco:${b._id}">${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`).join('')
+    || '<option value="">No tenés ningún banco habilitado — pedile a un administrador que te habilite uno desde Configuración</option>';
 }
 function actualizarTipoValorCobro(){
-  const esCheque = document.getElementById('ncTipoValor').value === 'cheque';
+  const tipoValor = document.getElementById('ncTipoValor').value;
+  const esCheque = tipoValor === 'cheque';
+  const esTarjeta = tipoValor === 'tarjeta';
   document.getElementById('ncCuentaWrap').classList.toggle('hidden', esCheque);
   document.getElementById('ncChequeWrap').classList.toggle('hidden', !esCheque);
+  document.getElementById('ncTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (!esCheque) {
+    document.getElementById('ncCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
+    document.getElementById('ncCuenta').innerHTML = opcionesCuentaCobro(tipoValor);
+  }
 }
 function abrirCobro(id){
   const v = ventasCache.find(x => x._id === id);
@@ -1091,10 +1103,13 @@ function abrirCobro(id){
         <h2>Registrar cobro — venta #${v.numero}</h2>
         <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
         <div class="grid2">
-          <div><label>Tipo de valor *</label><select id="ncTipoValor" onchange="actualizarTipoValorCobro()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Tipo de valor *</label><select id="ncTipoValor" onchange="actualizarTipoValorCobro()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
           <div><label>Monto *</label><input id="ncMonto" type="number" min="0.01" step="0.01" value="${v.saldoPendiente}"></div>
         </div>
-        <div id="ncCuentaWrap" style="margin-top:10px"><label>¿A qué caja/banco va? *</label><select id="ncCuenta">${opcionesCuentaCobro()}</select></div>
+        <div class="grid2" style="margin-top:10px">
+          <div id="ncCuentaWrap"><label id="ncCuentaLabel">¿A qué caja va? *</label><select id="ncCuenta">${opcionesCuentaCobro('efectivo')}</select></div>
+          <div><label>Fecha *</label><input id="ncFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
         <div id="ncChequeWrap" class="hidden" style="margin-top:10px">
           <div class="grid2">
             <div><label>Número de cheque *</label><input id="ncChequeNumero"></div>
@@ -1102,7 +1117,25 @@ function abrirCobro(id){
           </div>
           <div class="grid2" style="margin-top:10px">
             <div><label>Librador</label><input id="ncChequeLibrador" placeholder="Si es distinto del cliente"></div>
+            <div><label>CUIT del librador</label><input id="ncChequeCuit" placeholder="Opcional"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Fecha de emisión</label><input id="ncChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
             <div><label>Vencimiento *</label><input id="ncChequeVencimiento" type="date"></div>
+          </div>
+        </div>
+        <div id="ncTarjetaWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Entidad/tarjeta</label><input id="ncTarjetaEntidad" placeholder="Ej: Visa, Mastercard"></div>
+            <div><label>Tipo</label><select id="ncTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Cuotas</label><input id="ncTarjetaCuotas" type="number" min="1" step="1" value="1"></div>
+            <div><label>Lote *</label><input id="ncTarjetaLote"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Cupón *</label><input id="ncTarjetaCupon"></div>
+            <div><label>Código de autorización</label><input id="ncTarjetaCodigoAutorizacion" placeholder="Opcional"></div>
           </div>
         </div>
         <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
@@ -1118,6 +1151,7 @@ async function confirmarCobro(id){
   const body = {
     tipoValor,
     monto: Number(document.getElementById('ncMonto').value),
+    fecha: document.getElementById('ncFecha').value,
     nota: document.getElementById('ncNota').value.trim()
   };
   if (!body.monto || body.monto <= 0) { document.getElementById('ncErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
@@ -1125,15 +1159,27 @@ async function confirmarCobro(id){
     body.chequeNumero = document.getElementById('ncChequeNumero').value.trim();
     body.chequeBanco = document.getElementById('ncChequeBanco').value.trim();
     body.chequeLibrador = document.getElementById('ncChequeLibrador').value.trim();
+    body.chequeCuitLibrador = document.getElementById('ncChequeCuit').value.trim();
+    body.chequeFechaEmision = document.getElementById('ncChequeFechaEmision').value;
     body.chequeFechaVencimiento = document.getElementById('ncChequeVencimiento').value;
     if (!body.chequeNumero) { document.getElementById('ncErr').textContent = 'Falta el número de cheque'; return; }
     if (!body.chequeFechaVencimiento) { document.getElementById('ncErr').textContent = 'Falta la fecha de vencimiento del cheque'; return; }
   } else {
     const cuenta = document.getElementById('ncCuenta').value;
-    if (!cuenta) { document.getElementById('ncErr').textContent = 'Elegí a qué caja o banco va el cobro'; return; }
+    if (!cuenta) { document.getElementById('ncErr').textContent = tipoValor === 'efectivo' ? 'Elegí a qué caja va el cobro' : 'Elegí a qué banco va el cobro'; return; }
     const [cuentaTipo, cuentaId] = cuenta.split(':');
     body.cuentaTipo = cuentaTipo;
     body.cuentaId = cuentaId;
+    if (tipoValor === 'tarjeta') {
+      body.tarjetaEntidad = document.getElementById('ncTarjetaEntidad').value.trim();
+      body.tarjetaTipo = document.getElementById('ncTarjetaTipo').value;
+      body.tarjetaCuotas = Number(document.getElementById('ncTarjetaCuotas').value) || 1;
+      body.tarjetaLote = document.getElementById('ncTarjetaLote').value.trim();
+      body.tarjetaCupon = document.getElementById('ncTarjetaCupon').value.trim();
+      body.tarjetaCodigoAutorizacion = document.getElementById('ncTarjetaCodigoAutorizacion').value.trim();
+      if (!body.tarjetaLote) { document.getElementById('ncErr').textContent = 'Falta el número de lote'; return; }
+      if (!body.tarjetaCupon) { document.getElementById('ncErr').textContent = 'Falta el número de cupón'; return; }
+    }
   }
   try{
     const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});

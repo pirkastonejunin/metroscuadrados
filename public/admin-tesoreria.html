@@ -482,6 +482,10 @@ function abrirNuevoCheque(){
           <div><label>Banco (texto, de terceros)</label><input id="ncqBancoTexto" placeholder="Banco emisor del cheque"></div>
           <div><label>Banco propio (cuenta, si es propio)</label><select id="ncqCuentaPropia">${opcionesBancoCheque()}</select></div>
         </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>CUIT del librador (de terceros)</label><input id="ncqCuitLibrador" placeholder="Opcional"></div>
+          <div><label>Fecha de emisión</label><input id="ncqFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
         <div style="margin-top:10px"><label>Cliente o proveedor (texto libre)</label><input id="ncqTercero" placeholder="Nombre"></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="ncqObservaciones"></textarea></div>
         <div class="err" id="ncqErr"></div>
@@ -498,11 +502,13 @@ async function guardarChequeSuelto(){
     tipo,
     monto: Number(document.getElementById('ncqMonto').value),
     numero: document.getElementById('ncqNumero').value.trim(),
+    fechaEmision: document.getElementById('ncqFechaEmision').value,
     fechaVencimiento: document.getElementById('ncqVencimiento').value,
     observaciones: document.getElementById('ncqObservaciones').value.trim()
   };
   if (tipo === 'tercero') {
     body.banco = document.getElementById('ncqBancoTexto').value.trim();
+    body.cuitLibrador = document.getElementById('ncqCuitLibrador').value.trim();
     body.clienteNombre = document.getElementById('ncqTercero').value.trim();
   } else {
     body.cuentaId = document.getElementById('ncqCuentaPropia').value;
@@ -545,6 +551,10 @@ function verCheque(id){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Cheque ${escapeHtml(c.numero||'')} <span class="pill ${c.estado}">${ESTADO_CHEQUE_LABEL[c.estado]||c.estado}</span></h2>
         <p class="muted" style="margin-top:-8px">${c.tipo === 'tercero' ? 'De tercero' : 'Propio'} — ${escapeHtml(c.tipo==='tercero'?(c.clienteNombre||''):(c.proveedorNombre||''))}</p>
+        ${c.tipo === 'tercero' && c.cuitLibrador ? `<div class="row" style="justify-content:space-between"><span class="muted">CUIT librador</span><strong>${escapeHtml(c.cuitLibrador)}</strong></div>` : ''}
+        <div class="row" style="justify-content:space-between">
+          <span class="muted">Emisión</span><strong>${fechaCorta(c.fechaEmision)}</strong>
+        </div>
         <div class="row" style="justify-content:space-between">
           <span class="muted">Vencimiento</span><strong>${fechaCorta(c.fechaVencimiento)}</strong>
         </div>
