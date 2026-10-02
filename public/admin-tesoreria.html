@@ -54,7 +54,13 @@
   .muted{color:var(--muted);font-size:12px;}
   .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
   .modal{background:var(--card);border-radius:16px;padding:20px;max-width:560px;width:100%;box-shadow:var(--shadow);}
+  .modal.wide{max-width:720px;}
   .modal h2{margin-top:0;font-size:16px;}
+  .campo-combo-cliente{position:relative;}
+  .producto-buscar-opciones{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:var(--shadow);}
+  .producto-buscar-opciones .opcion{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .producto-buscar-opciones .opcion:hover,.producto-buscar-opciones .opcion.activa{background:var(--accent-soft);}
+  .producto-buscar-opciones .sin-resultados{padding:8px 10px;font-size:13px;color:var(--muted);}
   .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
   .err{color:var(--danger);font-size:13px;margin:6px 0;}
   #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
@@ -170,7 +176,10 @@
               <input id="fmHasta" type="date" onchange="cargarMovimientos()">
             </div>
           </div>
-          <button class="btn" onclick="abrirMovimientoManual()">+ Movimiento manual</button>
+          <div class="row">
+            <button class="btn secondary" onclick="abrirCobroCuentaCliente()">+ Cobro a cuenta de cliente</button>
+            <button class="btn" onclick="abrirMovimientoManual()">+ Movimiento manual</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -390,6 +399,203 @@ async function guardarMovimientoManual(){
   if (!body.monto || body.monto <= 0) { errEl.textContent = 'El monto tiene que ser mayor a 0'; return; }
   try{
     const r = await fetch(BASE + '/movimientos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal();
+    await cargarSaldos();
+    if (!document.getElementById('tab-movimientos').classList.contains('hidden')) await cargarMovimientos();
+  }catch(e){ errEl.textContent = e.message; }
+}
+
+// -------------------------------------------------------------------
+// Cobro a cuenta de cliente (2/10/2026, pedido de Mato: "tambien en
+// tesoreria deberiamos poder realizar una cobranza en la cuenta del
+// cliente") — un cobro que no está atado a una venta puntual, ver
+// POST /cobros-cuenta-cliente en tesoreria.js. Mismo buscador de cliente
+// tipo combobox que usa Nueva Venta en admin-ventas.html, y las mismas
+// reglas de tipo de valor que un cobro de venta (efectivo solo a caja,
+// cuenta/tarjeta solo a banco, cheque entra en cartera) — se repite acá,
+// mismo criterio que el resto de la app: cada pantalla mantiene su
+// propia copia mínima en vez de requerir otro archivo.
+// -------------------------------------------------------------------
+let clientesCache = [];
+let clientesCargados = false;
+async function asegurarClientesCargados(){
+  if (clientesCargados) return;
+  const r = await fetch('/api/clientes', {headers: headersAuth()});
+  if (r.ok) { clientesCache = await r.json(); clientesCargados = true; }
+}
+function textoClienteCC(c){ return c.apellidoRazonSocial || c.nombre || '(sin nombre)'; }
+const LIMITE_SUGERENCIAS_CLIENTE_CC = 30;
+function buscarClientesComboCC(query){
+  const q = (query || '').trim().toLowerCase();
+  const resultados = q ? clientesCache.filter(c => textoClienteCC(c).toLowerCase().includes(q)) : clientesCache;
+  return resultados.slice(0, LIMITE_SUGERENCIAS_CLIENTE_CC);
+}
+function comboClienteHtmlCC(){
+  return `
+    <div class="campo-combo-cliente" id="ccClienteWrap">
+      <input type="text" id="ccBuscar" autocomplete="off" placeholder="Buscar cliente…"
+        oninput="escribirClienteComboCC(this)" onfocus="renderOpcionesClienteComboCC(this.value)"
+        onblur="cerrarOpcionesClienteComboCC()" onkeydown="navegarOpcionesClienteComboCC(event)">
+      <input type="hidden" id="ccCliente" value="">
+      <div class="producto-buscar-opciones hidden" id="ccClienteOpciones"></div>
+    </div>
+  `;
+}
+function renderOpcionesClienteComboCC(query){
+  const cont = document.getElementById('ccClienteOpciones');
+  const resultados = buscarClientesComboCC(query);
+  cont.innerHTML = resultados.length
+    ? resultados.map(c => `<div class="opcion" data-id="${c._id}" onmousedown="elegirClienteComboCC(this)">${escapeHtml(textoClienteCC(c))}</div>`).join('')
+    : `<div class="sin-resultados">${clientesCache.length ? 'Sin resultados para esa búsqueda' : 'No hay clientes cargados'}</div>`;
+  cont.classList.remove('hidden');
+}
+function escribirClienteComboCC(input){
+  document.getElementById('ccCliente').value = '';
+  renderOpcionesClienteComboCC(input.value);
+}
+function cerrarOpcionesClienteComboCC(){
+  setTimeout(() => { const cont = document.getElementById('ccClienteOpciones'); if (cont) cont.classList.add('hidden'); }, 150);
+}
+function navegarOpcionesClienteComboCC(e){
+  const cont = document.getElementById('ccClienteOpciones');
+  if (cont.classList.contains('hidden')) return;
+  const opciones = Array.from(cont.querySelectorAll('.opcion'));
+  if (!opciones.length) return;
+  let idx = opciones.findIndex(o => o.classList.contains('activa'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(opciones.length - 1, idx + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); elegirClienteComboCC(opciones[idx >= 0 ? idx : 0]); return; }
+  else if (e.key === 'Escape') { cont.classList.add('hidden'); return; }
+  else return;
+  opciones.forEach(o => o.classList.remove('activa'));
+  opciones[idx].classList.add('activa');
+  opciones[idx].scrollIntoView({ block: 'nearest' });
+}
+function elegirClienteComboCC(el){
+  const clienteId = el.dataset.id;
+  const cliente = clientesCache.find(c => String(c._id) === clienteId);
+  document.getElementById('ccCliente').value = clienteId;
+  document.getElementById('ccBuscar').value = cliente ? textoClienteCC(cliente) : '';
+  document.getElementById('ccClienteOpciones').classList.add('hidden');
+}
+
+// Mismas reglas que ventas.js POST /:id/pagos: efectivo solo a caja;
+// cuenta (transferencia) y tarjeta solo a banco.
+function opcionesCuentaCobroCC(tipoValor){
+  if (tipoValor === 'efectivo') {
+    return cajasCache.map(c => `<option value="caja:${c._id}">${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)}, saldo ${money(c.saldo)})</option>`).join('')
+      || '<option value="">No tenés ninguna caja habilitada — pedile a un administrador que te habilite una desde Configuración</option>';
+  }
+  return bancosCache.map(b => `<option value="banco:${b._id}">${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`).join('')
+    || '<option value="">No tenés ningún banco habilitado — pedile a un administrador que te habilite uno desde Configuración</option>';
+}
+function actualizarTipoValorCobroCC(){
+  const tipoValor = document.getElementById('ccTipoValor').value;
+  const esCheque = tipoValor === 'cheque';
+  const esTarjeta = tipoValor === 'tarjeta';
+  document.getElementById('ccCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('ccChequeWrap').classList.toggle('hidden', !esCheque);
+  document.getElementById('ccTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (!esCheque) {
+    document.getElementById('ccCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
+    document.getElementById('ccCuenta').innerHTML = opcionesCuentaCobroCC(tipoValor);
+  }
+}
+async function abrirCobroCuentaCliente(){
+  await asegurarClientesCargados();
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Cobro a cuenta de cliente</h2>
+        <p class="muted" style="margin-top:-6px">Un cobro que no está atado a una venta puntual — reduce directamente el saldo de la cuenta corriente del cliente.</p>
+        <div style="margin-top:10px"><label>Cliente *</label>${comboClienteHtmlCC()}</div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Tipo de valor *</label><select id="ccTipoValor" onchange="actualizarTipoValorCobroCC()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Monto *</label><input id="ccMonto" type="number" min="0.01" step="0.01"></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div id="ccCuentaWrap"><label id="ccCuentaLabel">¿A qué caja va? *</label><select id="ccCuenta">${opcionesCuentaCobroCC('efectivo')}</select></div>
+          <div><label>Fecha *</label><input id="ccFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div id="ccChequeWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Número de cheque *</label><input id="ccChequeNumero"></div>
+            <div><label>Banco emisor</label><input id="ccChequeBanco"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Librador</label><input id="ccChequeLibrador" placeholder="Si es distinto del cliente"></div>
+            <div><label>CUIT del librador</label><input id="ccChequeCuit" placeholder="Opcional"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Fecha de emisión</label><input id="ccChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Vencimiento *</label><input id="ccChequeVencimiento" type="date"></div>
+          </div>
+        </div>
+        <div id="ccTarjetaWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Entidad/tarjeta</label><input id="ccTarjetaEntidad" placeholder="Ej: Visa, Mastercard"></div>
+            <div><label>Tipo</label><select id="ccTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Cuotas</label><input id="ccTarjetaCuotas" type="number" min="1" step="1" value="1"></div>
+            <div><label>Lote *</label><input id="ccTarjetaLote"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Cupón *</label><input id="ccTarjetaCupon"></div>
+            <div><label>Código de autorización</label><input id="ccTarjetaCodigoAutorizacion" placeholder="Opcional"></div>
+          </div>
+        </div>
+        <div style="margin-top:10px"><label>Nota</label><input id="ccNota" placeholder="Opcional"></div>
+        <div class="err" id="ccErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarCobroCuentaCliente()">Registrar</button>
+      </div>
+    </div>
+  `;
+}
+async function confirmarCobroCuentaCliente(){
+  const errEl = document.getElementById('ccErr');
+  errEl.textContent = '';
+  const clienteId = document.getElementById('ccCliente').value;
+  if (!clienteId) { errEl.textContent = 'Elegí un cliente'; return; }
+  const tipoValor = document.getElementById('ccTipoValor').value;
+  const body = {
+    clienteId, tipoValor,
+    monto: Number(document.getElementById('ccMonto').value),
+    fecha: document.getElementById('ccFecha').value,
+    nota: document.getElementById('ccNota').value.trim()
+  };
+  if (!body.monto || body.monto <= 0) { errEl.textContent = 'El monto tiene que ser mayor a 0'; return; }
+  if (tipoValor === 'cheque') {
+    body.chequeNumero = document.getElementById('ccChequeNumero').value.trim();
+    body.chequeBanco = document.getElementById('ccChequeBanco').value.trim();
+    body.chequeLibrador = document.getElementById('ccChequeLibrador').value.trim();
+    body.chequeCuitLibrador = document.getElementById('ccChequeCuit').value.trim();
+    body.chequeFechaEmision = document.getElementById('ccChequeFechaEmision').value;
+    body.chequeFechaVencimiento = document.getElementById('ccChequeVencimiento').value;
+    if (!body.chequeNumero) { errEl.textContent = 'Falta el número de cheque'; return; }
+    if (!body.chequeFechaVencimiento) { errEl.textContent = 'Falta la fecha de vencimiento del cheque'; return; }
+  } else {
+    const cuenta = document.getElementById('ccCuenta').value;
+    if (!cuenta) { errEl.textContent = tipoValor === 'efectivo' ? 'Elegí a qué caja va el cobro' : 'Elegí a qué banco va el cobro'; return; }
+    const [cuentaTipo, cuentaId] = cuenta.split(':');
+    body.cuentaTipo = cuentaTipo;
+    body.cuentaId = cuentaId;
+    if (tipoValor === 'tarjeta') {
+      body.tarjetaEntidad = document.getElementById('ccTarjetaEntidad').value.trim();
+      body.tarjetaTipo = document.getElementById('ccTarjetaTipo').value;
+      body.tarjetaCuotas = Number(document.getElementById('ccTarjetaCuotas').value) || 1;
+      body.tarjetaLote = document.getElementById('ccTarjetaLote').value.trim();
+      body.tarjetaCupon = document.getElementById('ccTarjetaCupon').value.trim();
+      body.tarjetaCodigoAutorizacion = document.getElementById('ccTarjetaCodigoAutorizacion').value.trim();
+      if (!body.tarjetaLote) { errEl.textContent = 'Falta el número de lote'; return; }
+      if (!body.tarjetaCupon) { errEl.textContent = 'Falta el número de cupón'; return; }
+    }
+  }
+  try{
+    const r = await fetch(BASE + '/cobros-cuenta-cliente', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();

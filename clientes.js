@@ -60,7 +60,9 @@ async function asegurarIndices(db) {
     await Promise.all([
       col.createIndex({ orgId: 1, activo: 1, apellidoRazonSocial: 1 }),
       col.createIndex({ orgId: 1, cuit: 1 }),
-      col.createIndex({ orgId: 1, codigo: 1 })
+      col.createIndex({ orgId: 1, codigo: 1 }),
+      db.collection('cuenta_corriente_movimientos').createIndex({ clienteId: 1, fecha: -1, createdAt: -1 }),
+      db.collection('cuenta_corriente_saldos').createIndex({ clienteId: 1 }, { unique: true })
     ]);
   } catch (e) {
     indicesListos = false;
@@ -99,6 +101,68 @@ const CATEGORIAS_FISCALES_VALIDAS = ['consumidor_final', 'exento', 'monotributis
 const TIPOS_DOCUMENTO_VALIDOS = ['cuil', 'cuit', 'dni', 'pasaporte'];
 const SEXOS_VALIDOS = ['femenino', 'masculino'];
 const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_venta', 'factura'];
+const TIPOS_MOVIMIENTO_CC_VALIDOS = ['debito', 'credito'];
+
+// -----------------------------------------------------------------------
+// Cuenta corriente — libro de deuda/pago por cliente, independiente de en
+// qué caja/banco entró la plata (eso lo lleva Tesorería). Pedido de Mato
+// (2/10/2026): "tambien en tesoreria deberiamos poder realizar una
+// cobranza en la cuenta del cliente, para lo que tenemos que crear la
+// cuenta corriente del cliente para ver los movimientos dentro de la
+// ficha del cliente".
+//
+// Débito = el cliente debe más (se genera una venta, por el total).
+// Crédito = el cliente debe menos (un cobro, atado a una venta puntual o
+// "a cuenta" sin venta puntual). Un cobro contra una venta (ventas.js
+// POST /:id/pagos) genera acá un crédito Y, por separado, el ingreso de
+// plata de verdad en Tesorería (aplicarMovimientoCuenta, en tesoreria.js)
+// — son dos cosas distintas: una es "cuánto me debe el cliente", la otra
+// es "en qué caja/banco está la plata". Un "cobro a cuenta" desde
+// Tesorería (sin venta puntual, ver POST /cobros-cuenta-cliente en
+// tesoreria.js) solo toca esta cuenta corriente (y, si no es cheque,
+// también Tesorería) — no hay una venta puntual a la que reducirle el
+// saldo.
+//
+// Mismo criterio que aplicarMovimientoCuenta en tesoreria.js: esto SÍ se
+// comparte entre routers (en vez de reimplementarlo en cada uno), porque
+// es lógica de negocio sensible al dinero, no una lectura liviana para
+// armar un formulario. Se cuelga de `router` (no de `module.exports`
+// directamente) por el mismo motivo documentado en tesoreria.js: más
+// abajo `module.exports = router` reemplaza el objeto exports entero, y
+// dejarla en module.exports acá se perdería sin avisar.
+//
+// Colecciones nuevas:
+//   cuenta_corriente_movimientos: { clienteId, clienteNombre, tipo
+//     (debito/credito), monto, moneda, concepto, origen
+//     (venta/cobro_venta/cobro_cuenta), ventaId, chequeId, observaciones,
+//     usuarioNombre, fecha, orgId, createdAt } — libro inmutable, sin
+//     PUT/DELETE, mismo criterio que tesoreria_movimientos/stock_movimientos.
+//   cuenta_corriente_saldos: { clienteId, saldo, actualizadoEn } — caché
+//     por cliente, actualizado con $inc en cada movimiento (saldo > 0 =
+//     el cliente debe; saldo < 0 = tiene a favor / pagó por adelantado).
+// -----------------------------------------------------------------------
+async function registrarMovimientoCuentaCorriente(db, req, { clienteId, clienteNombre, tipo, monto, moneda, concepto, origen, ventaId, chequeId, observaciones, fecha }) {
+  if (!clienteId) throw err(400, 'Falta el cliente');
+  if (!TIPOS_MOVIMIENTO_CC_VALIDOS.includes(tipo)) throw err(400, 'Tipo de movimiento de cuenta corriente inválido');
+  const montoNum = Number(monto);
+  if (!Number.isFinite(montoNum) || montoNum <= 0) throw err(400, 'El monto tiene que ser mayor a 0');
+  const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+  const movimiento = {
+    clienteId, clienteNombre: clienteNombre || '', tipo, monto: montoNum, moneda: moneda || 'ARS',
+    concepto: concepto || '', origen: origen || 'manual',
+    ventaId: ventaId || null, chequeId: chequeId || null, observaciones: observaciones || '',
+    usuarioNombre, fecha: fecha || new Date(), orgId: req.orgId, createdAt: new Date()
+  };
+  await db.collection('cuenta_corriente_movimientos').insertOne(movimiento);
+  const delta = tipo === 'debito' ? montoNum : -montoNum;
+  await db.collection('cuenta_corriente_saldos').updateOne(
+    { clienteId },
+    { $inc: { saldo: delta }, $set: { actualizadoEn: new Date() }, $setOnInsert: { clienteId } },
+    { upsert: true }
+  );
+  return movimiento;
+}
+router.registrarMovimientoCuentaCorriente = registrarMovimientoCuentaCorriente;
 
 // Columnas del Excel de import/export (30/9/2026, pedido de Mato: "todas
 // las bases tengo que tener la posibilidad de importar y exportar") — ver
@@ -367,6 +431,31 @@ router.delete('/:id', authAdmin, async (req, res) => {
       if (!r.matchedCount) throw err(404, 'Cliente no encontrado');
     });
     res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Cuenta corriente de un cliente — historial de movimientos (ventas que
+// generan deuda, cobros que la reducen, atados o no a una venta puntual)
+// más el saldo actual. Pensada para mostrarse dentro de la ficha del
+// cliente (ver comentario de registrarMovimientoCuentaCorriente arriba).
+// -----------------------------------------------------------------------
+router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const limite = Math.min(Number(req.query.limite) || 300, 1000);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!cliente) throw err(404, 'Cliente no encontrado');
+      const [movimientos, saldoDoc] = await Promise.all([
+        db.collection('cuenta_corriente_movimientos').find({ clienteId: id }).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray(),
+        db.collection('cuenta_corriente_saldos').findOne({ clienteId: id })
+      ]);
+      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

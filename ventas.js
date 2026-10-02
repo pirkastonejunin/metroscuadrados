@@ -29,11 +29,13 @@
 //     mezclan acá.
 //   - "Vendedor" es texto libre (por defecto, quien carga la venta) — no
 //     hay todavía un módulo de Personal/empleados separado de Usuarios.
-//   - Cobranza simplificada: se registran cobros (pagos) contra la venta,
-//     con su saldo pendiente, pero NO se construye un mayor de cuenta
-//     corriente por cliente (eso es parte de la etapa grande de
-//     Facturación electrónica/cuenta corriente, ver roadmap) — el saldo
-//     vive únicamente a nivel de cada venta.
+//   - Cobranza: se registran cobros (pagos) contra la venta, con su saldo
+//     pendiente a nivel de cada venta. Desde el 2/10/2026 además se
+//     mantiene un mayor de cuenta corriente POR CLIENTE (débito al crear
+//     la venta, crédito al cobrarla o al cobrar "a cuenta" desde
+//     Tesorería sin venta puntual) — ver registrarMovimientoCuentaCorriente
+//     en clientes.js. Sigue faltando la etapa grande de Facturación
+//     electrónica (AFIP), eso no cambió.
 //   - "Entrega inmediata" aplica el egreso de stock en el momento de crear
 //     la venta (mismo momento que en Dux). Una venta creada como "no
 //     entrega" queda `pendiente` y se puede entregar después
@@ -76,6 +78,9 @@ const { exportarXlsx } = require('./importExport');
 // tesoreria.js (en vez de reimplementarlas) porque son lógica de
 // negocio sensible al dinero — ver la nota en tesoreria.js.
 const { aplicarMovimientoCuenta, cuentaHabilitada } = require('./tesoreria');
+// Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
+// comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
+const { registrarMovimientoCuentaCorriente } = require('./clientes');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -648,6 +653,17 @@ router.post('/', authAdmin, async (req, res) => {
 
       const r = await db.collection('ventas').insertOne(venta);
       venta._id = r.insertedId;
+
+      // Cuenta corriente del cliente (2/10/2026, pedido de Mato): la
+      // venta genera deuda por el total — Nueva Venta no carga cobros en
+      // el mismo paso, así que siempre arranca en saldoPendiente = total.
+      if (total > 0) {
+        await registrarMovimientoCuentaCorriente(db, req, {
+          clienteId, clienteNombre: venta.clienteNombre, tipo: 'debito', monto: total, moneda,
+          concepto: `Venta Nº ${numero}`, origen: 'venta', ventaId: venta._id, fecha
+        });
+      }
+
       // El stock se COMPROMETE siempre, sea cual sea el tipo de entrega —
       // queda reservado desde que se carga la venta.
       await comprometerStockDeVenta(db, req, items, depositoId);
@@ -728,6 +744,17 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
         await reingresarStockDeVenta(db, req, venta);
       } else {
         await liberarCompromisoDeVenta(db, req, venta);
+      }
+
+      // Cuenta corriente del cliente (2/10/2026): al anular, se le
+      // devuelve al cliente la deuda que le quedaba pendiente de ESTA
+      // venta (lo ya cobrado ya generó su propio crédito al cobrarse —
+      // acá solo se cancela lo que faltaba).
+      if (venta.saldoPendiente > 0) {
+        await registrarMovimientoCuentaCorriente(db, req, {
+          clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto: venta.saldoPendiente, moneda: venta.moneda || 'ARS',
+          concepto: `Anulación venta Nº ${venta.numero}`, origen: 'venta', ventaId: venta._id, observaciones: motivo
+        });
       }
 
       const ahora = new Date();
@@ -849,6 +876,15 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         { _id: id },
         { $push: { pagos: pago }, $set: { totalCobrado, saldoPendiente, updatedAt: new Date() } }
       );
+
+      // Cuenta corriente del cliente (2/10/2026): el cobro reduce la
+      // deuda, además del ingreso real en Tesorería (o el cheque en
+      // cartera) ya aplicado arriba.
+      await registrarMovimientoCuentaCorriente(db, req, {
+        clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto, moneda: venta.moneda || 'ARS',
+        concepto: `Cobro venta Nº ${venta.numero}`, origen: 'cobro_venta', ventaId: id, chequeId, fecha
+      });
+
       return db.collection('ventas').findOne({ _id: id });
     });
     res.json(resultado);

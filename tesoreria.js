@@ -47,8 +47,11 @@
 //     emitir un cheque propio para cualquier pago, no solo a un
 //     proveedor cargado en Compras) — si se asocia a una compra, se
 //     resuelve igual que un pago común de Compras.
-//   - Sin cuenta corriente por cliente/proveedor (misma salvedad que
-//     Ventas/Compras) y sin conciliación bancaria automática.
+//   - Cuenta corriente por CLIENTE agregada el 2/10/2026 (pedido de
+//     Mato) — ver POST /cobros-cuenta-cliente más abajo y
+//     registrarMovimientoCuentaCorriente en clientes.js. Sigue sin haber
+//     cuenta corriente de PROVEEDOR (no la pidió) ni conciliación
+//     bancaria automática.
 //
 // Colecciones nuevas:
 //   tesoreria_cajas: { nombre, moneda (ARS/USD), sucursalesHabilitadas:
@@ -87,6 +90,9 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+// Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
+// comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
+const { registrarMovimientoCuentaCorriente } = require('./clientes');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -145,6 +151,9 @@ const TIPOS_CUENTA_BANCARIA_VALIDOS = ['cuenta_corriente', 'caja_ahorro'];
 const TIPOS_MOVIMIENTO_VALIDOS = ['ingreso', 'egreso'];
 const ESTADOS_CHEQUE_TERCERO = ['en_cartera', 'depositado', 'rechazado', 'endosado', 'anulado'];
 const ESTADOS_CHEQUE_PROPIO = ['emitido', 'pagado', 'rechazado', 'anulado'];
+// Mismas formas de valor que un cobro de venta (ventas.js) — ver
+// POST /cobros-cuenta-cliente más abajo.
+const TIPOS_VALOR_COBRO_CUENTA_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
 
 const authConfig = [authUsuario, resolverOrg, requiereModulo('usuarios')];
 const authOperar = [authUsuario, resolverOrg, requiereModulo('tesoreria')];
@@ -417,6 +426,108 @@ router.post('/movimientos', authOperar, async (req, res) => {
     const resultado = await conReintento(async () => {
       const db = await getDb();
       await aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, monto, motivo, observaciones, origen: 'manual', fecha });
+      return { ok: true };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Cobro a cuenta de un cliente — un cobro que no está atado a una venta
+// puntual. Pedido de Mato (2/10/2026): "tambien en tesoreria deberiamos
+// poder realizar una cobranza en la cuenta del cliente". Reduce el saldo
+// de la cuenta corriente del cliente (ver clientes.js,
+// registrarMovimientoCuentaCorriente) y, si no es cheque, acredita de
+// verdad una caja/banco (aplicarMovimientoCuenta) — mismas reglas que un
+// cobro de venta: efectivo solo a caja, cuenta/tarjeta solo a banco; un
+// cheque entra "en cartera" (no mueve plata todavía, igual que uno
+// recibido por una venta).
+// -----------------------------------------------------------------------
+router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const clienteId = toObjectId(body.clienteId);
+    if (!clienteId) throw err(400, 'Elegí un cliente');
+    const tipoValor = normalizarTexto(body.tipoValor).toLowerCase();
+    if (!TIPOS_VALOR_COBRO_CUENTA_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_COBRO_CUENTA_VALIDOS.join(', ')})`);
+    const monto = normalizarMontoPositivo(body.monto, 'El monto');
+    const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
+    if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
+    const nota = normalizarTexto(body.nota);
+    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+
+    let cuentaTipo = null, cuentaId = null;
+    if (tipoValor !== 'cheque') {
+      cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
+      if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí a qué caja o banco va el cobro.');
+      if (tipoValor === 'efectivo' && cuentaTipo !== 'caja') throw err(400, 'Un cobro en efectivo solo puede ir a una caja.');
+      if ((tipoValor === 'cuenta' || tipoValor === 'tarjeta') && cuentaTipo !== 'banco') throw err(400, 'Un cobro por transferencia o tarjeta solo puede ir a un banco.');
+      cuentaId = toObjectId(body.cuentaId);
+      if (!cuentaId) throw err(400, 'Caja/banco inválido');
+    }
+
+    let chequeDatos = null;
+    if (tipoValor === 'cheque') {
+      chequeDatos = {
+        numero: normalizarTexto(body.chequeNumero),
+        banco: normalizarTexto(body.chequeBanco),
+        librador: normalizarTexto(body.chequeLibrador),
+        cuitLibrador: normalizarTexto(body.chequeCuitLibrador),
+        fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : fecha,
+        fechaVencimiento: body.chequeFechaVencimiento ? new Date(body.chequeFechaVencimiento) : null,
+        observaciones: normalizarTexto(body.chequeObservaciones)
+      };
+      if (!chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
+      if (!chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
+    }
+
+    let tarjetaDatos = null;
+    if (tipoValor === 'tarjeta') {
+      tarjetaDatos = {
+        tarjetaEntidad: normalizarTexto(body.tarjetaEntidad),
+        tarjetaTipo: normalizarTexto(body.tarjetaTipo).toLowerCase(),
+        tarjetaCuotas: body.tarjetaCuotas ? Number(body.tarjetaCuotas) : 1,
+        tarjetaLote: normalizarTexto(body.tarjetaLote),
+        tarjetaCupon: normalizarTexto(body.tarjetaCupon),
+        tarjetaCodigoAutorizacion: normalizarTexto(body.tarjetaCodigoAutorizacion)
+      };
+      if (!tarjetaDatos.tarjetaLote) throw err(400, 'Falta el número de lote.');
+      if (!tarjetaDatos.tarjetaCupon) throw err(400, 'Falta el número de cupón.');
+    }
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
+      if (!cliente) throw err(404, 'Cliente no encontrado');
+      const clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      let chequeId = null;
+
+      if (tipoValor === 'cheque') {
+        const cheque = Object.assign({
+          tipo: 'tercero', moneda, monto, estado: 'en_cartera',
+          clienteId, clienteNombre,
+          ventaId: null, compraId: null, cuentaId: null, depositadoEnCuentaId: null, endosadoA: null,
+          usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
+        }, chequeDatos);
+        const { insertedId } = await db.collection('cheques').insertOne(cheque);
+        chequeId = insertedId;
+      } else {
+        const observacionesMovimiento = tipoValor === 'tarjeta'
+          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
+          : nota;
+        await aplicarMovimientoCuenta(db, req, {
+          cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda,
+          motivo: `Cobro a cuenta — ${clienteNombre}`, observaciones: observacionesMovimiento,
+          origen: 'cobro_cuenta', fecha
+        });
+      }
+
+      await registrarMovimientoCuentaCorriente(db, req, {
+        clienteId, clienteNombre, tipo: 'credito', monto, moneda,
+        concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId, observaciones: nota, fecha
+      });
+
       return { ok: true };
     });
     res.json(resultado);
