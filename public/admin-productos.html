@@ -814,9 +814,19 @@ function leerArchivoComoBase64(file){
   });
 }
 async function resolverMapeoColumnas(base64, endpointEncabezados, contenedorId){
-  const r = await fetch(BASE + endpointEncabezados, {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || 'Error leyendo las columnas del archivo');
+  // Si el chequeo de encabezados falla por cualquier motivo (red, timeout,
+  // etc.), no debe impedir el import real: seguimos sin mapeo manual, igual
+  // que siempre se hizo antes de que existiera esta función. Esto es una
+  // mejora aditiva, nunca un punto nuevo de falla para el import.
+  let data;
+  try {
+    const r = await fetch(BASE + endpointEncabezados, {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error leyendo las columnas del archivo');
+  } catch (e) {
+    console.warn('No se pudo chequear la equivalencia de columnas, se continúa sin mapeo manual:', e);
+    return {};
+  }
   const faltaAlguna = data.columnas.some(c => !data.sugeridos[c.clave]);
   if (!faltaAlguna) return {}; // todas las columnas matchearon solas con la plantilla
   return new Promise(resolve => {
