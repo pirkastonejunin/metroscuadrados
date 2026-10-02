@@ -131,6 +131,8 @@ const COLUMNAS_STOCK_ACTUAL = [
   { clave: 'nombre', titulo: 'Producto' },
   { clave: 'deposito', titulo: 'Depósito' },
   { clave: 'cantidad', titulo: 'Cantidad', tipo: 'numero' },
+  { clave: 'cantidadComprometida', titulo: 'Comprometido', tipo: 'numero' },
+  { clave: 'disponible', titulo: 'Disponible', tipo: 'numero' },
   { clave: 'unidad', titulo: 'Unidad' },
   { clave: 'cantidadMinima', titulo: 'Cantidad mínima', tipo: 'numero' },
   { clave: 'stockIdeal', titulo: 'Stock ideal', tipo: 'numero' }
@@ -348,6 +350,11 @@ router.get('/actual', authAdmin, async (req, res) => {
         .map(e => {
           const p = productosPorId.get(String(e.productoId));
           const d = depositosPorId.get(String(e.depositoId));
+          // cantidadComprometida (2/10/2026): reservada por ventas que
+          // todavía no generaron remito — ver ventas.js. "Disponible" es
+          // lo que realmente se puede vender de nuevo.
+          const comprometida = e.cantidadComprometida || 0;
+          const disponible = e.cantidad - comprometida;
           return {
             productoId: e.productoId,
             depositoId: e.depositoId,
@@ -355,6 +362,8 @@ router.get('/actual', authAdmin, async (req, res) => {
             nombre: p.nombre,
             deposito: d ? d.nombre : '(depósito eliminado)',
             cantidad: e.cantidad,
+            cantidadComprometida: comprometida,
+            disponible,
             cantidadMinima: p.cantidadMinima != null ? p.cantidadMinima : null,
             stockIdeal: p.stockIdeal != null ? p.stockIdeal : null,
             bajoMinimo: p.cantidadMinima != null && e.cantidad < p.cantidadMinima,
@@ -398,9 +407,11 @@ router.get('/actual/export', authAdmin, async (req, res) => {
         .map(e => {
           const p = productosPorId.get(String(e.productoId));
           const d = depositosPorId.get(String(e.depositoId));
+          const comprometida = e.cantidadComprometida || 0;
           return {
             sku: p.sku, nombre: p.nombre, deposito: d ? d.nombre : '(depósito eliminado)',
-            cantidad: e.cantidad, unidad: p.unidad,
+            cantidad: e.cantidad, cantidadComprometida: comprometida, disponible: e.cantidad - comprometida,
+            unidad: p.unidad,
             cantidadMinima: p.cantidadMinima != null ? p.cantidadMinima : null,
             stockIdeal: p.stockIdeal != null ? p.stockIdeal : null
           };

@@ -360,7 +360,7 @@ function listaPrecioSeleccionadaVenta(){
 // -------------------------------------------------------------------
 // Listado de ventas
 // -------------------------------------------------------------------
-const ESTADO_LABEL = { pendiente: 'Pendiente', entregada: 'Entregada', anulada: 'Anulada' };
+const ESTADO_LABEL = { pendiente: 'Pendiente (stock comprometido)', entregada: 'Entregada (remito generado)', anulada: 'Anulada' };
 let ventasCache = [];
 
 async function cargarVentas(){
@@ -520,9 +520,9 @@ function abrirNuevaVenta(){
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Moneda</label><select id="nvMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
-          <div><label>Tipo de entrega *</label><select id="nvTipoEntrega" onchange="actualizarVisibilidadDeposito()"><option value="inmediata">Entrega inmediata (descuenta stock ahora)</option><option value="pendiente">Sin entrega (pendiente, sin descontar stock)</option></select></div>
+          <div><label>Tipo de entrega *</label><select id="nvTipoEntrega" onchange="actualizarVisibilidadDeposito()"><option value="inmediata">Entrega inmediata (genera el remito y descuenta el stock ahora)</option><option value="pendiente">Pendiente (el stock queda comprometido hasta generar el remito)</option></select></div>
           <div id="nvDepositoWrap">
-            <label>Depósito *</label>
+            <label id="nvDepositoLabel">Depósito *</label>
             <div class="row" style="gap:6px">
               <select id="nvDeposito" style="flex:1">${opcionesDepositosVenta()}</select>
               <button type="button" class="btn secondary small" onclick="abrirNuevoDepositoDesdeVenta()">+ Nuevo</button>
@@ -558,9 +558,15 @@ function abrirNuevaVenta(){
   actualizarVisibilidadDeposito();
 }
 
+// El depósito ahora es obligatorio siempre (2/10/2026, pedido de Mato):
+// el stock se compromete ahí desde que se carga la venta, aunque todavía
+// no se entregue — solo cambia el texto según si se descuenta ya mismo
+// (entrega inmediata) o recién al generar el remito más adelante.
 function actualizarVisibilidadDeposito(){
   const esInmediata = document.getElementById('nvTipoEntrega').value === 'inmediata';
-  document.getElementById('nvDepositoWrap').classList.toggle('hidden', !esInmediata);
+  document.getElementById('nvDepositoLabel').textContent = esInmediata
+    ? 'Depósito (se descuenta ahora) *'
+    : 'Depósito (se compromete el stock ahí) *';
 }
 
 // Cambiar la sucursal (organización) de la venta que se está cargando trae
@@ -832,7 +838,7 @@ async function guardarNuevaVenta(){
     moneda: document.getElementById('nvMoneda').value,
     tipoEntrega,
     tipoComprobante: document.getElementById('nvTipoComprobante') ? document.getElementById('nvTipoComprobante').value : 'comprobante_x',
-    depositoId: tipoEntrega === 'inmediata' ? document.getElementById('nvDeposito').value : null,
+    depositoId: document.getElementById('nvDeposito').value || null,
     listaPrecioId: document.getElementById('nvListaPrecio') ? (document.getElementById('nvListaPrecio').value || null) : null,
     items,
     descuentoPorcentaje: Number(document.getElementById('nvDescuentoPorcentaje').value) || 0,
@@ -842,7 +848,9 @@ async function guardarNuevaVenta(){
   document.getElementById('nvErr').textContent = '';
   if (!body.clienteId) { document.getElementById('nvErr').textContent = 'Elegí un cliente'; return; }
   if (!items.length) { document.getElementById('nvErr').textContent = 'Agregá al menos un producto'; return; }
-  if (tipoEntrega === 'inmediata' && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a descontar el stock'; return; }
+  // El depósito es obligatorio siempre, no solo con entrega inmediata
+  // (ver actualizarVisibilidadDeposito): ahí se compromete el stock.
+  if (!body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a comprometer el stock'; return; }
   // Bloquea el botón mientras la venta se está guardando (2/10/2026) — sin
   // esto, tocar "Guardar venta" varias veces seguidas (por ejemplo después
   // de un rechazo, esperando que "ahora sí" funcione) disparaba un POST
@@ -912,13 +920,14 @@ function verDetalle(id){
         </div>
 
         ${v.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(v.observaciones)}</p>` : ''}
+        ${v.remitoNumero ? `<p class="muted" style="margin-top:10px">Remito N° ${v.remitoNumero}</p>` : (v.estado === 'pendiente' ? `<p class="muted" style="margin-top:10px">Stock comprometido, remito sin generar todavía.</p>` : '')}
 
         <div class="section-title">Cobros</div>
         <div id="dvPagos">${filasPagos}</div>
         <div class="err" id="dvErr"></div>
 
         <div class="row" style="margin-top:14px">
-          ${v.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Entregar (descontar stock)</button>` : ''}
+          ${v.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
           ${v.estado !== 'anulada' ? `<button class="btn danger" onclick="anularVenta('${v._id}')">Anular venta</button>` : ''}
         </div>
@@ -930,29 +939,35 @@ function verDetalle(id){
 
 const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
 
+// El depósito ya se eligió al cargar la venta (y el stock ya está
+// comprometido ahí) para cualquier venta cargada desde el 2/10/2026 en
+// adelante — ahí no hace falta volver a preguntarlo, solo confirmar que
+// se quiere generar el remito. Una venta más vieja, sin depósito
+// asignado todavía, sigue preguntándolo acá (ver POST /:id/entregar).
 function abrirEntregar(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
+  const deposito = v.depositoId ? depositosCache.find(d => String(d._id) === String(v.depositoId)) : null;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Entregar venta #${v.numero}</h2>
-        <p class="muted">Esto va a descontar el stock de los productos de la venta. No se puede deshacer — si hace falta corregir, se anula la venta.</p>
-        <label>Depósito *</label>
-        <select id="ntDeposito">${opcionesDepositosVenta(v.depositoId)}</select>
+        <h2>Generar remito — venta #${v.numero}</h2>
+        <p class="muted">Esto va a descontar el stock${deposito ? ' comprometido en ' + escapeHtml(deposito.nombre) : ''} y generar el remito. No se puede deshacer — si hace falta corregir, se anula la venta.</p>
+        ${deposito ? '' : `<label>Depósito *</label><select id="ntDeposito">${opcionesDepositosVenta()}</select>`}
         <div class="err" id="ntErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="confirmarEntregar('${id}')">Confirmar entrega</button>
+        <button class="btn" style="margin-top:10px" onclick="confirmarEntregar('${id}')">Confirmar y generar remito</button>
       </div>
     </div>
   `;
 }
 
 async function confirmarEntregar(id){
-  const depositoId = document.getElementById('ntDeposito').value;
-  if (!depositoId) { document.getElementById('ntErr').textContent = 'Elegí un depósito'; return; }
+  const sel = document.getElementById('ntDeposito');
+  const depositoId = sel ? sel.value : null;
+  if (sel && !depositoId) { document.getElementById('ntErr').textContent = 'Elegí un depósito'; return; }
   try{
-    const r = await fetch(BASE + '/' + id + '/entregar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({depositoId})});
+    const r = await fetch(BASE + '/' + id + '/entregar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(depositoId ? {depositoId} : {})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarVentas();
