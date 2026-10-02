@@ -367,6 +367,11 @@ router.get('/actual', authAdmin, async (req, res) => {
       if (!depId) throw err(400, 'depositoId inválido');
       match.depositoId = depId;
     }
+    if (req.query.productoId) {
+      const prodId = toObjectId(req.query.productoId);
+      if (!prodId) throw err(400, 'productoId inválido');
+      match.productoId = prodId;
+    }
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const [existencias, productos, depositos] = await Promise.all([
@@ -547,6 +552,56 @@ router.post('/movimientos', authAdmin, async (req, res) => {
       const r = await db.collection('stock_movimientos').insertOne(nuevo);
       await aplicarAlStockActual(db, req, productoId, depositoId, tipo, cantidad);
       return Object.assign({ _id: r.insertedId }, nuevo);
+    });
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Ajuste de inventario (2/10/2026, pedido de Mato) — en vez de que Mato
+// tenga que calcular a mano la diferencia y cargar un ingreso o un
+// egreso, acá dice directamente "lo que conté fue tal cantidad" y el
+// sistema calcula la diferencia contra `stock_actual` y carga el
+// ingreso/egreso correspondiente — mismo libro `stock_movimientos` de
+// siempre (un ajuste es, al final, una corrección más, con su propio
+// motivo para que quede trazado como tal).
+router.post('/ajustar', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de ajustar stock.');
+    const body = req.body || {};
+    const productoId = toObjectId(body.productoId);
+    if (!productoId) throw err(400, 'Elegí un producto');
+    const depositoId = toObjectId(body.depositoId);
+    if (!depositoId) throw err(400, 'Elegí un depósito');
+    const cantidadReal = Number(body.cantidadReal);
+    if (!Number.isFinite(cantidadReal) || cantidadReal < 0) throw err(400, 'La cantidad contada tiene que ser un número mayor o igual a 0');
+    const motivo = normalizarTexto(body.motivo) || 'Ajuste de inventario';
+    const observaciones = normalizarTexto(body.observaciones);
+    const fecha = normalizarFecha(body.fecha);
+
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
+      if (!producto) throw err(404, 'Producto no encontrado');
+      const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
+      if (!deposito) throw err(404, 'Depósito no encontrado');
+
+      const actualDoc = await db.collection('stock_actual').findOne(Object.assign({ productoId, depositoId }, filtroOrg(req)));
+      const cantidadAnterior = actualDoc ? actualDoc.cantidad : 0;
+      const diferencia = cantidadReal - cantidadAnterior;
+      if (diferencia === 0) throw err(400, `El stock de "${producto.nombre}" en ${deposito.nombre} ya es ${cantidadAnterior} — no hay diferencia para ajustar.`);
+      const tipo = diferencia > 0 ? 'ingreso' : 'egreso';
+      const cantidadMovimiento = Math.abs(diferencia);
+
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const nuevo = {
+        productoId, depositoId, tipo, cantidad: cantidadMovimiento,
+        motivo: `${motivo} (${cantidadAnterior} → ${cantidadReal})`,
+        sucursal: '', codigoExterno: '', observaciones,
+        usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date()
+      };
+      const r = await db.collection('stock_movimientos').insertOne(nuevo);
+      await aplicarAlStockActual(db, req, productoId, depositoId, tipo, cantidadMovimiento);
+      return Object.assign({ _id: r.insertedId }, nuevo, { cantidadAnterior, cantidadNueva: cantidadReal });
     });
     res.json(doc);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

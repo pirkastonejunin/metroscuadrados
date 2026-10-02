@@ -188,6 +188,7 @@
             <button class="btn secondary" onclick="descargarBlob(BASE + '/movimientos/export', 'movimientos-stock.xlsx')">Exportar</button>
             <button class="btn secondary" onclick="abrirImportarMovimientos()">Carga inicial de stock</button>
             <button class="btn secondary" onclick="abrirNuevaTransferencia()">Transferencia</button>
+            <button class="btn secondary" onclick="abrirAjusteStock()">Ajustar stock</button>
             <button class="btn" onclick="abrirNuevoMovimiento()">+ Nuevo movimiento</button>
           </div>
         </div>
@@ -505,6 +506,70 @@ async function guardarMovimiento(){
     if (tabActiva === 'actual') await cargarStockActual();
   }catch(e){
     document.getElementById('mmErr').textContent = e.message;
+  }
+}
+
+// Ajuste de inventario (2/10/2026, pedido de Mato) — en vez de calcular
+// a mano la diferencia para cargar un ingreso o un egreso, acá se elige
+// producto + depósito, se muestra el stock actual, y se escribe
+// directamente la cantidad que se contó — el servidor calcula la
+// diferencia y carga el movimiento correspondiente (ver POST /ajustar).
+function abrirAjusteStock(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Ajustar stock</h2>
+        <p class="muted">Elegí el producto y el depósito, y escribí la cantidad que contaste — el sistema calcula la diferencia sola y la carga como ingreso o egreso, según corresponda.</p>
+        <div class="grid2">
+          <div><label>Producto *</label><select id="ajProducto" onchange="actualizarCantidadActualAjuste()">${opcionesProductosDatalist()}</select></div>
+          <div><label>Depósito *</label><select id="ajDeposito" onchange="actualizarCantidadActualAjuste()">${opcionesDepositosSelect()}</select></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Stock actual</label><input id="ajActual" value="—" disabled></div>
+          <div><label>Cantidad contada (real) *</label><input id="ajCantidadReal" type="number" min="0" step="0.01"></div>
+        </div>
+        <div style="margin-top:10px"><label>Motivo</label><input id="ajMotivo" placeholder="Ej: Conteo físico, Rotura, Diferencia de inventario"></div>
+        <div class="err" id="ajErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarAjusteStock()">Guardar ajuste</button>
+      </div>
+    </div>
+  `;
+}
+
+async function actualizarCantidadActualAjuste(){
+  const productoId = document.getElementById('ajProducto').value;
+  const depositoId = document.getElementById('ajDeposito').value;
+  const campo = document.getElementById('ajActual');
+  if (!productoId || !depositoId) { campo.value = '—'; return; }
+  try{
+    const r = await fetch(BASE + '/actual?productoId=' + encodeURIComponent(productoId) + '&depositoId=' + encodeURIComponent(depositoId), {headers: headersAuth()});
+    const data = await r.json();
+    campo.value = (r.ok && data.length) ? data[0].cantidad : 0;
+  }catch(e){
+    campo.value = '—';
+  }
+}
+
+async function guardarAjusteStock(){
+  const body = {
+    productoId: document.getElementById('ajProducto').value,
+    depositoId: document.getElementById('ajDeposito').value,
+    cantidadReal: document.getElementById('ajCantidadReal').value,
+    motivo: document.getElementById('ajMotivo').value.trim()
+  };
+  if (!body.productoId) { document.getElementById('ajErr').textContent = 'Elegí un producto'; return; }
+  if (!body.depositoId) { document.getElementById('ajErr').textContent = 'Elegí un depósito'; return; }
+  if (body.cantidadReal === '' || Number(body.cantidadReal) < 0) { document.getElementById('ajErr').textContent = 'Escribí la cantidad contada (puede ser 0)'; return; }
+  try{
+    const r = await fetch(BASE + '/ajustar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal();
+    await cargarMovimientos();
+    if (tabActiva === 'actual') await cargarStockActual();
+  }catch(e){
+    document.getElementById('ajErr').textContent = e.message;
   }
 }
 
