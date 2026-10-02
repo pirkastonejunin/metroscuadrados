@@ -194,7 +194,18 @@ function leerEncabezadosXlsxBase64(base64) {
   if (!buffer.length) throw err(400, 'El archivo está vacío');
   let wb;
   try {
-    wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+    // `sheetRows: 2` (2/10/2026 — bug reportado por Mato: "Unexpected end
+    // of JSON input" al importar): sin esto, leer solo los encabezados
+    // igual parseaba el archivo ENTERO (con el catálogo real, ~20.000
+    // filas) — y como esto se agregó como un paso previo al import real,
+    // ahora se parseaba el mismo archivo grande dos veces seguidas antes
+    // de empezar a guardar nada, lo que en Render alcanzaba a cortar la
+    // conexión (mismo síntoma ya visto antes con el import de Productos,
+    // ver comentario de TANDA_IMPORT más abajo). Con `sheetRows` la
+    // librería deja de leer el resto de las filas apenas tiene el
+    // encabezado, así que esto queda rápido sin importar el tamaño real
+    // del archivo.
+    wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, sheetRows: 2 });
   } catch (e) {
     throw err(400, 'No se pudo leer el archivo — ¿es un .xlsx válido?');
   }
