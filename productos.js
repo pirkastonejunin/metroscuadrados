@@ -89,7 +89,7 @@
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, tieneModulo } = require('./usuarios');
-const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
+const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64, leerEncabezadosXlsxBase64, sugerirMapeo } = require('./importExport');
 // Para mostrar en la ficha de producto el link y las fotos de Tiendanube
 // (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
 // cotizador.js.
@@ -1031,13 +1031,30 @@ const TANDA_IMPORT_LISTAS = 500;
 // archivo (porque se borró al editar) se interpreta como "sin cambios"
 // para esa lista — a diferencia de la celda vacía, que si saca el precio
 // manual cargado.
+// Antes de importar de verdad, le muestra a Mato qué encabezados trae el
+// archivo + una sugerencia automática de a qué columna corresponde cada
+// uno, para que pueda elegir la equivalencia a mano si no coinciden con
+// la plantilla (2/10/2026, pedido de Mato: "que me deje elegir
+// equivalencia de columna cuando no coincide con la plantilla").
+router.post('/listas-precio/importar-todas/encabezados', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const db = await conReintento(getDb);
+    const listas = await db.collection('productos_listas_precio').find(filtroOrg(req)).toArray();
+    const columnas = columnasTodasLasListas(listas);
+    const encabezados = leerEncabezadosXlsxBase64((req.body || {}).archivoBase64);
+    const sugeridos = sugerirMapeo(encabezados, columnas);
+    res.json({ encabezados, columnas: columnas.map(c => ({ clave: c.clave, titulo: c.titulo })), sugeridos });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/listas-precio/importar-todas', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const db = await conReintento(getDb);
     const listas = await db.collection('productos_listas_precio').find(filtroOrg(req)).toArray();
     const columnas = columnasTodasLasListas(listas);
-    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, columnas);
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, columnas, (req.body || {}).mapeo);
     if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
 
     const ahora = new Date();
@@ -1154,6 +1171,15 @@ router.get('/listas-precio/:id/plantilla-import', authListasPrecio, (req, res) =
 // para varias). Fila sin precio (celda vacía) saca el override puntual
 // (vuelve a Costo + %). También en segundo plano con progreso, igual que
 // /importar-todas arriba.
+// Mismo propósito que la de arriba, para el import de una lista puntual.
+router.post('/listas-precio/:id/import/encabezados', authAdmin, async (req, res) => {
+  try {
+    const encabezados = leerEncabezadosXlsxBase64((req.body || {}).archivoBase64);
+    const sugeridos = sugerirMapeo(encabezados, COLUMNAS_LISTA_PRECIO);
+    res.json({ encabezados, columnas: COLUMNAS_LISTA_PRECIO.map(c => ({ clave: c.clave, titulo: c.titulo })), sugeridos });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/listas-precio/:id/import', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -1162,7 +1188,7 @@ router.post('/listas-precio/:id/import', authAdmin, async (req, res) => {
     const db = await conReintento(getDb);
     const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
     if (!lista) throw err(404, 'Lista no encontrada');
-    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_LISTA_PRECIO);
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_LISTA_PRECIO, (req.body || {}).mapeo);
     if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
 
     const ahora = new Date();

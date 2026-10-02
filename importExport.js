@@ -122,7 +122,15 @@ function exportarPlantillaXlsx(res, nombreArchivo, columnas) {
 // valor, ... } según `columnas`, usando la PRIMERA hoja del archivo.
 // Cada fila trae además `__fila` (número de fila en el Excel, para poder
 // señalar errores puntuales al usuario).
-function parsearXlsxBase64(base64, columnas) {
+// `mapeoManual` (opcional) = { clave: tituloEncabezadoReal } — equivalencia
+// elegida A MANO por Mato cuando el archivo no trae los títulos/aliases
+// esperados (2/10/2026, pedido de Mato: "que me deje elegir equivalencia
+// de columna cuando no coincide con la plantilla"). Se suma como un
+// alias más de esa columna, con prioridad sobre el automático: ver
+// leerEncabezadosXlsxBase64 y sugerirMapeo más abajo, que son los que le
+// arman a la pantalla de import la lista de encabezados reales del
+// archivo para que arme ese mapeo.
+function parsearXlsxBase64(base64, columnas, mapeoManual) {
   if (!base64) throw err(400, 'Falta el archivo (.xlsx)');
   let buffer;
   try {
@@ -152,6 +160,13 @@ function parsearXlsxBase64(base64, columnas) {
     columnaPorTitulo.set(normalizarEncabezado(c.titulo), c);
     (c.aliases || []).forEach(a => columnaPorTitulo.set(normalizarEncabezado(a), c));
   });
+  if (mapeoManual) {
+    for (const [clave, tituloReal] of Object.entries(mapeoManual)) {
+      if (!tituloReal) continue;
+      const columna = columnas.find(c => c.clave === clave);
+      if (columna) columnaPorTitulo.set(normalizarEncabezado(tituloReal), columna);
+    }
+  }
   return filasCrudas.map((filaCruda, idx) => {
     const fila = {};
     for (const [encabezado, valor] of Object.entries(filaCruda)) {
@@ -164,4 +179,52 @@ function parsearXlsxBase64(base64, columnas) {
   });
 }
 
-module.exports = { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 };
+// Lee solo los encabezados (primera fila) de un .xlsx en base64 — se usa
+// ANTES de importar de verdad, para mostrarle a Mato qué columnas trae
+// el archivo y dejarlo elegir a mano la equivalencia cuando no coinciden
+// con la plantilla.
+function leerEncabezadosXlsxBase64(base64) {
+  if (!base64) throw err(400, 'Falta el archivo (.xlsx)');
+  let buffer;
+  try {
+    buffer = Buffer.from(String(base64).replace(/^data:.*;base64,/, ''), 'base64');
+  } catch (e) {
+    throw err(400, 'El archivo no es un base64 válido');
+  }
+  if (!buffer.length) throw err(400, 'El archivo está vacío');
+  let wb;
+  try {
+    wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+  } catch (e) {
+    throw err(400, 'No se pudo leer el archivo — ¿es un .xlsx válido?');
+  }
+  const nombreHoja = wb.SheetNames[0];
+  if (!nombreHoja) throw err(400, 'El Excel no tiene ninguna hoja');
+  const hoja = wb.Sheets[nombreHoja];
+  const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: false, defval: '' });
+  const encabezados = (filas[0] || []).map(h => String(h == null ? '' : h).trim()).filter(Boolean);
+  if (!encabezados.length) throw err(400, 'El Excel no tiene encabezados en la primera fila');
+  return encabezados;
+}
+
+// Dados los encabezados REALES de un archivo y las `columnas` esperadas,
+// arma una sugerencia automática de qué encabezado le corresponde a cada
+// columna (misma lógica de título/alias que usa parsearXlsxBase64) —
+// para prellenar la pantalla de equivalencias y que Mato solo tenga que
+// corregir las que de verdad no coinciden.
+function sugerirMapeo(encabezados, columnas) {
+  const tituloPorNormalizado = new Map();
+  columnas.forEach(c => {
+    tituloPorNormalizado.set(normalizarEncabezado(c.titulo), c);
+    (c.aliases || []).forEach(a => tituloPorNormalizado.set(normalizarEncabezado(a), c));
+  });
+  const sugeridos = {};
+  columnas.forEach(c => { sugeridos[c.clave] = null; });
+  encabezados.forEach(h => {
+    const columna = tituloPorNormalizado.get(normalizarEncabezado(h));
+    if (columna && !sugeridos[columna.clave]) sugeridos[columna.clave] = h;
+  });
+  return sugeridos;
+}
+
+module.exports = { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64, leerEncabezadosXlsxBase64, sugerirMapeo };

@@ -797,6 +797,61 @@ async function esperarJobImportListaPrecio(jobId, contenedorId){
   }
 }
 
+// Equivalencia de columnas al importar (2/10/2026, pedido de Mato: "que
+// me deje elegir equivalencia de columna cuando no coincide con la
+// plantilla"): antes de importar de verdad, se consulta el archivo para
+// ver qué encabezados trae y se compara contra la plantilla esperada. Si
+// TODO matchea solo (igual que siempre pasó hasta ahora), no se lo
+// molesta con nada; si alguna columna esperada no tiene un encabezado que
+// le corresponda, se muestra un panel para elegir a mano cuál columna del
+// archivo es cuál, antes de seguir.
+function leerArchivoComoBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+async function resolverMapeoColumnas(base64, endpointEncabezados, contenedorId){
+  const r = await fetch(BASE + endpointEncabezados, {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Error leyendo las columnas del archivo');
+  const faltaAlguna = data.columnas.some(c => !data.sugeridos[c.clave]);
+  if (!faltaAlguna) return {}; // todas las columnas matchearon solas con la plantilla
+  return new Promise(resolve => {
+    const cont = document.getElementById(contenedorId);
+    if (!cont) { resolve({}); return; }
+    cont.innerHTML = `
+      <div class="card" style="margin:10px 0;background:var(--bg)">
+        <strong>Algunas columnas del archivo no coinciden con la plantilla</strong>
+        <p class="muted" style="margin-top:4px;margin-bottom:0">Elegí a mano a cuál columna del archivo corresponde cada una. Si una columna esperada no está en tu archivo, dejala en "— no asignar —".</p>
+        ${data.columnas.map(c => `
+          <div class="row" style="margin-top:8px;align-items:center">
+            <div style="width:200px"><strong>${escapeHtml(c.titulo)}</strong></div>
+            <div style="flex:1">
+              <select id="mapcol_${c.clave}">
+                <option value="">— no asignar —</option>
+                ${data.encabezados.map(h => `<option value="${escapeHtml(h)}" ${h===data.sugeridos[c.clave]?'selected':''}>${escapeHtml(h)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+        `).join('')}
+        <button type="button" class="btn" style="margin-top:10px" onclick="window.__confirmarMapeoColumnas()">Confirmar equivalencias y continuar</button>
+      </div>
+    `;
+    window.__confirmarMapeoColumnas = () => {
+      const mapeo = {};
+      data.columnas.forEach(c => {
+        const v = document.getElementById('mapcol_'+c.clave).value;
+        if (v) mapeo[c.clave] = v;
+      });
+      cont.innerHTML = '';
+      resolve(mapeo);
+    };
+  });
+}
+
 // Revisar/consolidar SKUs duplicados por mayúsculas (30/9/2026) — primero
 // muestra una vista previa (no toca nada), y solo si Mato confirma
 // ejecuta la fusión. Ver productos.js (GET /duplicados-sku, POST
@@ -1071,6 +1126,7 @@ function abrirImportarListaPrecio(listaId, listaNombre){
       <label>Archivo (.xlsx o .xls)</label>
       <input type="file" id="ilpArchivo" accept=".xlsx,.xls">
       <div class="err" id="ilpErr"></div>
+      <div id="ilpMapeo"></div>
       <div id="ilpResultado"></div>
       <button class="btn" id="ilpBtn" style="margin-top:10px" onclick="confirmarImportarListaPrecio('${listaId}')">Importar</button>
     </div>
@@ -1083,17 +1139,14 @@ async function confirmarImportarListaPrecio(listaId){
   const file = input.files[0];
   const btn = document.getElementById('ilpBtn');
   document.getElementById('ilpErr').textContent = '';
+  document.getElementById('ilpMapeo').innerHTML = '';
   document.getElementById('ilpResultado').innerHTML = '';
   if (!file) { document.getElementById('ilpErr').textContent = 'Elegí un archivo .xlsx o .xls'; return; }
   btn.disabled = true;
   try{
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
-      reader.readAsDataURL(file);
-    });
-    const r = await fetch(BASE + '/listas-precio/' + listaId + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    const base64 = await leerArchivoComoBase64(file);
+    const mapeo = await resolverMapeoColumnas(base64, '/listas-precio/' + listaId + '/import/encabezados', 'ilpMapeo');
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64, mapeo})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al importar');
     document.getElementById('ilpResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
@@ -1137,6 +1190,7 @@ function abrirImportarTodasListas(){
       <label>Archivo (.xlsx o .xls)</label>
       <input type="file" id="itlArchivo" accept=".xlsx,.xls">
       <div class="err" id="itlErr"></div>
+      <div id="itlMapeo"></div>
       <div id="itlResultado"></div>
       <button class="btn" id="itlBtn" style="margin-top:10px" onclick="confirmarImportarTodasListas()">Importar</button>
     </div>
@@ -1149,17 +1203,14 @@ async function confirmarImportarTodasListas(){
   const file = input.files[0];
   const btn = document.getElementById('itlBtn');
   document.getElementById('itlErr').textContent = '';
+  document.getElementById('itlMapeo').innerHTML = '';
   document.getElementById('itlResultado').innerHTML = '';
   if (!file) { document.getElementById('itlErr').textContent = 'Elegí un archivo .xlsx o .xls'; return; }
   btn.disabled = true;
   try{
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
-      reader.readAsDataURL(file);
-    });
-    const r = await fetch(BASE + '/listas-precio/importar-todas', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    const base64 = await leerArchivoComoBase64(file);
+    const mapeo = await resolverMapeoColumnas(base64, '/listas-precio/importar-todas/encabezados', 'itlMapeo');
+    const r = await fetch(BASE + '/listas-precio/importar-todas', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64, mapeo})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al importar');
     document.getElementById('itlResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
@@ -1261,21 +1312,51 @@ function renderGestionProductosLista(listaId){
     <p class="muted">${filas.length} de ${gestionListaCache.filas.length} producto(s)</p>
     <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
     <table>
-      <thead><tr><th>SKU</th><th>Nombre</th><th>Rubro</th><th>Precio</th>${esSeleccion?'<th></th>':''}</tr></thead>
+      <thead><tr><th>SKU</th><th>Nombre</th><th>Rubro</th><th>Precio</th><th></th></tr></thead>
       <tbody>
         ${filas.map(f => `
           <tr>
             <td>${escapeHtml(f.sku||'')}</td>
             <td>${escapeHtml(f.nombre||'')}</td>
             <td class="muted">${escapeHtml(f.rubro||'')}</td>
-            <td>${f.precio!=null ? money(f.precio) : '<span class="muted">—</span>'}</td>
-            ${esSeleccion ? `<td><button class="btn small secondary" onclick="quitarProductoDeLista('${listaId}','${f._id}')">Quitar</button></td>` : ''}
+            <td>
+              <input type="number" step="0.01" id="gplPrecio_${f._id}" value="${f.precio!=null?f.precio:''}" style="width:110px"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();guardarPrecioListaDesdeGestion('${listaId}','${f._id}')}">
+            </td>
+            <td style="white-space:nowrap">
+              <button type="button" class="btn small secondary" title="Guardar precio (vacío = volver a Costo + %)" onclick="guardarPrecioListaDesdeGestion('${listaId}','${f._id}')">💾</button>
+              ${esSeleccion ? `<button type="button" class="btn small secondary" title="Quitar de la lista" onclick="quitarProductoDeLista('${listaId}','${f._id}')">✕</button>` : ''}
+            </td>
           </tr>
         `).join('')}
       </tbody>
     </table>
     </div>
   `;
+}
+
+// Editar el precio de un producto directo desde la vista de la lista
+// (2/10/2026, pedido de Mato: "cuando entro a la lista que me deje
+// editar los precios de cada producto") — mismo PUT que ya usaba la
+// ficha de producto ("Precios por lista"), vacío saca el override manual
+// (vuelve a Costo + % o a la fórmula de la lista).
+async function guardarPrecioListaDesdeGestion(listaId, productoId){
+  const input = document.getElementById('gplPrecio_'+productoId);
+  if (!input) return;
+  const valor = input.value.trim();
+  const precio = valor === '' ? null : Number(valor);
+  if (precio !== null && (!Number.isFinite(precio) || precio < 0)) { alert('El precio tiene que ser un número mayor o igual a 0'); return; }
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/precio/' + productoId, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({precio})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar el precio');
+    const fila = gestionListaCache && gestionListaCache.filas.find(f => String(f._id) === String(productoId));
+    if (fila) fila.precio = precio;
+    input.style.borderColor = 'var(--ok)';
+    setTimeout(() => { if (input && input.isConnected) input.style.borderColor = ''; }, 800);
+  }catch(e){
+    alert(e.message);
+  }
 }
 
 async function agregarRubroALista(listaId){
