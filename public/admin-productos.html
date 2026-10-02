@@ -46,7 +46,7 @@
   .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
-  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
   .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
   .modal h2{margin-top:0;font-size:16px;}
   .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
@@ -1061,7 +1061,7 @@ function abrirImportarListaPrecio(listaId, listaNombre){
   const sub = document.createElement('div');
   sub.id = 'ilpModalBg';
   sub.className = 'modal-bg';
-  sub.style.zIndex = '70';
+  sub.style.zIndex = '570';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
   sub.innerHTML = `
     <div class="modal">
@@ -1127,7 +1127,7 @@ function abrirImportarTodasListas(){
   const sub = document.createElement('div');
   sub.id = 'itlModalBg';
   sub.className = 'modal-bg';
-  sub.style.zIndex = '70';
+  sub.style.zIndex = '570';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
   sub.innerHTML = `
     <div class="modal">
@@ -1198,7 +1198,7 @@ async function abrirGestionProductosLista(listaId){
   const sub = document.createElement('div');
   sub.id = 'gplModalBg';
   sub.className = 'modal-bg';
-  sub.style.zIndex = '70';
+  sub.style.zIndex = '570';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
   sub.innerHTML = `
     <div class="modal" style="max-width:720px">
