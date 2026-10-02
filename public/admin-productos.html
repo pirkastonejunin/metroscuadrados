@@ -1022,6 +1022,7 @@ function renderListasPrecioModal(){
               ${botonIcono('👁️', 'Ver productos y precios de esta lista', `abrirGestionProductosLista('${l._id}')`)}
               ${botonIcono('⬇️', 'Exportar a Excel', `descargarBlob(BASE + '/listas-precio/${l._id}/export', 'lista-precio-${String(l.nombre||'').toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx')`)}
               ${botonIcono('⬆️', 'Importar precios desde Excel', `abrirImportarListaPrecio('${l._id}', '${nombreEsc}')`)}
+              ${l.formula==='cf_x_bulto' ? botonIcono('🔄', 'Sincronizar estos precios con tu tienda Tiendanube', `abrirSincronizarTiendanube('${l._id}', '${nombreEsc}')`) : ''}
               ${botonIcono(l.activa===false?'▶️':'⏸️', l.activa===false?'Activar lista':'Desactivar lista', `toggleActivaLista('${l._id}', ${l.activa===false})`)}
               ${l.predeterminada ? '' : botonIcono('🗑️', 'Eliminar lista', `eliminarListaPrecio('${l._id}', '${nombreEsc}')`, 'danger')}
             </td>
@@ -1172,6 +1173,55 @@ async function confirmarImportarListaPrecio(listaId){
     if (document.getElementById('gplModalBg')) await cargarGestionProductosLista(listaId);
   }catch(e){
     document.getElementById('ilpErr').textContent = e.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// Sincronizar con Tiendanube (2/10/2026, pedido de Mato: un botón para
+// empujar a su tienda real los precios ya calculados de la lista
+// "Consumidor Final × bulto"). Mismo patrón de job en segundo plano que
+// el import, reusando esperarJobImportListaPrecio para el polling.
+function abrirSincronizarTiendanube(listaId, listaNombre){
+  const sub = document.createElement('div');
+  sub.id = 'stnModalBg';
+  sub.className = 'modal-bg';
+  sub.style.zIndex = '570';
+  sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  sub.innerHTML = `
+    <div class="modal">
+      <span class="close-x" onclick="document.getElementById('stnModalBg').remove()">✕</span>
+      <h2>Sincronizar con Tiendanube — ${escapeHtml(listaNombre)}</h2>
+      <p class="muted">Esto actualiza el precio real de cada producto en tu tienda Tiendanube (buscado por SKU) con el precio ya calculado de esta lista. Los productos sin ese SKU publicado en la tienda se saltean, y los que ya tienen el precio al día no se tocan.</p>
+      <div class="err" id="stnErr"></div>
+      <div id="stnResultado"></div>
+      <button class="btn" id="stnBtn" style="margin-top:10px" onclick="confirmarSincronizarTiendanube('${listaId}')">Sincronizar ahora</button>
+    </div>
+  `;
+  document.body.appendChild(sub);
+}
+
+async function confirmarSincronizarTiendanube(listaId){
+  const btn = document.getElementById('stnBtn');
+  document.getElementById('stnErr').textContent = '';
+  document.getElementById('stnResultado').innerHTML = '';
+  btn.disabled = true;
+  try{
+    const r = await fetch(BASE + '/listas-precio/' + listaId + '/sincronizar-tiendanube', {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al sincronizar');
+    document.getElementById('stnResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
+    const job = await esperarJobImportListaPrecio(data.jobId, 'stnResultado');
+    let html = `<p class="ok-msg">Actualizados en Tiendanube: ${job.actualizados||0} · Sin cambios: ${job.sinCambios||0}${job.noEncontrados ? ` · No encontrados en la tienda: ${job.noEncontrados}` : ''}</p>`;
+    if (job.errores && job.errores.length) {
+      html += `<p class="err">${job.errores.length} producto(s) con error:</p><ul class="muted" style="margin-top:0">` +
+        job.errores.slice(0, 100).map(e => `<li>${escapeHtml(e.sku||'')}: ${escapeHtml(e.detalle||'')}</li>`).join('') +
+        (job.errores.length > 100 ? `<li>... y ${job.errores.length - 100} más</li>` : '') + '</ul>';
+    }
+    document.getElementById('stnResultado').innerHTML = html;
+    btn.textContent = 'Sincronizar de nuevo';
+  }catch(e){
+    document.getElementById('stnErr').textContent = e.message;
   }finally{
     btn.disabled = false;
   }

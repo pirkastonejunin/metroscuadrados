@@ -93,7 +93,7 @@ const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64, leerEncabezadosX
 // Para mostrar en la ficha de producto el link y las fotos de Tiendanube
 // (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
 // cotizador.js.
-const { buscarProductoTiendanubePorSku } = require('./cotizador');
+const { buscarProductoTiendanubePorSku, sincronizarPreciosTiendanube } = require('./cotizador');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -1536,6 +1536,63 @@ async function procesarImportProductos(db, req, jobId, filas) {
   await db.collection('productos_import_jobs').updateOne(
     { _id: jobId },
     { $set: { estado: 'listo', procesados, creados, actualizados, errores, terminadoEn: new Date() } }
+  );
+}
+
+// Sincronización a demanda con la tienda real de Tiendanube (2/10/2026,
+// pedido de Mato: la lista con fórmula 'cf_x_bulto' ya se calcula sola
+// dentro de la app — ver precioResuelto más arriba — pero el precio
+// real que ve el cliente en la tienda no se actualiza solo; este botón
+// es lo que empuja esos precios calculados a Tiendanube, buscando cada
+// producto por SKU). Mismo patrón de job en segundo plano que el import
+// (reusa la colección y el endpoint de progreso /import/estado/:id).
+router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const db = await conReintento(getDb);
+    const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+    if (!lista) throw err(404, 'Lista no encontrada');
+    if (lista.formula !== 'cf_x_bulto') {
+      throw err(400, 'Esta lista no está configurada para sincronizar con Tiendanube (necesita el cálculo "Consumidor Final × bulto")');
+    }
+
+    const productos = await db.collection('productos_catalogo')
+      .find(matchProductosDeLista(req, lista))
+      .project({ sku: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1 }).toArray();
+    const preciosPorSku = new Map();
+    productos.forEach(p => {
+      if (!p.sku) return;
+      const { precio } = precioResuelto(p, lista, null);
+      if (precio != null) preciosPorSku.set(String(p.sku), precio);
+    });
+    if (!preciosPorSku.size) throw err(400, 'No hay productos con precio calculado para sincronizar en esta lista');
+
+    const ahora = new Date();
+    const { insertedId: jobId } = await db.collection('productos_import_jobs').insertOne({
+      orgId: req.orgId, tipo: 'sync-tiendanube', listaId: id, total: preciosPorSku.size, procesados: 0,
+      actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [], estado: 'procesando', creadoEn: ahora, terminadoEn: null
+    });
+    res.json({ jobId, total: preciosPorSku.size });
+
+    procesarSincronizacionTiendanube(db, jobId, preciosPorSku).catch(async (e) => {
+      try {
+        await db.collection('productos_import_jobs').updateOne(
+          { _id: jobId }, { $set: { estado: 'error', errorGeneral: e.message, terminadoEn: new Date() } }
+        );
+      } catch (e2) { /* nada más para hacer del lado del servidor */ }
+    });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+async function procesarSincronizacionTiendanube(db, jobId, preciosPorSku) {
+  const resultado = await sincronizarPreciosTiendanube(preciosPorSku, async (procesados, total) => {
+    await db.collection('productos_import_jobs').updateOne({ _id: jobId }, { $set: { procesados, total } });
+  });
+  await db.collection('productos_import_jobs').updateOne(
+    { _id: jobId },
+    { $set: Object.assign({ estado: 'listo', terminadoEn: new Date() }, resultado) }
   );
 }
 

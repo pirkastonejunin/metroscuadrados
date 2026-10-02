@@ -1854,6 +1854,91 @@ router.get('/pdf/:id', async (req, res) => {
   }
 });
 
+// Empuja precios a la tienda REAL de Tiendanube (2/10/2026, pedido de
+// Mato: "ponele un botón para cuando quiero que mi tiendanube se
+// sincronice con esa lista lo pueda hacer" — la lista con fórmula
+// 'cf_x_bulto' se calcula sola en la app, pero el precio que ve el
+// cliente en la tienda no se actualiza solo; esto es lo que lo empuja,
+// a demanda, cuando Mato aprieta el botón).
+//
+// `preciosPorSku` es un Map sku (tal cual está cargado en el producto,
+// sin tocar mayúsculas) -> precio numérico ya calculado. Se trae UNA
+// sola vez todo el catálogo de la tienda real (paginado, igual que
+// fetchAllProducts) para armar un índice sku(minúscula) -> variante, y
+// recién ahí se hace un PUT por variante que realmente cambió de precio
+// — así no se gasta la cuota de llamadas a la API en variantes que ya
+// están al día. `onProgreso(procesados, total)` (opcional) se llama cada
+// tanto para que el que llama pueda ir actualizando el progreso de un
+// job, igual que en los imports.
+//
+// Nunca tira por un producto puntual que falle (SKU no encontrado en la
+// tienda, error de red, respuesta de error de la API): esos casos quedan
+// contados en el resultado para mostrar un resumen, aunque el resto haya
+// salido bien. Si falta la configuración de la tienda (sin
+// TIENDA_REAL_STORE_ID o sin token), ahí sí tira, porque no hay nada que
+// sincronizar.
+async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
+  const storeId = process.env.TIENDA_REAL_STORE_ID;
+  if (!storeId) {
+    const e = new Error('No hay una tienda de Tiendanube configurada para sincronizar (falta TIENDA_REAL_STORE_ID).');
+    e.status = 400;
+    throw e;
+  }
+  const store = await getStoreById(storeId);
+  if (!store || !store.access_token) {
+    const e = new Error('La tienda de Tiendanube configurada no tiene un token de acceso válido.');
+    e.status = 400;
+    throw e;
+  }
+
+  const productosTienda = await fetchAllProducts(store.store_id, store.access_token);
+  const indice = new Map(); // sku en minúsculas -> {productId, variantId, precioActual}
+  for (const p of productosTienda) {
+    if (!p.variants) continue;
+    for (const v of p.variants) {
+      if (!v.sku) continue;
+      indice.set(String(v.sku).trim().toLowerCase(), {
+        productId: p.id,
+        variantId: v.id,
+        precioActual: parseFloat(v.price)
+      });
+    }
+  }
+
+  const resultado = { actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [] };
+  let procesados = 0;
+  const total = preciosPorSku.size;
+  for (const [sku, precio] of preciosPorSku.entries()) {
+    procesados++;
+    const ref = indice.get(String(sku).trim().toLowerCase());
+    if (!ref) {
+      resultado.noEncontrados++;
+    } else if (Number.isFinite(precio) && ref.precioActual != null && Math.abs(ref.precioActual - precio) < 0.005) {
+      resultado.sinCambios++;
+    } else if (Number.isFinite(precio)) {
+      try {
+        const r = await fetch(
+          API_BASE + '/' + store.store_id + '/products/' + ref.productId + '/variants/' + ref.variantId,
+          { method: 'PUT', headers: apiHeaders(store.access_token), body: JSON.stringify({ price: String(precio) }) }
+        );
+        if (r.ok) {
+          resultado.actualizados++;
+        } else {
+          const texto = await r.text().catch(() => '');
+          resultado.errores.push({ sku, detalle: 'Tiendanube respondió ' + r.status + (texto ? (': ' + texto.slice(0, 200)) : '') });
+        }
+      } catch (e) {
+        resultado.errores.push({ sku, detalle: e.message });
+      }
+    }
+    if (onProgreso && (procesados % 10 === 0 || procesados === total)) {
+      try { await onProgreso(procesados, total); } catch (e) { /* no debe frenar la sincronización */ }
+    }
+  }
+  return resultado;
+}
+
 module.exports = router;
 module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
 module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js
+module.exports.sincronizarPreciosTiendanube = sincronizarPreciosTiendanube; // exportado para productos.js
