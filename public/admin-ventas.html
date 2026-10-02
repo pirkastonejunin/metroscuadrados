@@ -48,7 +48,7 @@
   .pill.anulada{background:var(--danger-soft);color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
-  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
   .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
   .modal.wide{max-width:860px;}
   .modal h2{margin-top:0;font-size:16px;}
@@ -275,6 +275,21 @@ let listasPrecioCache = [];
 // organización sin tocar la activa — se usa al cambiar de sucursal adentro
 // del formulario de carga, donde clientes/productos/depósitos disponibles
 // dependen de qué organización se eligió para esa venta puntual.
+// Antes, si alguno de estos 4 pedidos fallaba (401, 500, red caída),
+// quedaba en silencio con un array vacío — Mato veía "no me despliega
+// los clientes" sin ningún indicio de qué pasó (2/10/2026). Ahora cada
+// uno que falla se loguea en la consola del navegador con el motivo, y
+// si CUALQUIERA falló se muestra un aviso arriba del formulario en vez
+// de dejarlo en blanco sin explicación.
+// Guarda el último aviso de carga (si hubo fallas) para poder mostrarlo
+// también si el modal de "Nueva venta" se abre DESPUÉS de que esto ya
+// corrió (como pasa normalmente: esto se ejecuta una vez al entrar a la
+// pantalla, antes de que exista el div #avisoCargaBase del modal).
+let avisoCargaBaseMsg = '';
+function pintarAvisoCargaBase(){
+  const avisoEl = document.getElementById('avisoCargaBase');
+  if (avisoEl) avisoEl.textContent = avisoCargaBaseMsg;
+}
 async function cargarListasBase(orgId){
   const h = orgId ? headersAuthOrg(orgId) : headersAuth();
   const [rc, rp, rd, rl] = await Promise.all([
@@ -283,10 +298,23 @@ async function cargarListasBase(orgId){
     fetch(BASE + '/depositos', {headers: h}),
     fetch('/api/productos/listas-precio', {headers: h})
   ]);
-  clientesCache = rc.ok ? await rc.json() : [];
-  productosCache = rp.ok ? await rp.json() : [];
-  depositosCache = rd.ok ? await rd.json() : [];
-  listasPrecioCache = rl.ok ? await rl.json() : [];
+  const fallas = [];
+  async function leer(r, nombre){
+    if (r.ok) return await r.json();
+    let detalle = '';
+    try { detalle = (await r.json()).error || ''; } catch(e){}
+    console.error(`Error cargando ${nombre}: HTTP ${r.status} ${detalle}`);
+    fallas.push(`${nombre} (HTTP ${r.status}${detalle ? ': ' + detalle : ''})`);
+    return [];
+  }
+  clientesCache = await leer(rc, 'clientes');
+  productosCache = await leer(rp, 'productos');
+  depositosCache = await leer(rd, 'depósitos');
+  listasPrecioCache = await leer(rl, 'listas de precio');
+  avisoCargaBaseMsg = fallas.length
+    ? `No se pudo cargar: ${fallas.join(' · ')}. Probá recargar la página; si sigue, avisá.`
+    : '';
+  pintarAvisoCargaBase();
   if (!orgId) {
     document.getElementById('fvCliente').innerHTML = '<option value="">Todos</option>' +
       clientesCache.map(c => `<option value="${c._id}">${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`).join('');
@@ -406,6 +434,7 @@ function abrirNuevaVenta(){
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nueva venta</h2>
+        <div id="avisoCargaBase" class="err"></div>
         ${puedeElegirSucursal() ? `
         <div class="grid3">
           <div><label>Sucursal *</label><select id="nvSucursal" onchange="cambiarSucursalVenta()">${opcionesSucursalVenta(ORG)}</select></div>
@@ -457,6 +486,7 @@ function abrirNuevaVenta(){
       </div>
     </div>
   `;
+  pintarAvisoCargaBase();
   agregarFilaVenta();
   actualizarVisibilidadDeposito();
 }
@@ -498,7 +528,7 @@ function abrirNuevoClienteDesdeVenta(){
   const sub = document.createElement('div');
   sub.id = 'ncvModalBg';
   sub.className = 'modal-bg';
-  sub.style.zIndex = '560';
+  sub.style.zIndex = '60';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
   sub.innerHTML = `
     <div class="modal">
@@ -551,7 +581,7 @@ function abrirNuevoDepositoDesdeVenta(){
   const sub = document.createElement('div');
   sub.id = 'ndvModalBg';
   sub.className = 'modal-bg';
-  sub.style.zIndex = '560';
+  sub.style.zIndex = '60';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
   sub.innerHTML = `
     <div class="modal">
