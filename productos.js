@@ -727,7 +727,22 @@ async function obtenerCotizacionDolar(db, req) {
 async function obtenerListaPredeterminada(db, req) {
   const match = Object.assign({ predeterminada: true }, filtroOrg(req));
   let lista = await db.collection('productos_listas_precio').findOne(match);
-  if (lista) return lista;
+  if (lista) {
+    // Autocorrección (2/10/2026, bug reportado por Mato: "la de consumidor
+    // final no me la está importando"): el botón de activar/desactivar no
+    // distinguía la predeterminada, así que se podía desactivar por
+    // accidente — y al estar inactiva, "Exportar todas las listas" la
+    // sacaba de la planilla (filtra solo listas activas) pero el import
+    // seguía esperando su columna iguel, así que nunca se volvía a
+    // actualizar desde el archivo que Mato reexportaba. Ahora ya no se
+    // puede desactivar (ver PUT /listas-precio/:id), pero si ya había
+    // quedado así, se corrige sola acá.
+    if (lista.activa === false) {
+      await db.collection('productos_listas_precio').updateOne(match, { $set: { activa: true, updatedAt: new Date() } });
+      lista.activa = true;
+    }
+    return lista;
+  }
 
   const ahora = new Date();
   const nueva = {
@@ -825,17 +840,23 @@ router.put('/listas-precio/:id', authAdmin, async (req, res) => {
       if (!Number.isFinite(porcentaje)) throw err(400, 'El % de margen tiene que ser un número');
       set.porcentaje = porcentaje;
     }
-    if (body.activa !== undefined) set.activa = !!body.activa;
     const doc = await conReintento(async () => {
       const db = await getDb();
       const match = Object.assign({ _id: id }, filtroOrg(req));
       const lista = await db.collection('productos_listas_precio').findOne(match);
       if (!lista) throw err(404, 'Lista no encontrada');
-      // El alcance y la fórmula de la lista predeterminada (Consumidor
-      // Final) no se pueden tocar — tiene que seguir cubriendo todo el
-      // catálogo con costo + %, porque de ahí sale el campo
-      // `producto.precio` que usan Ventas/Cotizador (y que a su vez usa
-      // la fórmula 'cf_x_bulto' de otras listas).
+      // El alcance, la fórmula y el estado activa/inactiva de la lista
+      // predeterminada (Consumidor Final) no se pueden tocar — tiene que
+      // seguir cubriendo todo el catálogo con costo + %, porque de ahí
+      // sale el campo `producto.precio` que usan Ventas/Cotizador (y que
+      // a su vez usa la fórmula 'cf_x_bulto' de otras listas). Desactivarla
+      // además rompía "Importar/Exportar todas las listas" (2/10/2026, ver
+      // comentario en obtenerListaPredeterminada): al quedar inactiva,
+      // "Exportar todas" la sacaba de la planilla, pero el import seguía
+      // esperando su columna igual, así que nunca se volvía a actualizar.
+      if (body.activa !== undefined && !lista.predeterminada) {
+        set.activa = !!body.activa;
+      }
       if (body.alcance !== undefined && !lista.predeterminada) {
         set.alcance = body.alcance === 'seleccion' ? 'seleccion' : 'todos';
       }

@@ -1023,7 +1023,7 @@ function renderListasPrecioModal(){
               ${botonIcono('⬇️', 'Exportar a Excel', `descargarBlob(BASE + '/listas-precio/${l._id}/export', 'lista-precio-${String(l.nombre||'').toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx')`)}
               ${botonIcono('⬆️', 'Importar precios desde Excel', `abrirImportarListaPrecio('${l._id}', '${nombreEsc}')`)}
               ${l.formula==='cf_x_bulto' ? botonIcono('🔄', 'Sincronizar estos precios con tu tienda Tiendanube', `abrirSincronizarTiendanube('${l._id}', '${nombreEsc}')`) : ''}
-              ${botonIcono(l.activa===false?'▶️':'⏸️', l.activa===false?'Activar lista':'Desactivar lista', `toggleActivaLista('${l._id}', ${l.activa===false})`)}
+              ${l.predeterminada ? '' : botonIcono(l.activa===false?'▶️':'⏸️', l.activa===false?'Activar lista':'Desactivar lista', `toggleActivaLista('${l._id}', ${l.activa===false})`)}
               ${l.predeterminada ? '' : botonIcono('🗑️', 'Eliminar lista', `eliminarListaPrecio('${l._id}', '${nombreEsc}')`, 'danger')}
             </td>
           </tr>
