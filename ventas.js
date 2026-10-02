@@ -255,16 +255,18 @@ async function aplicarMovimientoStock(db, req, { productoId, depositoId, tipo, c
   );
 }
 
-// Descuenta stock de cada ítem de la venta (egresos) — usada tanto al
-// crear una venta con "entrega inmediata" como al entregar una venta que
-// había quedado pendiente. Valida stock suficiente salvo
-// `aceptaStockNegativo`. Devuelve la lista de avisos de productos sin
-// vínculo a Stock (sin `productoId`, ítem cargado a mano sin catálogo).
-async function descontarStockDeVenta(db, req, venta, depositoId) {
+// Valida que haya stock suficiente para una lista de ítems en un depósito
+// (salvo `aceptaStockNegativo`), SIN tocar stock todavía. Separado de
+// aplicarEgresosStockDeVenta (2/10/2026) para poder validar ANTES de
+// insertar el comprobante de venta — antes la validación corría después
+// de guardarlo, así que "no hay stock suficiente" igual dejaba la venta
+// cargada (bug reportado por Mato: la rechazaba y la guardaba al mismo
+// tiempo, y si encima insistía tocando "Guardar" quedaba duplicada).
+async function validarStockSuficiente(db, req, items, depositoId) {
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
   if (!deposito) throw err(404, 'Depósito no encontrado');
-  for (const item of venta.items) {
-    if (!item.productoId) continue; // ítem cargado sin vínculo a Stock — no genera movimiento
+  for (const item of items) {
+    if (!item.productoId) continue; // ítem cargado sin vínculo a Stock — no se valida
     const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: item.productoId }, filtroOrg(req)));
     if (!producto) continue;
     if (!producto.aceptaStockNegativo) {
@@ -275,6 +277,11 @@ async function descontarStockDeVenta(db, req, venta, depositoId) {
       }
     }
   }
+}
+
+// Aplica los egresos de stock de una venta YA VALIDADA (ver
+// validarStockSuficiente) — no vuelve a chequear cantidades.
+async function aplicarEgresosStockDeVenta(db, req, venta, depositoId) {
   for (const item of venta.items) {
     if (!item.productoId) continue;
     await aplicarMovimientoStock(db, req, {
@@ -283,6 +290,14 @@ async function descontarStockDeVenta(db, req, venta, depositoId) {
       ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: venta.fecha
     });
   }
+}
+
+// Descuenta stock de cada ítem de la venta — usada al entregar una venta
+// que había quedado pendiente (ahí no hay riesgo de duplicar nada si
+// falla: la venta ya existía de antes y simplemente se queda "pendiente").
+async function descontarStockDeVenta(db, req, venta, depositoId) {
+  await validarStockSuficiente(db, req, venta.items, depositoId);
+  await aplicarEgresosStockDeVenta(db, req, venta, depositoId);
 }
 
 // Reingresa el stock de una venta ya entregada (usado al anular).
@@ -460,6 +475,12 @@ router.post('/', authAdmin, async (req, res) => {
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       const { items, subtotal } = await normalizarItems(db, req, body.items);
+      // Si falta stock, esto corta ACÁ — antes de pedir numeración y de
+      // insertar el comprobante — para que un rechazo por stock no deje
+      // igual una venta guardada (ver nota en validarStockSuficiente).
+      if (tipoEntrega === 'inmediata') {
+        await validarStockSuficiente(db, req, items, depositoId);
+      }
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const numero = await proximoNumero(db, req.orgId, tipoComprobante);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
@@ -509,7 +530,7 @@ router.post('/', authAdmin, async (req, res) => {
       venta._id = r.insertedId;
 
       if (tipoEntrega === 'inmediata') {
-        await descontarStockDeVenta(db, req, venta, depositoId);
+        await aplicarEgresosStockDeVenta(db, req, venta, depositoId);
         await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { stockDescontado: true, stockDescontadoEn: ahora, entregadaEn: ahora } });
         venta.stockDescontado = true;
         venta.stockDescontadoEn = ahora;

@@ -549,7 +549,7 @@ function abrirNuevaVenta(){
 
         <div class="totales-box" id="nvTotales"></div>
         <div class="err" id="nvErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarNuevaVenta()">Guardar venta</button>
+        <button class="btn" id="nvGuardarBtn" style="margin-top:10px" onclick="guardarNuevaVenta()">Guardar venta</button>
       </div>
     </div>
   `;
@@ -843,6 +843,15 @@ async function guardarNuevaVenta(){
   if (!body.clienteId) { document.getElementById('nvErr').textContent = 'Elegí un cliente'; return; }
   if (!items.length) { document.getElementById('nvErr').textContent = 'Agregá al menos un producto'; return; }
   if (tipoEntrega === 'inmediata' && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a descontar el stock'; return; }
+  // Bloquea el botón mientras la venta se está guardando (2/10/2026) — sin
+  // esto, tocar "Guardar venta" varias veces seguidas (por ejemplo después
+  // de un rechazo, esperando que "ahora sí" funcione) disparaba un POST
+  // por cada click y podía duplicar el comprobante.
+  const btn = document.getElementById('nvGuardarBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Guardando…';
   try{
     // La venta se guarda en la sucursal elegida en el formulario (puede ser
     // distinta de la sucursal activa del resto de la pantalla, ver
@@ -857,6 +866,8 @@ async function guardarNuevaVenta(){
     // activa) no la muestra — es esperado, no hace falta recargar nada acá.
   }catch(e){
     document.getElementById('nvErr').textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
   }
 }
 
