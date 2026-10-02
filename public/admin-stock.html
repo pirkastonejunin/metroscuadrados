@@ -51,6 +51,11 @@
   .link-comprometido{color:var(--accent);font-weight:700;text-decoration:none;}
   .link-comprometido:hover{text-decoration:underline;}
   .disponible-negativo{color:var(--danger);}
+  .campo-combo-producto{position:relative;}
+  .producto-buscar-opciones{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:var(--shadow);}
+  .producto-buscar-opciones .opcion{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .producto-buscar-opciones .opcion:hover,.producto-buscar-opciones .opcion.activa{background:var(--accent-soft);}
+  .producto-buscar-opciones .sin-resultados{padding:8px 10px;font-size:13px;color:var(--muted);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
   .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
@@ -159,9 +164,15 @@
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row" style="flex:1">
-            <div style="min-width:180px">
+            <div style="min-width:220px">
               <label>Producto</label>
-              <select id="fmProducto" onchange="cargarMovimientos()"><option value="">Todos</option></select>
+              <div class="campo-combo-producto">
+                <input type="text" id="fmBuscar" class="producto-buscar" placeholder="Todos" autocomplete="off"
+                  oninput="escribirProductoCombo(this,'fm')" onfocus="renderOpcionesProductoCombo(this,'fm',this.value)"
+                  onblur="cerrarOpcionesProductoCombo('fm')" onkeydown="navegarOpcionesProductoCombo(event,'fm')">
+                <input type="hidden" id="fmProducto" value="" data-onselect="cargarMovimientos">
+                <div class="producto-buscar-opciones hidden" id="fmProductoOpciones"></div>
+              </div>
             </div>
             <div style="min-width:160px">
               <label>Depósito</label>
@@ -328,10 +339,8 @@ async function cargarProductosYDepositos(){
   ]);
   productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
-  const opcionesProductos = productosCache.map(p => `<option value="${p._id}">${escapeHtml(p.sku)} — ${escapeHtml(p.nombre)}</option>`).join('');
   const opcionesDepositos = depositosCache.filter(d => d.activo !== false).map(d => `<option value="${d._id}">${escapeHtml(d.nombre)}</option>`).join('');
   document.getElementById('faDeposito').innerHTML = '<option value="">Todos</option>' + opcionesDepositos;
-  document.getElementById('fmProducto').innerHTML = '<option value="">Todos</option>' + opcionesProductos;
   document.getElementById('fmDeposito').innerHTML = '<option value="">Todos</option>' + opcionesDepositos;
 }
 
@@ -445,8 +454,86 @@ async function cargarMovimientos(){
   `).join('');
 }
 
-function opcionesProductosDatalist(seleccionado){
-  return '<option value="">Elegí un producto…</option>' + productosCache.map(p => `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.sku)} — ${escapeHtml(p.nombre)}</option>`).join('');
+// Buscador de producto tipo combobox (2/10/2026, pedido de Mato) — antes
+// estos campos eran un <select> con el catálogo completo, lo que lo hacía
+// lento para elegir y además el tipeo nativo del navegador no se veía en
+// pantalla ni filtraba por el medio del texto. Mismo patrón ya resuelto en
+// Ventas, generalizado acá con un "prefix" para poder reusarlo en los tres
+// modales (Nuevo movimiento, Ajustar stock, Transferencia) y en el filtro
+// de la grilla de Movimientos.
+const LIMITE_SUGERENCIAS_PRODUCTO = 30;
+function textoProducto(p){
+  return (p.sku ? p.sku + ' — ' : '') + p.nombre;
+}
+function buscarProductosStock(query){
+  const q = (query || '').trim().toLowerCase();
+  const activos = productosCache.filter(p => p.activo !== false);
+  const resultados = q
+    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
+    : activos;
+  return resultados.slice(0, LIMITE_SUGERENCIAS_PRODUCTO);
+}
+function comboProductoHtml(prefix, seleccionadoId, onSelect){
+  const seleccionado = seleccionadoId ? productosCache.find(p => String(p._id) === String(seleccionadoId)) : null;
+  return `
+    <div class="campo-combo-producto">
+      <input type="text" id="${prefix}Buscar" class="producto-buscar" placeholder="Buscar por SKU o nombre…" autocomplete="off"
+        value="${seleccionado ? escapeHtml(textoProducto(seleccionado)) : ''}"
+        oninput="escribirProductoCombo(this,'${prefix}')" onfocus="renderOpcionesProductoCombo(this,'${prefix}',this.value)"
+        onblur="cerrarOpcionesProductoCombo('${prefix}')" onkeydown="navegarOpcionesProductoCombo(event,'${prefix}')">
+      <input type="hidden" id="${prefix}Producto" value="${seleccionadoId||''}" data-onselect="${onSelect||''}">
+      <div class="producto-buscar-opciones hidden" id="${prefix}ProductoOpciones"></div>
+    </div>
+  `;
+}
+function renderOpcionesProductoCombo(input, prefix, query){
+  const cont = document.getElementById(prefix + 'ProductoOpciones');
+  const resultados = buscarProductosStock(query);
+  cont.innerHTML = resultados.length
+    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCombo(this,'${prefix}')">${escapeHtml(textoProducto(p))}</div>`).join('')
+    : `<div class="sin-resultados">${productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados'}</div>`;
+  cont.classList.remove('hidden');
+}
+// Al escribir, la selección previa queda invalidada hasta elegir de nuevo
+// de la lista — evita guardar un producto distinto del que quedó escrito.
+function escribirProductoCombo(input, prefix){
+  const oculto = document.getElementById(prefix + 'Producto');
+  oculto.value = '';
+  renderOpcionesProductoCombo(input, prefix, input.value);
+  if (!input.value.trim()) {
+    const onSelect = oculto.dataset.onselect;
+    if (onSelect && typeof window[onSelect] === 'function') window[onSelect]();
+  }
+}
+function cerrarOpcionesProductoCombo(prefix){
+  // El onmousedown de la opción dispara ANTES que este blur, así que
+  // elegir con el mouse/touch funciona igual aunque esto la cierre después.
+  setTimeout(() => { const cont = document.getElementById(prefix + 'ProductoOpciones'); if (cont) cont.classList.add('hidden'); }, 150);
+}
+function navegarOpcionesProductoCombo(e, prefix){
+  const cont = document.getElementById(prefix + 'ProductoOpciones');
+  if (cont.classList.contains('hidden')) return;
+  const opciones = Array.from(cont.querySelectorAll('.opcion'));
+  if (!opciones.length) return;
+  let idx = opciones.findIndex(o => o.classList.contains('activa'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(opciones.length - 1, idx + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); elegirProductoCombo(opciones[idx >= 0 ? idx : 0], prefix); return; }
+  else if (e.key === 'Escape') { cont.classList.add('hidden'); return; }
+  else return;
+  opciones.forEach(o => o.classList.remove('activa'));
+  opciones[idx].classList.add('activa');
+  opciones[idx].scrollIntoView({ block: 'nearest' });
+}
+function elegirProductoCombo(el, prefix){
+  const productoId = el.dataset.id;
+  const producto = productosCache.find(p => String(p._id) === productoId);
+  const oculto = document.getElementById(prefix + 'Producto');
+  oculto.value = productoId;
+  document.getElementById(prefix + 'Buscar').value = producto ? textoProducto(producto) : '';
+  document.getElementById(prefix + 'ProductoOpciones').classList.add('hidden');
+  const onSelect = oculto.dataset.onselect;
+  if (onSelect && typeof window[onSelect] === 'function') window[onSelect]();
 }
 function opcionesDepositosSelect(seleccionado){
   return '<option value="">Elegí un depósito…</option>' + depositosCache.filter(d => d.activo !== false).map(d => `<option value="${d._id}" ${d._id===seleccionado?'selected':''}>${escapeHtml(d.nombre)}</option>`).join('');
@@ -459,7 +546,7 @@ function abrirNuevoMovimiento(){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo movimiento</h2>
         <div class="grid2">
-          <div><label>Producto *</label><select id="mmProducto">${opcionesProductosDatalist()}</select></div>
+          <div><label>Producto *</label>${comboProductoHtml('mm', '', '')}</div>
           <div><label>Depósito *</label><select id="mmDeposito">${opcionesDepositosSelect()}</select></div>
         </div>
         <div class="grid2" style="margin-top:10px">
@@ -522,7 +609,7 @@ function abrirAjusteStock(){
         <h2>Ajustar stock</h2>
         <p class="muted">Elegí el producto y el depósito, y escribí la cantidad que contaste — el sistema calcula la diferencia sola y la carga como ingreso o egreso, según corresponda.</p>
         <div class="grid2">
-          <div><label>Producto *</label><select id="ajProducto" onchange="actualizarCantidadActualAjuste()">${opcionesProductosDatalist()}</select></div>
+          <div><label>Producto *</label>${comboProductoHtml('aj', '', 'actualizarCantidadActualAjuste')}</div>
           <div><label>Depósito *</label><select id="ajDeposito" onchange="actualizarCantidadActualAjuste()">${opcionesDepositosSelect()}</select></div>
         </div>
         <div class="grid2" style="margin-top:10px">
@@ -579,7 +666,7 @@ function abrirNuevaTransferencia(){
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Transferencia entre depósitos</h2>
-        <div><label>Producto *</label><select id="mtProducto">${opcionesProductosDatalist()}</select></div>
+        <div><label>Producto *</label>${comboProductoHtml('mt', '', '')}</div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Depósito origen *</label><select id="mtOrigen">${opcionesDepositosSelect()}</select></div>
           <div><label>Depósito destino *</label><select id="mtDestino">${opcionesDepositosSelect()}</select></div>
