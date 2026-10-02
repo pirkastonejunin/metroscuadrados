@@ -1877,10 +1877,14 @@ router.get('/pdf/:id', async (req, res) => {
 // salido bien. Si falta la configuración de la tienda (sin
 // TIENDA_REAL_STORE_ID o sin token), ahí sí tira, porque no hay nada que
 // sincronizar.
-async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
+// Trae la tienda real configurada (con su token) y arma el índice sku
+// (minúscula) -> {productId, variantId, precioActual} de TODO su catálogo
+// — una sola pasada paginada, compartida por sincronizarPreciosTiendanube
+// y obtenerPreciosTiendanubePorSku (recuperación, ver más abajo).
+async function obtenerIndiceSkuTiendanube() {
   const storeId = process.env.TIENDA_REAL_STORE_ID;
   if (!storeId) {
-    const e = new Error('No hay una tienda de Tiendanube configurada para sincronizar (falta TIENDA_REAL_STORE_ID).');
+    const e = new Error('No hay una tienda de Tiendanube configurada (falta TIENDA_REAL_STORE_ID).');
     e.status = 400;
     throw e;
   }
@@ -1890,9 +1894,8 @@ async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
     e.status = 400;
     throw e;
   }
-
   const productosTienda = await fetchAllProducts(store.store_id, store.access_token);
-  const indice = new Map(); // sku en minúsculas -> {productId, variantId, precioActual}
+  const indice = new Map();
   for (const p of productosTienda) {
     if (!p.variants) continue;
     for (const v of p.variants) {
@@ -1904,6 +1907,30 @@ async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
       });
     }
   }
+  return { store, indice };
+}
+
+// Recuperación de precios (2/10/2026): un bug de parseo de números ya
+// corregido (ver importExport.js, convertirValorImport) hizo que varios
+// imports de la lista Consumidor Final guardaran el precio VACÍO en vez
+// del valor real para cualquier precio de 4+ cifras — eso dejó
+// `producto.precio` en null para buena parte del catálogo. La tienda
+// real de Tiendanube nunca se tocó con ese bug (la sincronización hacia
+// Tiendanube solo empuja precios que SÍ están cargados acá, nunca
+// vacíos), así que sus precios actuales sirven de respaldo para
+// recuperar lo perdido. Devuelve un Map sku(tal cual vino del catálogo
+// de Tiendanube, en MAYÚSCULAS para matchear con nuestro SKU) -> precio.
+async function obtenerPreciosTiendanubePorSku() {
+  const { indice } = await obtenerIndiceSkuTiendanube();
+  const porSku = new Map();
+  for (const [skuMin, ref] of indice.entries()) {
+    if (Number.isFinite(ref.precioActual)) porSku.set(skuMin.toUpperCase(), ref.precioActual);
+  }
+  return porSku;
+}
+
+async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
+  const { store, indice } = await obtenerIndiceSkuTiendanube();
 
   const resultado = { actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [] };
   let procesados = 0;
@@ -1942,3 +1969,4 @@ module.exports = router;
 module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
 module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js
 module.exports.sincronizarPreciosTiendanube = sincronizarPreciosTiendanube; // exportado para productos.js
+module.exports.obtenerPreciosTiendanubePorSku = obtenerPreciosTiendanubePorSku; // exportado para productos.js

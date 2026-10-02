@@ -138,6 +138,7 @@
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
           <button class="btn secondary" onclick="abrirDuplicadosSku()">Revisar SKUs duplicados</button>
+          <button class="btn secondary" title="Completa el precio de los productos que lo tienen vacío, trayéndolo desde tu tienda real de Tiendanube" onclick="abrirRecuperarPreciosTiendanube()">🛟 Recuperar precios</button>
           <button class="btn secondary" onclick="abrirListasPrecio()">Listas de precio</button>
           <button class="btn" onclick="abrirNuevoProducto()">+ Nuevo producto</button>
         </div>
@@ -859,6 +860,48 @@ async function resolverMapeoColumnas(base64, endpointEncabezados, contenedorId){
       resolve(mapeo);
     };
   });
+}
+
+// Recuperar precios vacíos desde Tiendanube (2/10/2026, bug grave: un
+// error de parseo de números en el import de Consumidor Final —ya
+// corregido— dejó el precio vacío en buena parte del catálogo). Esto
+// SOLO completa lo que hoy está vacío, nunca pisa un precio que ya
+// tenga algo cargado — es seguro de correr más de una vez.
+function abrirRecuperarPreciosTiendanube(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Recuperar precios vacíos desde Tiendanube</h2>
+        <p class="muted">Busca, por SKU, el precio de cada producto que hoy tiene el precio vacío en tu tienda real de Tiendanube, y lo completa acá. Nunca pisa un precio que ya tenga algo cargado — si un producto no aparece en tu tienda, queda sin tocar.</p>
+        <div class="err" id="rptErr"></div>
+        <div id="rptResultado"></div>
+        <button class="btn" id="rptBtn" style="margin-top:10px" onclick="confirmarRecuperarPreciosTiendanube()">Recuperar ahora</button>
+      </div>
+    </div>
+  `;
+}
+
+async function confirmarRecuperarPreciosTiendanube(){
+  const btn = document.getElementById('rptBtn');
+  document.getElementById('rptErr').textContent = '';
+  document.getElementById('rptResultado').innerHTML = '';
+  btn.disabled = true;
+  try{
+    const r = await fetch(BASE + '/recuperar-precios-tiendanube', {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al recuperar precios');
+    document.getElementById('rptResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
+    const job = await esperarJobImportListaPrecio(data.jobId, 'rptResultado');
+    document.getElementById('rptResultado').innerHTML =
+      `<p class="ok-msg">Precios recuperados: ${job.actualizados||0}${job.noEncontrados ? ` · No encontrados en Tiendanube: ${job.noEncontrados}` : ''}</p>`;
+    btn.textContent = 'Recuperar de nuevo';
+    await cargarProductos();
+  }catch(e){
+    document.getElementById('rptErr').textContent = e.message;
+  }finally{
+    btn.disabled = false;
+  }
 }
 
 // Revisar/consolidar SKUs duplicados por mayúsculas (30/9/2026) — primero

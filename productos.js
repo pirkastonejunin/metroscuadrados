@@ -93,7 +93,7 @@ const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64, leerEncabezadosX
 // Para mostrar en la ficha de producto el link y las fotos de Tiendanube
 // (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
 // cotizador.js.
-const { buscarProductoTiendanubePorSku, sincronizarPreciosTiendanube } = require('./cotizador');
+const { buscarProductoTiendanubePorSku, sincronizarPreciosTiendanube, obtenerPreciosTiendanubePorSku } = require('./cotizador');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -1646,6 +1646,69 @@ async function procesarSincronizacionTiendanube(db, jobId, preciosPorSku) {
   await db.collection('productos_import_jobs').updateOne(
     { _id: jobId },
     { $set: Object.assign({ estado: 'listo', terminadoEn: new Date() }, resultado) }
+  );
+}
+
+// Recuperación de precios vacíos desde Tiendanube (2/10/2026, bug
+// grave: un error de parseo de números — ya corregido, ver
+// importExport.js — hizo que varios imports de Consumidor Final
+// guardaran vacío cualquier precio de 4+ cifras, en vez del valor real).
+// SOLO completa `producto.precio` donde hoy está vacío (null) — nunca
+// pisa un precio que ya tenga algo cargado, así que es seguro de
+// reintentar y no puede tapar una corrección manual que Mato ya haya
+// hecho. La fuente es el catálogo real de Tiendanube (buscarProductoPorSku),
+// que nunca se tocó con este bug porque la sincronización hacia la
+// tienda solo empuja precios que están cargados, nunca vacíos.
+router.post('/recuperar-precios-tiendanube', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const db = await conReintento(getDb);
+    const productos = await db.collection('productos_catalogo')
+      .find(Object.assign({ activo: { $ne: false }, precio: null }, filtroOrg(req)))
+      .project({ sku: 1 }).toArray();
+    if (!productos.length) throw err(400, 'No hay productos activos con el precio vacío — no hay nada para recuperar.');
+
+    const ahora = new Date();
+    const { insertedId: jobId } = await db.collection('productos_import_jobs').insertOne({
+      orgId: req.orgId, tipo: 'recuperar-precios-tiendanube', total: productos.length, procesados: 0,
+      actualizados: 0, noEncontrados: 0, errores: [], estado: 'procesando', creadoEn: ahora, terminadoEn: null
+    });
+    res.json({ jobId, total: productos.length });
+
+    procesarRecuperacionPreciosTiendanube(db, jobId, productos).catch(async (e) => {
+      try {
+        await db.collection('productos_import_jobs').updateOne(
+          { _id: jobId }, { $set: { estado: 'error', errorGeneral: e.message, terminadoEn: new Date() } }
+        );
+      } catch (e2) { /* nada más para hacer del lado del servidor */ }
+    });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+async function procesarRecuperacionPreciosTiendanube(db, jobId, productos) {
+  const preciosPorSku = await obtenerPreciosTiendanubePorSku();
+  let actualizados = 0;
+  let noEncontrados = 0;
+  const ahora = new Date();
+  for (let i = 0; i < productos.length; i += TANDA_IMPORT_LISTAS) {
+    const grupo = productos.slice(i, i + TANDA_IMPORT_LISTAS);
+    const tanda = [];
+    for (const p of grupo) {
+      const precio = p.sku ? preciosPorSku.get(String(p.sku).toUpperCase()) : undefined;
+      if (precio === undefined) { noEncontrados++; continue; }
+      tanda.push({ updateOne: { filter: { _id: p._id, precio: null }, update: { $set: { precio, updatedAt: ahora } } } });
+    }
+    if (tanda.length) {
+      const r = await db.collection('productos_catalogo').bulkWrite(tanda, { ordered: false });
+      actualizados += r.modifiedCount || 0;
+    }
+    await db.collection('productos_import_jobs').updateOne(
+      { _id: jobId }, { $set: { procesados: Math.min(productos.length, i + TANDA_IMPORT_LISTAS), actualizados, noEncontrados } }
+    );
+  }
+  await db.collection('productos_import_jobs').updateOne(
+    { _id: jobId },
+    { $set: { estado: 'listo', actualizados, noEncontrados, terminadoEn: new Date() } }
   );
 }
 
