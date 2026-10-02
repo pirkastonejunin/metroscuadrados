@@ -48,6 +48,9 @@
   .pill.ok{background:var(--ok-soft);color:var(--ok);}
   .pill.ingreso{background:var(--ok-soft);color:var(--ok);}
   .pill.egreso{background:var(--danger-soft);color:var(--danger);}
+  .link-comprometido{color:var(--accent);font-weight:700;text-decoration:none;}
+  .link-comprometido:hover{text-decoration:underline;}
+  .disponible-negativo{color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
   .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
@@ -336,6 +339,8 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 // -------------------------------------------------------------------
 // Stock actual
 // -------------------------------------------------------------------
+let stockActualCache = [];
+
 async function cargarStockActual(){
   const params = new URLSearchParams();
   if (document.getElementById('faBusqueda').value.trim()) params.set('q', document.getElementById('faBusqueda').value.trim());
@@ -345,19 +350,68 @@ async function cargarStockActual(){
   const body = document.getElementById('actualBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
   const filas = await r.json();
+  stockActualCache = filas;
   if (!filas.length) { body.innerHTML = '<tr><td colspan="8" class="muted">Sin existencias cargadas todavía.</td></tr>'; return; }
+  // Código/Descripción = sku/nombre (2/10/2026, pedido de Mato). El
+  // número de "Comprometido" es clickeable cuando hay algo comprometido
+  // — abre el detalle de qué ventas pendientes de remito lo componen
+  // (cliente y cantidad). "Disponible" puede ser negativo: significa que
+  // lo comprometido ya supera el stock físico — hace falta reponer o
+  // fabricar ese faltante para poder generar esos remitos.
   body.innerHTML = filas.map(f => `
     <tr>
       <td><strong>${escapeHtml(f.sku)}</strong></td>
       <td>${escapeHtml(f.nombre)}</td>
       <td class="muted">${escapeHtml(f.deposito)}</td>
       <td>${f.cantidad} <span class="muted">${escapeHtml(f.unidad||'')}</span></td>
-      <td class="muted">${f.cantidadComprometida ? f.cantidadComprometida : '—'}</td>
-      <td><strong>${f.disponible}</strong> <span class="muted">${escapeHtml(f.unidad||'')}</span></td>
+      <td>${f.cantidadComprometida
+          ? `<a href="#" class="link-comprometido" onclick="event.preventDefault(); verComprometido('${f.productoId}','${f.depositoId}')">${f.cantidadComprometida}</a>`
+          : '<span class="muted">—</span>'}</td>
+      <td><strong class="${f.disponible < 0 ? 'disponible-negativo' : ''}">${f.disponible}</strong> <span class="muted">${escapeHtml(f.unidad||'')}</span></td>
       <td class="muted">${f.cantidadMinima!=null ? f.cantidadMinima : '—'}</td>
       <td>${f.cantidadMinima!=null ? `<span class="pill ${f.bajoMinimo?'bajo':'ok'}">${f.bajoMinimo?'Bajo mínimo':'OK'}</span>` : '<span class="muted">—</span>'}</td>
     </tr>
   `).join('');
+}
+
+// Detalle de qué ventas pendientes de remito componen el "comprometido"
+// de un producto en un depósito (2/10/2026, pedido de Mato) — para ver a
+// qué cliente y qué cantidad corresponde ese número.
+async function verComprometido(productoId, depositoId){
+  const fila = stockActualCache.find(f => String(f.productoId) === productoId && String(f.depositoId) === depositoId);
+  const titulo = fila ? `${escapeHtml(fila.sku)} — ${escapeHtml(fila.nombre)}` : 'Producto';
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Comprometido — ${titulo}</h2>
+        <p class="muted">${fila ? escapeHtml(fila.deposito) : ''}</p>
+        <div id="cpContenido"><p class="muted">Cargando...</p></div>
+      </div>
+    </div>
+  `;
+  try{
+    const r = await fetch(BASE + '/comprometido?productoId=' + encodeURIComponent(productoId) + '&depositoId=' + encodeURIComponent(depositoId), {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al cargar');
+    const cont = document.getElementById('cpContenido');
+    if (!data.length) { cont.innerHTML = '<p class="muted">No hay ventas pendientes que lo expliquen (puede haberse liberado recién).</p>'; return; }
+    cont.innerHTML = `
+      <table>
+        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Fecha</th><th>Cantidad</th></tr></thead>
+        <tbody>${data.map(v => `
+          <tr>
+            <td>${v.tipoComprobante === 'fiscal' ? 'F' : 'X'}-${String(v.numero).padStart(5,'0')}</td>
+            <td>${escapeHtml(v.clienteNombre)}</td>
+            <td class="muted">${fechaCorta(v.fecha)}</td>
+            <td>${v.cantidad}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    `;
+  }catch(e){
+    document.getElementById('cpContenido').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+  }
 }
 
 // -------------------------------------------------------------------

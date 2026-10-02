@@ -328,6 +328,37 @@ async function aplicarAlStockActual(db, req, productoId, depositoId, tipo, canti
   return doc ? doc.cantidad : delta;
 }
 
+// Detalle de qué ventas componen el "comprometido" de un producto en un
+// depósito (2/10/2026, pedido de Mato: poder ver a qué cliente y cuánta
+// cantidad corresponde ese número antes de hacer click). Lee directo de
+// la colección `ventas` — mismo criterio ya usado en este archivo para
+// replicar la mínima lógica necesaria de otro módulo sin importarlo.
+router.get('/comprometido', authAdmin, async (req, res) => {
+  try {
+    const productoId = toObjectId(req.query.productoId);
+    const depositoId = toObjectId(req.query.depositoId);
+    if (!productoId || !depositoId) throw err(400, 'Falta productoId o depositoId');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const ventas = await db.collection('ventas').find(Object.assign({
+        estado: 'pendiente', depositoId, 'items.productoId': productoId
+      }, filtroOrg(req))).sort({ fecha: 1 }).toArray();
+      return ventas.map(v => {
+        const item = (v.items || []).find(it => String(it.productoId) === String(productoId));
+        return {
+          ventaId: v._id,
+          numero: v.numero,
+          tipoComprobante: v.tipoComprobante,
+          clienteNombre: v.clienteNombre,
+          cantidad: item ? item.cantidad : 0,
+          fecha: v.fecha
+        };
+      });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/actual', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));

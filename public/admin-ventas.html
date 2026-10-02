@@ -869,6 +869,10 @@ async function guardarNuevaVenta(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
     cerrarModal();
+    // avisoRemito (2/10/2026): la venta se guardó igual aunque elegiste
+    // entrega inmediata — no había stock físico para generar el remito
+    // en el momento, así que quedó pendiente con el stock comprometido.
+    if (data.avisoRemito) alert('La venta se guardó, pero no se pudo generar el remito todavía:\n\n' + data.avisoRemito + '\n\nQuedó pendiente — generá el remito desde el detalle cuando haya stock.');
     if (ventaOrgSeleccionada === ORG) await cargarVentas();
     // Si se guardó en OTRA sucursal, el listado actual (de la sucursal
     // activa) no la muestra — es esperado, no hace falta recargar nada acá.

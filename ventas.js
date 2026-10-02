@@ -259,25 +259,29 @@ async function aplicarMovimientoStock(db, req, { productoId, depositoId, tipo, c
 }
 
 // -----------------------------------------------------------------------
-// Stock comprometido vs. disponible (2/10/2026, pedido de Mato) — la
-// mercadería de una venta se RESERVA en el depósito elegido desde que se
-// carga (no se puede vender dos veces el mismo stock), pero recién se da
-// de baja de verdad cuando se genera el REMITO. Con "entrega inmediata"
-// el remito se genera en el mismo momento de cargar la venta (ver POST /).
-// `stock_actual.cantidadComprometida` guarda esa reserva; "disponible" es
-// siempre `cantidad - cantidadComprometida`. A diferencia de un
+// Stock comprometido vs. disponible (2/10/2026, pedido de Mato; ajustado
+// el mismo día) — la venta se carga SIEMPRE, haya o no stock: un cliente
+// puede dejarla pendiente de retiro mientras entra mercadería o se
+// fabrica. Lo que hace la venta es COMPROMETER el stock del depósito
+// elegido (no se puede prometer dos veces lo mismo), sin bloquear la
+// carga aunque el comprometido ya supere lo que hay — eso es justamente
+// la señal de que hace falta reponer o fabricar ese faltante (se ve en
+// Stock como "Disponible" negativo). Recién al GENERAR EL REMITO se
+// cruza contra el stock físico de verdad: si no alcanza, ahí sí se
+// rechaza. Con "entrega inmediata" el remito se genera en el mismo
+// momento de cargar la venta (ver POST /). A diferencia de un
 // ingreso/egreso real, comprometer o liberar NO queda en el libro
 // `stock_movimientos` (no es un movimiento físico) — el libro solo
 // registra bajas reales (remito generado) y altas reales (reingreso por
 // anulación), igual que antes de este cambio.
 // -----------------------------------------------------------------------
 
-// Valida que haya stock DISPONIBLE (cantidad - comprometido) para una
-// lista de ítems en un depósito, salvo `aceptaStockNegativo`. No toca
-// nada — se usa antes de comprometer al cargar la venta, y antes de
-// comprometer "tarde" para una venta vieja sin depósito asignado (ver
-// POST /:id/entregar).
-async function validarStockDisponible(db, req, items, depositoId) {
+// Valida que haya stock FÍSICO suficiente (cantidad real en el depósito,
+// sin restar lo comprometido) para los ítems de una venta puntual, salvo
+// `aceptaStockNegativo`. Se usa SOLO al generar el remito — es la
+// mercadería real que se va a entregar en este momento, no importa
+// cuánto más esté comprometido por otras ventas pendientes.
+async function validarStockFisicoParaRemito(db, req, items, depositoId) {
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
   if (!deposito) throw err(404, 'Depósito no encontrado');
   for (const item of items) {
@@ -287,17 +291,17 @@ async function validarStockDisponible(db, req, items, depositoId) {
     if (!producto.aceptaStockNegativo) {
       const actual = await db.collection('stock_actual').findOne(Object.assign({ productoId: item.productoId, depositoId }, filtroOrg(req)));
       const cantidadActual = actual ? actual.cantidad : 0;
-      const comprometida = actual ? (actual.cantidadComprometida || 0) : 0;
-      const disponible = cantidadActual - comprometida;
-      if (item.cantidad > disponible) {
-        throw err(400, `No hay stock disponible de "${item.nombre}" en ${deposito.nombre} (disponible: ${disponible}, comprometido: ${comprometida}).`);
+      if (item.cantidad > cantidadActual) {
+        throw err(400, `No hay stock suficiente de "${item.nombre}" en ${deposito.nombre} para generar el remito (disponible físico: ${cantidadActual}).`);
       }
     }
   }
 }
 
 // Reserva stock (sin descontarlo todavía) para cada ítem con producto
-// vinculado. Asume que ya se validó disponibilidad (validarStockDisponible).
+// vinculado. NO valida disponibilidad — la venta se compromete siempre,
+// aunque el comprometido termine superando el stock físico (ver nota
+// arriba). El chequeo real pasa a generarRemitoDeVenta.
 async function comprometerStockDeVenta(db, req, items, depositoId) {
   for (const item of items) {
     if (!item.productoId) continue;
@@ -346,6 +350,9 @@ async function proximoNumeroRemito(db, orgId) {
 async function generarRemitoDeVenta(db, req, venta, depositoId) {
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
   if (!deposito) throw err(404, 'Depósito no encontrado');
+  // Recién ACÁ se cruza contra el stock físico real — si no alcanza, se
+  // rechaza el remito (la venta sigue existiendo, pendiente, comprometida).
+  await validarStockFisicoParaRemito(db, req, venta.items, depositoId);
   for (const item of venta.items) {
     if (!item.productoId) continue;
     await aplicarMovimientoStock(db, req, {
@@ -579,11 +586,13 @@ router.post('/', authAdmin, async (req, res) => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
+      const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
+      if (!deposito) throw err(404, 'Depósito no encontrado');
       const { items, subtotal } = await normalizarItems(db, req, body.items);
-      // Si falta stock DISPONIBLE, esto corta ACÁ — antes de pedir
-      // numeración y de insertar el comprobante — para que un rechazo por
-      // stock no deje igual una venta guardada.
-      await validarStockDisponible(db, req, items, depositoId);
+      // La venta se carga SIEMPRE, haya o no stock (2/10/2026, pedido de
+      // Mato) — puede quedar pendiente de retiro mientras entra
+      // mercadería o se fabrica. No hay validación de stock acá; el
+      // chequeo real es al generar el remito (ver generarRemitoDeVenta).
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const numero = await proximoNumero(db, req.orgId, tipoComprobante);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
@@ -641,8 +650,18 @@ router.post('/', authAdmin, async (req, res) => {
         // Entrega inmediata: la misma venta dispara el remito en el acto
         // (pedido de Mato, 2/10/2026) — se descuenta el stock de verdad y
         // queda numerado el remito, sin pasar por el estado "pendiente".
-        await generarRemitoDeVenta(db, req, venta, depositoId);
-        return db.collection('ventas').findOne({ _id: venta._id });
+        // Si no hay stock físico para generarlo, la venta NO se pierde
+        // (ya quedó comprometida arriba): queda guardada como pendiente,
+        // y se avisa en la respuesta en vez de rechazar toda la carga.
+        try {
+          await generarRemitoDeVenta(db, req, venta, depositoId);
+          return db.collection('ventas').findOne({ _id: venta._id });
+        } catch (eRemito) {
+          if (eRemito.status !== 400) throw eRemito; // error real, no de stock
+          const ventaFinal = await db.collection('ventas').findOne({ _id: venta._id });
+          ventaFinal.avisoRemito = eRemito.message;
+          return ventaFinal;
+        }
       }
       return venta;
     });
@@ -670,9 +689,9 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
 
       if (!venta.depositoId) {
         // Venta cargada antes de este cambio (sin depósito ni reserva
-        // hecha al momento de guardarla) — se valida y se compromete
-        // recién ahora, como paso previo a generar el remito.
-        await validarStockDisponible(db, req, venta.items, depositoId);
+        // hecha al momento de guardarla) — se compromete recién ahora,
+        // como paso previo a generar el remito (que valida el stock
+        // físico real antes de descontar — ver generarRemitoDeVenta).
         await comprometerStockDeVenta(db, req, venta.items, depositoId);
       }
 
