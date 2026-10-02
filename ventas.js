@@ -70,6 +70,12 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
+// Tesorería (2/10/2026): un cobro en efectivo/cuenta/tarjeta tiene que
+// acreditarse YA en una caja/banco real; un cobro en cheque crea un
+// cheque "de terceros" en cartera. Se reusan estas dos funciones de
+// tesoreria.js (en vez de reimplementarlas) porque son lógica de
+// negocio sensible al dinero — ver la nota en tesoreria.js.
+const { aplicarMovimientoCuenta, cuentaHabilitada } = require('./tesoreria');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -750,6 +756,31 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     if (monto <= 0) throw err(400, 'El monto del cobro tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
 
+    // Tesorería (2/10/2026): efectivo/cuenta/tarjeta se acredita ya mismo
+    // en una caja o banco; cheque crea un cheque de terceros en cartera
+    // (no mueve plata todavía — eso pasa al depositarlo, desde Tesorería).
+    let cuentaTipo = null, cuentaId = null;
+    if (tipoValor !== 'cheque') {
+      cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
+      if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí a qué caja o banco va el cobro.');
+      cuentaId = toObjectId(body.cuentaId);
+      if (!cuentaId) throw err(400, 'Caja/banco inválido');
+    }
+
+    let chequeDatos = null;
+    if (tipoValor === 'cheque') {
+      chequeDatos = {
+        numero: normalizarTexto(body.chequeNumero),
+        banco: normalizarTexto(body.chequeBanco),
+        librador: normalizarTexto(body.chequeLibrador),
+        fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : new Date(),
+        fechaVencimiento: body.chequeFechaVencimiento ? new Date(body.chequeFechaVencimiento) : null,
+        observaciones: normalizarTexto(body.chequeObservaciones)
+      };
+      if (!chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
+      if (!chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
+    }
+
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
@@ -757,7 +788,25 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada, no se le pueden registrar cobros.');
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
-      const pago = { tipoValor, monto, fecha: new Date(), nota, usuarioNombre };
+      let chequeId = null;
+
+      if (tipoValor === 'cheque') {
+        const cheque = Object.assign({
+          tipo: 'tercero', moneda: venta.moneda || 'ARS', monto, estado: 'en_cartera',
+          clienteId: venta.clienteId || null, clienteNombre: venta.clienteNombre || '',
+          ventaId: id, compraId: null, cuentaId: null, depositadoEnCuentaId: null, endosadoA: null,
+          usuarioNombre, fecha: new Date(), orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
+        }, chequeDatos);
+        const { insertedId } = await db.collection('cheques').insertOne(cheque);
+        chequeId = insertedId;
+      } else {
+        await aplicarMovimientoCuenta(db, req, {
+          cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda: venta.moneda || 'ARS',
+          motivo: `Cobro venta Nº ${venta.numero}`, observaciones: nota, origen: 'venta', ventaId: id
+        });
+      }
+
+      const pago = Object.assign({ tipoValor, monto, fecha: new Date(), nota, usuarioNombre }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {});
       const totalCobrado = (venta.totalCobrado || 0) + monto;
       const saldoPendiente = Math.max(0, venta.total - totalCobrado);
       await db.collection('ventas').updateOne(

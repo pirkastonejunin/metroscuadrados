@@ -65,6 +65,12 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
+// Tesorería (2/10/2026): un pago en efectivo/cuenta/tarjeta sale YA de
+// una caja/banco real; un pago en cheque propio crea el cheque
+// "emitido" (sin mover plata hasta que se confirme el pago, desde
+// Tesorería). Se reusa esta función de tesoreria.js en vez de
+// reimplementarla — ver la nota en tesoreria.js.
+const { aplicarMovimientoCuenta } = require('./tesoreria');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -514,6 +520,31 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     if (monto <= 0) throw err(400, 'El monto del pago tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
 
+    // Tesorería (2/10/2026): efectivo/cuenta/tarjeta sale ya de una caja
+    // o banco; cheque crea un cheque propio "emitido" (no mueve plata
+    // todavía — eso pasa al confirmar el pago, desde Tesorería).
+    let cuentaTipo = null, cuentaId = null;
+    if (tipoValor !== 'cheque') {
+      cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
+      if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
+      cuentaId = toObjectId(body.cuentaId);
+      if (!cuentaId) throw err(400, 'Caja/banco inválido');
+    }
+
+    let chequeDatos = null;
+    if (tipoValor === 'cheque') {
+      chequeDatos = {
+        numero: normalizarTexto(body.chequeNumero),
+        cuentaId: toObjectId(body.chequeCuentaId),
+        fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : new Date(),
+        fechaVencimiento: body.chequeFechaVencimiento ? new Date(body.chequeFechaVencimiento) : null,
+        observaciones: normalizarTexto(body.chequeObservaciones)
+      };
+      if (!chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
+      if (!chequeDatos.cuentaId) throw err(400, 'Elegí de qué banco propio sale el cheque.');
+      if (!chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
+    }
+
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
@@ -521,7 +552,26 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
       if (compra.estado === 'anulada') throw err(400, 'Esta compra está anulada, no se le pueden registrar pagos.');
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
-      const pago = { tipoValor, monto, fecha: new Date(), nota, usuarioNombre };
+      let chequeId = null;
+
+      if (tipoValor === 'cheque') {
+        const cheque = Object.assign({
+          tipo: 'propio', moneda: compra.moneda || 'ARS', monto, estado: 'emitido',
+          proveedorId: compra.proveedorId || null, proveedorNombre: compra.proveedorNombre || '',
+          ventaId: null, compraId: id, clienteId: null, clienteNombre: '', librador: '',
+          banco: '', depositadoEnCuentaId: null, endosadoA: null,
+          usuarioNombre, fecha: new Date(), orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
+        }, chequeDatos);
+        const { insertedId } = await db.collection('cheques').insertOne(cheque);
+        chequeId = insertedId;
+      } else {
+        await aplicarMovimientoCuenta(db, req, {
+          cuentaTipo, cuentaId, tipo: 'egreso', monto, moneda: compra.moneda || 'ARS',
+          motivo: `Pago compra Nº ${compra.numero}`, observaciones: nota, origen: 'compra', compraId: id
+        });
+      }
+
+      const pago = Object.assign({ tipoValor, monto, fecha: new Date(), nota, usuarioNombre }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {});
       const totalPagado = (compra.totalPagado || 0) + monto;
       const saldoPendiente = Math.max(0, compra.total - totalPagado);
       await db.collection('compras').updateOne(
