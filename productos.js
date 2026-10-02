@@ -703,6 +703,19 @@ function precioResuelto(producto, lista, cotizacion) {
   const overrides = producto.preciosPorLista || [];
   const ov = overrides.find(x => String(x.listaId) === String(lista._id));
   if (ov) return { precio: ov.precio, override: true };
+  // La lista predeterminada (Consumidor Final) NO calcula nada con costo +
+  // %: su precio es directamente `producto.precio`, el mismo campo que se
+  // carga desde la ficha de Productos o el import de Productos (ver
+  // comentario de cabecera, y el de 'cf_x_bulto' más abajo que depende de
+  // este mismo campo). Antes, un producto sin un ajuste puntual guardado
+  // para esta lista (o sea, cualquiera cargado/editado por la ficha de
+  // Productos en vez de por la pantalla de Listas de precio) caía en el
+  // cálculo de costo + % de más abajo, que daba vacío sin costo cargado
+  // — eso era lo que hacía ver "todo vacío" en Consumidor Final (2/10/2026,
+  // bug reportado por Mato).
+  if (lista.predeterminada) {
+    return { precio: producto.precio != null ? producto.precio : null, override: false };
+  }
   if (lista.formula === 'cf_x_bulto') {
     if (producto.precio == null) return { precio: null, override: false };
     const bultos = (producto.unidadesPorBulto && producto.unidadesPorBulto > 0) ? producto.unidadesPorBulto : 1;
