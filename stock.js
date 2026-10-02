@@ -376,7 +376,12 @@ router.get('/actual', authAdmin, async (req, res) => {
       const db = await getDb();
       const [existencias, productos, depositos] = await Promise.all([
         db.collection('stock_actual').find(match).toArray(),
-        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray(),
+        // Proyectado (2/10/2026, "sigue tardando mucho en mostrar la base
+        // del stock") — antes traía el documento COMPLETO de cada producto
+        // del catálogo (20.327 filas reales de Dux) solo para leer 5
+        // campos; con eso de más, armar esta grilla era pesado.
+        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+          .project({ sku: 1, nombre: 1, unidad: 1, cantidadMinima: 1, stockIdeal: 1 }).toArray(),
         db.collection('depositos').find(filtroOrg(req)).toArray()
       ]);
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));
@@ -433,7 +438,8 @@ router.get('/actual/export', authAdmin, async (req, res) => {
       const db = await getDb();
       const [existencias, productos, depositos] = await Promise.all([
         db.collection('stock_actual').find(match).toArray(),
-        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray(),
+        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+          .project({ sku: 1, nombre: 1, unidad: 1, cantidadMinima: 1, stockIdeal: 1 }).toArray(),
         db.collection('depositos').find(filtroOrg(req)).toArray()
       ]);
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));

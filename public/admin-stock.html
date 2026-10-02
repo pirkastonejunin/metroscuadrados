@@ -334,7 +334,12 @@ let productosCache = [];
 let depositosCache = [];
 async function cargarProductosYDepositos(){
   const [rp, rd] = await Promise.all([
-    fetch('/api/productos', {headers: headersAuth()}),
+    // Solo los campos que esta pantalla necesita (2/10/2026, "sigue
+    // tardando mucho en mostrar la base del stock") — el catálogo real
+    // tiene 20.327 productos y antes se traía el documento completo de
+    // cada uno (precios, listas, descripciones...) solo para armar el
+    // buscador y la grilla.
+    fetch('/api/productos?campos=sku,nombre,activo,unidad,unidadesPorBulto,cantidadMinima,stockIdeal', {headers: headersAuth()}),
     fetch(BASE + '/depositos', {headers: headersAuth()})
   ]);
   productosCache = rp.ok ? await rp.json() : [];
@@ -500,6 +505,7 @@ function escribirProductoCombo(input, prefix){
   const oculto = document.getElementById(prefix + 'Producto');
   oculto.value = '';
   renderOpcionesProductoCombo(input, prefix, input.value);
+  actualizarSelectorUnidad(prefix);
   if (!input.value.trim()) {
     const onSelect = oculto.dataset.onselect;
     if (onSelect && typeof window[onSelect] === 'function') window[onSelect]();
@@ -532,8 +538,44 @@ function elegirProductoCombo(el, prefix){
   oculto.value = productoId;
   document.getElementById(prefix + 'Buscar').value = producto ? textoProducto(producto) : '';
   document.getElementById(prefix + 'ProductoOpciones').classList.add('hidden');
+  actualizarSelectorUnidad(prefix);
   const onSelect = oculto.dataset.onselect;
   if (onSelect && typeof window[onSelect] === 'function') window[onSelect]();
+}
+// Cargar en bultos o en la unidad real del producto (2/10/2026, pedido de
+// Mato) — mismo mecanismo que ya tiene Ventas para sus ítems: cuando el
+// producto elegido tiene `unidadesPorBulto` (ej: un bulto de cerámico son
+// 1,86 m2), esto muestra un selector para elegir en qué unidad se está
+// cargando la cantidad. El stock siempre se guarda en la unidad real del
+// producto (m2, kg, etc.) — si se eligió "bulto", `cantidadBaseDesde`
+// multiplica antes de mandar al servidor; la conversión es enteramente
+// del frontend, no hace falta tocar la API.
+function actualizarSelectorUnidad(prefix){
+  const wrap = document.getElementById(prefix + 'UnidadWrap');
+  if (!wrap) return;
+  const productoId = document.getElementById(prefix + 'Producto').value;
+  const producto = productoId ? productosCache.find(p => String(p._id) === productoId) : null;
+  const bultos = (producto && producto.unidadesPorBulto > 1) ? producto.unidadesPorBulto : 0;
+  if (!bultos) { wrap.classList.add('hidden'); return; }
+  const unidad = producto.unidad || 'unidad';
+  document.getElementById(prefix + 'UnidadSelect').innerHTML = `
+    <option value="unidad">${escapeHtml(unidad)}</option>
+    <option value="bulto">Bulto (${bultos} ${escapeHtml(unidad)} c/u)</option>
+  `;
+  wrap.classList.remove('hidden');
+}
+// Convierte lo que se tipeó a la unidad real del producto, según lo que
+// esté elegido en el selector de unidad (si no hay selector visible, no
+// hay nada que convertir — se guarda tal cual).
+function cantidadBaseDesde(prefix, valorIngresado){
+  const cantidad = Number(valorIngresado);
+  const wrap = document.getElementById(prefix + 'UnidadWrap');
+  if (!wrap || wrap.classList.contains('hidden')) return cantidad;
+  if (document.getElementById(prefix + 'UnidadSelect').value !== 'bulto') return cantidad;
+  const productoId = document.getElementById(prefix + 'Producto').value;
+  const producto = productosCache.find(p => String(p._id) === productoId);
+  const bultos = (producto && producto.unidadesPorBulto > 1) ? producto.unidadesPorBulto : 1;
+  return cantidad * bultos;
 }
 function opcionesDepositosSelect(seleccionado){
   return '<option value="">Elegí un depósito…</option>' + depositosCache.filter(d => d.activo !== false).map(d => `<option value="${d._id}" ${d._id===seleccionado?'selected':''}>${escapeHtml(d.nombre)}</option>`).join('');
@@ -552,6 +594,10 @@ function abrirNuevoMovimiento(){
         <div class="grid2" style="margin-top:10px">
           <div><label>Tipo *</label><select id="mmTipo"><option value="ingreso">Ingreso</option><option value="egreso">Egreso</option></select></div>
           <div><label>Cantidad *</label><input id="mmCantidad" type="number" min="0.01" step="0.01"></div>
+        </div>
+        <div id="mmUnidadWrap" class="hidden" style="margin-top:10px">
+          <label>¿La cantidad de arriba es por bulto o por unidad?</label>
+          <select id="mmUnidadSelect"></select>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Fecha</label><input id="mmFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
@@ -574,7 +620,7 @@ async function guardarMovimiento(){
     productoId: document.getElementById('mmProducto').value,
     depositoId: document.getElementById('mmDeposito').value,
     tipo: document.getElementById('mmTipo').value,
-    cantidad: document.getElementById('mmCantidad').value,
+    cantidad: cantidadBaseDesde('mm', document.getElementById('mmCantidad').value),
     fecha: document.getElementById('mmFecha').value,
     sucursal: document.getElementById('mmSucursal').value.trim(),
     motivo: document.getElementById('mmMotivo').value.trim(),
@@ -616,6 +662,10 @@ function abrirAjusteStock(){
           <div><label>Stock actual</label><input id="ajActual" value="—" disabled></div>
           <div><label>Cantidad contada (real) *</label><input id="ajCantidadReal" type="number" min="0" step="0.01"></div>
         </div>
+        <div id="ajUnidadWrap" class="hidden" style="margin-top:10px">
+          <label>¿Contaste por bulto o por unidad?</label>
+          <select id="ajUnidadSelect"></select>
+        </div>
         <div style="margin-top:10px"><label>Motivo</label><input id="ajMotivo" placeholder="Ej: Conteo físico, Rotura, Diferencia de inventario"></div>
         <div class="err" id="ajErr"></div>
         <button class="btn" style="margin-top:10px" onclick="guardarAjusteStock()">Guardar ajuste</button>
@@ -639,10 +689,11 @@ async function actualizarCantidadActualAjuste(){
 }
 
 async function guardarAjusteStock(){
+  const cantidadRealTipeada = document.getElementById('ajCantidadReal').value;
   const body = {
     productoId: document.getElementById('ajProducto').value,
     depositoId: document.getElementById('ajDeposito').value,
-    cantidadReal: document.getElementById('ajCantidadReal').value,
+    cantidadReal: cantidadRealTipeada === '' ? '' : cantidadBaseDesde('aj', cantidadRealTipeada),
     motivo: document.getElementById('ajMotivo').value.trim()
   };
   if (!body.productoId) { document.getElementById('ajErr').textContent = 'Elegí un producto'; return; }
@@ -675,6 +726,10 @@ function abrirNuevaTransferencia(){
           <div><label>Cantidad *</label><input id="mtCantidad" type="number" min="0.01" step="0.01"></div>
           <div><label>Fecha</label><input id="mtFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
+        <div id="mtUnidadWrap" class="hidden" style="margin-top:10px">
+          <label>¿La cantidad de arriba es por bulto o por unidad?</label>
+          <select id="mtUnidadSelect"></select>
+        </div>
         <div style="margin-top:10px"><label>Motivo</label><input id="mtMotivo" placeholder="Opcional"></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="mtObservaciones"></textarea></div>
         <div class="err" id="mtErr"></div>
@@ -689,7 +744,7 @@ async function guardarTransferencia(){
     productoId: document.getElementById('mtProducto').value,
     depositoOrigenId: document.getElementById('mtOrigen').value,
     depositoDestinoId: document.getElementById('mtDestino').value,
-    cantidad: document.getElementById('mtCantidad').value,
+    cantidad: cantidadBaseDesde('mt', document.getElementById('mtCantidad').value),
     fecha: document.getElementById('mtFecha').value,
     motivo: document.getElementById('mtMotivo').value.trim(),
     observaciones: document.getElementById('mtObservaciones').value.trim()

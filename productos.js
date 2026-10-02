@@ -1415,6 +1415,20 @@ router.put('/listas-precio/:listaId/precio/:productoId', authAdmin, async (req, 
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// `campos` (2/10/2026, pedido de Mato: "sigue tardando mucho en mostrar
+// la base del stock") — opcional, lista separada por comas de los campos
+// que hacen falta. Sin esto, esta ruta devolvía el documento COMPLETO de
+// cada producto (con descripción, preciosPorLista, etc.) — con el
+// catálogo real de Dux (20.327 filas, ver nota del import más abajo) eso
+// es un montón de datos para pantallas como Stock que solo necesitan
+// unos pocos campos para armar el buscador y la grilla. Que no se pida
+// `campos` sigue devolviendo todo (compatibilidad con quien ya lo usaba
+// así, como esta misma pantalla de Productos).
+const CAMPOS_PRODUCTOS_PERMITIDOS = [
+  'sku', 'nombre', 'activo', 'unidad', 'tipoUnidad', 'unidadesPorBulto',
+  'cantidadMinima', 'stockIdeal', 'rubro', 'marca', 'moneda', 'costo',
+  'precio', 'preciosPorLista', 'stockeable', 'aceptaStockNegativo'
+];
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
@@ -1430,9 +1444,19 @@ router.get('/', authAdmin, async (req, res) => {
       const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       match.$or = [{ nombre: re }, { sku: re }];
     }
+    let projection = null;
+    if (req.query.campos) {
+      const pedidos = String(req.query.campos).split(',').map(s => s.trim()).filter(s => CAMPOS_PRODUCTOS_PERMITIDOS.includes(s));
+      if (pedidos.length) {
+        projection = {};
+        pedidos.forEach(c => { projection[c] = 1; });
+      }
+    }
     const productos = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('productos_catalogo').find(match).sort({ nombre: 1 }).toArray();
+      let cursor = db.collection('productos_catalogo').find(match).sort({ nombre: 1 });
+      if (projection) cursor = cursor.project(projection);
+      return cursor.toArray();
     });
     res.json(productos);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
