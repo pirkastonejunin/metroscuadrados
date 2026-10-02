@@ -58,6 +58,9 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;}
+  .modal-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+  .modal-tabs button{background:none;border:none;padding:9px 12px;font-size:13px;font-family:inherit;font-weight:700;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  .modal-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
@@ -246,7 +249,6 @@ function renderClientes(){
       <td class="muted">${[c.telefono || c.celular, c.email].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
       <td><span class="pill ${c.activo === false ? 'inactivo' : 'activo'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span></td>
       <td>
-        <button class="btn small secondary" onclick="verCuentaCorriente('${c._id}')">Cta. cte.</button>
         <button class="btn small secondary" onclick="abrirEditarCliente('${c._id}')">Editar</button>
         ${c.activo === false ? '' : `<button class="btn small danger" onclick="desactivarCliente('${c._id}', '${escapeHtml(c.apellidoRazonSocial).replace(/'/g,"\\'")}')">Desactivar</button>`}
       </td>
@@ -452,6 +454,13 @@ async function guardarNuevoCliente(){
   }
 }
 
+// Editar cliente: pestañas dentro del mismo modal (2/10/2026, pedido de
+// Mato: "la cuenta corriente anidamela dentro del cliente cuando abri
+// para editarlo. ponele una pestaña que sea datos de clientes y otra que
+// sea cuenta corriente, y de essa manera vamos a ir sumandole cosas al
+// cliente") — pensado para que futuras secciones de la ficha (lo que
+// sea que se sume después) entren como una pestaña más, en vez de volver
+// a repartir botones sueltos en la fila de la tabla.
 function abrirEditarCliente(id){
   const c = clientesCache.find(x => x._id === id);
   if (!c) return;
@@ -459,14 +468,29 @@ function abrirEditarCliente(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Editar cliente</h2>
-        ${formularioCliente(c)}
-        <div class="err" id="fcErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarEdicionCliente('${id}')">Guardar cambios</button>
+        <h2>${escapeHtml(c.apellidoRazonSocial)}</h2>
+        <div class="modal-tabs">
+          <button class="active" data-tab="datos" onclick="mostrarTabCliente('datos')">Datos del cliente</button>
+          <button data-tab="cuenta-corriente" onclick="mostrarTabCliente('cuenta-corriente', '${id}')">Cuenta corriente</button>
+        </div>
+        <div id="tabClienteDatos">
+          ${formularioCliente(c)}
+          <div class="err" id="fcErr"></div>
+          <button class="btn" style="margin-top:10px" onclick="guardarEdicionCliente('${id}')">Guardar cambios</button>
+        </div>
+        <div id="tabClienteCuentaCorriente" class="hidden">
+          <div id="ccContenido" class="muted">Cargando...</div>
+        </div>
       </div>
     </div>
   `;
   listenerTipoCliente();
+}
+function mostrarTabCliente(tab, clienteId){
+  document.querySelectorAll('.modal-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('tabClienteDatos').classList.toggle('hidden', tab !== 'datos');
+  document.getElementById('tabClienteCuentaCorriente').classList.toggle('hidden', tab !== 'cuenta-corriente');
+  if (tab === 'cuenta-corriente') cargarCuentaCorrienteTab(clienteId);
 }
 
 async function guardarEdicionCliente(id){
@@ -503,16 +527,12 @@ async function desactivarCliente(id, nombre){
 // clientes.js (backend).
 // -------------------------------------------------------------------
 const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual' };
-async function verCuentaCorriente(id){
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
-      <div class="modal wide">
-        <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Cuenta corriente</h2>
-        <div id="ccContenido" class="muted">Cargando...</div>
-      </div>
-    </div>
-  `;
+// Pensada para la pestaña "Cuenta corriente" del modal de Editar cliente
+// (ver abrirEditarCliente/mostrarTabCliente arriba) — no es un modal
+// propio, rellena el contenedor #ccContenido que ya está en el DOM.
+async function cargarCuentaCorrienteTab(id){
+  const cont0 = document.getElementById('ccContenido');
+  if (cont0) cont0.innerHTML = 'Cargando...';
   try{
     const r = await fetch(BASE + '/' + id + '/cuenta-corriente', {headers: headersAuth()});
     const data = await r.json();
@@ -521,8 +541,7 @@ async function verCuentaCorriente(id){
     if (!cont) return; // se cerró el modal mientras cargaba
     const saldoTexto = data.saldo > 0 ? `Debe ${money(data.saldo)}` : (data.saldo < 0 ? `Tiene a favor ${money(-data.saldo)}` : 'Al día ($ 0,00)');
     cont.innerHTML = `
-      <p><strong>${escapeHtml(data.cliente.apellidoRazonSocial || data.cliente.nombre || '')}</strong></p>
-      <p class="muted" style="margin-top:-6px">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong></p>
+      <p class="muted" style="margin-top:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong></p>
       <table>
         <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th></tr></thead>
         <tbody>

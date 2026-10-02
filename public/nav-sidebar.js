@@ -69,6 +69,13 @@
     { nombre: 'Comercial', items: [
       { key: 'clientes', href: '/admin-clientes.html', modulo: 'clientes', label: 'Clientes', icon: ICONOS.clientes },
       { key: 'ventas', href: '/admin-ventas.html', modulo: 'ventas', label: 'Ventas', icon: ICONOS.ventas },
+      // Cobranza (2/10/2026, pedido de Mato): acceso directo para hacer un
+      // recibo a la cuenta de un cliente sin pasar por Tesorería — la
+      // misma ruta POST /api/tesoreria/cobros-cuenta-cliente de siempre,
+      // que sigue pidiendo el módulo 'tesoreria' (es la que mueve la
+      // plata de verdad), pero expuesta acá porque conceptualmente es
+      // tarea de Comercial, no de administración de cajas/bancos.
+      { key: 'cobranza', href: '/admin-cobranza.html', modulo: 'tesoreria', label: 'Cobranza', icon: ICONOS.tesoreria },
       { key: 'cotizador', href: '/cotizador.html', modulo: 'cotizador', label: 'Cotizador', icon: ICONOS.cotizador }
     ]},
     { nombre: 'Inventario', items: [
