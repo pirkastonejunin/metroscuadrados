@@ -359,6 +359,33 @@ router.get('/comprometido', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Rubro/marca para los filtros de "Stock actual" (2/10/2026, pedido de
+// Mato) — mismo patrón que ya tiene Productos (GET /rubros, GET /marcas),
+// replicado acá en vez de importar ese router porque un usuario con solo
+// el módulo 'stock' habilitado no necesariamente tiene acceso a
+// 'productos' (mismo criterio que ya se usa en el resto de este archivo
+// para clientes/productos/depósitos de Ventas).
+router.get('/rubros', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false }, rubro: { $nin: [null, ''] } }, filtroOrg(req));
+    const rubros = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_catalogo').distinct('rubro', match);
+    });
+    res.json(rubros.sort((a, b) => a.localeCompare(b, 'es')));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.get('/marcas', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ activo: { $ne: false }, marca: { $nin: [null, ''] } }, filtroOrg(req));
+    const marcas = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_catalogo').distinct('marca', match);
+    });
+    res.json(marcas.sort((a, b) => a.localeCompare(b, 'es')));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/actual', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
@@ -381,13 +408,22 @@ router.get('/actual', authAdmin, async (req, res) => {
         // del catálogo (20.327 filas reales de Dux) solo para leer 5
         // campos; con eso de más, armar esta grilla era pesado.
         db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
-          .project({ sku: 1, nombre: 1, unidad: 1, cantidadMinima: 1, stockIdeal: 1 }).toArray(),
+          .project({ sku: 1, nombre: 1, unidad: 1, cantidadMinima: 1, stockIdeal: 1, rubro: 1, marca: 1 }).toArray(),
         db.collection('depositos').find(filtroOrg(req)).toArray()
       ]);
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));
       const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
       let filas = existencias
         .filter(e => productosPorId.has(String(e.productoId)))
+        // Filtros por rubro/marca (2/10/2026, pedido de Mato) — van sobre
+        // el producto, no sobre stock_actual, así que se resuelven acá
+        // contra el mismo mapa que ya se armó para el join.
+        .filter(e => {
+          const p = productosPorId.get(String(e.productoId));
+          if (req.query.rubro && p.rubro !== req.query.rubro) return false;
+          if (req.query.marca && p.marca !== req.query.marca) return false;
+          return true;
+        })
         .map(e => {
           const p = productosPorId.get(String(e.productoId));
           const d = depositosPorId.get(String(e.depositoId));

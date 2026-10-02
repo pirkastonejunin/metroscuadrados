@@ -142,6 +142,14 @@
               <label>Depósito</label>
               <select id="faDeposito" onchange="cargarStockActual()"><option value="">Todos</option></select>
             </div>
+            <div style="min-width:160px">
+              <label>Rubro</label>
+              <select id="faRubro" onchange="cargarStockActual()"><option value="">Todos</option></select>
+            </div>
+            <div style="min-width:160px">
+              <label>Marca</label>
+              <select id="faMarca" onchange="cargarStockActual()"><option value="">Todas</option></select>
+            </div>
             <div>
               <label style="visibility:hidden">.</label>
               <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);white-space:nowrap">
@@ -333,20 +341,27 @@ function cambiarTab(tab){
 let productosCache = [];
 let depositosCache = [];
 async function cargarProductosYDepositos(){
-  const [rp, rd] = await Promise.all([
+  const [rp, rd, rr, rm] = await Promise.all([
     // Solo los campos que esta pantalla necesita (2/10/2026, "sigue
     // tardando mucho en mostrar la base del stock") — el catálogo real
     // tiene 20.327 productos y antes se traía el documento completo de
     // cada uno (precios, listas, descripciones...) solo para armar el
     // buscador y la grilla.
     fetch('/api/productos?campos=sku,nombre,activo,unidad,unidadesPorBulto,cantidadMinima,stockIdeal', {headers: headersAuth()}),
-    fetch(BASE + '/depositos', {headers: headersAuth()})
+    fetch(BASE + '/depositos', {headers: headersAuth()}),
+    // Filtros de Rubro/Marca en Stock actual (2/10/2026, pedido de Mato).
+    fetch(BASE + '/rubros', {headers: headersAuth()}),
+    fetch(BASE + '/marcas', {headers: headersAuth()})
   ]);
   productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
+  const rubros = rr.ok ? await rr.json() : [];
+  const marcas = rm.ok ? await rm.json() : [];
   const opcionesDepositos = depositosCache.filter(d => d.activo !== false).map(d => `<option value="${d._id}">${escapeHtml(d.nombre)}</option>`).join('');
   document.getElementById('faDeposito').innerHTML = '<option value="">Todos</option>' + opcionesDepositos;
   document.getElementById('fmDeposito').innerHTML = '<option value="">Todos</option>' + opcionesDepositos;
+  document.getElementById('faRubro').innerHTML = '<option value="">Todos</option>' + rubros.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  document.getElementById('faMarca').innerHTML = '<option value="">Todas</option>' + marcas.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
 }
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
@@ -360,6 +375,8 @@ async function cargarStockActual(){
   const params = new URLSearchParams();
   if (document.getElementById('faBusqueda').value.trim()) params.set('q', document.getElementById('faBusqueda').value.trim());
   if (document.getElementById('faDeposito').value) params.set('depositoId', document.getElementById('faDeposito').value);
+  if (document.getElementById('faRubro').value) params.set('rubro', document.getElementById('faRubro').value);
+  if (document.getElementById('faMarca').value) params.set('marca', document.getElementById('faMarca').value);
   if (document.getElementById('faBajoMinimo').checked) params.set('soloBajoMinimo', '1');
   const r = await fetch(BASE + '/actual?' + params.toString(), {headers: headersAuth()});
   const body = document.getElementById('actualBody');
