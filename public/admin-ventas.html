@@ -61,7 +61,11 @@
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
   .fila-item{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:8px;}
-  .fila-item .campo-producto{flex:2;min-width:160px;}
+  .fila-item .campo-producto{flex:2;min-width:160px;position:relative;}
+  .producto-buscar-opciones{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:var(--shadow);}
+  .producto-buscar-opciones .opcion{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .producto-buscar-opciones .opcion:hover,.producto-buscar-opciones .opcion.activa{background:var(--accent-soft);}
+  .producto-buscar-opciones .sin-resultados{padding:8px 10px;font-size:13px;color:var(--muted);}
   .fila-item .campo-cant{flex:1;min-width:100px;}
   .fila-item .campo-cant-bulto{flex:1;min-width:100px;}
   .fila-item .campo-precio{flex:1;min-width:100px;}
@@ -392,10 +396,73 @@ function opcionesClientesSelect(seleccionado){
     `<option value="${c._id}" ${c._id===seleccionado?'selected':''}>${escapeHtml(c.apellidoRazonSocial || c.nombre || '(sin nombre)')}</option>`
   ).join('');
 }
-function opcionesProductosVenta(seleccionado){
-  return '<option value="">Elegí un producto…</option>' + productosCache.map(p =>
-    `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.sku||'')} — ${escapeHtml(p.nombre)}</option>`
-  ).join('');
+// Buscador de producto por SKU o nombre (2/10/2026) — reemplaza al <select>
+// con el catálogo entero como <option>. Un <select> nativo con miles de
+// productos tiene dos problemas que Mato reportó: tarda en abrirse/elegir
+// (el navegador arma de nuevo toda la lista) y el "salto al escribir" del
+// select nativo no muestra lo que estás tecleando y solo busca por el
+// PRINCIPIO del texto de cada opción — si el producto no empieza con lo
+// que escribiste, no lo encuentra aunque esté ahí. Esto en cambio es un
+// campo de texto real (se ve lo que se escribe) que filtra por SKU o
+// nombre en cualquier parte del texto, mostrando como máximo
+// LIMITE_SUGERENCIAS_PRODUCTO resultados a la vez.
+const LIMITE_SUGERENCIAS_PRODUCTO = 30;
+function textoProducto(p){
+  return (p.sku ? p.sku + ' — ' : '') + p.nombre;
+}
+function buscarProductosVenta(query){
+  const q = (query || '').trim().toLowerCase();
+  const activos = productosCache.filter(p => p.activo !== false);
+  const resultados = q
+    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
+    : activos;
+  return resultados.slice(0, LIMITE_SUGERENCIAS_PRODUCTO);
+}
+function renderOpcionesProductoVenta(input, query){
+  const fila = input.closest('.fila-item');
+  const cont = fila.querySelector('.producto-buscar-opciones');
+  const resultados = buscarProductosVenta(query);
+  cont.innerHTML = resultados.length
+    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoVenta(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
+    : `<div class="sin-resultados">${productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados'}</div>`;
+  cont.classList.remove('hidden');
+}
+// Al escribir, la selección previa queda invalidada hasta elegir de nuevo
+// de la lista — evita mandar a vender un producto distinto al que
+// terminó quedando escrito en el campo.
+function escribirProductoVenta(input){
+  input.closest('.fila-item').querySelector('.producto-id').value = '';
+  renderOpcionesProductoVenta(input, input.value);
+}
+function cerrarOpcionesProductoVenta(input){
+  // El onmousedown de la opción dispara ANTES que este blur, así que
+  // elegir con el mouse/touch funciona igual aunque esto la cierre después.
+  const fila = input.closest('.fila-item');
+  setTimeout(() => { const cont = fila.querySelector('.producto-buscar-opciones'); if (cont) cont.classList.add('hidden'); }, 150);
+}
+function navegarOpcionesProductoVenta(e, input){
+  const cont = input.closest('.fila-item').querySelector('.producto-buscar-opciones');
+  if (cont.classList.contains('hidden')) return;
+  const opciones = Array.from(cont.querySelectorAll('.opcion'));
+  if (!opciones.length) return;
+  let idx = opciones.findIndex(o => o.classList.contains('activa'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(opciones.length - 1, idx + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); elegirProductoVenta(opciones[idx >= 0 ? idx : 0]); return; }
+  else if (e.key === 'Escape') { cont.classList.add('hidden'); return; }
+  else return;
+  opciones.forEach(o => o.classList.remove('activa'));
+  opciones[idx].classList.add('activa');
+  opciones[idx].scrollIntoView({ block: 'nearest' });
+}
+function elegirProductoVenta(el){
+  const fila = el.closest('.fila-item');
+  const productoId = el.dataset.id;
+  const producto = productosCache.find(p => String(p._id) === productoId);
+  fila.querySelector('.producto-id').value = productoId;
+  fila.querySelector('.producto-buscar').value = producto ? textoProducto(producto) : '';
+  fila.querySelector('.producto-buscar-opciones').classList.add('hidden');
+  actualizarFilaVenta(fila);
 }
 function opcionesDepositosVenta(seleccionado){
   return '<option value="">Elegí un depósito…</option>' + depositosCache.filter(d => d.activo !== false).map(d =>
@@ -629,7 +696,11 @@ function agregarFilaVenta(){
   fila.innerHTML = `
     <div class="campo-producto">
       <label>Producto</label>
-      <select onchange="actualizarFilaVenta(this)">${opcionesProductosVenta()}</select>
+      <input type="text" class="producto-buscar" placeholder="Buscar por SKU o nombre…" autocomplete="off"
+        oninput="escribirProductoVenta(this)" onfocus="renderOpcionesProductoVenta(this, this.value)"
+        onblur="cerrarOpcionesProductoVenta(this)" onkeydown="navegarOpcionesProductoVenta(event, this)">
+      <input type="hidden" class="producto-id">
+      <div class="producto-buscar-opciones hidden"></div>
     </div>
     <div class="campo-cant">
       <label>Cantidad <span class="muted unidad-indicador"></span></label>
@@ -662,8 +733,8 @@ function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
 
 function sincronizarCantidadVenta(el, origen){
   const fila = el.closest('.fila-item');
-  const select = fila.querySelector('.campo-producto select');
-  const producto = productosCache.find(p => String(p._id) === select.value);
+  const oculto = fila.querySelector('.producto-id');
+  const producto = productosCache.find(p => String(p._id) === oculto.value);
   const unidadInput = fila.querySelector('.cant-unidad');
   const bultoInput = fila.querySelector('.cant-bulto');
   if (producto && producto.unidadesPorBulto) {
@@ -680,26 +751,23 @@ function cantidadBaseDeFila(fila){
   return Number(fila.querySelector('.cant-unidad').value) || 0;
 }
 
-function actualizarFilaVenta(el){
-  const fila = el.closest('.fila-item');
-  const select = fila.querySelector('.campo-producto select');
+function actualizarFilaVenta(fila){
+  const oculto = fila.querySelector('.producto-id');
   const precioInput = fila.querySelector('.campo-precio input');
   const bultoWrap = fila.querySelector('.campo-cant-bulto');
   const unidadInput = fila.querySelector('.cant-unidad');
   const unidadIndicador = fila.querySelector('.unidad-indicador');
-  const producto = productosCache.find(p => String(p._id) === select.value);
+  const producto = productosCache.find(p => String(p._id) === oculto.value);
 
-  if (el === select) {
-    const lista = listaPrecioSeleccionadaVenta();
-    const precio = producto ? precioResueltoVenta(producto, lista) : null;
-    // Si no hay lista seleccionada o el producto no tiene costo cargado,
-    // se cae al precio general del producto (como antes de esta función).
-    precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
-    unidadIndicador.textContent = producto ? (UNIDAD_LABEL_VENTA[producto.unidad] || producto.unidad || '') : '';
-    bultoWrap.classList.toggle('hidden', !(producto && producto.unidadesPorBulto > 0));
-    if (producto && producto.unidadesPorBulto) {
-      sincronizarCantidadVenta(unidadInput, 'unidad');
-    }
+  const lista = listaPrecioSeleccionadaVenta();
+  const precio = producto ? precioResueltoVenta(producto, lista) : null;
+  // Si no hay lista seleccionada o el producto no tiene costo cargado,
+  // se cae al precio general del producto (como antes de esta función).
+  precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
+  unidadIndicador.textContent = producto ? (UNIDAD_LABEL_VENTA[producto.unidad] || producto.unidad || '') : '';
+  bultoWrap.classList.toggle('hidden', !(producto && producto.unidadesPorBulto > 0));
+  if (producto && producto.unidadesPorBulto) {
+    sincronizarCantidadVenta(unidadInput, 'unidad');
   }
 
   actualizarTotalesVenta();
@@ -710,9 +778,9 @@ function actualizarFilaVenta(el){
 function recalcularPreciosPorListaVenta(){
   const lista = listaPrecioSeleccionadaVenta();
   document.querySelectorAll('#nvFilasItems .fila-item').forEach(fila => {
-    const select = fila.querySelector('.campo-producto select');
-    if (!select.value) return;
-    const producto = productosCache.find(p => String(p._id) === select.value);
+    const oculto = fila.querySelector('.producto-id');
+    if (!oculto.value) return;
+    const producto = productosCache.find(p => String(p._id) === oculto.value);
     const precioInput = fila.querySelector('.campo-precio input');
     const precio = producto ? precioResueltoVenta(producto, lista) : null;
     precioInput.value = precio != null ? precio : (producto ? (producto.precio || 0) : 0);
@@ -724,10 +792,10 @@ function juntarItemsVenta(){
   const filas = document.querySelectorAll('#nvFilasItems .fila-item');
   const items = [];
   filas.forEach(fila => {
-    const select = fila.querySelector('.campo-producto select');
+    const oculto = fila.querySelector('.producto-id');
     const cantidad = cantidadBaseDeFila(fila);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
-    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
+    if (oculto.value && cantidad > 0) items.push({ productoId: oculto.value, cantidad, precioUnitario });
   });
   return items;
 }
