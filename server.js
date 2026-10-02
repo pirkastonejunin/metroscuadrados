@@ -1,9 +1,21 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const compression = require('compression');
 const { MongoClient } = require('mongodb');
 
 const app = express();
+// Compresión gzip de todas las respuestas (2/10/2026, pedido de Mato:
+// "optimizar todas las bases para que el sistema sea fluido y rápido
+// desde cualquier dispositivo"): el catálogo real tiene ~20.000
+// productos, y pantallas como "Nueva venta" traen esa lista entera sin
+// paginar (necesario: cualquier producto tiene que poder buscarse al
+// toque). Ese JSON es muy repetitivo (mismas claves una y otra vez), así
+// que comprime altísimo — en la práctica baja varias veces el peso de la
+// respuesta, lo que en una conexión de celular o WiFi floja es la
+// diferencia entre notarse trabado o no. No tiene contras: el browser
+// descomprime solo, es estándar en cualquier API.
+app.use(compression());
 // Límite subido a 30mb (30/9/2026): el import de módulos (Productos,
 // Clientes, etc.) manda el Excel como base64 dentro del JSON, y el
 // export real de Dux (catálogo completo, ~20.000 productos) ya pesa
