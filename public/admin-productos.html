@@ -134,6 +134,7 @@
           </div>
         </div>
         <div class="row" style="gap:8px">
+          <button class="btn secondary" title="Elegir qué columnas mostrar en la tabla" onclick="abrirColumnas()">⚙️ Columnas</button>
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
           <button class="btn secondary" onclick="abrirDuplicadosSku()">Revisar SKUs duplicados</button>
@@ -143,10 +144,12 @@
       </div>
     </div>
     <div class="card">
+      <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>SKU</th><th>Producto</th><th>Rubro / Marca</th><th>Unidad</th><th>Precio</th><th>Tipo</th><th>Estado</th><th></th></tr></thead>
+        <thead><tr id="productosHead"></tr></thead>
         <tbody id="productosBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
       </table>
+      </div>
     </div>
   </main>
 </div>
@@ -348,19 +351,75 @@ async function cargarProductos(){
 
 const TIPO_PRODUCTO_LABEL = { simple: 'Simple', combo: 'Combo', produccion: 'De producción' };
 
+// Columnas elegibles de la tabla de Productos (2/10/2026, pedido de
+// Mato: "que me deje elegir qué columnas quiero mostrar"). SKU, Producto
+// y Acciones son fijas (identifican la fila y siempre hacen falta); el
+// resto se puede prender/apagar desde el botón "Columnas" y la elección
+// queda guardada en este navegador.
+const COLUMNAS_PRODUCTOS_DISPONIBLES = [
+  { key: 'rubroMarca', titulo: 'Rubro / Marca', defecto: true,
+    render: p => `<td class="muted">${[p.rubro, p.marca].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>` },
+  { key: 'unidad', titulo: 'Unidad', defecto: true,
+    render: p => `<td class="muted">${escapeHtml(p.unidad)}</td>` },
+  { key: 'precio', titulo: 'Precio', defecto: true,
+    render: p => `<td>${money(p.precio)}</td>` },
+  { key: 'costo', titulo: 'Costo', defecto: false,
+    render: p => `<td class="muted">${p.costo!=null ? (p.moneda==='USD'?'US$ ':'$ ') + Number(p.costo).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>` },
+  { key: 'tipo', titulo: 'Tipo', defecto: true,
+    render: p => `<td class="muted">${TIPO_PRODUCTO_LABEL[p.tipoProducto] || 'Simple'}</td>` },
+  { key: 'proveedor', titulo: 'Proveedor', defecto: false,
+    render: p => { const prov = proveedoresCache.find(x => String(x._id) === String(p.proveedorId)); return `<td class="muted">${prov ? escapeHtml(prov.razonSocial || prov.nombreFantasia || '') : (escapeHtml(p.proveedor||'') || '—')}</td>`; } },
+  { key: 'estado', titulo: 'Estado', defecto: true,
+    render: p => `<td><span class="pill ${p.activo === false ? 'inactivo' : 'activo'}">${p.activo === false ? 'Inactivo' : 'Activo'}</span></td>` }
+];
+const COLUMNAS_PRODUCTOS_KEY = 'pn_productos_columnas_v1';
+function columnasProductosVisibles(){
+  try{
+    const guardado = JSON.parse(localStorage.getItem(COLUMNAS_PRODUCTOS_KEY) || 'null');
+    if (Array.isArray(guardado)) return guardado;
+  }catch(e){}
+  return COLUMNAS_PRODUCTOS_DISPONIBLES.filter(c => c.defecto).map(c => c.key);
+}
+
+function abrirColumnas(){
+  const visibles = columnasProductosVisibles();
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal" style="max-width:360px">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Columnas a mostrar</h2>
+        <p class="muted">SKU, Producto y Acciones siempre se muestran.</p>
+        ${COLUMNAS_PRODUCTOS_DISPONIBLES.map(c => `
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--text);margin-bottom:8px">
+            <input type="checkbox" style="width:auto" id="col_${c.key}" ${visibles.includes(c.key)?'checked':''}> ${escapeHtml(c.titulo)}
+          </label>
+        `).join('')}
+        <button class="btn" style="margin-top:6px" onclick="guardarColumnas()">Aplicar</button>
+      </div>
+    </div>
+  `;
+}
+function guardarColumnas(){
+  const elegidas = COLUMNAS_PRODUCTOS_DISPONIBLES.filter(c => document.getElementById('col_'+c.key).checked).map(c => c.key);
+  localStorage.setItem(COLUMNAS_PRODUCTOS_KEY, JSON.stringify(elegidas));
+  cerrarModal();
+  renderProductos();
+}
+
 function renderProductos(){
   const body = document.getElementById('productosBody');
-  if (!productosCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay productos todavía.</td></tr>'; return; }
+  const visibles = columnasProductosVisibles();
+  const columnas = COLUMNAS_PRODUCTOS_DISPONIBLES.filter(c => visibles.includes(c.key));
+  const totalCols = columnas.length + 3; // SKU, Producto y Acciones
+  document.getElementById('productosHead').innerHTML =
+    `<th>SKU</th><th>Producto</th>` + columnas.map(c => `<th>${escapeHtml(c.titulo)}</th>`).join('') + `<th></th>`;
+  if (!productosCache.length) { body.innerHTML = `<tr><td colspan="${totalCols}" class="muted">No hay productos todavía.</td></tr>`; return; }
   body.innerHTML = productosCache.map(p => `
     <tr>
       <td><strong>${escapeHtml(p.sku)}</strong></td>
       <td>${escapeHtml(p.nombre)}${p.descripcion ? `<div class="muted">${escapeHtml(p.descripcion)}</div>` : ''}</td>
-      <td class="muted">${[p.rubro, p.marca].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
-      <td class="muted">${escapeHtml(p.unidad)}</td>
-      <td>${money(p.precio)}</td>
-      <td class="muted">${TIPO_PRODUCTO_LABEL[p.tipoProducto] || 'Simple'}</td>
-      <td><span class="pill ${p.activo === false ? 'inactivo' : 'activo'}">${p.activo === false ? 'Inactivo' : 'Activo'}</span></td>
-      <td>
+      ${columnas.map(c => c.render(p)).join('')}
+      <td style="white-space:nowrap">
         <button class="btn small secondary" onclick="abrirEditarProducto('${p._id}')">Editar</button>
         ${p.activo === false ? '' : `<button class="btn small danger" onclick="desactivarProducto('${p._id}', '${escapeHtml(p.nombre).replace(/'/g,"\\'")}')">Desactivar</button>`}
       </td>
@@ -819,7 +878,7 @@ let listasPrecioModalCache = [];
 async function abrirListasPrecio(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
-      <div class="modal">
+      <div class="modal" style="max-width:1040px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Listas de precio</h2>
         <p class="muted">Cada lista calcula el precio de cada producto como Costo + % (se puede pisar puntualmente desde la ficha de cada producto, o importando un Excel). "Consumidor Final" es la lista predeterminada — es el mismo valor que el campo "Precio de venta" de la ficha, aplica a todo el catálogo y no se puede eliminar. Las demás listas pueden aplicar a todo el catálogo o solo a una selección de productos (ej: "Mayorista" con los artículos de Producción y algún extra). Un producto con el costo cargado en USD se convierte a pesos con la cotización del dólar de Bases y catálogos.</p>
@@ -856,13 +915,24 @@ async function cargarListasPrecioModal(){
   }
 }
 
+// Botón de ícono con tooltip nativo (title) en vez de texto (2/10/2026,
+// pedido de Mato: "ponerle íconos en vez de palabras y que al posicionar
+// el mouse nos diga qué es cada uno") — así entran todas las acciones de
+// una lista en una sola fila sin que se salgan del cuadro.
+function botonIcono(icono, titulo, onclick, clase){
+  return `<button class="btn small ${clase||'secondary'}" title="${escapeHtml(titulo)}" aria-label="${escapeHtml(titulo)}" onclick="${onclick}">${icono}</button>`;
+}
+
 function renderListasPrecioModal(){
   const cont = document.getElementById('listasPrecioContenido');
   cont.innerHTML = `
+    <div style="overflow-x:auto">
     <table>
       <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Aplica a</th><th>Cálculo</th><th>Estado</th><th></th></tr></thead>
       <tbody>
-        ${listasPrecioModalCache.map(l => `
+        ${listasPrecioModalCache.map(l => {
+          const nombreEsc = escapeHtml(l.nombre).replace(/'/g,"\\'");
+          return `
           <tr>
             <td>${escapeHtml(l.nombre)}${l.predeterminada ? ' <span class="muted">(predeterminada)</span>' : ''}</td>
             <td>${l.formula==='cf_x_bulto' ? '<span class="muted">—</span>' : `<input type="number" step="0.01" value="${l.porcentaje||0}" style="width:90px" onchange="editarPorcentajeLista('${l._id}', this.value)">`}</td>
@@ -884,16 +954,17 @@ function renderListasPrecioModal(){
             </td>
             <td><span class="pill ${l.activa!==false?'activo':'inactivo'}">${l.activa!==false?'Activa':'Inactiva'}</span></td>
             <td style="white-space:nowrap">
-              ${l.alcance==='seleccion' ? `<button class="btn small secondary" onclick="abrirGestionProductosLista('${l._id}')">Productos</button>` : ''}
-              <button class="btn small secondary" onclick="descargarBlob(BASE + '/listas-precio/${l._id}/export', 'lista-precio-${String(l.nombre||'').toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx')">Exportar</button>
-              <button class="btn small secondary" onclick="abrirImportarListaPrecio('${l._id}', '${escapeHtml(l.nombre).replace(/'/g,"\\'")}')">Importar</button>
-              <button class="btn small secondary" onclick="toggleActivaLista('${l._id}', ${l.activa===false})">${l.activa===false?'Activar':'Desactivar'}</button>
-              ${l.predeterminada ? '' : `<button class="btn small danger" onclick="eliminarListaPrecio('${l._id}', '${escapeHtml(l.nombre).replace(/'/g,"\\'")}')">Eliminar</button>`}
+              ${botonIcono('👁️', 'Ver productos y precios de esta lista', `abrirGestionProductosLista('${l._id}')`)}
+              ${botonIcono('⬇️', 'Exportar a Excel', `descargarBlob(BASE + '/listas-precio/${l._id}/export', 'lista-precio-${String(l.nombre||'').toLowerCase().replace(/[^a-z0-9]+/g,'-')}.xlsx')`)}
+              ${botonIcono('⬆️', 'Importar precios desde Excel', `abrirImportarListaPrecio('${l._id}', '${nombreEsc}')`)}
+              ${botonIcono(l.activa===false?'▶️':'⏸️', l.activa===false?'Activar lista':'Desactivar lista', `toggleActivaLista('${l._id}', ${l.activa===false})`)}
+              ${l.predeterminada ? '' : botonIcono('🗑️', 'Eliminar lista', `eliminarListaPrecio('${l._id}', '${nombreEsc}')`, 'danger')}
             </td>
           </tr>
-        `).join('')}
+        `;}).join('')}
       </tbody>
     </table>
+    </div>
   `;
 }
 
@@ -1116,6 +1187,13 @@ async function confirmarImportarTodasListas(){
 // quiénes están y sacar uno puntual — sumar de a uno puntual se hace
 // completando el Excel de import con el SKU que falte.
 // -------------------------------------------------------------------
+// Abre la vista de productos de una lista (2/10/2026, 2da vuelta — pedido
+// de Mato: "cuando entro a las listas que me deje acceder a cada una
+// para poder verlas"): antes el botón "Productos" solo aparecía en listas
+// de alcance "selección"; ahora cualquier lista se puede abrir para VER
+// sus precios resueltos. Agregar/quitar miembros a mano solo tiene
+// sentido en una lista de "selección" — en una de "todo el catálogo" esta
+// pantalla es de solo consulta.
 async function abrirGestionProductosLista(listaId){
   const sub = document.createElement('div');
   sub.id = 'gplModalBg';
@@ -1123,20 +1201,10 @@ async function abrirGestionProductosLista(listaId){
   sub.style.zIndex = '70';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
   sub.innerHTML = `
-    <div class="modal">
+    <div class="modal" style="max-width:720px">
       <span class="close-x" onclick="document.getElementById('gplModalBg').remove()">✕</span>
       <h2 id="gplTitulo">Productos de la lista</h2>
-      <p class="muted">Esta lista solo aplica a los productos que tiene agregados acá (no a todo el catálogo). Sumá un rubro entero, o un SKU puntual importando un Excel con ese SKU agregado.</p>
-      <div class="row" style="margin-bottom:10px">
-        <div style="flex:1"><label>Agregar todo un rubro</label><select id="gplRubro">${opcionesRubroSelect('')}</select></div>
-        <div><label style="visibility:hidden">.</label><button class="btn secondary" onclick="agregarRubroALista('${listaId}')">Agregar rubro</button></div>
-      </div>
-      <div class="row" style="margin-bottom:10px">
-        <button class="btn secondary small" onclick="descargarBlob(BASE + '/listas-precio/${listaId}/export', 'lista-precio.xlsx')">Exportar esta lista</button>
-        <button class="btn secondary small" onclick="abrirImportarListaPrecio('${listaId}', (gestionListaCache&&gestionListaCache.lista.nombre)||'')">Importar precios / productos</button>
-      </div>
-      <div class="err" id="gplErr"></div>
-      <div id="gplContenido"><p class="muted">Cargando...</p></div>
+      <div id="gplBody"><p class="muted">Cargando...</p></div>
     </div>
   `;
   document.body.appendChild(sub);
@@ -1144,9 +1212,10 @@ async function abrirGestionProductosLista(listaId){
 }
 
 let gestionListaCache = null;
+let gplFiltro = '';
 async function cargarGestionProductosLista(listaId){
-  const cont = document.getElementById('gplContenido');
-  if (!cont) return;
+  const body = document.getElementById('gplBody');
+  if (!body) return;
   try{
     const r = await fetch(BASE + '/listas-precio/' + listaId + '/precios', {headers: headersAuthJson()});
     const data = await r.json();
@@ -1154,26 +1223,59 @@ async function cargarGestionProductosLista(listaId){
     gestionListaCache = data;
     const titulo = document.getElementById('gplTitulo');
     if (titulo) titulo.textContent = 'Productos de "' + data.lista.nombre + '"';
-    if (!data.filas.length) { cont.innerHTML = '<p class="muted">Todavía no tiene productos agregados.</p>'; return; }
-    cont.innerHTML = `
-      <table>
-        <thead><tr><th>SKU</th><th>Nombre</th><th>Rubro</th><th>Precio</th><th></th></tr></thead>
-        <tbody>
-          ${data.filas.map(f => `
-            <tr>
-              <td>${escapeHtml(f.sku||'')}</td>
-              <td>${escapeHtml(f.nombre||'')}</td>
-              <td class="muted">${escapeHtml(f.rubro||'')}</td>
-              <td>${f.precio!=null ? money(f.precio) : '<span class="muted">—</span>'}</td>
-              <td><button class="btn small secondary" onclick="quitarProductoDeLista('${listaId}','${f._id}')">Quitar</button></td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+    const esSeleccion = data.lista.alcance === 'seleccion';
+    body.innerHTML = `
+      <p class="muted">${esSeleccion
+        ? 'Esta lista solo aplica a los productos que tiene agregados acá (no a todo el catálogo). Sumá un rubro entero, o un SKU puntual importando un Excel con ese SKU agregado.'
+        : 'Esta lista aplica a todo el catálogo — acá podés ver el precio resuelto de cada producto.'}</p>
+      ${esSeleccion ? `
+      <div class="row" style="margin-bottom:10px">
+        <div style="flex:1"><label>Agregar todo un rubro</label><select id="gplRubro">${opcionesRubroSelect('')}</select></div>
+        <div><label style="visibility:hidden">.</label><button class="btn secondary" onclick="agregarRubroALista('${listaId}')">Agregar rubro</button></div>
+      </div>` : ''}
+      <div class="row" style="margin-bottom:10px;align-items:flex-end">
+        <div style="flex:1"><label>Buscar (nombre o SKU)</label><input id="gplBuscar" value="${escapeHtml(gplFiltro)}" oninput="gplFiltro=this.value;renderGestionProductosLista()" placeholder="Filtrar esta lista..."></div>
+        <button class="btn secondary small" title="Exportar a Excel" onclick="descargarBlob(BASE + '/listas-precio/${listaId}/export', 'lista-precio.xlsx')">⬇️ Exportar</button>
+        <button class="btn secondary small" title="Importar precios desde Excel" onclick="abrirImportarListaPrecio('${listaId}', (gestionListaCache&&gestionListaCache.lista.nombre)||'')">⬆️ Importar</button>
+      </div>
+      <div class="err" id="gplErr"></div>
+      <div id="gplTablaWrap"></div>
     `;
+    renderGestionProductosLista(listaId);
   }catch(e){
-    cont.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+    body.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
   }
+}
+
+function renderGestionProductosLista(listaId){
+  const wrap = document.getElementById('gplTablaWrap');
+  if (!wrap || !gestionListaCache) return;
+  listaId = listaId || gestionListaCache.lista._id;
+  const esSeleccion = gestionListaCache.lista.alcance === 'seleccion';
+  const q = gplFiltro.trim().toLowerCase();
+  const filas = gestionListaCache.filas.filter(f => !q ||
+    (f.nombre||'').toLowerCase().includes(q) || (f.sku||'').toLowerCase().includes(q));
+  if (!gestionListaCache.filas.length) { wrap.innerHTML = '<p class="muted">Todavía no tiene productos agregados.</p>'; return; }
+  if (!filas.length) { wrap.innerHTML = '<p class="muted">Ningún producto coincide con la búsqueda.</p>'; return; }
+  wrap.innerHTML = `
+    <p class="muted">${filas.length} de ${gestionListaCache.filas.length} producto(s)</p>
+    <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
+    <table>
+      <thead><tr><th>SKU</th><th>Nombre</th><th>Rubro</th><th>Precio</th>${esSeleccion?'<th></th>':''}</tr></thead>
+      <tbody>
+        ${filas.map(f => `
+          <tr>
+            <td>${escapeHtml(f.sku||'')}</td>
+            <td>${escapeHtml(f.nombre||'')}</td>
+            <td class="muted">${escapeHtml(f.rubro||'')}</td>
+            <td>${f.precio!=null ? money(f.precio) : '<span class="muted">—</span>'}</td>
+            ${esSeleccion ? `<td><button class="btn small secondary" onclick="quitarProductoDeLista('${listaId}','${f._id}')">Quitar</button></td>` : ''}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    </div>
+  `;
 }
 
 async function agregarRubroALista(listaId){
