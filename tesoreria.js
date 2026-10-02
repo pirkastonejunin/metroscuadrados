@@ -69,7 +69,8 @@
 //   cheques: { tipo (tercero/propio), numero, banco (texto libre, terceros),
 //     cuentaId (propios — de qué banco propio sale), clienteId,
 //     clienteNombre, proveedorId, proveedorNombre, ventaId, compraId,
-//     librador, fechaEmision, fechaVencimiento, moneda, monto, estado
+//     librador, cuitLibrador (solo terceros, pedido de Mato 2/10/2026),
+//     fechaEmision, fechaVencimiento, moneda, monto, estado
 //     (terceros: en_cartera/depositado/rechazado/endosado/anulado —
 //     propios: emitido/pagado/rechazado/anulado), depositadoEnCuentaId,
 //     endosadoA, observaciones, usuarioNombre, fecha, orgId, createdAt,
@@ -197,8 +198,15 @@ async function aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, mo
   );
   return movimiento;
 }
-module.exports.aplicarMovimientoCuenta = aplicarMovimientoCuenta;
-module.exports.cuentaHabilitada = cuentaHabilitada;
+// Se cuelgan como propiedades de `router` (no de `module.exports`
+// directamente) porque más abajo `module.exports = router` REEMPLAZA el
+// objeto exports entero — si se dejaran en module.exports acá, esa
+// reasignación las borraba sin avisar (bug real, 2/10/2026: ventas.js
+// tiraba "aplicarMovimientoCuenta is not a function" en producción).
+// Colgarlas de `router` en cambio sobrevive esa reasignación, porque es
+// el mismo objeto al que apunta `module.exports` al final.
+router.aplicarMovimientoCuenta = aplicarMovimientoCuenta;
+router.cuentaHabilitada = cuentaHabilitada;
 
 // -----------------------------------------------------------------------
 // Configuración — alta y habilitación de cajas/bancos. Vive dentro de
@@ -459,6 +467,11 @@ router.post('/cheques', authOperar, async (req, res) => {
       ventaId: body.ventaId ? toObjectId(body.ventaId) : null,
       compraId: body.compraId ? toObjectId(body.compraId) : null,
       librador: normalizarTexto(body.librador),
+      // CUIT del librador (2/10/2026, pedido de Mato: un cheque de tercero
+      // tiene que poder guardar el CUIT de quien lo libró) — solo tiene
+      // sentido para cheques de tercero; en uno propio el librador es
+      // Piedra Negra mismo, no hace falta.
+      cuitLibrador: tipo === 'tercero' ? normalizarTexto(body.cuitLibrador) : '',
       fechaEmision: body.fechaEmision ? new Date(body.fechaEmision) : ahora,
       fechaVencimiento, moneda, monto,
       estado: tipo === 'tercero' ? 'en_cartera' : 'emitido',
