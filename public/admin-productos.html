@@ -706,6 +706,7 @@ function abrirImportar(){
         <label>Archivo (.xlsx o .xls)</label>
         <input type="file" id="impArchivo" accept=".xlsx,.xls">
         <div class="err" id="impErr"></div>
+        <div id="impMapeo"></div>
         <div id="impResultado"></div>
         <button class="btn" id="impBtn" style="margin-top:10px" onclick="confirmarImportar()">Importar</button>
       </div>
@@ -724,18 +725,16 @@ async function confirmarImportar(){
   const file = input.files[0];
   const btn = document.getElementById('impBtn');
   document.getElementById('impErr').textContent = '';
+  document.getElementById('impMapeo').innerHTML = '';
   document.getElementById('impResultado').innerHTML = '';
   if (!file) { document.getElementById('impErr').textContent = 'Elegí un archivo .xlsx o .xls'; return; }
   btn.disabled = true;
   document.getElementById('impResultado').innerHTML = '<p class="muted">Subiendo archivo...</p>';
   try{
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
-      reader.readAsDataURL(file);
-    });
-    const r = await fetch(BASE + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64})});
+    const base64 = await leerArchivoComoBase64(file);
+    const mapeo = await resolverMapeoColumnas(base64, '/import/encabezados', 'impMapeo');
+    document.getElementById('impResultado').innerHTML = '<p class="muted">Subiendo archivo...</p>';
+    const r = await fetch(BASE + '/import', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: base64, mapeo})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al importar');
 

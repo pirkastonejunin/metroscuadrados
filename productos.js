@@ -1475,10 +1475,29 @@ router.get('/plantilla-import', authAdmin, (req, res) => {
 // GET /import/estado/:id cada par de segundos hasta que termina.
 const TANDA_IMPORT = 500;
 
+// Equivalencia de columnas al importar Productos (2/10/2026, pedido de
+// Mato: "podés poner para validar los campos, como en las listas de
+// precio" — mismo mecanismo que ya existe para las listas de precio:
+// antes de importar de verdad, se le muestra qué encabezados trae el
+// archivo y se lo deja elegir a mano la equivalencia cuando no coincide
+// con la plantilla. Importante en Dux: la columna "PRODUCTO" es el
+// nombre del artículo (ya matchea con nuestro "Nombre" por el alias) y
+// la columna "DESCRIPCION" es el detalle para catálogo/tienda (matchea
+// directo con nuestra "Descripción") — pero como Dux cambia de
+// plantilla con el tiempo, esta pantalla deja confirmar a mano
+// cualquier columna que alguna vez no matchee sola.
+router.post('/import/encabezados', authAdmin, async (req, res) => {
+  try {
+    const encabezados = leerEncabezadosXlsxBase64((req.body || {}).archivoBase64);
+    const sugeridos = sugerirMapeo(encabezados, COLUMNAS_PRODUCTOS);
+    res.json({ encabezados, columnas: COLUMNAS_PRODUCTOS.map(c => ({ clave: c.clave, titulo: c.titulo })), sugeridos });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/import', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
-    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_PRODUCTOS);
+    const filas = parsearXlsxBase64((req.body || {}).archivoBase64, COLUMNAS_PRODUCTOS, (req.body || {}).mapeo);
     if (!filas.length) throw err(400, 'El Excel no tiene filas de datos');
 
     const db = await conReintento(getDb);
