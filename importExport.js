@@ -76,7 +76,31 @@ function convertirValorImport(v, tipo, mapaValores) {
   }
   if (v === '' || v === undefined || v === null) return null;
   if (tipo === 'numero') {
-    const n = Number(String(v).replace(',', '.'));
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    // Bug grave encontrado 2/10/2026 (Mato: "la lista consumidor final
+    // sigue sin funcionar cuando importo... queda vacío"): esto ANTES
+    // hacía solo `.replace(',', '.')`, que asume que la coma siempre es
+    // el separador decimal. Pero el Excel (con cellDates/raw:false) nos
+    // da los números ya formateados como TEXTO según el formato de la
+    // celda, y un precio con separador de miles puede llegar como
+    // "1,234.56" (estilo inglés, punto decimal) o "1.234,56" (estilo
+    // argentino, coma decimal) según cómo haya quedado formateada esa
+    // celda en el archivo. Con el reemplazo viejo, "1,234.56" quedaba
+    // "1.234.56" (dos puntos) → no es un número válido → se guardaba
+    // vacío. Como era cualquier precio con 4+ cifras el que se rompía
+    // (los de Consumidor Final, no los de costo que suelen ser más
+    // chicos), esto es lo que vaciaba esa lista en cada import.
+    // Ahora: si el texto termina en coma + 1 o 2 dígitos, la coma es el
+    // separador decimal (estilo argentino) y cualquier punto es de
+    // miles; si no, cualquier coma es de miles (estilo inglés) y se
+    // descarta.
+    let s = String(v).trim();
+    if (/,\d{1,2}$/.test(s)) {
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      s = s.replace(/,/g, '');
+    }
+    const n = Number(s);
     return Number.isFinite(n) ? n : null;
   }
   if (tipo === 'booleano') {
