@@ -50,7 +50,7 @@
   .pill.modulo{background:var(--accent-soft);color:var(--accent);margin:2px 4px 2px 0;}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
-  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:50;}
   .modal{background:var(--card);border-radius:16px;padding:20px;max-width:480px;width:100%;box-shadow:var(--shadow);}
   .modal h2{margin-top:0;font-size:16px;}
   .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
@@ -124,6 +124,7 @@
     <button data-tab="organizaciones" id="navOrganizaciones" class="hidden" onclick="showTab('organizaciones')">Organizaciones</button>
     <button data-tab="vendedores" id="navVendedores" class="hidden" onclick="showTab('vendedores')">Vendedores</button>
     <button data-tab="colocadores" id="navColocadores" class="hidden" onclick="showTab('colocadores')">Colocadores</button>
+    <button data-tab="tesoreriaConfig" onclick="showTab('tesoreriaConfig')">Cajas y Bancos</button>
     <button data-tab="config" onclick="showTab('config')">Notificaciones</button>
   </nav>
   <main>
@@ -206,6 +207,37 @@
       </div>
     </section>
 
+    <!-- CAJAS Y BANCOS (Tesorería) -->
+    <!-- Alta y habilitación de cajas y bancos, por sucursal y por usuario
+         (pedido de Mato, 2/10/2026). El día a día (saldos, movimientos,
+         cheques) está en la pantalla Tesorería — esto es solo config. -->
+    <section id="tab-tesoreriaConfig" class="hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Cajas</h3>
+          <button class="btn" onclick="abrirNuevaCaja()">+ Nueva caja</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Moneda</th><th>Sucursales</th><th>Usuarios</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="cajasConfigBody"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Bancos</h3>
+          <button class="btn" onclick="abrirNuevoBanco()">+ Nuevo banco</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nombre</th><th>Banco</th><th>Moneda</th><th>Sucursales</th><th>Usuarios</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="bancosConfigBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- CONFIGURACIÓN -->
     <!-- Primer rincón de lo que puede terminar siendo un menú de
          Configuración más grande (calendarios, accesos y demás, a medida
@@ -246,6 +278,8 @@ let ES_PROTEGIDO = false;
 let VENDEDORES = [];
 let COLOCADORES = [];
 let TIPOS_TRABAJO = [];
+let CAJAS_CONFIG = [];
+let BANCOS_CONFIG = [];
 
 function headersAuth(extra){
   const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
@@ -277,6 +311,16 @@ function apiObras(path, opts={}) {
   opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
   if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
   return fetch('/api/obras'+path, opts).then(async r => {
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.error || 'Error de red');
+    return data;
+  });
+}
+
+function apiTesoreria(path, opts={}) {
+  opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  return fetch('/api/tesoreria'+path, opts).then(async r => {
     const data = await r.json().catch(()=>({}));
     if (!r.ok) throw new Error(data.error || 'Error de red');
     return data;
@@ -352,6 +396,7 @@ function showTab(tab){
   if (tab === 'organizaciones') cargarOrganizaciones();
   if (tab === 'vendedores') cargarVendedores();
   if (tab === 'colocadores') { cargarColocadores(); cargarTiposTrabajoObra(); }
+  if (tab === 'tesoreriaConfig') cargarCajasYBancosConfig();
 }
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
@@ -865,6 +910,194 @@ async function guardarConfigNotificaciones(){
 // La campanita de notificaciones vive ahora solo en inicio.html. Este panel
 // (Configuración) solo guarda qué tipos de vencimiento la alimentan.
 const BASE_NOTIF = '/api/notificaciones';
+
+// ---------------------------------------------------------------------
+// CAJAS Y BANCOS (Tesorería) — alta y habilitación por sucursal/usuario.
+// El saldo y los movimientos viven en la pantalla Tesorería; acá solo
+// se da de alta y se elige dónde/para quién está habilitada cada cuenta.
+// ---------------------------------------------------------------------
+async function cargarCajasYBancosConfig(){
+  if (!ORGANIZACIONES.length) ORGANIZACIONES = await api('/organizaciones');
+  if (!USUARIOS.length) USUARIOS = await api('/');
+  [CAJAS_CONFIG, BANCOS_CONFIG] = await Promise.all([
+    apiTesoreria('/config/cajas'),
+    apiTesoreria('/config/bancos')
+  ]);
+  renderCajasConfig();
+  renderBancosConfig();
+}
+
+function resumenHabilitacion(ids, lista, etiquetaCampo){
+  if (!ids || !ids.length) return '<span class="muted">Todas / todos</span>';
+  const nombres = ids.map(id => {
+    const item = lista.find(x => String(x._id) === String(id));
+    return item ? escapeHtml(item[etiquetaCampo]) : null;
+  }).filter(Boolean);
+  return nombres.join(', ') || '<span class="muted">—</span>';
+}
+
+function renderCajasConfig(){
+  const tbody = document.getElementById('cajasConfigBody');
+  tbody.innerHTML = CAJAS_CONFIG.map(c => `
+    <tr>
+      <td>${escapeHtml(c.nombre)}</td>
+      <td>${escapeHtml(c.moneda)}</td>
+      <td>${resumenHabilitacion(c.sucursalesHabilitadas, ORGANIZACIONES, 'nombre')}</td>
+      <td>${resumenHabilitacion(c.usuariosHabilitados, USUARIOS, 'nombre')}</td>
+      <td><span class="pill ${c.activa===false?'off':'on'}">${c.activa===false?'Inactiva':'Activa'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="abrirEditarCaja('${c._id}')">Editar</button>
+        <button class="btn small danger" onclick="borrarCaja('${c._id}')">Desactivar</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">Todavía no hay ninguna caja creada.</td></tr>';
+}
+function renderBancosConfig(){
+  const tbody = document.getElementById('bancosConfigBody');
+  tbody.innerHTML = BANCOS_CONFIG.map(b => `
+    <tr>
+      <td>${escapeHtml(b.nombre)}</td>
+      <td>${escapeHtml(b.banco||'')}</td>
+      <td>${escapeHtml(b.moneda)}</td>
+      <td>${resumenHabilitacion(b.sucursalesHabilitadas, ORGANIZACIONES, 'nombre')}</td>
+      <td>${resumenHabilitacion(b.usuariosHabilitados, USUARIOS, 'nombre')}</td>
+      <td><span class="pill ${b.activo===false?'off':'on'}">${b.activo===false?'Inactivo':'Activo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="abrirEditarBanco('${b._id}')">Editar</button>
+        <button class="btn small danger" onclick="borrarBanco('${b._id}')">Desactivar</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Todavía no hay ningún banco creado.</td></tr>';
+}
+
+function checksHabilitacion(prefix, seleccionadas, lista, campoNombre){
+  const sel = new Set((seleccionadas||[]).map(String));
+  if (!lista.length) return '<p class="muted" style="margin:4px 0">No hay nada cargado todavía.</p>';
+  return lista.map(x => `
+    <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:4px 0">
+      <input type="checkbox" class="${prefix}Check" value="${x._id}" style="width:auto" ${sel.has(String(x._id))?'checked':''}> ${escapeHtml(x[campoNombre])}
+    </label>`).join('');
+}
+function idsSeleccionados(prefix){
+  return Array.from(document.querySelectorAll('.'+prefix+'Check:checked')).map(el => el.value);
+}
+
+function abrirNuevaCaja(){ abrirFormCaja(null); }
+function abrirEditarCaja(id){ abrirFormCaja(CAJAS_CONFIG.find(c => c._id === id)); }
+function abrirFormCaja(c){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>${c ? 'Editar caja' : 'Nueva caja'}</h2>
+        <div class="campo-edit"><label>Nombre</label><input id="cajaNombre" value="${c?escapeHtml(c.nombre):''}" placeholder="Ej: Caja Junín"></div>
+        <div class="campo-edit"><label>Moneda</label>
+          <select id="cajaMoneda">
+            <option value="ARS" ${(!c||c.moneda==='ARS')?'selected':''}>ARS</option>
+            <option value="USD" ${c&&c.moneda==='USD'?'selected':''}>USD</option>
+          </select>
+        </div>
+        <div class="campo-edit"><label>Habilitada para estas sucursales (vacío = todas)</label><div class="checks" id="cajaOrgChecks">${checksHabilitacion('cajaOrg', c?c.sucursalesHabilitadas:[], ORGANIZACIONES, 'nombre')}</div></div>
+        <div class="campo-edit"><label>Habilitada para estos usuarios (vacío = todos)</label><div class="checks" id="cajaUsrChecks">${checksHabilitacion('cajaUsr', c?c.usuariosHabilitados:[], USUARIOS, 'nombre')}</div></div>
+        <div class="campo-edit"><label>Notas (opcional)</label><input id="cajaNotas" value="${c?escapeHtml(c.notas||''):''}"></div>
+        ${c ? `<div class="campo-edit"><label><input type="checkbox" id="cajaActiva" ${c.activa===false?'':'checked'} style="width:auto;margin-right:6px">Caja activa</label></div>` : ''}
+        <div class="err" id="cajaErr"></div>
+        <button class="btn" style="width:100%;margin-top:6px" onclick="guardarCaja(${c?`'${c._id}'`:'null'})">${c ? 'Guardar cambios' : 'Crear caja'}</button>
+      </div>
+    </div>`;
+}
+async function guardarCaja(id){
+  const errEl = document.getElementById('cajaErr');
+  errEl.textContent = '';
+  const body = {
+    nombre: document.getElementById('cajaNombre').value.trim(),
+    moneda: document.getElementById('cajaMoneda').value,
+    sucursalesHabilitadas: idsSeleccionados('cajaOrg'),
+    usuariosHabilitados: idsSeleccionados('cajaUsr'),
+    notas: document.getElementById('cajaNotas').value.trim()
+  };
+  const cajaActivaEl = document.getElementById('cajaActiva');
+  if (cajaActivaEl) body.activa = cajaActivaEl.checked;
+  try{
+    if (id) await apiTesoreria('/config/cajas/'+id, {method:'PUT', body});
+    else await apiTesoreria('/config/cajas', {method:'POST', body});
+    cerrarModal();
+    await cargarCajasYBancosConfig();
+  }catch(e){ errEl.textContent = e.message; }
+}
+async function borrarCaja(id){
+  if (!confirm('¿Desactivar esta caja? Deja de aparecer para cargar movimientos nuevos, pero su historial se conserva.')) return;
+  try{
+    await apiTesoreria('/config/cajas/'+id, {method:'DELETE'});
+    await cargarCajasYBancosConfig();
+  }catch(e){ alert(e.message); }
+}
+
+function abrirNuevoBanco(){ abrirFormBanco(null); }
+function abrirEditarBanco(id){ abrirFormBanco(BANCOS_CONFIG.find(b => b._id === id)); }
+function abrirFormBanco(b){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>${b ? 'Editar banco' : 'Nuevo banco'}</h2>
+        <div class="campo-edit"><label>Nombre de la cuenta</label><input id="bancoNombre" value="${b?escapeHtml(b.nombre):''}" placeholder="Ej: Galicia Junín"></div>
+        <div class="campo-edit"><label>Banco</label><input id="bancoBanco" value="${b?escapeHtml(b.banco||''):''}" placeholder="Ej: Banco Galicia"></div>
+        <div class="row">
+          <div class="campo-edit" style="flex:1"><label>Tipo de cuenta</label>
+            <select id="bancoTipoCuenta">
+              <option value="cuenta_corriente" ${(!b||b.tipoCuenta==='cuenta_corriente')?'selected':''}>Cuenta corriente</option>
+              <option value="caja_ahorro" ${b&&b.tipoCuenta==='caja_ahorro'?'selected':''}>Caja de ahorro</option>
+            </select>
+          </div>
+          <div class="campo-edit" style="flex:1"><label>Moneda</label>
+            <select id="bancoMoneda">
+              <option value="ARS" ${(!b||b.moneda==='ARS')?'selected':''}>ARS</option>
+              <option value="USD" ${b&&b.moneda==='USD'?'selected':''}>USD</option>
+            </select>
+          </div>
+        </div>
+        <div class="campo-edit"><label>CBU (opcional)</label><input id="bancoCbu" value="${b?escapeHtml(b.cbu||''):''}"></div>
+        <div class="campo-edit"><label>Alias (opcional)</label><input id="bancoAlias" value="${b?escapeHtml(b.aliasCbu||''):''}"></div>
+        <div class="campo-edit"><label>Número de cuenta (opcional)</label><input id="bancoNumeroCuenta" value="${b?escapeHtml(b.numeroCuenta||''):''}"></div>
+        <div class="campo-edit"><label>Habilitado para estas sucursales (vacío = todas)</label><div class="checks" id="bancoOrgChecks">${checksHabilitacion('bancoOrg', b?b.sucursalesHabilitadas:[], ORGANIZACIONES, 'nombre')}</div></div>
+        <div class="campo-edit"><label>Habilitado para estos usuarios (vacío = todos)</label><div class="checks" id="bancoUsrChecks">${checksHabilitacion('bancoUsr', b?b.usuariosHabilitados:[], USUARIOS, 'nombre')}</div></div>
+        <div class="campo-edit"><label>Notas (opcional)</label><input id="bancoNotas" value="${b?escapeHtml(b.notas||''):''}"></div>
+        ${b ? `<div class="campo-edit"><label><input type="checkbox" id="bancoActivo" ${b.activo===false?'':'checked'} style="width:auto;margin-right:6px">Banco activo</label></div>` : ''}
+        <div class="err" id="bancoErr"></div>
+        <button class="btn" style="width:100%;margin-top:6px" onclick="guardarBanco(${b?`'${b._id}'`:'null'})">${b ? 'Guardar cambios' : 'Crear banco'}</button>
+      </div>
+    </div>`;
+}
+async function guardarBanco(id){
+  const errEl = document.getElementById('bancoErr');
+  errEl.textContent = '';
+  const body = {
+    nombre: document.getElementById('bancoNombre').value.trim(),
+    banco: document.getElementById('bancoBanco').value.trim(),
+    tipoCuenta: document.getElementById('bancoTipoCuenta').value,
+    moneda: document.getElementById('bancoMoneda').value,
+    cbu: document.getElementById('bancoCbu').value.trim(),
+    aliasCbu: document.getElementById('bancoAlias').value.trim(),
+    numeroCuenta: document.getElementById('bancoNumeroCuenta').value.trim(),
+    sucursalesHabilitadas: idsSeleccionados('bancoOrg'),
+    usuariosHabilitados: idsSeleccionados('bancoUsr'),
+    notas: document.getElementById('bancoNotas').value.trim()
+  };
+  const bancoActivoEl = document.getElementById('bancoActivo');
+  if (bancoActivoEl) body.activo = bancoActivoEl.checked;
+  try{
+    if (id) await apiTesoreria('/config/bancos/'+id, {method:'PUT', body});
+    else await apiTesoreria('/config/bancos', {method:'POST', body});
+    cerrarModal();
+    await cargarCajasYBancosConfig();
+  }catch(e){ errEl.textContent = e.message; }
+}
+async function borrarBanco(id){
+  if (!confirm('¿Desactivar este banco? Deja de aparecer para cargar movimientos nuevos, pero su historial se conserva.')) return;
+  try{
+    await apiTesoreria('/config/bancos/'+id, {method:'DELETE'});
+    await cargarCajasYBancosConfig();
+  }catch(e){ alert(e.message); }
+}
 </script>
 </body>
 </html>

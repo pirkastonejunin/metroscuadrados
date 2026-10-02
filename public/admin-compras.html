@@ -250,15 +250,26 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 let proveedoresCache = [];
 let productosCache = [];
 let depositosCache = [];
+// Tesorería (2/10/2026): cajas/bancos habilitados para este usuario+
+// sucursal, para elegir de dónde sale un pago (o qué banco propio
+// emite un cheque).
+let cajasTesoreriaCache = [];
+let bancosTesoreriaCache = [];
 async function cargarListasBase(){
-  const [rp2, rp, rd] = await Promise.all([
+  const [rp2, rp, rd, rcj, rbc] = await Promise.all([
     fetch(BASE + '/proveedores', {headers: headersAuth()}),
     fetch(BASE + '/productos', {headers: headersAuth()}),
-    fetch(BASE + '/depositos', {headers: headersAuth()})
+    fetch(BASE + '/depositos', {headers: headersAuth()}),
+    fetch('/api/tesoreria/cajas', {headers: headersAuth()}),
+    fetch('/api/tesoreria/bancos', {headers: headersAuth()})
   ]);
   proveedoresCache = rp2.ok ? await rp2.json() : [];
   productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
+  // Si el usuario no tiene el módulo Tesorería habilitado esto da 403 —
+  // no es una falla real, simplemente no va a poder elegir cuenta al pagar.
+  cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
+  bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
   document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
     proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
 }
@@ -549,6 +560,24 @@ async function confirmarRecibir(id){
   }
 }
 
+// Tesorería (2/10/2026): efectivo/cuenta/tarjeta tienen que decir de qué
+// caja o banco sale; cheque pide los datos del cheque propio que se
+// emite (entra "emitido", no mueve plata hasta que se confirme el pago).
+function opcionesCuentaPago(){
+  const cajas = cajasTesoreriaCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (saldo ${money(c.saldo)})</option>`);
+  const bancos = bancosTesoreriaCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`);
+  const opciones = cajas.concat(bancos).join('');
+  return opciones || '<option value="">No tenés ninguna caja/banco habilitada — pedile a un administrador que te habilite una desde Configuración</option>';
+}
+function opcionesBancoPropioCheque(seleccionado){
+  return bancosTesoreriaCache.map(b => `<option value="${b._id}" ${String(b._id)===seleccionado?'selected':''}>${escapeHtml(b.nombre)}</option>`).join('')
+    || '<option value="">No tenés ningún banco propio habilitado</option>';
+}
+function actualizarTipoValorPago(){
+  const esCheque = document.getElementById('npTipoValor').value === 'cheque';
+  document.getElementById('npCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('npChequeWrap').classList.toggle('hidden', !esCheque);
+}
 function abrirPago(id){
   const c = comprasCache.find(x => x._id === id);
   if (!c) return;
@@ -559,8 +588,16 @@ function abrirPago(id){
         <h2>Registrar pago — compra #${c.numero}</h2>
         <p class="muted">Saldo pendiente: ${money(c.saldoPendiente)}</p>
         <div class="grid2">
-          <div><label>Tipo de valor *</label><select id="npTipoValor"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Tipo de valor *</label><select id="npTipoValor" onchange="actualizarTipoValorPago()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
           <div><label>Monto *</label><input id="npMonto" type="number" min="0.01" step="0.01" value="${c.saldoPendiente}"></div>
+        </div>
+        <div id="npCuentaWrap" style="margin-top:10px"><label>¿De qué caja/banco sale? *</label><select id="npCuenta">${opcionesCuentaPago()}</select></div>
+        <div id="npChequeWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Número de cheque *</label><input id="npChequeNumero"></div>
+            <div><label>Banco propio *</label><select id="npChequeCuenta">${opcionesBancoPropioCheque()}</select></div>
+          </div>
+          <div style="margin-top:10px"><label>Vencimiento *</label><input id="npChequeVencimiento" type="date"></div>
         </div>
         <div style="margin-top:10px"><label>Nota</label><input id="npNota" placeholder="Opcional"></div>
         <div class="err" id="npErr"></div>
@@ -571,12 +608,27 @@ function abrirPago(id){
 }
 
 async function confirmarPago(id){
+  const tipoValor = document.getElementById('npTipoValor').value;
   const body = {
-    tipoValor: document.getElementById('npTipoValor').value,
+    tipoValor,
     monto: Number(document.getElementById('npMonto').value),
     nota: document.getElementById('npNota').value.trim()
   };
   if (!body.monto || body.monto <= 0) { document.getElementById('npErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
+  if (tipoValor === 'cheque') {
+    body.chequeNumero = document.getElementById('npChequeNumero').value.trim();
+    body.chequeCuentaId = document.getElementById('npChequeCuenta').value;
+    body.chequeFechaVencimiento = document.getElementById('npChequeVencimiento').value;
+    if (!body.chequeNumero) { document.getElementById('npErr').textContent = 'Falta el número de cheque'; return; }
+    if (!body.chequeCuentaId) { document.getElementById('npErr').textContent = 'Elegí de qué banco propio sale el cheque'; return; }
+    if (!body.chequeFechaVencimiento) { document.getElementById('npErr').textContent = 'Falta la fecha de vencimiento del cheque'; return; }
+  } else {
+    const cuenta = document.getElementById('npCuenta').value;
+    if (!cuenta) { document.getElementById('npErr').textContent = 'Elegí de qué caja o banco sale el pago'; return; }
+    const [cuentaTipo, cuentaId] = cuenta.split(':');
+    body.cuentaTipo = cuentaTipo;
+    body.cuentaId = cuentaId;
+  }
   try{
     const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();

@@ -274,6 +274,12 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 let clientesCache = [];
 let productosCache = [];
 let depositosCache = [];
+// Tesorería (2/10/2026): cajas/bancos habilitados para este usuario+
+// sucursal, para elegir adónde va un cobro (o cuál banco propio al
+// endosar, si hiciera falta más adelante) — se recargan junto con el
+// resto de las listas base porque dependen de la organización activa.
+let cajasTesoreriaCache = [];
+let bancosTesoreriaCache = [];
 // Listas de precio de Productos (30/9/2026) — se piden acá también porque
 // GET /api/productos/listas-precio acepta acceso de 'productos' O 'ventas'
 // (ver authListasPrecio en productos.js). Se usan solo para sugerir el
@@ -303,11 +309,13 @@ function pintarAvisoCargaBase(){
 }
 async function cargarListasBase(orgId){
   const h = orgId ? headersAuthOrg(orgId) : headersAuth();
-  const [rc, rp, rd, rl] = await Promise.all([
+  const [rc, rp, rd, rl, rcj, rbc] = await Promise.all([
     fetch(BASE + '/clientes', {headers: h}),
     fetch(BASE + '/productos', {headers: h}),
     fetch(BASE + '/depositos', {headers: h}),
-    fetch('/api/productos/listas-precio', {headers: h})
+    fetch('/api/productos/listas-precio', {headers: h}),
+    fetch('/api/tesoreria/cajas', {headers: h}),
+    fetch('/api/tesoreria/bancos', {headers: h})
   ]);
   const fallas = [];
   async function leer(r, nombre){
@@ -322,6 +330,11 @@ async function cargarListasBase(orgId){
   productosCache = await leer(rp, 'productos');
   depositosCache = await leer(rd, 'depósitos');
   listasPrecioCache = await leer(rl, 'listas de precio');
+  // Cajas/bancos: si el usuario no tiene el módulo Tesorería habilitado
+  // esto da 403 — no es una falla real, simplemente no va a poder elegir
+  // cuenta al cobrar (ver construirSelectorCuentaCobro).
+  cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
+  bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
   avisoCargaBaseMsg = fallas.length
     ? `No se pudo cargar: ${fallas.join(' · ')}. Probá recargar la página; si sigue, avisá.`
     : '';
@@ -1054,6 +1067,20 @@ async function confirmarEntregar(id){
   }
 }
 
+// Tesorería (2/10/2026): efectivo/cuenta/tarjeta tienen que decir a qué
+// caja o banco se acredita; cheque pide los datos del cheque de tercero
+// en vez de una cuenta (entra "en cartera", no mueve plata todavía).
+function opcionesCuentaCobro(){
+  const cajas = cajasTesoreriaCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (saldo ${money(c.saldo)})</option>`);
+  const bancos = bancosTesoreriaCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`);
+  const opciones = cajas.concat(bancos).join('');
+  return opciones || '<option value="">No tenés ninguna caja/banco habilitada — pedile a un administrador que te habilite una desde Configuración</option>';
+}
+function actualizarTipoValorCobro(){
+  const esCheque = document.getElementById('ncTipoValor').value === 'cheque';
+  document.getElementById('ncCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('ncChequeWrap').classList.toggle('hidden', !esCheque);
+}
 function abrirCobro(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
@@ -1064,8 +1091,19 @@ function abrirCobro(id){
         <h2>Registrar cobro — venta #${v.numero}</h2>
         <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
         <div class="grid2">
-          <div><label>Tipo de valor *</label><select id="ncTipoValor"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Tipo de valor *</label><select id="ncTipoValor" onchange="actualizarTipoValorCobro()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta</option><option value="tarjeta">Tarjeta</option></select></div>
           <div><label>Monto *</label><input id="ncMonto" type="number" min="0.01" step="0.01" value="${v.saldoPendiente}"></div>
+        </div>
+        <div id="ncCuentaWrap" style="margin-top:10px"><label>¿A qué caja/banco va? *</label><select id="ncCuenta">${opcionesCuentaCobro()}</select></div>
+        <div id="ncChequeWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Número de cheque *</label><input id="ncChequeNumero"></div>
+            <div><label>Banco emisor</label><input id="ncChequeBanco"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Librador</label><input id="ncChequeLibrador" placeholder="Si es distinto del cliente"></div>
+            <div><label>Vencimiento *</label><input id="ncChequeVencimiento" type="date"></div>
+          </div>
         </div>
         <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
         <div class="err" id="ncErr"></div>
@@ -1076,12 +1114,27 @@ function abrirCobro(id){
 }
 
 async function confirmarCobro(id){
+  const tipoValor = document.getElementById('ncTipoValor').value;
   const body = {
-    tipoValor: document.getElementById('ncTipoValor').value,
+    tipoValor,
     monto: Number(document.getElementById('ncMonto').value),
     nota: document.getElementById('ncNota').value.trim()
   };
   if (!body.monto || body.monto <= 0) { document.getElementById('ncErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
+  if (tipoValor === 'cheque') {
+    body.chequeNumero = document.getElementById('ncChequeNumero').value.trim();
+    body.chequeBanco = document.getElementById('ncChequeBanco').value.trim();
+    body.chequeLibrador = document.getElementById('ncChequeLibrador').value.trim();
+    body.chequeFechaVencimiento = document.getElementById('ncChequeVencimiento').value;
+    if (!body.chequeNumero) { document.getElementById('ncErr').textContent = 'Falta el número de cheque'; return; }
+    if (!body.chequeFechaVencimiento) { document.getElementById('ncErr').textContent = 'Falta la fecha de vencimiento del cheque'; return; }
+  } else {
+    const cuenta = document.getElementById('ncCuenta').value;
+    if (!cuenta) { document.getElementById('ncErr').textContent = 'Elegí a qué caja o banco va el cobro'; return; }
+    const [cuentaTipo, cuentaId] = cuenta.split(':');
+    body.cuentaTipo = cuentaTipo;
+    body.cuentaId = cuentaId;
+  }
   try{
     const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
