@@ -286,6 +286,17 @@ let bancosTesoreriaCache = [];
 // precio unitario al armar una venta; el precio de cada ítem sigue siendo
 // editable a mano como siempre.
 let listasPrecioCache = [];
+// Usuarios activos, para el combo de "Vendedor" en Nueva venta
+// (3/10/2026) — ver cargarListasBase.
+let usuariosCache = [];
+function opcionesVendedorVenta(seleccionado){
+  const base = seleccionado && !usuariosCache.some(u => u.nombre === seleccionado)
+    ? [{ nombre: seleccionado }] // por si el usuario logueado no está en la lista (caso raro)
+    : [];
+  return base.concat(usuariosCache).map(u =>
+    `<option value="${escapeHtml(u.nombre)}" ${u.nombre === seleccionado ? 'selected' : ''}>${escapeHtml(u.nombre)}</option>`
+  ).join('');
+}
 // `orgId` opcional (1/10/2026, selector de Sucursal en Nueva venta): sin
 // él, carga todo para la organización activa globalmente y repuebla el
 // filtro de la pantalla de listado. Con él, trae los datos de ESA otra
@@ -309,13 +320,14 @@ function pintarAvisoCargaBase(){
 }
 async function cargarListasBase(orgId){
   const h = orgId ? headersAuthOrg(orgId) : headersAuth();
-  const [rc, rp, rd, rl, rcj, rbc] = await Promise.all([
+  const [rc, rp, rd, rl, rcj, rbc, ru] = await Promise.all([
     fetch(BASE + '/clientes', {headers: h}),
     fetch(BASE + '/productos', {headers: h}),
     fetch(BASE + '/depositos', {headers: h}),
     fetch('/api/productos/listas-precio', {headers: h}),
     fetch('/api/tesoreria/cajas', {headers: h}),
-    fetch('/api/tesoreria/bancos', {headers: h})
+    fetch('/api/tesoreria/bancos', {headers: h}),
+    fetch('/api/usuarios/lite', {headers: h})
   ]);
   const fallas = [];
   async function leer(r, nombre){
@@ -335,6 +347,12 @@ async function cargarListasBase(orgId){
   // cuenta al cobrar (ver construirSelectorCuentaCobro).
   cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
   bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
+  // Usuarios para el combo de "Vendedor" (3/10/2026, pedido de Mato: "en
+  // la pantalla de venta cuando figura vendedor deberia dejar elegir
+  // entre los que ya estan cargados, solo aparece administrador" — era
+  // un campo de texto libre precargado con el nombre de quien está
+  // logueado). GET /api/usuarios/lite no pide el módulo 'usuarios'.
+  usuariosCache = ru.ok ? await ru.json() : [];
   avisoCargaBaseMsg = fallas.length
     ? `No se pudo cargar: ${fallas.join(' · ')}. Probá recargar la página; si sigue, avisá.`
     : '';
@@ -634,7 +652,7 @@ async function abrirNuevaVenta(){
               <button type="button" class="btn secondary small" onclick="abrirNuevoClienteDesdeVenta()">+ Nuevo</button>
             </div>
           </div>
-          <div><label>Vendedor</label><input id="nvVendedor" value="${escapeHtml(NOMBRE_USUARIO)}"></div>
+          <div><label>Vendedor</label><select id="nvVendedor">${opcionesVendedorVenta(NOMBRE_USUARIO)}</select></div>
           <div><label>Fecha</label><input id="nvFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">

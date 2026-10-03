@@ -605,6 +605,25 @@ router.delete('/roles/:id', authAdmin, async (req, res) => {
 // ---------------------------------------------------------------------
 // USUARIOS
 // ---------------------------------------------------------------------
+
+// Listado liviano (3/10/2026, pedido de Mato: en Ventas, el campo
+// "Vendedor" era texto libre y solo mostraba el nombre de quien está
+// logueado ("solo aparece administrador") — pidió poder elegir entre
+// los usuarios ya cargados. Esta ruta NO pide el módulo 'usuarios'
+// (sería pedirle demasiado a quien solo tiene Ventas) — cualquier
+// usuario logueado puede pedirla, solo devuelve id + nombre de los
+// usuarios activos, nada sensible (ni rol, ni organizaciones, ni mucho
+// menos passwordHash).
+router.get('/lite', authUsuario, async (req, res) => {
+  try {
+    const usuarios = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('usuarios').find({ activo: true }).sort({ nombre: 1 }).project({ nombre: 1 }).toArray();
+    });
+    res.json(usuarios);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const [usuarios, roles, vendedores, organizaciones] = await conReintento(async () => {
