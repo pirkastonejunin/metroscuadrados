@@ -772,11 +772,17 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     // columna en la tabla, así que acá también queda fija, con el valor
     // calculado (`cantidad / unidadesPorBulto`) cuando el producto tiene
     // `unidadesPorBulto` configurado, o "—" cuando no aplica.
+    //
+    // Bug real (3/10/2026, encontrado con el diagnóstico en vivo): la
+    // condición pedía `unidadesPorBulto > 1`, pero hay productos (ej.
+    // cerámicas por m2) donde un bulto es MENOS de 1 m2 —
+    // `unidadesPorBulto` queda como 0.4, no como un entero mayor a 1.
+    // Esa condición descartaba justo esos casos. Tiene que ser `> 0`.
     const filas = (venta.items || []).map(it => {
       const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
       const unidad = (prod && prod.unidad) ? prod.unidad : '';
       const cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
-      const bultosHtml = (prod && prod.unidadesPorBulto > 1) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
+      const bultosHtml = (prod && prod.unidadesPorBulto > 0) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
       return `
         <tr>
           <td>${escHtml(it.sku || '—')} - ${escHtml(it.nombre)}</td>
@@ -826,17 +832,6 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         ${venta.saldoPendiente > 0 ? `<tr><td>Saldo pendiente</td><td class="num">${moneyImp(venta.saldoPendiente, venta.moneda)}</td></tr>` : ''}
       </table>
       ${org && org.condicionVenta ? `<div class="cmp-condicion-venta"><strong>Condición de venta:</strong><br>${escHtml(org.condicionVenta)}</div>` : ''}
-      ${req.query.debug === '1' ? `
-        <div style="margin-top:20px;border:1px dashed #c33;padding:8px;font-size:11px;font-family:monospace;color:#900">
-          <strong>DEBUG (sacar después)</strong><br>
-          ${(venta.items || []).map(it => {
-            const pid = it.productoId;
-            const prod = pid ? productosPorId[String(pid)] : null;
-            return `sku=${escHtml(it.sku||'')} productoId=${escHtml(String(pid))} tipo=${escHtml(typeof pid)} esObjectId=${pid && pid._bsontype === 'ObjectId'} match=${!!prod} unidadesPorBulto=${prod ? escHtml(String(prod.unidadesPorBulto)) : 'n/a'}`;
-          }).join('<br>')}
-          <br>productosPorId keys: ${escHtml(Object.keys(productosPorId).join(', ') || '(ninguna)')}
-        </div>
-      ` : ''}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(paginaImprimible({
@@ -877,7 +872,7 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
       const unidad = (prod && prod.unidad) ? prod.unidad : '';
       const cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
-      const bultosHtml = (prod && prod.unidadesPorBulto > 1) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
+      const bultosHtml = (prod && prod.unidadesPorBulto > 0) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
       return `
         <tr>
           <td>${escHtml(it.sku || '—')}</td>
@@ -904,17 +899,6 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
         <tbody>${filas || '<tr><td colspan="4" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
       <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
-      ${req.query.debug === '1' ? `
-        <div style="margin-top:20px;border:1px dashed #c33;padding:8px;font-size:11px;font-family:monospace;color:#900">
-          <strong>DEBUG (sacar después)</strong><br>
-          ${(remito.items || []).map(it => {
-            const pid = it.productoId;
-            const prod = pid ? productosPorId[String(pid)] : null;
-            return `sku=${escHtml(it.sku||'')} productoId=${escHtml(String(pid))} tipo=${escHtml(typeof pid)} match=${!!prod} unidadesPorBulto=${prod ? escHtml(String(prod.unidadesPorBulto)) : 'n/a'}`;
-          }).join('<br>')}
-          <br>productosPorId keys: ${escHtml(Object.keys(productosPorId).join(', ') || '(ninguna)')}
-        </div>
-      ` : ''}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml }));
