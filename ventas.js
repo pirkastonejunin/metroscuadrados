@@ -147,7 +147,7 @@ function err(status, message) { return Object.assign(new Error(message), { statu
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 
 const TIPOS_ENTREGA_VALIDOS = ['inmediata', 'pendiente'];
-const ESTADOS_VALIDOS = ['pendiente', 'entregada', 'anulada'];
+const ESTADOS_VALIDOS = ['pendiente', 'parcialmente_entregada', 'entregada', 'anulada'];
 // Tipo de comprobante (1/10/2026, pedido de Mato: preparar el terreno para
 // cuando esté el módulo de ARCA/facturación electrónica). Por ahora NINGUNO
 // de los dos es un comprobante fiscal de verdad — "fiscal" es un rótulo
@@ -335,17 +335,11 @@ async function comprometerStockDeVenta(db, req, items, depositoId) {
   }
 }
 
-// Libera una reserva de stock sin haberla convertido en una baja real —
-// usado al anular una venta que todavía no tenía remito generado.
-async function liberarCompromisoDeVenta(db, req, venta) {
-  if (!venta.depositoId) return;
-  for (const item of venta.items) {
-    if (!item.productoId) continue;
-    await db.collection('stock_actual').updateOne(
-      Object.assign({ productoId: item.productoId, depositoId: venta.depositoId }, filtroOrg(req)),
-      { $inc: { cantidadComprometida: -item.cantidad }, $set: { actualizadoEn: new Date() } }
-    );
-  }
+// (3/10/2026, pedido de Mato: "una venta puede tener varios remitos" —
+// el cliente puede retirar parcialmente) cuánto queda sin entregar de
+// cada ítem — lo que ya salió por algún remito anterior no cuenta.
+function cantidadPendiente(item) {
+  return Math.max(0, (item.cantidad || 0) - (item.cantidadEntregada || 0));
 }
 
 // Numeración de remitos — correlativo propio por organización, separado
@@ -362,17 +356,44 @@ async function proximoNumeroRemito(db, orgId) {
 
 // Genera el remito de una venta: aplica la baja REAL de stock (egreso +
 // libera la reserva de ese mismo ítem), crea el documento de remito
-// (numerado, imprimible más adelante) y marca la venta como entregada.
+// (numerado, imprimible más adelante) y actualiza el estado de la venta.
 // Para "entrega inmediata" se llama en el mismo momento de crear la
-// venta (ver POST /); para una venta que había quedado pendiente, se
-// llama desde POST /:id/entregar.
-async function generarRemitoDeVenta(db, req, venta, depositoId) {
+// venta (ver POST /); para una venta pendiente o parcialmente entregada,
+// se llama desde POST /:id/entregar.
+//
+// `entregas` (3/10/2026, pedido de Mato: "una venta puede tener varios
+// remitos... el cliente puede retirar parcialmente") es opcional: un
+// array de `{ index, cantidad }` con el índice del ítem dentro de
+// `venta.items` y cuánto se entrega AHORA de ese ítem (puede ser menos
+// que lo pendiente). Si se omite, se entrega todo lo pendiente de todos
+// los ítems (comportamiento de antes, y el que usa "entrega inmediata").
+async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
   if (!deposito) throw err(404, 'Depósito no encontrado');
+
+  if (!entregas) {
+    entregas = venta.items.map((it, index) => ({ index, cantidad: cantidadPendiente(it) }));
+  }
+  const itemsAEntregar = [];
+  for (const e of entregas) {
+    const index = Number(e.index);
+    const it = venta.items[index];
+    if (!it) throw err(400, 'Uno de los ítems a entregar no existe en esta venta.');
+    const cantidad = Number(e.cantidad);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) continue; // nada a entregar de este ítem ahora
+    const pendiente = cantidadPendiente(it);
+    if (cantidad > pendiente + 1e-9) {
+      throw err(400, `No se puede entregar ${cantidad} de "${it.nombre}": solo queda pendiente ${pendiente}.`);
+    }
+    itemsAEntregar.push({ index, productoId: it.productoId, sku: it.sku, nombre: it.nombre, cantidad });
+  }
+  if (!itemsAEntregar.length) throw err(400, 'No hay nada pendiente para entregar en esta venta.');
+
   // Recién ACÁ se cruza contra el stock físico real — si no alcanza, se
-  // rechaza el remito (la venta sigue existiendo, pendiente, comprometida).
-  await validarStockFisicoParaRemito(db, req, venta.items, depositoId);
-  for (const item of venta.items) {
+  // rechaza el remito (la venta sigue como estaba, con lo pendiente
+  // todavía comprometido).
+  await validarStockFisicoParaRemito(db, req, itemsAEntregar, depositoId);
+  for (const item of itemsAEntregar) {
     if (!item.productoId) continue;
     await aplicarMovimientoStock(db, req, {
       productoId: item.productoId, depositoId, tipo: 'egreso', cantidad: item.cantidad,
@@ -395,7 +416,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId) {
     clienteNombre: venta.clienteNombre,
     depositoId: deposito._id,
     depositoNombre: deposito.nombre,
-    items: venta.items.map(it => ({ productoId: it.productoId, sku: it.sku, nombre: it.nombre, cantidad: it.cantidad })),
+    items: itemsAEntregar.map(it => ({ productoId: it.productoId, sku: it.sku, nombre: it.nombre, cantidad: it.cantidad })),
     fecha: ahora,
     usuarioNombre: venta.usuarioNombre,
     orgId: req.orgId,
@@ -403,25 +424,67 @@ async function generarRemitoDeVenta(db, req, venta, depositoId) {
   };
   const r = await db.collection('remitos').insertOne(remito);
   remito._id = r.insertedId;
+
+  // Acumula lo entregado en cada ítem de la venta y recalcula el estado
+  // general: "entregada" solo cuando no quede nada pendiente en ningún
+  // ítem, "parcialmente_entregada" si ya salió algo pero falta el resto,
+  // "pendiente" si por algún motivo no se entregó nada (no debería pasar
+  // acá, ya se valida arriba, pero queda la rama por si itemsAEntregar
+  // termina vacío de cantidad real en algún caso límite).
+  const itemsActualizados = venta.items.map((it, idx) => {
+    const entrega = itemsAEntregar.find(e => e.index === idx);
+    if (!entrega) return it;
+    return Object.assign({}, it, { cantidadEntregada: (it.cantidadEntregada || 0) + entrega.cantidad });
+  });
+  const totalCantidad = itemsActualizados.reduce((s, it) => s + (it.cantidad || 0), 0);
+  const totalEntregada = itemsActualizados.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
+  const nuevoEstado = totalEntregada <= 0 ? 'pendiente' : (totalEntregada >= totalCantidad - 1e-9 ? 'entregada' : 'parcialmente_entregada');
+
   await db.collection('ventas').updateOne(
     { _id: venta._id },
-    { $set: { estado: 'entregada', depositoId, stockDescontado: true, stockDescontadoEn: ahora, entregadaEn: ahora, remitoId: remito._id, remitoNumero: remito.numero, updatedAt: ahora } }
+    {
+      $set: {
+        items: itemsActualizados,
+        estado: nuevoEstado,
+        depositoId,
+        stockDescontado: totalEntregada > 0,
+        stockDescontadoEn: ahora,
+        entregadaEn: nuevoEstado === 'entregada' ? ahora : (venta.entregadaEn || null),
+        remitoId: remito._id,
+        remitoNumero: remito.numero,
+        updatedAt: ahora
+      },
+      $push: { remitosIds: remito._id }
+    }
   );
   return remito;
 }
 
-// Reingresa el stock FÍSICO de una venta que ya tenía remito generado
-// (usado al anular). La reserva (`cantidadComprometida`) de esa venta ya
-// se había liberado al generar el remito, así que acá no hay que tocarla.
-async function reingresarStockDeVenta(db, req, venta) {
-  if (!venta.depositoId) return;
-  for (const item of venta.items) {
+// Revierte el stock de una venta anulada, cubriendo los tres casos
+// posibles (3/10/2026, antes eran dos funciones separadas porque no
+// existía la entrega parcial): lo que YA se entregó (tenía uno o varios
+// remitos) se reingresa de verdad al físico; lo que todavía estaba
+// comprometido sin entregar (toda la venta si estaba "pendiente", o el
+// resto si estaba "parcialmente_entregada") se libera sin tocar el
+// físico, porque nunca se había descontado.
+async function revertirStockDeVentaAnulada(db, req, venta) {
+  for (const item of venta.items || []) {
     if (!item.productoId) continue;
-    await aplicarMovimientoStock(db, req, {
-      productoId: item.productoId, depositoId: venta.depositoId, tipo: 'ingreso', cantidad: item.cantidad,
-      motivo: 'Anulación de venta', observaciones: `Anulación de venta ${venta.numero ? '#' + venta.numero : ''}`.trim(),
-      ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date()
-    });
+    const entregada = item.cantidadEntregada || 0;
+    const pendiente = cantidadPendiente(item);
+    if (entregada > 0) {
+      await aplicarMovimientoStock(db, req, {
+        productoId: item.productoId, depositoId: venta.depositoId, tipo: 'ingreso', cantidad: entregada,
+        motivo: 'Anulación de venta', observaciones: `Anulación de venta ${venta.numero ? '#' + venta.numero : ''}`.trim(),
+        ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date()
+      });
+    }
+    if (pendiente > 0 && venta.depositoId) {
+      await db.collection('stock_actual').updateOne(
+        Object.assign({ productoId: item.productoId, depositoId: venta.depositoId }, filtroOrg(req)),
+        { $inc: { cantidadComprometida: -pendiente }, $set: { actualizadoEn: new Date() } }
+      );
+    }
   }
 }
 
@@ -484,7 +547,10 @@ async function normalizarItems(db, req, itemsRaw) {
     const precioUnitario = normalizarMontoNoNegativo(precioBase, `El precio unitario de "${nombre}"`);
     const itemSubtotal = cantidad * precioUnitario;
     subtotal += itemSubtotal;
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal });
+    // cantidadEntregada (3/10/2026, pedido de Mato: "una venta puede
+    // tener varios remitos" — el cliente puede retirar parcialmente) va
+    // acumulando cuánto de este ítem ya salió por remito; arranca en 0.
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, cantidadEntregada: 0 });
   }
   return { items, subtotal };
 }
@@ -559,6 +625,25 @@ router.get('/:id', authAdmin, async (req, res) => {
     });
     if (!venta) throw err(404, 'Venta no encontrada');
     res.json(venta);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Todos los remitos de una venta (3/10/2026, pedido de Mato: "una venta
+// puede tener varios remitos... el cliente puede retirar parcialmente")
+// — antes alcanzaba con el `remitoId` único de la venta; ahora puede
+// haber uno por cada entrega parcial, así que el detalle de venta los
+// lista a todos, más viejo primero.
+router.get('/:id/remitos', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const remitos = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!venta) throw err(404, 'Venta no encontrada');
+      return db.collection('remitos').find(Object.assign({ ventaId: id }, filtroOrg(req))).sort({ fecha: 1 }).toArray();
+    });
+    res.json(remitos);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -913,6 +998,7 @@ router.post('/', authAdmin, async (req, res) => {
         stockDescontadoEn: null,
         remitoId: null,
         remitoNumero: null,
+        remitosIds: [],
         entregadaEn: null,
         anuladaEn: null,
         anuladaPor: null,
@@ -964,20 +1050,26 @@ router.post('/', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Genera el remito de una venta que había quedado "pendiente" — recién
-// ahí se descuenta de verdad el stock que ya estaba comprometido.
+// Genera un remito de una venta "pendiente" o "parcialmente_entregada"
+// — recién ahí se descuenta de verdad el stock que ya estaba
+// comprometido. `body.items` (3/10/2026, pedido de Mato: "una venta
+// puede tener varios remitos... el cliente puede retirar parcialmente")
+// es opcional: `[{ index, cantidad }]` con cuánto entregar AHORA de
+// cada ítem (por índice dentro de venta.items). Si se omite, se entrega
+// todo lo que estaba pendiente (comportamiento de antes).
 router.post('/:id/entregar', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const depositoIdBody = (req.body && req.body.depositoId) ? toObjectId(req.body.depositoId) : null;
+    const itemsBody = (req.body && Array.isArray(req.body.items)) ? req.body.items : null;
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
-      if (venta.estado === 'entregada') throw err(400, 'Esta venta ya tiene remito generado.');
+      if (venta.estado === 'entregada') throw err(400, 'Esta venta ya tiene todo entregado.');
 
       const depositoId = venta.depositoId || depositoIdBody;
       if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a descontar el stock.');
@@ -990,17 +1082,19 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
         await comprometerStockDeVenta(db, req, venta.items, depositoId);
       }
 
-      await generarRemitoDeVenta(db, req, venta, depositoId);
+      const entregas = itemsBody ? itemsBody.map(it => ({ index: it.index, cantidad: it.cantidad })) : null;
+      await generarRemitoDeVenta(db, req, venta, depositoId, entregas);
       return db.collection('ventas').findOne({ _id: id });
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Anula una venta. Si ya tenía remito generado (stock descontado de
-// verdad), reingresa el stock físico automáticamente. Si todavía estaba
-// "pendiente" (solo comprometido, sin remito), libera esa reserva sin
-// tocar el stock físico — nunca se había descontado nada.
+// Anula una venta. Si ya se había entregado algo (uno o varios remitos),
+// reingresa al físico lo entregado y libera lo que quedaba pendiente sin
+// entregar. Si todavía estaba "pendiente" (solo comprometido, sin
+// ningún remito), libera esa reserva sin tocar el stock físico — nunca
+// se había descontado nada.
 router.post('/:id/anular', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -1013,11 +1107,11 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta ya está anulada.');
 
-      if (venta.stockDescontado) {
-        await reingresarStockDeVenta(db, req, venta);
-      } else {
-        await liberarCompromisoDeVenta(db, req, venta);
-      }
+      // (3/10/2026) una sola función cubre los tres casos — pendiente sin
+      // nada entregado, entregada del todo, o con uno o varios remitos
+      // parciales — porque ahora puede haber una mezcla de ambas cosas
+      // en la misma venta (parte entregada, parte todavía comprometida).
+      await revertirStockDeVentaAnulada(db, req, venta);
 
       // Cuenta corriente del cliente (2/10/2026): al anular, se le
       // devuelve al cliente la deuda que le quedaba pendiente de ESTA

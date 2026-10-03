@@ -340,20 +340,28 @@ router.get('/comprometido', authAdmin, async (req, res) => {
     if (!productoId || !depositoId) throw err(400, 'Falta productoId o depositoId');
     const resultado = await conReintento(async () => {
       const db = await getDb();
+      // (3/10/2026, pedido de Mato: "una venta puede tener varios
+      // remitos... el cliente puede retirar parcialmente") una venta
+      // "parcialmente_entregada" también tiene parte comprometida (lo
+      // que todavía no se entregó), así que entra en este listado igual
+      // que "pendiente" — y la cantidad que aporta es la PENDIENTE del
+      // ítem, no el total original (lo ya entregado dejó de estar
+      // comprometido al generarse su remito).
       const ventas = await db.collection('ventas').find(Object.assign({
-        estado: 'pendiente', depositoId, 'items.productoId': productoId
+        estado: { $in: ['pendiente', 'parcialmente_entregada'] }, depositoId, 'items.productoId': productoId
       }, filtroOrg(req))).sort({ fecha: 1 }).toArray();
       return ventas.map(v => {
         const item = (v.items || []).find(it => String(it.productoId) === String(productoId));
+        const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0)) : 0;
         return {
           ventaId: v._id,
           numero: v.numero,
           tipoComprobante: v.tipoComprobante,
           clienteNombre: v.clienteNombre,
-          cantidad: item ? item.cantidad : 0,
+          cantidad,
           fecha: v.fecha
         };
-      });
+      }).filter(v => v.cantidad > 0);
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

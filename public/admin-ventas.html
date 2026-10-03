@@ -44,6 +44,7 @@
   tr:hover td{background:var(--bg);}
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
   .pill.pendiente{background:var(--warn-soft);color:var(--warn);}
+  .pill.parcialmente_entregada{background:var(--info-soft);color:var(--info);}
   .pill.entregada{background:var(--ok-soft);color:var(--ok);}
   .pill.anulada{background:var(--danger-soft);color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
@@ -147,6 +148,7 @@
             <select id="fvEstado" onchange="cargarVentas()">
               <option value="">Todos</option>
               <option value="pendiente">Pendiente</option>
+              <option value="parcialmente_entregada">Entrega parcial</option>
               <option value="entregada">Entregada</option>
               <option value="anulada">Anulada</option>
             </select>
@@ -411,7 +413,7 @@ function listaPrecioSeleccionadaVenta(){
 // -------------------------------------------------------------------
 // Listado de ventas
 // -------------------------------------------------------------------
-const ESTADO_LABEL = { pendiente: 'Pendiente (stock comprometido)', entregada: 'Entregada (remito generado)', anulada: 'Anulada' };
+const ESTADO_LABEL = { pendiente: 'Pendiente (stock comprometido)', parcialmente_entregada: 'Entrega parcial', entregada: 'Entregada (remito generado)', anulada: 'Anulada' };
 let ventasCache = [];
 
 async function cargarVentas(){
@@ -1032,15 +1034,24 @@ async function guardarNuevaVenta(){
 function verDetalle(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
-  const filasItems = v.items.map(it => `
+  // Columnas Entregado/Pendiente (3/10/2026, pedido de Mato: "una venta
+  // puede tener varios remitos... el cliente puede retirar parcialmente")
+  // — antes solo había Cantidad, porque una venta se entregaba entera de
+  // una sola vez o no se entregaba nada.
+  const filasItems = v.items.map(it => {
+    const entregada = it.cantidadEntregada || 0;
+    const pendiente = Math.max(0, it.cantidad - entregada);
+    return `
     <tr>
       <td>${escapeHtml(it.sku||'')}</td>
       <td>${escapeHtml(it.nombre)}</td>
       <td>${it.cantidad}</td>
+      <td class="muted">${entregada || '—'}</td>
+      <td class="muted">${pendiente || '—'}</td>
       <td>${money(it.precioUnitario)}</td>
       <td>${money(it.subtotal)}</td>
     </tr>
-  `).join('');
+  `; }).join('');
   const filasPagos = (v.pagos||[]).length
     ? v.pagos.map((p, i) => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)} ${botonesImprimible(BASE+'/'+v._id+'/pagos/'+i+'/recibo')}</span></div>`).join('')
     : '<p class="muted">Sin cobros registrados.</p>';
@@ -1054,7 +1065,7 @@ function verDetalle(id){
           ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''} — ${TIPO_COMPROBANTE_LABEL[v.tipoComprobante] || 'Comprobante X'}
         </p>
         <table>
-          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Entregado</th><th>Pendiente</th><th>Precio</th><th>Subtotal</th></tr></thead>
           <tbody>${filasItems}</tbody>
         </table>
         <div class="totales-box">
@@ -1067,7 +1078,7 @@ function verDetalle(id){
         </div>
 
         ${v.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(v.observaciones)}</p>` : ''}
-        ${v.remitoNumero ? `<p class="muted" style="margin-top:10px">Remito N° ${v.remitoNumero}</p>` : (v.estado === 'pendiente' ? `<p class="muted" style="margin-top:10px">Stock comprometido, remito sin generar todavía.</p>` : '')}
+        ${v.estado === 'pendiente' ? `<p class="muted" style="margin-top:10px">Stock comprometido, remito sin generar todavía.</p>` : ''}
 
         <div class="section-title">Cobros</div>
         <div id="dvPagos">${filasPagos}</div>
@@ -1078,19 +1089,43 @@ function verDetalle(id){
           ${botonesImprimible(BASE+'/'+v._id+'/comprobante')}
           ${v.estado !== 'anulada' ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
         </div>
-        ${v.remitoId ? `
-        <div class="row" style="margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px">
-          <span class="muted" style="font-size:12px">Remito:</span>
-          ${botonesImprimible(BASE+'/remitos/'+v.remitoId+'/imprimir')}
-        </div>` : ''}
+        <div class="section-title" style="margin-top:14px">Remitos</div>
+        <div id="dvRemitos"><p class="muted">Cargando...</p></div>
         <div class="row" style="margin-top:10px">
-          ${v.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
+          ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
         </div>
         ${v.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${v.anuladaPor ? ' por ' + escapeHtml(v.anuladaPor) : ''}${v.anuladaEn ? ' — ' + fechaHora(v.anuladaEn) : ''}${v.anuladaMotivo ? ': ' + escapeHtml(v.anuladaMotivo) : ''}</p>` : ''}
       </div>
     </div>
   `;
+  cargarRemitosDetalle(v._id);
+}
+
+// Lista todos los remitos de la venta (3/10/2026, pedido de Mato: "una
+// venta puede tener varios remitos") — se pide aparte porque la venta en
+// caché no trae el detalle de cada remito, solo iba a tener el último.
+async function cargarRemitosDetalle(ventaId){
+  const cont = document.getElementById('dvRemitos');
+  if (!cont) return;
+  try{
+    const r = await fetch(BASE + '/' + ventaId + '/remitos', {headers: headersAuth()});
+    const remitos = await r.json();
+    if (!r.ok) throw new Error(remitos.error || 'Error al cargar los remitos');
+    const cont2 = document.getElementById('dvRemitos');
+    if (!cont2) return; // se cerró el modal mientras cargaba
+    cont2.innerHTML = remitos.length
+      ? remitos.map(rem => `
+        <div class="row" style="margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px">
+          <span class="muted" style="font-size:12px">Remito N° ${rem.numero} — ${fechaCorta(rem.fecha)}:</span>
+          ${botonesImprimible(BASE+'/remitos/'+rem._id+'/imprimir')}
+        </div>
+      `).join('')
+      : '<p class="muted">Todavía no se generó ningún remito.</p>';
+  }catch(e){
+    const cont2 = document.getElementById('dvRemitos');
+    if (cont2) cont2.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+  }
 }
 
 const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
@@ -1142,17 +1177,40 @@ function botonesImprimible(url){
 // adelante — ahí no hace falta volver a preguntarlo, solo confirmar que
 // se quiere generar el remito. Una venta más vieja, sin depósito
 // asignado todavía, sigue preguntándolo acá (ver POST /:id/entregar).
+// Generar remito con entrega parcial (3/10/2026, pedido de Mato: "una
+// venta puede tener varios remitos... el cliente puede retirar
+// parcialmente") — por defecto se entrega todo lo pendiente de cada
+// ítem (el input ya arranca con ese valor), pero se puede bajar la
+// cantidad para dejar el resto pendiente de otro remito posterior.
+// Los ítems sin nada pendiente (ya entregados del todo en un remito
+// anterior) ni se muestran.
 function abrirEntregar(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
   const deposito = v.depositoId ? depositosCache.find(d => String(d._id) === String(v.depositoId)) : null;
+  const filasItems = v.items.map((it, idx) => {
+    const entregada = it.cantidadEntregada || 0;
+    const pendiente = Math.max(0, it.cantidad - entregada);
+    if (pendiente <= 0) return '';
+    return `
+      <tr>
+        <td>${escapeHtml(it.nombre)}</td>
+        <td class="muted">${pendiente}</td>
+        <td><input type="number" class="ent-cantidad" data-idx="${idx}" data-pendiente="${pendiente}" min="0" max="${pendiente}" step="any" value="${pendiente}" style="width:100px"></td>
+      </tr>
+    `;
+  }).join('');
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Generar remito — venta #${v.numero}</h2>
-        <p class="muted">Esto va a descontar el stock${deposito ? ' comprometido en ' + escapeHtml(deposito.nombre) : ''} y generar el remito. No se puede deshacer — si hace falta corregir, se anula la venta.</p>
+        <p class="muted">Por defecto se entrega todo lo pendiente. Si el cliente retira solo una parte, cambiá la cantidad de ese ítem — el resto queda pendiente para otro remito. No se puede deshacer — si hace falta corregir, se anula la venta.</p>
         ${deposito ? '' : `<label>Depósito *</label><select id="ntDeposito">${opcionesDepositosVenta()}</select>`}
+        <table style="margin-top:10px">
+          <thead><tr><th>Producto</th><th>Pendiente</th><th>A entregar ahora</th></tr></thead>
+          <tbody>${filasItems}</tbody>
+        </table>
         <div class="err" id="ntErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarEntregar('${id}')">Confirmar y generar remito</button>
       </div>
@@ -1164,8 +1222,15 @@ async function confirmarEntregar(id){
   const sel = document.getElementById('ntDeposito');
   const depositoId = sel ? sel.value : null;
   if (sel && !depositoId) { document.getElementById('ntErr').textContent = 'Elegí un depósito'; return; }
+  const items = [];
+  document.querySelectorAll('.ent-cantidad').forEach(inp => {
+    const cantidad = Number(inp.value) || 0;
+    if (cantidad > 0) items.push({ index: Number(inp.dataset.idx), cantidad });
+  });
+  if (!items.length) { document.getElementById('ntErr').textContent = 'Elegí al menos un ítem para entregar'; return; }
   try{
-    const r = await fetch(BASE + '/' + id + '/entregar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(depositoId ? {depositoId} : {})});
+    const body = Object.assign({ items }, depositoId ? {depositoId} : {});
+    const r = await fetch(BASE + '/' + id + '/entregar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarVentas();
