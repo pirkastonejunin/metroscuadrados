@@ -341,6 +341,23 @@ async function cargarListasBase(orgId){
   pintarAvisoCargaBase();
 }
 
+// Versión liviana de lo de arriba, SOLO depósitos + listas de precio
+// (3/10/2026, segunda vuelta — el fix anterior traía todo cargarListasBase()
+// de nuevo al abrir "Nueva venta", incluido el catálogo completo de
+// productos y clientes, y Mato reportó que ahora tardaba muchísimo en
+// abrir. Depósitos y listas de precio son unas pocas decenas de
+// registros como mucho — no hace falta volver a pedir ~20.000 productos
+// cada vez solo para que esos dos combos estén al día).
+async function refrescarDepositosYListasVenta(orgId){
+  const h = orgId ? headersAuthOrg(orgId) : headersAuth();
+  const [rd, rl] = await Promise.all([
+    fetch(BASE + '/depositos', {headers: h}),
+    fetch('/api/productos/listas-precio', {headers: h})
+  ]);
+  if (rd.ok) depositosCache = await rd.json();
+  if (rl.ok) listasPrecioCache = await rl.json();
+}
+
 // Misma lógica que precioResuelto() en productos.js: un override puntual
 // manda; si no hay, se calcula costo + % de la lista.
 // No todas las listas tienen todo el catálogo (1/10/2026) — si la lista
@@ -585,16 +602,19 @@ let ventaOrgSeleccionada = '';
 // sucursal) — si Mato creaba un depósito o una lista de precio desde OTRA
 // pantalla (Stock, Productos) mientras la pestaña de Ventas ya estaba
 // abierta, el combo de "Nueva venta" seguía mostrando el caché viejo
-// hasta recargar toda la página. Ahora cada apertura de "Nueva venta"
-// vuelve a pedir depósitos/listas de precio (y clientes/productos de
-// paso, mismo pedido) ANTES de armar el formulario, para que lo recién
-// creado aparezca sin tener que recargar.
+// hasta recargar toda la página.
+// Primer intento: volver a pedir TODO (cargarListasBase, incluido el
+// catálogo completo de productos y clientes) en cada apertura — Mato
+// avisó enseguida que así tardaba muchísimo en abrir. Corregido: ahora
+// solo se refresca lo liviano (refrescarDepositosYListasVenta —
+// depósitos y listas de precio, unas pocas decenas de registros), sin
+// tocar el caché de clientes/productos.
 async function abrirNuevaVenta(){
   ventaOrgSeleccionada = ORG;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg"><div class="modal wide"><p class="muted">Cargando…</p></div></div>
   `;
-  await cargarListasBase(ventaOrgSeleccionada === ORG ? undefined : ventaOrgSeleccionada);
+  await refrescarDepositosYListasVenta(ventaOrgSeleccionada === ORG ? undefined : ventaOrgSeleccionada);
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
