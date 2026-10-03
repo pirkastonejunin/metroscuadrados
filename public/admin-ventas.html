@@ -858,7 +858,7 @@ function agregarFilaVenta(){
     </div>
     <div class="campo-cant-bulto hidden">
       <label>Bultos</label>
-      <input type="number" min="0.01" step="0.01" class="cant-bulto" oninput="sincronizarCantidadVenta(this,'bulto')">
+      <input type="number" min="1" step="1" class="cant-bulto" oninput="sincronizarCantidadVenta(this,'bulto')">
     </div>
     <div class="campo-precio">
       <label>Precio unit.</label>
@@ -881,6 +881,13 @@ function agregarFilaVenta(){
 // cargados en la ficha, el campo de bultos ni aparece (como antes).
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
 
+// Los bultos no se pueden fraccionar (3/10/2026, pedido de Mato: "los
+// bultos no pueden ser fracciones entonces tenemos que redondear cuando
+// hacemos la venta ajustando los m2") — se redondea siempre PARA ARRIBA
+// al bulto entero más cercano (nunca para abajo: el cliente tiene que
+// recibir al menos lo que pidió), y la cantidad real (m2 u otra unidad)
+// se reajusta para coincidir exacto con esos bultos enteros — tanto si
+// se escribió la cantidad en m2 como si se escribió directo en bultos.
 function sincronizarCantidadVenta(el, origen){
   const fila = el.closest('.fila-item');
   const oculto = fila.querySelector('.producto-id');
@@ -888,11 +895,12 @@ function sincronizarCantidadVenta(el, origen){
   const unidadInput = fila.querySelector('.cant-unidad');
   const bultoInput = fila.querySelector('.cant-bulto');
   if (producto && producto.unidadesPorBulto) {
-    if (origen === 'unidad') {
-      bultoInput.value = redondear2((Number(unidadInput.value) || 0) / producto.unidadesPorBulto);
-    } else {
-      unidadInput.value = redondear2((Number(bultoInput.value) || 0) * producto.unidadesPorBulto);
-    }
+    const bultosExactos = origen === 'unidad'
+      ? (Number(unidadInput.value) || 0) / producto.unidadesPorBulto
+      : (Number(bultoInput.value) || 0);
+    const bultos = Math.max(0, Math.ceil(bultosExactos - 1e-9));
+    bultoInput.value = bultos;
+    unidadInput.value = redondear2(bultos * producto.unidadesPorBulto);
   }
   actualizarTotalesVenta();
 }

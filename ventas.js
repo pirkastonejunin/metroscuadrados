@@ -568,15 +568,29 @@ async function normalizarItems(db, req, itemsRaw) {
     let nombre = normalizarTexto(it.nombre);
     let sku = normalizarTexto(it.sku) || null;
     let precioBase = it.precioUnitario;
+    let producto = null;
     if (productoId) {
-      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
+      producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
       if (!producto) throw err(400, 'Uno de los productos de la venta no existe (o no pertenece a esta organización)');
       nombre = producto.nombre;
       sku = producto.sku || null;
       if (precioBase === undefined || precioBase === null || precioBase === '') precioBase = producto.precio;
     }
     if (!nombre) throw err(400, 'Falta el nombre de un ítem de la venta');
-    const cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad de "${nombre}"`);
+    let cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad de "${nombre}"`);
+    // Los bultos no se pueden fraccionar (3/10/2026, pedido de Mato: "los
+    // bultos no pueden ser fracciones entonces tenemos que redondear
+    // cuando hacemos la venta ajustando los m2") — se redondea siempre
+    // PARA ARRIBA al bulto entero más cercano (nunca para abajo: el
+    // cliente tiene que recibir al menos lo que pidió) y la cantidad
+    // real (m2 u otra unidad) se reajusta para coincidir exacto con esos
+    // bultos enteros. El frontend (admin-ventas.html) ya hace este mismo
+    // ajuste en vivo mientras se carga la venta — esto es el resguardo
+    // del lado del servidor, por si algo llega sin pasar por ahí.
+    if (producto && producto.unidadesPorBulto > 0) {
+      const bultos = Math.ceil(cantidad / producto.unidadesPorBulto - 1e-9);
+      cantidad = Math.round(bultos * producto.unidadesPorBulto * 100) / 100;
+    }
     const precioUnitario = normalizarMontoNoNegativo(precioBase, `El precio unitario de "${nombre}"`);
     const itemSubtotal = cantidad * precioUnitario;
     subtotal += itemSubtotal;
