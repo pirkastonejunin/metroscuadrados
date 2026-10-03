@@ -708,6 +708,17 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         ${venta.saldoPendiente > 0 ? `<tr><td>Saldo pendiente</td><td class="num">${moneyImp(venta.saldoPendiente, venta.moneda)}</td></tr>` : ''}
       </table>
       ${org && org.condicionVenta ? `<div class="cmp-condicion-venta"><strong>Condición de venta:</strong><br>${escHtml(org.condicionVenta)}</div>` : ''}
+      ${req.query.debug === '1' ? `
+        <div style="margin-top:20px;border:1px dashed #c33;padding:8px;font-size:11px;font-family:monospace;color:#900">
+          <strong>DEBUG (sacar después)</strong><br>
+          ${(venta.items || []).map(it => {
+            const pid = it.productoId;
+            const prod = pid ? productosPorId[String(pid)] : null;
+            return `sku=${escHtml(it.sku||'')} productoId=${escHtml(String(pid))} tipo=${escHtml(typeof pid)} esObjectId=${pid && pid._bsontype === 'ObjectId'} match=${!!prod} unidadesPorBulto=${prod ? escHtml(String(prod.unidadesPorBulto)) : 'n/a'}`;
+          }).join('<br>')}
+          <br>productosPorId keys: ${escHtml(Object.keys(productosPorId).join(', ') || '(ninguna)')}
+        </div>
+      ` : ''}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(paginaImprimible({
