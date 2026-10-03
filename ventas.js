@@ -84,7 +84,11 @@ const { registrarMovimientoCuentaCorriente } = require('./clientes');
 // Imprimibles (3/10/2026, pedido de Mato) — plantilla de impresión
 // compartida (sin acceso a Mongo), ver el comentario grande al principio
 // de imprimibles.js.
-const { paginaImprimible, escapeHtml: escHtml, money: moneyImp, fechaLarga } = require('./imprimibles');
+const {
+  paginaImprimible, encabezadoComprobante, recuadroClienteComprobante,
+  escapeHtml: escHtml, money: moneyImp, numero: numImp, fechaLarga, fechaCorta,
+  CATEGORIA_FISCAL_LABEL
+} = require('./imprimibles');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -597,6 +601,21 @@ router.get('/remitos/:id', authAdmin, async (req, res) => {
 function datosNegocioParaImprimir(org) {
   return org || { nombre: 'Organización' };
 }
+// Rediseñado el 3/10/2026, pedido de Mato: "podes hacer el diseño del
+// compr mas parecido a esto?" (mandó un comprobante real impreso desde
+// Dux — logo en recuadro, razón social centrada, recuadro con la letra
+// X/F, título+numeración+fecha a la derecha, línea de datos fiscales de
+// la sucursal, recuadro de datos del cliente estilo Dux, tabla de ítems
+// con % IVA/Subtotal c/IVA y condición de venta al pie). Ver
+// `encabezadoComprobante`/`recuadroClienteComprobante` en imprimibles.js
+// — es un encabezado propio del Comprobante, distinto del genérico que
+// siguen usando Recibo y Remito.
+//
+// "Y cuando el producto tenga bultos pone las dos medidas" (mismo
+// pedido, mismo día): la cantidad del ítem siempre está en la unidad
+// real (m2, unidad, etc. — ver Stock), nunca en bultos; si el producto
+// tiene `unidadesPorBulto` configurado, se muestra además la cantidad
+// equivalente en bultos como una segunda línea chica debajo.
 router.get('/:id/comprobante', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -609,50 +628,85 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         db.collection('organizaciones').findOne({ _id: venta.orgId }),
         venta.clienteId ? db.collection('clientes').findOne({ _id: venta.clienteId }) : null
       ]);
-      return { venta, org, cliente };
+      const productoIds = (venta.items || []).map(it => it.productoId).filter(Boolean);
+      const productos = productoIds.length
+        ? await db.collection('productos_catalogo').find({ _id: { $in: productoIds } }).project({ unidadesPorBulto: 1, unidad: 1 }).toArray()
+        : [];
+      const productosPorId = {};
+      productos.forEach(p => { productosPorId[String(p._id)] = p; });
+      return { venta, org, cliente, productosPorId };
     });
-    const { venta, org, cliente } = resultado;
+    const { venta, org, cliente, productosPorId } = resultado;
     const prefijo = venta.tipoComprobante === 'fiscal' ? 'F' : 'X';
-    const numeroFmt = `${prefijo}-${String(venta.numero).padStart(5, '0')}`;
-    const filas = (venta.items || []).map(it => `
-      <tr>
-        <td>${escHtml(it.sku || '—')}</td>
-        <td>${escHtml(it.nombre)}</td>
-        <td class="num">${it.cantidad}</td>
-        <td class="num">${moneyImp(it.precioUnitario, venta.moneda)}</td>
-        <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
-      </tr>
-    `).join('');
+    // Dux numera "punto de venta - correlativo" (ej. 00007-00000718); acá
+    // no hay punto de venta propio (sin AFIP, ver "Decisiones de alcance
+    // v1" más arriba), así que se imprime solo el correlativo interno,
+    // con el mismo relleno de ceros a la izquierda.
+    const numeroDigitos = String(venta.numero).padStart(5, '0');
+    const filas = (venta.items || []).map(it => {
+      const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
+      const unidad = (prod && prod.unidad) ? prod.unidad : '';
+      let cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
+      if (prod && prod.unidadesPorBulto > 1) {
+        const bultos = it.cantidad / prod.unidadesPorBulto;
+        cantidadHtml += `<div class="muted" style="font-size:11px">${numImp(bultos)} bultos</div>`;
+      }
+      return `
+        <tr>
+          <td>${escHtml(it.sku || '—')} - ${escHtml(it.nombre)}</td>
+          <td class="num">${cantidadHtml}</td>
+          <td class="num">${moneyImp(it.precioUnitario, venta.moneda)}</td>
+          <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
+          <td class="num">0%</td>
+          <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
+        </tr>
+      `;
+    }).join('');
+    const ivaClienteLabel = (cliente && cliente.categoriaFiscal && CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal]) || '';
+    const detalleVenta = [];
+    if (venta.vendedor) detalleVenta.push(`Vendedor: ${escHtml(venta.vendedor)}`);
+    if (venta.moneda && venta.moneda !== 'ARS') detalleVenta.push(`Moneda: ${escHtml(venta.moneda)}`);
+    detalleVenta.push(venta.tipoEntrega === 'inmediata' ? 'Entrega inmediata' : 'Entrega pendiente');
+    const headerHtml = encabezadoComprobante(org, {
+      letra: prefijo,
+      numeroFmt: numeroDigitos,
+      fecha: fechaCorta(venta.fecha),
+      tituloGrande: venta.tipoComprobante === 'fiscal' ? 'FACTURA' : 'COMPROBANTE'
+    });
     const bodyHtml = `
-      <h1>${venta.tipoComprobante === 'fiscal' ? 'Factura' : 'Comprobante de venta'} Nº ${numeroFmt}</h1>
-      <div class="datos-doc">
-        <div>
-          <strong>Cliente:</strong> ${escHtml(venta.clienteNombre)}<br>
-          ${cliente && cliente.cuit ? `CUIT/CUIL: ${escHtml(cliente.cuit)}<br>` : ''}
-          ${cliente && cliente.domicilio ? `${escHtml(cliente.domicilio)}<br>` : ''}
-          ${venta.vendedor ? `<span class="muted">Vendedor: ${escHtml(venta.vendedor)}</span>` : ''}
-        </div>
-        <div>
-          <strong>Fecha:</strong> ${fechaLarga(venta.fecha)}<br>
-          <strong>Moneda:</strong> ${escHtml(venta.moneda || 'ARS')}<br>
-          <span class="muted">Tipo de entrega: ${venta.tipoEntrega === 'inmediata' ? 'Entrega inmediata' : 'Pendiente'}</span>
-        </div>
-      </div>
+      ${recuadroClienteComprobante({
+        nombre: venta.clienteNombre,
+        iva: ivaClienteLabel,
+        cuit: cliente ? cliente.cuit : '',
+        domicilio: cliente ? cliente.domicilio : '',
+        localidad: cliente ? cliente.localidad : '',
+        provincia: cliente ? cliente.provincia : '',
+        email: cliente ? cliente.email : '',
+        condicionPago: cliente ? cliente.condicionPago : '',
+        observaciones: venta.observaciones
+      })}
+      <p class="muted" style="margin:-8px 0 10px 0;font-size:11.5px">${detalleVenta.join(' · ')}</p>
       <table>
-        <thead><tr><th>Código</th><th>Producto</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Subtotal</th></tr></thead>
-        <tbody>${filas || '<tr><td colspan="5" class="muted">Sin ítems</td></tr>'}</tbody>
+        <thead><tr><th>Descripción</th><th class="num">Cant.</th><th class="num">Precio Uni.</th><th class="num">Sub Total</th><th class="num">% IVA</th><th class="num">Sub Total c/IVA</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="6" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
       <table class="totales">
         <tr><td>Subtotal</td><td class="num">${moneyImp(venta.subtotal, venta.moneda)}</td></tr>
         ${venta.descuentoMonto ? `<tr><td>Descuento</td><td class="num">-${moneyImp(venta.descuentoMonto, venta.moneda)}</td></tr>` : ''}
+        <tr><td>Monto IVA</td><td class="num">${moneyImp(0, venta.moneda)}</td></tr>
         <tr class="total-final"><td>Total</td><td class="num">${moneyImp(venta.total, venta.moneda)}</td></tr>
         <tr><td>Cobrado</td><td class="num">${moneyImp(venta.totalCobrado, venta.moneda)}</td></tr>
         ${venta.saldoPendiente > 0 ? `<tr><td>Saldo pendiente</td><td class="num">${moneyImp(venta.saldoPendiente, venta.moneda)}</td></tr>` : ''}
       </table>
-      ${venta.observaciones ? `<p class="muted" style="margin-top:14px">Observaciones: ${escHtml(venta.observaciones)}</p>` : ''}
+      ${org && org.condicionVenta ? `<div class="cmp-condicion-venta"><strong>Condición de venta:</strong><br>${escHtml(org.condicionVenta)}</div>` : ''}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(paginaImprimible({ titulo: `Comprobante Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml }));
+    res.send(paginaImprimible({
+      titulo: `Comprobante Nº ${prefijo}-${numeroDigitos}`,
+      org: datosNegocioParaImprimir(org),
+      headerHtml,
+      bodyHtml
+    }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

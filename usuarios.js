@@ -474,6 +474,14 @@ function normalizarDatosNegocio(body, set) {
     set.condicionIva = v || null;
   }
   if (body.logoBase64 !== undefined) set.logoBase64 = body.logoBase64 ? String(body.logoBase64) : null;
+  // Sumados el 3/10/2026, pedido de Mato: "hace el diseño del comprobante
+  // más parecido a esto" (mandó un comprobante real de Dux) — ese diseño
+  // muestra Inicio de actividad, Ingresos brutos y un texto de condición
+  // de venta al pie. Los tres son opcionales y solo se imprimen si están
+  // cargados (ver imprimibles del comprobante en ventas.js).
+  if (body.inicioActividad !== undefined) set.inicioActividad = normalizarTexto(body.inicioActividad);
+  if (body.ingresosBrutos !== undefined) set.ingresosBrutos = normalizarTexto(body.ingresosBrutos);
+  if (body.condicionVenta !== undefined) set.condicionVenta = normalizarTexto(body.condicionVenta);
 }
 
 router.post('/organizaciones', authUsuario, requiereSuperAdmin, async (req, res) => {
@@ -484,6 +492,7 @@ router.post('/organizaciones', authUsuario, requiereSuperAdmin, async (req, res)
       nombre: String(nombre).trim(),
       tiendanubeStoreId: tiendanubeStoreId ? String(tiendanubeStoreId).trim() : null,
       razonSocial: '', cuit: '', direccion: '', telefono: '', condicionIva: null, logoBase64: null,
+      inicioActividad: '', ingresosBrutos: '', condicionVenta: '',
       activa: true,
       createdAt: new Date(),
       updatedAt: new Date()

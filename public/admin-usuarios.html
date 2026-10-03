@@ -540,12 +540,18 @@ function camposDatosNegocioOrg(o){
     <div class="campo-edit"><label>Dirección</label><input id="orgDireccion" value="${escapeHtml(o.direccion||'')}"></div>
     <div class="campo-edit"><label>Teléfono</label><input id="orgTelefono" value="${escapeHtml(o.telefono||'')}"></div>
     <div class="campo-edit"><label>Condición frente al IVA</label><select id="orgCondicionIva">${opcionesCondicionIvaOrg(o.condicionIva)}</select></div>
+    <div class="campo-edit"><label>Inicio de actividad (opcional)</label><input id="orgInicioActividad" placeholder="ej: 01/10/2014" value="${escapeHtml(o.inicioActividad||'')}"></div>
+    <div class="campo-edit"><label>Ingresos brutos (opcional)</label><input id="orgIngresosBrutos" placeholder="Número de inscripción en IIBB" value="${escapeHtml(o.ingresosBrutos||'')}"></div>
     <div class="campo-edit">
       <label>Logo</label>
       ${o.logoBase64 ? `<div style="margin-bottom:6px"><img src="${o.logoBase64}" style="max-height:60px;max-width:220px"></div>` : ''}
       <input type="file" id="orgLogoArchivo" accept="image/*" onchange="leerLogoOrganizacion(this)">
       <input type="hidden" id="orgLogoBase64" value="${o.logoBase64 ? escapeHtml(o.logoBase64) : ''}">
       ${o.logoBase64 ? `<button type="button" class="btn small secondary" style="margin-top:4px" onclick="document.getElementById('orgLogoBase64').value='';this.previousElementSibling.previousElementSibling.remove();this.remove();">Quitar logo</button>` : ''}
+    </div>
+    <div class="campo-edit">
+      <label>Condición de venta (opcional, se imprime al pie del comprobante)</label>
+      <textarea id="orgCondicionVenta" rows="3" placeholder="ej: Pedidos con seña: una vez notificada la llegada de la mercadería, el cliente dispone de 7 días corridos para cancelar el saldo.">${escapeHtml(o.condicionVenta||'')}</textarea>
     </div>
   `;
 }
@@ -563,7 +569,10 @@ function leerDatosNegocioOrg(){
     direccion: document.getElementById('orgDireccion').value.trim(),
     telefono: document.getElementById('orgTelefono').value.trim(),
     condicionIva: document.getElementById('orgCondicionIva').value || null,
-    logoBase64: document.getElementById('orgLogoBase64').value || null
+    logoBase64: document.getElementById('orgLogoBase64').value || null,
+    inicioActividad: document.getElementById('orgInicioActividad').value.trim(),
+    ingresosBrutos: document.getElementById('orgIngresosBrutos').value.trim(),
+    condicionVenta: document.getElementById('orgCondicionVenta').value.trim()
   };
 }
 function abrirNuevaOrganizacion(){
