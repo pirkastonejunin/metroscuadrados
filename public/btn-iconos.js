@@ -24,6 +24,13 @@
   // de más específico a más genérico — alcanza con que el texto del botón
   // EMPIECE con el patrón.
   var REGLAS = [
+    // Casos puntuales (3/10/2026, pedido de Mato: "el de cobrar del rayo
+    // no va ponele un billete y el de remito un camion") — van ANTES que
+    // las reglas genéricas de "generar"/"registrar", que si no les
+    // tocaría a estos dos el mismo ícono que a cualquier otro
+    // "Generar..."/"Registrar...".
+    [/^(generar remito|confirmar y generar remito)/, '🚚'],
+    [/^(registrar cobro|cobrar)$/, '💵'],
     [/^cerrar sesi[oó]n$/, '🚪'],
     [/^salir$/, '🚪'],
     [/^(entrar|ingresar)$/, '🔑'],
