@@ -429,7 +429,7 @@ async function cargarVentas(){
   if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
   body.innerHTML = ventasCache.map(v => `
     <tr>
-      <td><strong>${prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}</strong></td>
+      <td><strong>${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}</strong></td>
       <td class="muted">${fechaCorta(v.fecha)}</td>
       <td>${escapeHtml(v.clienteNombre)}</td>
       <td>${money(v.total)}</td>
@@ -678,7 +678,7 @@ async function abrirNuevaVenta(prefill){
           <div>
             <label>Cliente *</label>
             <div class="row" style="gap:6px">
-              ${comboClienteHtml('nv', prefill ? prefill.clienteId : '', '')}
+              ${comboClienteHtml('nv', prefill ? prefill.clienteId : '', 'actualizarPreviewLetra')}
               <button type="button" class="btn secondary small" onclick="abrirNuevoClienteDesdeVenta()">+ Nuevo</button>
             </div>
           </div>
@@ -708,6 +708,20 @@ async function abrirNuevaVenta(prefill){
             </select>
           </div>
         </div>
+        <!-- "Es fiscal" (3/10/2026, pedido de Mato: "nota de credito y
+             debito tambien pueden ser fiscal... x para no fiscal y las
+             letras fiscales para la que corresponda") — solo aplica a
+             Nota de Crédito/Débito: Factura ya es fiscal por elegirla, y
+             Comprobante X ya es no fiscal por elegirlo. La letra A/B no
+             se elige a mano: se calcula sola según la condición fiscal
+             del cliente (ver actualizarPreviewLetra). -->
+        <div id="nvFiscalWrap" class="hidden" style="margin-top:10px">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+            <input type="checkbox" id="nvEsFiscal" onchange="actualizarPreviewLetra()" style="width:auto">
+            Es fiscal <span class="muted" style="font-size:12px">(si no, se emite como comprobante X)</span>
+          </label>
+        </div>
+        <p class="muted" id="nvLetraPreview" style="font-size:12px;margin:6px 0 0"></p>
 
         <div class="section-title">Productos</div>
         <div id="nvFilasItems"></div>
@@ -735,6 +749,7 @@ async function abrirNuevaVenta(prefill){
   } else {
     agregarFilaVenta();
   }
+  if (prefill && prefill.esFiscalOrigen) document.getElementById('nvEsFiscal').checked = true;
   actualizarVisibilidadDeposito();
 }
 
@@ -766,6 +781,42 @@ function actualizarVisibilidadDeposito(){
   document.getElementById('nvDepositoLabel').textContent = esNotaCredito
     ? 'Depósito donde reingresa la mercadería *'
     : 'Depósito *';
+
+  document.getElementById('nvFiscalWrap').classList.toggle('hidden', !(esNotaCredito || esNotaDebito));
+  actualizarPreviewLetra();
+}
+
+// Letra real (3/10/2026): A si el cliente es Responsable Inscripto, B
+// para el resto — misma regla que el backend (letraFiscalParaCliente en
+// ventas.js), para poder mostrar la letra ANTES de guardar.
+function letraFiscalParaClienteFrontend(cliente){
+  return (cliente && cliente.categoriaFiscal === 'responsable_inscripto') ? 'A' : 'B';
+}
+
+// Vista previa de qué letra le va a tocar al comprobante, antes de
+// guardar — Factura y Comprobante X ya la tenían implícita (F/X); ahora
+// Factura calcula A/B sola según el cliente, y Nota de Crédito/Débito la
+// calculan igual cuando el casillero "Es fiscal" está marcado.
+function actualizarPreviewLetra(){
+  const tipoComprobante = document.getElementById('nvTipoComprobante').value;
+  const clienteId = document.getElementById('nvCliente') ? document.getElementById('nvCliente').value : '';
+  const cliente = clientesCache.find(c => String(c._id) === clienteId);
+  const preview = document.getElementById('nvLetraPreview');
+  if (!preview) return;
+
+  let letra;
+  if (tipoComprobante === 'comprobante_x') {
+    letra = 'X';
+  } else if (tipoComprobante === 'fiscal') {
+    if (!cliente) { preview.textContent = 'Letra: se calcula al elegir el cliente'; return; }
+    letra = letraFiscalParaClienteFrontend(cliente);
+  } else {
+    const esFiscalNota = document.getElementById('nvEsFiscal') && document.getElementById('nvEsFiscal').checked;
+    if (!esFiscalNota) { letra = 'X'; }
+    else if (!cliente) { preview.textContent = 'Letra: se calcula al elegir el cliente'; return; }
+    else { letra = letraFiscalParaClienteFrontend(cliente); }
+  }
+  preview.textContent = `Letra: ${letra}`;
 }
 
 // Cambiar la sucursal (organización) de la venta que se está cargando trae
@@ -1080,6 +1131,9 @@ async function guardarNuevaVenta(){
     // el backend, que de todas formas lo ignora para estos dos casos.
     tipoEntrega: (esNotaCredito || esNotaDebito) ? 'pendiente' : tipoEntrega,
     tipoComprobante,
+    // Solo tiene efecto para Nota de Crédito/Débito — el backend lo
+    // ignora para Factura/Comprobante X (3/10/2026).
+    esFiscal: (document.getElementById('nvEsFiscal') && document.getElementById('nvEsFiscal').checked) || false,
     // La Nota de Débito no reingresa ni descuenta stock, así que no usa
     // depósito (3/10/2026).
     depositoId: esNotaDebito ? null : (document.getElementById('nvDeposito').value || null),
@@ -1170,7 +1224,7 @@ function verDetalle(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Venta ${prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
+        <h2>Venta ${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''} — ${TIPO_COMPROBANTE_LABEL[v.tipoComprobante] || 'Comprobante X'}
         </p>
@@ -1534,10 +1588,14 @@ function generarNotaCreditoDesdeVenta(id){
     tipoComprobante: 'nota_credito',
     clienteId: v.clienteId,
     moneda: v.moneda,
-    observaciones: `Nota de crédito referente a ${prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}`,
+    observaciones: `Nota de crédito referente a ${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}`,
     comprobanteOrigenId: v._id,
     comprobanteOrigenNumero: v.numero,
     comprobanteOrigenTipo: v.tipoComprobante,
+    // Si la venta original era fiscal (letra A/B), la Nota de Crédito
+    // arranca con el casillero "Es fiscal" ya marcado — se puede
+    // destildar antes de guardar (3/10/2026).
+    esFiscalOrigen: v.letra ? v.letra !== 'X' : (v.tipoComprobante === 'fiscal'),
     items: (v.items || []).map(it => ({
       productoId: it.productoId || null,
       nombre: it.nombre,

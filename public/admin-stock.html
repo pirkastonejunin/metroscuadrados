@@ -433,7 +433,7 @@ async function verComprometido(productoId, depositoId){
         <thead><tr><th>Comprobante</th><th>Cliente</th><th>Fecha</th><th>Cantidad</th></tr></thead>
         <tbody>${data.map(v => `
           <tr>
-            <td>${v.tipoComprobante === 'fiscal' ? 'F' : 'X'}-${String(v.numero).padStart(5,'0')}</td>
+            <td>${v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')}-${String(v.numero).padStart(5,'0')}</td>
             <td>${escapeHtml(v.clienteNombre)}</td>
             <td class="muted">${fechaCorta(v.fecha)}</td>
             <td>${v.cantidad}</td>

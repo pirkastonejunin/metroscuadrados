@@ -170,7 +170,22 @@ const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_x', 'fiscal', 'nota_credito', 'n
 // proximoNumero, que ya separa por tipoComprobante).
 const PREFIJO_COMPROBANTE = { fiscal: 'F', comprobante_x: 'X', nota_credito: 'NC', nota_debito: 'ND' };
 const TITULO_COMPROBANTE = { fiscal: 'FACTURA', comprobante_x: 'COMPROBANTE', nota_credito: 'NOTA DE CRÉDITO', nota_debito: 'NOTA DE DÉBITO' };
+// Usado solo como FALLBACK al imprimir un comprobante viejo (de antes del
+// 3/10/2026) que no tiene `letra` guardada — todo lo nuevo usa
+// directamente `venta.letra` (ver letraFiscalParaCliente más abajo).
 function prefijoComprobante(tipo) { return PREFIJO_COMPROBANTE[tipo] || 'X'; }
+
+// Letra real de AFIP para un comprobante fiscal (3/10/2026, pedido de
+// Mato: "nota de credito y debito tambien pueden ser fiscal... x para
+// no fiscal y las letras fiscales para la que corresponda"; regla
+// confirmada: "A = Responsable Inscripto, B = el resto"). El punto de
+// venta real (ej. 00007) queda para cuando se arme la parte fiscal
+// completa (Mato: "es un campo que vamos a asignar cuando armemos la
+// parte fiscal") — por ahora el comprobante sigue imprimiéndose como
+// "<letra>-<correlativo>".
+function letraFiscalParaCliente(cliente) {
+  return (cliente && cliente.categoriaFiscal === 'responsable_inscripto') ? 'A' : 'B';
+}
 
 // Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
 // bases tengo que tener la posibilidad de importar y exportar") — ver
@@ -224,8 +239,11 @@ router.get('/clientes', authAdmin, async (req, res) => {
     const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
     const lista = await conReintento(async () => {
       const db = await getDb();
+      // categoriaFiscal (3/10/2026) se agrega a la proyección para que el
+      // front pueda mostrar en el momento qué letra (A/B) le va a tocar a
+      // una Factura o a una Nota de Crédito/Débito fiscal antes de guardar.
       return db.collection('clientes')
-        .find(match, { projection: { apellidoRazonSocial: 1, nombre: 1, tipoCliente: 1, cuit: 1 } })
+        .find(match, { projection: { apellidoRazonSocial: 1, nombre: 1, tipoCliente: 1, cuit: 1, categoriaFiscal: 1 } })
         .sort({ apellidoRazonSocial: 1 }).toArray();
     });
     res.json(lista);
@@ -819,7 +837,10 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
       return { venta, org, cliente, productosPorId };
     });
     const { venta, org, cliente, productosPorId } = resultado;
-    const prefijo = prefijoComprobante(venta.tipoComprobante);
+    // `letra` es lo nuevo (3/10/2026: X/A/B reales); si el comprobante es
+    // de antes de ese cambio y no la tiene guardada, se cae al F/X/NC/ND
+    // de siempre.
+    const prefijo = venta.letra || prefijoComprobante(venta.tipoComprobante);
     // Dux numera "punto de venta - correlativo" (ej. 00007-00000718); acá
     // no hay punto de venta propio (sin AFIP, ver "Decisiones de alcance
     // v1" más arriba), así que se imprime solo el correlativo interno,
@@ -861,7 +882,8 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     if (venta.moneda && venta.moneda !== 'ARS') detalleVenta.push(`Moneda: ${escHtml(venta.moneda)}`);
     if (!esNota) detalleVenta.push(venta.tipoEntrega === 'inmediata' ? 'Entrega inmediata' : 'Entrega pendiente');
     if (venta.comprobanteOrigenNumero) {
-      detalleVenta.push(`Referente a comprobante ${prefijoComprobante(venta.comprobanteOrigenTipo)}-${String(venta.comprobanteOrigenNumero).padStart(5, '0')}`);
+      const prefijoOrigen = venta.comprobanteOrigenLetra || prefijoComprobante(venta.comprobanteOrigenTipo);
+      detalleVenta.push(`Referente a comprobante ${prefijoOrigen}-${String(venta.comprobanteOrigenNumero).padStart(5, '0')}`);
     }
     const headerHtml = encabezadoComprobante(org, {
       letra: prefijo,
@@ -1040,6 +1062,10 @@ router.post('/', authAdmin, async (req, res) => {
     // stock para nada.
     const esNotaCredito = tipoComprobante === 'nota_credito';
     const esNotaDebito = tipoComprobante === 'nota_debito';
+    // Si una Nota de Crédito/Débito es fiscal (3/10/2026, pedido de Mato)
+    // se decide con este casillero aparte — a Factura/Comprobante X no
+    // les hace falta, ya lo dice el tipo de comprobante elegido.
+    const esFiscalNota = !!body.esFiscal;
     if (esNotaDebito) { /* depositoId no aplica */ }
     else if (esNotaCredito && !depositoId) throw err(400, 'Elegí a qué depósito reingresa la mercadería de esta nota de crédito.');
     else if (tipoEntrega === 'inmediata' && !depositoId) throw err(400, 'Elegí a qué depósito le vas a entregar la venta.');
@@ -1059,10 +1085,22 @@ router.post('/', authAdmin, async (req, res) => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
+      let comprobanteOrigenLetra = null;
       if (comprobanteOrigenId) {
         const origen = await db.collection('ventas').findOne(Object.assign({ _id: comprobanteOrigenId }, filtroOrg(req)));
         if (!origen) throw err(400, 'El comprobante de origen no existe (o no pertenece a esta organización).');
+        comprobanteOrigenLetra = origen.letra || null;
       }
+      // Letra real del comprobante (3/10/2026): X para lo no fiscal, A/B
+      // (según la condición fiscal del cliente) para lo fiscal. Factura
+      // ya era "fiscal" de por sí; Comprobante X ya era "no fiscal"; para
+      // Nota de Crédito/Débito ahora lo decide el casillero "Es fiscal".
+      const letra = tipoComprobante === 'comprobante_x'
+        ? 'X'
+        : tipoComprobante === 'fiscal'
+          ? letraFiscalParaCliente(cliente)
+          : (esFiscalNota ? letraFiscalParaCliente(cliente) : 'X');
+      const esFiscal = letra !== 'X';
       if (depositoId) {
         const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
         if (!deposito) throw err(404, 'Depósito no encontrado');
@@ -1073,7 +1111,13 @@ router.post('/', authAdmin, async (req, res) => {
       // mercadería o se fabrica. No hay validación de stock acá; el
       // chequeo real es al generar el remito (ver generarRemitoDeVenta).
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
-      const numero = await proximoNumero(db, req.orgId, tipoComprobante);
+      // Comprobante X sigue contando con la clave de siempre (no romper
+      // la numeración histórica); Factura y Nota de Crédito/Débito ahora
+      // cuentan por separado para cada letra (A, B o X), como realmente
+      // funciona la numeración de AFIP (3/10/2026, pedido de Mato:
+      // "Separado por letra").
+      const claveContador = tipoComprobante === 'comprobante_x' ? 'comprobante_x' : `${tipoComprobante}_${letra}`;
+      const numero = await proximoNumero(db, req.orgId, claveContador);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
 
@@ -1093,6 +1137,7 @@ router.post('/', authAdmin, async (req, res) => {
       const venta = {
         numero,
         tipoComprobante,
+        letra, esFiscal,
         clienteId,
         clienteNombre: cliente.apellidoRazonSocial || cliente.nombre || '',
         vendedor,
@@ -1102,7 +1147,7 @@ router.post('/', authAdmin, async (req, res) => {
         cotizacionDolar: body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null,
         tipoEntrega: (esNotaCredito || esNotaDebito) ? null : tipoEntrega,
         depositoId: esNotaDebito ? null : depositoId,
-        comprobanteOrigenId, comprobanteOrigenNumero, comprobanteOrigenTipo,
+        comprobanteOrigenId, comprobanteOrigenNumero, comprobanteOrigenTipo, comprobanteOrigenLetra,
         // stockComprometido (3/10/2026): true desde ahora, siempre, para
         // una venta normal — se compromete al cargar la venta tenga o no
         // depósito elegido (ver más abajo). Distingue de una venta vieja
