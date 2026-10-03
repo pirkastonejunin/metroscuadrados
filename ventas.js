@@ -643,18 +643,22 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     // v1" más arriba), así que se imprime solo el correlativo interno,
     // con el mismo relleno de ceros a la izquierda.
     const numeroDigitos = String(venta.numero).padStart(5, '0');
+    // Columna "Bultos" propia (3/10/2026, 2da vuelta — pedido de Mato: "no
+    // aparecen los bultos... quiero que lo hagas tal cual dux"), en vez de
+    // una línea chica debajo de la cantidad: Dux siempre tiene esa
+    // columna en la tabla, así que acá también queda fija, con el valor
+    // calculado (`cantidad / unidadesPorBulto`) cuando el producto tiene
+    // `unidadesPorBulto` configurado, o "—" cuando no aplica.
     const filas = (venta.items || []).map(it => {
       const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
       const unidad = (prod && prod.unidad) ? prod.unidad : '';
-      let cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
-      if (prod && prod.unidadesPorBulto > 1) {
-        const bultos = it.cantidad / prod.unidadesPorBulto;
-        cantidadHtml += `<div class="muted" style="font-size:11px">${numImp(bultos)} bultos</div>`;
-      }
+      const cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
+      const bultosHtml = (prod && prod.unidadesPorBulto > 1) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
       return `
         <tr>
           <td>${escHtml(it.sku || '—')} - ${escHtml(it.nombre)}</td>
           <td class="num">${cantidadHtml}</td>
+          <td class="num">${bultosHtml}</td>
           <td class="num">${moneyImp(it.precioUnitario, venta.moneda)}</td>
           <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
           <td class="num">0%</td>
@@ -687,8 +691,8 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
       })}
       <p class="muted" style="margin:-8px 0 10px 0;font-size:11.5px">${detalleVenta.join(' · ')}</p>
       <table>
-        <thead><tr><th>Descripción</th><th class="num">Cant.</th><th class="num">Precio Uni.</th><th class="num">Sub Total</th><th class="num">% IVA</th><th class="num">Sub Total c/IVA</th></tr></thead>
-        <tbody>${filas || '<tr><td colspan="6" class="muted">Sin ítems</td></tr>'}</tbody>
+        <thead><tr><th>Descripción</th><th class="num">Cant.</th><th class="num">Bultos</th><th class="num">Precio Uni.</th><th class="num">Sub Total</th><th class="num">% IVA</th><th class="num">Sub Total c/IVA</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="7" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
       <table class="totales">
         <tr><td>Subtotal</td><td class="num">${moneyImp(venta.subtotal, venta.moneda)}</td></tr>
@@ -719,13 +723,34 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       const remito = await db.collection('remitos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!remito) throw err(404, 'Remito no encontrado');
       const org = await db.collection('organizaciones').findOne({ _id: remito.orgId });
-      return { remito, org };
+      // Mismo criterio que el Comprobante (3/10/2026, pedido de Mato: "en
+      // remito tambien pone las dos unidades de medida") — se busca el
+      // producto de cada ítem para saber si tiene `unidadesPorBulto`
+      // configurado y mostrar la cantidad también en bultos.
+      const productoIds = (remito.items || []).map(it => it.productoId).filter(Boolean);
+      const productos = productoIds.length
+        ? await db.collection('productos_catalogo').find({ _id: { $in: productoIds } }).project({ unidadesPorBulto: 1, unidad: 1 }).toArray()
+        : [];
+      const productosPorId = {};
+      productos.forEach(p => { productosPorId[String(p._id)] = p; });
+      return { remito, org, productosPorId };
     });
-    const { remito, org } = resultado;
+    const { remito, org, productosPorId } = resultado;
     const numeroFmt = String(remito.numero).padStart(5, '0');
-    const filas = (remito.items || []).map(it => `
-      <tr><td>${escHtml(it.sku || '—')}</td><td>${escHtml(it.nombre)}</td><td class="num">${it.cantidad}</td></tr>
-    `).join('');
+    const filas = (remito.items || []).map(it => {
+      const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
+      const unidad = (prod && prod.unidad) ? prod.unidad : '';
+      const cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
+      const bultosHtml = (prod && prod.unidadesPorBulto > 1) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
+      return `
+        <tr>
+          <td>${escHtml(it.sku || '—')}</td>
+          <td>${escHtml(it.nombre)}</td>
+          <td class="num">${cantidadHtml}</td>
+          <td class="num">${bultosHtml}</td>
+        </tr>
+      `;
+    }).join('');
     const bodyHtml = `
       <h1>Remito Nº ${numeroFmt}</h1>
       <div class="datos-doc">
@@ -739,8 +764,8 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
         </div>
       </div>
       <table>
-        <thead><tr><th>Código</th><th>Producto</th><th class="num">Cantidad</th></tr></thead>
-        <tbody>${filas || '<tr><td colspan="3" class="muted">Sin ítems</td></tr>'}</tbody>
+        <thead><tr><th>Código</th><th>Producto</th><th class="num">Cantidad</th><th class="num">Bultos</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="4" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
       <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
     `;

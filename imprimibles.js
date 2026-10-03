@@ -94,12 +94,21 @@ function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande }) {
   const lineaFiscal2 = [];
   if (org.inicioActividad) lineaFiscal2.push(`INICIO ACT.: ${escapeHtml(org.inicioActividad)}`);
   if (org.ingresosBrutos) lineaFiscal2.push(`ING. BRUTOS: ${escapeHtml(org.ingresosBrutos)}`);
+  // Nombre del local vs. razón social (3/10/2026, 2da vuelta — pedido de
+  // Mato: "el nombre del local deberia ir mas grande q la razon social"):
+  // al revés de cómo lo imprime Dux (razón social grande, nombre de
+  // fantasía chico) — acá el nombre comercial (`org.nombre`, ej. "Piedra
+  // Negra") es el que va grande y en negrita, y la razón social
+  // (`org.razonSocial`, ej. "Capogrosso Juan Matías") va como línea chica
+  // debajo, igual que el resto de los datos fiscales.
+  const nombreGrande = org.nombre || org.razonSocial || '';
+  const razonSocialChica = (org.razonSocial && org.razonSocial !== nombreGrande) ? org.razonSocial : '';
   return `
     <div class="cmp-header">
-      <div class="cmp-logo-box">${org.logoBase64 ? `<img src="${org.logoBase64}" alt="Logo">` : ''}</div>
+      ${org.logoBase64 ? `<div class="cmp-logo"><img src="${org.logoBase64}" alt="Logo"></div>` : ''}
       <div class="cmp-negocio">
-        <div class="cmp-razon">${escapeHtml(org.razonSocial || org.nombre || '')}</div>
-        ${org.nombre && org.razonSocial && org.nombre !== org.razonSocial ? `<div>${escapeHtml(org.nombre)}</div>` : ''}
+        <div class="cmp-razon">${escapeHtml(nombreGrande)}</div>
+        ${razonSocialChica ? `<div>${escapeHtml(razonSocialChica)}</div>` : ''}
         ${org.direccion ? `<div>${escapeHtml(org.direccion)}</div>` : ''}
         ${org.telefono ? `<div>TEL: ${escapeHtml(org.telefono)}</div>` : ''}
       </div>
@@ -179,16 +188,17 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
   .datos-doc { display: flex; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
   .datos-doc > div { min-width: 220px; }
   .muted { color: #666; }
-  .no-imprimir { margin-top: 24px; }
+  .no-imprimir { margin-top: 24px; display: flex; gap: 10px; align-items: center; }
   .no-imprimir button { font-size: 14px; padding: 8px 16px; cursor: pointer; }
+  .no-imprimir .compartir-estado { font-size: 12px; color: #666; }
   @media print { .no-imprimir { display: none; } }
 
   /* Comprobante "tipo Dux" (3/10/2026) — ver encabezadoComprobante */
   .cmp-header { display: flex; align-items: stretch; gap: 14px; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 4px; }
-  .cmp-logo-box { width: 72px; min-width: 72px; border: 1px solid #999; display: flex; align-items: center; justify-content: center; padding: 4px; }
-  .cmp-logo-box img { max-width: 100%; max-height: 64px; object-fit: contain; }
+  .cmp-logo { width: 80px; min-width: 80px; display: flex; align-items: center; justify-content: center; }
+  .cmp-logo img { max-width: 100%; max-height: 72px; object-fit: contain; }
   .cmp-negocio { flex: 1; text-align: center; padding-top: 2px; }
-  .cmp-negocio .cmp-razon { font-size: 15px; font-weight: bold; margin-bottom: 2px; }
+  .cmp-negocio .cmp-razon { font-size: 19px; font-weight: bold; margin-bottom: 3px; }
   .cmp-negocio div { line-height: 1.4; color: #222; font-size: 12px; }
   .cmp-letra { width: 44px; min-width: 44px; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
   .cmp-titulo { width: 230px; min-width: 190px; text-align: right; }
@@ -202,11 +212,86 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
   .cmp-cliente-fila > div { flex: 1; }
   .cmp-condicion-venta { margin-top: 20px; font-size: 11px; color: #333; border-top: 1px solid #999; padding-top: 8px; white-space: pre-line; }
 </style>
+<!--
+  Compartir (3/10/2026, pedido de Mato: "agregar boton de ver, comparti,
+  imprimir, anular" en todo lo que tenga un comprobante asociado). Como
+  estas páginas piden sesión (header x-admin-token) no hay un link
+  público para mandar por WhatsApp/mail — en vez de eso, "Compartir"
+  arma un PDF de la propia página en el navegador (html2canvas + jsPDF,
+  cargados desde CDN, ver compartirDocumento más abajo) y lo pasa al
+  selector nativo de compartir del celular/navegador
+  (navigator.share con un archivo). Si el navegador no soporta compartir
+  archivos (la mayoría de los de escritorio), se descarga el PDF en su
+  lugar. Las pantallas que abren esta página (admin-ventas.html,
+  admin-clientes.html, etc.) reusan este mismo botón: le dicen a la
+  ventana recién abierta que dispare "Compartir" o "Imprimir" solas
+  apenas termina de cargar, en vez de duplicar esta lógica en cada una.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
   ${headerHtml || encabezadoNegocio(org)}
   ${bodyHtml}
-  <div class="no-imprimir"><button onclick="window.print()">Imprimir</button></div>
+  <div class="no-imprimir">
+    <button onclick="window.print()">Imprimir</button>
+    <button onclick="compartirDocumento()">Compartir</button>
+    <span class="compartir-estado" id="compartirEstado"></span>
+  </div>
+  <script>
+    // Arma un PDF de la página (sin los botones de acá abajo) y lo
+    // comparte con el selector nativo del navegador/celular; si no se
+    // puede compartir un archivo (la mayoría de los navegadores de
+    // escritorio), lo descarga.
+    async function compartirDocumento(){
+      const controles = document.querySelector('.no-imprimir');
+      const estado = document.getElementById('compartirEstado');
+      if (controles) controles.style.display = 'none';
+      try{
+        if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
+          if (estado) estado.textContent = 'No se pudo cargar el generador de PDF.';
+          return;
+        }
+        const canvas = await html2canvas(document.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = pageWidth;
+        const imgHeight = canvas.height * imgWidth / canvas.width;
+        const imgData = canvas.toDataURL('image/jpeg', 0.92);
+        let alturaRestante = imgHeight;
+        let posicion = 0;
+        pdf.addImage(imgData, 'JPEG', 0, posicion, imgWidth, imgHeight);
+        alturaRestante -= pageHeight;
+        while (alturaRestante > 0) {
+          posicion = alturaRestante - imgHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', 0, posicion, imgWidth, imgHeight);
+          alturaRestante -= pageHeight;
+        }
+        const nombreArchivo = (document.title || 'documento').replace(/[^a-z0-9]+/gi, '_').toLowerCase() + '.pdf';
+        const blob = pdf.output('blob');
+        const archivo = new File([blob], nombreArchivo, { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+          await navigator.share({ files: [archivo], title: document.title });
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = nombreArchivo;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 4000);
+          if (estado) estado.textContent = 'Se descargó el PDF (tu navegador no permite compartir archivos directo).';
+        }
+      }catch(e){
+        if (e && e.name === 'AbortError') { /* el usuario cerró el selector de compartir — no es un error */ }
+        else if (estado) estado.textContent = 'No se pudo compartir: ' + (e && e.message ? e.message : e);
+      }finally{
+        if (controles) controles.style.display = '';
+      }
+    }
+    window.compartirDocumento = compartirDocumento;
+  </script>
 </body>
 </html>`;
 }
