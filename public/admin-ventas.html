@@ -579,8 +579,22 @@ const TIPO_COMPROBANTE_LABEL = {
 
 let ventaOrgSeleccionada = '';
 
-function abrirNuevaVenta(){
+// 3/10/2026 — pedido de Mato: "sigue sin traerme las listas y si estan
+// creadas" (depósitos y listas de precio). Causa real: cargarListasBase()
+// solo corría una vez al entrar a la pantalla (más el cambio de
+// sucursal) — si Mato creaba un depósito o una lista de precio desde OTRA
+// pantalla (Stock, Productos) mientras la pestaña de Ventas ya estaba
+// abierta, el combo de "Nueva venta" seguía mostrando el caché viejo
+// hasta recargar toda la página. Ahora cada apertura de "Nueva venta"
+// vuelve a pedir depósitos/listas de precio (y clientes/productos de
+// paso, mismo pedido) ANTES de armar el formulario, para que lo recién
+// creado aparezca sin tener que recargar.
+async function abrirNuevaVenta(){
   ventaOrgSeleccionada = ORG;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg"><div class="modal wide"><p class="muted">Cargando…</p></div></div>
+  `;
+  await cargarListasBase(ventaOrgSeleccionada === ORG ? undefined : ventaOrgSeleccionada);
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
@@ -649,11 +663,13 @@ function abrirNuevaVenta(){
 // 2/10/2026, pero con "no entrega" no hace falta elegirlo todavía; el
 // stock se compromete recién al generar el remito, desde el detalle de
 // la venta).
+// Segunda vuelta, mismo día — pedido de Mato: "si pongo pendiente q ni
+// me pida deposito sacalo": con "no entrega" el campo se OCULTA del
+// todo (antes solo cambiaba el texto a "opcional" pero seguía viéndose
+// y pidiéndose). Con "inmediata" vuelve a aparecer.
 function actualizarVisibilidadDeposito(){
   const esInmediata = document.getElementById('nvTipoEntrega').value === 'inmediata';
-  document.getElementById('nvDepositoLabel').textContent = esInmediata
-    ? 'Depósito (se descuenta ahora) *'
-    : 'Depósito (opcional — se puede elegir después, al entregar)';
+  document.getElementById('nvDepositoWrap').classList.toggle('hidden', !esInmediata);
 }
 
 // Cambiar la sucursal (organización) de la venta que se está cargando trae
