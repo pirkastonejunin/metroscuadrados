@@ -109,6 +109,10 @@
     if (!btn.getAttribute('aria-label')) btn.setAttribute('aria-label', resto || crudo);
     btn.textContent = icono;
     btn.dataset.iconizado = '1';
+    // Marca para menu-acciones.js: SOLO los botones realmente
+    // convertidos a ícono (no los símbolos que ya venían así, como "×" o
+    // "‹") son candidatos a agruparse bajo el ⚙ cuando hay varios juntos.
+    btn.dataset.accionIcono = '1';
   }
 
   function procesarDesde(nodo) {
