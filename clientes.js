@@ -453,7 +453,23 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
         db.collection('cuenta_corriente_movimientos').find({ clienteId: id }).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray(),
         db.collection('cuenta_corriente_saldos').findOne({ clienteId: id })
       ]);
-      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos };
+      // Saldo pendiente por venta (3/10/2026, pedido de Mato: poder
+      // generar un cobro de cada factura, o uno parcial, directo desde
+      // la cuenta corriente). Se resuelve acá, no en el frontend, porque
+      // el saldo real de cada venta vive en `ventas` (ya tiene en cuenta
+      // cobros parciales y anulaciones) — la cuenta corriente solo
+      // refleja el efecto neto, no alcanza para saber cuánto falta
+      // cobrar de UNA venta puntual.
+      const ventaIds = [...new Set(movimientos.filter(m => m.ventaId).map(m => String(m.ventaId)))].map(toObjectId).filter(Boolean);
+      const ventasPorId = {};
+      if (ventaIds.length) {
+        const ventas = await db.collection('ventas')
+          .find({ _id: { $in: ventaIds } })
+          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1 })
+          .toArray();
+        for (const v of ventas) ventasPorId[String(v._id)] = v;
+      }
+      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos, ventasPorId };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

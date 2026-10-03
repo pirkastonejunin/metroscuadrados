@@ -143,6 +143,10 @@
 </div>
 
 <div id="modalRoot"></div>
+<!-- Modal aparte para "Cobrar" una venta desde la pestaña Cuenta corriente
+     (3/10/2026) — va en SU PROPIO contenedor, no en #modalRoot, para no
+     pisar el modal de "Editar cliente" que sigue abierto detrás. -->
+<div id="modalCobroVentaRoot"></div>
 
 <script>
 const BASE = '/api/clientes';
@@ -540,20 +544,51 @@ async function cargarCuentaCorrienteTab(id){
     const cont = document.getElementById('ccContenido');
     if (!cont) return; // se cerró el modal mientras cargaba
     const saldoTexto = data.saldo > 0 ? `Debe ${money(data.saldo)}` : (data.saldo < 0 ? `Tiene a favor ${money(-data.saldo)}` : 'Al día ($ 0,00)');
+    // Columna "Saldo" (3/10/2026, pedido de Mato: "agreguemos una columna
+    // de saldo que vaya tirando el saldo historico"): data.movimientos
+    // viene ordenado del más nuevo al más viejo (fecha desc). El saldo
+    // actual en caché (data.saldo) es el saldo DESPUÉS del movimiento más
+    // nuevo (fila 0) — para cada fila siguiente (más vieja), el saldo que
+    // tenía la cuenta después de ESE movimiento es el de la fila anterior
+    // menos el efecto de la fila anterior (débito suma, crédito resta),
+    // es decir, deshaciendo los movimientos uno por uno yendo hacia atrás
+    // en el tiempo.
+    let saldoCorrido = data.saldo;
+    const filas = data.movimientos.map((m, i) => {
+      if (i > 0) {
+        const anterior = data.movimientos[i - 1];
+        saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto;
+      }
+      return { m, saldo: saldoCorrido };
+    });
+    // Botón "Cobrar" por fila (3/10/2026, pedido de Mato: "deberiamos
+    // tener algun boton que nos permita generar un cobro de cada factura
+    // o un cobro parcial") — solo tiene sentido en el movimiento de
+    // DÉBITO de una venta (origen: 'venta') que todavía tenga saldo
+    // pendiente según `ventasPorId` (viene resuelto del backend, que ya
+    // tiene en cuenta cobros parciales/anulaciones). El propio cobro de
+    // venta (origen: 'cobro_venta') y los movimientos sin ventaId
+    // (cobro a cuenta, manual) no llevan botón.
+    const ventasPorId = data.ventasPorId || {};
     cont.innerHTML = `
       <p class="muted" style="margin-top:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong></p>
       <table>
-        <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>
-          ${data.movimientos.length ? data.movimientos.map(m => `
+          ${filas.length ? filas.map(({m, saldo}) => {
+            const venta = (m.tipo === 'debito' && m.ventaId) ? ventasPorId[String(m.ventaId)] : null;
+            const cobrable = venta && venta.estado !== 'anulada' && venta.saldoPendiente > 0;
+            return `
             <tr>
               <td>${fechaCorta(m.fecha)}</td>
               <td>${escapeHtml(m.concepto || '—')}${m.observaciones ? `<div class="muted">${escapeHtml(m.observaciones)}</div>` : ''}</td>
               <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
+              <td class="muted">${money(saldo)}</td>
+              <td>${cobrable ? `<button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}</td>
             </tr>
-          `).join('') : '<tr><td colspan="5" class="muted">Todavía no hay movimientos.</td></tr>'}
+          `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
       </table>
     `;
@@ -561,6 +596,142 @@ async function cargarCuentaCorrienteTab(id){
     const cont = document.getElementById('ccContenido');
     if (cont) cont.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
   }
+}
+
+// -------------------------------------------------------------------
+// Cobro de una venta puntual, directo desde la pestaña Cuenta corriente
+// (3/10/2026, pedido de Mato: "deberiamos tener algun boton que nos
+// permita generar un cobro de cada factura o un cobro parcial"). Mismas
+// reglas que el cobro de Ventas/Cobranza: efectivo solo a caja, cuenta
+// (transferencia)/tarjeta solo a banco, cheque entra "en cartera". Pega
+// directo a POST /api/ventas/:id/pagos — mismo endpoint que usa
+// admin-ventas.html — así que lo que se cobra acá actualiza la venta
+// real (totalCobrado/saldoPendiente) y la cuenta corriente del cliente.
+// Cajas y bancos se piden recién al abrir este modal (no en el caché de
+// la pantalla), siguiendo el mismo criterio de no cargar de más que
+// motivó el fix de rendimiento de Ventas.
+let cajasTesoreriaCacheCC = [];
+let bancosTesoreriaCacheCC = [];
+async function cargarCajasYBancosCC(){
+  const [rc, rb] = await Promise.all([
+    fetch('/api/tesoreria/cajas', {headers: headersAuth()}),
+    fetch('/api/tesoreria/bancos', {headers: headersAuth()})
+  ]);
+  cajasTesoreriaCacheCC = rc.ok ? await rc.json() : [];
+  bancosTesoreriaCacheCC = rb.ok ? await rb.json() : [];
+}
+function opcionesCuentaCobroVentaCC(tipoValor){
+  if (tipoValor === 'efectivo') {
+    return cajasTesoreriaCacheCC.map(c => `<option value="caja:${c._id}">${escapeHtml(c.nombre)}</option>`).join('')
+      || '<option value="">No hay ninguna caja habilitada</option>';
+  }
+  return bancosTesoreriaCacheCC.map(b => `<option value="banco:${b._id}">${escapeHtml(b.nombre)}</option>`).join('')
+    || '<option value="">No hay ningún banco habilitado</option>';
+}
+function actualizarTipoValorCobroVentaCC(){
+  const tipoValor = document.getElementById('cvccTipoValor').value;
+  const esCheque = tipoValor === 'cheque';
+  const esTarjeta = tipoValor === 'tarjeta';
+  document.getElementById('cvccCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('cvccChequeWrap').classList.toggle('hidden', !esCheque);
+  document.getElementById('cvccTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (!esCheque) {
+    document.getElementById('cvccCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
+    document.getElementById('cvccCuenta').innerHTML = opcionesCuentaCobroVentaCC(tipoValor);
+  }
+  if (esCheque) document.getElementById('cvccChequeFechaEmision').value = document.getElementById('cvccChequeFechaEmision').value || new Date().toISOString().slice(0,10);
+}
+async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, clienteId){
+  document.getElementById('modalCobroVentaRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModalCobroVentaCC()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModalCobroVentaCC()">✕</span>
+        <h2>Cobrar venta Nº ${String(numero).padStart(5,'0')}</h2>
+        <p class="muted" style="margin-top:0">Saldo pendiente: <strong>${money(saldoPendiente)} ${escapeHtml(moneda)}</strong></p>
+        <input type="hidden" id="cvccVentaId" value="${ventaId}">
+        <input type="hidden" id="cvccClienteId" value="${clienteId}">
+        <div class="grid2">
+          <div><label>Tipo de valor</label><select id="cvccTipoValor" onchange="actualizarTipoValorCobroVentaCC()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Monto * (podés poner menos para un cobro parcial)</label><input id="cvccMonto" type="number" min="0.01" step="0.01" value="${saldoPendiente}"></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Fecha</label><input id="cvccFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Nota</label><input id="cvccNota"></div>
+        </div>
+        <div class="grid2" id="cvccCuentaWrap" style="margin-top:10px">
+          <div><label id="cvccCuentaLabel">¿A qué caja va? *</label><select id="cvccCuenta"></select></div>
+        </div>
+        <div class="grid2 hidden" id="cvccChequeWrap" style="margin-top:10px">
+          <div><label>Número de cheque *</label><input id="cvccChequeNumero"></div>
+          <div><label>Banco</label><input id="cvccChequeBanco"></div>
+          <div><label>Librador</label><input id="cvccChequeLibrador"></div>
+          <div><label>CUIT librador</label><input id="cvccChequeCuit"></div>
+          <div><label>Fecha de emisión</label><input id="cvccChequeFechaEmision" type="date"></div>
+          <div><label>Fecha de vencimiento *</label><input id="cvccChequeVencimiento" type="date"></div>
+        </div>
+        <div class="grid2 hidden" id="cvccTarjetaWrap" style="margin-top:10px">
+          <div><label>Entidad</label><input id="cvccTarjetaEntidad"></div>
+          <div><label>Tipo</label><select id="cvccTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
+          <div><label>Cuotas</label><input id="cvccTarjetaCuotas" type="number" min="1" value="1"></div>
+          <div><label>Lote *</label><input id="cvccTarjetaLote"></div>
+          <div><label>Cupón *</label><input id="cvccTarjetaCupon"></div>
+          <div><label>Código de autorización</label><input id="cvccTarjetaCodigoAutorizacion"></div>
+        </div>
+        <div class="err" id="cvccErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarCobroVentaCC()">Registrar cobro</button>
+      </div>
+    </div>
+  `;
+  await cargarCajasYBancosCC();
+  actualizarTipoValorCobroVentaCC();
+}
+function cerrarModalCobroVentaCC(){ document.getElementById('modalCobroVentaRoot').innerHTML = ''; }
+async function confirmarCobroVentaCC(){
+  const errEl = document.getElementById('cvccErr');
+  errEl.textContent = '';
+  const ventaId = document.getElementById('cvccVentaId').value;
+  const clienteId = document.getElementById('cvccClienteId').value;
+  const tipoValor = document.getElementById('cvccTipoValor').value;
+  const body = {
+    tipoValor,
+    monto: Number(document.getElementById('cvccMonto').value),
+    fecha: document.getElementById('cvccFecha').value,
+    nota: document.getElementById('cvccNota').value.trim()
+  };
+  if (!body.monto || body.monto <= 0) { errEl.textContent = 'El monto tiene que ser mayor a 0'; return; }
+  if (tipoValor === 'cheque') {
+    body.chequeNumero = document.getElementById('cvccChequeNumero').value.trim();
+    body.chequeBanco = document.getElementById('cvccChequeBanco').value.trim();
+    body.chequeLibrador = document.getElementById('cvccChequeLibrador').value.trim();
+    body.chequeCuitLibrador = document.getElementById('cvccChequeCuit').value.trim();
+    body.chequeFechaEmision = document.getElementById('cvccChequeFechaEmision').value;
+    body.chequeFechaVencimiento = document.getElementById('cvccChequeVencimiento').value;
+    if (!body.chequeNumero) { errEl.textContent = 'Falta el número de cheque'; return; }
+    if (!body.chequeFechaVencimiento) { errEl.textContent = 'Falta la fecha de vencimiento del cheque'; return; }
+  } else {
+    const cuenta = document.getElementById('cvccCuenta').value;
+    if (!cuenta) { errEl.textContent = tipoValor === 'efectivo' ? 'Elegí a qué caja va el cobro' : 'Elegí a qué banco va el cobro'; return; }
+    const [cuentaTipo, cuentaId] = cuenta.split(':');
+    body.cuentaTipo = cuentaTipo;
+    body.cuentaId = cuentaId;
+    if (tipoValor === 'tarjeta') {
+      body.tarjetaEntidad = document.getElementById('cvccTarjetaEntidad').value.trim();
+      body.tarjetaTipo = document.getElementById('cvccTarjetaTipo').value;
+      body.tarjetaCuotas = Number(document.getElementById('cvccTarjetaCuotas').value) || 1;
+      body.tarjetaLote = document.getElementById('cvccTarjetaLote').value.trim();
+      body.tarjetaCupon = document.getElementById('cvccTarjetaCupon').value.trim();
+      body.tarjetaCodigoAutorizacion = document.getElementById('cvccTarjetaCodigoAutorizacion').value.trim();
+      if (!body.tarjetaLote) { errEl.textContent = 'Falta el número de lote'; return; }
+      if (!body.tarjetaCupon) { errEl.textContent = 'Falta el número de cupón'; return; }
+    }
+  }
+  try{
+    const r = await fetch('/api/ventas/' + ventaId + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al registrar el cobro');
+    cerrarModalCobroVentaCC();
+    await cargarCuentaCorrienteTab(clienteId);
+  }catch(e){ errEl.textContent = e.message; }
 }
 
 // -------------------------------------------------------------------
