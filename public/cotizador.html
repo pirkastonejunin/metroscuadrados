@@ -487,7 +487,7 @@
 
         <!-- Vista: tarifas de mano de obra de este tipo de obra -->
         <div id="cfg-catalogo-tarifas" class="hidden">
-          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente. Para Placas, el valor por m² es solo mano de obra: el pegamento y la masilla se cobran aparte (incluidos en esa tarifa). Para Piedra, el valor por m² es "llave en mano": cubre TODOS los materiales (piedra, pegamento, laca) más la colocación en un solo precio, sin discriminar por artículo — la cotización sigue mostrando la cantidad que hace falta de cada material, pero no su precio individual.</p>
+          <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente. Para Placas, el valor por m² es solo mano de obra: el pegamento y la masilla se cobran aparte (incluidos en esa tarifa). Para Piedra, "Valor m² completo, llave en mano" es un precio único (materiales + colocación) que se multiplica directo por los m² de la obra: la cotización no discrimina precio por artículo, pero sigue mostrando la cantidad que hace falta de cada material (piedra, pegamento, laca).</p>
           <div class="grid" id="t_camposPiso">
             <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
             <div class="field"><label>Por ml de zócalo ($)</label><input type="number" id="t_zocalos_ml" min="0" step="0.01"></div>
@@ -495,7 +495,7 @@
             <div class="field"><label>Por m² de nivelación ($)</label><input type="number" id="t_nivelacion_m2" min="0" step="0.01"></div>
           </div>
           <div class="grid hidden" id="t_camposPiedra">
-            <div class="field"><label>Valor llave en mano por m² de piedra ($)</label><input type="number" id="t_piedra_m2" min="0" step="0.01"></div>
+            <div class="field"><label>Valor m² completo, llave en mano ($)</label><input type="number" id="t_piedra_m2_completo" min="0" step="0.01"></div>
           </div>
           <div class="grid hidden" id="t_camposPlacas">
             <div class="field"><label>Por m² de placas ($)</label><input type="number" id="t_placas_m2" min="0" step="0.01"></div>
@@ -2705,7 +2705,7 @@ async function cargarTarifasTipoObra(){
   $('#t_zocalos_ml').value = t.zocalos_ml;
   $('#t_puertas_unidad').value = t.puertas_unidad;
   $('#t_nivelacion_m2').value = t.nivelacion_m2;
-  $('#t_piedra_m2').value = t.piedra_m2 || 0;
+  $('#t_piedra_m2_completo').value = t.piedra_m2_completo || 0;
   $('#t_placas_m2').value = t.placas_m2 || 0;
   $('#t_minimoM2Cotizable').value = t.minimoM2Cotizable || 0;
 }
@@ -2717,7 +2717,7 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
     zocalos_ml: parseFloat($('#t_zocalos_ml').value) || 0,
     puertas_unidad: parseFloat($('#t_puertas_unidad').value) || 0,
     nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0,
-    piedra_m2: parseFloat($('#t_piedra_m2').value) || 0,
+    piedra_m2_completo: parseFloat($('#t_piedra_m2_completo').value) || 0,
     placas_m2: parseFloat($('#t_placas_m2').value) || 0,
     minimoM2Cotizable: parseFloat($('#t_minimoM2Cotizable').value) || 0
   };

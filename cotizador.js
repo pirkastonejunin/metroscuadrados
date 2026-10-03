@@ -186,6 +186,12 @@ const TARIFA_DEFAULT = {
   puertas_unidad: 0,
   nivelacion_m2: 0,
   piedra_m2: 0,
+  // Valor llave en mano por m2 de Piedra (materiales + mano de obra en un
+  // solo numero, cargado aparte de piedra_m2): se usa en vez de sumar el
+  // precio de cada material cuando la obra tiene "Incluir mano de obra"
+  // tildado. Independiente de piedra_m2 (que queda sin uso para Piedra,
+  // pero no se borra por si Mato vuelve a necesitarlo).
+  piedra_m2_completo: 0,
   placas_m2: 0,
   minimoM2Cotizable: 0
 };
@@ -210,6 +216,7 @@ async function setTarifas(storeId, tipoObraId, tarifas) {
     puertas_unidad: Number(tarifas.puertas_unidad) || 0,
     nivelacion_m2: Number(tarifas.nivelacion_m2) || 0,
     piedra_m2: Number(tarifas.piedra_m2) || 0,
+    piedra_m2_completo: Number(tarifas.piedra_m2_completo) || 0,
     placas_m2: Number(tarifas.placas_m2) || 0,
     minimoM2Cotizable: Number(tarifas.minimoM2Cotizable) || 0
   };
@@ -632,7 +639,7 @@ function calcularItemsPiedra({ obra, productos, tarifas: t }) {
       if (!manoObra) totalProductos += it.subtotal;
     }
 
-    if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.piedra_m2);
+    if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.piedra_m2_completo);
   }
 
   return { items, faltantes, totalProductos, totalManoObra };
