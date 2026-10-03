@@ -517,6 +517,55 @@ async function cargarOrganizaciones(){
       </tr>`).join('') || '<tr><td colspan="4" class="muted">Todavía no hay ninguna organización cargada.</td></tr>';
   }
 }
+// Datos del negocio para imprimibles (3/10/2026) — mismo bloque de
+// campos en "Nueva organización" y "Editar organización": razón social,
+// CUIT, dirección, teléfono, condición de IVA y logo (como data URI
+// chico, leído del archivo elegido con FileReader — no hay storage de
+// archivos aparte todavía).
+const CONDICION_IVA_LABEL_ORG = {
+  responsable_inscripto: 'Responsable Inscripto', monotributista: 'Monotributista', exento: 'Exento',
+  consumidor_final: 'Consumidor Final', iva_no_alcanzado: 'IVA No Alcanzado'
+};
+function opcionesCondicionIvaOrg(seleccionada){
+  return '<option value="">Sin definir</option>' + Object.entries(CONDICION_IVA_LABEL_ORG).map(([v, label]) =>
+    `<option value="${v}" ${v===seleccionada?'selected':''}>${label}</option>`
+  ).join('');
+}
+function camposDatosNegocioOrg(o){
+  o = o || {};
+  return `
+    <h3 style="margin-top:14px">Datos del negocio (para imprimir en comprobantes, recibos y remitos)</h3>
+    <div class="campo-edit"><label>Razón social</label><input id="orgRazonSocial" value="${escapeHtml(o.razonSocial||'')}"></div>
+    <div class="campo-edit"><label>CUIT</label><input id="orgCuit" value="${escapeHtml(o.cuit||'')}"></div>
+    <div class="campo-edit"><label>Dirección</label><input id="orgDireccion" value="${escapeHtml(o.direccion||'')}"></div>
+    <div class="campo-edit"><label>Teléfono</label><input id="orgTelefono" value="${escapeHtml(o.telefono||'')}"></div>
+    <div class="campo-edit"><label>Condición frente al IVA</label><select id="orgCondicionIva">${opcionesCondicionIvaOrg(o.condicionIva)}</select></div>
+    <div class="campo-edit">
+      <label>Logo</label>
+      ${o.logoBase64 ? `<div style="margin-bottom:6px"><img src="${o.logoBase64}" style="max-height:60px;max-width:220px"></div>` : ''}
+      <input type="file" id="orgLogoArchivo" accept="image/*" onchange="leerLogoOrganizacion(this)">
+      <input type="hidden" id="orgLogoBase64" value="${o.logoBase64 ? escapeHtml(o.logoBase64) : ''}">
+      ${o.logoBase64 ? `<button type="button" class="btn small secondary" style="margin-top:4px" onclick="document.getElementById('orgLogoBase64').value='';this.previousElementSibling.previousElementSibling.remove();this.remove();">Quitar logo</button>` : ''}
+    </div>
+  `;
+}
+function leerLogoOrganizacion(input){
+  const archivo = input.files && input.files[0];
+  if (!archivo) return;
+  const lector = new FileReader();
+  lector.onload = () => { document.getElementById('orgLogoBase64').value = lector.result; };
+  lector.readAsDataURL(archivo);
+}
+function leerDatosNegocioOrg(){
+  return {
+    razonSocial: document.getElementById('orgRazonSocial').value.trim(),
+    cuit: document.getElementById('orgCuit').value.trim(),
+    direccion: document.getElementById('orgDireccion').value.trim(),
+    telefono: document.getElementById('orgTelefono').value.trim(),
+    condicionIva: document.getElementById('orgCondicionIva').value || null,
+    logoBase64: document.getElementById('orgLogoBase64').value || null
+  };
+}
 function abrirNuevaOrganizacion(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
@@ -525,6 +574,7 @@ function abrirNuevaOrganizacion(){
         <h2>Nueva organización</h2>
         <div class="campo-edit"><label>Nombre</label><input id="orgNombre" placeholder="ej: Piedra Negra Rosario"></div>
         <div class="campo-edit"><label>Tienda propia en Tiendanube (opcional)</label><input id="orgStoreId" placeholder="Dejar vacío para compartir la de Piedra Negra"></div>
+        ${camposDatosNegocioOrg()}
         <div class="err" id="orgErr"></div>
         <button class="btn" style="width:100%;margin-top:6px" onclick="guardarNuevaOrganizacion()">Crear organización</button>
       </div>
@@ -536,7 +586,7 @@ async function guardarNuevaOrganizacion(){
   const errEl = document.getElementById('orgErr');
   errEl.textContent = '';
   try{
-    await api('/organizaciones', {method:'POST', body:{nombre, tiendanubeStoreId}});
+    await api('/organizaciones', {method:'POST', body:Object.assign({nombre, tiendanubeStoreId}, leerDatosNegocioOrg())});
     cerrarModal();
     await cargarOrganizaciones();
   }catch(e){ errEl.textContent = e.message; }
@@ -552,6 +602,7 @@ function abrirEditarOrganizacion(id){
         <div class="campo-edit"><label>Nombre</label><input id="orgNombre" value="${escapeHtml(o.nombre)}"></div>
         <div class="campo-edit"><label>Tienda propia en Tiendanube (opcional)</label><input id="orgStoreId" value="${escapeHtml(o.tiendanubeStoreId||'')}" placeholder="Dejar vacío para compartir la de Piedra Negra"></div>
         <div class="campo-edit"><label><input type="checkbox" id="orgActiva" ${o.activa===false?'':'checked'} style="width:auto;margin-right:6px">Organización activa</label></div>
+        ${camposDatosNegocioOrg(o)}
         <div class="err" id="orgErr"></div>
         <button class="btn" style="width:100%;margin-top:6px" onclick="guardarEdicionOrganizacion('${id}')">Guardar cambios</button>
       </div>
@@ -564,7 +615,7 @@ async function guardarEdicionOrganizacion(id){
   const errEl = document.getElementById('orgErr');
   errEl.textContent = '';
   try{
-    await api('/organizaciones/'+id, {method:'PUT', body:{nombre, tiendanubeStoreId, activa}});
+    await api('/organizaciones/'+id, {method:'PUT', body:Object.assign({nombre, tiendanubeStoreId, activa}, leerDatosNegocioOrg())});
     cerrarModal();
     await cargarOrganizaciones();
   }catch(e){ errEl.textContent = e.message; }

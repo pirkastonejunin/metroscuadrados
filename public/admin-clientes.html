@@ -219,7 +219,7 @@ async function iniciarApp(){
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
-  await cargarClientes();
+  await Promise.all([cargarClientes(), cargarVendedoresYListasCliente()]);
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -270,6 +270,36 @@ const TIPOS_COMPROBANTE = [{v:'', l:'Sin especificar'}, {v:'comprobante_venta', 
 
 function opciones(lista, seleccionada){
   return lista.map(u => `<option value="${u.v}" ${u.v===(seleccionada||'')?'selected':''}>${u.l}</option>`).join('');
+}
+
+// Vendedores y listas de precio por defecto (3/10/2026, pedido de Mato:
+// "en datos de clientes fijate que deberia desplegar vendedores y lista
+// de precios por defecto. de esa manera puedo asignarle un vendedor y
+// una lista para cuando tenga que hacer una venta") — antes eran campos
+// de texto libre. Vendedor usa los usuarios activos del sistema (mismo
+// GET /api/usuarios/lite que ya usa el combo de Ventas, guarda el
+// nombre); Lista de precio usa las listas reales de Productos (guarda
+// el _id de la lista, igual que en Ventas).
+let usuariosClientesCache = [];
+let listasPrecioClientesCache = [];
+async function cargarVendedoresYListasCliente(){
+  const [ru, rl] = await Promise.all([
+    fetch('/api/usuarios/lite', {headers: headersAuth()}),
+    fetch('/api/productos/listas-precio', {headers: headersAuth()})
+  ]);
+  usuariosClientesCache = ru.ok ? await ru.json() : [];
+  listasPrecioClientesCache = rl.ok ? await rl.json() : [];
+}
+function opcionesVendedorCliente(seleccionado){
+  const base = seleccionado && !usuariosClientesCache.some(u => u.nombre === seleccionado) ? [{nombre: seleccionado}] : [];
+  return '<option value="">Sin especificar</option>' + base.concat(usuariosClientesCache).map(u =>
+    `<option value="${escapeHtml(u.nombre)}" ${u.nombre===seleccionado?'selected':''}>${escapeHtml(u.nombre)}</option>`
+  ).join('');
+}
+function opcionesListaPrecioCliente(seleccionada){
+  return '<option value="">Sin especificar</option>' + listasPrecioClientesCache.filter(l => l.activa !== false).map(l =>
+    `<option value="${l._id}" ${String(l._id)===String(seleccionada||'')?'selected':''}>${escapeHtml(l.nombre)}</option>`
+  ).join('');
 }
 
 // Tipo de cliente: desplegable con algunos valores fijos + los que ya se
@@ -342,12 +372,12 @@ function formularioCliente(c){
     </div>
     <div class="grid3" style="margin-top:10px">
       <div><label>CUIT / CUIL</label><input id="fcCuit" value="${escapeHtml(c.cuit||'')}" placeholder="20-12345678-9"></div>
-      <div><label>Lista de precio por defecto</label><input id="fcListaPrecioPorDefecto" value="${escapeHtml(c.listaPrecioPorDefecto||'')}"></div>
+      <div><label>Lista de precio por defecto</label><select id="fcListaPrecioPorDefecto">${opcionesListaPrecioCliente(c.listaPrecioPorDefecto)}</select></div>
       <div><label>Condición de pago</label><input id="fcCondicionPago" value="${escapeHtml(c.condicionPago||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
       <div><label>% de descuento</label><input id="fcPorcentajeDescuento" type="number" min="0" step="0.01" value="${c.porcentajeDescuento!=null?c.porcentajeDescuento:''}"></div>
-      <div><label>Vendedor</label><input id="fcVendedor" value="${escapeHtml(c.vendedor||'')}"></div>
+      <div><label>Vendedor</label><select id="fcVendedor">${opcionesVendedorCliente(c.vendedor)}</select></div>
       <div><label>Tipo de comprobante por defecto</label><select id="fcTipoComprobantePorDefecto">${opciones(TIPOS_COMPROBANTE, c.tipoComprobantePorDefecto)}</select></div>
     </div>
     <div class="grid2" style="margin-top:10px">

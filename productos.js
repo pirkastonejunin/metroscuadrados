@@ -168,6 +168,12 @@ function requiereModuloAlguno(...claves) {
   };
 }
 const authListasPrecio = [authUsuario, resolverOrg, requiereModuloAlguno('productos', 'ventas')];
+// Solo para EL LISTADO (nombre + id, nada sensible) — se suma 'clientes'
+// (3/10/2026, pedido de Mato: poder elegir una lista de precio por
+// defecto en la ficha del cliente). Las operaciones más sensibles
+// (exportar, importar, editar precios de una lista) siguen con
+// authListasPrecio tal como estaba, sin abrirle nada nuevo a Clientes.
+const authListasPrecioListado = [authUsuario, resolverOrg, requiereModuloAlguno('productos', 'ventas', 'clientes')];
 
 const UNIDADES_VALIDAS = ['unidad', 'm2', 'ml', 'kg', 'litro', 'paquete', 'jornal'];
 // "Tipo de unidad" de Dux — una categoría más amplia que la unidad de
@@ -796,7 +802,7 @@ async function sincronizarPrecioConsumidorFinal(db, req, productoId, precio) {
   );
 }
 
-router.get('/listas-precio', authListasPrecio, async (req, res) => {
+router.get('/listas-precio', authListasPrecioListado, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const listas = await conReintento(async () => {

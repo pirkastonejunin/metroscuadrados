@@ -120,6 +120,7 @@ async function conReintento(fn) {
 }
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
 function err(status, message) { const e = new Error(message); e.status = status; return e; }
+function normalizarTexto(v) { return v == null ? '' : String(v).trim(); }
 
 // ---------------------------------------------------------------------
 // Módulos
@@ -449,6 +450,32 @@ router.get('/organizaciones', authUsuario, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Datos del negocio para esta organización/sucursal, para los
+// imprimibles (3/10/2026, pedido de Mato: "tene en cuenta que tiene que
+// tener los datos del negocio (de cada una de las sucursales) en
+// Configuracion podrias agregar todos los datos necesarios para
+// imprimir"). Cada sucursal es su propia razón social a los efectos de
+// lo que se imprime (comprobante de venta, recibo, remito y, más
+// adelante, factura) — por eso viven en `organizaciones`, no en un
+// único documento global. `condicionIva` usa el mismo enum que
+// `categoriaFiscal` en Clientes/Proveedores, por consistencia. `logo`
+// es un data URI (base64) chico, no un archivo aparte — no hay storage
+// de archivos armado todavía y un logo pesa unos KB, entra bien en el
+// propio documento de Mongo.
+const CONDICION_IVA_OPCIONES = ['responsable_inscripto', 'monotributista', 'exento', 'consumidor_final', 'iva_no_alcanzado'];
+function normalizarDatosNegocio(body, set) {
+  if (body.razonSocial !== undefined) set.razonSocial = normalizarTexto(body.razonSocial);
+  if (body.cuit !== undefined) set.cuit = normalizarTexto(body.cuit);
+  if (body.direccion !== undefined) set.direccion = normalizarTexto(body.direccion);
+  if (body.telefono !== undefined) set.telefono = normalizarTexto(body.telefono);
+  if (body.condicionIva !== undefined) {
+    const v = normalizarTexto(body.condicionIva).toLowerCase();
+    if (v && !CONDICION_IVA_OPCIONES.includes(v)) throw err(400, `Condición de IVA inválida (opciones: ${CONDICION_IVA_OPCIONES.join(', ')})`);
+    set.condicionIva = v || null;
+  }
+  if (body.logoBase64 !== undefined) set.logoBase64 = body.logoBase64 ? String(body.logoBase64) : null;
+}
+
 router.post('/organizaciones', authUsuario, requiereSuperAdmin, async (req, res) => {
   try {
     const { nombre, tiendanubeStoreId } = req.body || {};
@@ -456,10 +483,12 @@ router.post('/organizaciones', authUsuario, requiereSuperAdmin, async (req, res)
     const doc = {
       nombre: String(nombre).trim(),
       tiendanubeStoreId: tiendanubeStoreId ? String(tiendanubeStoreId).trim() : null,
+      razonSocial: '', cuit: '', direccion: '', telefono: '', condicionIva: null, logoBase64: null,
       activa: true,
       createdAt: new Date(),
       updatedAt: new Date()
     };
+    normalizarDatosNegocio(req.body || {}, doc);
     const r = await conReintento(async () => (await getDb()).collection('organizaciones').insertOne(doc));
     doc._id = r.insertedId;
     res.json(doc);
@@ -478,6 +507,7 @@ router.put('/organizaciones/:id', authUsuario, requiereSuperAdmin, async (req, r
     }
     if (tiendanubeStoreId !== undefined) set.tiendanubeStoreId = tiendanubeStoreId ? String(tiendanubeStoreId).trim() : null;
     if (activa !== undefined) set.activa = !!activa;
+    normalizarDatosNegocio(req.body || {}, set);
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const actual = await db.collection('organizaciones').findOne({ _id: id });
