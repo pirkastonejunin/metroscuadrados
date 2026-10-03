@@ -116,20 +116,20 @@
           </div>
           <div style="min-width:180px">
             <label>Rubro</label>
-            <select id="fRubro" onchange="cargarProductos()"><option value="">Todos</option></select>
+            <select id="fRubro" onchange="cargarProductosDesdeFiltro()"><option value="">Todos</option></select>
           </div>
           <div style="min-width:180px">
             <label>Marca</label>
-            <select id="fMarca" onchange="cargarProductos()"><option value="">Todas</option></select>
+            <select id="fMarca" onchange="cargarProductosDesdeFiltro()"><option value="">Todas</option></select>
           </div>
           <div style="min-width:200px">
             <label>Proveedor</label>
-            <select id="fProveedor" onchange="cargarProductos()"><option value="">Todos</option></select>
+            <select id="fProveedor" onchange="cargarProductosDesdeFiltro()"><option value="">Todos</option></select>
           </div>
           <div>
             <label style="visibility:hidden">.</label>
             <label style="display:flex;align-items:center;gap:6px;font-weight:600;color:var(--text);white-space:nowrap">
-              <input type="checkbox" id="fInactivos" style="width:auto" onchange="cargarProductos()"> Ver inactivos
+              <input type="checkbox" id="fInactivos" style="width:auto" onchange="cargarProductosDesdeFiltro()"> Ver inactivos
             </label>
           </div>
         </div>
@@ -151,6 +151,7 @@
         <tbody id="productosBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
       </table>
       </div>
+      <div class="row" id="productosPager" style="justify-content:space-between;margin-top:10px"></div>
     </div>
   </main>
 </div>
@@ -227,11 +228,20 @@ async function iniciarApp(){
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
-  await cargarRubros();
-  await cargarMarcas();
-  await cargarRubrosBase();
-  await cargarSubrubrosBase();
-  await cargarProveedoresLite();
+  // 3/10/2026 (continuación del diagnóstico de rendimiento): estos 5
+  // pedidos son independientes entre sí (ninguno depende del resultado
+  // de otro), así que van en paralelo en vez de uno tras otro — ahorra
+  // el tiempo que antes se esperaba en cadena antes de empezar a traer
+  // el catálogo. `cargarProductos` queda afuera del Promise.all porque
+  // su render usa `proveedoresCache` (columna Proveedor), así que espera
+  // a que las demás terminen.
+  await Promise.all([
+    cargarRubros(),
+    cargarMarcas(),
+    cargarRubrosBase(),
+    cargarSubrubrosBase(),
+    cargarProveedoresLite()
+  ]);
   await cargarProductos();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
@@ -331,7 +341,19 @@ let cargarPausaTimer = null;
 // pero así hay menos pedidos de sobra.
 function cargarProductosConPausa(){
   clearTimeout(cargarPausaTimer);
-  cargarPausaTimer = setTimeout(cargarProductos, 300);
+  cargarPausaTimer = setTimeout(() => { paginaProductosActual = 1; cargarProductos(); }, 300);
+}
+// Paginación real (3/10/2026, continuación del diagnóstico de
+// rendimiento: "admin-productos.html es la pantalla más pesada...
+// renderiza las ~20.000 filas de una sola vez en el DOM"). Ahora se pide
+// y se renderiza de a `PRODUCTOS_POR_PAGINA` por vez — cambiar un filtro
+// vuelve siempre a la página 1.
+const PRODUCTOS_POR_PAGINA = 100;
+let paginaProductosActual = 1;
+let productosTotal = 0;
+function cargarProductosDesdeFiltro(){
+  paginaProductosActual = 1;
+  cargarProductos();
 }
 async function cargarProductos(){
   const pedido = ++cargarPedido;
@@ -341,13 +363,37 @@ async function cargarProductos(){
   if (document.getElementById('fMarca').value) params.set('marca', document.getElementById('fMarca').value);
   if (document.getElementById('fProveedor').value) params.set('proveedorId', document.getElementById('fProveedor').value);
   if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
+  params.set('pagina', String(paginaProductosActual));
+  params.set('porPagina', String(PRODUCTOS_POR_PAGINA));
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
   if (pedido !== cargarPedido) return; // ya se pidió algo más nuevo, descartar esta respuesta
   const body = document.getElementById('productosBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
-  productosCache = await r.json();
+  const data = await r.json();
   if (pedido !== cargarPedido) return; // por si se disparó otro pedido mientras se leía el body
+  productosCache = data.productos || [];
+  productosTotal = data.total || 0;
   renderProductos();
+  renderPagerProductos();
+}
+function renderPagerProductos(){
+  const el = document.getElementById('productosPager');
+  if (!productosTotal) { el.innerHTML = ''; return; }
+  const totalPaginas = Math.max(Math.ceil(productosTotal / PRODUCTOS_POR_PAGINA), 1);
+  const desde = (paginaProductosActual - 1) * PRODUCTOS_POR_PAGINA + 1;
+  const hasta = Math.min(paginaProductosActual * PRODUCTOS_POR_PAGINA, productosTotal);
+  el.innerHTML = `
+    <span class="muted">Mostrando ${desde}–${hasta} de ${productosTotal}</span>
+    <div class="row" style="gap:8px">
+      <button class="btn small secondary" ${paginaProductosActual<=1?'disabled':''} onclick="irPaginaProductos(${paginaProductosActual-1})">← Anterior</button>
+      <span class="muted">Página ${paginaProductosActual} de ${totalPaginas}</span>
+      <button class="btn small secondary" ${paginaProductosActual>=totalPaginas?'disabled':''} onclick="irPaginaProductos(${paginaProductosActual+1})">Siguiente →</button>
+    </div>
+  `;
+}
+function irPaginaProductos(pagina){
+  paginaProductosActual = pagina;
+  cargarProductos();
 }
 
 const TIPO_PRODUCTO_LABEL = { simple: 'Simple', combo: 'Combo', produccion: 'De producción' };

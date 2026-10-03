@@ -1458,6 +1458,30 @@ router.get('/', authAdmin, async (req, res) => {
         pedidos.forEach(c => { projection[c] = 1; });
       }
     }
+    // Paginación real (3/10/2026, continuación del diagnóstico de
+    // rendimiento) — opcional, a propósito: si no se pide `pagina` ni
+    // `porPagina`, esta ruta sigue devolviendo el array completo como
+    // siempre (compatibilidad con quien ya la usa así, como Stock al
+    // armar su propio buscador). `admin-productos.html` es la primera en
+    // pedirla, para no traer y renderizar las ~20.000 filas de una sola
+    // vez. Con paginación, la respuesta cambia de forma: en vez de un
+    // array, se devuelve `{ productos, total, pagina, porPagina }`.
+    const pidePaginacion = req.query.pagina != null || req.query.porPagina != null;
+    const porPagina = Math.min(Math.max(parseInt(req.query.porPagina, 10) || 100, 1), 500);
+    const pagina = Math.max(parseInt(req.query.pagina, 10) || 1, 1);
+    if (pidePaginacion) {
+      const { productos, total } = await conReintento(async () => {
+        const db = await getDb();
+        let cursor = db.collection('productos_catalogo').find(match).sort({ nombre: 1 });
+        if (projection) cursor = cursor.project(projection);
+        const [productos, total] = await Promise.all([
+          cursor.skip((pagina - 1) * porPagina).limit(porPagina).toArray(),
+          db.collection('productos_catalogo').countDocuments(match)
+        ]);
+        return { productos, total };
+      });
+      return res.json({ productos, total, pagina, porPagina });
+    }
     const productos = await conReintento(async () => {
       const db = await getDb();
       let cursor = db.collection('productos_catalogo').find(match).sort({ nombre: 1 });
