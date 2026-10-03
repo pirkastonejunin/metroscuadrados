@@ -443,7 +443,7 @@ async function confirmarReciboCB(){
 }
 
 // Imprimibles (3/10/2026) — ver el mismo helper en admin-ventas.html.
-async function imprimirDocumento(url){
+async function imprimirDocumento(url, accion){
   const ventana = window.open('', '_blank');
   try{
     const r = await fetch(url, {headers: headersAuth()});
@@ -451,9 +451,21 @@ async function imprimirDocumento(url){
     if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
     ventana.document.write(html);
     ventana.document.close();
+    if (accion === 'imprimir') {
+      ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
+    } else if (accion === 'compartir') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.compartirDocumento) ventana.compartirDocumento(); }, 250));
+    }
   }catch(e){
     ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
   }
+}
+function botonesImprimible(url){
+  return `
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}')">Ver</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button>
+  `;
 }
 </script>
 </body>

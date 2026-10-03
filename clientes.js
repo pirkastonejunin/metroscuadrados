@@ -465,7 +465,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       if (ventaIds.length) {
         const ventas = await db.collection('ventas')
           .find({ _id: { $in: ventaIds } })
-          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1 })
+          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1, stockDescontado: 1 })
           .toArray();
         for (const v of ventas) ventasPorId[String(v._id)] = v;
       }

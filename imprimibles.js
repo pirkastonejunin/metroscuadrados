@@ -103,14 +103,22 @@ function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande }) {
   // debajo, igual que el resto de los datos fiscales.
   const nombreGrande = org.nombre || org.razonSocial || '';
   const razonSocialChica = (org.razonSocial && org.razonSocial !== nombreGrande) ? org.razonSocial : '';
+  // (3/10/2026, 3ra vuelta — pedido de Mato: "el logo debe ir mas grande,
+  // la letra del comprobante en el medio y los datos nuestros abajo del
+  // logo") — se pasa de 4 columnas en fila (logo | negocio | letra |
+  // título) a una columna izquierda (logo arriba, datos del negocio
+  // debajo, todo apilado) + la letra centrada + el título a la derecha,
+  // que es como queda realmente "en el medio" del encabezado.
   return `
     <div class="cmp-header">
-      ${org.logoBase64 ? `<div class="cmp-logo"><img src="${org.logoBase64}" alt="Logo"></div>` : ''}
-      <div class="cmp-negocio">
-        <div class="cmp-razon">${escapeHtml(nombreGrande)}</div>
-        ${razonSocialChica ? `<div>${escapeHtml(razonSocialChica)}</div>` : ''}
-        ${org.direccion ? `<div>${escapeHtml(org.direccion)}</div>` : ''}
-        ${org.telefono ? `<div>TEL: ${escapeHtml(org.telefono)}</div>` : ''}
+      <div class="cmp-izquierda">
+        ${org.logoBase64 ? `<div class="cmp-logo"><img src="${org.logoBase64}" alt="Logo"></div>` : ''}
+        <div class="cmp-negocio">
+          <div class="cmp-razon">${escapeHtml(nombreGrande)}</div>
+          ${razonSocialChica ? `<div>${escapeHtml(razonSocialChica)}</div>` : ''}
+          ${org.direccion ? `<div>${escapeHtml(org.direccion)}</div>` : ''}
+          ${org.telefono ? `<div>TEL: ${escapeHtml(org.telefono)}</div>` : ''}
+        </div>
       </div>
       <div class="cmp-letra">${escapeHtml(letra)}</div>
       <div class="cmp-titulo">
@@ -194,13 +202,14 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
   @media print { .no-imprimir { display: none; } }
 
   /* Comprobante "tipo Dux" (3/10/2026) — ver encabezadoComprobante */
-  .cmp-header { display: flex; align-items: stretch; gap: 14px; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 4px; }
-  .cmp-logo { width: 80px; min-width: 80px; display: flex; align-items: center; justify-content: center; }
-  .cmp-logo img { max-width: 100%; max-height: 72px; object-fit: contain; }
-  .cmp-negocio { flex: 1; text-align: center; padding-top: 2px; }
+  .cmp-header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 4px; }
+  .cmp-izquierda { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+  .cmp-logo { width: 100%; display: flex; align-items: center; justify-content: center; }
+  .cmp-logo img { max-width: 220px; max-height: 110px; object-fit: contain; }
+  .cmp-negocio { text-align: center; }
   .cmp-negocio .cmp-razon { font-size: 19px; font-weight: bold; margin-bottom: 3px; }
   .cmp-negocio div { line-height: 1.4; color: #222; font-size: 12px; }
-  .cmp-letra { width: 44px; min-width: 44px; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
+  .cmp-letra { width: 44px; min-width: 44px; align-self: center; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
   .cmp-titulo { width: 230px; min-width: 190px; text-align: right; }
   .cmp-titulo-grande { font-size: 19px; font-weight: bold; }
   .cmp-titulo .cmp-numero { font-size: 15px; margin-top: 2px; }

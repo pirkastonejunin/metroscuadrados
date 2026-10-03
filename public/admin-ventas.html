@@ -1042,7 +1042,7 @@ function verDetalle(id){
     </tr>
   `).join('');
   const filasPagos = (v.pagos||[]).length
-    ? v.pagos.map((p, i) => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)} <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${v._id}/pagos/${i}/recibo')">Recibo</button></span></div>`).join('')
+    ? v.pagos.map((p, i) => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)} ${botonesImprimible(BASE+'/'+v._id+'/pagos/'+i+'/recibo')}</span></div>`).join('')
     : '<p class="muted">Sin cobros registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
@@ -1073,12 +1073,19 @@ function verDetalle(id){
         <div id="dvPagos">${filasPagos}</div>
         <div class="err" id="dvErr"></div>
 
-        <div class="row" style="margin-top:14px">
-          <button class="btn secondary" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante')">Imprimir comprobante</button>
-          ${v.remitoId ? `<button class="btn secondary" onclick="imprimirDocumento('${BASE}/remitos/${v.remitoId}/imprimir')">Imprimir remito</button>` : ''}
+        <div class="row" style="margin-top:14px;align-items:center;flex-wrap:wrap;gap:6px">
+          <span class="muted" style="font-size:12px">Comprobante:</span>
+          ${botonesImprimible(BASE+'/'+v._id+'/comprobante')}
+          ${v.estado !== 'anulada' ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
+        </div>
+        ${v.remitoId ? `
+        <div class="row" style="margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px">
+          <span class="muted" style="font-size:12px">Remito:</span>
+          ${botonesImprimible(BASE+'/remitos/'+v.remitoId+'/imprimir')}
+        </div>` : ''}
+        <div class="row" style="margin-top:10px">
           ${v.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
-          ${v.estado !== 'anulada' ? `<button class="btn danger" onclick="anularVenta('${v._id}')">Anular venta</button>` : ''}
         </div>
         ${v.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${v.anuladaPor ? ' por ' + escapeHtml(v.anuladaPor) : ''}${v.anuladaEn ? ' — ' + fechaHora(v.anuladaEn) : ''}${v.anuladaMotivo ? ': ' + escapeHtml(v.anuladaMotivo) : ''}</p>` : ''}
       </div>
@@ -1094,7 +1101,16 @@ const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuen
 // pide con fetch() y el HTML resultante se escribe en una pestaña nueva
 // en blanco — mismo criterio que ya se usa para descargar los .xlsx
 // (ver descargarBlob más abajo), adaptado para mostrar en vez de bajar.
-async function imprimirDocumento(url){
+//
+// `accion` (opcional, 2da vuelta del mismo día — pedido de Mato: "agregar
+// boton de ver, comparti, imprimir, anular"): además de "Ver" (abre
+// nomás), deja abrir y disparar sola la acción correspondiente apenas
+// carga — "imprimir" llama a window.print(), "compartir" llama a
+// compartirDocumento() (definida dentro de la propia página imprimible,
+// ver imprimibles.js) — así "Imprimir" y "Compartir" quedan como botón
+// de un solo click desde cualquier lista, sin duplicar la lógica de
+// armar el PDF en cada pantalla.
+async function imprimirDocumento(url, accion){
   const ventana = window.open('', '_blank');
   try{
     const r = await fetch(url, {headers: headersAuth()});
@@ -1102,9 +1118,23 @@ async function imprimirDocumento(url){
     if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
     ventana.document.write(html);
     ventana.document.close();
+    if (accion === 'imprimir') {
+      ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
+    } else if (accion === 'compartir') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.compartirDocumento) ventana.compartirDocumento(); }, 250));
+    }
   }catch(e){
     ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
   }
+}
+// Grupo de botones Ver/Imprimir/Compartir para un documento imprimible
+// (comprobante, remito o recibo) — reusado en el detalle de venta.
+function botonesImprimible(url){
+  return `
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}')">Ver</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button>
+  `;
 }
 
 // El depósito ya se eligió al cargar la venta (y el stock ya está

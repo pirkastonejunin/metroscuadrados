@@ -628,7 +628,12 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         db.collection('organizaciones').findOne({ _id: venta.orgId }),
         venta.clienteId ? db.collection('clientes').findOne({ _id: venta.clienteId }) : null
       ]);
-      const productoIds = (venta.items || []).map(it => it.productoId).filter(Boolean);
+      // (3/10/2026, corrección: "no aparece el dato" de bultos) algunos
+      // ítems tienen `productoId` guardado como string en vez de
+      // ObjectId (ventas viejas, u otro camino de carga) — el `$in`
+      // contra `_id` no matchea un string contra un ObjectId, así que
+      // hay que convertir cada uno con `toObjectId` antes de buscar.
+      const productoIds = (venta.items || []).map(it => it.productoId ? toObjectId(it.productoId) : null).filter(Boolean);
       const productos = productoIds.length
         ? await db.collection('productos_catalogo').find({ _id: { $in: productoIds } }).project({ unidadesPorBulto: 1, unidad: 1 }).toArray()
         : [];
@@ -727,7 +732,9 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       // remito tambien pone las dos unidades de medida") — se busca el
       // producto de cada ítem para saber si tiene `unidadesPorBulto`
       // configurado y mostrar la cantidad también en bultos.
-      const productoIds = (remito.items || []).map(it => it.productoId).filter(Boolean);
+      // Misma corrección que el Comprobante: convertir cada productoId a
+      // ObjectId antes del `$in` (puede venir como string).
+      const productoIds = (remito.items || []).map(it => it.productoId ? toObjectId(it.productoId) : null).filter(Boolean);
       const productos = productoIds.length
         ? await db.collection('productos_catalogo').find({ _id: { $in: productoIds } }).project({ unidadesPorBulto: 1, unidad: 1 }).toArray()
         : [];

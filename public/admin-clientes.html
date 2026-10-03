@@ -561,6 +561,51 @@ async function desactivarCliente(id, nombre){
 // clientes.js (backend).
 // -------------------------------------------------------------------
 const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual' };
+// Ver/Imprimir/Compartir/Anular para comprobantes de venta referenciados
+// desde la cuenta corriente (3/10/2026, pedido de Mato: "en todas las
+// cuentas corrientes o detalles q haya algun comprobante asociado
+// agregar boton de ver, comparti, imprimir, anular"). Misma convención
+// que admin-ventas.html (cada pantalla con su copia mínima).
+async function imprimirDocumento(url, accion){
+  const ventana = window.open('', '_blank');
+  try{
+    const r = await fetch(url, {headers: headersAuth()});
+    const html = await r.text();
+    if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
+    ventana.document.write(html);
+    ventana.document.close();
+    if (accion === 'imprimir') {
+      ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
+    } else if (accion === 'compartir') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.compartirDocumento) ventana.compartirDocumento(); }, 250));
+    }
+  }catch(e){
+    ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
+  }
+}
+function botonesImprimible(url){
+  return `
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}')">Ver</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button>
+  `;
+}
+// Anular una venta desde la cuenta corriente del cliente. No tenemos acá
+// un ventasCache como en admin-ventas.html, así que recibe directo el
+// número y si tenía stock descontado (para el texto de confirmación).
+async function anularVentaDesdeCC(ventaId, numero, stockDescontado, clienteId){
+  const motivo = prompt('¿Por qué se anula esta venta? (opcional)') || '';
+  if (motivo === null) return;
+  if (!confirm(`¿Anular la venta #${numero}?${stockDescontado ? ' Se va a reingresar el stock descontado.' : ''}`)) return;
+  try{
+    const r = await fetch('/api/ventas/' + ventaId + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCuentaCorrienteTab(clienteId);
+  }catch(e){
+    alert(e.message);
+  }
+}
 // Pensada para la pestaña "Cuenta corriente" del modal de Editar cliente
 // (ver abrirEditarCliente/mostrarTabCliente arriba) — no es un modal
 // propio, rellena el contenedor #ccContenido que ya está en el DOM.
@@ -616,7 +661,11 @@ async function cargarCuentaCorrienteTab(id){
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
               <td class="muted">${money(saldo)}</td>
-              <td>${cobrable ? `<button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}</td>
+              <td style="white-space:nowrap">
+                ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
+                ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
+                ${venta && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
+              </td>
             </tr>
           `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
