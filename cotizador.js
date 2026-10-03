@@ -608,8 +608,13 @@ function calcularItemsPiedra({ obra, productos, tarifas: t }) {
     return s + (largo > 0 && alto > 0 ? largo * alto : 0);
   }, 0);
 
+  // El valor llave en mano se cobra sobre los m2 CON desperdicio (igual que
+  // la cantidad de material: si cotiza 10m2 con 10% de desperdicio, cobra
+  // sobre 11m2), no sobre los m2 "limpios" de la obra.
+  const factorDesperdicioPiedra = 1 + desperdicioPctPiedra / 100;
+  const m2PiedraConDesperdicio = m2Piedra * factorDesperdicioPiedra;
   const minimoM2 = Number(t.minimoM2Cotizable) || 0;
-  const m2CotizableManoObra = m2Piedra > 0 ? Math.max(m2Piedra, minimoM2) : 0;
+  const m2CotizableManoObra = m2Piedra > 0 ? Math.max(m2PiedraConDesperdicio, minimoM2) : 0;
 
   if (m2Piedra > 0) {
     if (!productos.piedra) faltantes.push('piedra');

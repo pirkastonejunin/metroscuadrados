@@ -1027,6 +1027,10 @@ function bloquesRubro(obra){
 function renderPasoProductos(obra){
   const cont = $('#rubros-container');
   cont.innerHTML = '';
+  // Piedra "llave en mano" (con mano de obra tildada): no se discrimina
+  // precio por artículo en ningún paso, así que tampoco se muestra el
+  // precio de cada producto al elegirlo acá.
+  const ocultarPrecioPiedra = !!(tipoObraElegido && tipoObraElegido.categoria === 'piedra' && obra.manoObra);
 
   bloquesRubro(obra).forEach(r => {
     const bloque = document.createElement('div');
@@ -1078,7 +1082,7 @@ function renderPasoProductos(obra){
     const selectOrden = bloque.querySelector('.orden-precio');
     const chkOcultos = bloque.querySelector('.mostrar-ocultos');
     const lista = bloque.querySelector('.prod-list');
-    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase(), selectMarca ? selectMarca.value : '', selectOrden ? selectOrden.value : '', chkOcultos.checked);
+    const pintar = () => pintarListaProductos(lista, r, inputNombre.value.trim().toLowerCase(), selectMarca ? selectMarca.value : '', selectOrden ? selectOrden.value : '', chkOcultos.checked, ocultarPrecioPiedra);
     inputNombre.addEventListener('input', pintar);
     if (selectMarca){
       // Solo las marcas que efectivamente aparecen entre los productos de
@@ -1152,7 +1156,7 @@ function renderPasoProductos(obra){
         '<div class="rubro-tag">' + round2(m2) + ' m² a cubrir</div>' +
         '<div class="prod-list" data-lista="pegamentoPiedra"></div>';
       cont.appendChild(bloquePegamentoPiedra);
-      pintarListaCatalogo(bloquePegamentoPiedra.querySelector('.prod-list'), 'pegamentoPiedra', catalogosTipoObraCache.pegamentoPiedra, m2);
+      pintarListaCatalogo(bloquePegamentoPiedra.querySelector('.prod-list'), 'pegamentoPiedra', catalogosTipoObraCache.pegamentoPiedra, m2, ocultarPrecioPiedra);
 
       const bloqueLaca = document.createElement('div');
       bloqueLaca.className = 'rubro-block';
@@ -1161,7 +1165,7 @@ function renderPasoProductos(obra){
         '<div class="rubro-tag">' + round2(m2) + ' m² a cubrir</div>' +
         '<div class="prod-list" data-lista="laca"></div>';
       cont.appendChild(bloqueLaca);
-      pintarListaCatalogo(bloqueLaca.querySelector('.prod-list'), 'laca', catalogosTipoObraCache.laca, m2);
+      pintarListaCatalogo(bloqueLaca.querySelector('.prod-list'), 'laca', catalogosTipoObraCache.laca, m2, ocultarPrecioPiedra);
     }
 
     // Placas: mismo patrón que Piedra, pero con masilla en vez de laca.
@@ -1248,7 +1252,7 @@ function precioComparable(p, rubro){
   return (rubro.tipoEsperado === 'm2' && p.cobertura) ? p.precio / p.cobertura : p.precio;
 }
 
-function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos){
+function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos, ocultarPrecio){
   let opciones = opcionesRubro(rubro);
   if (!mostrarOcultos){
     opciones = opciones.filter(p => !p.oculto);
@@ -1280,9 +1284,9 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
     // Ojo: el campo que trae /api/cotizador/productos es "cobertura", no
     // "rendimiento" (ver productosConfigurados() en cotizador.js).
     const precioPorRendimiento = (rubro.tipoEsperado === 'm2' && p.cobertura) ? p.precio / p.cobertura : null;
-    const precioHtml = precioPorRendimiento !== null
+    const precioHtml = ocultarPrecio ? '' : (precioPorRendimiento !== null
       ? money(precioPorRendimiento) + '/m²<div class="precio-caja">' + money(p.precio) + ' la ' + escapeHtml(p.envase || 'unidad') + '</div>'
-      : money(p.precio);
+      : money(p.precio));
     // El simulador con IA (ver /simular-piso en cotizador.js) solo tiene
     // sentido para piso — es lo que se "pisa", no zócalo/niveladores/etc.
     // Necesita la foto real del producto para ser fiel al SKU, así que si
@@ -1305,7 +1309,7 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
         '<div class="sub">rinde ' + p.cobertura + ' ' + rubro.tipoEsperado + '/' + p.envase + (p.marca ? ' · ' + escapeHtml(p.marca) : '') + '</div></div>' +
         linkFicha +
         btnSimularHtml +
-        '<div class="precio">' + precioHtml + '</div>' +
+        (ocultarPrecio ? '' : '<div class="precio">' + precioHtml + '</div>') +
       '</div>'
     );
   }).join('');
@@ -1314,7 +1318,7 @@ function pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPr
       const id = parseInt(el.dataset.id, 10);
       const prod = catalogoCache.find(p => p.id === id);
       seleccion[rubro.clave] = prod;
-      pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos);
+      pintarListaProductos(listaEl, rubro, filtroNombre, filtroMarca, ordenPrecio, mostrarOcultos, ocultarPrecio);
     });
   });
   listaEl.querySelectorAll('.chk-comparar-input').forEach(chk => {
@@ -1952,7 +1956,7 @@ function verSimulacionGuardada(idx){
 // Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
 // de piso, manta y silicona/pegamento), todos con la misma forma:
 // { id, sku, cobertura, nombre, precio, imagen }.
-function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
+function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase, ocultarPrecio){
   if (!lista || !lista.length){
     listaEl.innerHTML = '<div class="empty">No hay productos cargados en esta categoría para este tipo de obra. Andá a Configuración → Tipos de obra → Catálogos.</div>';
     return;
@@ -1966,7 +1970,7 @@ function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
         (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div>' +
         '<div class="sub">cubre ' + n.cobertura + ' ' + etiqueta + ' por unidad · necesita ' + necesarios + '</div></div>' +
-        '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div>' +
+        (ocultarPrecio ? '' : '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div>') +
       '</div>'
     );
   }).join('');
@@ -1975,7 +1979,7 @@ function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase){
       const id = el.dataset.id;
       const item = lista.find(n => String(n.id) === String(id));
       seleccion[clave] = item;
-      pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase);
+      pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase, ocultarPrecio);
     });
   });
 }
