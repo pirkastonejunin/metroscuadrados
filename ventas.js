@@ -342,6 +342,35 @@ function cantidadPendiente(item) {
   return Math.max(0, (item.cantidad || 0) - (item.cantidadEntregada || 0));
 }
 
+// Mueve lo comprometido de un depósito a otro (3/10/2026, pedido de
+// Mato: "quiero que comprometas la mercaderia igual independientemente
+// si hay deposito o no") — una venta "pendiente" sin depósito elegido
+// queda comprometida en el depósito `null` ("sin asignar"); cuando se
+// elige un depósito real para generar el remito, el compromiso de lo
+// que todavía está pendiente se traslada ahí. `depositoViejo` puede ser
+// `null`. No toca lo que ya se haya entregado (eso ya se descontó de
+// donde correspondía en su momento).
+async function migrarCompromisoDeposito(db, req, venta, depositoViejo, depositoNuevo) {
+  if (String(depositoViejo) === String(depositoNuevo)) return;
+  for (const item of venta.items) {
+    if (!item.productoId) continue;
+    const pendiente = cantidadPendiente(item);
+    if (pendiente <= 0) continue;
+    await db.collection('stock_actual').updateOne(
+      Object.assign({ productoId: item.productoId, depositoId: depositoViejo }, filtroOrg(req)),
+      { $inc: { cantidadComprometida: -pendiente }, $set: { actualizadoEn: new Date() } }
+    );
+    await db.collection('stock_actual').updateOne(
+      Object.assign({ productoId: item.productoId, depositoId: depositoNuevo }, filtroOrg(req)),
+      {
+        $inc: { cantidadComprometida: pendiente },
+        $setOnInsert: Object.assign({ productoId: item.productoId, depositoId: depositoNuevo, cantidad: 0 }, filtroOrg(req))
+      },
+      { upsert: true }
+    );
+  }
+}
+
 // Numeración de remitos — correlativo propio por organización, separado
 // de la numeración de comprobantes de venta.
 async function proximoNumeroRemito(db, orgId) {
@@ -479,7 +508,11 @@ async function revertirStockDeVentaAnulada(db, req, venta) {
         ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date()
       });
     }
-    if (pendiente > 0 && venta.depositoId) {
+    // (3/10/2026) antes se chequeaba `venta.depositoId` para saber si
+    // había algo comprometido que liberar — pero ahora el compromiso
+    // puede vivir en el depósito `null` ("sin asignar"), así que lo que
+    // importa es `stockComprometido`, no si el depósito es un id real.
+    if (pendiente > 0 && venta.stockComprometido) {
       await db.collection('stock_actual').updateOne(
         Object.assign({ productoId: item.productoId, depositoId: venta.depositoId }, filtroOrg(req)),
         { $inc: { cantidadComprometida: -pendiente }, $set: { actualizadoEn: new Date() } }
@@ -871,6 +904,17 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
         <tbody>${filas || '<tr><td colspan="4" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
       <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
+      ${req.query.debug === '1' ? `
+        <div style="margin-top:20px;border:1px dashed #c33;padding:8px;font-size:11px;font-family:monospace;color:#900">
+          <strong>DEBUG (sacar después)</strong><br>
+          ${(remito.items || []).map(it => {
+            const pid = it.productoId;
+            const prod = pid ? productosPorId[String(pid)] : null;
+            return `sku=${escHtml(it.sku||'')} productoId=${escHtml(String(pid))} tipo=${escHtml(typeof pid)} match=${!!prod} unidadesPorBulto=${prod ? escHtml(String(prod.unidadesPorBulto)) : 'n/a'}`;
+          }).join('<br>')}
+          <br>productosPorId keys: ${escHtml(Object.keys(productosPorId).join(', ') || '(ninguna)')}
+        </div>
+      ` : ''}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml }));
@@ -984,6 +1028,13 @@ router.post('/', authAdmin, async (req, res) => {
         cotizacionDolar: body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null,
         tipoEntrega,
         depositoId,
+        // stockComprometido (3/10/2026): true desde ahora, siempre — se
+        // compromete al cargar la venta tenga o no depósito elegido
+        // (ver más abajo). Distingue de una venta vieja (de antes de
+        // este cambio) sin depósito, que en cambio nunca comprometió
+        // nada — POST /:id/entregar lo necesita para decidir si hay que
+        // comprometer recién ahora o solo migrar lo ya comprometido.
+        stockComprometido: true,
         estado: 'pendiente',
         items,
         descuentoPorcentaje,
@@ -1022,10 +1073,15 @@ router.post('/', authAdmin, async (req, res) => {
         });
       }
 
-      // El stock se COMPROMETE ya mismo si se eligió un depósito (sea
-      // cual sea el tipo de entrega) — si no se eligió (solo posible con
-      // "no entrega"), queda sin reservar hasta que se entregue de verdad.
-      if (depositoId) await comprometerStockDeVenta(db, req, items, depositoId);
+      // El stock se COMPROMETE ya mismo siempre (3/10/2026, pedido de
+      // Mato: "quiero que comprometas la mercaderia igual
+      // independientemente si hay deposito o no") — antes, sin depósito
+      // elegido (solo posible con "no entrega"), quedaba sin reservar
+      // hasta entregar; ahora se reserva igual, en un "depósito" null
+      // (sin asignar todavía) que Stock muestra aparte. Cuando se elija
+      // un depósito real (al generar el remito), ese compromiso se
+      // migra ahí — ver migrarCompromisoDeposito.
+      await comprometerStockDeVenta(db, req, items, depositoId);
 
       if (tipoEntrega === 'inmediata') {
         // Entrega inmediata: la misma venta dispara el remito en el acto
@@ -1074,7 +1130,13 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
       const depositoId = venta.depositoId || depositoIdBody;
       if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a descontar el stock.');
 
-      if (!venta.depositoId) {
+      if (venta.stockComprometido) {
+        // (3/10/2026) ya estaba comprometido en algún lado — en el
+        // depósito de la venta si tenía uno, o en el "sin asignar"
+        // (null) si no. Si el depósito elegido ahora es otro, se migra
+        // lo pendiente antes de generar el remito.
+        await migrarCompromisoDeposito(db, req, venta, venta.depositoId, depositoId);
+      } else {
         // Venta cargada antes de este cambio (sin depósito ni reserva
         // hecha al momento de guardarla) — se compromete recién ahora,
         // como paso previo a generar el remito (que valida el stock

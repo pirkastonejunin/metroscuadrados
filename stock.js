@@ -336,8 +336,12 @@ async function aplicarAlStockActual(db, req, productoId, depositoId, tipo, canti
 router.get('/comprometido', authAdmin, async (req, res) => {
   try {
     const productoId = toObjectId(req.query.productoId);
-    const depositoId = toObjectId(req.query.depositoId);
-    if (!productoId || !depositoId) throw err(400, 'Falta productoId o depositoId');
+    // (3/10/2026) la fila "Sin depósito asignado" de Stock manda
+    // depositoId='null' (texto) para pedir el detalle de ESE grupo — no
+    // es un id real, así que no se intenta convertir a ObjectId.
+    const sinDeposito = req.query.depositoId === 'null';
+    const depositoId = sinDeposito ? null : toObjectId(req.query.depositoId);
+    if (!productoId || (!sinDeposito && !depositoId)) throw err(400, 'Falta productoId o depositoId');
     const resultado = await conReintento(async () => {
       const db = await getDb();
       // (3/10/2026, pedido de Mato: "una venta puede tener varios
@@ -438,6 +442,16 @@ router.get('/actual', authAdmin, async (req, res) => {
           // cantidadComprometida (2/10/2026): reservada por ventas que
           // todavía no generaron remito — ver ventas.js. "Disponible" es
           // lo que realmente se puede vender de nuevo.
+          //
+          // (3/10/2026, pedido de Mato: "quiero que comprometas la
+          // mercaderia igual independientemente si hay deposito o no")
+          // un depositoId `null` es la fila de lo comprometido por
+          // ventas pendientes que todavía NO tienen depósito asignado
+          // — no es un depósito real eliminado, así que se distingue
+          // con su propia etiqueta, y no cuenta para "bajo mínimo" (no
+          // hay stock físico ahí, nunca lo va a haber: es solo demanda
+          // sin asignar todavía).
+          const sinDeposito = e.depositoId == null;
           const comprometida = e.cantidadComprometida || 0;
           const disponible = e.cantidad - comprometida;
           return {
@@ -445,13 +459,13 @@ router.get('/actual', authAdmin, async (req, res) => {
             depositoId: e.depositoId,
             sku: p.sku,
             nombre: p.nombre,
-            deposito: d ? d.nombre : '(depósito eliminado)',
+            deposito: sinDeposito ? 'Sin depósito asignado' : (d ? d.nombre : '(depósito eliminado)'),
             cantidad: e.cantidad,
             cantidadComprometida: comprometida,
             disponible,
             cantidadMinima: p.cantidadMinima != null ? p.cantidadMinima : null,
             stockIdeal: p.stockIdeal != null ? p.stockIdeal : null,
-            bajoMinimo: p.cantidadMinima != null && e.cantidad < p.cantidadMinima,
+            bajoMinimo: !sinDeposito && p.cantidadMinima != null && e.cantidad < p.cantidadMinima,
             unidad: p.unidad,
             actualizadoEn: e.actualizadoEn
           };

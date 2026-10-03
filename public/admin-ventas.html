@@ -1087,6 +1087,7 @@ function verDetalle(id){
         <div class="row" style="margin-top:14px;align-items:center;flex-wrap:wrap;gap:6px">
           <span class="muted" style="font-size:12px">Comprobante:</span>
           ${botonesImprimible(BASE+'/'+v._id+'/comprobante')}
+          <button class="btn small secondary" style="opacity:.6" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante?debug=1')" title="Temporal, para diagnosticar el problema de Bultos">Diagnóstico</button>
           ${v.estado !== 'anulada' ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
         </div>
         <div class="section-title" style="margin-top:14px">Remitos</div>
@@ -1119,6 +1120,7 @@ async function cargarRemitosDetalle(ventaId){
         <div class="row" style="margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px">
           <span class="muted" style="font-size:12px">Remito N° ${rem.numero} — ${fechaCorta(rem.fecha)}:</span>
           ${botonesImprimible(BASE+'/remitos/'+rem._id+'/imprimir')}
+          <button class="btn small secondary" style="opacity:.6" onclick="imprimirDocumento('${BASE}/remitos/${rem._id}/imprimir?debug=1')" title="Temporal, para diagnosticar el problema de Bultos">Diagnóstico</button>
         </div>
       `).join('')
       : '<p class="muted">Todavía no se generó ningún remito.</p>';
