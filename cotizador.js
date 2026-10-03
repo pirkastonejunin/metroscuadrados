@@ -479,7 +479,12 @@ function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago })
     };
   });
 
-  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas };
+  // llaveEnMano: Piedra con mano de obra tildada cotiza con un único valor
+  // por m2 (ver calcularItemsPiedra) en vez de precio por artículo — el
+  // front usa este flag para no mostrar columnas de precio por ítem.
+  const llaveEnMano = categoria === 'piedra' && !!(obra && obra.manoObra);
+
+  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano };
 }
 
 // ---- Piso (lógica original, sin cambios de comportamiento) ----
@@ -572,9 +577,15 @@ function calcularItemsPiso({ obra, productos, tarifas: t }) {
 
 // ---- Piedra: superficies sueltas (largo x alto cada una) en vez de un
 // único m2Pisos, más pegamento y laca (ambos de catálogo, como el pegamento
-// de zócalo en piso: se necesitan siempre que hay piedra, sin check aparte
-// y sin tarifa propia de mano de obra — su colocación va incluida en la
-// tarifa de piedra, piedra_m2). ----
+// de zócalo en piso: se necesitan siempre que hay piedra, sin check aparte).
+// Con mano de obra tildada, Mato cotiza "llave en mano": un único valor por
+// m2 (tarifas.piedra_m2) que ya cubre TODOS los materiales (piedra,
+// pegamento, laca) más la colocación, sin discriminar precio por artículo
+// — por eso cuando manoObra está tildado se apagan precioUnitario/subtotal
+// de cada item (quedan en 0, items.push sigue mostrando la cantidad que
+// hace falta de cada material) y el total sale todo de totalManoObra. Sin
+// mano de obra tildada sigue itemizado (solo materiales, cada uno con su
+// precio), como antes. ----
 function calcularItemsPiedra({ obra, productos, tarifas: t }) {
   const items = [];
   const faltantes = [];
@@ -600,24 +611,28 @@ function calcularItemsPiedra({ obra, productos, tarifas: t }) {
         rubro: 'Piedra', unidadObra: 'm2', cantidadObra: m2Piedra,
         producto: productos.piedra, desperdicioPct: desperdicioPctPiedra
       });
+      if (manoObra) { it.precioUnitario = 0; it.subtotal = 0; }
       items.push(it);
-      totalProductos += it.subtotal;
-      if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.piedra_m2);
+      if (!manoObra) totalProductos += it.subtotal;
     }
 
     if (!productos.pegamentoPiedra) faltantes.push('pegamentoPiedra');
     else {
       const it = calcularItem({ rubro: 'Pegamento para piedra', unidadObra: 'm2', cantidadObra: m2Piedra, producto: productos.pegamentoPiedra });
+      if (manoObra) { it.precioUnitario = 0; it.subtotal = 0; }
       items.push(it);
-      totalProductos += it.subtotal;
+      if (!manoObra) totalProductos += it.subtotal;
     }
 
     if (!productos.laca) faltantes.push('laca');
     else {
       const it = calcularItem({ rubro: 'Laca', unidadObra: 'm2', cantidadObra: m2Piedra, producto: productos.laca });
+      if (manoObra) { it.precioUnitario = 0; it.subtotal = 0; }
       items.push(it);
-      totalProductos += it.subtotal;
+      if (!manoObra) totalProductos += it.subtotal;
     }
+
+    if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.piedra_m2);
   }
 
   return { items, faltantes, totalProductos, totalManoObra };
@@ -1381,6 +1396,17 @@ router.post('/guardar', async (req, res) => {
       return res.status(400).json({ error: 'No hay items para guardar.' });
     }
 
+    // Igual que en /calcular: la categoría (y por lo tanto si esta
+    // cotización es "llave en mano") se resuelve del tipo de obra guardado
+    // en Mongo, no de lo que mande el front, para que quede consistente si
+    // se reabre esta cotización más adelante.
+    let tipoObraDoc = null;
+    try { tipoObraDoc = await (await getTiposObraCollection()).findOne({ _id: new ObjectId(tipoObraId), store_id: store.store_id }); } catch (e) { tipoObraDoc = null; }
+    const categoriaGuardado = (tipoObraDoc && (tipoObraDoc.categoria === 'piedra' || tipoObraDoc.categoria === 'placas'))
+      ? tipoObraDoc.categoria
+      : 'piso';
+    const llaveEnMano = categoriaGuardado === 'piedra' && !!(obra && obra.manoObra);
+
     const itemsFinales = finalizarItems(items);
     const totalProductos = round2(itemsFinales.reduce((s, it) => s + it.subtotal, 0));
     const totalManoObraFinal = round2(Number(totalManoObra) || 0);
@@ -1426,7 +1452,8 @@ router.post('/guardar', async (req, res) => {
       totalManoObra: totalManoObraFinal,
       total,
       formasPago: formasPagoFinales,
-      simulaciones: simulacionesFinales
+      simulaciones: simulacionesFinales,
+      llaveEnMano
     };
 
     const col = await getCotizacionesCollection();
