@@ -155,7 +155,22 @@ const ESTADOS_VALIDOS = ['pendiente', 'parcialmente_entregada', 'entregada', 'an
 // "Comprobante X" (lo que ya se venía usando) — el día que se conecte
 // ARCA, esas ventas marcadas "fiscal" van a ser las candidatas a facturar,
 // con CAE y numeración real de AFIP/ARCA en vez de este correlativo interno.
-const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_x', 'fiscal'];
+const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_x', 'fiscal', 'nota_credito', 'nota_debito'];
+
+// Nota de Crédito/Débito (3/10/2026, pedido de Mato: "agregar la
+// posibilidad de hacer nota de credito y debito") — se guardan en la
+// MISMA colección "ventas" (reutilizan cliente/ítems/numeración/
+// impresión), pero no pasan por el circuito de entrega/remito de una
+// venta normal: se resuelven en el momento, con estado 'entregada'
+// directo. Una Nota de Crédito reingresa stock de verdad (ingreso
+// directo, no comprometido) y resta deuda del cliente (movimiento
+// 'credito'); una Nota de Débito solo agrega deuda (movimiento
+// 'debito', igual que una venta) sin tocar stock para nada — no hay
+// mercadería física de por medio. Numeración propia para cada una (ver
+// proximoNumero, que ya separa por tipoComprobante).
+const PREFIJO_COMPROBANTE = { fiscal: 'F', comprobante_x: 'X', nota_credito: 'NC', nota_debito: 'ND' };
+const TITULO_COMPROBANTE = { fiscal: 'FACTURA', comprobante_x: 'COMPROBANTE', nota_credito: 'NOTA DE CRÉDITO', nota_debito: 'NOTA DE DÉBITO' };
+function prefijoComprobante(tipo) { return PREFIJO_COMPROBANTE[tipo] || 'X'; }
 
 // Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
 // bases tengo que tener la posibilidad de importar y exportar") — ver
@@ -510,6 +525,23 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
 // resto si estaba "parcialmente_entregada") se libera sin tocar el
 // físico, porque nunca se había descontado.
 async function revertirStockDeVentaAnulada(db, req, venta) {
+  if (venta.tipoComprobante === 'nota_credito') {
+    // Al crearse, una Nota de Crédito reingresa stock DE VERDAD (ingreso
+    // directo, ver POST /) — anularla deshace exactamente eso: un egreso
+    // por la misma cantidad, del mismo depósito.
+    for (const item of venta.items || []) {
+      if (!item.productoId) continue;
+      await aplicarMovimientoStock(db, req, {
+        productoId: item.productoId, depositoId: venta.depositoId, tipo: 'egreso', cantidad: item.cantidad,
+        motivo: 'Anulación de nota de crédito', observaciones: `Anulación de nota de crédito ${venta.numero ? '#' + venta.numero : ''}`.trim(),
+        ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date()
+      });
+    }
+    return;
+  }
+  // Nota de Débito: nunca movió stock, no hay nada que revertir acá — el
+  // loop de abajo es un no-op para ella (stockComprometido es false y
+  // cantidadEntregada nunca se usó para reservar nada).
   for (const item of venta.items || []) {
     if (!item.productoId) continue;
     const entregada = item.cantidadEntregada || 0;
@@ -787,7 +819,7 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
       return { venta, org, cliente, productosPorId };
     });
     const { venta, org, cliente, productosPorId } = resultado;
-    const prefijo = venta.tipoComprobante === 'fiscal' ? 'F' : 'X';
+    const prefijo = prefijoComprobante(venta.tipoComprobante);
     // Dux numera "punto de venta - correlativo" (ej. 00007-00000718); acá
     // no hay punto de venta propio (sin AFIP, ver "Decisiones de alcance
     // v1" más arriba), así que se imprime solo el correlativo interno,
@@ -822,16 +854,20 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         </tr>
       `;
     }).join('');
+    const esNota = venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito';
     const ivaClienteLabel = (cliente && cliente.categoriaFiscal && CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal]) || '';
     const detalleVenta = [];
     if (venta.vendedor) detalleVenta.push(`Vendedor: ${escHtml(venta.vendedor)}`);
     if (venta.moneda && venta.moneda !== 'ARS') detalleVenta.push(`Moneda: ${escHtml(venta.moneda)}`);
-    detalleVenta.push(venta.tipoEntrega === 'inmediata' ? 'Entrega inmediata' : 'Entrega pendiente');
+    if (!esNota) detalleVenta.push(venta.tipoEntrega === 'inmediata' ? 'Entrega inmediata' : 'Entrega pendiente');
+    if (venta.comprobanteOrigenNumero) {
+      detalleVenta.push(`Referente a comprobante ${prefijoComprobante(venta.comprobanteOrigenTipo)}-${String(venta.comprobanteOrigenNumero).padStart(5, '0')}`);
+    }
     const headerHtml = encabezadoComprobante(org, {
       letra: prefijo,
       numeroFmt: numeroDigitos,
       fecha: fechaCorta(venta.fecha),
-      tituloGrande: venta.tipoComprobante === 'fiscal' ? 'FACTURA' : 'COMPROBANTE'
+      tituloGrande: TITULO_COMPROBANTE[venta.tipoComprobante] || 'COMPROBANTE'
     });
     const bodyHtml = `
       ${recuadroClienteComprobante({
@@ -855,7 +891,7 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         ${venta.descuentoMonto ? `<tr><td>Descuento</td><td class="num">-${moneyImp(venta.descuentoMonto, venta.moneda)}</td></tr>` : ''}
         <tr><td>Monto IVA</td><td class="num">${moneyImp(0, venta.moneda)}</td></tr>
         <tr class="total-final"><td>Total</td><td class="num">${moneyImp(venta.total, venta.moneda)}</td></tr>
-        <tr><td>Cobrado</td><td class="num">${moneyImp(venta.totalCobrado, venta.moneda)}</td></tr>
+        ${venta.tipoComprobante === 'nota_credito' ? '' : `<tr><td>Cobrado</td><td class="num">${moneyImp(venta.totalCobrado, venta.moneda)}</td></tr>`}
         ${venta.saldoPendiente > 0 ? `<tr><td>Saldo pendiente</td><td class="num">${moneyImp(venta.saldoPendiente, venta.moneda)}</td></tr>` : ''}
       </table>
       ${org && org.condicionVenta ? `<div class="cmp-condicion-venta"><strong>Condición de venta:</strong><br>${escHtml(org.condicionVenta)}</div>` : ''}
@@ -996,17 +1032,37 @@ router.post('/', authAdmin, async (req, res) => {
     // compromiso se hace recién al entregar (POST /:id/entregar, que ya
     // sabía manejar este caso desde antes, para ventas viejas sin
     // depósito elegido al cargarlas).
-    if (tipoEntrega === 'inmediata' && !depositoId) throw err(400, 'Elegí a qué depósito le vas a entregar la venta.');
+    // Nota de Crédito/Débito (3/10/2026): no pasan por el circuito de
+    // entrega/remito de una venta normal — tipoEntrega llega igual desde
+    // el front (tiene que mandar algo válido) pero se ignora para estos
+    // dos tipos. La Nota de Crédito SÍ necesita depósito (reingresa stock
+    // de verdad ahí mismo); la de Débito nunca lo necesita, no mueve
+    // stock para nada.
+    const esNotaCredito = tipoComprobante === 'nota_credito';
+    const esNotaDebito = tipoComprobante === 'nota_debito';
+    if (esNotaDebito) { /* depositoId no aplica */ }
+    else if (esNotaCredito && !depositoId) throw err(400, 'Elegí a qué depósito reingresa la mercadería de esta nota de crédito.');
+    else if (tipoEntrega === 'inmediata' && !depositoId) throw err(400, 'Elegí a qué depósito le vas a entregar la venta.');
     const vendedor = normalizarTexto(body.vendedor) || (req.usuario && req.usuario.nombre) || '';
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    // Comprobante de origen (botón "Generar Nota de Crédito" desde una
+    // venta ya cargada, precarga estos datos) — opcional, solo
+    // informativo/para imprimir la referencia en el PDF.
+    const comprobanteOrigenId = body.comprobanteOrigenId ? toObjectId(body.comprobanteOrigenId) : null;
+    const comprobanteOrigenNumero = (comprobanteOrigenId && body.comprobanteOrigenNumero) ? Number(body.comprobanteOrigenNumero) || null : null;
+    const comprobanteOrigenTipo = (comprobanteOrigenId && body.comprobanteOrigenTipo) ? normalizarTexto(body.comprobanteOrigenTipo) : null;
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
+      if (comprobanteOrigenId) {
+        const origen = await db.collection('ventas').findOne(Object.assign({ _id: comprobanteOrigenId }, filtroOrg(req)));
+        if (!origen) throw err(400, 'El comprobante de origen no existe (o no pertenece a esta organización).');
+      }
       if (depositoId) {
         const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
         if (!deposito) throw err(404, 'Depósito no encontrado');
@@ -1027,6 +1083,13 @@ router.post('/', authAdmin, async (req, res) => {
       // resuelto por el frontend, editable como siempre.
       const listaPrecioId = body.listaPrecioId ? toObjectId(body.listaPrecioId) : null;
 
+      // Nota de Crédito/Débito: se resuelven en el momento, sin pasar por
+      // "pendiente" ni remito — items.forEach abajo las marca como
+      // cantidadEntregada = cantidad (nada queda pendiente de entregar).
+      const itemsFinales = (esNotaCredito || esNotaDebito)
+        ? items.map(it => Object.assign({}, it, { cantidadEntregada: it.cantidad }))
+        : items;
+
       const venta = {
         numero,
         tipoComprobante,
@@ -1037,31 +1100,39 @@ router.post('/', authAdmin, async (req, res) => {
         moneda,
         listaPrecioId,
         cotizacionDolar: body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null,
-        tipoEntrega,
-        depositoId,
-        // stockComprometido (3/10/2026): true desde ahora, siempre — se
-        // compromete al cargar la venta tenga o no depósito elegido
-        // (ver más abajo). Distingue de una venta vieja (de antes de
-        // este cambio) sin depósito, que en cambio nunca comprometió
-        // nada — POST /:id/entregar lo necesita para decidir si hay que
-        // comprometer recién ahora o solo migrar lo ya comprometido.
-        stockComprometido: true,
-        estado: 'pendiente',
-        items,
+        tipoEntrega: (esNotaCredito || esNotaDebito) ? null : tipoEntrega,
+        depositoId: esNotaDebito ? null : depositoId,
+        comprobanteOrigenId, comprobanteOrigenNumero, comprobanteOrigenTipo,
+        // stockComprometido (3/10/2026): true desde ahora, siempre, para
+        // una venta normal — se compromete al cargar la venta tenga o no
+        // depósito elegido (ver más abajo). Distingue de una venta vieja
+        // (de antes de este cambio) sin depósito, que en cambio nunca
+        // comprometió nada — POST /:id/entregar lo necesita para decidir
+        // si hay que comprometer recién ahora o solo migrar lo ya
+        // comprometido. Una Nota de Crédito/Débito nunca compromete nada
+        // (la de crédito mueve stock real directo, sin pasar por
+        // "comprometido"; la de débito no toca stock para nada).
+        stockComprometido: !esNotaCredito && !esNotaDebito,
+        estado: (esNotaCredito || esNotaDebito) ? 'entregada' : 'pendiente',
+        items: itemsFinales,
         descuentoPorcentaje,
         descuentoMonto,
         subtotal,
         total,
         pagos: [],
         totalCobrado: 0,
-        saldoPendiente: total,
+        // Una Nota de Crédito no se "cobra" — ya quedó resuelta al
+        // registrar el movimiento de crédito en la cuenta corriente, así
+        // que arranca sin saldo pendiente (y sin botón de Cobrar en el
+        // front). Nota de Débito sí funciona como una venta para esto.
+        saldoPendiente: esNotaCredito ? 0 : total,
         observaciones,
-        stockDescontado: false,
-        stockDescontadoEn: null,
+        stockDescontado: esNotaCredito, // reingreso directo ya aplicado (ver más abajo)
+        stockDescontadoEn: esNotaCredito ? ahora : null,
         remitoId: null,
         remitoNumero: null,
         remitosIds: [],
-        entregadaEn: null,
+        entregadaEn: (esNotaCredito || esNotaDebito) ? ahora : null,
         anuladaEn: null,
         anuladaPor: null,
         anuladaMotivo: null,
@@ -1074,14 +1145,38 @@ router.post('/', authAdmin, async (req, res) => {
       const r = await db.collection('ventas').insertOne(venta);
       venta._id = r.insertedId;
 
-      // Cuenta corriente del cliente (2/10/2026, pedido de Mato): la
-      // venta genera deuda por el total — Nueva Venta no carga cobros en
-      // el mismo paso, así que siempre arranca en saldoPendiente = total.
+      // Cuenta corriente del cliente (2/10/2026, pedido de Mato; ramas de
+      // Nota de Crédito/Débito agregadas 3/10/2026): una venta o una Nota
+      // de Débito generan deuda por el total (débito); una Nota de
+      // Crédito la cancela (crédito) — ninguna de las dos carga cobros en
+      // el mismo paso, así que una venta/ND siempre arranca con
+      // saldoPendiente = total.
       if (total > 0) {
+        const conceptoCC = esNotaCredito ? `Nota de Crédito Nº ${numero}` : esNotaDebito ? `Nota de Débito Nº ${numero}` : `Venta Nº ${numero}`;
         await registrarMovimientoCuentaCorriente(db, req, {
-          clienteId, clienteNombre: venta.clienteNombre, tipo: 'debito', monto: total, moneda,
-          concepto: `Venta Nº ${numero}`, origen: 'venta', ventaId: venta._id, fecha
+          clienteId, clienteNombre: venta.clienteNombre, tipo: esNotaCredito ? 'credito' : 'debito', monto: total, moneda,
+          concepto: conceptoCC, origen: 'venta', ventaId: venta._id, fecha
         });
+      }
+
+      if (esNotaDebito) {
+        // No mueve stock para nada: no hay mercadería física de por
+        // medio, solo un cargo en la cuenta corriente.
+        return venta;
+      }
+
+      if (esNotaCredito) {
+        // Reingresa stock DE VERDAD ahora mismo (no es un compromiso: es
+        // la devolución física de la mercadería) al depósito elegido.
+        for (const item of items) {
+          if (!item.productoId) continue;
+          await aplicarMovimientoStock(db, req, {
+            productoId: item.productoId, depositoId, tipo: 'ingreso', cantidad: item.cantidad,
+            motivo: 'Nota de crédito', observaciones: `Nota de crédito Nº ${numero}`.trim(),
+            ventaId: venta._id, usuarioNombre, fecha
+          });
+        }
+        return venta;
       }
 
       // El stock se COMPROMETE ya mismo siempre (3/10/2026, pedido de
@@ -1135,6 +1230,9 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
       const db = await getDb();
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito') {
+        throw err(400, 'Las notas de crédito/débito no generan remito.');
+      }
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
       if (venta.estado === 'entregada') throw err(400, 'Esta venta ya tiene todo entregado.');
 
@@ -1186,11 +1284,22 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       // en la misma venta (parte entregada, parte todavía comprometida).
       await revertirStockDeVentaAnulada(db, req, venta);
 
-      // Cuenta corriente del cliente (2/10/2026): al anular, se le
-      // devuelve al cliente la deuda que le quedaba pendiente de ESTA
-      // venta (lo ya cobrado ya generó su propio crédito al cobrarse —
-      // acá solo se cancela lo que faltaba).
-      if (venta.saldoPendiente > 0) {
+      // Cuenta corriente del cliente (2/10/2026; rama de Nota de Crédito
+      // agregada 3/10/2026): al anular una venta o Nota de Débito, se le
+      // devuelve al cliente la deuda que le quedaba pendiente de ESTE
+      // comprobante (lo ya cobrado ya generó su propio crédito al
+      // cobrarse — acá solo se cancela lo que faltaba). Una Nota de
+      // Crédito no tiene saldoPendiente (nunca se "cobra", ver POST /),
+      // así que anularla necesita el movimiento inverso explícito: un
+      // débito por el total, deshaciendo el crédito que se había dado.
+      if (venta.tipoComprobante === 'nota_credito') {
+        if (venta.total > 0) {
+          await registrarMovimientoCuentaCorriente(db, req, {
+            clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'debito', monto: venta.total, moneda: venta.moneda || 'ARS',
+            concepto: `Anulación Nota de Crédito Nº ${venta.numero}`, origen: 'venta', ventaId: venta._id, observaciones: motivo
+          });
+        }
+      } else if (venta.saldoPendiente > 0) {
         await registrarMovimientoCuentaCorriente(db, req, {
           clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto: venta.saldoPendiente, moneda: venta.moneda || 'ARS',
           concepto: `Anulación venta Nº ${venta.numero}`, origen: 'venta', ventaId: venta._id, observaciones: motivo
