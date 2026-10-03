@@ -201,15 +201,20 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
   .no-imprimir .compartir-estado { font-size: 12px; color: #666; }
   @media print { .no-imprimir { display: none; } }
 
-  /* Comprobante "tipo Dux" (3/10/2026) — ver encabezadoComprobante */
-  .cmp-header { display: flex; align-items: center; gap: 14px; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 4px; }
-  .cmp-izquierda { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
-  .cmp-logo { width: 100%; display: flex; align-items: center; justify-content: center; }
+  /* Comprobante "tipo Dux" (3/10/2026) — ver encabezadoComprobante. Grid
+     de 3 columnas 1fr/auto/1fr en vez de flex: así la columna del medio
+     (la letra) queda centrada en el ANCHO TOTAL del comprobante, no solo
+     "entre" los otros dos bloques — y logo+datos quedan pegados al
+     margen izquierdo (pedido de Mato: "el logo y los datos deben ir al
+     margen izquierdo y la letra centrada en el comprobante"). */
+  .cmp-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 4px; }
+  .cmp-izquierda { justify-self: start; display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 6px; }
+  .cmp-logo { display: flex; align-items: center; justify-content: flex-start; }
   .cmp-logo img { max-width: 220px; max-height: 110px; object-fit: contain; }
-  .cmp-negocio { text-align: center; }
+  .cmp-negocio { text-align: left; }
   .cmp-negocio .cmp-razon { font-size: 19px; font-weight: bold; margin-bottom: 3px; }
   .cmp-negocio div { line-height: 1.4; color: #222; font-size: 12px; }
-  .cmp-letra { width: 44px; min-width: 44px; align-self: center; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
+  .cmp-letra { justify-self: center; width: 44px; min-width: 44px; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
   .cmp-titulo { width: 230px; min-width: 190px; text-align: right; }
   .cmp-titulo-grande { font-size: 19px; font-weight: bold; }
   .cmp-titulo .cmp-numero { font-size: 15px; margin-top: 2px; }
