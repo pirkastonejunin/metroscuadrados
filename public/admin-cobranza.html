@@ -429,12 +429,31 @@ async function confirmarReciboCB(){
     const r = await fetch(BASE + '/cobros-cuenta-cliente', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
-    okEl.textContent = 'Recibo registrado.';
+    // Imprimible (3/10/2026) — botón para imprimir el recibo de este
+    // cobro recién hecho, junto al mensaje de éxito (reciboTipo/reciboId
+    // vienen del POST). No se abre solo porque el navegador puede
+    // bloquear el popup si no viene directo de un click del usuario.
+    const reciboUrl = (data.reciboTipo && data.reciboId) ? (BASE + '/recibo-cuenta/' + data.reciboTipo + '/' + data.reciboId) : null;
+    okEl.innerHTML = 'Recibo registrado.' + (reciboUrl ? ` <button class="btn small secondary" onclick="imprimirDocumento('${reciboUrl}')">Imprimir recibo</button>` : '');
     document.getElementById('cbMonto').value = '';
     document.getElementById('cbNota').value = '';
     await Promise.all([cargarCajasYBancosCB(), mostrarClienteSeleccionadoCB(clienteId)]);
     actualizarTipoValorCB();
   }catch(e){ errEl.textContent = e.message; }
+}
+
+// Imprimibles (3/10/2026) — ver el mismo helper en admin-ventas.html.
+async function imprimirDocumento(url){
+  const ventana = window.open('', '_blank');
+  try{
+    const r = await fetch(url, {headers: headersAuth()});
+    const html = await r.text();
+    if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
+    ventana.document.write(html);
+    ventana.document.close();
+  }catch(e){
+    ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
+  }
 }
 </script>
 </body>

@@ -81,6 +81,10 @@ const { aplicarMovimientoCuenta, cuentaHabilitada } = require('./tesoreria');
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
+// Imprimibles (3/10/2026, pedido de Mato) — plantilla de impresión
+// compartida (sin acceso a Mongo), ver el comentario grande al principio
+// de imprimibles.js.
+const { paginaImprimible, escapeHtml: escHtml, money: moneyImp, fechaLarga } = require('./imprimibles');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -567,6 +571,169 @@ router.get('/remitos/:id', authAdmin, async (req, res) => {
     });
     if (!remito) throw err(404, 'Remito no encontrado');
     res.json(remito);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Imprimibles (3/10/2026, pedido de Mato: "comencemos a trabajar en los
+// imprimibles. el comprobante de venta..., recibo, remito, etc."). Las
+// tres rutas de abajo devuelven HTML completo (texto, no JSON) armado
+// con la plantilla compartida de imprimibles.js — el frontend las pide
+// con fetch() (para poder mandar el header de autenticación, que una
+// navegación directa a la URL no puede llevar) y abre el resultado en
+// una pestaña nueva con document.write, igual que ya se hace para
+// descargar los .xlsx (ver descargarBlob en los admin-*.html).
+//
+// Numeración (3/10/2026, pedido de Mato — pensando en la futura
+// importación del historial de Dux): se imprime el `numero` que la
+// venta/remito ya tiene (el correlativo interno, X/F + 5 dígitos). NO
+// se inventa un formato nuevo. Cuando se importen las ventas viejas de
+// Dux más adelante, la recomendación (a confirmar en ese momento) es
+// conservar el número ORIGINAL de Dux tal cual estaba en el comprobante
+// real (no renumerarlas para que encajen en este correlativo), marcadas
+// con un origen "importado" — así el cliente sigue reconociendo su
+// comprobante viejo, y el correlativo interno de acá no se pisa con
+// números que nunca generó este sistema.
+function datosNegocioParaImprimir(org) {
+  return org || { nombre: 'Organización' };
+}
+router.get('/:id/comprobante', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!venta) throw err(404, 'Venta no encontrada');
+      const [org, cliente] = await Promise.all([
+        db.collection('organizaciones').findOne({ _id: venta.orgId }),
+        venta.clienteId ? db.collection('clientes').findOne({ _id: venta.clienteId }) : null
+      ]);
+      return { venta, org, cliente };
+    });
+    const { venta, org, cliente } = resultado;
+    const prefijo = venta.tipoComprobante === 'fiscal' ? 'F' : 'X';
+    const numeroFmt = `${prefijo}-${String(venta.numero).padStart(5, '0')}`;
+    const filas = (venta.items || []).map(it => `
+      <tr>
+        <td>${escHtml(it.sku || '—')}</td>
+        <td>${escHtml(it.nombre)}</td>
+        <td class="num">${it.cantidad}</td>
+        <td class="num">${moneyImp(it.precioUnitario, venta.moneda)}</td>
+        <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
+      </tr>
+    `).join('');
+    const bodyHtml = `
+      <h1>${venta.tipoComprobante === 'fiscal' ? 'Factura' : 'Comprobante de venta'} Nº ${numeroFmt}</h1>
+      <div class="datos-doc">
+        <div>
+          <strong>Cliente:</strong> ${escHtml(venta.clienteNombre)}<br>
+          ${cliente && cliente.cuit ? `CUIT/CUIL: ${escHtml(cliente.cuit)}<br>` : ''}
+          ${cliente && cliente.domicilio ? `${escHtml(cliente.domicilio)}<br>` : ''}
+          ${venta.vendedor ? `<span class="muted">Vendedor: ${escHtml(venta.vendedor)}</span>` : ''}
+        </div>
+        <div>
+          <strong>Fecha:</strong> ${fechaLarga(venta.fecha)}<br>
+          <strong>Moneda:</strong> ${escHtml(venta.moneda || 'ARS')}<br>
+          <span class="muted">Tipo de entrega: ${venta.tipoEntrega === 'inmediata' ? 'Entrega inmediata' : 'Pendiente'}</span>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Código</th><th>Producto</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">Subtotal</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="5" class="muted">Sin ítems</td></tr>'}</tbody>
+      </table>
+      <table class="totales">
+        <tr><td>Subtotal</td><td class="num">${moneyImp(venta.subtotal, venta.moneda)}</td></tr>
+        ${venta.descuentoMonto ? `<tr><td>Descuento</td><td class="num">-${moneyImp(venta.descuentoMonto, venta.moneda)}</td></tr>` : ''}
+        <tr class="total-final"><td>Total</td><td class="num">${moneyImp(venta.total, venta.moneda)}</td></tr>
+        <tr><td>Cobrado</td><td class="num">${moneyImp(venta.totalCobrado, venta.moneda)}</td></tr>
+        ${venta.saldoPendiente > 0 ? `<tr><td>Saldo pendiente</td><td class="num">${moneyImp(venta.saldoPendiente, venta.moneda)}</td></tr>` : ''}
+      </table>
+      ${venta.observaciones ? `<p class="muted" style="margin-top:14px">Observaciones: ${escHtml(venta.observaciones)}</p>` : ''}
+    `;
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(paginaImprimible({ titulo: `Comprobante Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const remito = await db.collection('remitos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!remito) throw err(404, 'Remito no encontrado');
+      const org = await db.collection('organizaciones').findOne({ _id: remito.orgId });
+      return { remito, org };
+    });
+    const { remito, org } = resultado;
+    const numeroFmt = String(remito.numero).padStart(5, '0');
+    const filas = (remito.items || []).map(it => `
+      <tr><td>${escHtml(it.sku || '—')}</td><td>${escHtml(it.nombre)}</td><td class="num">${it.cantidad}</td></tr>
+    `).join('');
+    const bodyHtml = `
+      <h1>Remito Nº ${numeroFmt}</h1>
+      <div class="datos-doc">
+        <div>
+          <strong>Cliente:</strong> ${escHtml(remito.clienteNombre)}<br>
+          <span class="muted">Comprobante asociado: Nº ${String(remito.ventaNumero).padStart(5, '0')}</span>
+        </div>
+        <div>
+          <strong>Fecha:</strong> ${fechaLarga(remito.fecha)}<br>
+          <strong>Depósito:</strong> ${escHtml(remito.depositoNombre)}
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Código</th><th>Producto</th><th class="num">Cantidad</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="3" class="muted">Sin ítems</td></tr>'}</tbody>
+      </table>
+      <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
+    `;
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Recibo de UN cobro puntual de la venta (`pagos[index]`) — los pagos
+// son un array append-only sin _id propio (ver POST /:id/pagos), así que
+// se identifican por posición, igual que ya hace el resto de la pantalla
+// de detalle de venta para mostrarlos.
+router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    const index = Number(req.params.index);
+    if (!id) throw err(400, 'id inválido');
+    if (!Number.isInteger(index) || index < 0) throw err(400, 'índice de pago inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!venta) throw err(404, 'Venta no encontrada');
+      const pago = (venta.pagos || [])[index];
+      if (!pago) throw err(404, 'Ese cobro no existe');
+      const org = await db.collection('organizaciones').findOne({ _id: venta.orgId });
+      return { venta, pago, org };
+    });
+    const { venta, pago, org } = resultado;
+    const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', tarjeta: 'Tarjeta' };
+    const bodyHtml = `
+      <h1>Recibo — Venta Nº ${String(venta.numero).padStart(5, '0')}</h1>
+      <div class="datos-doc">
+        <div>
+          <strong>Recibí de:</strong> ${escHtml(venta.clienteNombre)}<br>
+          <strong>La suma de:</strong> ${moneyImp(pago.monto, venta.moneda)}
+        </div>
+        <div>
+          <strong>Fecha:</strong> ${fechaLarga(pago.fecha)}<br>
+          <strong>Forma de pago:</strong> ${TIPO_VALOR_LABEL[pago.tipoValor] || escHtml(pago.tipoValor)}
+          ${pago.tipoValor === 'tarjeta' ? `<br><span class="muted">Lote ${escHtml(pago.tarjetaLote || '—')} / Cupón ${escHtml(pago.tarjetaCupon || '—')}</span>` : ''}
+        </div>
+      </div>
+      <p>En concepto de pago de la Venta Nº ${String(venta.numero).padStart(5, '0')}.${pago.nota ? ` ${escHtml(pago.nota)}` : ''}</p>
+      <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>
+    `;
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(paginaImprimible({ titulo: `Recibo — Venta Nº ${venta.numero}`, org: datosNegocioParaImprimir(org), bodyHtml }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

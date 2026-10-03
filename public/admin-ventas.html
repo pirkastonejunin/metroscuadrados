@@ -1042,7 +1042,7 @@ function verDetalle(id){
     </tr>
   `).join('');
   const filasPagos = (v.pagos||[]).length
-    ? v.pagos.map(p => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)}</span></div>`).join('')
+    ? v.pagos.map((p, i) => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)} <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${v._id}/pagos/${i}/recibo')">Recibo</button></span></div>`).join('')
     : '<p class="muted">Sin cobros registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
@@ -1074,6 +1074,8 @@ function verDetalle(id){
         <div class="err" id="dvErr"></div>
 
         <div class="row" style="margin-top:14px">
+          <button class="btn secondary" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante')">Imprimir comprobante</button>
+          ${v.remitoId ? `<button class="btn secondary" onclick="imprimirDocumento('${BASE}/remitos/${v.remitoId}/imprimir')">Imprimir remito</button>` : ''}
           ${v.estado === 'pendiente' ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
           ${v.estado !== 'anulada' ? `<button class="btn danger" onclick="anularVenta('${v._id}')">Anular venta</button>` : ''}
@@ -1085,6 +1087,25 @@ function verDetalle(id){
 }
 
 const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
+
+// Imprimibles (3/10/2026) — las rutas de comprobante/remito/recibo
+// devuelven HTML, no JSON, y necesitan el header de autenticación, que
+// una navegación directa (window.open(url)) no puede llevar. Por eso se
+// pide con fetch() y el HTML resultante se escribe en una pestaña nueva
+// en blanco — mismo criterio que ya se usa para descargar los .xlsx
+// (ver descargarBlob más abajo), adaptado para mostrar en vez de bajar.
+async function imprimirDocumento(url){
+  const ventana = window.open('', '_blank');
+  try{
+    const r = await fetch(url, {headers: headersAuth()});
+    const html = await r.text();
+    if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
+    ventana.document.write(html);
+    ventana.document.close();
+  }catch(e){
+    ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
+  }
+}
 
 // El depósito ya se eligió al cargar la venta (y el stock ya está
 // comprometido ahí) para cualquier venta cargada desde el 2/10/2026 en

@@ -93,6 +93,8 @@ const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuar
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
+// Imprimibles (3/10/2026, pedido de Mato) — ver imprimibles.js.
+const { paginaImprimible, escapeHtml: escHtml, money: moneyImp, fechaLarga } = require('./imprimibles');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -198,7 +200,8 @@ async function aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, mo
     ventaId: ventaId || null, compraId: compraId || null, chequeId: chequeId || null,
     usuarioNombre, fecha: fecha || new Date(), orgId: req.orgId, createdAt: new Date()
   };
-  await db.collection('tesoreria_movimientos').insertOne(movimiento);
+  const { insertedId } = await db.collection('tesoreria_movimientos').insertOne(movimiento);
+  movimiento._id = insertedId; // 3/10/2026: lo necesita el recibo imprimible de un cobro a cuenta (ver /cobros-cuenta-cliente e imprimibles.js) — el driver no lo completa solo.
   const delta = tipo === 'ingreso' ? monto : -monto;
   await db.collection('tesoreria_saldos').updateOne(
     { cuentaTipo, cuentaId },
@@ -502,6 +505,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
       const clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;
+      let movimientoId = null; // 3/10/2026: para poder imprimir el recibo de este cobro recién hecho.
 
       if (tipoValor === 'cheque') {
         const cheque = Object.assign({
@@ -516,11 +520,12 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
         const observacionesMovimiento = tipoValor === 'tarjeta'
           ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
           : nota;
-        await aplicarMovimientoCuenta(db, req, {
+        const movimiento = await aplicarMovimientoCuenta(db, req, {
           cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda,
           motivo: `Cobro a cuenta — ${clienteNombre}`, observaciones: observacionesMovimiento,
           origen: 'cobro_cuenta', fecha
         });
+        movimientoId = movimiento._id;
       }
 
       await registrarMovimientoCuentaCorriente(db, req, {
@@ -528,9 +533,55 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
         concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId, observaciones: nota, fecha
       });
 
-      return { ok: true };
+      // Para el botón "Imprimir recibo" (ver imprimibles.js y
+      // GET /recibo-cuenta/:tipo/:id más abajo) — el tipo le dice al
+      // frontend cuál de las dos rutas de recibo usar.
+      return { ok: true, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId };
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Recibo imprimible de un cobro "a cuenta" (sin venta puntual) — ver
+// `reciboTipo`/`reciboId` que devuelve el POST de arriba. `tipo` es
+// 'movimiento' (efectivo/cuenta/tarjeta, ya acreditado) o 'cheque'
+// (en cartera). Mismo criterio de ruta con fetch() + document.write en
+// el frontend que el resto de los imprimibles (ver ventas.js).
+router.get('/recibo-cuenta/:tipo/:id', authOperar, async (req, res) => {
+  try {
+    const tipo = req.params.tipo;
+    if (!['movimiento', 'cheque'].includes(tipo)) throw err(400, 'tipo inválido');
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const doc = tipo === 'cheque'
+        ? await db.collection('cheques').findOne(Object.assign({ _id: id }, filtroOrg(req)))
+        : await db.collection('tesoreria_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!doc) throw err(404, 'No se encontró ese cobro');
+      const org = await db.collection('organizaciones').findOne({ _id: doc.orgId });
+      return { doc, org };
+    });
+    const { doc, org } = resultado;
+    const esMovimiento = tipo === 'movimiento';
+    const clienteNombre = doc.clienteNombre || (esMovimiento ? (doc.motivo || '').replace('Cobro a cuenta — ', '') : '');
+    const bodyHtml = `
+      <h1>Recibo — Cobro a cuenta</h1>
+      <div class="datos-doc">
+        <div>
+          <strong>Recibí de:</strong> ${escHtml(clienteNombre || '—')}<br>
+          <strong>La suma de:</strong> ${moneyImp(doc.monto, doc.moneda)}
+        </div>
+        <div>
+          <strong>Fecha:</strong> ${fechaLarga(doc.fecha)}<br>
+          <strong>Forma de pago:</strong> ${esMovimiento ? 'Ver movimiento de caja/banco' : 'Cheque Nº ' + escHtml(doc.numero || '—')}
+        </div>
+      </div>
+      <p>En concepto de cobro a cuenta corriente, sin venta puntual asociada.${doc.observaciones ? ` ${escHtml(doc.observaciones)}` : ''}</p>
+      <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>
+    `;
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(paginaImprimible({ titulo: 'Recibo — Cobro a cuenta', org: org || { nombre: 'Organización' }, bodyHtml }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
