@@ -583,10 +583,16 @@ router.post('/', authAdmin, async (req, res) => {
     const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
     if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
     const depositoId = body.depositoId ? toObjectId(body.depositoId) : null;
-    // El depósito ahora es obligatorio siempre (2/10/2026) — aunque la
-    // entrega sea "pendiente", hace falta saber de qué depósito se
-    // compromete el stock desde el momento en que se carga la venta.
-    if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a comprometer el stock.');
+    // El depósito es obligatorio SOLO para "entrega inmediata" (3/10/2026,
+    // corregido a pedido de Mato: "si no pongo entrega inmediata no me
+    // deberia pedir deposito" — había quedado obligatorio siempre desde el
+    // 2/10/2026, pero eso era un paso de más para una venta que todavía
+    // no se va a entregar). Con "no entrega"/pendiente, el depósito es
+    // opcional: si se elige, se compromete el stock ahí mismo; si no, el
+    // compromiso se hace recién al entregar (POST /:id/entregar, que ya
+    // sabía manejar este caso desde antes, para ventas viejas sin
+    // depósito elegido al cargarlas).
+    if (tipoEntrega === 'inmediata' && !depositoId) throw err(400, 'Elegí a qué depósito le vas a entregar la venta.');
     const vendedor = normalizarTexto(body.vendedor) || (req.usuario && req.usuario.nombre) || '';
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
@@ -597,8 +603,10 @@ router.post('/', authAdmin, async (req, res) => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
-      const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
-      if (!deposito) throw err(404, 'Depósito no encontrado');
+      if (depositoId) {
+        const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
+        if (!deposito) throw err(404, 'Depósito no encontrado');
+      }
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       // La venta se carga SIEMPRE, haya o no stock (2/10/2026, pedido de
       // Mato) — puede quedar pendiente de retiro mientras entra
@@ -664,9 +672,10 @@ router.post('/', authAdmin, async (req, res) => {
         });
       }
 
-      // El stock se COMPROMETE siempre, sea cual sea el tipo de entrega —
-      // queda reservado desde que se carga la venta.
-      await comprometerStockDeVenta(db, req, items, depositoId);
+      // El stock se COMPROMETE ya mismo si se eligió un depósito (sea
+      // cual sea el tipo de entrega) — si no se eligió (solo posible con
+      // "no entrega"), queda sin reservar hasta que se entregue de verdad.
+      if (depositoId) await comprometerStockDeVenta(db, req, items, depositoId);
 
       if (tipoEntrega === 'inmediata') {
         // Entrega inmediata: la misma venta dispara el remito en el acto

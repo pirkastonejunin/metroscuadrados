@@ -643,15 +643,17 @@ function abrirNuevaVenta(){
   actualizarVisibilidadDeposito();
 }
 
-// El depósito ahora es obligatorio siempre (2/10/2026, pedido de Mato):
-// el stock se compromete ahí desde que se carga la venta, aunque todavía
-// no se entregue — solo cambia el texto según si se descuenta ya mismo
-// (entrega inmediata) o recién al generar el remito más adelante.
+// El depósito es obligatorio SOLO con entrega inmediata (3/10/2026,
+// corregido a pedido de Mato: "si no pongo entrega inmediata no me
+// deberia pedir deposito" — había quedado obligatorio siempre desde el
+// 2/10/2026, pero con "no entrega" no hace falta elegirlo todavía; el
+// stock se compromete recién al generar el remito, desde el detalle de
+// la venta).
 function actualizarVisibilidadDeposito(){
   const esInmediata = document.getElementById('nvTipoEntrega').value === 'inmediata';
   document.getElementById('nvDepositoLabel').textContent = esInmediata
     ? 'Depósito (se descuenta ahora) *'
-    : 'Depósito (se compromete el stock ahí) *';
+    : 'Depósito (opcional — se puede elegir después, al entregar)';
 }
 
 // Cambiar la sucursal (organización) de la venta que se está cargando trae
@@ -934,9 +936,10 @@ async function guardarNuevaVenta(){
   document.getElementById('nvErr').textContent = '';
   if (!body.clienteId) { document.getElementById('nvErr').textContent = 'Elegí un cliente'; return; }
   if (!items.length) { document.getElementById('nvErr').textContent = 'Agregá al menos un producto'; return; }
-  // El depósito es obligatorio siempre, no solo con entrega inmediata
-  // (ver actualizarVisibilidadDeposito): ahí se compromete el stock.
-  if (!body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a comprometer el stock'; return; }
+  // El depósito solo es obligatorio con entrega inmediata (ver
+  // actualizarVisibilidadDeposito) — con "no entrega" se puede elegir
+  // después, al generar el remito.
+  if (tipoEntrega === 'inmediata' && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a entregar la venta'; return; }
   // Bloquea el botón mientras la venta se está guardando (2/10/2026) — sin
   // esto, tocar "Guardar venta" varias veces seguidas (por ejemplo después
   // de un rechazo, esperando que "ahora sí" funcione) disparaba un POST
