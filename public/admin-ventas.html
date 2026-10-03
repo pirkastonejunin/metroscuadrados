@@ -1192,6 +1192,24 @@ function botonesImprimible(url){
 // cantidad para dejar el resto pendiente de otro remito posterior.
 // Los ítems sin nada pendiente (ya entregados del todo en un remito
 // anterior) ni se muestran.
+// Redondea la cantidad a entregar en un remito al bulto entero más
+// cercano para arriba (igual que sincronizarCantidadVenta al cargar la
+// venta), sin pasarse de lo que queda pendiente para ese ítem — lo
+// pendiente ya quedó ajustado a bulto entero al cargar/entregar antes, así
+// que si el redondeo se pasa, simplemente se entrega todo lo pendiente.
+function sincronizarCantidadEntrega(inp){
+  const pendiente = Number(inp.dataset.pendiente) || 0;
+  const unidadesPorBulto = Number(inp.dataset.bulto) || 0;
+  let valor = Number(inp.value) || 0;
+  if (valor < 0) valor = 0;
+  if (unidadesPorBulto > 0 && valor > 0) {
+    const bultos = Math.ceil(valor / unidadesPorBulto - 1e-9);
+    valor = redondear2(bultos * unidadesPorBulto);
+  }
+  if (valor > pendiente) valor = redondear2(pendiente);
+  inp.value = valor;
+}
+
 function abrirEntregar(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
@@ -1200,11 +1218,16 @@ function abrirEntregar(id){
     const entregada = it.cantidadEntregada || 0;
     const pendiente = Math.max(0, it.cantidad - entregada);
     if (pendiente <= 0) return '';
+    // Igual que al cargar la venta: si el producto se vende por bulto, no
+    // se puede remitir una fracción de bulto. data-bulto en 0 (producto sin
+    // bulto, o no encontrado en el catálogo) desactiva el redondeo.
+    const producto = it.productoId ? productosCache.find(p => String(p._id) === String(it.productoId)) : null;
+    const unidadesPorBulto = (producto && producto.unidadesPorBulto > 0) ? producto.unidadesPorBulto : 0;
     return `
       <tr>
         <td>${escapeHtml(it.nombre)}</td>
         <td class="muted">${pendiente}</td>
-        <td><input type="number" class="ent-cantidad" data-idx="${idx}" data-pendiente="${pendiente}" min="0" max="${pendiente}" step="any" value="${pendiente}" style="width:100px"></td>
+        <td><input type="number" class="ent-cantidad" data-idx="${idx}" data-pendiente="${pendiente}" data-bulto="${unidadesPorBulto}" min="0" max="${pendiente}" step="any" value="${pendiente}" style="width:100px" oninput="sincronizarCantidadEntrega(this)"></td>
       </tr>
     `;
   }).join('');
