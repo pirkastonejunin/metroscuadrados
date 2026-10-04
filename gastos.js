@@ -132,14 +132,8 @@ function normalizarComprobante(body) {
   if (!puntoVenta) throw err(400, 'Falta el punto de venta del comprobante');
   const comprobanteNumero = normalizarTexto(body.comprobanteNumero);
   if (!comprobanteNumero) throw err(400, 'Falta el número del comprobante');
-  const importeNeto = normalizarMontoNoNegativo(body.importeNeto, 'El importe neto del comprobante');
-  const alicuotaIva = Number(body.alicuotaIva);
-  if (!ALICUOTAS_IVA_VALIDAS.includes(alicuotaIva)) throw err(400, `Alícuota de IVA inválida (opciones: ${ALICUOTAS_IVA_VALIDAS.join(', ')})`);
-  const importeExento = body.importeExento ? normalizarMontoNoNegativo(body.importeExento, 'El importe exento/no gravado del comprobante') : 0;
-  const importeIva = Math.round(importeNeto * alicuotaIva) / 100;
-  const importeTotalComprobante = Math.round((importeNeto + importeIva + importeExento) * 100) / 100;
   const esFiscal = TIPOS_COMPROBANTE_FISCALES.has(tipoComprobante);
-  return { tipoComprobante, puntoVenta, comprobanteNumero, importeNeto, alicuotaIva, importeIva, importeExento, importeTotalComprobante, esFiscal };
+  return { tipoComprobante, puntoVenta, comprobanteNumero, esFiscal };
 }
 
 // Columnas del Excel de export — mismo criterio que Compras: solo
@@ -156,7 +150,6 @@ const COLUMNAS_GASTOS_EXPORT = [
   { clave: 'estado', titulo: 'Estado' },
   { clave: 'moneda', titulo: 'Moneda' },
   { clave: 'importeNeto', titulo: 'Importe neto', tipo: 'numero' },
-  { clave: 'alicuotaIva', titulo: 'Alícuota IVA', tipo: 'numero' },
   { clave: 'importeIva', titulo: 'Importe IVA', tipo: 'numero' },
   { clave: 'importeExento', titulo: 'Importe exento', tipo: 'numero' },
   { clave: 'importeTotalComprobante', titulo: 'Total comprobante', tipo: 'numero' },
@@ -356,11 +349,32 @@ async function normalizarItems(db, req, itemsRaw) {
     const cantidad = normalizarCantidadPositiva(it.cantidad !== undefined && it.cantidad !== null && it.cantidad !== '' ? it.cantidad : 1, `La cantidad de "${conceptoNombre}"`);
     const precioUnitario = normalizarMontoNoNegativo(it.precioUnitario, `El monto de "${conceptoNombre}"`);
     const observaciones = normalizarTexto(it.observaciones);
+    // IVA por artículo/concepto (4/10/2026, corrección de Mato: "el
+    // tema del iva debe ir por articulo no por factura").
+    const alicuotaIva = Number(it.alicuotaIva);
+    if (!ALICUOTAS_IVA_VALIDAS.includes(alicuotaIva)) throw err(400, `Alícuota de IVA inválida para "${conceptoNombre}" (opciones: ${ALICUOTAS_IVA_VALIDAS.join(', ')})`);
     const itemSubtotal = cantidad * precioUnitario;
+    const itemIva = Math.round(itemSubtotal * alicuotaIva) / 100;
     subtotal += itemSubtotal;
-    items.push({ conceptoId, conceptoNombre, cantidad, precioUnitario, subtotal: itemSubtotal, observaciones });
+    items.push({ conceptoId, conceptoNombre, cantidad, precioUnitario, subtotal: itemSubtotal, observaciones, alicuotaIva, importeIva: itemIva });
   }
   return { items, subtotal };
+}
+
+// Arma el desglose fiscal del comprobante A PARTIR de los ítems (ver
+// mismo helper en compras.js).
+function calcularComprobanteDesdeItems(items) {
+  let importeNeto = 0, importeExento = 0, importeIva = 0;
+  for (const it of items) {
+    if (it.alicuotaIva === 0) importeExento += it.subtotal;
+    else importeNeto += it.subtotal;
+    importeIva += it.importeIva;
+  }
+  importeNeto = Math.round(importeNeto * 100) / 100;
+  importeExento = Math.round(importeExento * 100) / 100;
+  importeIva = Math.round(importeIva * 100) / 100;
+  const importeTotalComprobante = Math.round((importeNeto + importeIva + importeExento) * 100) / 100;
+  return { importeNeto, importeExento, importeIva, importeTotalComprobante };
 }
 
 function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
@@ -470,6 +484,7 @@ router.post('/', authAdmin, async (req, res) => {
       if (dupe) throw err(400, `Ya hay un gasto cargado con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es el gasto #${dupe.numero}.`);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
+      const fiscalItems = calcularComprobanteDesdeItems(items);
       const numero = await proximoNumero(db, req.orgId);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
@@ -480,11 +495,10 @@ router.post('/', authAdmin, async (req, res) => {
         puntoVenta: comprobante.puntoVenta,
         comprobanteNumero: comprobante.comprobanteNumero,
         esFiscal: comprobante.esFiscal,
-        importeNeto: comprobante.importeNeto,
-        alicuotaIva: comprobante.alicuotaIva,
-        importeIva: comprobante.importeIva,
-        importeExento: comprobante.importeExento,
-        importeTotalComprobante: comprobante.importeTotalComprobante,
+        importeNeto: fiscalItems.importeNeto,
+        importeIva: fiscalItems.importeIva,
+        importeExento: fiscalItems.importeExento,
+        importeTotalComprobante: fiscalItems.importeTotalComprobante,
         proveedorId,
         proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
         fecha,

@@ -66,6 +66,7 @@
   .fila-item .campo-concepto{flex:2;min-width:0;}
   .fila-item .campo-cant{flex:1;min-width:0;}
   .fila-item .campo-precio{flex:1;min-width:0;}
+  .fila-item .campo-iva{flex:1;min-width:0;}
   .fila-item .campo-subtotal{flex:1;min-width:0;text-align:right;font-weight:700;padding-top:8px;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
   .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
@@ -388,16 +389,11 @@ function abrirNuevoGasto(){
           <div><label>Punto de venta *</label><input id="ngPuntoVenta" placeholder="Ej: 0007"></div>
           <div><label>Número *</label><input id="ngComprobanteNumero" placeholder="Ej: 00001234"></div>
         </div>
-        <div class="grid3" style="margin-top:10px">
-          <div><label>Importe neto *</label><input id="ngImporteNeto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesComprobanteGasto()"></div>
-          <div><label>Alícuota IVA *</label><select id="ngAlicuotaIva" onchange="actualizarTotalesComprobanteGasto()">${opcionesAlicuotaIva(21)}</select></div>
-          <div><label>Importe exento/no gravado</label><input id="ngImporteExento" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesComprobanteGasto()"></div>
-        </div>
-        <div class="muted" id="ngComprobanteTotales" style="margin-top:6px"></div>
 
         <div class="section-title">Conceptos</div>
         <div id="ngFilasItems"></div>
         <button class="btn secondary small" onclick="agregarFilaGasto()">+ Agregar concepto</button>
+        <div class="muted" id="ngComprobanteTotales" style="margin-top:8px"></div>
 
         <div class="grid2" style="margin-top:14px">
           <div><label>Descuento (%)</label><input id="ngDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesGasto()"></div>
@@ -412,16 +408,6 @@ function abrirNuevoGasto(){
     </div>
   `;
   agregarFilaGasto();
-  actualizarTotalesComprobanteGasto();
-}
-
-function actualizarTotalesComprobanteGasto(){
-  const neto = Number(document.getElementById('ngImporteNeto').value) || 0;
-  const alicuota = Number(document.getElementById('ngAlicuotaIva').value) || 0;
-  const exento = Number(document.getElementById('ngImporteExento').value) || 0;
-  const iva = Math.round(neto * alicuota) / 100;
-  const total = Math.round((neto + iva + exento) * 100) / 100;
-  document.getElementById('ngComprobanteTotales').textContent = `IVA: ${money(iva)} — Total del comprobante: ${money(total)}`;
 }
 
 function actualizarCondicionPago(){
@@ -446,6 +432,10 @@ function agregarFilaGasto(){
       <label>Monto unit.</label>
       <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesGasto()">
     </div>
+    <div class="campo-iva">
+      <label>IVA</label>
+      <select class="select-iva" onchange="actualizarTotalesGasto()">${opcionesAlicuotaIva(21)}</select>
+    </div>
     <div class="campo-subtotal"><span class="subtotal-valor">$ 0,00</span></div>
     <button class="btn-quitar" onclick="this.closest('.fila-item').remove(); actualizarTotalesGasto()">×</button>
   `;
@@ -459,21 +449,43 @@ function juntarItemsGasto(){
     const select = fila.querySelector('select.select-concepto');
     const cantidad = Number(fila.querySelector('.campo-cant input').value);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
-    if (select.value && select.value !== '__nuevo__' && cantidad > 0) items.push({ conceptoId: select.value, cantidad, precioUnitario });
+    const alicuotaIva = Number(fila.querySelector('select.select-iva').value);
+    if (select.value && select.value !== '__nuevo__' && cantidad > 0) items.push({ conceptoId: select.value, cantidad, precioUnitario, alicuotaIva });
   });
   return items;
 }
 
+// Desglosa el IVA por alícuota (cada concepto puede tener la suya —
+// 4/10/2026, pedido de Mato: "el tema del iva debe ir por articulo no
+// por factura") y lo muestra debajo de los conceptos.
 function actualizarTotalesGasto(){
   const filas = document.querySelectorAll('#ngFilasItems .fila-item');
   let subtotal = 0;
+  const porAlicuota = {};
+  let importeExento = 0;
   filas.forEach(fila => {
     const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const alicuota = Number(fila.querySelector('select.select-iva').value) || 0;
     const sub = cantidad * precioUnitario;
     subtotal += sub;
     fila.querySelector('.subtotal-valor').textContent = money(sub);
+    if (alicuota === 0) { importeExento += sub; }
+    else {
+      if (!porAlicuota[alicuota]) porAlicuota[alicuota] = { neto: 0, iva: 0 };
+      porAlicuota[alicuota].neto += sub;
+      porAlicuota[alicuota].iva += Math.round(sub * alicuota) / 100;
+    }
   });
+  const lineasIva = Object.keys(porAlicuota).sort((a,b) => b-a).map(al =>
+    `${al}%: neto ${money(porAlicuota[al].neto)} + IVA ${money(porAlicuota[al].iva)}`
+  );
+  if (importeExento > 0) lineasIva.push(`Exento: ${money(importeExento)}`);
+  const totalIva = Object.values(porAlicuota).reduce((a,x) => a + x.iva, 0);
+  const totalComprobante = subtotal + totalIva;
+  document.getElementById('ngComprobanteTotales').innerHTML = lineasIva.length
+    ? lineasIva.join(' — ') + ` — <strong>Total comprobante: ${money(totalComprobante)}</strong>`
+    : '';
   const descPorc = Number(document.getElementById('ngDescuentoPorcentaje').value) || 0;
   const descMonto = Number(document.getElementById('ngDescuentoMonto').value) || 0;
   let total = subtotal;
@@ -500,9 +512,6 @@ async function guardarNuevoGasto(){
     tipoComprobante: document.getElementById('ngTipoComprobante').value,
     puntoVenta: document.getElementById('ngPuntoVenta').value.trim(),
     comprobanteNumero: document.getElementById('ngComprobanteNumero').value.trim(),
-    importeNeto: Number(document.getElementById('ngImporteNeto').value) || 0,
-    alicuotaIva: Number(document.getElementById('ngAlicuotaIva').value),
-    importeExento: Number(document.getElementById('ngImporteExento').value) || 0
   };
   document.getElementById('ngErrNueva').textContent = '';
   if (!body.proveedorId) { document.getElementById('ngErrNueva').textContent = 'Elegí un proveedor'; return; }
@@ -531,6 +540,7 @@ function verDetalle(id){
       <td>${escapeHtml(it.conceptoNombre)}</td>
       <td>${it.cantidad}</td>
       <td>${money(it.precioUnitario)}</td>
+      <td>${it.alicuotaIva !== undefined ? (it.alicuotaIva === 0 ? 'Exento' : it.alicuotaIva + '%') : '—'}</td>
       <td>${money(it.subtotal)}</td>
     </tr>
   `).join('');
@@ -549,10 +559,10 @@ function verDetalle(id){
         ${g.tipoComprobante ? `<p class="muted" style="margin-top:-6px">
           ${TIPO_COMPROBANTE_LABEL[g.tipoComprobante]||g.tipoComprobante} ${escapeHtml(g.puntoVenta||'')}-${escapeHtml(g.comprobanteNumero||'')}
           ${g.esFiscal ? '<span class="pill activo">Fiscal</span>' : '<span class="pill inactivo">No fiscal</span>'}
-          — Neto ${money(g.importeNeto)} + IVA (${g.alicuotaIva}%) ${money(g.importeIva)}${g.importeExento ? ' + Exento ' + money(g.importeExento) : ''} = ${money(g.importeTotalComprobante)}
+          — Neto ${money(g.importeNeto)} + IVA ${money(g.importeIva)}${g.importeExento ? ' + Exento ' + money(g.importeExento) : ''} = ${money(g.importeTotalComprobante)}
         </p>` : ''}
         <table>
-          <thead><tr><th>Concepto</th><th>Cant.</th><th>Monto</th><th>Subtotal</th></tr></thead>
+          <thead><tr><th>Concepto</th><th>Cant.</th><th>Monto</th><th>IVA</th><th>Subtotal</th></tr></thead>
           <tbody>${filasItems}</tbody>
         </table>
         <div class="totales-box">

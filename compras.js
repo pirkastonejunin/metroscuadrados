@@ -135,10 +135,12 @@ const TIPO_COMPROBANTE_LABEL = {
 // que el ítem se cargue en importeExento en vez de importeNeto).
 const ALICUOTAS_IVA_VALIDAS = [0, 2.5, 5, 10.5, 21, 27];
 
-// Valida y normaliza los datos fiscales del comprobante — compartido
-// entre Compras y Gastos (misma estructura, duplicado a propósito:
-// cada router maneja su propia colección y no hay un módulo común de
-// "comprobantes" todavía).
+// Valida los datos del comprobante que NO dependen de los ítems (el
+// IVA, en cambio, se calcula por artículo — ver calcularComprobanteDesdeItems
+// más abajo, 4/10/2026: "el tema del iva debe ir por articulo no por
+// factura", corrección de Mato). Compartido entre Compras y Gastos
+// (misma estructura, duplicado a propósito: cada router maneja su
+// propia colección y no hay un módulo común de "comprobantes" todavía).
 function normalizarComprobante(body) {
   const tipoComprobante = normalizarTexto(body.tipoComprobante).toLowerCase();
   if (!TIPOS_COMPROBANTE_VALIDOS.includes(tipoComprobante)) throw err(400, `Tipo de comprobante inválido (opciones: ${TIPOS_COMPROBANTE_VALIDOS.join(', ')})`);
@@ -146,14 +148,8 @@ function normalizarComprobante(body) {
   if (!puntoVenta) throw err(400, 'Falta el punto de venta del comprobante');
   const comprobanteNumero = normalizarTexto(body.comprobanteNumero);
   if (!comprobanteNumero) throw err(400, 'Falta el número del comprobante');
-  const importeNeto = normalizarMontoNoNegativo(body.importeNeto, 'El importe neto del comprobante');
-  const alicuotaIva = Number(body.alicuotaIva);
-  if (!ALICUOTAS_IVA_VALIDAS.includes(alicuotaIva)) throw err(400, `Alícuota de IVA inválida (opciones: ${ALICUOTAS_IVA_VALIDAS.join(', ')})`);
-  const importeExento = body.importeExento ? normalizarMontoNoNegativo(body.importeExento, 'El importe exento/no gravado del comprobante') : 0;
-  const importeIva = Math.round(importeNeto * alicuotaIva) / 100;
-  const importeTotalComprobante = Math.round((importeNeto + importeIva + importeExento) * 100) / 100;
   const esFiscal = TIPOS_COMPROBANTE_FISCALES.has(tipoComprobante);
-  return { tipoComprobante, puntoVenta, comprobanteNumero, importeNeto, alicuotaIva, importeIva, importeExento, importeTotalComprobante, esFiscal };
+  return { tipoComprobante, puntoVenta, comprobanteNumero, esFiscal };
 }
 
 // Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
@@ -174,7 +170,6 @@ const COLUMNAS_COMPRAS_EXPORT = [
   { clave: 'estado', titulo: 'Estado' },
   { clave: 'moneda', titulo: 'Moneda' },
   { clave: 'importeNeto', titulo: 'Importe neto', tipo: 'numero' },
-  { clave: 'alicuotaIva', titulo: 'Alícuota IVA', tipo: 'numero' },
   { clave: 'importeIva', titulo: 'Importe IVA', tipo: 'numero' },
   { clave: 'importeExento', titulo: 'Importe exento', tipo: 'numero' },
   { clave: 'importeTotalComprobante', titulo: 'Total comprobante', tipo: 'numero' },
@@ -353,11 +348,35 @@ async function normalizarItems(db, req, itemsRaw) {
     if (!nombre) throw err(400, 'Falta el nombre de un ítem de la compra');
     const cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad de "${nombre}"`);
     const precioUnitario = normalizarMontoNoNegativo(precioBase, `El precio unitario de "${nombre}"`);
+    // IVA por artículo (4/10/2026, corrección de Mato: "el tema del iva
+    // debe ir por articulo no por factura" — cada ítem puede tener su
+    // propia alícuota, no una sola para todo el comprobante).
+    const alicuotaIva = Number(it.alicuotaIva);
+    if (!ALICUOTAS_IVA_VALIDAS.includes(alicuotaIva)) throw err(400, `Alícuota de IVA inválida para "${nombre}" (opciones: ${ALICUOTAS_IVA_VALIDAS.join(', ')})`);
     const itemSubtotal = cantidad * precioUnitario;
+    const itemIva = Math.round(itemSubtotal * alicuotaIva) / 100;
     subtotal += itemSubtotal;
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal });
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, alicuotaIva, importeIva: itemIva });
   }
   return { items, subtotal };
+}
+
+// Arma el desglose fiscal del comprobante A PARTIR de los ítems (cada
+// uno con su propia alícuota) — no es un dato que se tipee aparte a
+// nivel comprobante. Los ítems con alícuota 0 se consideran exentos/no
+// gravados; el resto suma a neto gravado + su IVA correspondiente.
+function calcularComprobanteDesdeItems(items) {
+  let importeNeto = 0, importeExento = 0, importeIva = 0;
+  for (const it of items) {
+    if (it.alicuotaIva === 0) importeExento += it.subtotal;
+    else importeNeto += it.subtotal;
+    importeIva += it.importeIva;
+  }
+  importeNeto = Math.round(importeNeto * 100) / 100;
+  importeExento = Math.round(importeExento * 100) / 100;
+  importeIva = Math.round(importeIva * 100) / 100;
+  const importeTotalComprobante = Math.round((importeNeto + importeIva + importeExento) * 100) / 100;
+  return { importeNeto, importeExento, importeIva, importeTotalComprobante };
 }
 
 function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
@@ -473,6 +492,7 @@ router.post('/', authAdmin, async (req, res) => {
       if (dupe) throw err(400, `Ya hay una compra cargada con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es la compra #${dupe.numero}.`);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
+      const fiscalItems = calcularComprobanteDesdeItems(items);
       const numero = await proximoNumero(db, req.orgId);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
@@ -483,11 +503,10 @@ router.post('/', authAdmin, async (req, res) => {
         puntoVenta: comprobante.puntoVenta,
         comprobanteNumero: comprobante.comprobanteNumero,
         esFiscal: comprobante.esFiscal,
-        importeNeto: comprobante.importeNeto,
-        alicuotaIva: comprobante.alicuotaIva,
-        importeIva: comprobante.importeIva,
-        importeExento: comprobante.importeExento,
-        importeTotalComprobante: comprobante.importeTotalComprobante,
+        importeNeto: fiscalItems.importeNeto,
+        importeIva: fiscalItems.importeIva,
+        importeExento: fiscalItems.importeExento,
+        importeTotalComprobante: fiscalItems.importeTotalComprobante,
         proveedorId,
         proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
         fecha,

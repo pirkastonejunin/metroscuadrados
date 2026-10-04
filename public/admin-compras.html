@@ -68,6 +68,7 @@
   .fila-item .campo-producto{flex:2;min-width:0;}
   .fila-item .campo-cant{flex:1;min-width:0;}
   .fila-item .campo-precio{flex:1;min-width:0;}
+  .fila-item .campo-iva{flex:1;min-width:0;}
   .fila-item .campo-subtotal{flex:1;min-width:0;text-align:right;font-weight:700;padding-top:8px;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
   .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
@@ -371,16 +372,11 @@ function abrirNuevaCompra(){
           <div><label>Punto de venta *</label><input id="ncPuntoVenta" placeholder="Ej: 0007"></div>
           <div><label>Número *</label><input id="ncComprobanteNumero" placeholder="Ej: 00001234"></div>
         </div>
-        <div class="grid3" style="margin-top:10px">
-          <div><label>Importe neto *</label><input id="ncImporteNeto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesComprobanteCompra()"></div>
-          <div><label>Alícuota IVA *</label><select id="ncAlicuotaIva" onchange="actualizarTotalesComprobanteCompra()">${opcionesAlicuotaIva(21)}</select></div>
-          <div><label>Importe exento/no gravado</label><input id="ncImporteExento" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesComprobanteCompra()"></div>
-        </div>
-        <div class="muted" id="ncComprobanteTotales" style="margin-top:6px"></div>
 
         <div class="section-title">Productos</div>
         <div id="ncFilasItems"></div>
         <button class="btn secondary small" onclick="agregarFilaCompra()">+ Agregar producto</button>
+        <div class="muted" id="ncComprobanteTotales" style="margin-top:8px"></div>
 
         <div class="grid2" style="margin-top:14px">
           <div><label>Descuento (%)</label><input id="ncDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()"></div>
@@ -396,16 +392,6 @@ function abrirNuevaCompra(){
   `;
   agregarFilaCompra();
   actualizarVisibilidadDepositoCompra();
-  actualizarTotalesComprobanteCompra();
-}
-
-function actualizarTotalesComprobanteCompra(){
-  const neto = Number(document.getElementById('ncImporteNeto').value) || 0;
-  const alicuota = Number(document.getElementById('ncAlicuotaIva').value) || 0;
-  const exento = Number(document.getElementById('ncImporteExento').value) || 0;
-  const iva = Math.round(neto * alicuota) / 100;
-  const total = Math.round((neto + iva + exento) * 100) / 100;
-  document.getElementById('ncComprobanteTotales').textContent = `IVA: ${money(iva)} — Total del comprobante: ${money(total)}`;
 }
 
 function actualizarCondicionPago(){
@@ -425,7 +411,7 @@ function agregarFilaCompra(){
   fila.innerHTML = `
     <div class="campo-producto">
       <label>Producto</label>
-      <select onchange="actualizarFilaCompra(this)">${opcionesProductosCompra()}</select>
+      <select class="select-producto" onchange="actualizarFilaCompra(this)">${opcionesProductosCompra()}</select>
     </div>
     <div class="campo-cant">
       <label>Cantidad</label>
@@ -435,6 +421,10 @@ function agregarFilaCompra(){
       <label>Precio unit.</label>
       <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()">
     </div>
+    <div class="campo-iva">
+      <label>IVA</label>
+      <select class="select-iva" onchange="actualizarTotalesCompra()">${opcionesAlicuotaIva(21)}</select>
+    </div>
     <div class="campo-subtotal"><span class="subtotal-valor">$ 0,00</span></div>
     <button class="btn-quitar" onclick="this.closest('.fila-item').remove(); actualizarTotalesCompra()">×</button>
   `;
@@ -443,7 +433,7 @@ function agregarFilaCompra(){
 
 function actualizarFilaCompra(el){
   const fila = el.closest('.fila-item');
-  const select = fila.querySelector('select');
+  const select = fila.querySelector('select.select-producto');
   const precioInput = fila.querySelector('.campo-precio input');
   if (el.tagName === 'SELECT') {
     const producto = productosCache.find(p => String(p._id) === select.value);
@@ -456,24 +446,47 @@ function juntarItemsCompra(){
   const filas = document.querySelectorAll('#ncFilasItems .fila-item');
   const items = [];
   filas.forEach(fila => {
-    const select = fila.querySelector('select');
+    const select = fila.querySelector('select.select-producto');
     const cantidad = Number(fila.querySelector('.campo-cant input').value);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
-    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
+    const alicuotaIva = Number(fila.querySelector('select.select-iva').value);
+    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario, alicuotaIva });
   });
   return items;
 }
 
+// Desglosa el IVA por alícuota (cada ítem puede tener la suya — 4/10/2026,
+// pedido de Mato: "el tema del iva debe ir por articulo no por factura")
+// y lo muestra debajo de los productos, junto al total fiscal del
+// comprobante.
 function actualizarTotalesCompra(){
   const filas = document.querySelectorAll('#ncFilasItems .fila-item');
   let subtotal = 0;
+  const porAlicuota = {};
+  let importeExento = 0;
   filas.forEach(fila => {
     const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const alicuota = Number(fila.querySelector('select.select-iva').value) || 0;
     const sub = cantidad * precioUnitario;
     subtotal += sub;
     fila.querySelector('.subtotal-valor').textContent = money(sub);
+    if (alicuota === 0) { importeExento += sub; }
+    else {
+      if (!porAlicuota[alicuota]) porAlicuota[alicuota] = { neto: 0, iva: 0 };
+      porAlicuota[alicuota].neto += sub;
+      porAlicuota[alicuota].iva += Math.round(sub * alicuota) / 100;
+    }
   });
+  const lineasIva = Object.keys(porAlicuota).sort((a,b) => b-a).map(al =>
+    `${al}%: neto ${money(porAlicuota[al].neto)} + IVA ${money(porAlicuota[al].iva)}`
+  );
+  if (importeExento > 0) lineasIva.push(`Exento: ${money(importeExento)}`);
+  const totalIva = Object.values(porAlicuota).reduce((a,x) => a + x.iva, 0);
+  const totalComprobante = subtotal + totalIva;
+  document.getElementById('ncComprobanteTotales').innerHTML = lineasIva.length
+    ? lineasIva.join(' — ') + ` — <strong>Total comprobante: ${money(totalComprobante)}</strong>`
+    : '';
   const descPorc = Number(document.getElementById('ncDescuentoPorcentaje').value) || 0;
   const descMonto = Number(document.getElementById('ncDescuentoMonto').value) || 0;
   let total = subtotal;
@@ -502,10 +515,7 @@ async function guardarNuevaCompra(){
     observaciones: document.getElementById('ncObservaciones').value.trim(),
     tipoComprobante: document.getElementById('ncTipoComprobante').value,
     puntoVenta: document.getElementById('ncPuntoVenta').value.trim(),
-    comprobanteNumero: document.getElementById('ncComprobanteNumero').value.trim(),
-    importeNeto: Number(document.getElementById('ncImporteNeto').value) || 0,
-    alicuotaIva: Number(document.getElementById('ncAlicuotaIva').value),
-    importeExento: Number(document.getElementById('ncImporteExento').value) || 0
+    comprobanteNumero: document.getElementById('ncComprobanteNumero').value.trim()
   };
   document.getElementById('ncErrNueva').textContent = '';
   if (!body.proveedorId) { document.getElementById('ncErrNueva').textContent = 'Elegí un proveedor'; return; }
@@ -536,6 +546,7 @@ function verDetalle(id){
       <td>${escapeHtml(it.nombre)}</td>
       <td>${it.cantidad}</td>
       <td>${money(it.precioUnitario)}</td>
+      <td>${it.alicuotaIva !== undefined ? (it.alicuotaIva === 0 ? 'Exento' : it.alicuotaIva + '%') : '—'}</td>
       <td>${money(it.subtotal)}</td>
     </tr>
   `).join('');
@@ -554,10 +565,10 @@ function verDetalle(id){
         ${c.tipoComprobante ? `<p class="muted" style="margin-top:-6px">
           ${TIPO_COMPROBANTE_LABEL[c.tipoComprobante]||c.tipoComprobante} ${escapeHtml(c.puntoVenta||'')}-${escapeHtml(c.comprobanteNumero||'')}
           ${c.esFiscal ? '<span class="pill activo">Fiscal</span>' : '<span class="pill inactivo">No fiscal</span>'}
-          — Neto ${money(c.importeNeto)} + IVA (${c.alicuotaIva}%) ${money(c.importeIva)}${c.importeExento ? ' + Exento ' + money(c.importeExento) : ''} = ${money(c.importeTotalComprobante)}
+          — Neto ${money(c.importeNeto)} + IVA ${money(c.importeIva)}${c.importeExento ? ' + Exento ' + money(c.importeExento) : ''} = ${money(c.importeTotalComprobante)}
         </p>` : ''}
         <table>
-          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>IVA</th><th>Subtotal</th></tr></thead>
           <tbody>${filasItems}</tbody>
         </table>
         <div class="totales-box">
