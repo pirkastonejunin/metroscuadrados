@@ -1453,9 +1453,21 @@ router.get('/', authAdmin, async (req, res) => {
       if (pid) match.proveedorId = pid;
     }
     if (req.query.q) {
-      const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      match.$or = [{ nombre: re }, { sku: re }];
+      // Varias palabras = todas deben aparecer en sku o nombre (3/10/2026,
+      // buscadores de productos de Stock/Ventas/etc. que ya no bajan el catálogo).
+      const palabras = String(req.query.q).trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      if (palabras.length) {
+        match.$and = palabras.map(w => {
+          const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+          return { $or: [{ nombre: re }, { sku: re }] };
+        });
+      }
     }
+    if (req.query.ids) {
+      const ids = String(req.query.ids).split(',').map(x => toObjectId(x.trim())).filter(Boolean).slice(0, 200);
+      match._id = { $in: ids };
+    }
+    const limiteSimple = req.query.limite ? Math.min(Math.max(parseInt(req.query.limite, 10) || 30, 1), 200) : 0;
     let projection = null;
     if (req.query.campos) {
       const pedidos = String(req.query.campos).split(',').map(s => s.trim()).filter(s => CAMPOS_PRODUCTOS_PERMITIDOS.includes(s));
@@ -1492,6 +1504,7 @@ router.get('/', authAdmin, async (req, res) => {
       const db = await getDb();
       let cursor = db.collection('productos_catalogo').find(match).sort({ nombre: 1 });
       if (projection) cursor = cursor.project(projection);
+      if (limiteSimple) cursor = cursor.limit(limiteSimple);
       return cursor.toArray();
     });
     res.json(productos);

@@ -419,16 +419,28 @@ router.get('/actual', authAdmin, async (req, res) => {
     }
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const [existencias, productos, depositos] = await Promise.all([
+      // (3/10/2026, "inventario tarda") antes se bajaba TODO el catálogo
+      // (25.000+ productos) en cada carga. Ahora solo se piden los productos
+      // que tienen existencias, y rubro/marca/búsqueda se filtran en Mongo.
+      const [existencias, depositos] = await Promise.all([
         db.collection('stock_actual').find(match).toArray(),
-        // Proyectado (2/10/2026, "sigue tardando mucho en mostrar la base
-        // del stock") — antes traía el documento COMPLETO de cada producto
-        // del catálogo (20.327 filas reales de Dux) solo para leer 5
-        // campos; con eso de más, armar esta grilla era pesado.
-        db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
-          .project({ sku: 1, nombre: 1, unidad: 1, cantidadMinima: 1, stockIdeal: 1, rubro: 1, marca: 1 }).toArray(),
         db.collection('depositos').find(filtroOrg(req)).toArray()
       ]);
+      const idsProd = Array.from(new Set(existencias.map(e => String(e.productoId)))).map(toObjectId).filter(Boolean);
+      const matchProd = Object.assign({ activo: { $ne: false }, _id: { $in: idsProd } }, filtroOrg(req));
+      if (req.query.rubro) matchProd.rubro = req.query.rubro;
+      if (req.query.marca) matchProd.marca = req.query.marca;
+      if (req.query.q) {
+        const palabras = String(req.query.q).trim().split(/\s+/).filter(Boolean).slice(0, 6);
+        if (palabras.length) matchProd.$and = palabras.map(w => {
+          const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+          return { $or: [{ nombre: re }, { sku: re }] };
+        });
+      }
+      const productos = idsProd.length
+        ? await db.collection('productos_catalogo').find(matchProd)
+            .project({ sku: 1, nombre: 1, unidad: 1, cantidadMinima: 1, stockIdeal: 1, rubro: 1, marca: 1 }).toArray()
+        : [];
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));
       const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
       let filas = existencias
@@ -476,10 +488,6 @@ router.get('/actual', authAdmin, async (req, res) => {
             actualizadoEn: e.actualizadoEn
           };
         });
-      if (req.query.q) {
-        const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-        filas = filas.filter(f => re.test(f.nombre) || re.test(f.sku));
-      }
       if (req.query.soloBajoMinimo === '1') filas = filas.filter(f => f.bajoMinimo);
       filas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
       return filas;
@@ -557,11 +565,15 @@ router.get('/movimientos', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 200, 500);
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const [movimientos, productos, depositos] = await Promise.all([
+      const [movimientos, depositos] = await Promise.all([
         db.collection('stock_movimientos').find(match).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray(),
-        db.collection('productos_catalogo').find({}).project({ sku: 1, nombre: 1 }).toArray(),
         db.collection('depositos').find({}).project({ nombre: 1 }).toArray()
       ]);
+      // Solo los productos de esas filas (antes se bajaba todo el catálogo).
+      const idsProd = Array.from(new Set(movimientos.map(m => String(m.productoId)))).map(toObjectId).filter(Boolean);
+      const productos = idsProd.length
+        ? await db.collection('productos_catalogo').find({ _id: { $in: idsProd } }).project({ sku: 1, nombre: 1 }).toArray()
+        : [];
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));
       const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
       return movimientos.map(m => {

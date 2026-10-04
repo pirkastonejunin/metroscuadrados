@@ -259,6 +259,21 @@ router.get('/clientes', authAdmin, async (req, res) => {
 router.get('/productos', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    // Búsqueda en el servidor (3/10/2026): ya no se baja el catálogo entero
+    // (25.000+ productos). ?q= (todas las palabras en sku o nombre),
+    // ?ids=a,b,c (productos puntuales) y ?limite=.
+    if (req.query.q) {
+      const palabras = String(req.query.q).trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      if (palabras.length) match.$and = palabras.map(w => {
+        const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        return { $or: [{ sku: re }, { nombre: re }] };
+      });
+    }
+    if (req.query.ids) {
+      const ids = String(req.query.ids).split(',').map(x => toObjectId(x.trim())).filter(Boolean).slice(0, 200);
+      match._id = { $in: ids };
+    }
+    const limiteProd = req.query.limite ? Math.min(Math.max(parseInt(req.query.limite, 10) || 30, 1), 200) : 0;
     const lista = await conReintento(async () => {
       const db = await getDb();
       // costo y preciosPorLista se agregan acá (30/9/2026) para que la
@@ -272,7 +287,7 @@ router.get('/productos', authAdmin, async (req, res) => {
       // conversión la hace el frontend antes de mandar la cantidad).
       return db.collection('productos_catalogo')
         .find(match, { projection: { sku: 1, nombre: 1, precio: 1, costo: 1, preciosPorLista: 1, unidad: 1, unidadesPorBulto: 1, stockeable: 1, aceptaStockNegativo: 1 } })
-        .sort({ nombre: 1 }).toArray();
+        .sort({ nombre: 1 }).limit(limiteProd || 0).toArray();
     });
     res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

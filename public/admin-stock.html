@@ -343,19 +343,13 @@ function cambiarTab(tab){
 let productosCache = [];
 let depositosCache = [];
 async function cargarProductosYDepositos(){
-  const [rp, rd, rr, rm] = await Promise.all([
-    // Solo los campos que esta pantalla necesita (2/10/2026, "sigue
-    // tardando mucho en mostrar la base del stock") — el catálogo real
-    // tiene 20.327 productos y antes se traía el documento completo de
-    // cada uno (precios, listas, descripciones...) solo para armar el
-    // buscador y la grilla.
-    fetch('/api/productos?campos=sku,nombre,activo,unidad,unidadesPorBulto,cantidadMinima,stockIdeal', {headers: headersAuth()}),
+  // Ya no se baja el catálogo (25.000+ productos): los buscadores piden
+  // al servidor solo lo que se escribe (3/10/2026, "tarda mucho").
+  const [rd, rr, rm] = await Promise.all([
     fetch(BASE + '/depositos', {headers: headersAuth()}),
-    // Filtros de Rubro/Marca en Stock actual (2/10/2026, pedido de Mato).
     fetch(BASE + '/rubros', {headers: headersAuth()}),
     fetch(BASE + '/marcas', {headers: headersAuth()})
   ]);
-  productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
   const rubros = rr.ok ? await rr.json() : [];
   const marcas = rm.ok ? await rm.json() : [];
@@ -392,7 +386,13 @@ async function cargarStockActual(){
   // (cliente y cantidad). "Disponible" puede ser negativo: significa que
   // lo comprometido ya supera el stock físico — hace falta reponer o
   // fabricar ese faltante para poder generar esos remitos.
-  body.innerHTML = filas.map(f => `
+  renderStockActual(200);
+}
+function renderStockActual(limite){
+  const filas = stockActualCache;
+  const body = document.getElementById('actualBody');
+  const visibles = filas.slice(0, limite);
+  body.innerHTML = visibles.map(f => `
     <tr>
       <td><strong>${escapeHtml(f.sku)}</strong></td>
       <td>${escapeHtml(f.nombre)}</td>
@@ -405,7 +405,9 @@ async function cargarStockActual(){
       <td class="muted">${f.cantidadMinima!=null ? f.cantidadMinima : '—'}</td>
       <td>${f.cantidadMinima!=null ? `<span class="pill ${f.bajoMinimo?'bajo':'ok'}">${f.bajoMinimo?'Bajo mínimo':'OK'}</span>` : '<span class="muted">—</span>'}</td>
     </tr>
-  `).join('');
+  `).join('') + (filas.length > limite
+    ? `<tr><td colspan="8" class="muted" style="text-align:center">Mostrando ${limite} de ${filas.length} — <a href="#" onclick="event.preventDefault(); renderStockActual(${limite + 200})">mostrar más</a> · o filtrá con la búsqueda</td></tr>`
+    : '');
 }
 
 // Detalle de qué ventas pendientes de remito componen el "comprometido"
@@ -489,13 +491,18 @@ const LIMITE_SUGERENCIAS_PRODUCTO = 30;
 function textoProducto(p){
   return (p.sku ? p.sku + ' — ' : '') + p.nombre;
 }
-function buscarProductosStock(query){
-  const q = (query || '').trim().toLowerCase();
-  const activos = productosCache.filter(p => p.activo !== false);
-  const resultados = q
-    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
-    : activos;
-  return resultados.slice(0, LIMITE_SUGERENCIAS_PRODUCTO);
+const CAMPOS_BUSQUEDA_PRODUCTO = 'sku,nombre,activo,unidad,unidadesPorBulto';
+function agregarAlCacheProductos(lista){
+  (lista || []).forEach(p => {
+    const i = productosCache.findIndex(x => String(x._id) === String(p._id));
+    if (i >= 0) productosCache[i] = p; else productosCache.push(p);
+  });
+}
+async function buscarProductosStock(query){
+  const r = await fetch('/api/productos?campos=' + CAMPOS_BUSQUEDA_PRODUCTO + '&limite=' + LIMITE_SUGERENCIAS_PRODUCTO + '&q=' + encodeURIComponent((query || '').trim()), {headers: headersAuth()});
+  const lista = r.ok ? await r.json() : [];
+  agregarAlCacheProductos(lista);
+  return lista;
 }
 function comboProductoHtml(prefix, seleccionadoId, onSelect){
   const seleccionado = seleccionadoId ? productosCache.find(p => String(p._id) === String(seleccionadoId)) : null;
@@ -510,13 +517,24 @@ function comboProductoHtml(prefix, seleccionadoId, onSelect){
     </div>
   `;
 }
+let _seqProd = 0;
+let _timerProd = null;
 function renderOpcionesProductoCombo(input, prefix, query){
   const cont = document.getElementById(prefix + 'ProductoOpciones');
-  const resultados = buscarProductosStock(query);
-  cont.innerHTML = resultados.length
-    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCombo(this,'${prefix}')">${escapeHtml(textoProducto(p))}</div>`).join('')
-    : `<div class="sin-resultados">${productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados'}</div>`;
   cont.classList.remove('hidden');
+  cont.innerHTML = '<div class="sin-resultados">Buscando…</div>';
+  const seq = ++_seqProd;
+  clearTimeout(_timerProd);
+  _timerProd = setTimeout(async () => {
+    let resultados = [];
+    try { resultados = await buscarProductosStock(query); } catch (e) { resultados = null; }
+    if (seq !== _seqProd) return;
+    cont.innerHTML = resultados === null
+      ? '<div class="sin-resultados">No se pudo buscar, probá de nuevo</div>'
+      : resultados.length
+        ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCombo(this,'${prefix}')">${escapeHtml(textoProducto(p))}</div>`).join('')
+        : '<div class="sin-resultados">Sin resultados para esa búsqueda</div>';
+  }, 200);
 }
 // Al escribir, la selección previa queda invalidada hasta elegir de nuevo
 // de la lista — evita guardar un producto distinto del que quedó escrito.

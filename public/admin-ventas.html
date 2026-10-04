@@ -354,9 +354,8 @@ function pintarAvisoCargaBase(){
 }
 async function cargarListasBase(orgId){
   const h = orgId ? headersAuthOrg(orgId) : headersAuth();
-  const [rc, rp, rd, rl, rcj, rbc, ru] = await Promise.all([
+  const [rc, rd, rl, rcj, rbc, ru] = await Promise.all([
     fetch(BASE + '/clientes', {headers: h}),
-    fetch(BASE + '/productos', {headers: h}),
     fetch(BASE + '/depositos', {headers: h}),
     fetch('/api/productos/listas-precio', {headers: h}),
     fetch('/api/tesoreria/cajas', {headers: h}),
@@ -373,7 +372,7 @@ async function cargarListasBase(orgId){
     return [];
   }
   clientesCache = await leer(rc, 'clientes');
-  productosCache = await leer(rp, 'productos');
+  productosCache = []; // se llena a demanda (búsqueda en el servidor), no se baja el catálogo
   depositosCache = await leer(rd, 'depósitos');
   listasPrecioCache = await leer(rl, 'listas de precio');
   // Cajas/bancos: si el usuario no tiene el módulo Tesorería habilitado
@@ -564,22 +563,49 @@ const LIMITE_SUGERENCIAS_PRODUCTO = 30;
 function textoProducto(p){
   return (p.sku ? p.sku + ' — ' : '') + p.nombre;
 }
-function buscarProductosVenta(query){
-  const q = (query || '').trim().toLowerCase();
-  const activos = productosCache.filter(p => p.activo !== false);
-  const resultados = q
-    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
-    : activos;
-  return resultados.slice(0, LIMITE_SUGERENCIAS_PRODUCTO);
+function headersProductosVenta(){
+  return (typeof ventaOrgSeleccionada !== 'undefined' && ventaOrgSeleccionada) ? headersAuthOrg(ventaOrgSeleccionada) : headersAuth();
 }
+function agregarAlCacheProductos(lista){
+  (lista || []).forEach(p => {
+    const i = productosCache.findIndex(x => String(x._id) === String(p._id));
+    if (i >= 0) productosCache[i] = p; else productosCache.push(p);
+  });
+}
+async function buscarProductosVenta(query){
+  const r = await fetch(BASE + '/productos?limite=' + LIMITE_SUGERENCIAS_PRODUCTO + '&q=' + encodeURIComponent((query || '').trim()), {headers: headersProductosVenta()});
+  const lista = r.ok ? await r.json() : [];
+  agregarAlCacheProductos(lista);
+  return lista;
+}
+// Trae al caché los productos que faltan (ítems de una venta existente, etc.)
+async function asegurarProductos(ids){
+  const faltan = Array.from(new Set((ids || []).filter(Boolean).map(String))).filter(id => !productosCache.some(p => String(p._id) === id));
+  if (!faltan.length) return;
+  try {
+    const r = await fetch(BASE + '/productos?ids=' + faltan.join(','), {headers: headersProductosVenta()});
+    if (r.ok) agregarAlCacheProductos(await r.json());
+  } catch (e) { console.error('No se pudieron traer los productos', e); }
+}
+let _seqProdVenta = 0;
+let _timerProdVenta = null;
 function renderOpcionesProductoVenta(input, query){
   const fila = input.closest('.fila-item');
   const cont = fila.querySelector('.producto-buscar-opciones');
-  const resultados = buscarProductosVenta(query);
-  cont.innerHTML = resultados.length
-    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoVenta(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
-    : `<div class="sin-resultados">${productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados'}</div>`;
   cont.classList.remove('hidden');
+  cont.innerHTML = '<div class="sin-resultados">Buscando…</div>';
+  const seq = ++_seqProdVenta;
+  clearTimeout(_timerProdVenta);
+  _timerProdVenta = setTimeout(async () => {
+    let resultados = [];
+    try { resultados = await buscarProductosVenta(query); } catch (e) { resultados = null; }
+    if (seq !== _seqProdVenta) return;
+    cont.innerHTML = resultados === null
+      ? '<div class="sin-resultados">No se pudo buscar, probá de nuevo</div>'
+      : resultados.length
+        ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoVenta(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
+        : '<div class="sin-resultados">Sin resultados para esa búsqueda</div>';
+  }, 200);
 }
 // Al escribir, la selección previa queda invalidada hasta elegir de nuevo
 // de la lista — evita mandar a vender un producto distinto al que
@@ -784,6 +810,7 @@ async function abrirNuevaVenta(prefill){
     if (prefill.observaciones) document.getElementById('nvObservaciones').value = prefill.observaciones;
   }
   if (prefill && prefill.items && prefill.items.length) {
+    await asegurarProductos(prefill.items.map(it => it.productoId));
     prefill.items.forEach(it => agregarFilaVentaPrefill(it));
   } else {
     agregarFilaVenta();
@@ -869,6 +896,7 @@ async function cambiarSucursalVenta(){
   if (!nuevaOrg || nuevaOrg === ventaOrgSeleccionada) return;
   ventaOrgSeleccionada = nuevaOrg;
   await cargarListasBase(nuevaOrg);
+  productosCache = [];
   document.getElementById('nvClienteWrap').outerHTML = comboClienteHtml('nv', '', '');
   document.getElementById('nvDeposito').outerHTML = `<select id="nvDeposito" style="flex:1">${opcionesDepositosVenta()}</select>`;
   document.getElementById('nvListaPrecio').innerHTML = opcionesListasPrecioVenta((listasPrecioCache.find(l=>l.predeterminada)||{})._id);
@@ -1442,9 +1470,10 @@ function sincronizarCantidadEntrega(el, origen){
   }
 }
 
-function abrirEntregar(id){
+async function abrirEntregar(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
+  await asegurarProductos((v.items || []).map(it => it.productoId));
   const deposito = v.depositoId ? depositosCache.find(d => String(d._id) === String(v.depositoId)) : null;
   const filasItems = v.items.map((it, idx) => {
     const entregada = it.cantidadEntregada || 0;

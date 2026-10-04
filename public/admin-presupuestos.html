@@ -244,12 +244,10 @@ async function iniciarApp(){
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
-  const [clientes, productos] = await Promise.all([
-    fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(r => r.json()),
-    fetch(BASE_VENTAS + '/productos', {headers: headersAuth()}).then(r => r.json())
-  ]);
+  // Los productos ya no se bajan enteros (25.000+): se buscan en el servidor al escribir.
+  const clientes = await fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(r => r.json());
   clientesCache = Array.isArray(clientes) ? clientes : [];
-  productosCache = Array.isArray(productos) ? productos : [];
+  productosCache = [];
   const hoy = new Date();
   const hace30 = new Date(hoy.getTime() - 30*24*60*60*1000);
   document.getElementById('fHasta').value = hoy.toISOString().slice(0,10);
@@ -399,13 +397,14 @@ function elegirClienteCombo(el, prefix){
 // compromete mercadería).
 // -----------------------------------------------------------------------
 function textoProducto(p){ return (p.sku ? p.sku + ' — ' : '') + p.nombre; }
-function buscarProductos(query){
-  const q = (query || '').trim().toLowerCase();
-  const activos = productosCache.filter(p => p.activo !== false);
-  const resultados = q
-    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
-    : activos;
-  return resultados.slice(0, LIMITE_SUGERENCIAS);
+async function buscarProductos(query){
+  const r = await fetch(BASE_VENTAS + '/productos?limite=' + LIMITE_SUGERENCIAS + '&q=' + encodeURIComponent((query || '').trim()), {headers: headersAuth()});
+  const lista = r.ok ? await r.json() : [];
+  lista.forEach(p => {
+    const i = productosCache.findIndex(x => String(x._id) === String(p._id));
+    if (i >= 0) productosCache[i] = p; else productosCache.push(p);
+  });
+  return lista;
 }
 function agregarFilaItem(prefill){
   const cont = document.getElementById('pItemsBody');
@@ -449,14 +448,23 @@ function agregarFilaItem(prefill){
   }
   actualizarTotalesPresupuesto();
 }
+let _seqProdItem = 0;
+let _timerProdItem = null;
 function renderOpcionesProductoItem(input, query){
   const fila = input.closest('.fila-item');
   const cont = fila.querySelector('.producto-buscar-opciones');
-  const resultados = buscarProductos(query);
-  cont.innerHTML = resultados.length
-    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoItem(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
-    : `<div class="sin-resultados">Sin coincidencias — se usa como ítem libre, con el texto tal cual lo escribiste.</div>`;
   cont.classList.remove('hidden');
+  cont.innerHTML = '<div class="sin-resultados">Buscando…</div>';
+  const seq = ++_seqProdItem;
+  clearTimeout(_timerProdItem);
+  _timerProdItem = setTimeout(async () => {
+    let resultados = [];
+    try { resultados = await buscarProductos(query); } catch (e) { resultados = []; }
+    if (seq !== _seqProdItem) return;
+    cont.innerHTML = resultados.length
+      ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoItem(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
+      : `<div class="sin-resultados">Sin coincidencias — se usa como ítem libre, con el texto tal cual lo escribiste.</div>`;
+  }, 200);
 }
 function escribirProductoItem(input){
   input.closest('.fila-item').querySelector('.producto-id').value = '';
