@@ -387,6 +387,72 @@ function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
 }
 
 // -----------------------------------------------------------------------
+// Órdenes de compra (4/10/2026, pedido de Mato: "para cerrar el ciclo
+// debemos armar ordenes de compra... es para cuando hago un pedido y
+// aun no llega la factura. no mueve stock, ni saldos. es un comprobante
+// de orden para mapear que es lo que falta ingresar") — es el pedido
+// que se le hace a un proveedor ANTES de que llegue la factura real:
+// no toca stock (sin recepción) ni Tesorería (sin pagos). Cuando llega
+// la factura, se "convierte" (total o parcialmente — un pedido puede
+// llegar en varias entregas/facturas) en una Compra de verdad, que ahí
+// sí es la que mueve stock y saldos — ver POST /ordenes/:id/convertir.
+//
+// Colección nueva: ordenes_compra : { numero (correlativo propio, NO
+//   fiscal, NO se mezcla con el de compras), proveedorId,
+//   proveedorNombre, fecha, moneda, cotizacionDolar, condicionPago,
+//   estado (pendiente/parcial/convertida/anulada), items: [{
+//   productoId, sku, nombre, cantidad, precioUnitario (estimado),
+//   subtotal, cantidadConvertida }], subtotal, observaciones,
+//   anuladaEn, anuladaPor, anuladaMotivo, usuarioNombre, orgId,
+//   createdAt, updatedAt } — y su propio contador,
+//   ordenes_compra_contadores.
+// -----------------------------------------------------------------------
+
+const ESTADOS_ORDEN_VALIDOS = ['pendiente', 'parcial', 'convertida', 'anulada'];
+
+async function proximoNumeroOrden(db, orgId) {
+  const r = await db.collection('ordenes_compra_contadores').findOneAndUpdate(
+    { orgId },
+    { $inc: { ultimo: 1 } },
+    { upsert: true, returnDocument: 'after' }
+  );
+  const doc = r && r.value !== undefined ? r.value : r;
+  return doc ? doc.ultimo : 1;
+}
+
+// Ítems de una orden — a diferencia de normalizarItems (la compra real),
+// acá NO hay IVA por artículo: es un pedido previo a la factura, el IVA
+// discriminado recién se carga cuando se convierte (con los datos reales
+// del comprobante que mandó el proveedor). El precio unitario es
+// estimado (se autocompleta con el costo del producto, pero no es
+// obligatorio que sea exacto).
+async function normalizarItemsOrden(db, req, itemsRaw) {
+  if (!Array.isArray(itemsRaw) || !itemsRaw.length) throw err(400, 'La orden de compra necesita al menos un ítem');
+  const items = [];
+  let subtotal = 0;
+  for (const it of itemsRaw) {
+    const productoId = it.productoId ? toObjectId(it.productoId) : null;
+    let nombre = normalizarTexto(it.nombre);
+    let sku = normalizarTexto(it.sku) || null;
+    let precioBase = it.precioUnitario;
+    if (productoId) {
+      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
+      if (!producto) throw err(400, 'Uno de los productos de la orden no existe (o no pertenece a esta organización)');
+      nombre = producto.nombre;
+      sku = producto.sku || null;
+      if (precioBase === undefined || precioBase === null || precioBase === '') precioBase = producto.costo;
+    }
+    if (!nombre) throw err(400, 'Falta el nombre de un ítem de la orden');
+    const cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad de "${nombre}"`);
+    const precioUnitario = normalizarMontoNoNegativo(precioBase || 0, `El precio unitario estimado de "${nombre}"`);
+    const itemSubtotal = Math.round(cantidad * precioUnitario * 100) / 100;
+    subtotal += itemSubtotal;
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, cantidadConvertida: 0 });
+  }
+  return { items, subtotal: Math.round(subtotal * 100) / 100 };
+}
+
+// -----------------------------------------------------------------------
 // Compras — CRUD + acciones
 // -----------------------------------------------------------------------
 
@@ -484,6 +550,319 @@ router.get('/saldos-proveedores', authAdmin, async (req, res) => {
       ]).toArray();
     });
     res.json(lista.map(x => ({ proveedorId: x._id, proveedorNombre: x.proveedorNombre, saldoPendiente: Math.round(x.saldoPendiente * 100) / 100, cantidadCompras: x.cantidadCompras })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Alta rápida de producto (4/10/2026, pedido de Mato: "la posibilidad de
+// dar de alta la mercadería desde ahí") — pensada para cargar un
+// producto al vuelo mientras se arma una orden de compra, sin tener que
+// salir a Productos (que además exige su propio módulo). Crea un
+// producto mínimo (sku + nombre, costo opcional); el resto de la ficha
+// se completa después, en Productos, si hace falta. Mismo patrón que
+// la alta rápida de "conceptos" en Gastos.
+// -----------------------------------------------------------------------
+
+router.post('/productos-rapido', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear un producto.');
+    const body = req.body || {};
+    const sku = normalizarTexto(body.sku).toUpperCase();
+    if (!sku) throw err(400, 'El SKU (código) es obligatorio');
+    const nombre = normalizarTexto(body.nombre);
+    if (!nombre) throw err(400, 'El nombre es obligatorio');
+    const costo = (body.costo !== undefined && body.costo !== null && body.costo !== '') ? normalizarMontoNoNegativo(body.costo, 'El costo') : null;
+    const unidad = normalizarTexto(body.unidad).toLowerCase() || 'unidad';
+
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const match = Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req));
+      const existente = await db.collection('productos_catalogo').findOne(match);
+      if (existente) throw err(400, `Ya hay otro producto activo con el SKU "${sku}" (${existente.nombre}).`);
+      const ahora = new Date();
+      const nuevo = {
+        sku, nombre, unidad, costo, precio: null, activo: true,
+        tipoProducto: 'simple', disponiblePara: 'todos', moneda: 'ARS',
+        stockeable: true, aceptaStockNegativo: false, trazable: false,
+        orgId: req.orgId, createdAt: ahora, updatedAt: ahora
+      };
+      const r = await db.collection('productos_catalogo').insertOne(nuevo);
+      return Object.assign({ _id: r.insertedId }, nuevo);
+    });
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Órdenes de compra — CRUD + conversión a Compra real.
+// -----------------------------------------------------------------------
+
+router.get('/ordenes', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.proveedorId) {
+      const pid = toObjectId(req.query.proveedorId);
+      if (!pid) throw err(400, 'proveedorId inválido');
+      match.proveedorId = pid;
+    }
+    if (req.query.estado) {
+      if (!ESTADOS_ORDEN_VALIDOS.includes(req.query.estado)) throw err(400, 'Estado inválido');
+      match.estado = req.query.estado;
+    }
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
+    }
+    const limite = Math.min(Number(req.query.limite) || 200, 500);
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('ordenes_compra').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/ordenes/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const orden = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+    });
+    if (!orden) throw err(404, 'Orden de compra no encontrada');
+    res.json(orden);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/ordenes', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar una orden de compra.');
+    const body = req.body || {};
+    const proveedorId = toObjectId(body.proveedorId);
+    if (!proveedorId) throw err(400, 'Elegí un proveedor');
+    const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
+    if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
+    const condicionPago = normalizarTexto(body.condicionPago);
+    const observaciones = normalizarTexto(body.observaciones);
+    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrg(req)));
+      if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
+      const { items, subtotal } = await normalizarItemsOrden(db, req, body.items);
+      const numero = await proximoNumeroOrden(db, req.orgId);
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const ahora = new Date();
+      const orden = {
+        numero,
+        proveedorId,
+        proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
+        fecha,
+        moneda,
+        cotizacionDolar,
+        condicionPago: condicionPago || proveedor.condicionPago || '',
+        estado: 'pendiente',
+        items,
+        subtotal,
+        observaciones,
+        anuladaEn: null,
+        anuladaPor: null,
+        anuladaMotivo: null,
+        usuarioNombre,
+        orgId: req.orgId,
+        createdAt: ahora,
+        updatedAt: ahora
+      };
+      const r = await db.collection('ordenes_compra').insertOne(orden);
+      orden._id = r.insertedId;
+      return orden;
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/ordenes/:id/anular', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const motivo = normalizarTexto((req.body || {}).motivo);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const orden = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!orden) throw err(404, 'Orden de compra no encontrada');
+      if (orden.estado === 'anulada') throw err(400, 'Esa orden ya está anulada');
+      if (orden.estado === 'convertida') throw err(400, 'Esa orden ya se convirtió por completo en una compra, no se puede anular');
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      await db.collection('ordenes_compra').updateOne({ _id: id }, { $set: {
+        estado: 'anulada', anuladaEn: new Date(), anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: new Date()
+      } });
+      return db.collection('ordenes_compra').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Convierte (total o parcialmente) una orden de compra en una Compra
+// real — recién acá se cargan los datos del comprobante fiscal (tipo,
+// punto de venta, número, IVA por artículo) porque recién acá existe la
+// factura de verdad. Es la ÚNICA de las rutas de órdenes que mueve stock
+// (si tipoRecepcion es inmediata) o deja saldo pendiente de pago — la
+// orden en sí nunca toca ninguno de los dos.
+router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    const tipoRecepcion = normalizarTexto(body.tipoRecepcion).toLowerCase();
+    if (!TIPOS_RECEPCION_VALIDOS.includes(tipoRecepcion)) throw err(400, `Tipo de recepción inválido (opciones: ${TIPOS_RECEPCION_VALIDOS.join(', ')})`);
+    const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
+    if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
+    const depositoId = body.depositoId ? toObjectId(body.depositoId) : null;
+    if (tipoRecepcion === 'inmediata' && !depositoId) throw err(400, 'Elegí a qué depósito le vas a ingresar el stock.');
+    const condicionPago = normalizarTexto(body.condicionPago);
+    const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
+    const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
+    const observaciones = normalizarTexto(body.observaciones);
+    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
+    const comprobante = normalizarComprobante(body);
+    if (!Array.isArray(body.items) || !body.items.length) throw err(400, 'Elegí al menos un ítem de la orden para convertir');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const orden = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!orden) throw err(404, 'Orden de compra no encontrada');
+      if (orden.estado === 'anulada') throw err(400, 'Esa orden está anulada, no se puede convertir');
+      if (orden.estado === 'convertida') throw err(400, 'Esa orden ya se convirtió por completo en una compra');
+
+      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: orden.proveedorId }, filtroOrg(req)));
+      if (!proveedor) throw err(400, 'El proveedor de la orden no existe (o no pertenece a esta organización)');
+
+      // Mismo chequeo de comprobante duplicado que en POST / de compras.
+      const dupe = await db.collection('compras').findOne(Object.assign({
+        proveedorId: orden.proveedorId, tipoComprobante: comprobante.tipoComprobante,
+        puntoVenta: comprobante.puntoVenta, comprobanteNumero: comprobante.comprobanteNumero,
+        estado: { $ne: 'anulada' }
+      }, filtroOrg(req)));
+      if (dupe) throw err(400, `Ya hay una compra cargada con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es la compra #${dupe.numero}.`);
+
+      // Valida cada ítem a convertir contra lo que todavía está
+      // pendiente en la orden (permite convertir de a partes).
+      const usados = new Set();
+      const itemsRaw = [];
+      const cantidadesPorIndice = [];
+      for (const it of body.items) {
+        const idx = Number(it.ordenItemIndex);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= orden.items.length) throw err(400, 'Ítem de la orden inválido');
+        if (usados.has(idx)) throw err(400, 'No se puede convertir el mismo ítem de la orden dos veces en la misma compra');
+        usados.add(idx);
+        const ordenItem = orden.items[idx];
+        const pendiente = Math.round((ordenItem.cantidad - (ordenItem.cantidadConvertida || 0)) * 1000) / 1000;
+        const cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad a convertir de "${ordenItem.nombre}"`);
+        if (cantidad > pendiente + 0.0001) throw err(400, `No se puede convertir más de lo pendiente de "${ordenItem.nombre}" (pendiente: ${pendiente})`);
+        itemsRaw.push({
+          productoId: ordenItem.productoId,
+          sku: ordenItem.sku,
+          nombre: ordenItem.nombre,
+          cantidad,
+          precioUnitario: (it.precioUnitario !== undefined && it.precioUnitario !== null && it.precioUnitario !== '') ? it.precioUnitario : ordenItem.precioUnitario,
+          alicuotaIva: it.alicuotaIva
+        });
+        cantidadesPorIndice.push([idx, cantidad]);
+      }
+
+      const { items, subtotal } = await normalizarItems(db, req, itemsRaw);
+      const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
+      const fiscalItems = calcularComprobanteDesdeItems(items);
+      const numero = await proximoNumero(db, req.orgId);
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const ahora = new Date();
+
+      const compra = {
+        numero,
+        tipoComprobante: comprobante.tipoComprobante,
+        puntoVenta: comprobante.puntoVenta,
+        comprobanteNumero: comprobante.comprobanteNumero,
+        esFiscal: comprobante.esFiscal,
+        importeNeto: fiscalItems.importeNeto,
+        importeIva: fiscalItems.importeIva,
+        importeExento: fiscalItems.importeExento,
+        importeTotalComprobante: fiscalItems.importeTotalComprobante,
+        proveedorId: orden.proveedorId,
+        proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
+        fecha,
+        moneda,
+        cotizacionDolar,
+        condicionPago: condicionPago || proveedor.condicionPago || '',
+        tipoRecepcion,
+        depositoId,
+        estado: tipoRecepcion === 'inmediata' ? 'recibida' : 'pendiente',
+        items,
+        descuentoPorcentaje,
+        descuentoMonto,
+        subtotal,
+        total,
+        pagos: [],
+        totalPagado: 0,
+        saldoPendiente: total,
+        observaciones,
+        stockIngresado: false,
+        stockIngresadoEn: null,
+        recibidaEn: null,
+        anuladaEn: null,
+        anuladaPor: null,
+        anuladaMotivo: null,
+        ordenCompraId: orden._id,
+        ordenCompraNumero: orden.numero,
+        usuarioNombre,
+        orgId: req.orgId,
+        createdAt: ahora,
+        updatedAt: ahora
+      };
+
+      const r = await db.collection('compras').insertOne(compra);
+      compra._id = r.insertedId;
+
+      for (const item of items) {
+        if (!item.productoId) continue;
+        await db.collection('productos_catalogo').updateOne(
+          Object.assign({ _id: item.productoId }, filtroOrg(req)),
+          { $set: { costo: item.precioUnitario, updatedAt: new Date() } }
+        );
+      }
+
+      if (tipoRecepcion === 'inmediata') {
+        await ingresarStockDeCompra(db, req, compra, depositoId);
+        await db.collection('compras').updateOne({ _id: compra._id }, { $set: { stockIngresado: true, stockIngresadoEn: ahora, recibidaEn: ahora } });
+        compra.stockIngresado = true;
+        compra.stockIngresadoEn = ahora;
+        compra.recibidaEn = ahora;
+      }
+
+      // Actualiza cuánto se convirtió de cada ítem de la orden, y
+      // recalcula su estado — esto NO toca stock ni saldos, solo lo que
+      // ya se actualizó arriba en la compra recién creada.
+      const porIndice = new Map(cantidadesPorIndice);
+      const itemsActualizados = orden.items.map((oi, i) => {
+        if (!porIndice.has(i)) return oi;
+        const nuevaCantidadConvertida = Math.round(((oi.cantidadConvertida || 0) + porIndice.get(i)) * 1000) / 1000;
+        return Object.assign({}, oi, { cantidadConvertida: nuevaCantidadConvertida });
+      });
+      const totalmenteConvertida = itemsActualizados.every(it => (it.cantidadConvertida || 0) >= it.cantidad - 0.0001);
+      const algoConvertido = itemsActualizados.some(it => (it.cantidadConvertida || 0) > 0);
+      const nuevoEstadoOrden = totalmenteConvertida ? 'convertida' : (algoConvertido ? 'parcial' : 'pendiente');
+      await db.collection('ordenes_compra').updateOne({ _id: orden._id }, { $set: {
+        items: itemsActualizados, estado: nuevoEstadoOrden, updatedAt: new Date()
+      } });
+
+      return compra;
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

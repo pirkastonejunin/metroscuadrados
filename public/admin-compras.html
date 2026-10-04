@@ -137,6 +137,7 @@
     <div class="tabs">
       <button type="button" class="tab-btn activo" id="tabBtnCompras" onclick="cambiarTab('compras')">Compras</button>
       <button type="button" class="tab-btn" id="tabBtnPagos" onclick="cambiarTab('pagos')">Pagos</button>
+      <button type="button" class="tab-btn" id="tabBtnOrdenes" onclick="cambiarTab('ordenes')">Órdenes</button>
     </div>
 
     <div id="tabCompras">
@@ -210,6 +211,44 @@
         <table>
           <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Monto</th><th>Aplicado a</th><th>Nota</th></tr></thead>
           <tbody id="pagosBody"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="tabOrdenes" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div class="row" style="flex:1">
+            <div style="min-width:180px">
+              <label>Proveedor</label>
+              <select id="foProveedor" onchange="cargarOrdenes()"><option value="">Todos</option></select>
+            </div>
+            <div style="min-width:150px">
+              <label>Estado</label>
+              <select id="foEstado" onchange="cargarOrdenes()">
+                <option value="">Todos</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="parcial">Parcial</option>
+                <option value="convertida">Convertida</option>
+                <option value="anulada">Anulada</option>
+              </select>
+            </div>
+            <div style="min-width:140px">
+              <label>Desde</label>
+              <input id="foDesde" type="date" onchange="cargarOrdenes()">
+            </div>
+            <div style="min-width:140px">
+              <label>Hasta</label>
+              <input id="foHasta" type="date" onchange="cargarOrdenes()">
+            </div>
+          </div>
+          <button class="btn" onclick="abrirNuevaOrden()">+ Nueva orden</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th>Estimado</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="ordenesBody"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -346,6 +385,8 @@ async function cargarListasBase(){
   document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
     proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
   document.getElementById('fpProveedor').innerHTML = '<option value="">Todos</option>' +
+    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
+  document.getElementById('foProveedor').innerHTML = '<option value="">Todos</option>' +
     proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
 }
 
@@ -843,9 +884,12 @@ async function descargarBlob(url, nombreArchivo){
 function cambiarTab(tab){
   document.getElementById('tabCompras').classList.toggle('hidden', tab !== 'compras');
   document.getElementById('tabPagos').classList.toggle('hidden', tab !== 'pagos');
+  document.getElementById('tabOrdenes').classList.toggle('hidden', tab !== 'ordenes');
   document.getElementById('tabBtnCompras').classList.toggle('activo', tab === 'compras');
   document.getElementById('tabBtnPagos').classList.toggle('activo', tab === 'pagos');
+  document.getElementById('tabBtnOrdenes').classList.toggle('activo', tab === 'ordenes');
   if (tab === 'pagos') { cargarSaldosProveedores(); cargarPagos(); }
+  if (tab === 'ordenes') { cargarOrdenes(); }
 }
 
 async function cargarSaldosProveedores(){
@@ -1082,6 +1126,451 @@ async function confirmarPagoCuenta(){
     await cargarCompras();
   }catch(e){
     document.getElementById('pcErr').textContent = e.message;
+  }
+}
+
+// -------------------------------------------------------------------
+// Pestaña "Órdenes" (4/10/2026, pedido de Mato: "para cerrar el ciclo
+// debemos armar ordenes de compra... es para cuando hago un pedido y
+// aun no llega la factura. no mueve stock, ni saldos") — un pedido al
+// proveedor previo a la factura real. Cuando llega la factura, se
+// "convierte" (total o parcialmente) en una Compra de verdad — ahí sí
+// se cargan los datos fiscales (comprobante + IVA) y recién ahí se
+// puede mover stock.
+// -------------------------------------------------------------------
+const ESTADO_ORDEN_LABEL = { pendiente: 'Pendiente', parcial: 'Parcial', convertida: 'Convertida', anulada: 'Anulada' };
+let ordenesCache = [];
+
+async function cargarOrdenes(){
+  const params = new URLSearchParams();
+  if (document.getElementById('foProveedor').value) params.set('proveedorId', document.getElementById('foProveedor').value);
+  if (document.getElementById('foEstado').value) params.set('estado', document.getElementById('foEstado').value);
+  if (document.getElementById('foDesde').value) params.set('desde', document.getElementById('foDesde').value);
+  if (document.getElementById('foHasta').value) params.set('hasta', document.getElementById('foHasta').value);
+  const r = await fetch(BASE + '/ordenes?' + params.toString(), {headers: headersAuth()});
+  const body = document.getElementById('ordenesBody');
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="err">No se pudo cargar.</td></tr>'; return; }
+  ordenesCache = await r.json();
+  if (!ordenesCache.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No hay órdenes de compra cargadas todavía.</td></tr>'; return; }
+  body.innerHTML = ordenesCache.map(o => `
+    <tr>
+      <td><strong>#${o.numero}</strong></td>
+      <td class="muted">${fechaCorta(o.fecha)}</td>
+      <td>${escapeHtml(o.proveedorNombre)}</td>
+      <td>${money(o.subtotal)}</td>
+      <td><span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span></td>
+      <td><button class="btn small secondary" onclick="verDetalleOrden('${o._id}')">Ver</button></td>
+    </tr>
+  `).join('');
+}
+
+function abrirNuevaOrden(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Nueva orden de compra</h2>
+        <p class="muted" style="margin-top:-8px">Es un pedido al proveedor — todavía no mueve stock ni genera saldo a pagar. Cuando llegue la factura, se convierte en una compra.</p>
+        <div class="grid3">
+          <div><label>Proveedor *</label><select id="noProveedor" onchange="actualizarCondicionPagoOrden()">${opcionesProveedoresSelect()}</select></div>
+          <div><label>Condición de pago</label><input id="noCondicionPago" placeholder="Se autocompleta del proveedor"></div>
+          <div><label>Fecha</label><input id="noFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Moneda</label><select id="noMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
+          <div><label>Cotización dólar</label><input id="noCotizacionDolar" type="number" min="0" step="0.01" placeholder="Opcional"></div>
+        </div>
+
+        <div class="section-title">Productos</div>
+        <div id="noFilasItems"></div>
+        <div class="row" style="gap:8px">
+          <button class="btn secondary small" onclick="agregarFilaOrden()">+ Agregar producto</button>
+          <button class="btn secondary small" onclick="abrirAltaRapidaProducto()">+ Crear producto nuevo</button>
+        </div>
+
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="noObservaciones"></textarea></div>
+        <div class="totales-box" id="noTotales"></div>
+        <div class="err" id="noErrNueva"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarNuevaOrden()">Guardar orden</button>
+      </div>
+    </div>
+  `;
+  agregarFilaOrden();
+}
+
+function actualizarCondicionPagoOrden(){
+  const prov = proveedoresCache.find(p => String(p._id) === document.getElementById('noProveedor').value);
+  document.getElementById('noCondicionPago').value = prov ? (prov.condicionPago || '') : '';
+}
+
+function agregarFilaOrden(){
+  const cont = document.getElementById('noFilasItems');
+  const fila = document.createElement('div');
+  fila.className = 'fila-item';
+  fila.innerHTML = `
+    <div class="campo-producto">
+      <label>Producto</label>
+      <select class="select-producto" onchange="actualizarFilaOrden(this)">${opcionesProductosCompra()}</select>
+    </div>
+    <div class="campo-cant">
+      <label>Cantidad</label>
+      <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarTotalesOrden()">
+    </div>
+    <div class="campo-precio">
+      <label>Precio estimado</label>
+      <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesOrden()">
+    </div>
+    <div class="campo-subtotal"><span class="subtotal-valor">$ 0,00</span></div>
+    <button class="btn-quitar" onclick="this.closest('.fila-item').remove(); actualizarTotalesOrden()">×</button>
+  `;
+  cont.appendChild(fila);
+}
+
+function actualizarFilaOrden(el){
+  const fila = el.closest('.fila-item');
+  const select = fila.querySelector('select.select-producto');
+  const precioInput = fila.querySelector('.campo-precio input');
+  if (el.tagName === 'SELECT') {
+    const producto = productosCache.find(p => String(p._id) === select.value);
+    precioInput.value = producto ? (producto.costo || 0) : 0;
+  }
+  actualizarTotalesOrden();
+}
+
+function juntarItemsOrden(){
+  const filas = document.querySelectorAll('#noFilasItems .fila-item');
+  const items = [];
+  filas.forEach(fila => {
+    const select = fila.querySelector('select.select-producto');
+    const cantidad = Number(fila.querySelector('.campo-cant input').value);
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
+    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
+  });
+  return items;
+}
+
+function actualizarTotalesOrden(){
+  const filas = document.querySelectorAll('#noFilasItems .fila-item');
+  let subtotal = 0;
+  filas.forEach(fila => {
+    const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const sub = cantidad * precioUnitario;
+    subtotal += sub;
+    fila.querySelector('.subtotal-valor').textContent = money(sub);
+  });
+  document.getElementById('noTotales').innerHTML = `
+    <div class="fila-total grande"><span>Estimado</span><span>${money(subtotal)}</span></div>
+  `;
+}
+
+// Alta rápida de producto (4/10/2026, pedido de Mato: "la posibilidad de
+// dar de alta la mercadería desde ahí") — crea un producto mínimo sin
+// salir del formulario de la orden, y lo deja seleccionado en una fila
+// nueva de productos.
+function abrirAltaRapidaProducto(){
+  const modalPrevio = document.getElementById('modalRoot').innerHTML;
+  document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
+    <div class="modal-bg" id="arpBg" onclick="if(event.target===this) cerrarAltaRapidaProducto()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarAltaRapidaProducto()">✕</span>
+        <h2>Crear producto nuevo</h2>
+        <p class="muted" style="margin-top:-8px">Alta mínima — después se puede completar la ficha entera desde Productos.</p>
+        <div class="grid2">
+          <div><label>SKU (código) *</label><input id="arpSku"></div>
+          <div><label>Nombre *</label><input id="arpNombre"></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Costo</label><input id="arpCosto" type="number" min="0" step="0.01" placeholder="Opcional"></div>
+          <div><label>Unidad</label><input id="arpUnidad" value="unidad"></div>
+        </div>
+        <div class="err" id="arpErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarAltaRapidaProducto()">Crear y usar en la orden</button>
+      </div>
+    </div>
+  `);
+}
+function cerrarAltaRapidaProducto(){
+  const el = document.getElementById('arpBg');
+  if (el) el.remove();
+}
+async function confirmarAltaRapidaProducto(){
+  const sku = document.getElementById('arpSku').value.trim();
+  const nombre = document.getElementById('arpNombre').value.trim();
+  const costo = document.getElementById('arpCosto').value;
+  const unidad = document.getElementById('arpUnidad').value.trim() || 'unidad';
+  const errEl = document.getElementById('arpErr');
+  errEl.textContent = '';
+  if (!sku) { errEl.textContent = 'El SKU es obligatorio'; return; }
+  if (!nombre) { errEl.textContent = 'El nombre es obligatorio'; return; }
+  try{
+    const r = await fetch(BASE + '/productos-rapido', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ sku, nombre, costo: costo === '' ? null : Number(costo), unidad })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al crear el producto');
+    productosCache.push(data);
+    cerrarAltaRapidaProducto();
+    // Usa el producto recién creado en una fila nueva de la orden.
+    agregarFilaOrden();
+    const filas = document.querySelectorAll('#noFilasItems .fila-item');
+    const ultima = filas[filas.length - 1];
+    const select = ultima.querySelector('select.select-producto');
+    select.innerHTML = opcionesProductosCompra(String(data._id));
+    actualizarFilaOrden(select);
+  }catch(e){
+    errEl.textContent = e.message;
+  }
+}
+
+async function guardarNuevaOrden(){
+  const items = juntarItemsOrden();
+  const body = {
+    proveedorId: document.getElementById('noProveedor').value,
+    condicionPago: document.getElementById('noCondicionPago').value.trim(),
+    fecha: document.getElementById('noFecha').value,
+    moneda: document.getElementById('noMoneda').value,
+    cotizacionDolar: document.getElementById('noCotizacionDolar').value || null,
+    items,
+    observaciones: document.getElementById('noObservaciones').value.trim()
+  };
+  document.getElementById('noErrNueva').textContent = '';
+  if (!body.proveedorId) { document.getElementById('noErrNueva').textContent = 'Elegí un proveedor'; return; }
+  if (!items.length) { document.getElementById('noErrNueva').textContent = 'Agregá al menos un producto'; return; }
+  try{
+    const r = await fetch(BASE + '/ordenes', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    cerrarModal();
+    await cargarOrdenes();
+  }catch(e){
+    document.getElementById('noErrNueva').textContent = e.message;
+  }
+}
+
+function verDetalleOrden(id){
+  const o = ordenesCache.find(x => x._id === id);
+  if (!o) return;
+  const filasItems = o.items.map((it, i) => {
+    const pendiente = Math.round((it.cantidad - (it.cantidadConvertida || 0)) * 1000) / 1000;
+    return `
+    <tr>
+      <td>${escapeHtml(it.sku||'')}</td>
+      <td>${escapeHtml(it.nombre)}</td>
+      <td>${it.cantidad}</td>
+      <td class="muted">${it.cantidadConvertida || 0}</td>
+      <td>${pendiente}</td>
+      <td>${money(it.precioUnitario)}</td>
+      <td>${money(it.subtotal)}</td>
+    </tr>
+  `;}).join('');
+
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Orden de compra #${o.numero} <span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span></h2>
+        <p class="muted" style="margin-top:-8px">
+          ${escapeHtml(o.proveedorNombre)} — ${fechaCorta(o.fecha)}${o.condicionPago ? ' — Condición: ' + escapeHtml(o.condicionPago) : ''}
+        </p>
+        <table>
+          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Convertido</th><th>Pendiente</th><th>Precio est.</th><th>Subtotal</th></tr></thead>
+          <tbody>${filasItems}</tbody>
+        </table>
+        <div class="totales-box">
+          <div class="fila-total grande"><span>Estimado</span><span>${money(o.subtotal)}</span></div>
+        </div>
+        ${o.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(o.observaciones)}</p>` : ''}
+        <div class="err" id="doErr"></div>
+        <div class="row" style="margin-top:14px">
+          ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn" onclick="abrirConvertirOrden('${o._id}')">Convertir en compra</button>` : ''}
+          ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn danger" onclick="anularOrden('${o._id}')">Anular orden</button>` : ''}
+        </div>
+        ${o.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${o.anuladaPor ? ' por ' + escapeHtml(o.anuladaPor) : ''}${o.anuladaEn ? ' — ' + fechaHora(o.anuladaEn) : ''}${o.anuladaMotivo ? ': ' + escapeHtml(o.anuladaMotivo) : ''}</p>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function anularOrden(id){
+  const o = ordenesCache.find(x => x._id === id);
+  const motivo = prompt('¿Por qué se anula esta orden? (opcional)') || '';
+  if (motivo === null) return;
+  if (!confirm(`¿Anular la orden #${o.numero}?`)) return;
+  try{
+    const r = await fetch(BASE + '/ordenes/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarOrdenes();
+    verDetalleOrden(id);
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// Convertir una orden (total o parcialmente) en una Compra real — recién
+// acá se cargan los datos del comprobante fiscal (llegó la factura de
+// verdad) y el IVA por artículo, y recién acá se puede elegir ingresar
+// stock.
+function abrirConvertirOrden(id){
+  const o = ordenesCache.find(x => x._id === id);
+  if (!o) return;
+  const filas = o.items.map((it, i) => {
+    const pendiente = Math.round((it.cantidad - (it.cantidadConvertida || 0)) * 1000) / 1000;
+    if (pendiente <= 0) return '';
+    return `
+    <div class="fila-item" data-orden-item-index="${i}" data-pendiente="${pendiente}">
+      <div class="campo-producto">
+        <label><input type="checkbox" checked onchange="actualizarFilaConvertirOrden(this)"> ${escapeHtml(it.sku||'')} — ${escapeHtml(it.nombre)}</label>
+        <div class="muted" style="font-size:11px">Pendiente: ${pendiente}</div>
+      </div>
+      <div class="campo-cant">
+        <label>Cantidad a convertir</label>
+        <input type="number" min="0.01" step="0.01" max="${pendiente}" value="${pendiente}" oninput="actualizarTotalesConvertirOrden()">
+      </div>
+      <div class="campo-precio">
+        <label>Precio real</label>
+        <input type="number" min="0" step="0.01" value="${it.precioUnitario}" oninput="actualizarTotalesConvertirOrden()">
+      </div>
+      <div class="campo-iva">
+        <label>IVA</label>
+        <select class="select-iva" onchange="actualizarTotalesConvertirOrden()">${opcionesAlicuotaIva(21)}</select>
+      </div>
+      <div class="campo-subtotal"><span class="subtotal-valor">$ 0,00</span></div>
+    </div>
+  `;}).join('');
+
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Convertir orden #${o.numero} en compra</h2>
+        <p class="muted" style="margin-top:-8px">Desmarcá lo que todavía no llegó — queda pendiente en la orden para convertir después.</p>
+        <div class="grid3">
+          <div><label>Condición de pago</label><input id="coCondicionPago" value="${escapeHtml(o.condicionPago||'')}"></div>
+          <div><label>Fecha</label><input id="coFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Moneda</label><select id="coMoneda"><option value="ARS" ${o.moneda==='ARS'?'selected':''}>Pesos (ARS)</option><option value="USD" ${o.moneda==='USD'?'selected':''}>Dólares (USD)</option></select></div>
+        </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Tipo de recepción *</label><select id="coTipoRecepcion" onchange="actualizarVisibilidadDepositoConvertirOrden()"><option value="inmediata">Recepción inmediata (ingresa stock ahora)</option><option value="pendiente">Sin recepción (pendiente, sin ingresar stock)</option></select></div>
+          <div id="coDepositoWrap"><label>Depósito *</label><select id="coDeposito">${opcionesDepositosCompra()}</select></div>
+        </div>
+
+        <div class="section-title">Comprobante (la factura que llegó)</div>
+        <div class="grid3">
+          <div><label>Tipo de comprobante *</label><select id="coTipoComprobante">${opcionesTipoComprobante('factura_a')}</select></div>
+          <div><label>Punto de venta *</label><input id="coPuntoVenta" placeholder="Ej: 0007"></div>
+          <div><label>Número *</label><input id="coComprobanteNumero" placeholder="Ej: 00001234"></div>
+        </div>
+
+        <div class="section-title">Ítems a convertir</div>
+        <div id="coFilasItems">${filas}</div>
+
+        <div class="grid2" style="margin-top:14px">
+          <div><label>Descuento (%)</label><input id="coDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesConvertirOrden()"></div>
+          <div><label>Descuento ($)</label><input id="coDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesConvertirOrden()"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="coObservaciones"></textarea></div>
+
+        <div class="totales-box" id="coTotales"></div>
+        <div class="err" id="coErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarConvertirOrden('${o._id}')">Registrar compra</button>
+      </div>
+    </div>
+  `;
+  actualizarVisibilidadDepositoConvertirOrden();
+  actualizarTotalesConvertirOrden();
+}
+
+function actualizarVisibilidadDepositoConvertirOrden(){
+  const esInmediata = document.getElementById('coTipoRecepcion').value === 'inmediata';
+  document.getElementById('coDepositoWrap').classList.toggle('hidden', !esInmediata);
+}
+
+function actualizarFilaConvertirOrden(checkbox){
+  const fila = checkbox.closest('.fila-item');
+  fila.querySelectorAll('.campo-cant input, .campo-precio input, .select-iva').forEach(el => el.disabled = !checkbox.checked);
+  actualizarTotalesConvertirOrden();
+}
+
+function actualizarTotalesConvertirOrden(){
+  const filas = document.querySelectorAll('#coFilasItems .fila-item');
+  let subtotal = 0;
+  const porAlicuota = {};
+  let importeExento = 0;
+  filas.forEach(fila => {
+    const checkbox = fila.querySelector('.campo-producto input[type="checkbox"]');
+    const cantidad = Number(fila.querySelector('.campo-cant input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const alicuota = Number(fila.querySelector('select.select-iva').value) || 0;
+    const sub = checkbox.checked ? cantidad * precioUnitario : 0;
+    fila.querySelector('.subtotal-valor').textContent = money(sub);
+    if (!checkbox.checked) return;
+    subtotal += sub;
+    if (alicuota === 0) { importeExento += sub; }
+    else {
+      if (!porAlicuota[alicuota]) porAlicuota[alicuota] = { neto: 0, iva: 0 };
+      porAlicuota[alicuota].neto += sub;
+      porAlicuota[alicuota].iva += Math.round(sub * alicuota) / 100;
+    }
+  });
+  const lineasIva = Object.keys(porAlicuota).sort((a,b) => b-a).map(al =>
+    `${al}%: neto ${money(porAlicuota[al].neto)} + IVA ${money(porAlicuota[al].iva)}`
+  );
+  if (importeExento > 0) lineasIva.push(`Exento: ${money(importeExento)}`);
+  const totalIva = Object.values(porAlicuota).reduce((a,x) => a + x.iva, 0);
+  const descPorc = Number(document.getElementById('coDescuentoPorcentaje').value) || 0;
+  const descMonto = Number(document.getElementById('coDescuentoMonto').value) || 0;
+  let total = subtotal;
+  if (descPorc) total -= total * (descPorc / 100);
+  if (descMonto) total -= descMonto;
+  total = Math.max(0, total);
+  document.getElementById('coTotales').innerHTML = `
+    ${lineasIva.length ? `<div class="muted" style="margin-bottom:6px">${lineasIva.join(' — ')}</div>` : ''}
+    <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+  `;
+}
+
+async function confirmarConvertirOrden(id){
+  const filas = document.querySelectorAll('#coFilasItems .fila-item');
+  const items = [];
+  filas.forEach(fila => {
+    const checkbox = fila.querySelector('.campo-producto input[type="checkbox"]');
+    if (!checkbox.checked) return;
+    const cantidad = Number(fila.querySelector('.campo-cant input').value);
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
+    const alicuotaIva = Number(fila.querySelector('select.select-iva').value);
+    if (cantidad > 0) items.push({ ordenItemIndex: Number(fila.dataset.ordenItemIndex), cantidad, precioUnitario, alicuotaIva });
+  });
+  const tipoRecepcion = document.getElementById('coTipoRecepcion').value;
+  const body = {
+    condicionPago: document.getElementById('coCondicionPago').value.trim(),
+    fecha: document.getElementById('coFecha').value,
+    moneda: document.getElementById('coMoneda').value,
+    tipoRecepcion,
+    depositoId: tipoRecepcion === 'inmediata' ? document.getElementById('coDeposito').value : null,
+    tipoComprobante: document.getElementById('coTipoComprobante').value,
+    puntoVenta: document.getElementById('coPuntoVenta').value.trim(),
+    comprobanteNumero: document.getElementById('coComprobanteNumero').value.trim(),
+    descuentoPorcentaje: Number(document.getElementById('coDescuentoPorcentaje').value) || 0,
+    descuentoMonto: Number(document.getElementById('coDescuentoMonto').value) || 0,
+    observaciones: document.getElementById('coObservaciones').value.trim(),
+    items
+  };
+  const errEl = document.getElementById('coErr');
+  errEl.textContent = '';
+  if (!items.length) { errEl.textContent = 'Elegí al menos un ítem para convertir'; return; }
+  if (tipoRecepcion === 'inmediata' && !body.depositoId) { errEl.textContent = 'Elegí a qué depósito le vas a ingresar el stock'; return; }
+  if (!body.puntoVenta) { errEl.textContent = 'Falta el punto de venta del comprobante'; return; }
+  if (!body.comprobanteNumero) { errEl.textContent = 'Falta el número del comprobante'; return; }
+  try{
+    const r = await fetch(BASE + '/ordenes/' + id + '/convertir', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al convertir');
+    cerrarModal();
+    await cargarOrdenes();
+    await cargarCompras();
+  }catch(e){
+    errEl.textContent = e.message;
   }
 }
 
