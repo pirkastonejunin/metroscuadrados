@@ -75,6 +75,7 @@
   .fila-item .campo-cant{flex:1;min-width:0;}
   .fila-item .campo-precio{flex:1;min-width:0;}
   .fila-item .campo-iva{flex:1;min-width:0;}
+  .fila-item .campo-cant-bulto{flex:1;min-width:100px;}
   .fila-item .campo-subtotal{flex:1;min-width:0;text-align:right;font-weight:700;padding-top:8px;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
   .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
@@ -271,6 +272,38 @@ function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'
 function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+// Mismo mapa que admin-ventas.html — unidad real del producto, para
+// mostrarla al lado de "Cantidad" (4/10/2026, pedido de Mato: "siempre
+// q elegimos productos nos debe traer la opcion de las distintas
+// unidades de medida y bulto, en compras ni en ordenes me trae ese campo").
+const UNIDAD_LABEL_COMPRA = { unidad:'Unidad', m2:'m²', ml:'Metro lineal', kg:'Kilo', litro:'Litro', paquete:'Paquete', jornal:'Jornal' };
+// Si el producto elegido tiene "Unidades por bulto" cargado en su ficha,
+// se muestran los dos campos (unidad real y bultos) juntos, sincronizados
+// en vivo en los dos sentidos, redondeando siempre los bultos PARA ARRIBA
+// al entero más cercano (mismo criterio que en Ventas).
+function sincronizarCantidadCompra(el, origen, productosCacheRef, actualizarTotalesFn){
+  const fila = el.closest('.fila-item');
+  const select = fila.querySelector('select.select-producto');
+  const producto = productosCacheRef.find(p => String(p._id) === select.value);
+  const unidadInput = fila.querySelector('.cant-unidad');
+  const bultoInput = fila.querySelector('.cant-bulto');
+  if (producto && producto.unidadesPorBulto) {
+    const bultosExactos = origen === 'unidad'
+      ? (Number(unidadInput.value) || 0) / producto.unidadesPorBulto
+      : (Number(bultoInput.value) || 0);
+    const bultos = Math.max(0, Math.ceil(bultosExactos - 1e-9));
+    bultoInput.value = bultos;
+    unidadInput.value = redondear2(bultos * producto.unidadesPorBulto);
+  }
+  actualizarTotalesFn();
+}
+function actualizarIndicadorUnidad(fila, producto){
+  const bultoWrap = fila.querySelector('.campo-cant-bulto');
+  const unidadIndicador = fila.querySelector('.unidad-indicador');
+  if (unidadIndicador) unidadIndicador.textContent = producto ? (UNIDAD_LABEL_COMPRA[producto.unidad] || producto.unidad || '') : '';
+  if (bultoWrap) bultoWrap.classList.toggle('hidden', !(producto && producto.unidadesPorBulto > 0));
+}
 
 // Comprobante fiscal (4/10/2026, pedido de Mato: numeración real +
 // IVA discriminado, para después poder armar el Libro IVA Compras).
@@ -514,8 +547,12 @@ function agregarFilaCompra(){
       <select class="select-producto" onchange="actualizarFilaCompra(this)">${opcionesProductosCompra()}</select>
     </div>
     <div class="campo-cant">
-      <label>Cantidad</label>
-      <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarFilaCompra(this)">
+      <label>Cantidad <span class="muted unidad-indicador"></span></label>
+      <input type="number" min="0.01" step="0.01" value="1" class="cant-unidad" oninput="sincronizarCantidadCompra(this,'unidad',productosCache,actualizarTotalesCompra)">
+    </div>
+    <div class="campo-cant-bulto hidden">
+      <label>Bultos</label>
+      <input type="number" min="1" step="1" class="cant-bulto" oninput="sincronizarCantidadCompra(this,'bulto',productosCache,actualizarTotalesCompra)">
     </div>
     <div class="campo-precio">
       <label>Precio unit.</label>
@@ -538,6 +575,11 @@ function actualizarFilaCompra(el){
   if (el.tagName === 'SELECT') {
     const producto = productosCache.find(p => String(p._id) === select.value);
     precioInput.value = producto ? (producto.costo || 0) : 0;
+    actualizarIndicadorUnidad(fila, producto);
+    if (producto && producto.unidadesPorBulto) {
+      sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesCompra);
+      return;
+    }
   }
   actualizarTotalesCompra();
 }
@@ -589,7 +631,11 @@ function actualizarTotalesCompra(){
     : '';
   const descPorc = Number(document.getElementById('ncDescuentoPorcentaje').value) || 0;
   const descMonto = Number(document.getElementById('ncDescuentoMonto').value) || 0;
-  let total = subtotal;
+  // El Total tiene que reflejar el IVA de cada ítem (4/10/2026, bug
+  // reportado por Mato: "cuando cambio el iva no me modifica el
+  // importe") — antes este Total era directamente el subtotal neto, sin
+  // sumarle nunca el IVA, así que cambiar la alícuota no lo movía.
+  let total = subtotal + totalIva;
   if (descPorc) total -= total * (descPorc / 100);
   if (descMonto) total -= descMonto;
   total = Math.max(0, total);
@@ -1194,7 +1240,7 @@ function abrirNuevaOrden(){
         <div id="noFilasItems"></div>
         <div class="row" style="gap:8px">
           <button class="btn secondary small" onclick="agregarFilaOrden()">+ Agregar producto</button>
-          <button class="btn secondary small" onclick="abrirAltaRapidaProducto()">+ Crear producto nuevo</button>
+          <button class="btn secondary small" onclick="abrirAltaRapidaProducto()">📦 Crear producto nuevo</button>
         </div>
 
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="noObservaciones"></textarea></div>
@@ -1222,8 +1268,12 @@ function agregarFilaOrden(){
       <select class="select-producto" onchange="actualizarFilaOrden(this)">${opcionesProductosCompra()}</select>
     </div>
     <div class="campo-cant">
-      <label>Cantidad</label>
-      <input type="number" min="0.01" step="0.01" value="1" oninput="actualizarTotalesOrden()">
+      <label>Cantidad <span class="muted unidad-indicador"></span></label>
+      <input type="number" min="0.01" step="0.01" value="1" class="cant-unidad" oninput="sincronizarCantidadCompra(this,'unidad',productosCache,actualizarTotalesOrden)">
+    </div>
+    <div class="campo-cant-bulto hidden">
+      <label>Bultos</label>
+      <input type="number" min="1" step="1" class="cant-bulto" oninput="sincronizarCantidadCompra(this,'bulto',productosCache,actualizarTotalesOrden)">
     </div>
     <div class="campo-precio">
       <label>Precio estimado</label>
@@ -1242,6 +1292,11 @@ function actualizarFilaOrden(el){
   if (el.tagName === 'SELECT') {
     const producto = productosCache.find(p => String(p._id) === select.value);
     precioInput.value = producto ? (producto.costo || 0) : 0;
+    actualizarIndicadorUnidad(fila, producto);
+    if (producto && producto.unidadesPorBulto) {
+      sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesOrden);
+      return;
+    }
   }
   actualizarTotalesOrden();
 }
@@ -1425,15 +1480,22 @@ function abrirConvertirOrden(id){
   const filas = o.items.map((it, i) => {
     const pendiente = Math.round((it.cantidad - (it.cantidadConvertida || 0)) * 1000) / 1000;
     if (pendiente <= 0) return '';
+    const producto = productosCache.find(p => String(p._id) === String(it.productoId));
+    const unidadLabel = producto ? (UNIDAD_LABEL_COMPRA[producto.unidad] || producto.unidad || '') : '';
+    const conBulto = producto && producto.unidadesPorBulto > 0;
     return `
-    <div class="fila-item" data-orden-item-index="${i}" data-pendiente="${pendiente}">
+    <div class="fila-item" data-orden-item-index="${i}" data-pendiente="${pendiente}" data-producto-id="${it.productoId||''}">
       <div class="campo-producto">
         <label><input type="checkbox" checked onchange="actualizarFilaConvertirOrden(this)"> ${escapeHtml(it.sku||'')} — ${escapeHtml(it.nombre)}</label>
         <div class="muted" style="font-size:11px">Pendiente: ${pendiente}</div>
       </div>
       <div class="campo-cant">
-        <label>Cantidad a convertir</label>
-        <input type="number" min="0.01" step="0.01" max="${pendiente}" value="${pendiente}" oninput="actualizarTotalesConvertirOrden()">
+        <label>Cantidad a convertir ${unidadLabel ? `<span class="muted">(${escapeHtml(unidadLabel)})</span>` : ''}</label>
+        <input type="number" min="0.01" step="0.01" max="${pendiente}" value="${pendiente}" class="cant-unidad" oninput="sincronizarCantidadCompra(this,'unidad',productosCache,actualizarTotalesConvertirOrden)">
+      </div>
+      <div class="campo-cant-bulto ${conBulto ? '' : 'hidden'}">
+        <label>Bultos</label>
+        <input type="number" min="1" step="1" class="cant-bulto" oninput="sincronizarCantidadCompra(this,'bulto',productosCache,actualizarTotalesConvertirOrden)">
       </div>
       <div class="campo-precio">
         <label>Precio real</label>
@@ -1496,7 +1558,7 @@ function actualizarVisibilidadDepositoConvertirOrden(){
 
 function actualizarFilaConvertirOrden(checkbox){
   const fila = checkbox.closest('.fila-item');
-  fila.querySelectorAll('.campo-cant input, .campo-precio input, .select-iva').forEach(el => el.disabled = !checkbox.checked);
+  fila.querySelectorAll('.campo-cant input, .campo-cant-bulto input, .campo-precio input, .select-iva').forEach(el => el.disabled = !checkbox.checked);
   actualizarTotalesConvertirOrden();
 }
 
@@ -1528,7 +1590,8 @@ function actualizarTotalesConvertirOrden(){
   const totalIva = Object.values(porAlicuota).reduce((a,x) => a + x.iva, 0);
   const descPorc = Number(document.getElementById('coDescuentoPorcentaje').value) || 0;
   const descMonto = Number(document.getElementById('coDescuentoMonto').value) || 0;
-  let total = subtotal;
+  // Mismo fix que en Nueva compra: el Total tiene que incluir el IVA.
+  let total = subtotal + totalIva;
   if (descPorc) total -= total * (descPorc / 100);
   if (descMonto) total -= descMonto;
   total = Math.max(0, total);
