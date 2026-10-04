@@ -99,6 +99,7 @@ const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 
 let mongoClient;
+let mongoConectando = null;
 // Índices (1/10/2026, pedido de Mato: "que ande más fluido... tarda
 // mucho cuando tiene que cargar las bases e ir a buscar un producto").
 // El catálogo real tiene ~20.000 productos (el export de Dux) y nunca se
@@ -129,13 +130,18 @@ async function asegurarIndices(db) {
 }
 async function getDb() {
   if (!mongoClient) {
-    mongoClient = new MongoClient(process.env.MONGODB_URI);
-    try {
-      await mongoClient.connect();
-    } catch (e) {
-      mongoClient = null;
-      throw e;
+    // Carrera de conexión (4/10/2026, ver compras.js): se guarda la
+    // conexión EN CURSO para que los requests simultáneos de un proceso
+    // recién arrancado esperen la misma, en vez de usar un cliente que
+    // todavía no terminó de conectar.
+    if (!mongoConectando) {
+      const nuevoCliente = new MongoClient(process.env.MONGODB_URI);
+      mongoConectando = nuevoCliente.connect().then(
+        () => { mongoClient = nuevoCliente; mongoConectando = null; },
+        (e) => { mongoConectando = null; throw e; }
+      );
     }
+    await mongoConectando;
   }
   const db = mongoClient.db(DB_NAME);
   asegurarIndices(db).catch(() => {});

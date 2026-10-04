@@ -118,15 +118,21 @@ function descripcionObra(o) {
 // ---------- Mongo (misma base que server.js) ----------
 
 let mongoClient;
+let mongoConectando = null;
 async function getDb() {
   if (!mongoClient) {
-    mongoClient = new MongoClient(process.env.MONGODB_URI);
-    try {
-      await mongoClient.connect();
-    } catch (err) {
-      mongoClient = null;
-      throw err;
+    // Carrera de conexión (4/10/2026, ver compras.js): se guarda la
+    // conexión EN CURSO para que los requests simultáneos de un proceso
+    // recién arrancado esperen la misma, en vez de usar un cliente que
+    // todavía no terminó de conectar.
+    if (!mongoConectando) {
+      const nuevoCliente = new MongoClient(process.env.MONGODB_URI);
+      mongoConectando = nuevoCliente.connect().then(
+        () => { mongoClient = nuevoCliente; mongoConectando = null; },
+        (e) => { mongoConectando = null; throw e; }
+      );
     }
+    await mongoConectando;
   }
   return mongoClient.db('calculadora_m2');
 }
