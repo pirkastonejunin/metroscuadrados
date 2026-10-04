@@ -36,10 +36,21 @@
   }
 
   function esElegible(btn) {
+    // El `closest` es una segunda red de seguridad (la principal es
+    // marcar trigger/items con data-iconizado al crearlos, más abajo):
+    // un botón que ya es parte de un menú armado por este mismo script
+    // nunca puede volver a agruparse — eso fue lo que colgó la página
+    // (3/10/2026, bug real reportado por Mato: "cuando quiero abrir
+    // venta y entrar a una queda trabada la pagina"): btn-iconos.js veía
+    // el "⚙" y los ítems del menú como botones nuevos, les ponía
+    // data-accion-icono, y este script los volvía a agrupar en un menú
+    // DENTRO del menú — en bucle infinito, uno más anidado que el
+    // anterior, para siempre.
     return btn.tagName === 'BUTTON' &&
       btn.dataset.accionIcono === '1' &&
       ICONOS_PRINCIPALES.indexOf(btn.textContent) === -1 &&
-      !esRiesgoso(btn);
+      !esRiesgoso(btn) &&
+      !btn.closest('.menu-acciones-wrap');
   }
 
   function cerrarTodosLosMenus(exceptoPanel) {
@@ -67,6 +78,11 @@
     trigger.title = 'Más acciones';
     trigger.setAttribute('aria-label', 'Más acciones');
     trigger.textContent = '⚙';
+    // Clave del fix: se marca como "ya procesado" ANTES de insertarlo en
+    // el documento, así btn-iconos.js lo ignora por completo (su guarda
+    // es "if (btn.dataset.iconizado) return;") y nunca le toca el
+    // contenido ni lo marca como accionIcono.
+    trigger.dataset.iconizado = '1';
 
     var panel = document.createElement('div');
     panel.className = 'menu-acciones-panel';
@@ -87,6 +103,7 @@
       spanTexto.textContent = b.title || b.getAttribute('aria-label') || '';
       item.appendChild(spanIcono);
       item.appendChild(spanTexto);
+      item.dataset.iconizado = '1'; // mismo fix que el trigger, ver más arriba
       var onclickAttr = b.getAttribute('onclick');
       if (onclickAttr) item.setAttribute('onclick', onclickAttr);
       item.addEventListener('click', function () { panel.classList.remove('abierto'); });
