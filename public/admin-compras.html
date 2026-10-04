@@ -64,6 +64,12 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;}
+  .tab-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+  .tab-btn.activo{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
+  .fila-pago-cuenta{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}
+  .fila-pago-cuenta .info{flex:1;min-width:0;}
+  .fila-pago-cuenta input[type="number"]{width:120px;}
   .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
   .fila-item .campo-producto{flex:2;min-width:0;}
   .fila-item .campo-cant{flex:1;min-width:0;}
@@ -128,42 +134,84 @@
     </div>
   </header>
   <main>
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <div class="row" style="flex:1">
-          <div style="min-width:180px">
-            <label>Proveedor</label>
-            <select id="fcProveedor" onchange="cargarCompras()"><option value="">Todos</option></select>
+    <div class="tabs">
+      <button type="button" class="tab-btn activo" id="tabBtnCompras" onclick="cambiarTab('compras')">Compras</button>
+      <button type="button" class="tab-btn" id="tabBtnPagos" onclick="cambiarTab('pagos')">Pagos</button>
+    </div>
+
+    <div id="tabCompras">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div class="row" style="flex:1">
+            <div style="min-width:180px">
+              <label>Proveedor</label>
+              <select id="fcProveedor" onchange="cargarCompras()"><option value="">Todos</option></select>
+            </div>
+            <div style="min-width:150px">
+              <label>Estado</label>
+              <select id="fcEstado" onchange="cargarCompras()">
+                <option value="">Todos</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="recibida">Recibida</option>
+                <option value="anulada">Anulada</option>
+              </select>
+            </div>
+            <div style="min-width:140px">
+              <label>Desde</label>
+              <input id="fcDesde" type="date" onchange="cargarCompras()">
+            </div>
+            <div style="min-width:140px">
+              <label>Hasta</label>
+              <input id="fcHasta" type="date" onchange="cargarCompras()">
+            </div>
           </div>
-          <div style="min-width:150px">
-            <label>Estado</label>
-            <select id="fcEstado" onchange="cargarCompras()">
-              <option value="">Todos</option>
-              <option value="pendiente">Pendiente</option>
-              <option value="recibida">Recibida</option>
-              <option value="anulada">Anulada</option>
-            </select>
+          <div class="row" style="gap:8px">
+            <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'compras.xlsx')">Exportar</button>
+            <button class="btn" onclick="abrirNuevaCompra()">+ Nueva compra</button>
           </div>
-          <div style="min-width:140px">
-            <label>Desde</label>
-            <input id="fcDesde" type="date" onchange="cargarCompras()">
-          </div>
-          <div style="min-width:140px">
-            <label>Hasta</label>
-            <input id="fcHasta" type="date" onchange="cargarCompras()">
-          </div>
-        </div>
-        <div class="row" style="gap:8px">
-          <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'compras.xlsx')">Exportar</button>
-          <button class="btn" onclick="abrirNuevaCompra()">+ Nueva compra</button>
         </div>
       </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="comprasBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
     </div>
-    <div class="card">
-      <table>
-        <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="comprasBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
-      </table>
+
+    <div id="tabPagos" class="hidden">
+      <div class="card">
+        <div class="section-title" style="margin-top:0">Saldo por proveedor</div>
+        <table>
+          <thead><tr><th>Proveedor</th><th>Compras pendientes</th><th>Saldo total</th></tr></thead>
+          <tbody id="saldosProveedoresBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div class="row" style="flex:1">
+            <div style="min-width:180px">
+              <label>Proveedor</label>
+              <select id="fpProveedor" onchange="cargarPagos()"><option value="">Todos</option></select>
+            </div>
+            <div style="min-width:140px">
+              <label>Desde</label>
+              <input id="fpDesde" type="date" onchange="cargarPagos()">
+            </div>
+            <div style="min-width:140px">
+              <label>Hasta</label>
+              <input id="fpHasta" type="date" onchange="cargarPagos()">
+            </div>
+          </div>
+          <button class="btn" onclick="abrirPagoCuenta()">+ Pago a cuenta</button>
+        </div>
+      </div>
+      <div class="card">
+        <table>
+          <thead><tr><th>Fecha</th><th>Proveedor</th><th>Tipo</th><th>Monto</th><th>Aplicado a</th><th>Nota</th></tr></thead>
+          <tbody id="pagosBody"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
     </div>
   </main>
 </div>
@@ -296,6 +344,8 @@ async function cargarListasBase(){
   cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
   bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
   document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
+    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
+  document.getElementById('fpProveedor').innerHTML = '<option value="">Todos</option>' +
     proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
 }
 
@@ -782,6 +832,259 @@ async function descargarBlob(url, nombreArchivo){
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
 }
+
+// -------------------------------------------------------------------
+// Pestaña "Pagos" (4/10/2026, pedido de Mato: "agreguemos pagos para
+// poder hacer pago a un proveedor a cuenta") — un pago real (una salida
+// de caja/banco, o un cheque) que se reparte a mano entre una o más
+// compras pendientes del proveedor elegido (nada de reparto automático
+// — "que podamos elegir a qué factura aplicarlo").
+// -------------------------------------------------------------------
+function cambiarTab(tab){
+  document.getElementById('tabCompras').classList.toggle('hidden', tab !== 'compras');
+  document.getElementById('tabPagos').classList.toggle('hidden', tab !== 'pagos');
+  document.getElementById('tabBtnCompras').classList.toggle('activo', tab === 'compras');
+  document.getElementById('tabBtnPagos').classList.toggle('activo', tab === 'pagos');
+  if (tab === 'pagos') { cargarSaldosProveedores(); cargarPagos(); }
+}
+
+async function cargarSaldosProveedores(){
+  const body = document.getElementById('saldosProveedoresBody');
+  try{
+    const r = await fetch(BASE + '/saldos-proveedores', {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    if (!data.length) { body.innerHTML = '<tr><td colspan="3" class="muted">No hay saldos pendientes con proveedores.</td></tr>'; return; }
+    body.innerHTML = data.map(s => `
+      <tr>
+        <td>${escapeHtml(s.proveedorNombre)}</td>
+        <td class="muted">${s.cantidadCompras}</td>
+        <td><strong>${money(s.saldoPendiente)}</strong></td>
+      </tr>
+    `).join('');
+  }catch(e){
+    body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+let pagosCache = [];
+async function cargarPagos(){
+  const params = new URLSearchParams();
+  if (document.getElementById('fpProveedor').value) params.set('proveedorId', document.getElementById('fpProveedor').value);
+  if (document.getElementById('fpDesde').value) params.set('desde', document.getElementById('fpDesde').value);
+  if (document.getElementById('fpHasta').value) params.set('hasta', document.getElementById('fpHasta').value);
+  const r = await fetch(BASE + '/pagos?' + params.toString(), {headers: headersAuth()});
+  const body = document.getElementById('pagosBody');
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="6" class="err">No se pudo cargar.</td></tr>'; return; }
+  pagosCache = await r.json();
+  if (!pagosCache.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No hay pagos registrados todavía.</td></tr>'; return; }
+  body.innerHTML = pagosCache.map(p => `
+    <tr>
+      <td class="muted">${fechaCorta(p.fecha)}</td>
+      <td>${escapeHtml(p.proveedorNombre)}</td>
+      <td>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor}</td>
+      <td>${money(p.monto)}</td>
+      <td class="muted">${(p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}</td>
+      <td class="muted">${escapeHtml(p.nota||'')}</td>
+    </tr>
+  `).join('');
+}
+
+function opcionesProveedoresPagoCuenta(seleccionado){
+  return '<option value="">Elegí un proveedor…</option>' + proveedoresCache.map(p =>
+    `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`
+  ).join('');
+}
+
+function abrirPagoCuenta(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Pago a cuenta</h2>
+        <div class="grid3">
+          <div><label>Proveedor *</label><select id="pcProveedor" onchange="cargarComprasPendientesPagoCuenta()">${opcionesProveedoresPagoCuenta()}</select></div>
+          <div><label>Monto *</label><input id="pcMonto" type="number" min="0.01" step="0.01" value="0" oninput="actualizarRepartidoPagoCuenta()"></div>
+          <div><label>Fecha *</label><input id="pcFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Tipo de valor *</label><select id="pcTipoValor" onchange="actualizarTipoValorPagoCuenta()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div id="pcCuentaWrap"><label id="pcCuentaLabel">¿De qué caja sale? *</label><select id="pcCuenta">${opcionesCuentaPago('efectivo')}</select></div>
+        </div>
+        <div id="pcChequeWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Número de cheque *</label><input id="pcChequeNumero"></div>
+            <div><label>Banco propio *</label><select id="pcChequeCuenta">${opcionesBancoPropioCheque()}</select></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Fecha de emisión</label><input id="pcChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Vencimiento *</label><input id="pcChequeVencimiento" type="date"></div>
+          </div>
+        </div>
+        <div id="pcTarjetaWrap" class="hidden" style="margin-top:10px">
+          <div class="grid2">
+            <div><label>Entidad/tarjeta</label><input id="pcTarjetaEntidad" placeholder="Ej: Visa, Mastercard"></div>
+            <div><label>Tipo</label><select id="pcTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Cuotas</label><input id="pcTarjetaCuotas" type="number" min="1" step="1" value="1"></div>
+            <div><label>Lote *</label><input id="pcTarjetaLote"></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Cupón *</label><input id="pcTarjetaCupon"></div>
+            <div><label>Código de autorización</label><input id="pcTarjetaCodigoAutorizacion" placeholder="Opcional"></div>
+          </div>
+        </div>
+        <div style="margin-top:10px"><label>Nota</label><input id="pcNota" placeholder="Opcional"></div>
+
+        <div class="section-title">Aplicar a compras pendientes</div>
+        <div id="pcCompras"><p class="muted">Elegí un proveedor para ver sus compras pendientes.</p></div>
+        <div class="muted" id="pcRepartido" style="margin-top:8px"></div>
+
+        <div class="err" id="pcErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarPagoCuenta()">Registrar pago</button>
+      </div>
+    </div>
+  `;
+}
+
+function actualizarTipoValorPagoCuenta(){
+  const tipoValor = document.getElementById('pcTipoValor').value;
+  const esCheque = tipoValor === 'cheque';
+  const esTarjeta = tipoValor === 'tarjeta';
+  document.getElementById('pcCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('pcChequeWrap').classList.toggle('hidden', !esCheque);
+  document.getElementById('pcTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (!esCheque) {
+    document.getElementById('pcCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿De qué caja sale? *' : '¿De qué banco sale? *';
+    document.getElementById('pcCuenta').innerHTML = opcionesCuentaPago(tipoValor);
+  }
+}
+
+let comprasPendientesPagoCuentaCache = [];
+async function cargarComprasPendientesPagoCuenta(){
+  const proveedorId = document.getElementById('pcProveedor').value;
+  const cont = document.getElementById('pcCompras');
+  if (!proveedorId) { cont.innerHTML = '<p class="muted">Elegí un proveedor para ver sus compras pendientes.</p>'; return; }
+  cont.innerHTML = '<p class="muted">Cargando...</p>';
+  const r = await fetch(BASE + '?proveedorId=' + proveedorId, {headers: headersAuth()});
+  const todas = r.ok ? await r.json() : [];
+  comprasPendientesPagoCuentaCache = todas.filter(c => c.estado !== 'anulada' && c.saldoPendiente > 0);
+  if (!comprasPendientesPagoCuentaCache.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene compras con saldo pendiente.</p>'; return; }
+  cont.innerHTML = comprasPendientesPagoCuentaCache.map(c => `
+    <div class="fila-pago-cuenta" data-compra-id="${c._id}" data-saldo="${c.saldoPendiente}">
+      <input type="checkbox" onchange="actualizarFilaPagoCuenta(this)">
+      <div class="info">Compra #${c.numero} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
+      <input type="number" min="0" step="0.01" value="0" disabled oninput="actualizarRepartidoPagoCuenta()">
+    </div>
+  `).join('');
+  actualizarRepartidoPagoCuenta();
+}
+
+function actualizarFilaPagoCuenta(checkbox){
+  const fila = checkbox.closest('.fila-pago-cuenta');
+  const input = fila.querySelector('input[type="number"]');
+  const saldo = Number(fila.dataset.saldo);
+  input.disabled = !checkbox.checked;
+  if (checkbox.checked) {
+    // Autocompleta con lo que falte repartir del monto total, sin
+    // pasarse del saldo de esta compra.
+    const monto = Number(document.getElementById('pcMonto').value) || 0;
+    const yaRepartido = sumarRepartidoPagoCuenta();
+    input.value = Math.max(0, Math.min(saldo, monto - yaRepartido));
+  } else {
+    input.value = 0;
+  }
+  actualizarRepartidoPagoCuenta();
+}
+
+function sumarRepartidoPagoCuenta(){
+  let total = 0;
+  document.querySelectorAll('#pcCompras .fila-pago-cuenta').forEach(fila => {
+    const checkbox = fila.querySelector('input[type="checkbox"]');
+    const input = fila.querySelector('input[type="number"]');
+    if (checkbox.checked) total += Number(input.value) || 0;
+  });
+  return Math.round(total * 100) / 100;
+}
+
+function actualizarRepartidoPagoCuenta(){
+  const monto = Number(document.getElementById('pcMonto').value) || 0;
+  const repartido = sumarRepartidoPagoCuenta();
+  const el = document.getElementById('pcRepartido');
+  if (!el) return;
+  const diff = Math.round((monto - repartido) * 100) / 100;
+  if (diff === 0 && monto > 0) el.innerHTML = `<span style="color:var(--ok)">Repartido: ${money(repartido)} de ${money(monto)} ✓</span>`;
+  else el.innerHTML = `Repartido: ${money(repartido)} de ${money(monto)}${diff !== 0 ? ' — faltan ' + money(diff) : ''}`;
+}
+
+function juntarAplicacionesPagoCuenta(){
+  const aplicaciones = [];
+  document.querySelectorAll('#pcCompras .fila-pago-cuenta').forEach(fila => {
+    const checkbox = fila.querySelector('input[type="checkbox"]');
+    const input = fila.querySelector('input[type="number"]');
+    const monto = Number(input.value) || 0;
+    if (checkbox.checked && monto > 0) aplicaciones.push({ compraId: fila.dataset.compraId, monto });
+  });
+  return aplicaciones;
+}
+
+async function confirmarPagoCuenta(){
+  const tipoValor = document.getElementById('pcTipoValor').value;
+  const proveedorId = document.getElementById('pcProveedor').value;
+  const monto = Number(document.getElementById('pcMonto').value);
+  const aplicaciones = juntarAplicacionesPagoCuenta();
+  document.getElementById('pcErr').textContent = '';
+  if (!proveedorId) { document.getElementById('pcErr').textContent = 'Elegí un proveedor'; return; }
+  if (!monto || monto <= 0) { document.getElementById('pcErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
+  if (!aplicaciones.length) { document.getElementById('pcErr').textContent = 'Elegí a qué compra(s) aplicar el pago'; return; }
+  const sumaAplicado = Math.round(aplicaciones.reduce((a,x) => a + x.monto, 0) * 100) / 100;
+  if (Math.abs(sumaAplicado - monto) > 0.01) { document.getElementById('pcErr').textContent = `Lo repartido (${money(sumaAplicado)}) no coincide con el monto del pago (${money(monto)})`; return; }
+
+  const body = {
+    proveedorId, monto, aplicaciones,
+    fecha: document.getElementById('pcFecha').value,
+    nota: document.getElementById('pcNota').value.trim(),
+    tipoValor
+  };
+  if (tipoValor === 'cheque') {
+    body.chequeNumero = document.getElementById('pcChequeNumero').value.trim();
+    body.chequeCuentaId = document.getElementById('pcChequeCuenta').value;
+    body.chequeFechaEmision = document.getElementById('pcChequeFechaEmision').value;
+    body.chequeFechaVencimiento = document.getElementById('pcChequeVencimiento').value;
+    if (!body.chequeNumero) { document.getElementById('pcErr').textContent = 'Falta el número de cheque'; return; }
+    if (!body.chequeCuentaId) { document.getElementById('pcErr').textContent = 'Elegí de qué banco propio sale el cheque'; return; }
+    if (!body.chequeFechaVencimiento) { document.getElementById('pcErr').textContent = 'Falta la fecha de vencimiento del cheque'; return; }
+  } else {
+    const cuenta = document.getElementById('pcCuenta').value;
+    if (!cuenta) { document.getElementById('pcErr').textContent = tipoValor === 'efectivo' ? 'Elegí de qué caja sale el pago' : 'Elegí de qué banco sale el pago'; return; }
+    const [cuentaTipo, cuentaId] = cuenta.split(':');
+    body.cuentaTipo = cuentaTipo;
+    body.cuentaId = cuentaId;
+    if (tipoValor === 'tarjeta') {
+      body.tarjetaEntidad = document.getElementById('pcTarjetaEntidad').value.trim();
+      body.tarjetaTipo = document.getElementById('pcTarjetaTipo').value;
+      body.tarjetaCuotas = Number(document.getElementById('pcTarjetaCuotas').value) || 1;
+      body.tarjetaLote = document.getElementById('pcTarjetaLote').value.trim();
+      body.tarjetaCupon = document.getElementById('pcTarjetaCupon').value.trim();
+      body.tarjetaCodigoAutorizacion = document.getElementById('pcTarjetaCodigoAutorizacion').value.trim();
+      if (!body.tarjetaLote) { document.getElementById('pcErr').textContent = 'Falta el número de lote'; return; }
+      if (!body.tarjetaCupon) { document.getElementById('pcErr').textContent = 'Falta el número de cupón'; return; }
+    }
+  }
+  try{
+    const r = await fetch(BASE + '/pagos-cuenta', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal();
+    await cargarPagos();
+    await cargarSaldosProveedores();
+    await cargarCompras();
+  }catch(e){
+    document.getElementById('pcErr').textContent = e.message;
+  }
+}
+
 </script>
 </body>
 </html>

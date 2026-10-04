@@ -443,6 +443,50 @@ router.get('/export', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Lista de pagos a proveedores (4/10/2026) — pestaña "Pagos" en
+// Compras: junta tanto los pagos a cuenta como los que se registran
+// desde el detalle de una compra puntual (ambos caen en esta misma
+// colección, ver aplicarPagoProveedor).
+router.get('/pagos', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.proveedorId) {
+      const pid = toObjectId(req.query.proveedorId);
+      if (!pid) throw err(400, 'proveedorId inválido');
+      match.proveedorId = pid;
+    }
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
+    }
+    const limite = Math.min(Number(req.query.limite) || 200, 500);
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('compras_pagos').find(match).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Saldo total adeudado por proveedor (4/10/2026, pedido de Mato) — suma
+// el saldoPendiente de todas las compras activas (no anuladas) de cada
+// proveedor, para la pestaña "Pagos".
+router.get('/saldos-proveedores', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('compras').aggregate([
+        { $match: match },
+        { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, saldoPendiente: { $sum: '$saldoPendiente' }, cantidadCompras: { $sum: 1 } } },
+        { $sort: { saldoPendiente: -1 } }
+      ]).toArray();
+    });
+    res.json(lista.map(x => ({ proveedorId: x._id, proveedorNombre: x.proveedorNombre, saldoPendiente: Math.round(x.saldoPendiente * 100) / 100, cantidadCompras: x.cantidadCompras })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -627,107 +671,198 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
 
 // Registra un pago contra la compra (parcial o total) — append-only,
 // mismo criterio que los cobros de Ventas y el libro de Stock.
+// Valida los datos del "valor" de un pago (tipo + de dónde sale, o
+// datos del cheque/tarjeta) — compartido entre el pago de una compra
+// puntual y el pago a cuenta (4/10/2026, pedido de Mato: "agreguemos
+// pagos... para poder hacer pago a un proveedor a cuenta").
+function normalizarDatosPago(body, fecha) {
+  const tipoValor = normalizarTexto(body.tipoValor).toLowerCase();
+  if (!TIPOS_VALOR_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_VALIDOS.join(', ')})`);
+
+  // Tesorería (2/10/2026): efectivo/cuenta/tarjeta sale ya de una caja
+  // o banco; cheque crea un cheque propio "emitido" (no mueve plata
+  // todavía — eso pasa al confirmar el pago, desde Tesorería). Pedido
+  // de Mato: efectivo SOLO puede salir de una caja; cuenta
+  // (transferencia) y tarjeta solo pueden salir de un banco.
+  let cuentaTipo = null, cuentaId = null;
+  if (tipoValor !== 'cheque') {
+    cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
+    if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
+    if (tipoValor === 'efectivo' && cuentaTipo !== 'caja') throw err(400, 'Un pago en efectivo solo puede salir de una caja.');
+    if ((tipoValor === 'cuenta' || tipoValor === 'tarjeta') && cuentaTipo !== 'banco') throw err(400, 'Un pago por transferencia o tarjeta solo puede salir de un banco.');
+    cuentaId = toObjectId(body.cuentaId);
+    if (!cuentaId) throw err(400, 'Caja/banco inválido');
+  }
+
+  let chequeDatos = null;
+  if (tipoValor === 'cheque') {
+    chequeDatos = {
+      numero: normalizarTexto(body.chequeNumero),
+      cuentaId: toObjectId(body.chequeCuentaId),
+      fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : fecha,
+      fechaVencimiento: body.chequeFechaVencimiento ? new Date(body.chequeFechaVencimiento) : null,
+      observaciones: normalizarTexto(body.chequeObservaciones)
+    };
+    if (!chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
+    if (!chequeDatos.cuentaId) throw err(400, 'Elegí de qué banco propio sale el cheque.');
+    if (!chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
+  }
+
+  // Tarjeta (2/10/2026, mismo pedido de Mato que en Ventas): lote y
+  // cupón son los que pide Dux; entidad/tipo/cuotas/código de
+  // autorización se suman por los datos habituales de un cupón real
+  // (razonamiento propio, Dux no los enumera).
+  let tarjetaDatos = null;
+  if (tipoValor === 'tarjeta') {
+    tarjetaDatos = {
+      tarjetaEntidad: normalizarTexto(body.tarjetaEntidad),
+      tarjetaTipo: normalizarTexto(body.tarjetaTipo).toLowerCase(),
+      tarjetaCuotas: body.tarjetaCuotas ? Number(body.tarjetaCuotas) : 1,
+      tarjetaLote: normalizarTexto(body.tarjetaLote),
+      tarjetaCupon: normalizarTexto(body.tarjetaCupon),
+      tarjetaCodigoAutorizacion: normalizarTexto(body.tarjetaCodigoAutorizacion)
+    };
+  }
+  return { tipoValor, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos };
+}
+
+// Registra UN pago real (una salida de caja/banco, o un cheque emitido)
+// y lo reparte entre una o más compras del mismo proveedor, elegidas a
+// mano (4/10/2026, pedido de Mato: "que podamos elegir a qué factura
+// aplicarlo" — nada de reparto automático). Queda además un registro
+// único en `compras_pagos` para que se pueda ver el pago completo en la
+// pestaña "Pagos", más allá de cómo haya quedado repartido.
+async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, moneda, tipoValor, montoTotal, fecha, nota, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos, aplicaciones, motivoMovimiento }) {
+  const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+  let chequeId = null;
+
+  if (tipoValor === 'cheque') {
+    const cheque = Object.assign({
+      tipo: 'propio', moneda: moneda || 'ARS', monto: montoTotal, estado: 'emitido',
+      proveedorId: proveedorId || null, proveedorNombre: proveedorNombre || '',
+      ventaId: null, compraId: aplicaciones.length === 1 ? aplicaciones[0].compraId : null, clienteId: null, clienteNombre: '', librador: '',
+      banco: '', depositadoEnCuentaId: null, endosadoA: null,
+      usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
+    }, chequeDatos);
+    const { insertedId } = await db.collection('cheques').insertOne(cheque);
+    chequeId = insertedId;
+  } else {
+    const observacionesMovimiento = tipoValor === 'tarjeta'
+      ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
+      : nota;
+    await aplicarMovimientoCuenta(db, req, {
+      cuentaTipo, cuentaId, tipo: 'egreso', monto: montoTotal, moneda: moneda || 'ARS',
+      motivo: motivoMovimiento, observaciones: observacionesMovimiento, origen: 'compra', fecha
+    });
+  }
+
+  const compras = [];
+  const aplicacionesGuardadas = [];
+  for (const aplic of aplicaciones) {
+    const compra = await db.collection('compras').findOne(Object.assign({ _id: aplic.compraId }, filtroOrg(req)));
+    if (!compra) throw err(404, 'Una de las compras elegidas no existe (o no pertenece a esta organización)');
+    if (compra.estado === 'anulada') throw err(400, `La compra #${compra.numero} está anulada, no se le pueden registrar pagos.`);
+    if (String(compra.proveedorId) !== String(proveedorId)) throw err(400, `La compra #${compra.numero} no es de este proveedor.`);
+    if (aplic.monto > compra.saldoPendiente + 0.01) throw err(400, `El monto aplicado a la compra #${compra.numero} (${aplic.monto}) es mayor que su saldo pendiente (${compra.saldoPendiente}).`);
+
+    const pago = Object.assign(
+      { tipoValor, monto: aplic.monto, fecha, nota, usuarioNombre },
+      cuentaTipo ? { cuentaTipo, cuentaId } : {},
+      chequeId ? { chequeId } : {},
+      tarjetaDatos || {}
+    );
+    const totalPagado = (compra.totalPagado || 0) + aplic.monto;
+    const saldoPendiente = Math.max(0, compra.total - totalPagado);
+    await db.collection('compras').updateOne(
+      { _id: aplic.compraId },
+      { $push: { pagos: pago }, $set: { totalPagado, saldoPendiente, updatedAt: new Date() } }
+    );
+    const compraActualizada = await db.collection('compras').findOne({ _id: aplic.compraId });
+    compras.push(compraActualizada);
+    aplicacionesGuardadas.push({ compraId: aplic.compraId, compraNumero: compra.numero, monto: aplic.monto });
+  }
+
+  const ahora = new Date();
+  const pagoCuenta = Object.assign({
+    proveedorId, proveedorNombre, fecha, tipoValor, monto: montoTotal, nota, usuarioNombre,
+    aplicaciones: aplicacionesGuardadas, orgId: req.orgId, createdAt: ahora
+  }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {}, tarjetaDatos || {});
+  const r = await db.collection('compras_pagos').insertOne(pagoCuenta);
+  pagoCuenta._id = r.insertedId;
+
+  return { pagoCuenta, compras };
+}
+
 router.post('/:id/pagos', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const body = req.body || {};
-    const tipoValor = normalizarTexto(body.tipoValor).toLowerCase();
-    if (!TIPOS_VALOR_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_VALIDOS.join(', ')})`);
     const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
     if (monto <= 0) throw err(400, 'El monto del pago tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
     // Fecha del pago editable (2/10/2026, mismo pedido de Mato que en
     // Ventas: por si se carga más tarde con la fecha real en que pasó).
     const fecha = body.fecha ? new Date(body.fecha) : new Date();
-
-    // Tesorería (2/10/2026): efectivo/cuenta/tarjeta sale ya de una caja
-    // o banco; cheque crea un cheque propio "emitido" (no mueve plata
-    // todavía — eso pasa al confirmar el pago, desde Tesorería). Pedido
-    // de Mato: efectivo SOLO puede salir de una caja; cuenta
-    // (transferencia) y tarjeta solo pueden salir de un banco.
-    let cuentaTipo = null, cuentaId = null;
-    if (tipoValor !== 'cheque') {
-      cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
-      if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
-      if (tipoValor === 'efectivo' && cuentaTipo !== 'caja') throw err(400, 'Un pago en efectivo solo puede salir de una caja.');
-      if ((tipoValor === 'cuenta' || tipoValor === 'tarjeta') && cuentaTipo !== 'banco') throw err(400, 'Un pago por transferencia o tarjeta solo puede salir de un banco.');
-      cuentaId = toObjectId(body.cuentaId);
-      if (!cuentaId) throw err(400, 'Caja/banco inválido');
-    }
-
-    let chequeDatos = null;
-    if (tipoValor === 'cheque') {
-      chequeDatos = {
-        numero: normalizarTexto(body.chequeNumero),
-        cuentaId: toObjectId(body.chequeCuentaId),
-        fechaEmision: body.chequeFechaEmision ? new Date(body.chequeFechaEmision) : fecha,
-        fechaVencimiento: body.chequeFechaVencimiento ? new Date(body.chequeFechaVencimiento) : null,
-        observaciones: normalizarTexto(body.chequeObservaciones)
-      };
-      if (!chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
-      if (!chequeDatos.cuentaId) throw err(400, 'Elegí de qué banco propio sale el cheque.');
-      if (!chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
-    }
-
-    // Tarjeta (2/10/2026, mismo pedido de Mato que en Ventas): lote y
-    // cupón son los que pide Dux; entidad/tipo/cuotas/código de
-    // autorización se suman por los datos habituales de un cupón real
-    // (razonamiento propio, Dux no los enumera).
-    let tarjetaDatos = null;
-    if (tipoValor === 'tarjeta') {
-      tarjetaDatos = {
-        tarjetaEntidad: normalizarTexto(body.tarjetaEntidad),
-        tarjetaTipo: normalizarTexto(body.tarjetaTipo).toLowerCase(),
-        tarjetaCuotas: body.tarjetaCuotas ? Number(body.tarjetaCuotas) : 1,
-        tarjetaLote: normalizarTexto(body.tarjetaLote),
-        tarjetaCupon: normalizarTexto(body.tarjetaCupon),
-        tarjetaCodigoAutorizacion: normalizarTexto(body.tarjetaCodigoAutorizacion)
-      };
-    }
+    const datosPago = normalizarDatosPago(body, fecha);
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra está anulada, no se le pueden registrar pagos.');
+      if (monto > compra.saldoPendiente + 0.01) throw err(400, `El monto no puede ser mayor que el saldo pendiente (${compra.saldoPendiente}).`);
 
-      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
-      let chequeId = null;
+      const { compras } = await aplicarPagoProveedor(db, req, Object.assign({
+        proveedorId: compra.proveedorId, proveedorNombre: compra.proveedorNombre, moneda: compra.moneda,
+        montoTotal: monto, fecha, nota, aplicaciones: [{ compraId: id, monto }],
+        motivoMovimiento: `Pago compra Nº ${compra.numero}`
+      }, datosPago));
+      return compras[0];
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 
-      if (tipoValor === 'cheque') {
-        const cheque = Object.assign({
-          tipo: 'propio', moneda: compra.moneda || 'ARS', monto, estado: 'emitido',
-          proveedorId: compra.proveedorId || null, proveedorNombre: compra.proveedorNombre || '',
-          ventaId: null, compraId: id, clienteId: null, clienteNombre: '', librador: '',
-          banco: '', depositadoEnCuentaId: null, endosadoA: null,
-          usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
-        }, chequeDatos);
-        const { insertedId } = await db.collection('cheques').insertOne(cheque);
-        chequeId = insertedId;
-      } else {
-        const observacionesMovimiento = tipoValor === 'tarjeta'
-          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
-          : nota;
-        await aplicarMovimientoCuenta(db, req, {
-          cuentaTipo, cuentaId, tipo: 'egreso', monto, moneda: compra.moneda || 'ARS',
-          motivo: `Pago compra Nº ${compra.numero}`, observaciones: observacionesMovimiento, origen: 'compra', compraId: id, fecha
-        });
-      }
+// Pago a cuenta de un proveedor (4/10/2026, pedido de Mato) — una sola
+// salida real de caja/banco (o un solo cheque) que se reparte a mano
+// entre una o más compras pendientes de ese proveedor, elegidas desde
+// la pestaña "Pagos".
+router.post('/pagos-cuenta', authAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const proveedorId = toObjectId(body.proveedorId);
+    if (!proveedorId) throw err(400, 'Elegí un proveedor');
+    const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
+    if (monto <= 0) throw err(400, 'El monto del pago tiene que ser mayor a 0.');
+    const nota = normalizarTexto(body.nota);
+    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const datosPago = normalizarDatosPago(body, fecha);
 
-      const pago = Object.assign(
-        { tipoValor, monto, fecha, nota, usuarioNombre },
-        cuentaTipo ? { cuentaTipo, cuentaId } : {},
-        chequeId ? { chequeId } : {},
-        tarjetaDatos || {}
-      );
-      const totalPagado = (compra.totalPagado || 0) + monto;
-      const saldoPendiente = Math.max(0, compra.total - totalPagado);
-      await db.collection('compras').updateOne(
-        { _id: id },
-        { $push: { pagos: pago }, $set: { totalPagado, saldoPendiente, updatedAt: new Date() } }
-      );
-      return db.collection('compras').findOne({ _id: id });
+    const aplicacionesRaw = Array.isArray(body.aplicaciones) ? body.aplicaciones : [];
+    if (!aplicacionesRaw.length) throw err(400, 'Elegí a qué compra(s) aplicar el pago.');
+    const aplicaciones = aplicacionesRaw.map(a => {
+      const compraId = toObjectId(a.compraId);
+      const montoAplicado = normalizarMontoNoNegativo(a.monto, 'El monto aplicado a una compra');
+      if (!compraId) throw err(400, 'Una de las compras elegidas es inválida');
+      if (montoAplicado <= 0) throw err(400, 'El monto aplicado a cada compra tiene que ser mayor a 0');
+      return { compraId, monto: montoAplicado };
+    });
+    const sumaAplicaciones = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
+    if (Math.abs(sumaAplicaciones - monto) > 0.01) throw err(400, `Lo repartido entre las compras (${sumaAplicaciones}) no coincide con el monto del pago (${monto}).`);
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrg(req)));
+      if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
+      const proveedorNombre = proveedor.razonSocial || proveedor.nombreFantasia || '';
+
+      const { pagoCuenta } = await aplicarPagoProveedor(db, req, Object.assign({
+        proveedorId, proveedorNombre, moneda: 'ARS',
+        montoTotal: monto, fecha, nota, aplicaciones,
+        motivoMovimiento: `Pago a cuenta — ${proveedorNombre}`
+      }, datosPago));
+      return pagoCuenta;
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
