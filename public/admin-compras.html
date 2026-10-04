@@ -1206,6 +1206,7 @@ async function confirmarPagoCuenta(){
 // puede mover stock.
 // -------------------------------------------------------------------
 const ESTADO_ORDEN_LABEL = { pendiente: 'Pendiente', parcial: 'Parcial', convertida: 'Convertida', anulada: 'Anulada' };
+const ESTADO_RECEPCION_ORDEN_LABEL = { pendiente: 'Sin recibir', parcial: 'Recibida parcial', recibida: 'Recibida' };
 let ordenesCache = [];
 
 async function cargarOrdenes(){
@@ -1427,11 +1428,13 @@ function verDetalleOrden(id){
   if (!o) return;
   const filasItems = o.items.map((it, i) => {
     const pendiente = Math.round((it.cantidad - (it.cantidadConvertida || 0)) * 1000) / 1000;
+    const pendienteRecibir = Math.round((it.cantidad - (it.cantidadRecibida || 0)) * 1000) / 1000;
     return `
     <tr>
       <td>${escapeHtml(it.sku||'')}</td>
       <td>${escapeHtml(it.nombre)}</td>
       <td>${it.cantidad}</td>
+      <td class="muted">${it.cantidadRecibida || 0}</td>
       <td class="muted">${it.cantidadConvertida || 0}</td>
       <td>${pendiente}</td>
       <td>${money(it.precioUnitario)}</td>
@@ -1439,16 +1442,18 @@ function verDetalleOrden(id){
     </tr>
   `;}).join('');
 
+  const haypendienteRecibir = o.items.some(it => (it.cantidad - (it.cantidadRecibida || 0)) > 0.0001);
+
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Orden de compra #${o.numero} <span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span></h2>
+        <h2>Orden de compra #${o.numero} <span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span> <span class="pill ${o.estadoRecepcion === 'recibida' ? 'recibida' : 'pendiente'}">${ESTADO_RECEPCION_ORDEN_LABEL[o.estadoRecepcion]||'Sin recibir'}</span></h2>
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(o.proveedorNombre)} — ${fechaCorta(o.fecha)}${o.condicionPago ? ' — Condición: ' + escapeHtml(o.condicionPago) : ''}
         </p>
         <table>
-          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Convertido</th><th>Pendiente</th><th>Precio est.</th><th>Subtotal</th></tr></thead>
+          <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Recibido</th><th>Convertido</th><th>Pendiente fact.</th><th>Precio est.</th><th>Subtotal</th></tr></thead>
           <tbody>${filasItems}</tbody>
         </table>
         <div class="totales-box">
@@ -1457,6 +1462,7 @@ function verDetalleOrden(id){
         ${o.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(o.observaciones)}</p>` : ''}
         <div class="err" id="doErr"></div>
         <div class="row" style="margin-top:14px">
+          ${o.estado !== 'anulada' && haypendienteRecibir ? `<button class="btn secondary" onclick="abrirRecibirOrden('${o._id}')">Recibir mercadería</button>` : ''}
           ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn" onclick="abrirConvertirOrden('${o._id}')">Convertir en compra</button>` : ''}
           ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn danger" onclick="anularOrden('${o._id}')">Anular orden</button>` : ''}
         </div>
@@ -1482,6 +1488,78 @@ async function anularOrden(id){
   }
 }
 
+// Recibe mercadería contra la orden ANTES de que llegue la factura
+// (4/10/2026, pedido de Mato: "la orden de compra ademas de poder
+// convertirla en compra nos deberia de permitir recibir la mercaderia,
+// impactando en el stock") — a diferencia de "Convertir en compra", acá
+// no se pide ningún dato de comprobante: solo ingresa stock. Cuando
+// después llegue la factura y se convierta la orden, lo que ya se
+// recibió por acá no se vuelve a sumar (lo resuelve el backend).
+function abrirRecibirOrden(id){
+  const o = ordenesCache.find(x => x._id === id);
+  if (!o) return;
+  const filas = o.items.map((it, i) => {
+    const pendiente = Math.round((it.cantidad - (it.cantidadRecibida || 0)) * 1000) / 1000;
+    if (pendiente <= 0) return '';
+    const producto = productosCache.find(p => String(p._id) === String(it.productoId));
+    const unidadLabel = producto ? (UNIDAD_LABEL_COMPRA[producto.unidad] || producto.unidad || '') : '';
+    const conBulto = producto && producto.unidadesPorBulto > 0;
+    return `
+    <div class="fila-item" data-orden-item-index="${i}" data-pendiente="${pendiente}">
+      <div class="campo-producto">
+        <label>${escapeHtml(it.sku||'')} — ${escapeHtml(it.nombre)}</label>
+        <div class="muted" style="font-size:11px">Pendiente de recibir: ${pendiente}</div>
+      </div>
+      <div class="campo-cant">
+        <label>Cantidad a recibir ${unidadLabel ? `<span class="muted">(${escapeHtml(unidadLabel)})</span>` : ''}</label>
+        <input type="number" min="0" step="0.01" max="${pendiente}" value="${pendiente}" class="cant-unidad" oninput="sincronizarCantidadCompra(this,'unidad',productosCache,function(){})">
+      </div>
+      <div class="campo-cant-bulto ${conBulto ? '' : 'hidden'}">
+        <label>Bultos</label>
+        <input type="number" min="0" step="1" class="cant-bulto" oninput="sincronizarCantidadCompra(this,'bulto',productosCache,function(){})">
+      </div>
+    </div>
+  `;}).join('');
+
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Recibir mercadería — Orden #${o.numero}</h2>
+        <p class="muted" style="margin-top:-8px">Ingresa el stock de lo que efectivamente llegó. Todavía no hace falta la factura — eso se hace después, al convertir la orden.</p>
+        <div><label>Depósito *</label><select id="roDeposito">${opcionesDepositosCompra()}</select></div>
+        <div class="section-title">Ítems a recibir</div>
+        <div id="roFilasItems">${filas}</div>
+        <div class="err" id="roErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarRecibirOrden('${o._id}')">Registrar recepción</button>
+      </div>
+    </div>
+  `;
+}
+async function confirmarRecibirOrden(id){
+  const depositoId = document.getElementById('roDeposito').value;
+  const errEl = document.getElementById('roErr');
+  errEl.textContent = '';
+  if (!depositoId) { errEl.textContent = 'Elegí a qué depósito le vas a ingresar el stock'; return; }
+  const items = [];
+  document.querySelectorAll('#roFilasItems .fila-item').forEach(fila => {
+    const idx = Number(fila.dataset.ordenItemIndex);
+    const cantidad = Number(fila.querySelector('.cant-unidad').value);
+    if (cantidad > 0) items.push({ ordenItemIndex: idx, cantidad });
+  });
+  if (!items.length) { errEl.textContent = 'Ingresá al menos una cantidad a recibir'; return; }
+  try{
+    const r = await fetch(BASE + '/ordenes/' + id + '/recibir', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ depositoId, items })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al recibir la mercadería');
+    cerrarModal();
+    await cargarOrdenes();
+    verDetalleOrden(id);
+  }catch(e){
+    errEl.textContent = e.message;
+  }
+}
+
 // Convertir una orden (total o parcialmente) en una Compra real — recién
 // acá se cargan los datos del comprobante fiscal (llegó la factura de
 // verdad) y el IVA por artículo, y recién acá se puede elegir ingresar
@@ -1499,7 +1577,7 @@ function abrirConvertirOrden(id){
     <div class="fila-item" data-orden-item-index="${i}" data-pendiente="${pendiente}" data-producto-id="${it.productoId||''}">
       <div class="campo-producto">
         <label><input type="checkbox" checked onchange="actualizarFilaConvertirOrden(this)"> ${escapeHtml(it.sku||'')} — ${escapeHtml(it.nombre)}</label>
-        <div class="muted" style="font-size:11px">Pendiente: ${pendiente}</div>
+        <div class="muted" style="font-size:11px">Pendiente: ${pendiente}${(it.cantidadRecibida || 0) > 0 ? ` — Ya recibido: ${it.cantidadRecibida} (no vuelve a ingresar stock)` : ''}</div>
       </div>
       <div class="campo-cant">
         <label>Cantidad a convertir ${unidadLabel ? `<span class="muted">(${escapeHtml(unidadLabel)})</span>` : ''}</label>

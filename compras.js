@@ -257,11 +257,11 @@ router.get('/depositos', authAdmin, async (req, res) => {
 // colecciones (`stock_movimientos`, `stock_actual`).
 // -----------------------------------------------------------------------
 
-async function aplicarMovimientoStock(db, req, { productoId, depositoId, tipo, cantidad, motivo, observaciones, compraId, usuarioNombre, fecha }) {
+async function aplicarMovimientoStock(db, req, { productoId, depositoId, tipo, cantidad, motivo, observaciones, compraId, ordenId, usuarioNombre, fecha }) {
   const movimiento = {
     productoId, depositoId, tipo, cantidad, motivo,
     sucursal: '', codigoExterno: '', observaciones: observaciones || '',
-    compraId, usuarioNombre, fecha: fecha || new Date(), orgId: req.orgId, createdAt: new Date()
+    compraId: compraId || null, ordenId: ordenId || null, usuarioNombre, fecha: fecha || new Date(), orgId: req.orgId, createdAt: new Date()
   };
   await db.collection('stock_movimientos').insertOne(movimiento);
   const delta = tipo === 'ingreso' ? cantidad : -cantidad;
@@ -284,13 +284,22 @@ async function ingresarStockDeCompra(db, req, compra, depositoId) {
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
   if (!deposito) throw err(404, 'Depósito no encontrado');
   for (const item of compra.items) {
-    if (!item.productoId) continue;
+    // `cantidadYaRecibida` (si está presente) es lo que de este ítem ya
+    // había entrado a stock antes, por una recepción directa contra la
+    // orden de compra (ver POST /ordenes/:id/recibir) — eso no se
+    // vuelve a ingresar. `cantidadIngresoStock` queda registrado en el
+    // ítem para que una anulación posterior revierta exactamente esto
+    // (ver egresarStockDeCompra), no el total facturado.
+    const aIngresar = Math.round((item.cantidad - (item.cantidadYaRecibida || 0)) * 1000) / 1000;
+    item.cantidadIngresoStock = aIngresar;
+    if (!item.productoId || aIngresar <= 0) continue;
     await aplicarMovimientoStock(db, req, {
-      productoId: item.productoId, depositoId, tipo: 'ingreso', cantidad: item.cantidad,
+      productoId: item.productoId, depositoId, tipo: 'ingreso', cantidad: aIngresar,
       motivo: 'Compra', observaciones: `Compra ${compra.numero ? '#' + compra.numero : ''}`.trim(),
       compraId: compra._id, usuarioNombre: compra.usuarioNombre, fecha: compra.fecha
     });
   }
+  await db.collection('compras').updateOne({ _id: compra._id }, { $set: { items: compra.items } });
 }
 
 // Reversa el stock de una compra ya recibida (usado al anular) — un
@@ -300,22 +309,31 @@ async function ingresarStockDeCompra(db, req, compra, depositoId) {
 async function egresarStockDeCompra(db, req, compra) {
   if (!compra.depositoId) return;
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: compra.depositoId }, filtroOrg(req)));
+  // `cantidadIngresoStock` (si está presente) es lo que ESTA compra
+  // realmente empujó a stock — puede ser menos que `cantidad` cuando la
+  // compra viene de convertir una orden que ya tenía parte recibida de
+  // antes (ver POST /ordenes/:id/convertir). Si no está, es una compra
+  // "normal" (no por orden) y se ingresó el total, como siempre.
   for (const item of compra.items) {
     if (!item.productoId) continue;
+    const aRevertir = item.cantidadIngresoStock != null ? item.cantidadIngresoStock : item.cantidad;
+    if (aRevertir <= 0) continue;
     const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: item.productoId }, filtroOrg(req)));
     if (!producto) continue;
     if (!producto.aceptaStockNegativo) {
       const actual = await db.collection('stock_actual').findOne(Object.assign({ productoId: item.productoId, depositoId: compra.depositoId }, filtroOrg(req)));
       const cantidadActual = actual ? actual.cantidad : 0;
-      if (item.cantidad > cantidadActual) {
+      if (aRevertir > cantidadActual) {
         throw err(400, `No se puede anular: ya no hay suficiente stock de "${item.nombre}" en ${deposito ? deposito.nombre : 'el depósito'} para revertir el ingreso (disponible: ${cantidadActual}, probablemente ya se vendió). Corregilo con un movimiento de ajuste a mano en Stock.`);
       }
     }
   }
   for (const item of compra.items) {
     if (!item.productoId) continue;
+    const aRevertir = item.cantidadIngresoStock != null ? item.cantidadIngresoStock : item.cantidad;
+    if (aRevertir <= 0) continue;
     await aplicarMovimientoStock(db, req, {
-      productoId: item.productoId, depositoId: compra.depositoId, tipo: 'egreso', cantidad: item.cantidad,
+      productoId: item.productoId, depositoId: compra.depositoId, tipo: 'egreso', cantidad: aRevertir,
       motivo: 'Anulación de compra', observaciones: `Anulación de compra ${compra.numero ? '#' + compra.numero : ''}`.trim(),
       compraId: compra._id, usuarioNombre: compra.usuarioNombre, fecha: new Date()
     });
@@ -458,7 +476,7 @@ async function normalizarItemsOrden(db, req, itemsRaw) {
     const precioUnitario = normalizarMontoNoNegativo(precioBase || 0, `El precio unitario estimado de "${nombre}"`);
     const itemSubtotal = Math.round(cantidad * precioUnitario * 100) / 100;
     subtotal += itemSubtotal;
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, cantidadConvertida: 0 });
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, cantidadConvertida: 0, cantidadRecibida: 0 });
   }
   return { items, subtotal: Math.round(subtotal * 100) / 100 };
 }
@@ -677,6 +695,12 @@ router.post('/ordenes', authAdmin, async (req, res) => {
         cotizacionDolar,
         condicionPago: condicionPago || proveedor.condicionPago || '',
         estado: 'pendiente',
+        // Recepción física de la mercadería — independiente de
+        // convertir la orden en compra (eso es cuando llega la
+        // factura). 4/10/2026, pedido de Mato: "la orden de compra
+        // ademas de poder convertirla en compra nos deberia de
+        // permitir recibir la mercaderia, impactando en el stock".
+        estadoRecepcion: 'pendiente',
         items,
         subtotal,
         observaciones,
@@ -691,6 +715,76 @@ router.post('/ordenes', authAdmin, async (req, res) => {
       const r = await db.collection('ordenes_compra').insertOne(orden);
       orden._id = r.insertedId;
       return orden;
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Recibe mercadería contra una orden de compra ANTES de que llegue la
+// factura — a diferencia de "convertir en compra" (que exige los datos
+// del comprobante fiscal), esto solo ingresa stock, sin tocar saldos ni
+// Tesorería. Se puede recibir de a partes (varias entregas) y después,
+// cuando llegue la factura, "convertir" la orden la va a tomar en
+// cuenta para no volver a sumar el mismo stock dos veces.
+router.post('/ordenes/:id/recibir', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    const depositoId = toObjectId(body.depositoId);
+    if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a ingresar el stock.');
+    if (!Array.isArray(body.items) || !body.items.length) throw err(400, 'Elegí al menos un ítem para recibir');
+
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const orden = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!orden) throw err(404, 'Orden de compra no encontrada');
+      if (orden.estado === 'anulada') throw err(400, 'Esa orden está anulada, no se puede recibir mercadería.');
+
+      const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
+      if (!deposito) throw err(404, 'Depósito no encontrado');
+
+      const usados = new Set();
+      const porIndice = new Map();
+      for (const it of body.items) {
+        const idx = Number(it.ordenItemIndex);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= orden.items.length) throw err(400, 'Ítem de la orden inválido');
+        if (usados.has(idx)) throw err(400, 'No se puede recibir el mismo ítem de la orden dos veces en la misma recepción');
+        usados.add(idx);
+        const ordenItem = orden.items[idx];
+        const cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad a recibir de "${ordenItem.nombre}"`);
+        const pendienteRecibir = Math.round((ordenItem.cantidad - (ordenItem.cantidadRecibida || 0)) * 1000) / 1000;
+        if (cantidad > pendienteRecibir + 0.0001) throw err(400, `No se puede recibir más de lo pendiente de "${ordenItem.nombre}" (pendiente de recibir: ${pendienteRecibir})`);
+        porIndice.set(idx, cantidad);
+      }
+      if (!porIndice.size) throw err(400, 'Elegí al menos un ítem para recibir');
+
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const ahora = new Date();
+      for (const [idx, cantidad] of porIndice) {
+        const ordenItem = orden.items[idx];
+        if (!ordenItem.productoId) continue; // ítems manuales sin vínculo al catálogo no mueven stock
+        await aplicarMovimientoStock(db, req, {
+          productoId: ordenItem.productoId, depositoId, tipo: 'ingreso', cantidad,
+          motivo: 'Recepción de orden de compra', observaciones: `Orden de compra #${orden.numero}`.trim(),
+          ordenId: orden._id, usuarioNombre, fecha: ahora
+        });
+      }
+
+      const itemsActualizados = orden.items.map((oi, i) => {
+        if (!porIndice.has(i)) return oi;
+        const nuevaCantidadRecibida = Math.round(((oi.cantidadRecibida || 0) + porIndice.get(i)) * 1000) / 1000;
+        return Object.assign({}, oi, { cantidadRecibida: nuevaCantidadRecibida });
+      });
+      const totalmenteRecibida = itemsActualizados.every(it => (it.cantidadRecibida || 0) >= it.cantidad - 0.0001);
+      const algoRecibido = itemsActualizados.some(it => (it.cantidadRecibida || 0) > 0);
+      const nuevoEstadoRecepcion = totalmenteRecibida ? 'recibida' : (algoRecibido ? 'parcial' : 'pendiente');
+
+      await db.collection('ordenes_compra').updateOne({ _id: id }, { $set: {
+        items: itemsActualizados, estadoRecepcion: nuevoEstadoRecepcion, updatedAt: new Date()
+      } });
+      return db.collection('ordenes_compra').findOne({ _id: id });
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -788,6 +882,16 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
       }
 
       const { items, subtotal } = await normalizarItems(db, req, itemsRaw);
+      // Cuánto de lo que se está convirtiendo ya había entrado a stock
+      // por una recepción directa contra la orden (y todavía no se
+      // había facturado) — eso NO se vuelve a ingresar acá (ver más
+      // abajo, donde se calcula cantidadIngresoStock de cada ítem).
+      items.forEach((item, i) => {
+        const [idx, cantidadConv] = cantidadesPorIndice[i];
+        const ordenItem = orden.items[idx];
+        const recibidoSinFacturar = Math.max(0, Math.round(((ordenItem.cantidadRecibida || 0) - (ordenItem.cantidadConvertida || 0)) * 1000) / 1000);
+        item.cantidadYaRecibida = Math.min(recibidoSinFacturar, cantidadConv);
+      });
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const fiscalItems = calcularComprobanteDesdeItems(items);
       const numero = await proximoNumero(db, req.orgId);
@@ -853,6 +957,14 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
         compra.stockIngresado = true;
         compra.stockIngresadoEn = ahora;
         compra.recibidaEn = ahora;
+      } else {
+        // Igual que una compra pendiente normal: no se ingresa nada
+        // ahora. Lo que ya se había recibido antes de la orden se deja
+        // registrado en cantidadIngresoStock=0 para que, si más
+        // adelante se usa "Recibir (ingresar stock)" sobre esta compra,
+        // ingresarStockDeCompra vuelva a descontarlo correctamente.
+        for (const item of compra.items) item.cantidadIngresoStock = 0;
+        await db.collection('compras').updateOne({ _id: compra._id }, { $set: { items: compra.items } });
       }
 
       // Actualiza cuánto se convirtió de cada ítem de la orden, y
