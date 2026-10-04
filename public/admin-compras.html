@@ -71,7 +71,11 @@
   .fila-pago-cuenta .info{flex:1;min-width:0;}
   .fila-pago-cuenta input[type="number"]{width:120px;}
   .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
-  .fila-item .campo-producto{flex:2;min-width:0;}
+  .fila-item .campo-producto{flex:2;min-width:160px;position:relative;}
+  .producto-buscar-opciones{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:var(--shadow);}
+  .producto-buscar-opciones .opcion{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .producto-buscar-opciones .opcion:hover,.producto-buscar-opciones .opcion.activa{background:var(--accent-soft);}
+  .producto-buscar-opciones .sin-resultados{padding:8px 10px;font-size:13px;color:var(--muted);}
   .fila-item .campo-cant{flex:1;min-width:0;}
   .fila-item .campo-precio{flex:1;min-width:0;}
   .fila-item .campo-iva{flex:1;min-width:0;}
@@ -273,6 +277,70 @@ function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); retur
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+// Buscador de producto por SKU o nombre (4/10/2026, pedido de Mato:
+// "optimizalo igual que en los otros") — mismo criterio que en Ventas:
+// reemplaza al <select> con las +25.000 opciones del catálogo, que
+// tardaba en abrirse y no dejaba buscar por cualquier parte del texto.
+const LIMITE_SUGERENCIAS_PRODUCTO = 30;
+function textoProducto(p){ return (p.sku ? p.sku + ' — ' : '') + p.nombre; }
+function htmlBuscadorProducto(){
+  return `<input type="text" class="producto-buscar" placeholder="Buscar por SKU o nombre…" autocomplete="off"
+      oninput="escribirProductoCompra(this)" onfocus="renderOpcionesProductoCompra(this, this.value)"
+      onblur="cerrarOpcionesProductoCompra(this)" onkeydown="navegarOpcionesProductoCompra(event, this)">
+    <input type="hidden" class="producto-id">
+    <div class="producto-buscar-opciones hidden"></div>`;
+}
+function productoIdDeFila(fila){ return fila.querySelector('.producto-id').value; }
+function buscarProductosCompra(query){
+  const q = (query || '').trim().toLowerCase();
+  const activos = productosCache.filter(p => p.activo !== false);
+  const resultados = q
+    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
+    : activos;
+  return resultados.slice(0, LIMITE_SUGERENCIAS_PRODUCTO);
+}
+function renderOpcionesProductoCompra(input, query){
+  const cont = input.closest('.fila-item').querySelector('.producto-buscar-opciones');
+  const resultados = buscarProductosCompra(query);
+  cont.innerHTML = resultados.length
+    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCompra(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
+    : `<div class="sin-resultados">${productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados'}</div>`;
+  cont.classList.remove('hidden');
+}
+// Al escribir, la selección previa queda invalidada hasta elegir de
+// nuevo de la lista (así no se carga un producto distinto al escrito).
+function escribirProductoCompra(input){
+  input.closest('.fila-item').querySelector('.producto-id').value = '';
+  renderOpcionesProductoCompra(input, input.value);
+}
+function cerrarOpcionesProductoCompra(input){
+  const fila = input.closest('.fila-item');
+  setTimeout(() => { const cont = fila.querySelector('.producto-buscar-opciones'); if (cont) cont.classList.add('hidden'); }, 150);
+}
+function navegarOpcionesProductoCompra(e, input){
+  const cont = input.closest('.fila-item').querySelector('.producto-buscar-opciones');
+  if (cont.classList.contains('hidden')) return;
+  const opciones = Array.from(cont.querySelectorAll('.opcion'));
+  if (!opciones.length) return;
+  let idx = opciones.findIndex(o => o.classList.contains('activa'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(opciones.length - 1, idx + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); elegirProductoCompra(opciones[idx >= 0 ? idx : 0]); return; }
+  else if (e.key === 'Escape') { cont.classList.add('hidden'); return; }
+  else return;
+  opciones.forEach(o => o.classList.remove('activa'));
+  opciones[idx].classList.add('activa');
+  opciones[idx].scrollIntoView({ block: 'nearest' });
+}
+function elegirProductoCompra(el){
+  const fila = el.closest('.fila-item');
+  const producto = productosCache.find(p => String(p._id) === el.dataset.id);
+  fila.querySelector('.producto-id').value = el.dataset.id;
+  fila.querySelector('.producto-buscar').value = producto ? textoProducto(producto) : '';
+  fila.querySelector('.producto-buscar-opciones').classList.add('hidden');
+  // Esta fila es de Compra o de Orden según el contenedor donde está.
+  if (fila.closest('#ncFilasItems')) actualizarFilaCompra(fila); else actualizarFilaOrden(fila);
+}
 // Cotización del dólar vigente de la organización (se carga al entrar).
 let cotizacionOrgCache = null;
 function cotizacionEfectiva(cotizId){
@@ -296,9 +364,9 @@ function precioCostoProducto(producto, monedaId, cotizId){
 }
 function recalcularPreciosPorMoneda(filasSel, monedaId, cotizId, actualizarFn){
   document.querySelectorAll(filasSel + ' .fila-item').forEach(fila => {
-    const sel = fila.querySelector('select.select-producto');
-    if (!sel || !sel.value) return;
-    const producto = productosCache.find(p => String(p._id) === sel.value);
+    const pid = productoIdDeFila(fila);
+    if (!pid) return;
+    const producto = productosCache.find(p => String(p._id) === pid);
     fila.querySelector('.campo-precio input').value = precioCostoProducto(producto, monedaId, cotizId);
   });
   actualizarFn();
@@ -321,8 +389,7 @@ const UNIDAD_LABEL_COMPRA = { unidad:'Unidad', m2:'m²', ml:'Metro lineal', kg:'
 // al entero más cercano (mismo criterio que en Ventas).
 function sincronizarCantidadCompra(el, origen, productosCacheRef, actualizarTotalesFn){
   const fila = el.closest('.fila-item');
-  const select = fila.querySelector('select.select-producto');
-  const producto = productosCacheRef.find(p => String(p._id) === select.value);
+  const producto = productosCacheRef.find(p => String(p._id) === productoIdDeFila(fila));
   const unidadInput = fila.querySelector('.cant-unidad');
   const bultoInput = fila.querySelector('.cant-bulto');
   if (producto && producto.unidadesPorBulto) {
@@ -533,11 +600,6 @@ function opcionesProveedoresSelect(seleccionado){
     `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`
   ).join('');
 }
-function opcionesProductosCompra(seleccionado){
-  return '<option value="">Elegí un producto…</option>' + productosCache.map(p =>
-    `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.sku||'')} — ${escapeHtml(p.nombre)}</option>`
-  ).join('');
-}
 function opcionesDepositosCompra(seleccionado){
   return '<option value="">Elegí un depósito…</option>' + depositosCache.filter(d => d.activo !== false).map(d =>
     `<option value="${d._id}" ${d._id===seleccionado?'selected':''}>${escapeHtml(d.nombre)}</option>`
@@ -609,7 +671,7 @@ function agregarFilaCompra(){
   fila.innerHTML = `
     <div class="campo-producto">
       <label>Producto</label>
-      <select class="select-producto" onchange="actualizarFilaCompra(this)">${opcionesProductosCompra()}</select>
+      ${htmlBuscadorProducto()}
     </div>
     <div class="campo-cant">
       <label>Cantidad <span class="muted unidad-indicador"></span></label>
@@ -633,18 +695,15 @@ function agregarFilaCompra(){
   cont.appendChild(fila);
 }
 
-function actualizarFilaCompra(el){
-  const fila = el.closest('.fila-item');
-  const select = fila.querySelector('select.select-producto');
+// Se llama al elegir un producto en el buscador de la fila.
+function actualizarFilaCompra(fila){
   const precioInput = fila.querySelector('.campo-precio input');
-  if (el.tagName === 'SELECT') {
-    const producto = productosCache.find(p => String(p._id) === select.value);
-    precioInput.value = precioCostoProducto(producto, 'ncMoneda', 'ncCotizacionDolar');
-    actualizarIndicadorUnidad(fila, producto);
-    if (producto && producto.unidadesPorBulto) {
-      sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesCompra);
-      return;
-    }
+  const producto = productosCache.find(p => String(p._id) === productoIdDeFila(fila));
+  precioInput.value = precioCostoProducto(producto, 'ncMoneda', 'ncCotizacionDolar');
+  actualizarIndicadorUnidad(fila, producto);
+  if (producto && producto.unidadesPorBulto) {
+    sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesCompra);
+    return;
   }
   actualizarTotalesCompra();
 }
@@ -653,11 +712,11 @@ function juntarItemsCompra(){
   const filas = document.querySelectorAll('#ncFilasItems .fila-item');
   const items = [];
   filas.forEach(fila => {
-    const select = fila.querySelector('select.select-producto');
+    const productoId = productoIdDeFila(fila);
     const cantidad = Number(fila.querySelector('.campo-cant input').value);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
     const alicuotaIva = Number(fila.querySelector('select.select-iva').value);
-    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario, alicuotaIva });
+    if (productoId && cantidad > 0) items.push({ productoId, cantidad, precioUnitario, alicuotaIva });
   });
   return items;
 }
@@ -1332,7 +1391,7 @@ function agregarFilaOrden(){
   fila.innerHTML = `
     <div class="campo-producto">
       <label>Producto</label>
-      <select class="select-producto" onchange="actualizarFilaOrden(this)">${opcionesProductosCompra()}</select>
+      ${htmlBuscadorProducto()}
     </div>
     <div class="campo-cant">
       <label>Cantidad <span class="muted unidad-indicador"></span></label>
@@ -1352,18 +1411,15 @@ function agregarFilaOrden(){
   cont.appendChild(fila);
 }
 
-function actualizarFilaOrden(el){
-  const fila = el.closest('.fila-item');
-  const select = fila.querySelector('select.select-producto');
+// Se llama al elegir un producto en el buscador de la fila.
+function actualizarFilaOrden(fila){
   const precioInput = fila.querySelector('.campo-precio input');
-  if (el.tagName === 'SELECT') {
-    const producto = productosCache.find(p => String(p._id) === select.value);
-    precioInput.value = precioCostoProducto(producto, 'noMoneda', 'noCotizacionDolar');
-    actualizarIndicadorUnidad(fila, producto);
-    if (producto && producto.unidadesPorBulto) {
-      sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesOrden);
-      return;
-    }
+  const producto = productosCache.find(p => String(p._id) === productoIdDeFila(fila));
+  precioInput.value = precioCostoProducto(producto, 'noMoneda', 'noCotizacionDolar');
+  actualizarIndicadorUnidad(fila, producto);
+  if (producto && producto.unidadesPorBulto) {
+    sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesOrden);
+    return;
   }
   actualizarTotalesOrden();
 }
@@ -1372,10 +1428,10 @@ function juntarItemsOrden(){
   const filas = document.querySelectorAll('#noFilasItems .fila-item');
   const items = [];
   filas.forEach(fila => {
-    const select = fila.querySelector('select.select-producto');
+    const productoId = productoIdDeFila(fila);
     const cantidad = Number(fila.querySelector('.campo-cant input').value);
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
-    if (select.value && cantidad > 0) items.push({ productoId: select.value, cantidad, precioUnitario });
+    if (productoId && cantidad > 0) items.push({ productoId, cantidad, precioUnitario });
   });
   return items;
 }
@@ -1444,9 +1500,9 @@ async function confirmarAltaRapidaProducto(){
     agregarFilaOrden();
     const filas = document.querySelectorAll('#noFilasItems .fila-item');
     const ultima = filas[filas.length - 1];
-    const select = ultima.querySelector('select.select-producto');
-    select.innerHTML = opcionesProductosCompra(String(data._id));
-    actualizarFilaOrden(select);
+    ultima.querySelector('.producto-id').value = String(data._id);
+    ultima.querySelector('.producto-buscar').value = textoProducto(data);
+    actualizarFilaOrden(ultima);
   }catch(e){
     errEl.textContent = e.message;
   }
