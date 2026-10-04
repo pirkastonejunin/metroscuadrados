@@ -304,7 +304,7 @@ function renderOpcionesProductoCompra(input, query){
   const resultados = buscarProductosCompra(query);
   cont.innerHTML = resultados.length
     ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCompra(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
-    : `<div class="sin-resultados">${productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados'}</div>`;
+    : `<div class="sin-resultados">${!productosListos ? 'Cargando productos… (tarda unos segundos)' : (productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados')}</div>`;
   cont.classList.remove('hidden');
 }
 // Al escribir, la selección previa queda invalidada hasta elegir de
@@ -516,49 +516,63 @@ let depositosCache = [];
 // emite un cheque).
 let cajasTesoreriaCache = [];
 let bancosTesoreriaCache = [];
-async function cargarListasBase(){
-  let [rp2, rp, rd, rcj, rbc] = await Promise.all([
-    fetch(BASE + '/proveedores', {headers: headersAuth()}),
-    fetch(BASE + '/productos', {headers: headersAuth()}),
-    fetch(BASE + '/depositos', {headers: headersAuth()}),
-    fetch('/api/tesoreria/cajas', {headers: headersAuth()}),
-    fetch('/api/tesoreria/bancos', {headers: headersAuth()})
-  ]);
-  // Reintento (4/10/2026): si alguno de los tres listados base falló
-  // (típicamente justo después de un reinicio del servidor), se vuelve
-  // a pedir uno por uno antes de dejar los combos vacíos.
-  for (let intento = 0; intento < 2 && (!rp2.ok || !rp.ok || !rd.ok); intento++) {
-    await new Promise(r => setTimeout(r, 1200));
-    if (!rp2.ok) rp2 = await fetch(BASE + '/proveedores', {headers: headersAuth()});
-    if (!rp.ok) rp = await fetch(BASE + '/productos', {headers: headersAuth()});
-    if (!rd.ok) rd = await fetch(BASE + '/depositos', {headers: headersAuth()});
+// Carga de listados base (4/10/2026). Causa real de los "no me trae
+// proveedores ni productos": el listado de productos (+25.000) tarda
+// varios segundos, y antes TODO se esperaba junto (Promise.all) — hasta
+// que no llegaba el último producto no se cargaba ni un proveedor, y si
+// se abría "Nueva orden" antes, los combos quedaban vacíos. Ahora cada
+// listado se asigna apenas llega, y los productos se piden aparte, en
+// segundo plano (el buscador dice "Cargando productos…" mientras tanto).
+let productosListos = false;
+function esperar(ms){ return new Promise(r => setTimeout(r, ms)); }
+async function pedirListado(url, nombre){
+  for (let intento = 0; intento < 3; intento++) {
+    try {
+      const r = await fetch(url, {headers: headersAuth()});
+      if (r.ok) return await r.json();
+      console.error('No se pudieron cargar ' + nombre + ':', r.status);
+    } catch (e) { console.error('No se pudieron cargar ' + nombre + ':', e.message); }
+    await esperar(1200);
   }
-  // 4/10/2026: antes esto fallaba en silencio (array vacío sin avisar
-  // nada) cuando alguno de los 5 pedidos en paralelo no venía bien — ver
-  // el comentario de getDb() en compras.js para la causa real (una
-  // carrera de conexión a Mongo). Se deja este console.error acá además
-  // del fix de fondo, para que si alguna vez vuelve a fallar algo quede
-  // visible en la consola en vez de mostrar los combos vacíos sin pista.
-  if (!rp2.ok) console.error('No se pudieron cargar los proveedores:', rp2.status);
-  if (!rp.ok) console.error('No se pudieron cargar los productos:', rp.status);
-  if (!rd.ok) console.error('No se pudieron cargar los depósitos:', rd.status);
-  proveedoresCache = rp2.ok ? await rp2.json() : [];
-  productosCache = rp.ok ? await rp.json() : [];
-  depositosCache = rd.ok ? await rd.json() : [];
+  return null;
+}
+// Si un formulario ya estaba abierto cuando llegó el listado, se
+// completa el combo en el momento (sin pisar lo que ya se eligió).
+function refrescarCombo(id, html){
+  const el = document.getElementById(id);
+  if (!el) return;
+  const valor = el.value;
+  el.innerHTML = html;
+  if (valor) el.value = valor;
+}
+function htmlComboProveedoresFiltro(){
+  return '<option value="">Todos</option>' + proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
+}
+async function cargarListasBase(){
+  // Productos: en segundo plano, sin frenar al resto.
+  pedirListado(BASE + '/productos', 'los productos').then(lista => {
+    productosCache = lista || [];
+    productosListos = true;
+    const activo = document.activeElement;
+    if (activo && activo.classList && activo.classList.contains('producto-buscar')) renderOpcionesProductoCompra(activo, activo.value);
+  });
+  const [prov, dep, rcj, rbc, rc] = await Promise.all([
+    pedirListado(BASE + '/proveedores', 'los proveedores'),
+    pedirListado(BASE + '/depositos', 'los depósitos'),
+    fetch('/api/tesoreria/cajas', {headers: headersAuth()}).catch(() => null),
+    fetch('/api/tesoreria/bancos', {headers: headersAuth()}).catch(() => null),
+    fetch(BASE + '/cotizacion-dolar', {headers: headersAuth()}).catch(() => null)
+  ]);
+  proveedoresCache = prov || [];
+  depositosCache = dep || [];
   // Si el usuario no tiene el módulo Tesorería habilitado esto da 403 —
   // no es una falla real, simplemente no va a poder elegir cuenta al pagar.
-  cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
-  bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
-  try {
-    const rc = await fetch(BASE + '/cotizacion-dolar', {headers: headersAuth()});
-    cotizacionOrgCache = rc.ok ? ((await rc.json()).valor || null) : null;
-  } catch (e) { cotizacionOrgCache = null; }
-  document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
-    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
-  document.getElementById('fpProveedor').innerHTML = '<option value="">Todos</option>' +
-    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
-  document.getElementById('foProveedor').innerHTML = '<option value="">Todos</option>' +
-    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
+  cajasTesoreriaCache = rcj && rcj.ok ? await rcj.json() : [];
+  bancosTesoreriaCache = rbc && rbc.ok ? await rbc.json() : [];
+  try { cotizacionOrgCache = rc && rc.ok ? ((await rc.json()).valor || null) : null; } catch (e) { cotizacionOrgCache = null; }
+  ['fcProveedor', 'fpProveedor', 'foProveedor'].forEach(id => refrescarCombo(id, htmlComboProveedoresFiltro()));
+  ['ncProveedor', 'noProveedor'].forEach(id => refrescarCombo(id, opcionesProveedoresSelect()));
+  ['ncDeposito', 'coDeposito', 'roDeposito'].forEach(id => refrescarCombo(id, opcionesDepositosCompra()));
 }
 
 // -------------------------------------------------------------------
