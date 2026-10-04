@@ -62,6 +62,8 @@ app.use('/api/stock', stockRouter);
 
 const ventasRouter = require('./ventas');
 app.use('/api/ventas', ventasRouter);
+const presupuestosRouter = require('./presupuestos');
+app.use('/api/presupuestos', presupuestosRouter);
 
 const comprasRouter = require('./compras');
 app.use('/api/compras', comprasRouter);

@@ -267,8 +267,30 @@ async function iniciarApp(){
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarListasBase();
   await cargarVentas();
+  abrirVentaDesdePresupuestoSiCorresponde();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+// Ver admin-presupuestos.html, botón "Convertir en venta": guarda el
+// prefill en sessionStorage y redirige para acá en vez de duplicar la
+// lógica de alta de venta (stock/cuenta corriente/letra fiscal) en
+// presupuestos.js — mismo criterio que una Nota de Crédito ya reusa este
+// mismo formulario con prefill (ver abrirNuevaVenta).
+function abrirVentaDesdePresupuestoSiCorresponde(){
+  const crudo = sessionStorage.getItem('presupuesto_prefill');
+  if (!crudo) return;
+  sessionStorage.removeItem('presupuesto_prefill');
+  let datos;
+  try { datos = JSON.parse(crudo); } catch (e) { return; }
+  if (!datos || !datos.presupuestoId) return;
+  presupuestoOrigenActual = datos.presupuestoId;
+  abrirNuevaVenta({
+    clienteId: datos.clienteId || '',
+    items: datos.items || [],
+    observaciones: datos.observaciones || '',
+    moneda: datos.moneda || 'ARS'
+  });
+}
 
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 
@@ -635,6 +657,11 @@ let ventaOrgSeleccionada = '';
 // Nota de Crédito" en el detalle de una venta (ver abrirNuevaVenta) —
 // null en una Nueva Venta común.
 let notaOrigenActual = null;
+// Presupuesto de origen (3/10/2026, pedido de Mato: "convertir en venta"
+// desde Presupuestos, sin volver a tipear todo) — ver abrirVentaDesdePresupuesto
+// más abajo y el hook en iniciarApp que lo dispara solo al volver de
+// admin-presupuestos.html con el prefill guardado en sessionStorage.
+let presupuestoOrigenActual = null;
 
 // 3/10/2026 — pedido de Mato: "sigue sin traerme las listas y si estan
 // creadas" (depósitos y listas de precio). Causa real: cargarListasBase()
@@ -1184,6 +1211,20 @@ async function guardarNuevaVenta(){
     // entrega inmediata — no había stock físico para generar el remito
     // en el momento, así que quedó pendiente con el stock comprometido.
     if (data.avisoRemito) alert('La venta se guardó, pero no se pudo generar el remito todavía:\n\n' + data.avisoRemito + '\n\nQuedó pendiente — generá el remito desde el detalle cuando haya stock.');
+    // Si esta venta viene de "Convertir en venta" en Presupuestos, se
+    // deja la trazabilidad del lado del presupuesto (no bloquea la venta
+    // ya guardada si falla: se avisa aparte, la venta es lo que importa).
+    if (presupuestoOrigenActual) {
+      try {
+        await fetch(`/api/presupuestos/${presupuestoOrigenActual}/vincular-venta`, {
+          method: 'POST', headers: headersAuthJsonOrg(ventaOrgSeleccionada),
+          body: JSON.stringify({ ventaId: data._id, ventaNumero: data.numero })
+        });
+      } catch (eVinculo) {
+        alert('La venta se guardó bien, pero no se pudo marcar el presupuesto de origen como convertido: ' + eVinculo.message);
+      }
+      presupuestoOrigenActual = null;
+    }
     if (ventaOrgSeleccionada === ORG) await cargarVentas();
     // Si se guardó en OTRA sucursal, el listado actual (de la sucursal
     // activa) no la muestra — es esperado, no hace falta recargar nada acá.

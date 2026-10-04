@@ -727,6 +727,11 @@ function abrirEditarUsuario(id){
           <label><input type="checkbox" id="usrActivo" ${u.activo ? 'checked' : ''} style="width:auto;margin-right:6px">Usuario activo</label>
         </div>
         <div class="campo-edit"><label>Nueva contraseña (opcional)</label><input type="password" id="usrPassword" placeholder="Dejar vacío para no cambiarla"></div>
+        <div class="campo-edit">
+          <label>Calendario Google (propio de este usuario)</label>
+          <p class="muted" style="margin:2px 0 6px">Poné el mail de su cuenta de Google y tocá "Crear calendario" — la app le crea un calendario propio y se lo comparte sola. Lo usa Presupuestos para guardar ahí el recordatorio cuando este usuario pone un presupuesto "En seguimiento" con una fecha.</p>
+          <div id="usrCalendarioBox">${celdaCalendarioUsuario(u)}</div>
+        </div>
         <div class="err" id="usrErr"></div>
         <button class="btn" style="width:100%;margin-top:6px" onclick="guardarEdicionUsuario('${id}')">Guardar cambios</button>
       </div>
@@ -754,6 +759,33 @@ async function borrarUsuario(id){
     await api('/'+id, {method:'DELETE'});
     await cargarUsuarios();
   }catch(e){ alert(e.message); }
+}
+
+function celdaCalendarioUsuario(u){
+  if (u.googleCalendarId) {
+    return `<div>📅 Activo${u.googleAccountEmail ? ' — <span class="muted">'+escapeHtml(u.googleAccountEmail)+'</span>' : ''}</div>
+      <button class="btn small secondary" type="button" onclick="darDeBajaCalendarioUsuario('${u._id}')">Dar de baja</button>`;
+  }
+  return `<input class="calEmailInput" id="usrCalEmail" placeholder="mail@gmail.com" style="min-width:180px">
+    <button class="btn small secondary" type="button" onclick="crearCalendarioUsuario('${u._id}')">Crear calendario</button>`;
+}
+async function crearCalendarioUsuario(id){
+  const input = document.getElementById('usrCalEmail');
+  const email = input ? input.value.trim() : '';
+  if (!email) { alert('Ingresá el mail de la cuenta de Google del usuario'); return; }
+  try{
+    const actualizado = await api(`/${id}/calendario`, {method:'POST', body:{email}});
+    document.getElementById('usrCalendarioBox').innerHTML = celdaCalendarioUsuario(actualizado);
+    await cargarUsuarios();
+  }catch(e){ alert('No se pudo crear el calendario: ' + e.message); }
+}
+async function darDeBajaCalendarioUsuario(id){
+  if (!confirm('¿Dar de baja el calendario de este usuario? Sus próximos recordatorios de seguimiento van a dejar de sincronizarse ahí (no se borra el calendario ni el historial ya sincronizado).')) return;
+  try{
+    const actualizado = await api(`/${id}/calendario`, {method:'DELETE'});
+    document.getElementById('usrCalendarioBox').innerHTML = celdaCalendarioUsuario(actualizado);
+    await cargarUsuarios();
+  }catch(e){ alert('No se pudo dar de baja: ' + e.message); }
 }
 
 // ---------------------------------------------------------------------

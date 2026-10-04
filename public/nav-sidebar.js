@@ -46,7 +46,11 @@
     // Remitos (3/10/2026, pedido de Mato: "tenemos que tener en el menu
     // comercial un submenu para ver los remitos emitidos") — mismo ícono
     // de camión que ya se usa para el botón de generar remito.
-    remitos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>'
+    remitos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+    // Presupuestos (3/10/2026, pedido de Mato): clipboard con un check,
+    // distinto del ícono de ventas (carrito) para que se note que es otra
+    // cosa (no compromete stock ni cuenta corriente).
+    presupuestos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6a1 1 0 011 1v2H8V3a1 1 0 011-1z"/><path d="M8 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2"/><path d="M9 14l2 2 4-4"/></svg>'
   };
 
   function slug(s) {
@@ -84,7 +88,12 @@
       // Remitos emitidos (3/10/2026, pedido de Mato): listado de todos los
       // remitos generados, para verlos/reimprimirlos sin tener que entrar
       // venta por venta. Reusa el módulo 'ventas' (no es un módulo nuevo).
-      { key: 'remitos', href: '/admin-remitos.html', modulo: 'ventas', label: 'Remitos', icon: ICONOS.remitos }
+      { key: 'remitos', href: '/admin-remitos.html', modulo: 'ventas', label: 'Remitos', icon: ICONOS.remitos },
+      // Presupuestos (3/10/2026, pedido de Mato): "lo mismo que venta pero
+      // que no comprometa stock ni cuenta", con estados y seguimiento, y
+      // la posibilidad de importar cotizaciones ya armadas en el
+      // cotizador. Reusa el módulo 'ventas' (no es un módulo nuevo).
+      { key: 'presupuestos', href: '/admin-presupuestos.html', modulo: 'ventas', label: 'Presupuestos', icon: ICONOS.presupuestos }
     ]},
     { nombre: 'Inventario', items: [
       { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos },

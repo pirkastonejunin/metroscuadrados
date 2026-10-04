@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Presupuestos - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --warn:#b45309; --warn-soft:#fef3c7;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{resize:vertical;min-height:54px;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--card);color:var(--danger);border:1px solid var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;}
+  .pill.presupuestado{background:var(--info-soft);color:var(--info);}
+  .pill.en_seguimiento{background:var(--warn-soft);color:var(--warn);}
+  .pill.aprobado{background:var(--ok-soft);color:var(--ok);}
+  .pill.rechazado{background:var(--danger-soft);color:var(--danger);}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:28px 14px;overflow:auto;z-index:100;}
+  .modal{background:var(--card);border-radius:14px;padding:20px;width:100%;max-width:460px;position:relative;box-shadow:var(--shadow);}
+  .modal.wide{max-width:780px;}
+  .modal h2{margin:0 0 14px;font-size:17px;}
+  .close-x{position:absolute;top:14px;right:16px;cursor:pointer;color:var(--muted);font-size:16px;}
+  .campo-edit{margin-bottom:10px;}
+  .campo-combo-cliente{position:relative;flex:1;min-width:160px;}
+  .producto-buscar-opciones{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:var(--shadow);}
+  .producto-buscar-opciones .opcion{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .producto-buscar-opciones .opcion:hover,.producto-buscar-opciones .opcion.activa{background:var(--accent-soft);}
+  .producto-buscar-opciones .sin-resultados{padding:8px 10px;font-size:13px;color:var(--muted);}
+  .fila-item{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:8px;}
+  .fila-item .campo-producto{flex:2;min-width:160px;position:relative;}
+  .fila-item .campo-cant{flex:1;min-width:90px;}
+  .fila-item .campo-precio{flex:1;min-width:100px;}
+  .fila-item .campo-subtotal{flex:1;min-width:90px;text-align:right;font-weight:700;padding-top:8px;}
+  .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
+  .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
+  .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
+  .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
+  .timeline{border-left:2px solid var(--border);padding-left:14px;margin:10px 0;}
+  .timeline .item{margin-bottom:12px;position:relative;}
+  .timeline .item::before{content:'';position:absolute;left:-19px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--accent);}
+  .timeline .item .fecha{font-size:11px;color:var(--muted);}
+  .cotiz-pick{border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer;}
+  .cotiz-pick:hover{border-color:var(--accent);background:var(--accent-soft);}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a; --warn:#fbbf6a; --warn-soft:#3a2d12;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a; --warn:#fbbf6a; --warn-soft:#3a2d12;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Presupuestos</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Ventas. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <h1>Presupuestos</h1>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><button class="btn" onclick="abrirNuevoPresupuesto()">+ Nuevo presupuesto</button></div>
+        <div class="row" style="gap:8px">
+          <div style="min-width:160px"><label>Estado</label><select id="fEstado" onchange="renderPresupuestos()">
+            <option value="">Todos</option>
+            <option value="presupuestado">Presupuestado</option>
+            <option value="en_seguimiento">En seguimiento</option>
+            <option value="aprobado">Aprobado</option>
+            <option value="rechazado">Rechazado</option>
+          </select></div>
+          <div style="min-width:140px"><label>Desde</label><input id="fDesde" type="date" onchange="cargarPresupuestos()"></div>
+          <div style="min-width:140px"><label>Hasta</label><input id="fHasta" type="date" onchange="cargarPresupuestos()"></div>
+          <div style="min-width:200px"><label>Buscar (cliente o nº)</label><input id="fBusqueda" oninput="renderPresupuestos()" placeholder="Ej: Pérez, 00034"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Fecha</th><th>Nº</th><th>Cliente</th><th>Vendedor</th><th>Total</th><th>Estado</th><th>Próx. contacto</th><th></th></tr></thead>
+        <tbody id="presupuestosBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/presupuestos';
+const BASE_VENTAS = '/api/ventas';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaHoraCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'}); }
+function money(n){
+  n = Number(n || 0);
+  const signo = n < 0 ? '-' : '';
+  return signo + '$ ' + Math.abs(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+const ESTADO_LABEL = { presupuestado: 'Presupuestado', en_seguimiento: 'En seguimiento', aprobado: 'Aprobado', rechazado: 'Rechazado' };
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+let NOMBRE_USUARIO = '';
+let clientesCache = [];
+let productosCache = [];
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    // Presupuestos reusa el módulo 'ventas' (3/10/2026, pedido de Mato) —
+    // vive en el mismo menú Comercial, lo carga el mismo personal que
+    // carga ventas.
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('ventas'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'presupuestos', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  const [clientes, productos] = await Promise.all([
+    fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(r => r.json()),
+    fetch(BASE_VENTAS + '/productos', {headers: headersAuth()}).then(r => r.json())
+  ]);
+  clientesCache = Array.isArray(clientes) ? clientes : [];
+  productosCache = Array.isArray(productos) ? productos : [];
+  const hoy = new Date();
+  const hace30 = new Date(hoy.getTime() - 30*24*60*60*1000);
+  document.getElementById('fHasta').value = hoy.toISOString().slice(0,10);
+  document.getElementById('fDesde').value = hace30.toISOString().slice(0,10);
+  await cargarPresupuestos();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+// -----------------------------------------------------------------------
+// Listado
+// -----------------------------------------------------------------------
+let presupuestosCache = [];
+async function cargarPresupuestos(){
+  const params = new URLSearchParams();
+  const desde = document.getElementById('fDesde').value;
+  const hasta = document.getElementById('fHasta').value;
+  if (desde) params.set('desde', desde);
+  if (hasta) params.set('hasta', hasta);
+  const body = document.getElementById('presupuestosBody');
+  body.innerHTML = '<tr><td colspan="8" class="muted">Cargando...</td></tr>';
+  try{
+    const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al cargar');
+    presupuestosCache = data;
+    renderPresupuestos();
+  }catch(e){
+    body.innerHTML = '<tr><td colspan="8" class="err">' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+function renderPresupuestos(){
+  const body = document.getElementById('presupuestosBody');
+  const q = (document.getElementById('fBusqueda').value || '').trim().toLowerCase();
+  const estadoFiltro = document.getElementById('fEstado').value;
+  let lista = presupuestosCache;
+  if (estadoFiltro) lista = lista.filter(p => p.estado === estadoFiltro);
+  if (q) lista = lista.filter(p => (p.clienteNombre||'').toLowerCase().includes(q) || String(p.numero||'').includes(q));
+  if (!lista.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay presupuestos para este filtro.</td></tr>'; return; }
+  body.innerHTML = lista.map(p => `
+    <tr>
+      <td>${fechaCorta(p.fecha)}</td>
+      <td><strong>${String(p.numero).padStart(5,'0')}</strong></td>
+      <td>${escapeHtml(p.clienteNombre || '—')}</td>
+      <td class="muted">${escapeHtml(p.vendedor || '—')}</td>
+      <td>${money(p.total)}</td>
+      <td><span class="pill ${p.estado}">${ESTADO_LABEL[p.estado] || p.estado}</span></td>
+      <td class="muted">${p.estado === 'en_seguimiento' && p.proximoContactoFecha ? fechaHoraCorta(p.proximoContactoFecha) : '—'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="verPresupuesto('${p._id}')">Ver</button>
+        <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${p._id}/imprimir')">Imprimir</button>
+        ${p.convertidoEnVentaId ? '' : `<button class="btn small secondary" onclick="abrirEditarPresupuesto('${p._id}')">Editar</button>`}
+        ${p.convertidoEnVentaId ? '' : `<button class="btn small danger" onclick="borrarPresupuesto('${p._id}')">Borrar</button>`}
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function imprimirDocumento(url, accion){
+  const ventana = window.open('', '_blank');
+  try{
+    const r = await fetch(url, {headers: headersAuth()});
+    const html = await r.text();
+    if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
+    ventana.document.write(html);
+    ventana.document.close();
+    if (accion === 'imprimir') {
+      ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
+    }
+  }catch(e){
+    ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
+  }
+}
+
+async function borrarPresupuesto(id){
+  if (!confirm('¿Borrar este presupuesto?')) return;
+  try{
+    await fetch(BASE + '/' + id, {method:'DELETE', headers: headersAuth()});
+    await cargarPresupuestos();
+  }catch(e){ alert('No se pudo borrar: ' + e.message); }
+}
+
+// -----------------------------------------------------------------------
+// Combo de cliente (mismo patrón que admin-ventas.html, acá propio y
+// simplificado — este archivo no comparte JS con esa pantalla)
+// -----------------------------------------------------------------------
+const LIMITE_SUGERENCIAS = 30;
+function textoCliente(c){ return c.apellidoRazonSocial || c.nombre || '(sin nombre)'; }
+function buscarClientes(query){
+  const q = (query || '').trim().toLowerCase();
+  const resultados = q ? clientesCache.filter(c => textoCliente(c).toLowerCase().includes(q)) : clientesCache;
+  return resultados.slice(0, LIMITE_SUGERENCIAS);
+}
+function comboClienteHtml(prefix, seleccionadoId){
+  const seleccionado = seleccionadoId ? clientesCache.find(c => String(c._id) === String(seleccionadoId)) : null;
+  return `
+    <div class="campo-combo-cliente" id="${prefix}ClienteWrap">
+      <input type="text" id="${prefix}Buscar" placeholder="Buscar cliente…" autocomplete="off"
+        value="${seleccionado ? escapeHtml(textoCliente(seleccionado)) : ''}"
+        oninput="escribirClienteCombo(this,'${prefix}')" onfocus="renderOpcionesClienteCombo(this,'${prefix}',this.value)"
+        onblur="cerrarOpcionesClienteCombo('${prefix}')" onkeydown="navegarOpcionesClienteCombo(event,'${prefix}')">
+      <input type="hidden" id="${prefix}Cliente" value="${seleccionadoId||''}">
+      <div class="producto-buscar-opciones hidden" id="${prefix}ClienteOpciones"></div>
+    </div>
+  `;
+}
+function renderOpcionesClienteCombo(input, prefix, query){
+  const cont = document.getElementById(prefix + 'ClienteOpciones');
+  const resultados = buscarClientes(query);
+  cont.innerHTML = resultados.length
+    ? resultados.map(c => `<div class="opcion" data-id="${c._id}" onmousedown="elegirClienteCombo(this,'${prefix}')">${escapeHtml(textoCliente(c))}</div>`).join('')
+    : `<div class="sin-resultados">${clientesCache.length ? 'Sin resultados para esa búsqueda' : 'No hay clientes cargados'}</div>`;
+  cont.classList.remove('hidden');
+}
+function escribirClienteCombo(input, prefix){
+  document.getElementById(prefix + 'Cliente').value = '';
+  renderOpcionesClienteCombo(input, prefix, input.value);
+}
+function cerrarOpcionesClienteCombo(prefix){
+  setTimeout(() => { const cont = document.getElementById(prefix + 'ClienteOpciones'); if (cont) cont.classList.add('hidden'); }, 150);
+}
+function navegarOpcionesClienteCombo(e, prefix){
+  const cont = document.getElementById(prefix + 'ClienteOpciones');
+  if (cont.classList.contains('hidden')) return;
+  const opciones = Array.from(cont.querySelectorAll('.opcion'));
+  if (!opciones.length) return;
+  let idx = opciones.findIndex(o => o.classList.contains('activa'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(opciones.length - 1, idx + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); elegirClienteCombo(opciones[idx >= 0 ? idx : 0], prefix); return; }
+  else if (e.key === 'Escape') { cont.classList.add('hidden'); return; }
+  else return;
+  opciones.forEach(o => o.classList.remove('activa'));
+  opciones[idx].classList.add('activa');
+  opciones[idx].scrollIntoView({ block: 'nearest' });
+}
+function elegirClienteCombo(el, prefix){
+  const clienteId = el.dataset.id;
+  const cliente = clientesCache.find(c => String(c._id) === clienteId);
+  document.getElementById(prefix + 'Cliente').value = clienteId;
+  document.getElementById(prefix + 'Buscar').value = cliente ? textoCliente(cliente) : '';
+  document.getElementById(prefix + 'ClienteOpciones').classList.add('hidden');
+}
+
+// -----------------------------------------------------------------------
+// Combo de producto (ítems del presupuesto) — versión liviana, sin
+// bultos/unidades (eso es cosa de Ventas/Stock, un presupuesto no
+// compromete mercadería).
+// -----------------------------------------------------------------------
+function textoProducto(p){ return (p.sku ? p.sku + ' — ' : '') + p.nombre; }
+function buscarProductos(query){
+  const q = (query || '').trim().toLowerCase();
+  const activos = productosCache.filter(p => p.activo !== false);
+  const resultados = q
+    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
+    : activos;
+  return resultados.slice(0, LIMITE_SUGERENCIAS);
+}
+function agregarFilaItem(prefill){
+  const cont = document.getElementById('pItemsBody');
+  const fila = document.createElement('div');
+  fila.className = 'fila-item';
+  fila.innerHTML = `
+    <div class="campo-producto">
+      <label>Producto / descripción</label>
+      <input type="text" class="producto-buscar" placeholder="Buscar por SKU o nombre, o escribir libre…" autocomplete="off"
+        oninput="escribirProductoItem(this)" onfocus="renderOpcionesProductoItem(this, this.value)"
+        onblur="cerrarOpcionesProductoItem(this)" onkeydown="navegarOpcionesProductoItem(event, this)">
+      <input type="hidden" class="producto-id">
+      <div class="producto-buscar-opciones hidden"></div>
+    </div>
+    <div class="campo-cant">
+      <label>Cantidad</label>
+      <input type="number" min="0.01" step="0.01" value="1" class="cant-input" oninput="actualizarTotalesPresupuesto()">
+    </div>
+    <div class="campo-precio">
+      <label>Precio unit.</label>
+      <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()">
+    </div>
+    <div class="campo-subtotal"><span class="subtotal-valor">${money(0)}</span></div>
+    <button type="button" class="btn-quitar" onclick="this.closest('.fila-item').remove(); actualizarTotalesPresupuesto()">✕</button>
+  `;
+  cont.appendChild(fila);
+  if (prefill) {
+    const buscar = fila.querySelector('.producto-buscar');
+    const oculto = fila.querySelector('.producto-id');
+    const cantInput = fila.querySelector('.cant-input');
+    const precioInput = fila.querySelector('.campo-precio input');
+    if (prefill.productoId) {
+      oculto.value = prefill.productoId;
+      const producto = productosCache.find(p => String(p._id) === String(prefill.productoId));
+      buscar.value = producto ? textoProducto(producto) : (prefill.nombre || '');
+    } else {
+      buscar.value = prefill.nombre || '';
+    }
+    cantInput.value = prefill.cantidad != null ? prefill.cantidad : 1;
+    precioInput.value = prefill.precioUnitario != null ? prefill.precioUnitario : 0;
+  }
+  actualizarTotalesPresupuesto();
+}
+function renderOpcionesProductoItem(input, query){
+  const fila = input.closest('.fila-item');
+  const cont = fila.querySelector('.producto-buscar-opciones');
+  const resultados = buscarProductos(query);
+  cont.innerHTML = resultados.length
+    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoItem(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
+    : `<div class="sin-resultados">Sin coincidencias — se usa como ítem libre, con el texto tal cual lo escribiste.</div>`;
+  cont.classList.remove('hidden');
+}
+function escribirProductoItem(input){
+  input.closest('.fila-item').querySelector('.producto-id').value = '';
+  renderOpcionesProductoItem(input, input.value);
+}
+function cerrarOpcionesProductoItem(input){
+  const fila = input.closest('.fila-item');
+  setTimeout(() => { const cont = fila.querySelector('.producto-buscar-opciones'); if (cont) cont.classList.add('hidden'); }, 150);
+}
+function navegarOpcionesProductoItem(e, input){
+  const cont = input.closest('.fila-item').querySelector('.producto-buscar-opciones');
+  if (cont.classList.contains('hidden')) return;
+  const opciones = Array.from(cont.querySelectorAll('.opcion'));
+  if (!opciones.length) return;
+  let idx = opciones.findIndex(o => o.classList.contains('activa'));
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(opciones.length - 1, idx + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); }
+  else if (e.key === 'Enter') { e.preventDefault(); if (opciones[idx>=0?idx:0]) elegirProductoItem(opciones[idx >= 0 ? idx : 0]); return; }
+  else if (e.key === 'Escape') { cont.classList.add('hidden'); return; }
+  else return;
+  opciones.forEach(o => o.classList.remove('activa'));
+  opciones[idx].classList.add('activa');
+  opciones[idx].scrollIntoView({ block: 'nearest' });
+}
+function elegirProductoItem(el){
+  const fila = el.closest('.fila-item');
+  const productoId = el.dataset.id;
+  const producto = productosCache.find(p => String(p._id) === productoId);
+  fila.querySelector('.producto-id').value = productoId;
+  fila.querySelector('.producto-buscar').value = producto ? textoProducto(producto) : '';
+  fila.querySelector('.producto-buscar-opciones').classList.add('hidden');
+  if (producto) fila.querySelector('.campo-precio input').value = producto.precio || 0;
+  actualizarTotalesPresupuesto();
+}
+function juntarItemsPresupuesto(){
+  const filas = document.querySelectorAll('#pItemsBody .fila-item');
+  const items = [];
+  filas.forEach(fila => {
+    const productoId = fila.querySelector('.producto-id').value;
+    const nombreLibre = fila.querySelector('.producto-buscar').value.trim();
+    const cantidad = Number(fila.querySelector('.cant-input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    if (cantidad > 0 && (productoId || nombreLibre)) {
+      const item = { cantidad, precioUnitario };
+      if (productoId) item.productoId = productoId; else item.nombre = nombreLibre;
+      items.push(item);
+    }
+  });
+  return items;
+}
+function actualizarTotalesPresupuesto(){
+  const filas = document.querySelectorAll('#pItemsBody .fila-item');
+  let subtotal = 0;
+  filas.forEach(fila => {
+    const cantidad = Number(fila.querySelector('.cant-input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const sub = cantidad * precioUnitario;
+    subtotal += sub;
+    fila.querySelector('.subtotal-valor').textContent = money(sub);
+  });
+  const descPorc = Number(document.getElementById('pDescuentoPorcentaje').value) || 0;
+  const descMonto = Number(document.getElementById('pDescuentoMonto').value) || 0;
+  let total = subtotal;
+  if (descPorc) total -= total * (descPorc / 100);
+  if (descMonto) total -= descMonto;
+  total = Math.max(0, total);
+  document.getElementById('pTotales').innerHTML = `
+    <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+  `;
+}
+
+// -----------------------------------------------------------------------
+// Modal: nuevo / editar presupuesto
+// -----------------------------------------------------------------------
+function abrirNuevoPresupuesto(prefill){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Nuevo presupuesto</h2>
+        ${prefill && prefill.origenCotizador ? `<p class="muted" style="margin-top:-8px">Importado del cotizador${prefill.origenCotizador.tipoObraNombre ? ' — ' + escapeHtml(prefill.origenCotizador.tipoObraNombre) : ''}${prefill.origenCotizador.direccion ? ' (' + escapeHtml(prefill.origenCotizador.direccion) + ')' : ''}. Elegí a qué cliente de tu base corresponde.</p>` : ''}
+        <div class="grid3">
+          <div style="grid-column:1/3">
+            <label>Cliente *</label>
+            ${comboClienteHtml('p', (prefill && prefill.clienteId) || '')}
+          </div>
+          <div><label>Fecha</label><input id="pFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Vendedor</label><input id="pVendedor" value="${escapeHtml(NOMBRE_USUARIO)}"></div>
+          <div><label>Moneda</label><select id="pMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
+          <div style="align-self:flex-end"><button type="button" class="btn secondary small" style="width:100%" onclick="abrirImportarCotizador()">Importar del cotizador</button></div>
+        </div>
+
+        <div class="section-title" style="margin-top:14px;font-weight:700;font-size:13px">Ítems</div>
+        <div id="pItemsBody"></div>
+        <button type="button" class="btn secondary small" onclick="agregarFilaItem()">+ Agregar ítem</button>
+
+        <div class="grid2" style="margin-top:14px">
+          <div><label>Descuento (%)</label><input id="pDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()"></div>
+          <div><label>Descuento ($)</label><input id="pDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="pObservaciones"></textarea></div>
+
+        <div class="totales-box" id="pTotales"></div>
+        <div class="err" id="pErr"></div>
+        <button class="btn" id="pGuardarBtn" style="margin-top:10px;width:100%" onclick="guardarNuevoPresupuesto()">Guardar presupuesto</button>
+      </div>
+    </div>
+  `;
+  // Se guarda en una variable (no en el HTML del botón) para no tener que
+  // escapar un JSON con comillas dentro de un atributo onclick — cosa que
+  // se rompe fácil (ver nota de "nunca a mano" en otras pantallas).
+  origenCotizadorPendiente = (prefill && prefill.origenCotizador) || null;
+  if (prefill && prefill.items && prefill.items.length) {
+    prefill.items.forEach(it => agregarFilaItem(it));
+  } else {
+    agregarFilaItem();
+  }
+  if (prefill && prefill.observaciones) document.getElementById('pObservaciones').value = prefill.observaciones;
+  actualizarTotalesPresupuesto();
+}
+let origenCotizadorPendiente = null;
+async function guardarNuevoPresupuesto(){
+  const clienteId = document.getElementById('pCliente').value;
+  const items = juntarItemsPresupuesto();
+  const errEl = document.getElementById('pErr');
+  errEl.textContent = '';
+  if (!clienteId) { errEl.textContent = 'Elegí un cliente'; return; }
+  if (!items.length) { errEl.textContent = 'Agregá al menos un ítem'; return; }
+  const body = {
+    clienteId,
+    vendedor: document.getElementById('pVendedor').value.trim(),
+    fecha: document.getElementById('pFecha').value,
+    moneda: document.getElementById('pMoneda').value,
+    items,
+    descuentoPorcentaje: Number(document.getElementById('pDescuentoPorcentaje').value) || 0,
+    descuentoMonto: Number(document.getElementById('pDescuentoMonto').value) || 0,
+    observaciones: document.getElementById('pObservaciones').value.trim()
+  };
+  if (origenCotizadorPendiente) body.origenCotizador = origenCotizadorPendiente;
+  const btn = document.getElementById('pGuardarBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const textoOriginal = btn.textContent;
+  btn.textContent = 'Guardando…';
+  try{
+    const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    cerrarModal();
+    origenCotizadorPendiente = null;
+    await cargarPresupuestos();
+  }catch(e){
+    errEl.textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = textoOriginal;
+  }
+}
+
+function abrirEditarPresupuesto(id){
+  const p = presupuestosCache.find(x => x._id === id);
+  if (!p) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Editar presupuesto Nº ${String(p.numero).padStart(5,'0')}</h2>
+        <div class="grid3">
+          <div style="grid-column:1/3">
+            <label>Cliente *</label>
+            ${comboClienteHtml('pe', p.clienteId)}
+          </div>
+          <div><label>Fecha</label><input id="peFecha" type="date" value="${new Date(p.fecha).toISOString().slice(0,10)}"></div>
+        </div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Vendedor</label><input id="peVendedor" value="${escapeHtml(p.vendedor||'')}"></div>
+          <div><label>Moneda</label><select id="peMoneda"><option value="ARS" ${p.moneda==='ARS'?'selected':''}>Pesos (ARS)</option><option value="USD" ${p.moneda==='USD'?'selected':''}>Dólares (USD)</option></select></div>
+        </div>
+
+        <div class="section-title" style="margin-top:14px;font-weight:700;font-size:13px">Ítems</div>
+        <div id="peItemsBody"></div>
+        <button type="button" class="btn secondary small" onclick="agregarFilaItemEn('peItemsBody')">+ Agregar ítem</button>
+
+        <div class="grid2" style="margin-top:14px">
+          <div><label>Descuento (%)</label><input id="peDescuentoPorcentaje" type="number" min="0" step="0.01" value="${p.descuentoPorcentaje||0}" oninput="actualizarTotalesEdicion()"></div>
+          <div><label>Descuento ($)</label><input id="peDescuentoMonto" type="number" min="0" step="0.01" value="${p.descuentoMonto||0}" oninput="actualizarTotalesEdicion()"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="peObservaciones">${escapeHtml(p.observaciones||'')}</textarea></div>
+
+        <div class="totales-box" id="peTotales"></div>
+        <div class="err" id="peErr"></div>
+        <button class="btn" id="peGuardarBtn" style="margin-top:10px;width:100%" onclick="guardarEdicionPresupuesto('${id}')">Guardar cambios</button>
+      </div>
+    </div>
+  `;
+  const cont = document.getElementById('peItemsBody');
+  (p.items || []).forEach(it => agregarFilaItemGenerica(cont, it));
+  actualizarTotalesEn('peItemsBody', 'peDescuentoPorcentaje', 'peDescuentoMonto', 'peTotales');
+}
+// Variantes genéricas (acepta un contenedor distinto a 'pItemsBody') para
+// poder reusar las mismas filas de ítem en el modal de edición, sin
+// duplicar todo el bloque de nuevo.
+function agregarFilaItemEn(contId){
+  const cont = document.getElementById(contId);
+  agregarFilaItemGenerica(cont, null);
+}
+function agregarFilaItemGenerica(cont, prefill){
+  const fila = document.createElement('div');
+  fila.className = 'fila-item';
+  fila.innerHTML = `
+    <div class="campo-producto">
+      <label>Producto / descripción</label>
+      <input type="text" class="producto-buscar" placeholder="Buscar por SKU o nombre, o escribir libre…" autocomplete="off"
+        oninput="escribirProductoItem(this)" onfocus="renderOpcionesProductoItem(this, this.value)"
+        onblur="cerrarOpcionesProductoItem(this)" onkeydown="navegarOpcionesProductoItem(event, this)">
+      <input type="hidden" class="producto-id">
+      <div class="producto-buscar-opciones hidden"></div>
+    </div>
+    <div class="campo-cant">
+      <label>Cantidad</label>
+      <input type="number" min="0.01" step="0.01" value="1" class="cant-input" oninput="actualizarTotalesEnFila(this)">
+    </div>
+    <div class="campo-precio">
+      <label>Precio unit.</label>
+      <input type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesEnFila(this)">
+    </div>
+    <div class="campo-subtotal"><span class="subtotal-valor">${money(0)}</span></div>
+    <button type="button" class="btn-quitar" onclick="actualizarTotalesEnFila(this,true)">✕</button>
+  `;
+  cont.appendChild(fila);
+  if (prefill) {
+    const buscar = fila.querySelector('.producto-buscar');
+    const oculto = fila.querySelector('.producto-id');
+    if (prefill.productoId) {
+      oculto.value = prefill.productoId;
+      const producto = productosCache.find(p => String(p._id) === String(prefill.productoId));
+      buscar.value = producto ? textoProducto(producto) : (prefill.nombre || '');
+    } else {
+      buscar.value = prefill.nombre || '';
+    }
+    fila.querySelector('.cant-input').value = prefill.cantidad != null ? prefill.cantidad : 1;
+    fila.querySelector('.campo-precio input').value = prefill.precioUnitario != null ? prefill.precioUnitario : 0;
+  }
+}
+// Pequeño helper que resuelve, a partir de cualquier control adentro de
+// una fila (o el propio botón "quitar"), en qué contenedor/modal está
+// para recalcular los totales correctos — así una sola función de
+// totales sirve tanto para "Nuevo" como para "Editar".
+function actualizarTotalesEnFila(el, quitar){
+  const fila = el.closest('.fila-item');
+  const cont = fila.parentElement;
+  if (quitar) fila.remove();
+  if (cont.id === 'pItemsBody') actualizarTotalesPresupuesto();
+  else actualizarTotalesEn(cont.id, 'peDescuentoPorcentaje', 'peDescuentoMonto', 'peTotales');
+}
+function actualizarTotalesEn(contId, descPorcId, descMontoId, totalesId){
+  const filas = document.querySelectorAll('#' + contId + ' .fila-item');
+  let subtotal = 0;
+  filas.forEach(fila => {
+    const cantidad = Number(fila.querySelector('.cant-input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    const sub = cantidad * precioUnitario;
+    subtotal += sub;
+    fila.querySelector('.subtotal-valor').textContent = money(sub);
+  });
+  const descPorc = Number(document.getElementById(descPorcId).value) || 0;
+  const descMonto = Number(document.getElementById(descMontoId).value) || 0;
+  let total = subtotal;
+  if (descPorc) total -= total * (descPorc / 100);
+  if (descMonto) total -= descMonto;
+  total = Math.max(0, total);
+  document.getElementById(totalesId).innerHTML = `
+    <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+  `;
+}
+function actualizarTotalesEdicion(){ actualizarTotalesEn('peItemsBody', 'peDescuentoPorcentaje', 'peDescuentoMonto', 'peTotales'); }
+function juntarItemsDe(contId){
+  const filas = document.querySelectorAll('#' + contId + ' .fila-item');
+  const items = [];
+  filas.forEach(fila => {
+    const productoId = fila.querySelector('.producto-id').value;
+    const nombreLibre = fila.querySelector('.producto-buscar').value.trim();
+    const cantidad = Number(fila.querySelector('.cant-input').value) || 0;
+    const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
+    if (cantidad > 0 && (productoId || nombreLibre)) {
+      const item = { cantidad, precioUnitario };
+      if (productoId) item.productoId = productoId; else item.nombre = nombreLibre;
+      items.push(item);
+    }
+  });
+  return items;
+}
+async function guardarEdicionPresupuesto(id){
+  const clienteId = document.getElementById('peCliente').value;
+  const items = juntarItemsDe('peItemsBody');
+  const errEl = document.getElementById('peErr');
+  errEl.textContent = '';
+  if (!clienteId) { errEl.textContent = 'Elegí un cliente'; return; }
+  if (!items.length) { errEl.textContent = 'Agregá al menos un ítem'; return; }
+  const body = {
+    clienteId,
+    vendedor: document.getElementById('peVendedor').value.trim(),
+    fecha: document.getElementById('peFecha').value,
+    moneda: document.getElementById('peMoneda').value,
+    items,
+    descuentoPorcentaje: Number(document.getElementById('peDescuentoPorcentaje').value) || 0,
+    descuentoMonto: Number(document.getElementById('peDescuentoMonto').value) || 0,
+    observaciones: document.getElementById('peObservaciones').value.trim()
+  };
+  try{
+    const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    cerrarModal();
+    await cargarPresupuestos();
+  }catch(e){ errEl.textContent = e.message; }
+}
+
+// -----------------------------------------------------------------------
+// Importar del cotizador
+// -----------------------------------------------------------------------
+async function abrirImportarCotizador(){
+  const prefillModal = document.getElementById('modalRoot').innerHTML;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar del cotizador</h2>
+        <div id="cotizListaBox"><p class="muted">Cargando…</p></div>
+      </div>
+    </div>
+  `;
+  try{
+    const r = await fetch(BASE + '/cotizador/historial', {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al cargar');
+    const box = document.getElementById('cotizListaBox');
+    if (!data.length) { box.innerHTML = '<p class="muted">No hay cotizaciones armadas en el cotizador todavía.</p>'; return; }
+    box.innerHTML = data.map(c => `
+      <div class="cotiz-pick" onclick="importarCotizacion('${c._id}')">
+        <strong>${escapeHtml(c.cliente || 'Sin nombre')}</strong> — ${escapeHtml(c.tipoObraNombre||'')}
+        <div class="muted">${c.direccion ? escapeHtml(c.direccion) + ' · ' : ''}${fechaCorta(c.fecha)} · ${money(c.total)}</div>
+      </div>
+    `).join('');
+  }catch(e){
+    document.getElementById('cotizListaBox').innerHTML = '<p class="err">' + escapeHtml(e.message) + '</p>';
+  }
+}
+async function importarCotizacion(cotizacionId){
+  try{
+    const r = await fetch(BASE + '/cotizador/' + cotizacionId, {headers: headersAuth()});
+    const cot = await r.json();
+    if (!r.ok) throw new Error(cot.error || 'Error al importar');
+    const items = (cot.items || []).map(it => ({
+      nombre: it.producto || it.rubro || 'Ítem',
+      cantidad: it.paquetesNecesarios || it.cantidadConDesperdicio || 1,
+      precioUnitario: it.precioUnitario || 0
+    }));
+    if (cot.totalManoObra > 0) items.push({ nombre: 'Mano de obra', cantidad: 1, precioUnitario: cot.totalManoObra });
+    cerrarModal();
+    abrirNuevoPresupuesto({
+      items,
+      observaciones: cot.cliente ? `Presupuesto del cotizador para ${cot.cliente}${cot.direccion ? ' (' + cot.direccion + ')' : ''}.` : '',
+      origenCotizador: { cotizacionId: cot._id, storeId: cot.store_id, tipoObraNombre: cot.tipoObraNombre, direccion: cot.direccion }
+    });
+  }catch(e){ alert('No se pudo importar: ' + e.message); }
+}
+
+// -----------------------------------------------------------------------
+// Ver / seguimiento / convertir en venta
+// -----------------------------------------------------------------------
+function verPresupuesto(id){
+  const p = presupuestosCache.find(x => x._id === id);
+  if (!p) return;
+  const filasItems = (p.items || []).map(it => `
+    <tr><td>${escapeHtml(it.sku ? it.sku + ' - ' : '')}${escapeHtml(it.nombre)}</td><td class="num" style="text-align:right">${it.cantidad}</td><td class="num" style="text-align:right">${money(it.precioUnitario)}</td><td class="num" style="text-align:right">${money(it.subtotal)}</td></tr>
+  `).join('');
+  const timeline = (p.seguimiento || []).slice().reverse().map(s => `
+    <div class="item">
+      <div class="fecha">${fechaHoraCorta(s.fecha)} — ${escapeHtml(s.usuarioNombre||'')}</div>
+      <div><span class="pill ${s.estado}">${ESTADO_LABEL[s.estado]||s.estado}</span>${s.nota ? ' ' + escapeHtml(s.nota) : ''}</div>
+    </div>
+  `).join('') || '<p class="muted">Sin movimientos todavía.</p>';
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Presupuesto Nº ${String(p.numero).padStart(5,'0')} <span class="pill ${p.estado}" style="margin-left:8px">${ESTADO_LABEL[p.estado]||p.estado}</span></h2>
+        <p class="muted" style="margin-top:-8px">${escapeHtml(p.clienteNombre)} · ${fechaCorta(p.fecha)} · Vendedor: ${escapeHtml(p.vendedor||'—')}</p>
+        ${p.convertidoEnVentaId ? `<p class="muted">Convertido en Venta Nº ${String(p.convertidoEnVentaNumero).padStart(5,'0')}.</p>` : ''}
+        <table>
+          <thead><tr><th>Descripción</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th></tr></thead>
+          <tbody>${filasItems}</tbody>
+        </table>
+        <div class="totales-box">
+          <div class="fila-total"><span>Subtotal</span><span>${money(p.subtotal)}</span></div>
+          ${p.descuentoMonto ? `<div class="fila-total"><span>Descuento</span><span>-${money(p.descuentoMonto)}</span></div>` : ''}
+          <div class="fila-total grande"><span>Total</span><span>${money(p.total)}</span></div>
+        </div>
+        ${p.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(p.observaciones)}</p>` : ''}
+
+        <div class="section-title" style="margin-top:16px;font-weight:700;font-size:13px">Seguimiento</div>
+        <div class="timeline">${timeline}</div>
+
+        ${p.convertidoEnVentaId ? '' : `
+        <div class="grid2" style="margin-top:10px">
+          <div>
+            <label>Cambiar estado</label>
+            <select id="vEstado" onchange="actualizarVisibilidadFechaSeguimiento()">
+              <option value="presupuestado" ${p.estado==='presupuestado'?'selected':''}>Presupuestado</option>
+              <option value="en_seguimiento" ${p.estado==='en_seguimiento'?'selected':''}>En seguimiento</option>
+              <option value="aprobado" ${p.estado==='aprobado'?'selected':''}>Aprobado</option>
+              <option value="rechazado" ${p.estado==='rechazado'?'selected':''}>Rechazado</option>
+            </select>
+          </div>
+          <div id="vFechaWrap" class="${p.estado==='en_seguimiento'?'':'hidden'}">
+            <label>Próximo contacto (se guarda en tu calendario)</label>
+            <input id="vProximoContacto" type="datetime-local" value="${p.proximoContactoFecha ? new Date(p.proximoContactoFecha).toISOString().slice(0,16) : ''}">
+          </div>
+        </div>
+        <div style="margin-top:8px"><label>Nota</label><textarea id="vNota" placeholder="Ej: lo llamé, dijo que decide la semana que viene"></textarea></div>
+        <div class="err" id="vErr"></div>
+        <button class="btn" style="width:100%;margin-top:8px" onclick="guardarEstadoPresupuesto('${id}')">Guardar seguimiento</button>
+        `}
+        ${(p.estado === 'aprobado' && !p.convertidoEnVentaId) ? `<button class="btn secondary" style="width:100%;margin-top:8px" onclick="convertirEnVenta('${id}')">Convertir en venta</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+function actualizarVisibilidadFechaSeguimiento(){
+  const wrap = document.getElementById('vFechaWrap');
+  wrap.classList.toggle('hidden', document.getElementById('vEstado').value !== 'en_seguimiento');
+}
+async function guardarEstadoPresupuesto(id){
+  const estado = document.getElementById('vEstado').value;
+  const nota = document.getElementById('vNota').value.trim();
+  const fechaInput = document.getElementById('vProximoContacto');
+  const body = { estado, nota };
+  if (estado === 'en_seguimiento') body.proximoContactoFecha = fechaInput.value ? new Date(fechaInput.value).toISOString() : null;
+  try{
+    const r = await fetch(BASE + '/' + id + '/estado', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    await cargarPresupuestos();
+    verPresupuesto(id);
+  }catch(e){ document.getElementById('vErr').textContent = e.message; }
+}
+// "Convertir en venta" (3/10/2026, pedido de Mato: que no haga falta
+// volver a tipear todo) — NO se crea la venta acá: se guarda el prefill
+// y se redirige a admin-ventas.html, que reusa su propio formulario de
+// "Nueva venta" (con su circuito ya probado de stock/cuenta corriente/
+// letra fiscal) y al guardar avisa acá que quedó convertido (ver
+// abrirVentaDesdePresupuestoSiCorresponde en admin-ventas.html).
+function convertirEnVenta(id){
+  const p = presupuestosCache.find(x => x._id === id);
+  if (!p) return;
+  sessionStorage.setItem('presupuesto_prefill', JSON.stringify({
+    presupuestoId: p._id,
+    clienteId: p.clienteId,
+    items: p.items,
+    observaciones: p.observaciones,
+    moneda: p.moneda
+  }));
+  location.href = '/admin-ventas.html';
+}
+</script>
+</body>
+</html>

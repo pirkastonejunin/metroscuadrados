@@ -92,6 +92,11 @@
 const express = require('express');
 const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
+// Calendario propio (3/10/2026, pedido de Mato: cuando un presupuesto
+// queda "en seguimiento" con una fecha, el recordatorio se guarda en el
+// calendario de Google del usuario que lo está cargando, mismo mecanismo
+// que ya usan vendedores/colocadores — ver google-calendar.js).
+const googleCalendar = require('./google-calendar');
 
 const router = express.Router();
 
@@ -784,6 +789,47 @@ router.put('/:id', authAdmin, async (req, res) => {
       }
 
       await db.collection('usuarios').updateOne({ _id: id }, { $set: set });
+      return db.collection('usuarios').findOne({ _id: id }, { projection: { passwordHash: 0 } });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Calendario propio del usuario (3/10/2026, pedido de Mato): cada usuario
+// de oficina puede tener su propio calendario de Google, igual que ya
+// pueden tener vendedores y colocadores (ver obras.js/visitas.js) — lo usa
+// Presupuestos para guardar ahí el recordatorio de seguimiento de quien
+// carga el presupuesto (ver presupuestos.js, POST /:id/estado).
+router.post('/:id/calendario', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const email = (req.body && req.body.email || '').trim();
+    if (!email) throw err(400, 'Falta el mail de la cuenta de Google del usuario');
+    if (!googleCalendar.habilitado()) throw err(400, 'Google Calendar no está configurado en el servidor (falta GOOGLE_SERVICE_ACCOUNT_KEY)');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const usuarioDoc = await db.collection('usuarios').findOne({ _id: id });
+      if (!usuarioDoc) throw err(404, 'Usuario no encontrado');
+      const calendarId = await googleCalendar.crearCalendarioParaPersona(`Piedra Negra — ${usuarioDoc.nombre}`, email);
+      if (!calendarId) throw err(500, 'No se pudo crear el calendario en Google (revisá los logs del servidor)');
+      await db.collection('usuarios').updateOne({ _id: id }, { $set: { googleCalendarId: calendarId, googleAccountEmail: email } });
+      return db.collection('usuarios').findOne({ _id: id }, { projection: { passwordHash: 0 } });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Da de baja el calendario propio de este usuario — no borra el calendario
+// de Google en sí (se conserva el historial ya sincronizado), solo deja de
+// usarlo para los próximos recordatorios de seguimiento.
+router.delete('/:id/calendario', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('usuarios').updateOne({ _id: id }, { $set: { googleCalendarId: '', googleAccountEmail: '' } });
       return db.collection('usuarios').findOne({ _id: id }, { projection: { passwordHash: 0 } });
     });
     res.json(resultado);
