@@ -75,24 +75,35 @@ const { aplicarMovimientoCuenta } = require('./tesoreria');
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 
-let mongoClient;
+// 4/10/2026, bug real reportado por Mato ("al cargar una orden o una
+// compra no trae proveedor ni producto" — el dato estaba bien en la
+// base, el fetch manual a mano andaba, pero las 5 llamadas en paralelo
+// de cargarListasBase() a veces no): el `if (!mongoClient)` de acá
+// abajo no alcanza para evitar la carrera cuando llegan varios
+// requests al mismo tiempo contra un proceso recién arrancado. Como
+// `new MongoClient(...)` se asignaba de forma SÍNCRONA antes del
+// `await connect()`, un segundo request que entraba mientras el
+// primero todavía estaba conectando veía `mongoClient` ya asignado
+// (verdadero) y seguía de largo usándolo SIN esperar a que
+// `connect()` hubiera terminado — con mala suerte, ese segundo (o
+// tercer, cuarto...) request podía fallar o devolver vacío. El fix:
+// en vez de guardar el cliente, se guarda la PROMESA de conexión —
+// así cualquier request que llegue mientras se está conectando espera
+// esa misma promesa en vez de asumir que ya está lista.
+let mongoClientPromise = null;
 async function getDb() {
-  if (!mongoClient) {
-    mongoClient = new MongoClient(process.env.MONGODB_URI);
-    try {
-      await mongoClient.connect();
-    } catch (e) {
-      mongoClient = null;
-      throw e;
-    }
+  if (!mongoClientPromise) {
+    mongoClientPromise = new MongoClient(process.env.MONGODB_URI).connect()
+      .catch(e => { mongoClientPromise = null; throw e; });
   }
-  return mongoClient.db(DB_NAME);
+  const cliente = await mongoClientPromise;
+  return cliente.db(DB_NAME);
 }
 async function conReintento(fn) {
   try {
     return await fn();
   } catch (e) {
-    mongoClient = null;
+    mongoClientPromise = null;
     return await fn();
   }
 }

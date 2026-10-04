@@ -375,6 +375,15 @@ async function cargarListasBase(){
     fetch('/api/tesoreria/cajas', {headers: headersAuth()}),
     fetch('/api/tesoreria/bancos', {headers: headersAuth()})
   ]);
+  // 4/10/2026: antes esto fallaba en silencio (array vacío sin avisar
+  // nada) cuando alguno de los 5 pedidos en paralelo no venía bien — ver
+  // el comentario de getDb() en compras.js para la causa real (una
+  // carrera de conexión a Mongo). Se deja este console.error acá además
+  // del fix de fondo, para que si alguna vez vuelve a fallar algo quede
+  // visible en la consola en vez de mostrar los combos vacíos sin pista.
+  if (!rp2.ok) console.error('No se pudieron cargar los proveedores:', rp2.status);
+  if (!rp.ok) console.error('No se pudieron cargar los productos:', rp.status);
+  if (!rd.ok) console.error('No se pudieron cargar los depósitos:', rd.status);
   proveedoresCache = rp2.ok ? await rp2.json() : [];
   productosCache = rp.ok ? await rp.json() : [];
   depositosCache = rd.ok ? await rd.json() : [];
