@@ -566,6 +566,16 @@ async function confirmarImportar(){
 // de Editar proveedor (ver abrirEditarProveedor/mostrarTabProveedor
 // arriba) — rellena el contenedor #pccContenido que ya está en el DOM.
 // -------------------------------------------------------------------
+// Acceso rápido para registrar un pago desde acá mismo (4/10/2026,
+// pedido de Mato: "cuando miramos la cuenta corriente del proveedor nos
+// deberia dejar generar pagos como acceso rapido") — el módulo de pagos
+// a proveedores vive en Compras (es ahí donde se reparte el pago entre
+// las facturas pendientes), así que se abre esa pantalla con el
+// proveedor ya elegido en vez de duplicar ese flujo acá.
+function irARegistrarPagoProveedor(id){
+  window.location.href = 'admin-compras.html?pagoProveedor=' + encodeURIComponent(id);
+}
+
 let cuentaCorrienteProveedorCache = null;
 async function cargarCuentaCorrienteProveedorTab(id){
   const cont0 = document.getElementById('pccContenido');
@@ -591,7 +601,10 @@ async function cargarCuentaCorrienteProveedorTab(id){
       return { m, saldo: saldoCorrido, index: i };
     });
     cont.innerHTML = `
-      <p class="muted" style="margin-top:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong>${data.saldo > 0 ? ' (le debemos esto al proveedor)' : (data.saldo < 0 ? ' (a favor nuestro)' : '')}</p>
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <p class="muted" style="margin-top:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong>${data.saldo > 0 ? ' (le debemos esto al proveedor)' : (data.saldo < 0 ? ' (a favor nuestro)' : '')}</p>
+        ${data.saldo > 0 ? `<button class="btn secondary small" onclick="irARegistrarPagoProveedor('${id}')">Registrar pago</button>` : ''}
+      </div>
       <table>
         <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>

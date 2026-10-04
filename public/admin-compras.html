@@ -384,6 +384,18 @@ async function iniciarApp(){
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarListasBase();
   await cargarCompras();
+  // Acceso rápido desde la Cuenta corriente del proveedor (4/10/2026,
+  // pedido de Mato: "que nos deje generar pagos como acceso rapido") —
+  // admin-proveedores.html linkea para acá con ?pagoProveedor=<id>, así
+  // que se abre directo el modal de "Pago a cuenta" con ese proveedor
+  // ya elegido, en vez de hacer repetir todo el flujo a mano.
+  const qp = new URLSearchParams(location.search);
+  const pagoProveedorId = qp.get('pagoProveedor');
+  if (pagoProveedorId) {
+    abrirPagoCuenta();
+    const sel = document.getElementById('pcProveedor');
+    if (sel) { sel.value = pagoProveedorId; cargarComprasPendientesPagoCuenta(); }
+  }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
