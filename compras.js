@@ -226,14 +226,33 @@ router.get('/proveedores', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Búsqueda de productos en el servidor (4/10/2026): con +25.000 productos
+// bajar el catálogo entero tardaba ~7 segundos en cada carga. Ahora el
+// buscador pide solo lo que se está tipeando: ?q=texto (cada palabra
+// tiene que aparecer en el SKU o en el nombre, en cualquier orden), o
+// ?ids=a,b,c para traer productos puntuales (ej. los de una orden).
+function escaparRegex(t) { return String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 router.get('/productos', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const limite = Math.min(Math.max(parseInt(req.query.limit, 10) || 30, 1), 100);
+    if (req.query.ids) {
+      const ids = String(req.query.ids).split(',').map(toObjectId).filter(Boolean).slice(0, 200);
+      match._id = { $in: ids };
+    } else {
+      const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+      if (palabras.length) {
+        match.$and = palabras.map(p => {
+          const re = new RegExp(escaparRegex(p), 'i');
+          return { $or: [{ sku: re }, { nombre: re }] };
+        });
+      }
+    }
     const lista = await conReintento(async () => {
       const db = await getDb();
       return db.collection('productos_catalogo')
         .find(match, { projection: { sku: 1, nombre: 1, costo: 1, moneda: 1, unidad: 1, unidadesPorBulto: 1, proveedorId: 1 } })
-        .sort({ nombre: 1 }).toArray();
+        .sort({ nombre: 1 }).limit(limite).toArray();
     });
     res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

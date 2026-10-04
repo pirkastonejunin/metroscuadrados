@@ -291,21 +291,43 @@ function htmlBuscadorProducto(){
     <div class="producto-buscar-opciones hidden"></div>`;
 }
 function productoIdDeFila(fila){ return fila.querySelector('.producto-id').value; }
-function buscarProductosCompra(query){
-  const q = (query || '').trim().toLowerCase();
-  const activos = productosCache.filter(p => p.activo !== false);
-  const resultados = q
-    ? activos.filter(p => (p.sku && p.sku.toLowerCase().includes(q)) || (p.nombre && p.nombre.toLowerCase().includes(q)))
-    : activos;
-  return resultados.slice(0, LIMITE_SUGERENCIAS_PRODUCTO);
+// El catálogo NO se baja entero (+25.000, ~7 s): cada búsqueda va al
+// servidor (con una pequeña espera mientras se tipea) y los productos que
+// aparecen quedan en productosCache, que es de donde después se leen
+// costo, moneda y unidades de los ya elegidos.
+function agregarAlCacheProductos(p){
+  if (!productosCache.some(x => String(x._id) === String(p._id))) productosCache.push(p);
+}
+async function asegurarProductos(ids){
+  const faltan = [...new Set((ids || []).filter(Boolean).map(String))].filter(id => !productosCache.some(p => String(p._id) === id));
+  if (!faltan.length) return;
+  try {
+    const r = await fetch(BASE + '/productos?limit=100&ids=' + faltan.join(','), {headers: headersAuth()});
+    if (r.ok) (await r.json()).forEach(agregarAlCacheProductos);
+  } catch (e) { console.error('No se pudieron traer los productos de la orden:', e.message); }
 }
 function renderOpcionesProductoCompra(input, query){
   const cont = input.closest('.fila-item').querySelector('.producto-buscar-opciones');
-  const resultados = buscarProductosCompra(query);
-  cont.innerHTML = resultados.length
-    ? resultados.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCompra(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
-    : `<div class="sin-resultados">${!productosListos ? 'Cargando productos… (tarda unos segundos)' : (productosCache.length ? 'Sin resultados para esa búsqueda' : 'No hay productos cargados')}</div>`;
+  const q = (query || '').trim();
+  const seq = (input._seq = (input._seq || 0) + 1);
+  cont.innerHTML = '<div class="sin-resultados">Buscando…</div>';
   cont.classList.remove('hidden');
+  clearTimeout(input._t);
+  input._t = setTimeout(async () => {
+    try {
+      const r = await fetch(BASE + '/productos?limit=' + LIMITE_SUGERENCIAS_PRODUCTO + '&q=' + encodeURIComponent(q), {headers: headersAuth()});
+      if (!r.ok) throw new Error('estado ' + r.status);
+      const lista = await r.json();
+      if (input._seq !== seq) return; // llegó tarde: ya se tipeó otra cosa
+      lista.forEach(agregarAlCacheProductos);
+      cont.innerHTML = lista.length
+        ? lista.map(p => `<div class="opcion" data-id="${p._id}" onmousedown="elegirProductoCompra(this)">${escapeHtml(textoProducto(p))}</div>`).join('')
+        : '<div class="sin-resultados">Sin resultados para esa búsqueda</div>';
+    } catch (e) {
+      console.error('No se pudo buscar productos:', e.message);
+      if (input._seq === seq) cont.innerHTML = '<div class="sin-resultados">No se pudo buscar. Probá de nuevo.</div>';
+    }
+  }, q ? 200 : 0);
 }
 // Al escribir, la selección previa queda invalidada hasta elegir de
 // nuevo de la lista (así no se carga un producto distinto al escrito).
@@ -523,7 +545,6 @@ let bancosTesoreriaCache = [];
 // se abría "Nueva orden" antes, los combos quedaban vacíos. Ahora cada
 // listado se asigna apenas llega, y los productos se piden aparte, en
 // segundo plano (el buscador dice "Cargando productos…" mientras tanto).
-let productosListos = false;
 function esperar(ms){ return new Promise(r => setTimeout(r, ms)); }
 async function pedirListado(url, nombre){
   for (let intento = 0; intento < 3; intento++) {
@@ -549,13 +570,7 @@ function htmlComboProveedoresFiltro(){
   return '<option value="">Todos</option>' + proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
 }
 async function cargarListasBase(){
-  // Productos: en segundo plano, sin frenar al resto.
-  pedirListado(BASE + '/productos', 'los productos').then(lista => {
-    productosCache = lista || [];
-    productosListos = true;
-    const activo = document.activeElement;
-    if (activo && activo.classList && activo.classList.contains('producto-buscar')) renderOpcionesProductoCompra(activo, activo.value);
-  });
+  // Los productos ya no se bajan acá: se buscan en el servidor al tipear.
   const [prov, dep, rcj, rbc, rc] = await Promise.all([
     pedirListado(BASE + '/proveedores', 'los proveedores'),
     pedirListado(BASE + '/depositos', 'los depósitos'),
@@ -1619,9 +1634,10 @@ async function anularOrden(id){
 // no se pide ningún dato de comprobante: solo ingresa stock. Cuando
 // después llegue la factura y se convierta la orden, lo que ya se
 // recibió por acá no se vuelve a sumar (lo resuelve el backend).
-function abrirRecibirOrden(id){
+async function abrirRecibirOrden(id){
   const o = ordenesCache.find(x => x._id === id);
   if (!o) return;
+  await asegurarProductos(o.items.map(it => it.productoId));
   const filas = o.items.map((it, i) => {
     const pendiente = Math.round((it.cantidad - (it.cantidadRecibida || 0)) * 1000) / 1000;
     if (pendiente <= 0) return '';
@@ -1688,9 +1704,10 @@ async function confirmarRecibirOrden(id){
 // acá se cargan los datos del comprobante fiscal (llegó la factura de
 // verdad) y el IVA por artículo, y recién acá se puede elegir ingresar
 // stock.
-function abrirConvertirOrden(id){
+async function abrirConvertirOrden(id){
   const o = ordenesCache.find(x => x._id === id);
   if (!o) return;
+  await asegurarProductos(o.items.map(it => it.productoId));
   const filas = o.items.map((it, i) => {
     const pendiente = Math.round((it.cantidad - (it.cantidadConvertida || 0)) * 1000) / 1000;
     if (pendiente <= 0) return '';
