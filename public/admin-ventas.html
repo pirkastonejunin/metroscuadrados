@@ -62,6 +62,14 @@
   #loginScreen .card{width:300px;text-align:center;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  /* 3/10/2026, pedido de Mato: bajarle el énfasis visual a Sucursal/
+     Cliente/Vendedor/Fecha/etc. (y achicar un poco Descuento) para que
+     el foco de la pantalla quede en Productos y en el Total — mismos
+     campos, nomás más chicos y con un fondo gris que los separa del
+     resto. */
+  .venta-top-compacto{background:var(--bg);border-radius:10px;padding:10px 12px;margin-bottom:4px;}
+  .venta-top-compacto label{font-size:10.5px;margin-bottom:2px;}
+  .venta-top-compacto input,.venta-top-compacto select{padding:5px 8px;font-size:12.5px;background:var(--card);}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;margin:14px 0 10px;}
   .fila-item{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:8px;}
   .fila-item .campo-producto{flex:2;min-width:160px;position:relative;}
@@ -698,6 +706,7 @@ async function abrirNuevaVenta(prefill){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${prefill && prefill.tipoComprobante === 'nota_credito' ? 'Nota de Crédito' : 'Nueva venta'}</h2>
         <div id="avisoCargaBase" class="err"></div>
+        <div class="venta-top-compacto">
         ${puedeElegirSucursal() ? `
         <div class="grid3">
           <div><label>Sucursal *</label><select id="nvSucursal" onchange="cambiarSucursalVenta()">${opcionesSucursalVenta(ORG)}</select></div>
@@ -751,12 +760,13 @@ async function abrirNuevaVenta(prefill){
           </label>
         </div>
         <p class="muted" id="nvLetraPreview" style="font-size:12px;margin:6px 0 0"></p>
+        </div>
 
         <div class="section-title">Productos</div>
         <div id="nvFilasItems"></div>
         <button class="btn secondary small" onclick="agregarFilaVenta()">+ Agregar producto</button>
 
-        <div class="grid2" style="margin-top:14px">
+        <div class="grid2 venta-top-compacto" style="margin-top:14px">
           <div><label>Descuento (%)</label><input id="nvDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()"></div>
           <div><label>Descuento ($)</label><input id="nvDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesVenta()"></div>
         </div>
@@ -977,11 +987,17 @@ const UNIDAD_LABEL_VENTA = { unidad:'Unidad', m2:'m²', ml:'Metro lineal', kg:'K
 
 function agregarFilaVenta(){
   const cont = document.getElementById('nvFilasItems');
+  // Solo la PRIMERA fila muestra la etiqueta "Producto" (3/10/2026,
+  // pedido de Mato: "cada vez que cargo un producto y agrego otro arriba
+  // dice Producto, eso deberiamos sacarlo en los productos adicionales")
+  // — funciona como encabezado de columna, no hace falta repetirlo en
+  // cada fila nueva.
+  const esPrimeraFila = cont.children.length === 0;
   const fila = document.createElement('div');
   fila.className = 'fila-item';
   fila.innerHTML = `
     <div class="campo-producto">
-      <label>Producto</label>
+      ${esPrimeraFila ? '<label>Producto</label>' : ''}
       <input type="text" class="producto-buscar" placeholder="Buscar por SKU o nombre…" autocomplete="off"
         oninput="escribirProductoVenta(this)" onfocus="renderOpcionesProductoVenta(this, this.value)"
         onblur="cerrarOpcionesProductoVenta(this)" onkeydown="navegarOpcionesProductoVenta(event, this)">
