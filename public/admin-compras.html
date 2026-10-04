@@ -450,13 +450,22 @@ let depositosCache = [];
 let cajasTesoreriaCache = [];
 let bancosTesoreriaCache = [];
 async function cargarListasBase(){
-  const [rp2, rp, rd, rcj, rbc] = await Promise.all([
+  let [rp2, rp, rd, rcj, rbc] = await Promise.all([
     fetch(BASE + '/proveedores', {headers: headersAuth()}),
     fetch(BASE + '/productos', {headers: headersAuth()}),
     fetch(BASE + '/depositos', {headers: headersAuth()}),
     fetch('/api/tesoreria/cajas', {headers: headersAuth()}),
     fetch('/api/tesoreria/bancos', {headers: headersAuth()})
   ]);
+  // Reintento (4/10/2026): si alguno de los tres listados base falló
+  // (típicamente justo después de un reinicio del servidor), se vuelve
+  // a pedir uno por uno antes de dejar los combos vacíos.
+  for (let intento = 0; intento < 2 && (!rp2.ok || !rp.ok || !rd.ok); intento++) {
+    await new Promise(r => setTimeout(r, 1200));
+    if (!rp2.ok) rp2 = await fetch(BASE + '/proveedores', {headers: headersAuth()});
+    if (!rp.ok) rp = await fetch(BASE + '/productos', {headers: headersAuth()});
+    if (!rd.ok) rd = await fetch(BASE + '/depositos', {headers: headersAuth()});
+  }
   // 4/10/2026: antes esto fallaba en silencio (array vacío sin avisar
   // nada) cuando alguno de los 5 pedidos en paralelo no venía bien — ver
   // el comentario de getDb() en compras.js para la causa real (una
