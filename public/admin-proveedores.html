@@ -60,6 +60,12 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;}
+  .modal-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+  .modal-tabs button{background:none;border:none;padding:9px 12px;font-size:13px;font-family:inherit;font-weight:700;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  .modal-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
+  .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
+  .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
@@ -154,6 +160,15 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+const TIPO_COMPROBANTE_LABEL = {
+  factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M',
+  nota_credito_a: 'Nota de Crédito A', nota_credito_b: 'Nota de Crédito B', nota_credito_c: 'Nota de Crédito C', nota_credito_m: 'Nota de Crédito M',
+  nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M',
+  recibo: 'Recibo', ticket: 'Ticket', otro: 'Otro (no fiscal)'
+};
+const ORIGEN_CC_PROVEEDOR_LABEL = { compra: 'Compra', pago_compra: 'Pago (compra)', gasto: 'Gasto', pago_gasto: 'Pago (gasto)' };
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -431,14 +446,29 @@ function abrirEditarProveedor(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Editar proveedor</h2>
-        ${formularioProveedor(p)}
-        <div class="err" id="fpErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarEdicionProveedor('${id}')">Guardar cambios</button>
+        <h2>${escapeHtml(p.razonSocial || p.nombreFantasia || 'Editar proveedor')}</h2>
+        <div class="modal-tabs">
+          <button class="active" data-tab="datos" onclick="mostrarTabProveedor('datos')">Datos del proveedor</button>
+          <button data-tab="cuenta-corriente" onclick="mostrarTabProveedor('cuenta-corriente', '${id}')">Cuenta corriente</button>
+        </div>
+        <div id="tabProveedorDatos">
+          ${formularioProveedor(p)}
+          <div class="err" id="fpErr"></div>
+          <button class="btn" style="margin-top:10px" onclick="guardarEdicionProveedor('${id}')">Guardar cambios</button>
+        </div>
+        <div id="tabProveedorCuentaCorriente" class="hidden">
+          <div id="pccContenido" class="muted">Cargando...</div>
+        </div>
       </div>
     </div>
   `;
   listenerRubroProveedor();
+}
+function mostrarTabProveedor(tab, proveedorId){
+  document.querySelectorAll('.modal-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('tabProveedorDatos').classList.toggle('hidden', tab !== 'datos');
+  document.getElementById('tabProveedorCuentaCorriente').classList.toggle('hidden', tab !== 'cuenta-corriente');
+  if (tab === 'cuenta-corriente') cargarCuentaCorrienteProveedorTab(proveedorId);
 }
 
 async function guardarEdicionProveedor(id){
@@ -527,6 +557,118 @@ async function confirmarImportar(){
     document.getElementById('impErr').textContent = e.message;
   }
 }
+// -------------------------------------------------------------------
+// Cuenta corriente del proveedor (4/10/2026, pedido de Mato: "crear una
+// pestaña para ver el saldo de la cuenta corriente... que nos de las
+// opciones de ver los comprobantes y demas") — reconstruida en el
+// backend a partir de Compras y Gastos (ver GET /:id/cuenta-corriente en
+// proveedores.js). Pensada para la pestaña "Cuenta corriente" del modal
+// de Editar proveedor (ver abrirEditarProveedor/mostrarTabProveedor
+// arriba) — rellena el contenedor #pccContenido que ya está en el DOM.
+// -------------------------------------------------------------------
+let cuentaCorrienteProveedorCache = null;
+async function cargarCuentaCorrienteProveedorTab(id){
+  const cont0 = document.getElementById('pccContenido');
+  if (cont0) cont0.innerHTML = 'Cargando...';
+  try{
+    const r = await fetch(BASE + '/' + id + '/cuenta-corriente', {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al cargar la cuenta corriente');
+    cuentaCorrienteProveedorCache = data;
+    const cont = document.getElementById('pccContenido');
+    if (!cont) return; // se cerró el modal mientras cargaba
+    const saldoTexto = money(data.saldo);
+    // Mismo criterio que la cuenta corriente de Clientes: los
+    // movimientos vienen del más nuevo al más viejo, así que el saldo
+    // corrido de cada fila se reconstruye deshaciendo, de ahí hacia
+    // atrás, el efecto de la fila anterior (débito suma, crédito resta).
+    let saldoCorrido = data.saldo;
+    const filas = data.movimientos.map((m, i) => {
+      if (i > 0) {
+        const anterior = data.movimientos[i - 1];
+        saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto;
+      }
+      return { m, saldo: saldoCorrido, index: i };
+    });
+    cont.innerHTML = `
+      <p class="muted" style="margin-top:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong>${data.saldo > 0 ? ' (le debemos esto al proveedor)' : (data.saldo < 0 ? ' (a favor nuestro)' : '')}</p>
+      <table>
+        <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
+        <tbody>
+          ${filas.length ? filas.map(({m, saldo, index}) => {
+            const tieneDetalle = m.origen === 'compra' || m.origen === 'gasto';
+            const conceptoHtml = tieneDetalle
+              ? `<a href="javascript:void(0)" onclick="verDetalleMovimientoProveedor(${index})" style="text-decoration:underline;cursor:pointer" title="Ver el comprobante">${escapeHtml(m.concepto || '—')}</a>`
+              : escapeHtml(m.concepto || '—');
+            return `
+            <tr>
+              <td>${fechaCorta(m.fecha)}</td>
+              <td>${conceptoHtml}${m.nota ? `<div class="muted">${escapeHtml(m.nota)}</div>` : ''}</td>
+              <td class="muted">${ORIGEN_CC_PROVEEDOR_LABEL[m.origen] || escapeHtml(m.origen || '—')}</td>
+              <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
+              <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
+              <td class="muted">${money(saldo)}</td>
+              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : ''}</td>
+            </tr>
+          `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }catch(e){
+    const cont = document.getElementById('pccContenido');
+    if (cont) cont.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// Detalle de un comprobante (compra o gasto) referenciado desde la
+// cuenta corriente — viene embebido en el movimiento (items,
+// observaciones, pagos ya resueltos), así que no hace falta llamar a
+// Compras/Gastos (y no exige tener esos módulos habilitados para poder
+// ver la cuenta corriente de un proveedor).
+function verDetalleMovimientoProveedor(index){
+  const data = cuentaCorrienteProveedorCache;
+  if (!data) return;
+  const m = data.movimientos[index];
+  if (!m) return;
+  const filasItems = (m.items || []).map(it => `
+    <tr>
+      <td>${escapeHtml(it.sku||'')}</td>
+      <td>${escapeHtml(it.nombre)}</td>
+      <td>${it.cantidad}</td>
+      <td>${money(it.precioUnitario)}</td>
+      <td>${it.alicuotaIva !== undefined ? (it.alicuotaIva === 0 ? 'Exento' : it.alicuotaIva + '%') : '—'}</td>
+      <td>${money(it.subtotal)}</td>
+    </tr>
+  `).join('');
+  document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
+    <div class="modal-bg" id="dmpBg" onclick="if(event.target===this) cerrarDetalleMovimientoProveedor()">
+      <div class="modal wide">
+        <span class="close-x" onclick="cerrarDetalleMovimientoProveedor()">✕</span>
+        <h2>${escapeHtml(m.concepto)}</h2>
+        ${m.tipoComprobante ? `<p class="muted" style="margin-top:-8px">
+          ${TIPO_COMPROBANTE_LABEL[m.tipoComprobante]||m.tipoComprobante} ${escapeHtml(m.puntoVenta||'')}-${escapeHtml(m.comprobanteNumero||'')}
+          ${m.esFiscal ? '<span class="pill activo">Fiscal</span>' : '<span class="pill inactivo">No fiscal</span>'}
+        </p>` : ''}
+        ${filasItems ? `<table>
+          <thead><tr><th>SKU</th><th>Producto/Concepto</th><th>Cant.</th><th>Precio</th><th>IVA</th><th>Subtotal</th></tr></thead>
+          <tbody>${filasItems}</tbody>
+        </table>` : ''}
+        <div class="totales-box">
+          <div class="fila-total grande"><span>Total</span><span>${money(m.monto)}</span></div>
+          <div class="fila-total"><span>Pagado</span><span>${money(m.totalPagado)}</span></div>
+          <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(m.saldoPendiente)}</span></div>
+        </div>
+        ${m.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(m.observaciones)}</p>` : ''}
+        <p class="muted" style="margin-top:10px">Para registrar pagos o anular, entrá a ${m.origen === 'compra' ? 'Compras' : 'Gastos'} y buscá el ${m.origen === 'compra' ? 'Compra' : 'Gasto'} #${m.docNumero}.</p>
+      </div>
+    </div>
+  `);
+}
+function cerrarDetalleMovimientoProveedor(){
+  const el = document.getElementById('dmpBg');
+  if (el) el.remove();
+}
+
 </script>
 </body>
 </html>

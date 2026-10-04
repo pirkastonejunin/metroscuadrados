@@ -333,4 +333,85 @@ router.delete('/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// -----------------------------------------------------------------------
+// Cuenta corriente del proveedor (4/10/2026, pedido de Mato: "cuando
+// entramos en proveedores en al lado de los datos debemos crear una
+// pestaña para ver el saldo de la cuenta corriente. y que sea similar al
+// de clientes, que nos de las opciones de ver los comprobantes y
+// demas") — a diferencia de Clientes, ACÁ NO hay una colección de
+// movimientos propia: se reconstruye en el momento a partir de lo que ya
+// existe en Compras y Gastos (cada uno ya lleva su propio
+// saldoPendiente/totalPagado por comprobante) — evita duplicar ese
+// estado en una segunda colección que se podría desincronizar.
+//
+//   Débito = una Compra o un Gasto (no anulado) — por su total.
+//   Crédito = un pago: de `compras_pagos` (cubre tanto el pago puntual
+//     de una compra como un pago a cuenta repartido entre varias) o de
+//     cada entrada del array `pagos` embebido en un Gasto (Gastos
+//     todavía no tiene su propio "pago a cuenta" como Compras).
+//
+// Incluye Compras Y Gastos juntos (pedido de Mato) — ambos representan
+// plata que le debemos al mismo proveedor.
+// -----------------------------------------------------------------------
+router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const limite = Math.min(Number(req.query.limite) || 300, 1000);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!proveedor) throw err(404, 'Proveedor no encontrado');
+
+      const [compras, gastos, pagosCompra] = await Promise.all([
+        db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
+        db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
+        db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, filtroOrg(req))).toArray()
+      ]);
+
+      const movimientos = [];
+      for (const c of compras) {
+        movimientos.push({
+          tipo: 'debito', monto: c.total, fecha: c.fecha,
+          concepto: `Compra #${c.numero}`, origen: 'compra',
+          docId: c._id, docNumero: c.numero, docEstado: c.estado,
+          tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
+          items: c.items, observaciones: c.observaciones, moneda: c.moneda,
+          totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
+        });
+      }
+      for (const p of pagosCompra) {
+        movimientos.push({
+          tipo: 'credito', monto: p.monto, fecha: p.fecha,
+          concepto: `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => '#' + a.compraNumero).join(', ') : ''}`,
+          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor
+        });
+      }
+      for (const g of gastos) {
+        movimientos.push({
+          tipo: 'debito', monto: g.total, fecha: g.fecha,
+          concepto: `Gasto #${g.numero}`, origen: 'gasto',
+          docId: g._id, docNumero: g.numero, docEstado: g.estado,
+          tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
+          items: g.items, observaciones: g.observaciones, moneda: g.moneda,
+          totalPagado: g.totalPagado, saldoPendiente: g.saldoPendiente
+        });
+        for (const p of (g.pagos || [])) {
+          movimientos.push({
+            tipo: 'credito', monto: p.monto, fecha: p.fecha,
+            concepto: `Pago — Gasto #${g.numero}`, origen: 'pago_gasto',
+            docId: g._id, nota: p.nota, tipoValor: p.tipoValor
+          });
+        }
+      }
+
+      movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+      const saldo = Math.round(movimientos.reduce((acc, m) => acc + (m.tipo === 'debito' ? m.monto : -m.monto), 0) * 100) / 100;
+
+      return { proveedor, saldo, movimientos: movimientos.slice(0, limite) };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;
