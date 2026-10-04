@@ -232,10 +232,20 @@ router.get('/productos', authAdmin, async (req, res) => {
     const lista = await conReintento(async () => {
       const db = await getDb();
       return db.collection('productos_catalogo')
-        .find(match, { projection: { sku: 1, nombre: 1, costo: 1, unidad: 1, proveedorId: 1 } })
+        .find(match, { projection: { sku: 1, nombre: 1, costo: 1, moneda: 1, unidad: 1, unidadesPorBulto: 1, proveedorId: 1 } })
         .sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/cotizacion-dolar', authAdmin, async (req, res) => {
+  try {
+    const valor = await conReintento(async () => {
+      const db = await getDb();
+      return obtenerCotizacionOrg(db, req);
+    });
+    res.json({ valor });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -344,6 +354,49 @@ async function egresarStockDeCompra(db, req, compra) {
 // Numeración interna — correlativo simple por organización, NO fiscal,
 // en su propio contador (no se mezcla con el de Ventas).
 // -----------------------------------------------------------------------
+
+// Cotización del dólar de la organización (la misma que usa Productos
+// para las listas de precio — colección config_general). null si no hay.
+async function obtenerCotizacionOrg(db, req) {
+  const doc = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+  return doc && doc.valor > 0 ? Number(doc.valor) : null;
+}
+
+// Cotización a usar en un documento: la que se cargó a mano o, si no,
+// la vigente de la organización. En USD, si `requerida` y no hay
+// ninguna, se rechaza (sin cotización no se puede pasar a pesos para
+// el Libro IVA ni comparar contra costos en pesos).
+async function resolverCotizacion(db, req, moneda, cotizacionCargada, requerida) {
+  if (moneda !== 'USD') return cotizacionCargada || null;
+  if (cotizacionCargada > 0) return cotizacionCargada;
+  const org = await obtenerCotizacionOrg(db, req);
+  if (org) return org;
+  if (requerida) throw err(400, 'Un documento en dólares necesita la cotización del dólar: cargala en el formulario o configurala en Productos.');
+  return null;
+}
+
+// Actualiza el costo del producto con lo que se pagó (pedido de Mato:
+// "que la compra actualice el costo del producto") respetando monedas
+// (4/10/2026: "que pase a dolares"): una compra en USD deja el costo
+// en USD y pasa el producto a moneda USD. Una compra en ARS de un
+// producto en USD se convierte a USD con la cotización del documento
+// (si no hay, no se toca el costo).
+async function actualizarCostoProductoDesdeCompra(db, req, item, moneda, cotizacion) {
+  if (!item.productoId) return;
+  const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: item.productoId }, filtroOrg(req)));
+  if (!producto) return;
+  const set = { updatedAt: new Date() };
+  if (moneda === 'USD') {
+    set.costo = item.precioUnitario;
+    set.moneda = 'USD';
+  } else if ((producto.moneda || 'ARS') === 'USD') {
+    if (!(cotizacion > 0)) return;
+    set.costo = Math.round((item.precioUnitario / cotizacion) * 100) / 100;
+  } else {
+    set.costo = item.precioUnitario;
+  }
+  await db.collection('productos_catalogo').updateOne({ _id: producto._id }, { $set: set });
+}
 
 async function proximoNumero(db, orgId) {
   const r = await db.collection('compras_contadores').findOneAndUpdate(
@@ -676,12 +729,13 @@ router.post('/ordenes', authAdmin, async (req, res) => {
     const condicionPago = normalizarTexto(body.condicionPago);
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = body.fecha ? new Date(body.fecha) : new Date();
-    const cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
+    let cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrg(req)));
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
+      cotizacionDolar = await resolverCotizacion(db, req, moneda, cotizacionDolar, false);
       const { items, subtotal } = await normalizarItemsOrden(db, req, body.items);
       const numero = await proximoNumeroOrden(db, req.orgId);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
@@ -834,7 +888,7 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = body.fecha ? new Date(body.fecha) : new Date();
-    const cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
+    let cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
     const comprobante = normalizarComprobante(body);
     if (!Array.isArray(body.items) || !body.items.length) throw err(400, 'Elegí al menos un ítem de la orden para convertir');
 
@@ -847,6 +901,8 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
 
       const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: orden.proveedorId }, filtroOrg(req)));
       if (!proveedor) throw err(400, 'El proveedor de la orden no existe (o no pertenece a esta organización)');
+
+      cotizacionDolar = await resolverCotizacion(db, req, moneda, cotizacionDolar, true);
 
       // Mismo chequeo de comprobante duplicado que en POST / de compras.
       const dupe = await db.collection('compras').findOne(Object.assign({
@@ -944,11 +1000,7 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
       compra._id = r.insertedId;
 
       for (const item of items) {
-        if (!item.productoId) continue;
-        await db.collection('productos_catalogo').updateOne(
-          Object.assign({ _id: item.productoId }, filtroOrg(req)),
-          { $set: { costo: item.precioUnitario, updatedAt: new Date() } }
-        );
+        await actualizarCostoProductoDesdeCompra(db, req, item, moneda, cotizacionDolar);
       }
 
       if (tipoRecepcion === 'inmediata') {
@@ -1036,6 +1088,7 @@ router.post('/', authAdmin, async (req, res) => {
         estado: { $ne: 'anulada' }
       }, filtroOrg(req)));
       if (dupe) throw err(400, `Ya hay una compra cargada con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es la compra #${dupe.numero}.`);
+      const cotizacionDolar = await resolverCotizacion(db, req, moneda, body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null, true);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const fiscalItems = calcularComprobanteDesdeItems(items);
@@ -1057,7 +1110,7 @@ router.post('/', authAdmin, async (req, res) => {
         proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
         fecha,
         moneda,
-        cotizacionDolar: body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null,
+        cotizacionDolar,
         condicionPago: condicionPago || proveedor.condicionPago || '',
         tipoRecepcion,
         depositoId,
@@ -1094,11 +1147,7 @@ router.post('/', authAdmin, async (req, res) => {
       // último). Los ítems cargados a mano (sin productoId) no tocan
       // ningún costo.
       for (const item of items) {
-        if (!item.productoId) continue;
-        await db.collection('productos_catalogo').updateOne(
-          Object.assign({ _id: item.productoId }, filtroOrg(req)),
-          { $set: { costo: item.precioUnitario, updatedAt: new Date() } }
-        );
+        await actualizarCostoProductoDesdeCompra(db, req, item, moneda, cotizacionDolar);
       }
 
       if (tipoRecepcion === 'inmediata') {

@@ -273,6 +273,43 @@ function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); retur
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
+// Cotización del dólar vigente de la organización (se carga al entrar).
+let cotizacionOrgCache = null;
+function cotizacionEfectiva(cotizId){
+  const el = document.getElementById(cotizId);
+  const v = el ? Number(el.value) : 0;
+  return v > 0 ? v : (cotizacionOrgCache > 0 ? cotizacionOrgCache : null);
+}
+// Costo sugerido de un producto en la moneda del documento (4/10/2026,
+// pedido de Mato sobre órdenes en dólares): si el producto está cargado
+// en otra moneda se convierte con la cotización; sin cotización queda 0
+// para no mostrar un número en la moneda equivocada.
+function precioCostoProducto(producto, monedaId, cotizId){
+  if (!producto) return 0;
+  const monedaDoc = document.getElementById(monedaId).value;
+  const monedaProd = producto.moneda || 'ARS';
+  const costo = Number(producto.costo) || 0;
+  if (monedaDoc === monedaProd) return costo;
+  const cot = cotizacionEfectiva(cotizId);
+  if (!cot) return 0;
+  return monedaDoc === 'USD' ? redondear2(costo / cot) : redondear2(costo * cot);
+}
+function recalcularPreciosPorMoneda(filasSel, monedaId, cotizId, actualizarFn){
+  document.querySelectorAll(filasSel + ' .fila-item').forEach(fila => {
+    const sel = fila.querySelector('select.select-producto');
+    if (!sel || !sel.value) return;
+    const producto = productosCache.find(p => String(p._id) === sel.value);
+    fila.querySelector('.campo-precio input').value = precioCostoProducto(producto, monedaId, cotizId);
+  });
+  actualizarFn();
+}
+function actualizarVisibilidadCotizacion(wrapId, monedaId, cotizId){
+  const usd = document.getElementById(monedaId).value === 'USD';
+  const wrap = document.getElementById(wrapId);
+  if (wrap) wrap.classList.toggle('hidden', !usd);
+  const inp = document.getElementById(cotizId);
+  if (inp && cotizacionOrgCache > 0) inp.placeholder = 'Vigente: ' + cotizacionOrgCache;
+}
 // Mismo mapa que admin-ventas.html — unidad real del producto, para
 // mostrarla al lado de "Cantidad" (4/10/2026, pedido de Mato: "siempre
 // q elegimos productos nos debe traer la opcion de las distintas
@@ -436,6 +473,10 @@ async function cargarListasBase(){
   // no es una falla real, simplemente no va a poder elegir cuenta al pagar.
   cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
   bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
+  try {
+    const rc = await fetch(BASE + '/cotizacion-dolar', {headers: headersAuth()});
+    cotizacionOrgCache = rc.ok ? ((await rc.json()).valor || null) : null;
+  } catch (e) { cotizacionOrgCache = null; }
   document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
     proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
   document.getElementById('fpProveedor').innerHTML = '<option value="">Todos</option>' +
@@ -506,10 +547,12 @@ function abrirNuevaCompra(){
           <div><label>Fecha</label><input id="ncFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">
-          <div><label>Moneda</label><select id="ncMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
+          <div><label>Moneda</label><select id="ncMoneda" onchange="actualizarVisibilidadCotizacion('ncCotizacionWrap','ncMoneda','ncCotizacionDolar'); recalcularPreciosPorMoneda('#ncFilasItems','ncMoneda','ncCotizacionDolar',actualizarTotalesCompra)"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
           <div><label>Tipo de recepción *</label><select id="ncTipoRecepcion" onchange="actualizarVisibilidadDepositoCompra()"><option value="inmediata">Recepción inmediata (ingresa stock ahora)</option><option value="pendiente">Sin recepción (pendiente, sin ingresar stock)</option></select></div>
           <div id="ncDepositoWrap"><label>Depósito *</label><select id="ncDeposito">${opcionesDepositosCompra()}</select></div>
         </div>
+
+        <div id="ncCotizacionWrap" class="hidden" style="margin-top:10px"><label>Cotización dólar *</label><input id="ncCotizacionDolar" type="number" min="0" step="0.01" onchange="recalcularPreciosPorMoneda('#ncFilasItems','ncMoneda','ncCotizacionDolar',actualizarTotalesCompra)"><div class="muted" style="font-size:11px">Se usa para pasar a pesos y convertir el costo de productos cargados en pesos. Si la dejás vacía se usa la vigente de la organización.</div></div>
 
         <div class="section-title">Comprobante</div>
         <div class="grid3">
@@ -537,6 +580,7 @@ function abrirNuevaCompra(){
   `;
   agregarFilaCompra();
   actualizarVisibilidadDepositoCompra();
+  actualizarVisibilidadCotizacion('ncCotizacionWrap', 'ncMoneda', 'ncCotizacionDolar');
 }
 
 function actualizarCondicionPago(){
@@ -586,7 +630,7 @@ function actualizarFilaCompra(el){
   const precioInput = fila.querySelector('.campo-precio input');
   if (el.tagName === 'SELECT') {
     const producto = productosCache.find(p => String(p._id) === select.value);
-    precioInput.value = producto ? (producto.costo || 0) : 0;
+    precioInput.value = precioCostoProducto(producto, 'ncMoneda', 'ncCotizacionDolar');
     actualizarIndicadorUnidad(fila, producto);
     if (producto && producto.unidadesPorBulto) {
       sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesCompra);
@@ -665,6 +709,7 @@ async function guardarNuevaCompra(){
     condicionPago: document.getElementById('ncCondicionPago').value.trim(),
     fecha: document.getElementById('ncFecha').value,
     moneda: document.getElementById('ncMoneda').value,
+    cotizacionDolar: document.getElementById('ncCotizacionDolar').value || null,
     tipoRecepcion,
     depositoId: tipoRecepcion === 'inmediata' ? document.getElementById('ncDeposito').value : null,
     items,
@@ -1245,8 +1290,8 @@ function abrirNuevaOrden(){
           <div><label>Fecha</label><input id="noFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
-          <div><label>Moneda</label><select id="noMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
-          <div><label>Cotización dólar</label><input id="noCotizacionDolar" type="number" min="0" step="0.01" placeholder="Opcional"></div>
+          <div><label>Moneda</label><select id="noMoneda" onchange="recalcularPreciosPorMoneda('#noFilasItems','noMoneda','noCotizacionDolar',actualizarTotalesOrden)"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
+          <div><label>Cotización dólar</label><input id="noCotizacionDolar" type="number" min="0" step="0.01" placeholder="Opcional (se usa la vigente)" onchange="recalcularPreciosPorMoneda('#noFilasItems','noMoneda','noCotizacionDolar',actualizarTotalesOrden)"></div>
         </div>
 
         <div class="section-title">Productos</div>
@@ -1304,7 +1349,7 @@ function actualizarFilaOrden(el){
   const precioInput = fila.querySelector('.campo-precio input');
   if (el.tagName === 'SELECT') {
     const producto = productosCache.find(p => String(p._id) === select.value);
-    precioInput.value = producto ? (producto.costo || 0) : 0;
+    precioInput.value = precioCostoProducto(producto, 'noMoneda', 'noCotizacionDolar');
     actualizarIndicadorUnidad(fila, producto);
     if (producto && producto.unidadesPorBulto) {
       sincronizarCantidadCompra(fila.querySelector('.cant-unidad'), 'unidad', productosCache, actualizarTotalesOrden);
@@ -1608,12 +1653,14 @@ function abrirConvertirOrden(id){
         <div class="grid3">
           <div><label>Condición de pago</label><input id="coCondicionPago" value="${escapeHtml(o.condicionPago||'')}"></div>
           <div><label>Fecha</label><input id="coFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
-          <div><label>Moneda</label><select id="coMoneda"><option value="ARS" ${o.moneda==='ARS'?'selected':''}>Pesos (ARS)</option><option value="USD" ${o.moneda==='USD'?'selected':''}>Dólares (USD)</option></select></div>
+          <div><label>Moneda</label><select id="coMoneda" onchange="actualizarVisibilidadCotizacion('coCotizacionWrap','coMoneda','coCotizacionDolar')"><option value="ARS" ${o.moneda==='ARS'?'selected':''}>Pesos (ARS)</option><option value="USD" ${o.moneda==='USD'?'selected':''}>Dólares (USD)</option></select></div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Tipo de recepción *</label><select id="coTipoRecepcion" onchange="actualizarVisibilidadDepositoConvertirOrden()"><option value="inmediata">Recepción inmediata (ingresa stock ahora)</option><option value="pendiente">Sin recepción (pendiente, sin ingresar stock)</option></select></div>
           <div id="coDepositoWrap"><label>Depósito *</label><select id="coDeposito">${opcionesDepositosCompra()}</select></div>
         </div>
+
+        <div id="coCotizacionWrap" class="${o.moneda==='USD' ? '' : 'hidden'}" style="margin-top:10px"><label>Cotización dólar *</label><input id="coCotizacionDolar" type="number" min="0" step="0.01" value="${o.cotizacionDolar || ''}"><div class="muted" style="font-size:11px">Si la dejás vacía se usa la vigente de la organización.</div></div>
 
         <div class="section-title">Comprobante (la factura que llegó)</div>
         <div class="grid3">
@@ -1638,6 +1685,7 @@ function abrirConvertirOrden(id){
     </div>
   `;
   actualizarVisibilidadDepositoConvertirOrden();
+  actualizarVisibilidadCotizacion('coCotizacionWrap', 'coMoneda', 'coCotizacionDolar');
   actualizarTotalesConvertirOrden();
 }
 
@@ -1708,6 +1756,7 @@ async function confirmarConvertirOrden(id){
     condicionPago: document.getElementById('coCondicionPago').value.trim(),
     fecha: document.getElementById('coFecha').value,
     moneda: document.getElementById('coMoneda').value,
+    cotizacionDolar: document.getElementById('coCotizacionDolar').value || null,
     tipoRecepcion,
     depositoId: tipoRecepcion === 'inmediata' ? document.getElementById('coDeposito').value : null,
     tipoComprobante: document.getElementById('coTipoComprobante').value,
