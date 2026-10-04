@@ -48,6 +48,8 @@
   .pill.pendiente{background:var(--warn-soft);color:var(--warn);}
   .pill.recibida{background:var(--ok-soft);color:var(--ok);}
   .pill.anulada{background:var(--danger-soft);color:var(--danger);}
+  .pill.activo{background:var(--ok-soft);color:var(--ok);}
+  .pill.inactivo{background:var(--bg);color:var(--muted);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
   .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
@@ -181,6 +183,26 @@ function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'
 function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+// Comprobante fiscal (4/10/2026, pedido de Mato: numeración real +
+// IVA discriminado, para después poder armar el Libro IVA Compras).
+const TIPO_COMPROBANTE_LABEL = {
+  factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M',
+  nota_credito_a: 'Nota de Crédito A', nota_credito_b: 'Nota de Crédito B', nota_credito_c: 'Nota de Crédito C', nota_credito_m: 'Nota de Crédito M',
+  nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M',
+  recibo: 'Recibo', ticket: 'Ticket', otro: 'Otro (no fiscal)'
+};
+const ALICUOTAS_IVA_VALIDAS = [21, 10.5, 27, 5, 2.5, 0];
+function opcionesTipoComprobante(seleccionado){
+  return Object.keys(TIPO_COMPROBANTE_LABEL).map(k =>
+    `<option value="${k}" ${k===seleccionado?'selected':''}>${TIPO_COMPROBANTE_LABEL[k]}</option>`
+  ).join('');
+}
+function opcionesAlicuotaIva(seleccionado){
+  return ALICUOTAS_IVA_VALIDAS.map(a =>
+    `<option value="${a}" ${String(a)===String(seleccionado)?'selected':''}>${a === 0 ? 'Exento / no gravado' : a + '%'}</option>`
+  ).join('');
+}
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -343,6 +365,19 @@ function abrirNuevaCompra(){
           <div id="ncDepositoWrap"><label>Depósito *</label><select id="ncDeposito">${opcionesDepositosCompra()}</select></div>
         </div>
 
+        <div class="section-title">Comprobante</div>
+        <div class="grid3">
+          <div><label>Tipo de comprobante *</label><select id="ncTipoComprobante">${opcionesTipoComprobante('factura_a')}</select></div>
+          <div><label>Punto de venta *</label><input id="ncPuntoVenta" placeholder="Ej: 0007"></div>
+          <div><label>Número *</label><input id="ncComprobanteNumero" placeholder="Ej: 00001234"></div>
+        </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>Importe neto *</label><input id="ncImporteNeto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesComprobanteCompra()"></div>
+          <div><label>Alícuota IVA *</label><select id="ncAlicuotaIva" onchange="actualizarTotalesComprobanteCompra()">${opcionesAlicuotaIva(21)}</select></div>
+          <div><label>Importe exento/no gravado</label><input id="ncImporteExento" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesComprobanteCompra()"></div>
+        </div>
+        <div class="muted" id="ncComprobanteTotales" style="margin-top:6px"></div>
+
         <div class="section-title">Productos</div>
         <div id="ncFilasItems"></div>
         <button class="btn secondary small" onclick="agregarFilaCompra()">+ Agregar producto</button>
@@ -361,6 +396,16 @@ function abrirNuevaCompra(){
   `;
   agregarFilaCompra();
   actualizarVisibilidadDepositoCompra();
+  actualizarTotalesComprobanteCompra();
+}
+
+function actualizarTotalesComprobanteCompra(){
+  const neto = Number(document.getElementById('ncImporteNeto').value) || 0;
+  const alicuota = Number(document.getElementById('ncAlicuotaIva').value) || 0;
+  const exento = Number(document.getElementById('ncImporteExento').value) || 0;
+  const iva = Math.round(neto * alicuota) / 100;
+  const total = Math.round((neto + iva + exento) * 100) / 100;
+  document.getElementById('ncComprobanteTotales').textContent = `IVA: ${money(iva)} — Total del comprobante: ${money(total)}`;
 }
 
 function actualizarCondicionPago(){
@@ -454,12 +499,20 @@ async function guardarNuevaCompra(){
     items,
     descuentoPorcentaje: Number(document.getElementById('ncDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('ncDescuentoMonto').value) || 0,
-    observaciones: document.getElementById('ncObservaciones').value.trim()
+    observaciones: document.getElementById('ncObservaciones').value.trim(),
+    tipoComprobante: document.getElementById('ncTipoComprobante').value,
+    puntoVenta: document.getElementById('ncPuntoVenta').value.trim(),
+    comprobanteNumero: document.getElementById('ncComprobanteNumero').value.trim(),
+    importeNeto: Number(document.getElementById('ncImporteNeto').value) || 0,
+    alicuotaIva: Number(document.getElementById('ncAlicuotaIva').value),
+    importeExento: Number(document.getElementById('ncImporteExento').value) || 0
   };
   document.getElementById('ncErrNueva').textContent = '';
   if (!body.proveedorId) { document.getElementById('ncErrNueva').textContent = 'Elegí un proveedor'; return; }
   if (!items.length) { document.getElementById('ncErrNueva').textContent = 'Agregá al menos un producto'; return; }
   if (tipoRecepcion === 'inmediata' && !body.depositoId) { document.getElementById('ncErrNueva').textContent = 'Elegí a qué depósito le vas a ingresar el stock'; return; }
+  if (!body.puntoVenta) { document.getElementById('ncErrNueva').textContent = 'Falta el punto de venta del comprobante'; return; }
+  if (!body.comprobanteNumero) { document.getElementById('ncErrNueva').textContent = 'Falta el número del comprobante'; return; }
   try{
     const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
@@ -498,6 +551,11 @@ function verDetalle(id){
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(c.proveedorNombre)} — ${fechaCorta(c.fecha)}${c.condicionPago ? ' — Condición: ' + escapeHtml(c.condicionPago) : ''}
         </p>
+        ${c.tipoComprobante ? `<p class="muted" style="margin-top:-6px">
+          ${TIPO_COMPROBANTE_LABEL[c.tipoComprobante]||c.tipoComprobante} ${escapeHtml(c.puntoVenta||'')}-${escapeHtml(c.comprobanteNumero||'')}
+          ${c.esFiscal ? '<span class="pill activo">Fiscal</span>' : '<span class="pill inactivo">No fiscal</span>'}
+          — Neto ${money(c.importeNeto)} + IVA (${c.alicuotaIva}%) ${money(c.importeIva)}${c.importeExento ? ' + Exento ' + money(c.importeExento) : ''} = ${money(c.importeTotalComprobante)}
+        </p>` : ''}
         <table>
           <thead><tr><th>SKU</th><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
           <tbody>${filasItems}</tbody>

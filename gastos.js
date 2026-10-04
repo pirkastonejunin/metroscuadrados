@@ -102,16 +102,64 @@ const ESTADOS_VALIDOS = ['activo', 'anulada'];
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
 
+// Comprobante fiscal (4/10/2026, pedido de Mato: "hay que agregar
+// comprobantes con numeracion y fiscal o no para luego poder sacar
+// libro iva compra y venta") — mismo bloque que en compras.js (ver ahí
+// el comentario completo), duplicado a propósito.
+const TIPOS_COMPROBANTE_VALIDOS = [
+  'factura_a', 'factura_b', 'factura_c', 'factura_m',
+  'nota_credito_a', 'nota_credito_b', 'nota_credito_c', 'nota_credito_m',
+  'nota_debito_a', 'nota_debito_b', 'nota_debito_c', 'nota_debito_m',
+  'recibo', 'ticket', 'otro'
+];
+const TIPOS_COMPROBANTE_FISCALES = new Set([
+  'factura_a', 'factura_b', 'factura_c', 'factura_m',
+  'nota_credito_a', 'nota_credito_b', 'nota_credito_c', 'nota_credito_m',
+  'nota_debito_a', 'nota_debito_b', 'nota_debito_c', 'nota_debito_m'
+]);
+const TIPO_COMPROBANTE_LABEL = {
+  factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M',
+  nota_credito_a: 'Nota de Crédito A', nota_credito_b: 'Nota de Crédito B', nota_credito_c: 'Nota de Crédito C', nota_credito_m: 'Nota de Crédito M',
+  nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M',
+  recibo: 'Recibo', ticket: 'Ticket', otro: 'Otro (no fiscal)'
+};
+const ALICUOTAS_IVA_VALIDAS = [0, 2.5, 5, 10.5, 21, 27];
+
+function normalizarComprobante(body) {
+  const tipoComprobante = normalizarTexto(body.tipoComprobante).toLowerCase();
+  if (!TIPOS_COMPROBANTE_VALIDOS.includes(tipoComprobante)) throw err(400, `Tipo de comprobante inválido (opciones: ${TIPOS_COMPROBANTE_VALIDOS.join(', ')})`);
+  const puntoVenta = normalizarTexto(body.puntoVenta);
+  if (!puntoVenta) throw err(400, 'Falta el punto de venta del comprobante');
+  const comprobanteNumero = normalizarTexto(body.comprobanteNumero);
+  if (!comprobanteNumero) throw err(400, 'Falta el número del comprobante');
+  const importeNeto = normalizarMontoNoNegativo(body.importeNeto, 'El importe neto del comprobante');
+  const alicuotaIva = Number(body.alicuotaIva);
+  if (!ALICUOTAS_IVA_VALIDAS.includes(alicuotaIva)) throw err(400, `Alícuota de IVA inválida (opciones: ${ALICUOTAS_IVA_VALIDAS.join(', ')})`);
+  const importeExento = body.importeExento ? normalizarMontoNoNegativo(body.importeExento, 'El importe exento/no gravado del comprobante') : 0;
+  const importeIva = Math.round(importeNeto * alicuotaIva) / 100;
+  const importeTotalComprobante = Math.round((importeNeto + importeIva + importeExento) * 100) / 100;
+  const esFiscal = TIPOS_COMPROBANTE_FISCALES.has(tipoComprobante);
+  return { tipoComprobante, puntoVenta, comprobanteNumero, importeNeto, alicuotaIva, importeIva, importeExento, importeTotalComprobante, esFiscal };
+}
+
 // Columnas del Excel de export — mismo criterio que Compras: solo
 // export, un gasto se genera operativamente (ligado a pagos reales).
 const COLUMNAS_GASTOS_EXPORT = [
-  { clave: 'numero', titulo: 'Nº' },
-  { clave: 'comprobanteNumero', titulo: 'Comprobante' },
+  { clave: 'numero', titulo: 'Nº interno' },
   { clave: 'fecha', titulo: 'Fecha', tipo: 'fecha' },
   { clave: 'proveedorNombre', titulo: 'Proveedor' },
+  { clave: 'tipoComprobanteLabel', titulo: 'Tipo comprobante' },
+  { clave: 'puntoVenta', titulo: 'Punto de venta' },
+  { clave: 'comprobanteNumero', titulo: 'Número comprobante' },
+  { clave: 'esFiscal', titulo: 'Fiscal' },
   { clave: 'condicionPago', titulo: 'Condición de pago' },
   { clave: 'estado', titulo: 'Estado' },
   { clave: 'moneda', titulo: 'Moneda' },
+  { clave: 'importeNeto', titulo: 'Importe neto', tipo: 'numero' },
+  { clave: 'alicuotaIva', titulo: 'Alícuota IVA', tipo: 'numero' },
+  { clave: 'importeIva', titulo: 'Importe IVA', tipo: 'numero' },
+  { clave: 'importeExento', titulo: 'Importe exento', tipo: 'numero' },
+  { clave: 'importeTotalComprobante', titulo: 'Total comprobante', tipo: 'numero' },
   { clave: 'subtotal', titulo: 'Subtotal', tipo: 'numero' },
   { clave: 'descuentoPorcentaje', titulo: 'Descuento %', tipo: 'numero' },
   { clave: 'descuentoMonto', titulo: 'Descuento $', tipo: 'numero' },
@@ -369,7 +417,11 @@ router.get('/export', authAdmin, async (req, res) => {
       const db = await getDb();
       return db.collection('gastos').find(match).sort({ fecha: -1, numero: -1 }).limit(2000).toArray();
     });
-    exportarXlsx(res, 'gastos.xlsx', COLUMNAS_GASTOS_EXPORT, lista);
+    const listaExport = lista.map(g => Object.assign({}, g, {
+      tipoComprobanteLabel: g.tipoComprobante ? (TIPO_COMPROBANTE_LABEL[g.tipoComprobante] || g.tipoComprobante) : '',
+      esFiscal: g.tipoComprobante ? (g.esFiscal ? 'Sí' : 'No') : ''
+    }));
+    exportarXlsx(res, 'gastos.xlsx', COLUMNAS_GASTOS_EXPORT, listaExport);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -395,16 +447,27 @@ router.post('/', authAdmin, async (req, res) => {
     const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
     if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
     const condicionPago = normalizarTexto(body.condicionPago);
-    const comprobanteNumero = normalizarTexto(body.comprobanteNumero);
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    // Comprobante fiscal (4/10/2026) — numeración real del proveedor +
+    // IVA discriminado, para el Libro IVA Compras.
+    const comprobante = normalizarComprobante(body);
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrg(req)));
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
+      // Evita cargar el mismo comprobante dos veces para el mismo
+      // proveedor (mismo tipo + punto de venta + número) — no bloquea
+      // comprobantes anulados, por si hay que corregir y volver a cargar.
+      const dupe = await db.collection('gastos').findOne(Object.assign({
+        proveedorId, tipoComprobante: comprobante.tipoComprobante,
+        puntoVenta: comprobante.puntoVenta, comprobanteNumero: comprobante.comprobanteNumero,
+        estado: { $ne: 'anulada' }
+      }, filtroOrg(req)));
+      if (dupe) throw err(400, `Ya hay un gasto cargado con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es el gasto #${dupe.numero}.`);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const numero = await proximoNumero(db, req.orgId);
@@ -413,7 +476,15 @@ router.post('/', authAdmin, async (req, res) => {
 
       const gasto = {
         numero,
-        comprobanteNumero,
+        tipoComprobante: comprobante.tipoComprobante,
+        puntoVenta: comprobante.puntoVenta,
+        comprobanteNumero: comprobante.comprobanteNumero,
+        esFiscal: comprobante.esFiscal,
+        importeNeto: comprobante.importeNeto,
+        alicuotaIva: comprobante.alicuotaIva,
+        importeIva: comprobante.importeIva,
+        importeExento: comprobante.importeExento,
+        importeTotalComprobante: comprobante.importeTotalComprobante,
         proveedorId,
         proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
         fecha,
