@@ -725,6 +725,32 @@ router.get('/export', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Listado de remitos emitidos (3/10/2026, pedido de Mato: "tenemos que
+// tener en el menu comercial un submenu para ver los remitos emitidos")
+// — mismo patrón de filtros que GET / de ventas (cliente, rango de
+// fecha), pero sobre la colección `remitos` en vez de `ventas`.
+router.get('/remitos', authAdmin, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.clienteId) {
+      const cid = toObjectId(req.query.clienteId);
+      if (!cid) throw err(400, 'clienteId inválido');
+      match.clienteId = cid;
+    }
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
+    }
+    const limite = Math.min(Number(req.query.limite) || 200, 500);
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('remitos').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -760,31 +786,6 @@ router.get('/:id/remitos', authAdmin, async (req, res) => {
 // Remito de una venta (2/10/2026) — se usa para mostrarlo/imprimirlo.
 // Nota de ruta: '/remitos/:id' tiene dos segmentos, así que nunca choca
 // con el '/:id' de arriba (que solo matchea un segmento).
-// Listado de remitos emitidos (3/10/2026, pedido de Mato: "tenemos que
-// tener en el menu comercial un submenu para ver los remitos emitidos")
-// — mismo patrón de filtros que GET / de ventas (cliente, rango de
-// fecha), pero sobre la colección `remitos` en vez de `ventas`.
-router.get('/remitos', authAdmin, async (req, res) => {
-  try {
-    const match = Object.assign({}, filtroOrg(req));
-    if (req.query.clienteId) {
-      const cid = toObjectId(req.query.clienteId);
-      if (!cid) throw err(400, 'clienteId inválido');
-      match.clienteId = cid;
-    }
-    if (req.query.desde || req.query.hasta) {
-      match.fecha = {};
-      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
-      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
-    }
-    const limite = Math.min(Number(req.query.limite) || 200, 500);
-    const lista = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('remitos').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
-    });
-    res.json(lista);
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
 
 router.get('/remitos/:id', authAdmin, async (req, res) => {
   try {
