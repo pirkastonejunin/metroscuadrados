@@ -68,6 +68,9 @@ app.use('/api/presupuestos', presupuestosRouter);
 const comprasRouter = require('./compras');
 app.use('/api/compras', comprasRouter);
 
+const gastosRouter = require('./gastos');
+app.use('/api/gastos', gastosRouter);
+
 const tesoreriaRouter = require('./tesoreria');
 app.use('/api/tesoreria', tesoreriaRouter);
 

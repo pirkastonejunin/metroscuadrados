@@ -171,6 +171,24 @@
     </div>
 
     <div class="card">
+      <button type="button" class="section-title seccion-toggle" id="toggleConceptosGasto" onclick="toggleSeccion('ConceptosGasto')">
+        <span>Conceptos de gasto</span><span class="chev">▾</span>
+      </button>
+      <div id="contConceptosGasto">
+        <p class="muted" style="margin-top:0">Se usan al cargar un Gasto (alquileres, servicios, honorarios, etc. — erogaciones que no están vinculadas a un producto). También se pueden crear al vuelo desde la propia pantalla de Gastos si falta alguno.</p>
+        <div class="row" style="margin-bottom:12px;margin-top:8px">
+          <div style="flex:1"><label>Nuevo concepto</label><input id="cgNombre" placeholder="Ej: Alquiler" onkeydown="if(event.key==='Enter')crearConceptoGasto()"></div>
+          <div><button class="btn" onclick="crearConceptoGasto()">Agregar</button></div>
+        </div>
+        <div class="err" id="conceptosGastoErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="conceptosGastoBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
       <button type="button" class="section-title seccion-toggle" id="toggleCotizacion" onclick="toggleSeccion('Cotizacion')">
         <span>Cotización del dólar</span><span class="chev">▾</span>
       </button>
@@ -189,6 +207,7 @@
 
 <script>
 const BASE = '/api/productos';
+const BASE_GASTOS = '/api/gastos';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
 function headersAuth(extra){
@@ -259,6 +278,7 @@ async function iniciarApp(){
   await cargarRubros();
   await cargarSubrubros();
   await cargarDepositos();
+  await cargarConceptosGasto();
   await cargarCotizacionDolar();
   // Sincroniza solo al entrar (1/10/2026, pedido de Mato: que la base
   // quede sincronizada con lo que ya tienen cargado los productos, sin
@@ -280,7 +300,7 @@ function toggleSeccion(nombre){
   try { localStorage.setItem('pn_bases_seccion_' + nombre, colapsada ? '0' : '1'); } catch(e){}
 }
 function restaurarSecciones(){
-  ['Rubros', 'Subrubros', 'Depositos', 'Cotizacion'].forEach(nombre => {
+  ['Rubros', 'Subrubros', 'Depositos', 'ConceptosGasto', 'Cotizacion'].forEach(nombre => {
     let abierta = true;
     try {
       const guardado = localStorage.getItem('pn_bases_seccion_' + nombre);
@@ -365,6 +385,82 @@ async function toggleActivoRubro(id, activar){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarRubros();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// -------------------------------------------------------------------
+// Conceptos de gasto — mismo patrón de alta/baja (soft-delete) que
+// Rubros, pero contra el router de Gastos (BASE_GASTOS), no Productos.
+// -------------------------------------------------------------------
+let conceptosGastoCache = [];
+async function cargarConceptosGasto(){
+  const body = document.getElementById('conceptosGastoBody');
+  try{
+    const r = await fetch(BASE_GASTOS + '/config/conceptos?incluirInactivos=1', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    conceptosGastoCache = data;
+    renderConceptosGasto();
+  }catch(e){
+    body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderConceptosGasto(){
+  const body = document.getElementById('conceptosGastoBody');
+  if (!conceptosGastoCache.length) { body.innerHTML = '<tr><td colspan="3" class="muted">Todavía no hay conceptos de gasto cargados.</td></tr>'; return; }
+  body.innerHTML = conceptosGastoCache.map(c => `
+    <tr>
+      <td>
+        <input value="${escapeHtml(c.nombre)}" style="width:auto;min-width:220px" id="cgn_${c._id}" onkeydown="if(event.key==='Enter')guardarNombreConceptoGasto('${c._id}')">
+      </td>
+      <td><span class="pill ${c.activo!==false?'activo':'inactivo'}">${c.activo!==false?'Activo':'Inactivo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarNombreConceptoGasto('${c._id}')">Guardar nombre</button>
+        <button class="btn small secondary" onclick="toggleActivoConceptoGasto('${c._id}', ${c.activo===false})">${c.activo===false?'Activar':'Desactivar'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function crearConceptoGasto(){
+  const input = document.getElementById('cgNombre');
+  const nombre = input.value.trim();
+  document.getElementById('conceptosGastoErr').textContent = '';
+  if (!nombre) { document.getElementById('conceptosGastoErr').textContent = 'Poné un nombre para el concepto'; return; }
+  try{
+    const r = await fetch(BASE_GASTOS + '/config/conceptos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    input.value = '';
+    await cargarConceptosGasto();
+  }catch(e){
+    document.getElementById('conceptosGastoErr').textContent = e.message;
+  }
+}
+
+async function guardarNombreConceptoGasto(id){
+  const nombre = document.getElementById('cgn_' + id).value.trim();
+  document.getElementById('conceptosGastoErr').textContent = '';
+  if (!nombre) { document.getElementById('conceptosGastoErr').textContent = 'El nombre no puede quedar vacío'; return; }
+  try{
+    const r = await fetch(BASE_GASTOS + '/config/conceptos/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarConceptosGasto();
+  }catch(e){
+    document.getElementById('conceptosGastoErr').textContent = e.message;
+  }
+}
+
+async function toggleActivoConceptoGasto(id, activar){
+  try{
+    const r = await fetch(BASE_GASTOS + '/config/conceptos/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarConceptosGasto();
   }catch(e){
     alert(e.message);
   }

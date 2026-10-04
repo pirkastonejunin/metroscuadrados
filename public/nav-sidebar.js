@@ -50,7 +50,11 @@
     // Presupuestos (3/10/2026, pedido de Mato): clipboard con un check,
     // distinto del ícono de ventas (carrito) para que se note que es otra
     // cosa (no compromete stock ni cuenta corriente).
-    presupuestos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6a1 1 0 011 1v2H8V3a1 1 0 011-1z"/><path d="M8 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2"/><path d="M9 14l2 2 4-4"/></svg>'
+    presupuestos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2h6a1 1 0 011 1v2H8V3a1 1 0 011-1z"/><path d="M8 4H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2"/><path d="M9 14l2 2 4-4"/></svg>',
+    // Gastos (3/10/2026, pedido de Mato): billete con una flecha de
+    // salida, distinto del ícono de Compras (caja) — no hay mercadería
+    // de por medio, es una erogación.
+    gastos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 6v.01M18 18v-.01"/></svg>'
   };
 
   function slug(s) {
@@ -101,7 +105,8 @@
     ]},
     { nombre: 'Proveedores', items: [
       { key: 'proveedores', href: '/admin-proveedores.html', modulo: 'proveedores', label: 'Proveedores', icon: ICONOS.proveedores },
-      { key: 'compras', href: '/admin-compras.html', modulo: 'compras', label: 'Compras', icon: ICONOS.compras }
+      { key: 'compras', href: '/admin-compras.html', modulo: 'compras', label: 'Compras', icon: ICONOS.compras },
+      { key: 'gastos', href: '/admin-gastos.html', modulo: 'gastos', label: 'Gastos', icon: ICONOS.gastos }
     ]},
     // Tesorería (2/10/2026): cajas, bancos y cheques — el día a día. El
     // alta/habilitación de cajas y bancos vive en Configuración, no acá.

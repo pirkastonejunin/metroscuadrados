@@ -437,6 +437,21 @@ router.post('/', authAdmin, async (req, res) => {
       const r = await db.collection('compras').insertOne(compra);
       compra._id = r.insertedId;
 
+      // Actualiza el costo del producto con lo que efectivamente se
+      // pagó en esta compra (3/10/2026, pedido de Mato: "que la compra
+      // actualice el costo del producto") — se pisa con el precio
+      // unitario de CADA ítem comprado, en el orden en que vienen (si
+      // el mismo producto aparece dos veces en la misma compra, gana el
+      // último). Los ítems cargados a mano (sin productoId) no tocan
+      // ningún costo.
+      for (const item of items) {
+        if (!item.productoId) continue;
+        await db.collection('productos_catalogo').updateOne(
+          Object.assign({ _id: item.productoId }, filtroOrg(req)),
+          { $set: { costo: item.precioUnitario, updatedAt: new Date() } }
+        );
+      }
+
       if (tipoRecepcion === 'inmediata') {
         await ingresarStockDeCompra(db, req, compra, depositoId);
         await db.collection('compras').updateOne({ _id: compra._id }, { $set: { stockIngresado: true, stockIngresadoEn: ahora, recibidaEn: ahora } });
