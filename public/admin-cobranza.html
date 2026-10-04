@@ -181,7 +181,11 @@ function headersAuth(extra){
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
-function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function money(n){
+  n = Number(n || 0);
+  const signo = n < 0 ? '-' : '';
+  return signo + '$ ' + Math.abs(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -338,7 +342,7 @@ async function mostrarClienteSeleccionadoCB(clienteId){
     if (!r.ok) throw new Error();
     const data = await r.json();
     const saldoEl = document.getElementById('cbSaldoTexto');
-    const saldoTexto = data.saldo > 0 ? `Debe ${money(data.saldo)}` : (data.saldo < 0 ? `Tiene a favor ${money(-data.saldo)}` : 'Al día ($ 0,00)');
+    const saldoTexto = money(data.saldo);
     saldoEl.textContent = saldoTexto;
     saldoEl.style.color = data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)');
     const movs = (data.movimientos || []).slice(0, 10);

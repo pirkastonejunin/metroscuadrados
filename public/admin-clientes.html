@@ -161,7 +161,11 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+function money(n){
+  n = Number(n || 0);
+  const signo = n < 0 ? '-' : '';
+  return signo + '$ ' + Math.abs(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
 function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
 
 async function login(){
@@ -620,7 +624,7 @@ async function cargarCuentaCorrienteTab(id){
     if (!r.ok) throw new Error(data.error || 'Error al cargar la cuenta corriente');
     const cont = document.getElementById('ccContenido');
     if (!cont) return; // se cerró el modal mientras cargaba
-    const saldoTexto = data.saldo > 0 ? `Debe ${money(data.saldo)}` : (data.saldo < 0 ? `Tiene a favor ${money(-data.saldo)}` : 'Al día ($ 0,00)');
+    const saldoTexto = money(data.saldo);
     // Columna "Saldo" (3/10/2026, pedido de Mato: "agreguemos una columna
     // de saldo que vaya tirando el saldo historico"): data.movimientos
     // viene ordenado del más nuevo al más viejo (fecha desc). El saldo
@@ -653,12 +657,22 @@ async function cargarCuentaCorrienteTab(id){
         <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>
           ${filas.length ? filas.map(({m, saldo}) => {
-            const venta = (m.tipo === 'debito' && m.ventaId) ? ventasPorId[String(m.ventaId)] : null;
-            const cobrable = venta && venta.estado !== 'anulada' && venta.saldoPendiente > 0;
+            // Antes solo resolvía la venta para un DÉBITO (una venta
+            // normal/Nota de Débito) — una Nota de Crédito es un
+            // CRÉDITO con ventaId igual, y se quedaba sin comprobante
+            // clickeable. Ahora alcanza con que tenga ventaId, sea cual
+            // sea el tipo de movimiento (3/10/2026, pedido de Mato:
+            // "poder clikear en el comprobante para ver el detalle o
+            // imprimirlo").
+            const venta = m.ventaId ? ventasPorId[String(m.ventaId)] : null;
+            const cobrable = venta && m.tipo === 'debito' && venta.estado !== 'anulada' && venta.saldoPendiente > 0;
+            const conceptoHtml = `${escapeHtml(m.concepto || '—')}${m.observaciones ? `<div class="muted">${escapeHtml(m.observaciones)}</div>` : ''}`;
             return `
             <tr>
               <td>${fechaCorta(m.fecha)}</td>
-              <td>${escapeHtml(m.concepto || '—')}${m.observaciones ? `<div class="muted">${escapeHtml(m.observaciones)}</div>` : ''}</td>
+              <td>${venta
+                ? `<a href="javascript:void(0)" onclick="imprimirDocumento('/api/ventas/${m.ventaId}/comprobante')" style="text-decoration:underline;cursor:pointer" title="Ver el comprobante">${conceptoHtml}</a>`
+                : conceptoHtml}</td>
               <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
@@ -666,7 +680,7 @@ async function cargarCuentaCorrienteTab(id){
               <td style="white-space:nowrap">
                 ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
-                ${venta && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
+                ${venta && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
             </tr>
           `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}

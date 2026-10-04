@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remitos - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Remitos</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Ventas. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <h1>Remitos emitidos</h1>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div class="grid3" style="flex:1;min-width:280px">
+          <div>
+            <label>Desde</label>
+            <input id="fDesde" type="date" onchange="cargarRemitos()">
+          </div>
+          <div>
+            <label>Hasta</label>
+            <input id="fHasta" type="date" onchange="cargarRemitos()">
+          </div>
+          <div>
+            <label>Buscar (cliente, nº remito o nº venta)</label>
+            <input id="fBusqueda" oninput="renderRemitos()" placeholder="Ej: Pérez, 00034">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Fecha</th><th>Remito</th><th>Venta</th><th>Cliente</th><th>Depósito</th><th>Ítems</th><th></th></tr></thead>
+        <tbody id="remitosBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+const BASE = '/api/ventas';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token;
+    localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){
+    document.getElementById('loginErr').textContent = e.message;
+  }
+}
+function logout(){
+  localStorage.removeItem('obras_admin_token');
+  location.reload();
+}
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido);
+  else localStorage.removeItem(ORG_KEY);
+}
+
+let NOMBRE_USUARIO = '';
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    // Los remitos nacen de ventas, así que piden el mismo módulo que el
+    // panel de Ventas — no un módulo propio (3/10/2026, pedido de Mato:
+    // "en el menu comercial un submenu para ver los remitos emitidos").
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('ventas'));
+    if (!tieneAcceso) {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('sinAccesoScreen').classList.remove('hidden');
+      return;
+    }
+  }catch(e){
+    document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.';
+    return;
+  }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'remitos', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
+  // Por defecto, últimos 30 días — una lista sin filtro de fecha puede
+  // ser larga con el tiempo, y lo más reciente es lo que se busca casi
+  // siempre.
+  const hoy = new Date();
+  const hace30 = new Date(hoy.getTime() - 30*24*60*60*1000);
+  document.getElementById('fHasta').value = hoy.toISOString().slice(0,10);
+  document.getElementById('fDesde').value = hace30.toISOString().slice(0,10);
+  await cargarRemitos();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+let remitosCache = [];
+async function cargarRemitos(){
+  const params = new URLSearchParams();
+  const desde = document.getElementById('fDesde').value;
+  const hasta = document.getElementById('fHasta').value;
+  if (desde) params.set('desde', desde);
+  if (hasta) params.set('hasta', hasta);
+  const body = document.getElementById('remitosBody');
+  body.innerHTML = '<tr><td colspan="7" class="muted">Cargando...</td></tr>';
+  try{
+    const r = await fetch(BASE + '/remitos?' + params.toString(), {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al cargar');
+    remitosCache = data;
+    renderRemitos();
+  }catch(e){
+    body.innerHTML = '<tr><td colspan="7" class="err">' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+function renderRemitos(){
+  const body = document.getElementById('remitosBody');
+  const q = (document.getElementById('fBusqueda').value || '').trim().toLowerCase();
+  const lista = !q ? remitosCache : remitosCache.filter(rem => {
+    return (rem.clienteNombre || '').toLowerCase().includes(q)
+      || String(rem.numero || '').includes(q)
+      || String(rem.ventaNumero || '').includes(q);
+  });
+  if (!lista.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay remitos para este filtro.</td></tr>'; return; }
+  body.innerHTML = lista.map(rem => {
+    const resumenItems = (rem.items || []).map(it => `${escapeHtml(it.nombre)} (${it.cantidad})`).join(', ');
+    return `
+    <tr>
+      <td>${fechaCorta(rem.fecha)}</td>
+      <td><strong>${String(rem.numero).padStart(5,'0')}</strong></td>
+      <td class="muted">${rem.ventaNumero ? String(rem.ventaNumero).padStart(5,'0') : '—'}</td>
+      <td>${escapeHtml(rem.clienteNombre || '—')}</td>
+      <td class="muted">${escapeHtml(rem.depositoNombre || '—')}</td>
+      <td class="muted" style="max-width:320px">${resumenItems || '—'}</td>
+      <td style="white-space:nowrap">${botonesImprimible(BASE + '/remitos/' + rem._id + '/imprimir')}</td>
+    </tr>
+  `; }).join('');
+}
+
+async function imprimirDocumento(url, accion){
+  const ventana = window.open('', '_blank');
+  try{
+    const r = await fetch(url, {headers: headersAuth()});
+    const html = await r.text();
+    if (!r.ok) { ventana.document.write('<p>No se pudo generar el documento.</p>'); return; }
+    ventana.document.write(html);
+    ventana.document.close();
+    if (accion === 'imprimir') {
+      ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
+    } else if (accion === 'compartir') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.compartirDocumento) ventana.compartirDocumento(); }, 250));
+    }
+  }catch(e){
+    ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
+  }
+}
+function botonesImprimible(url){
+  return `
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}')">Ver</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button>
+  `;
+}
+</script>
+</body>
+</html>
