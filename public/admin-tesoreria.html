@@ -68,6 +68,12 @@
   #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
   #loginScreen .card{width:300px;text-align:center;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);}
+  .kpi .t{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .kpi .v{font-size:20px;font-weight:800;margin-top:6px;}
+  .kpi .s{font-size:12px;color:var(--muted);margin-top:4px;}
+  .kpi .v.negativo,.vencido{color:var(--danger);}
   .saldo-card{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-bottom:1px solid var(--border);}
   .saldo-card:last-child{border-bottom:none;}
   .saldo-card .nombre{font-weight:700;}
@@ -138,6 +144,7 @@
 
     <!-- SALDOS -->
     <section id="tab-saldos">
+      <div class="kpis" id="resumenKpis"></div>
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h3 style="margin:0">Cajas</h3>
@@ -148,6 +155,14 @@
       <div class="card">
         <h3 style="margin-top:0">Bancos</h3>
         <div id="saldosBancos" style="margin-top:10px"></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Cheques</h3>
+        <div id="resumenCheques" style="margin-top:10px"><p class="muted">Cargando…</p></div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Tarjetas</h3>
+        <div id="resumenTarjeta" style="margin-top:10px"><p class="muted">Cargando…</p></div>
       </div>
       <p class="muted">No ves ninguna caja o banco acá? Pedile a un administrador que te la habilite desde Configuración → Cajas y Bancos.</p>
     </section>
@@ -327,7 +342,73 @@ function showTab(tab){
 // -------------------------------------------------------------------
 let cajasCache = [];
 let bancosCache = [];
+function moneyMoneda(n, m){ return (m === 'USD' ? 'US$ ' : '$ ') + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+// Un objeto {ARS: x, USD: y} → "$ x · US$ y" (omite las monedas en cero, salvo que no haya ninguna)
+function montosPorMoneda(obj){
+  const claves = Object.keys(obj || {}).filter(m => Number(obj[m]) !== 0);
+  if (!claves.length) return moneyMoneda(0, 'ARS');
+  return claves.map(m => moneyMoneda(obj[m], m)).join(' · ');
+}
+function kpiHtml(titulo, valor, sub, negativo){
+  return `<div class="kpi"><div class="t">${titulo}</div><div class="v ${negativo?'negativo':''}">${valor}</div>${sub?`<div class="s">${sub}</div>`:''}</div>`;
+}
+async function cargarResumenTesoreria(){
+  let r;
+  try { r = await fetch(BASE + '/resumen', {headers: headersAuth()}); } catch (e) { r = null; }
+  const kp = document.getElementById('resumenKpis');
+  if (!r || !r.ok) {
+    kp.innerHTML = '';
+    document.getElementById('resumenCheques').innerHTML = '<p class="err">No se pudo cargar el resumen de cheques.</p>';
+    document.getElementById('resumenTarjeta').innerHTML = '<p class="err">No se pudo cargar el resumen de tarjetas.</p>';
+    return;
+  }
+  const d = await r.json();
+  const ch = d.cheques, tj = d.tarjeta;
+  kp.innerHTML =
+    kpiHtml('Cajas (efectivo)', montosPorMoneda(d.totalCajas), d.cajas.length + ' caja' + (d.cajas.length===1?'':'s')) +
+    kpiHtml('Bancos', montosPorMoneda(d.totalBancos), d.bancos.length + ' cuenta' + (d.bancos.length===1?'':'s')) +
+    kpiHtml('Cheques en cartera', montosPorMoneda(ch.cartera.total), ch.cartera.cantidad + ' cheque' + (ch.cartera.cantidad===1?'':'s') + (ch.cartera.cantidadVencidos ? ' · ' + ch.cartera.cantidadVencidos + ' vencido' + (ch.cartera.cantidadVencidos===1?'':'s') : '')) +
+    kpiHtml('Cheques propios a pagar', montosPorMoneda(ch.emitidos.total), ch.emitidos.cantidad + ' emitido' + (ch.emitidos.cantidad===1?'':'s') + (ch.emitidos.cantidadVencidos ? ' · ' + ch.emitidos.cantidadVencidos + ' vencido' + (ch.emitidos.cantidadVencidos===1?'':'s') : '')) +
+    kpiHtml('Tarjetas (últimos 30 días)', montosPorMoneda(tj.ultimos30), 'Total histórico: ' + montosPorMoneda(tj.total));
+  // Cheques
+  const filaGrupo = (nombre, g) => `<tr><td><strong>${nombre}</strong></td><td>${g.cantidad}</td><td>${montosPorMoneda(g.total)}</td><td class="${g.cantidadVencidos?'vencido':''}">${g.cantidadVencidos ? montosPorMoneda(g.vencidos) + ' (' + g.cantidadVencidos + ')' : '—'}</td><td>${montosPorMoneda(g.prox7)}</td><td>${montosPorMoneda(g.prox30)}</td></tr>`;
+  const prox = ch.proximos.length ? `
+    <h4 style="margin:16px 0 6px">Próximos vencimientos</h4>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Tipo</th><th>Nº</th><th>Banco</th><th>Cliente / Proveedor</th><th>Vence</th><th>Monto</th></tr></thead>
+      <tbody>${ch.proximos.map(c => `<tr>
+        <td>${c.tipo === 'tercero' ? 'De tercero' : 'Propio'}</td><td>${escapeHtml(c.numero||'')}</td><td>${escapeHtml(c.banco||'')}</td>
+        <td>${escapeHtml(c.contraparte||'')}</td>
+        <td class="${c.fechaVencimiento && new Date(c.fechaVencimiento) < new Date(new Date().setHours(0,0,0,0)) ? 'vencido' : ''}">${fechaCorta(c.fechaVencimiento)}</td>
+        <td>${moneyMoneda(c.monto, c.moneda)}</td></tr>`).join('')}</tbody>
+    </table></div>` : '';
+  document.getElementById('resumenCheques').innerHTML = `
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Estado</th><th>Cant.</th><th>Total</th><th>Vencidos</th><th>Vencen en 7 días</th><th>Vencen en 30 días</th></tr></thead>
+      <tbody>
+        ${filaGrupo('En cartera (de terceros)', ch.cartera)}
+        ${filaGrupo('Depositados (de terceros)', ch.depositados)}
+        ${filaGrupo('Emitidos (propios, a pagar)', ch.emitidos)}
+      </tbody>
+    </table></div>${prox}
+    <p style="margin-top:10px"><a href="#" onclick="event.preventDefault(); showTab('cheques')">Ver todos los cheques →</a></p>`;
+  // Tarjetas
+  document.getElementById('resumenTarjeta').innerHTML = tj.cantidad ? `
+    <p class="muted" style="margin-top:0">Los cobros con tarjeta se acreditan directo en el banco elegido, por eso ya están dentro del saldo de Bancos; acá se ve el detalle de lo que entró por tarjeta.</p>
+    <div class="row" style="gap:24px;margin-bottom:10px">
+      ${tj.porBanco.map(b => `<div><div class="muted" style="font-size:12px">${escapeHtml(b.banco)}</div><strong>${moneyMoneda(b.monto, b.moneda)}</strong></div>`).join('')}
+    </div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Fecha</th><th>Detalle</th><th>Tarjeta</th><th>Lote / Cupón</th><th>Banco</th><th>Monto</th></tr></thead>
+      <tbody>${tj.ultimos.map(c => `<tr>
+        <td class="muted">${fechaCorta(c.fecha)}</td><td>${escapeHtml(c.referencia||'')}</td>
+        <td>${escapeHtml([c.entidad, c.tipoTarjeta, c.cuotas > 1 ? c.cuotas + ' cuotas' : ''].filter(Boolean).join(' · ') || '—')}</td>
+        <td>${escapeHtml(c.lote||'—')} / ${escapeHtml(c.cupon||'—')}</td>
+        <td>${escapeHtml(c.banco||'—')}</td><td>${moneyMoneda(c.monto, c.moneda)}</td></tr>`).join('')}</tbody>
+    </table></div>` : '<p class="muted">Todavía no hay cobros con tarjeta registrados.</p>';
+}
 async function cargarSaldos(){
+  cargarResumenTesoreria();
   const [rc, rb] = await Promise.all([
     fetch(BASE + '/cajas', {headers: headersAuth()}),
     fetch(BASE + '/bancos', {headers: headersAuth()})

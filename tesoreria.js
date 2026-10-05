@@ -385,6 +385,92 @@ router.get('/bancos', authOperar, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Resumen de Tesorería (4/10/2026, pedido de Mato: "tesorería debería mostrarme
+// un detalle de los saldos de banco, tarjeta y cheques todo en la misma
+// pantalla"). Junta en una sola respuesta: saldos de cajas y bancos, cheques
+// por estado (con vencimientos) y cobros con tarjeta. Los cobros con tarjeta
+// se acreditan directo en el banco elegido (ya están dentro del saldo del
+// banco); acá se muestran aparte solo como detalle de cuánto entró por tarjeta.
+router.get('/resumen', authOperar, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+      const [cajas, bancos, cheques, ventasTarjeta, movTarjeta] = await Promise.all([
+        listarCuentasHabilitadas(db, req, 'tesoreria_cajas', 'caja'),
+        listarCuentasHabilitadas(db, req, 'tesoreria_bancos', 'banco'),
+        db.collection('cheques').find(Object.assign({ estado: { $in: ['en_cartera', 'depositado', 'emitido'] } }, filtroOrg(req)))
+          .sort({ fechaVencimiento: 1 }).limit(1000).toArray(),
+        db.collection('ventas').find(Object.assign({ estado: { $ne: 'anulada' }, 'pagos.tipoValor': 'tarjeta' }, filtroOrg(req)))
+          .project({ numero: 1, clienteNombre: 1, moneda: 1, pagos: 1 }).sort({ createdAt: -1 }).limit(500).toArray(),
+        db.collection('tesoreria_movimientos').find(Object.assign({ origen: 'cobro_cuenta', tipo: 'ingreso', observaciones: /Lote .* \/ Cup/ }, filtroOrg(req)))
+          .sort({ fecha: -1 }).limit(200).toArray()
+      ]);
+      const nombreBanco = new Map(bancos.map(b => [String(b._id), b.nombre]));
+      const sumar = (lista, campo) => {
+        const t = {};
+        lista.forEach(x => { const m = x.moneda || 'ARS'; t[m] = (t[m] || 0) + (Number(x[campo]) || 0); });
+        return t;
+      };
+      // Cheques
+      const grupos = { cartera: [], depositados: [], emitidos: [] };
+      cheques.forEach(c => {
+        if (c.tipo === 'tercero' && c.estado === 'en_cartera') grupos.cartera.push(c);
+        else if (c.tipo === 'tercero' && c.estado === 'depositado') grupos.depositados.push(c);
+        else if (c.tipo === 'propio' && c.estado === 'emitido') grupos.emitidos.push(c);
+      });
+      const venc = (c) => c.fechaVencimiento ? new Date(c.fechaVencimiento) : null;
+      const resumenGrupo = (lista) => ({
+        cantidad: lista.length,
+        total: sumar(lista, 'monto'),
+        vencidos: sumar(lista.filter(c => venc(c) && venc(c) < hoy), 'monto'),
+        cantidadVencidos: lista.filter(c => venc(c) && venc(c) < hoy).length,
+        prox7: sumar(lista.filter(c => venc(c) && venc(c) >= hoy && venc(c) < new Date(hoy.getTime() + 7 * 86400000)), 'monto'),
+        prox30: sumar(lista.filter(c => venc(c) && venc(c) >= hoy && venc(c) < new Date(hoy.getTime() + 30 * 86400000)), 'monto')
+      });
+      const proximos = grupos.cartera.concat(grupos.emitidos)
+        .sort((a, b) => (venc(a) || 0) - (venc(b) || 0)).slice(0, 15)
+        .map(c => ({ _id: c._id, tipo: c.tipo, numero: c.numero, banco: c.banco || '', fechaVencimiento: c.fechaVencimiento, monto: c.monto, moneda: c.moneda || 'ARS', estado: c.estado, contraparte: c.tipo === 'tercero' ? (c.clienteNombre || c.librador || '') : (c.proveedorNombre || '') }));
+      // Tarjeta
+      const cobrosTarjeta = [];
+      ventasTarjeta.forEach(v => (v.pagos || []).filter(p => p.tipoValor === 'tarjeta').forEach(p => cobrosTarjeta.push({
+        fecha: p.fecha, monto: p.monto, moneda: v.moneda || 'ARS',
+        referencia: `Venta Nº ${v.numero}${v.clienteNombre ? ' — ' + v.clienteNombre : ''}`,
+        entidad: p.tarjetaEntidad || '', tipoTarjeta: p.tarjetaTipo || '', cuotas: p.tarjetaCuotas || 1,
+        lote: p.tarjetaLote || '', cupon: p.tarjetaCupon || '',
+        banco: p.cuentaId ? (nombreBanco.get(String(p.cuentaId)) || '') : ''
+      })));
+      movTarjeta.forEach(m => {
+        const mm = /Lote (.*?) \/ Cup[oó]n (.*)$/.exec(m.observaciones || '');
+        cobrosTarjeta.push({
+          fecha: m.fecha, monto: m.monto, moneda: m.moneda || 'ARS', referencia: m.motivo || 'Cobro a cuenta',
+          entidad: '', tipoTarjeta: '', cuotas: 1, lote: mm ? mm[1] : '', cupon: mm ? mm[2] : '',
+          banco: nombreBanco.get(String(m.cuentaId)) || ''
+        });
+      });
+      cobrosTarjeta.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+      const hace30 = new Date(hoy.getTime() - 30 * 86400000);
+      const porBanco = {};
+      cobrosTarjeta.forEach(c => { const k = (c.banco || 'Sin banco') + '|' + c.moneda; porBanco[k] = (porBanco[k] || 0) + (Number(c.monto) || 0); });
+      return {
+        cajas: cajas.map(c => ({ _id: c._id, nombre: c.nombre, moneda: c.moneda || 'ARS', saldo: c.saldo })),
+        bancos: bancos.map(b => ({ _id: b._id, nombre: b.nombre, banco: b.banco || '', moneda: b.moneda || 'ARS', saldo: b.saldo })),
+        totalCajas: sumar(cajas.map(c => ({ moneda: c.moneda, saldo: c.saldo })), 'saldo'),
+        totalBancos: sumar(bancos.map(b => ({ moneda: b.moneda, saldo: b.saldo })), 'saldo'),
+        cheques: { cartera: resumenGrupo(grupos.cartera), depositados: resumenGrupo(grupos.depositados), emitidos: resumenGrupo(grupos.emitidos), proximos },
+        tarjeta: {
+          cantidad: cobrosTarjeta.length,
+          total: sumar(cobrosTarjeta, 'monto'),
+          ultimos30: sumar(cobrosTarjeta.filter(c => new Date(c.fecha) >= hace30), 'monto'),
+          porBanco: Object.keys(porBanco).map(k => { const [banco, moneda] = k.split('|'); return { banco, moneda, monto: porBanco[k] }; }),
+          ultimos: cobrosTarjeta.slice(0, 15)
+        }
+      };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/movimientos', authOperar, async (req, res) => {
   try {
     const match = {};
