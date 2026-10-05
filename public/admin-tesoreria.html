@@ -220,6 +220,7 @@
           <div class="row"><button class="btn small secondary" onclick="cambiarDiaCajaDiaria(-1)">◀ Día anterior</button><button class="btn small secondary" onclick="cambiarDiaCajaDiaria(1)">Día siguiente ▶</button></div>
         </div>
       </div>
+      <div id="cdResumenDia"></div>
       <div id="cdContenido"></div>
     </section>
 
@@ -983,6 +984,52 @@ async function cargarCajaDiaria(){
   if (!r || !r.ok) { let m = 'No se pudo cargar la planilla.'; try { m = (await r.json()).error || m; } catch(e){} cont.innerHTML = `<p class="err">${escapeHtml(m)}</p>`; return; }
   cajaDiariaActual = await r.json();
   renderCajaDiaria();
+  cargarResumenDia(dia);
+}
+let resumenDiaActual = null;
+async function cargarResumenDia(dia){
+  const cont = document.getElementById('cdResumenDia');
+  cont.innerHTML = '<div class="card"><p class="muted">Cargando resumen del día…</p></div>';
+  let r;
+  try { r = await fetch(BASE + '/caja-diaria/resumen?dia=' + dia, {headers: headersAuth()}); } catch (e) { r = null; }
+  if (!r || !r.ok) { cont.innerHTML = '<div class="card"><p class="err">No se pudo cargar el resumen del día.</p></div>'; return; }
+  const d = await r.json();
+  if (document.getElementById('cdDia').value !== dia) return; // cambió el día mientras cargaba
+  resumenDiaActual = d;
+  const f = (g) => g.cantidad ? montosPorMoneda(g.total) : '—';
+  const n = (g) => g.cantidad + (g.cantidad === 1 ? ' movimiento' : ' movimientos');
+  const ch = d.cheques;
+  const FORMA = { efectivo:'Efectivo (cajas)', transferencia:'En cuenta / transferencia', tarjeta:'Tarjeta', cheque:'Cheques depositados / cobrados', interna:'Pases entre cuentas propias', otro:'Otros movimientos manuales' };
+  const filaForma = (k) => (d.cobros[k].cantidad || d.pagos[k].cantidad) ? `<tr><td>${FORMA[k]}</td><td>${f(d.cobros[k])} <span class="muted">${d.cobros[k].cantidad ? '(' + d.cobros[k].cantidad + ')' : ''}</span></td><td>${f(d.pagos[k])} <span class="muted">${d.pagos[k].cantidad ? '(' + d.pagos[k].cantidad + ')' : ''}</span></td></tr>` : '';
+  const filas = ['efectivo','transferencia','tarjeta','cheque','interna','otro'].map(filaForma).join('');
+  const detalle = d.detalle.filter(x => x.forma !== 'interna' || true);
+  document.getElementById('cdResumenDia').innerHTML = `
+    <div class="card" style="border-color:var(--accent)">
+      <h3 style="margin-top:0">Resumen del día — toda la Tesorería</h3>
+      <div class="kpis">
+        ${kpiHtml('Cobrado en efectivo', f(d.cobros.efectivo), n(d.cobros.efectivo))}
+        ${kpiHtml('Cobrado en cuenta', f(d.cobros.transferencia), n(d.cobros.transferencia))}
+        ${kpiHtml('Cobrado con tarjeta', f(d.cobros.tarjeta), n(d.cobros.tarjeta))}
+        ${kpiHtml('Cheques recibidos', ch.recibidos.length ? montosPorMoneda(ch.totalRecibidos) : '—', ch.recibidos.length + ' cheque' + (ch.recibidos.length===1?'':'s') + ' de terceros')}
+        ${kpiHtml('Cheques depositados / cobrados', f(d.cobros.cheque), n(d.cobros.cheque))}
+        ${kpiHtml('Pagado en el día', montosPorMoneda(['efectivo','transferencia','cheque','otro'].reduce((a,k)=>{ Object.keys(d.pagos[k].total).forEach(m=>{a[m]=(a[m]||0)+d.pagos[k].total[m];}); return a; },{})), 'Efectivo + cuenta + otros')}
+      </div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>Forma</th><th>Ingresos</th><th>Egresos</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="3" class="muted">Sin movimientos de Tesorería este día.</td></tr>'}</tbody>
+      </table></div>
+      ${(ch.recibidos.length || ch.emitidos.length) ? `
+        <h4 style="margin:16px 0 6px">Cheques del día</h4>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>Tipo</th><th>Nº</th><th>Banco</th><th>Cliente / Proveedor</th><th>Vence</th><th>Estado</th><th>Monto</th></tr></thead>
+          <tbody>${ch.recibidos.concat(ch.emitidos).map(c => `<tr><td>${c.tipo==='tercero'?'Recibido':'Emitido'}</td><td>${escapeHtml(c.numero||'')}</td><td>${escapeHtml(c.banco||'')}</td><td>${escapeHtml(c.contraparte||'')}</td><td>${fechaCorta(c.fechaVencimiento)}</td><td><span class="pill ${c.estado}">${ESTADO_CHEQUE_LABEL[c.estado]||c.estado}</span></td><td>${moneyMoneda(c.monto, c.moneda)}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}
+      <h4 style="margin:16px 0 6px">Saldos por cuenta</h4>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>Cuenta</th><th>Saldo inicial</th><th>Ingresos</th><th>Egresos</th><th>Saldo final</th><th>Cierre</th></tr></thead>
+        <tbody>${d.cuentas.map(c => `<tr><td>${c.tipo==='caja'?'Caja':'Banco'} — ${escapeHtml(c.nombre)}</td><td>${moneyMoneda(c.saldoInicial, c.moneda)}</td><td>${moneyMoneda(c.ingresos, c.moneda)}</td><td>${moneyMoneda(c.egresos, c.moneda)}</td><td><strong>${moneyMoneda(c.saldoFinal, c.moneda)}</strong></td><td>${c.tipo==='caja' ? (c.cierre ? (c.cierre.diferencia===0 ? '<span class="pill ingreso">Cuadra</span>' : 'Dif. ' + moneyMoneda(c.cierre.diferencia, c.moneda)) : '<span class="muted">Sin cerrar</span>') : ''}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
 }
 function renderCajaDiaria(){
   const d = cajaDiariaActual, m = d.cuenta.moneda, cont = document.getElementById('cdContenido');
@@ -1085,6 +1132,12 @@ function imprimirCajaDiaria(){
     <tr><td>Egresos</td><td class="r">${moneyMoneda(d.egresos, m)}</td></tr>
     <tr><td><strong>Saldo final (sistema)</strong></td><td class="r"><strong>${moneyMoneda(d.saldoFinal, m)}</strong></td></tr>
     ${d.cierre ? `<tr><td>Efectivo contado</td><td class="r">${moneyMoneda(d.cierre.efectivoContado, m)}</td></tr><tr><td>Diferencia</td><td class="r">${moneyMoneda(d.cierre.diferencia, m)}</td></tr>` : ''}</table>
+    ${resumenDiaActual ? `<table><thead><tr><th>Resumen del día (toda la Tesorería)</th><th class="r">Ingresos</th></tr></thead><tbody>
+      <tr><td>Efectivo</td><td class="r">${resumenDiaActual.cobros.efectivo.cantidad ? montosPorMoneda(resumenDiaActual.cobros.efectivo.total) : '—'}</td></tr>
+      <tr><td>En cuenta / transferencia</td><td class="r">${resumenDiaActual.cobros.transferencia.cantidad ? montosPorMoneda(resumenDiaActual.cobros.transferencia.total) : '—'}</td></tr>
+      <tr><td>Tarjeta</td><td class="r">${resumenDiaActual.cobros.tarjeta.cantidad ? montosPorMoneda(resumenDiaActual.cobros.tarjeta.total) : '—'}</td></tr>
+      <tr><td>Cheques recibidos (${resumenDiaActual.cheques.recibidos.length})</td><td class="r">${resumenDiaActual.cheques.recibidos.length ? montosPorMoneda(resumenDiaActual.cheques.totalRecibidos) : '—'}</td></tr>
+      <tr><td>Cheques depositados / cobrados</td><td class="r">${resumenDiaActual.cobros.cheque.cantidad ? montosPorMoneda(resumenDiaActual.cobros.cheque.total) : '—'}</td></tr></tbody></table>` : ''}
     <table><thead><tr><th>Detalle</th><th class="r">Ingreso</th><th class="r">Egreso</th></tr></thead><tbody>${filas || '<tr><td colspan="3">Sin movimientos</td></tr>'}</tbody></table>
     <div class="firma"><div>Responsable de caja</div><div>Control</div></div>
     <script>window.onload=function(){window.print();}<\/script></body></html>`);

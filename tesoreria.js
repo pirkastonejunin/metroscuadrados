@@ -579,6 +579,65 @@ router.get('/caja-diaria', authOperar, async (req, res) => {
     res.json(await conReintento(async () => armarCajaDiaria(await getDb(), req, cuentaTipo, cuentaId, dia)));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// Resumen del día de TODA la Tesorería (4/10/2026, pedido de Mato: "la caja
+// diaria, más allá del efectivo, nos debería indicar si cobramos algún cheque,
+// algo en cuenta y algo con tarjeta"). Junta los movimientos del día de todas
+// las cajas y bancos habilitados y los clasifica por forma de pago:
+//  - caja → efectivo; banco → transferencia, salvo que la observación tenga
+//    "Lote … / Cupón …" (cobro con tarjeta); origen 'cheque' → cheque
+//    depositado/pagado; origen 'transferencia' → pase entre cuentas propias.
+//  - los cheques recibidos / emitidos del día salen de la colección cheques
+//    (todavía no son plata hasta depositarlos o pagarlos).
+router.get('/caja-diaria/resumen', authOperar, async (req, res) => {
+  try {
+    const dia = validarDia(req.query.dia);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const [cajas, bancos] = await Promise.all([
+        listarCuentasHabilitadas(db, req, 'tesoreria_cajas', 'caja'),
+        listarCuentasHabilitadas(db, req, 'tesoreria_bancos', 'banco')
+      ]);
+      const cuentas = cajas.map(c => ({ c, tipo: 'caja' })).concat(bancos.map(c => ({ c, tipo: 'banco' })));
+      const planes = await Promise.all(cuentas.map(({ c, tipo }) => armarCajaDiaria(db, req, tipo, c._id, dia)));
+      const formas = ['efectivo', 'transferencia', 'tarjeta', 'cheque', 'interna', 'otro'];
+      const nuevo = () => { const o = {}; formas.forEach(f => { o[f] = { total: {}, cantidad: 0 }; }); return o; };
+      const cobros = nuevo(), pagos = nuevo();
+      const sumarEn = (grupo, forma, moneda, monto) => { const g = grupo[forma]; g.total[moneda] = (g.total[moneda] || 0) + monto; g.cantidad++; };
+      const detalle = [];
+      planes.forEach(pl => {
+        pl.movimientos.forEach(m => {
+          const esTarjeta = /Lote .* \/ Cup/.test(m.observaciones || '');
+          let forma;
+          if (m.origen === 'transferencia') forma = 'interna';
+          else if (m.origen === 'cheque') forma = 'cheque';
+          else if (pl.cuenta.tipo === 'caja') forma = 'efectivo';
+          else if (m.origen === 'venta' || m.origen === 'cobro_cuenta') forma = esTarjeta ? 'tarjeta' : 'transferencia';
+          else if (m.origen === 'manual') forma = 'otro';
+          else forma = 'transferencia';
+          sumarEn(m.tipo === 'ingreso' ? cobros : pagos, forma, pl.cuenta.moneda, m.monto);
+          detalle.push({ fecha: m.fecha, tipo: m.tipo, forma, monto: m.monto, moneda: pl.cuenta.moneda, cuenta: pl.cuenta.nombre, cuentaTipo: pl.cuenta.tipo, motivo: m.motivo, observaciones: m.observaciones, origen: m.origen });
+        });
+      });
+      const desde = new Date(new Date(dia + 'T00:00:00Z').getTime() - 86400000);
+      const chs = await db.collection('cheques').find(Object.assign({ $or: [{ fecha: { $gte: desde } }, { createdAt: { $gte: desde } }] }, filtroOrg(req))).sort({ fechaVencimiento: 1 }).toArray();
+      const delDia = chs.filter(c => diaDeMovimiento(c.fecha || c.createdAt) === dia).map(c => ({
+        _id: c._id, tipo: c.tipo, numero: c.numero, banco: c.banco || '', estado: c.estado, monto: c.monto, moneda: c.moneda || 'ARS',
+        fechaVencimiento: c.fechaVencimiento, contraparte: c.tipo === 'tercero' ? (c.clienteNombre || c.librador || '') : (c.proveedorNombre || '')
+      }));
+      const recibidos = delDia.filter(c => c.tipo === 'tercero'), emitidos = delDia.filter(c => c.tipo === 'propio');
+      const sumaCh = (l) => { const t = {}; l.forEach(c => { t[c.moneda] = (t[c.moneda] || 0) + c.monto; }); return t; };
+      return {
+        dia,
+        cobros, pagos,
+        cheques: { recibidos, totalRecibidos: sumaCh(recibidos), emitidos, totalEmitidos: sumaCh(emitidos) },
+        cuentas: planes.map(pl => ({ tipo: pl.cuenta.tipo, nombre: pl.cuenta.nombre, moneda: pl.cuenta.moneda, saldoInicial: pl.saldoInicial, ingresos: pl.ingresos, egresos: pl.egresos, saldoFinal: pl.saldoFinal, cierre: pl.cierre ? { diferencia: pl.cierre.diferencia, efectivoContado: pl.cierre.efectivoContado } : null })),
+        detalle: detalle.sort((a, b) => new Date(a.fecha) - new Date(b.fecha))
+      };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/caja-diaria/cierre', authOperar, async (req, res) => {
   try {
     const b = req.body || {};
