@@ -340,6 +340,12 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarSaldos();
+  const qs = new URLSearchParams(location.search);
+  const tabPedida = qs.get('tab');
+  if (['movimientos','cajadiaria','cheques'].includes(tabPedida)) {
+    if (tabPedida === 'cajadiaria') cajaDiariaPendiente = { dia: qs.get('dia'), caja: qs.get('caja') };
+    showTab(tabPedida);
+  }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -949,6 +955,7 @@ function opcionesCuentaTransferencia(){
 // CAJA DIARIA (planilla para liquidar) — 4/10/2026
 // -------------------------------------------------------------------
 let cajaDiariaActual = null;
+let cajaDiariaPendiente = null; // viene de una notificación: ?tab=cajadiaria&dia=...&caja=...
 let cajaCentral = { _id: null };
 async function cargarCajaCentral(){
   try { const r = await fetch(BASE + '/caja-central', {headers: headersAuth()}); if (r.ok) cajaCentral = await r.json(); } catch (e) {}
@@ -970,6 +977,11 @@ async function iniciarCajaDiaria(){
   sel.innerHTML = cajasCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)})</option>`).join('') +
     bancosCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (${escapeHtml(b.moneda)})</option>`).join('');
   if (previo) sel.value = previo;
+  if (cajaDiariaPendiente) {
+    if (cajaDiariaPendiente.caja && [...sel.options].some(o => o.value === 'caja:' + cajaDiariaPendiente.caja)) sel.value = 'caja:' + cajaDiariaPendiente.caja;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cajaDiariaPendiente.dia || '')) document.getElementById('cdDia').value = cajaDiariaPendiente.dia;
+    cajaDiariaPendiente = null;
+  }
   if (!document.getElementById('cdDia').value) document.getElementById('cdDia').value = hoyLocalISO();
   await cargarCajaCentral();
   if (!sel.options.length) { document.getElementById('cdContenido').innerHTML = '<p class="muted">No tenés ninguna caja habilitada.</p>'; return; }

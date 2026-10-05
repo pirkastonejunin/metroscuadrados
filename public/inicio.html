@@ -229,6 +229,7 @@
             <div class="notif-panel hidden" id="notifPanel">
               <div class="notif-panel-header">
                 <span>Notificaciones</span>
+                <button id="notifConfigBtn" class="hidden" onclick="abrirConfigNotifPersonal()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;margin-left:auto;margin-right:6px" title="Elegir qué alertas recibo">⚙ Configurar</button>
                 <button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;padding:2px 4px" aria-label="Cerrar">✕</button>
               </div>
               <div id="notifPanelBody"></div>
@@ -631,6 +632,7 @@ async function cargarNotificaciones(){
     const data = await r.json().catch(()=>({}));
     NOTIF_ITEMS = data.items || [];
     renderNotifBadge();
+    if (NOTIF_PREFS === null) cargarPrefsNotif();
     const panel = document.getElementById('notifPanel');
     if (panel && !panel.classList.contains('hidden')) renderNotifPanel();
     renderVencimientosPrincipal();
@@ -737,7 +739,7 @@ function renderNotifPanel(){
     <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
       <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
       <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
-      <div class="notif-item-fecha">Venció el ${notifFmtFecha(it.fecha)}</div>
+      <div class="notif-item-fecha">${notifEscapeHtml(it.etiquetaFecha || 'Venció el')} ${notifFmtFecha(it.fecha)}</div>
     </div>
   `).join('');
 }
@@ -746,6 +748,53 @@ function irANotificacion(tipo, id){
   if (tipo === 'crm') location.href = '/admin-visitas.html?abrir=crm-' + id;
   else if (tipo === 'visita') location.href = '/admin-visitas.html?abrir=visita-' + id;
   else if (tipo === 'obra') location.href = '/admin-obras.html?abrir=obra-' + id;
+  else if (tipo === 'cheque_vencido' || tipo === 'cheque_por_vencer') location.href = '/admin-tesoreria.html?tab=cheques';
+  else if (tipo === 'caja_sin_cerrar') { const p = String(id).split('|'); location.href = '/admin-tesoreria.html?tab=cajadiaria&dia=' + encodeURIComponent(p[0]) + '&caja=' + encodeURIComponent(p[1] || ''); }
+  else if (tipo === 'orden_compra' || tipo === 'compra_por_pagar') location.href = '/admin-compras.html';
+  else if (tipo === 'venta_sin_entregar' || tipo === 'venta_sin_cobrar') location.href = '/admin-ventas.html';
+  else if (tipo === 'stock_bajo') location.href = '/admin-stock.html';
+}
+
+// ---- Preferencias personales de notificaciones (permiso «Notificaciones personales») ----
+let NOTIF_PREFS = null;
+async function cargarPrefsNotif(){
+  try{
+    const r = await fetch(BASE_NOTIF + '/catalogo', { headers: headersAuth() });
+    if (!r.ok) return;
+    NOTIF_PREFS = await r.json();
+    const btn = document.getElementById('notifConfigBtn');
+    if (btn) btn.classList.toggle('hidden', !NOTIF_PREFS.puedeEditarMias);
+  }catch(e){}
+}
+async function abrirConfigNotifPersonal(){
+  await cargarPrefsNotif();
+  if (!NOTIF_PREFS || !NOTIF_PREFS.puedeEditarMias) return;
+  const disp = NOTIF_PREFS.catalogo.filter(t => t.disponibleParaMi && NOTIF_PREFS.config[t.key]);
+  const grupos = {};
+  disp.forEach(t => { (grupos[t.grupo] = grupos[t.grupo] || []).push(t); });
+  const cont = document.getElementById('notifPanelBody');
+  cont.innerHTML = `<div style="padding:10px 14px">
+    <div class="notif-item-sub" style="margin-bottom:8px">Elegí qué avisos querés recibir. Solo cambia lo tuyo; no afecta a los demás usuarios.</div>
+    ${disp.length ? Object.keys(grupos).map(g => `<div style="margin:8px 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)">${notifEscapeHtml(g)}</div>` + grupos[g].map(t => `
+      <label style="display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:13px;cursor:pointer">
+        <input type="checkbox" data-pref="${t.key}" style="width:auto;margin-top:3px" ${NOTIF_PREFS.apagadas.includes(t.key) ? '' : 'checked'}> <span>${notifEscapeHtml(t.label)}</span>
+      </label>`).join('')).join('') : '<div class="notif-empty">No hay alertas disponibles para tu usuario.</div>'}
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn" onclick="guardarPrefsNotif()" style="padding:6px 12px">Guardar</button>
+      <button class="btn secondary" onclick="renderNotifPanel()" style="padding:6px 12px">Volver</button>
+    </div><div class="err" id="notifPrefErr" style="margin-top:6px"></div></div>`;
+}
+async function guardarPrefsNotif(){
+  const apagadas = (NOTIF_PREFS.apagadas || []).filter(k => !document.querySelector('input[data-pref="' + k + '"]'));
+  document.querySelectorAll('input[data-pref]').forEach(i => { if (!i.checked) apagadas.push(i.dataset.pref); });
+  try{
+    const r = await fetch(BASE_NOTIF + '/mias', { method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({ apagadas }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo guardar');
+    await cargarPrefsNotif();
+    await cargarNotificaciones();
+    renderNotifPanel();
+  }catch(e){ document.getElementById('notifPrefErr').textContent = e.message; }
 }
 document.addEventListener('click', function(e){
   const wrap = document.getElementById('notifWrap');

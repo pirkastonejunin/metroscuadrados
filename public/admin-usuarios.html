@@ -248,18 +248,8 @@
     <section id="tab-config" class="hidden">
       <div class="card">
         <h3 style="margin-top:0">Notificaciones</h3>
-        <p class="muted" style="margin-top:-6px">Elegí qué vencimientos aparecen en la campanita de notificaciones, arriba a la derecha en los paneles de Oficina. Desactivar un módulo lo apaga para todos los usuarios.</p>
-        <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
-          <label style="display:flex;align-items:center;gap:10px;font-weight:600;color:var(--text);cursor:pointer">
-            <input type="checkbox" id="cfgNotifCrm" style="width:auto" onchange="guardarConfigNotificaciones()"> CRM — próximas acciones vencidas
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;font-weight:600;color:var(--text);cursor:pointer">
-            <input type="checkbox" id="cfgNotifVisitas" style="width:auto" onchange="guardarConfigNotificaciones()"> Visitas sin confirmar
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;font-weight:600;color:var(--text);cursor:pointer">
-            <input type="checkbox" id="cfgNotifObras" style="width:auto" onchange="guardarConfigNotificaciones()"> Obras — tareas atrasadas
-          </label>
-        </div>
+        <p class="muted" style="margin-top:-6px">Elegí qué alertas y recordatorios están disponibles en la campanita de notificaciones, arriba a la derecha en el menú de inicio. Apagar una la apaga para TODOS los usuarios de esta organización. Cada usuario con el permiso «Notificaciones personales» (se da desde Roles) además puede apagar, solo para él, las que no le interesen.</p>
+        <div id="cfgNotifLista" style="margin-top:14px"><p class="muted">Cargando…</p></div>
         <div class="err" id="cfgNotifMsg" style="margin-top:10px"></div>
       </div>
     </section>
@@ -975,26 +965,34 @@ async function darDeBajaCalendarioColocador(id){
 // ---------------------------------------------------------------------
 // CONFIGURACIÓN — por ahora, solo los toggles de notificaciones.
 // ---------------------------------------------------------------------
+let NOTIF_CATALOGO = [];
 async function cargarConfigNotificaciones(){
   const msg = document.getElementById('cfgNotifMsg');
   msg.textContent = '';
   try{
-    const r = await fetch(BASE_NOTIF + '/config', { headers: headersAuth() });
-    const cfg = await r.json();
-    document.getElementById('cfgNotifCrm').checked = !!cfg.crm;
-    document.getElementById('cfgNotifVisitas').checked = !!cfg.visitas;
-    document.getElementById('cfgNotifObras').checked = !!cfg.obras;
+    const r = await fetch(BASE_NOTIF + '/catalogo', { headers: headersAuth() });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    NOTIF_CATALOGO = data.catalogo;
+    const grupos = {};
+    data.catalogo.forEach(t => { (grupos[t.grupo] = grupos[t.grupo] || []).push(t); });
+    document.getElementById('cfgNotifLista').innerHTML = Object.keys(grupos).map(g => `
+      <div style="margin-bottom:14px">
+        <div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">${g}</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${grupos[g].map(t => `<label style="display:flex;align-items:center;gap:10px;font-weight:600;color:var(--text);cursor:pointer">
+            <input type="checkbox" data-notif="${t.key}" style="width:auto" ${data.config[t.key] ? 'checked' : ''} onchange="guardarConfigNotificaciones()"> ${t.label}
+          </label>`).join('')}
+        </div>
+      </div>`).join('');
   }catch(e){ msg.textContent = 'No se pudo cargar la configuración.'; }
 }
 async function guardarConfigNotificaciones(){
   const msg = document.getElementById('cfgNotifMsg');
   msg.textContent = '';
   try{
-    const body = {
-      crm: document.getElementById('cfgNotifCrm').checked,
-      visitas: document.getElementById('cfgNotifVisitas').checked,
-      obras: document.getElementById('cfgNotifObras').checked
-    };
+    const body = {};
+    document.querySelectorAll('#cfgNotifLista input[data-notif]').forEach(i => { body[i.dataset.notif] = i.checked; });
     const r = await fetch(BASE_NOTIF + '/config', { method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify(body) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'No se pudo guardar');
