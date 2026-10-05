@@ -19,8 +19,12 @@
 //     Excel/CSV y texto incluidos).
 //
 // Configuración (variables de entorno en Render):
-//   ANTHROPIC_API_KEY    obligatoria — clave de la API de Anthropic.
-//   FACTURA_IA_MODEL     opcional — modelo a usar (default: claude-sonnet-5-5).
+//   Proveedor de IA (se usa el primero que tenga clave):
+//   GEMINI_API_KEY       clave de la API de Google Gemini (aistudio.google.com).
+//   GEMINI_MODEL         opcional — modelo de Gemini (default: gemini-3.8-flash).
+//   ANTHROPIC_API_KEY    clave de la API de Anthropic.
+//   FACTURA_IA_MODEL     opcional — modelo de Anthropic (default: claude-sonnet-5-5).
+//   FACTURA_IA_PROVEEDOR opcional — fuerza "gemini" o "anthropic" si hay las dos claves.
 //
 // Uso (en compras.js y gastos.js):
 //   require('./facturaIA').registrarRutasFacturaIA(router, { modo, authAdmin, getDb,
@@ -29,6 +33,8 @@
 // ---------------------------------------------------------------------------
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const GEMINI_MODELO_DEFAULT = 'gemini-3.8-flash';
 const MODELO_DEFAULT = 'claude-sonnet-5-5';
 const MAX_BYTES_ARCHIVO = 20 * 1024 * 1024;
 const MAX_CARACTERES_TEXTO = 60000;
@@ -271,9 +277,85 @@ const HERRAMIENTA = {
   }
 };
 
+function proveedorIA() {
+  const forzado = String(process.env.FACTURA_IA_PROVEEDOR || '').toLowerCase();
+  if (forzado === 'gemini' || forzado === 'anthropic') return forzado;
+  if (process.env.GEMINI_API_KEY) return 'gemini';
+  return 'anthropic';
+}
+
+// Gemini no acepta enums numéricos en el esquema: se sacan (la normalización
+// posterior ya ajusta las alícuotas a los valores válidos).
+function esquemaParaGemini(nodo) {
+  if (Array.isArray(nodo)) return nodo.map(esquemaParaGemini);
+  if (!nodo || typeof nodo !== 'object') return nodo;
+  const out = {};
+  for (const k of Object.keys(nodo)) {
+    if (k === 'enum' && nodo.type === 'number') continue;
+    out[k] = esquemaParaGemini(nodo[k]);
+  }
+  return out;
+}
+
+function partesGemini(contenidoArchivo) {
+  const partes = contenidoArchivo.map(b => {
+    if (b.type === 'text') return { text: b.text };
+    return { inlineData: { mimeType: b.source.media_type, data: b.source.data } };
+  });
+  partes.push({ text: 'Leé este comprobante y devolvé sus datos en el formato pedido.' });
+  return partes;
+}
+
+async function pedirAlServicio(url, opciones) {
+  const controlador = new AbortController();
+  const timer = setTimeout(() => controlador.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, Object.assign({}, opciones, { signal: controlador.signal }));
+  } catch (e) {
+    if (e.name === 'AbortError') throw err(504, 'La IA tardó demasiado en leer la factura. Probá de nuevo.');
+    throw err(502, 'No se pudo conectar con el servicio de IA: ' + e.message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function llamarGemini(contenidoArchivo) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw err(503, 'La lectura de facturas con IA todavía no está configurada: falta la variable GEMINI_API_KEY en el servidor.');
+  const modelo = process.env.GEMINI_MODEL || GEMINI_MODELO_DEFAULT;
+  const resp = await pedirAlServicio(GEMINI_URL + encodeURIComponent(modelo) + ':generateContent', {
+    method: 'POST',
+    headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: INSTRUCCIONES.replace('llamando a la herramienta "registrar_factura"', 'como un objeto JSON con el esquema indicado') }] },
+      contents: [{ role: 'user', parts: partesGemini(contenidoArchivo) }],
+      generationConfig: { responseMimeType: 'application/json', responseJsonSchema: esquemaParaGemini(HERRAMIENTA.input_schema), temperature: 0 }
+    })
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const detalle = (data && data.error && data.error.message) ? data.error.message : ('estado ' + resp.status);
+    if (resp.status === 401 || resp.status === 403 || /API key not valid|API_KEY_INVALID/i.test(detalle)) throw err(502, 'La clave de la IA (GEMINI_API_KEY) no es válida.');
+    if (resp.status === 429) throw err(429, 'Se superó el límite de uso de la IA (el plan gratuito tiene un tope diario). Esperá un momento y probá de nuevo.');
+    throw err(502, 'El servicio de IA devolvió un error: ' + detalle);
+  }
+  const cand = (data.candidates || [])[0];
+  const texto = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts.map(x => x.text || '').join('') : '';
+  if (!texto) {
+    const bloqueo = data.promptFeedback && data.promptFeedback.blockReason;
+    throw err(502, 'La IA no devolvió datos de la factura' + (bloqueo ? ' (' + bloqueo + ')' : '') + '. Probá con una foto más nítida.');
+  }
+  let json;
+  try { json = JSON.parse(texto.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
+  catch (e) { throw err(502, 'La IA devolvió una respuesta que no se pudo interpretar. Probá de nuevo.'); }
+  if (data.usageMetadata) console.log(`[facturaIA] modelo=${modelo} tokens_in=${data.usageMetadata.promptTokenCount} tokens_out=${data.usageMetadata.candidatesTokenCount}`);
+  return json;
+}
+
 async function llamarIA(contenidoArchivo) {
+  if (proveedorIA() === 'gemini') return llamarGemini(contenidoArchivo);
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw err(503, 'La lectura de facturas con IA todavía no está configurada: falta la variable ANTHROPIC_API_KEY en el servidor.');
+  if (!apiKey) throw err(503, 'La lectura de facturas con IA todavía no está configurada: falta la variable GEMINI_API_KEY (o ANTHROPIC_API_KEY) en el servidor.');
   const modelo = process.env.FACTURA_IA_MODEL || MODELO_DEFAULT;
   const controlador = new AbortController();
   const timer = setTimeout(() => controlador.abort(), TIMEOUT_MS);
