@@ -23,6 +23,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/impuestos-ui.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -126,7 +127,7 @@
 
         <div class="grid2">
           <div><label>Tipo de valor *</label><select id="cbTipoValor" onchange="actualizarTipoValorCB()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
-          <div><label>Monto *</label><input id="cbMonto" type="number" min="0.01" step="0.01"></div>
+          <div><label>Monto cobrado *</label><input id="cbMonto" type="number" min="0.01" step="0.01" oninput="actualizarResumenCB()"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="cbCuentaWrap"><label id="cbCuentaLabel">¿A qué caja va? *</label><select id="cbCuenta"></select></div>
@@ -160,6 +161,8 @@
             <div><label>Código de autorización</label><input id="cbTarjetaCodigoAutorizacion" placeholder="Opcional"></div>
           </div>
         </div>
+        <div id="cbRetBloque"></div>
+        <div class="muted" id="cbResumenCobro" style="margin-top:6px"></div>
         <div style="margin-top:10px"><label>Nota</label><input id="cbNota" placeholder="Opcional"></div>
         <div class="err" id="cbErr"></div>
         <div class="ok-msg" id="cbOk"></div>
@@ -247,6 +250,8 @@ async function iniciarApp(){
   await Promise.all([cargarCajasYBancosCB(), asegurarClientesCargadosCB()]);
   document.getElementById('cbClienteCombo').innerHTML = comboClienteHtmlCB();
   document.getElementById('cbFecha').value = new Date().toISOString().slice(0,10);
+  await ImpuestosUI.cargarTipos(BASE, headersAuth);
+  document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -391,6 +396,18 @@ function actualizarTipoValorCB(){
   if (esCheque) document.getElementById('cbChequeFechaEmision').value = document.getElementById('cbChequeFechaEmision').value || new Date().toISOString().slice(0,10);
 }
 
+// Retenciones en el recibo (5/10/2026, pedido de Mato): "Monto cobrado" es lo
+// que realmente entra (caja/banco/cheque); las retenciones cancelan deuda
+// sin que entre plata, así que lo que se aplica a la cuenta del cliente es
+// cobrado + retenciones.
+function actualizarResumenCB(){
+  const el = document.getElementById('cbResumenCobro');
+  if (!el) return;
+  const ret = ImpuestosUI.totales('impCB').retenciones;
+  const monto = Number(document.getElementById('cbMonto').value) || 0;
+  el.innerHTML = ret > 0 ? `Cobrado ${money(monto)} + retenciones ${money(ret)} = <strong>aplicado a la cuenta ${money(monto + ret)}</strong>` : '';
+}
+
 async function confirmarReciboCB(){
   const errEl = document.getElementById('cbErr');
   const okEl = document.getElementById('cbOk');
@@ -402,7 +419,8 @@ async function confirmarReciboCB(){
     clienteId, tipoValor,
     monto: Number(document.getElementById('cbMonto').value),
     fecha: document.getElementById('cbFecha').value,
-    nota: document.getElementById('cbNota').value.trim()
+    nota: document.getElementById('cbNota').value.trim(),
+    retenciones: ImpuestosUI.leer('impCB').retenciones
   };
   if (!body.monto || body.monto <= 0) { errEl.textContent = 'El monto tiene que ser mayor a 0'; return; }
   if (tipoValor === 'cheque') {
@@ -440,11 +458,12 @@ async function confirmarReciboCB(){
     // vienen del POST). No se abre solo porque el navegador puede
     // bloquear el popup si no viene directo de un click del usuario.
     const reciboUrl = (data.reciboTipo && data.reciboId) ? (BASE + '/recibo-cuenta/' + data.reciboTipo + '/' + data.reciboId) : null;
-    okEl.innerHTML = 'Recibo registrado.' + (reciboUrl ? ` <button class="btn small secondary" onclick="imprimirDocumento('${reciboUrl}')">Imprimir recibo</button>` : '');
     document.getElementById('cbMonto').value = '';
     document.getElementById('cbNota').value = '';
+    ImpuestosUI.cargar('impCB', {});
     await Promise.all([cargarCajasYBancosCB(), mostrarClienteSeleccionadoCB(clienteId)]);
     actualizarTipoValorCB();
+    okEl.innerHTML = 'Recibo registrado.' + (reciboUrl ? ` <button class="btn small secondary" onclick="imprimirDocumento('${reciboUrl}')">Imprimir recibo</button>` : '');
   }catch(e){ errEl.textContent = e.message; }
 }
 

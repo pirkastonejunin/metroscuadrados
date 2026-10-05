@@ -93,6 +93,14 @@ const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuar
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
+
+// Retenciones sufridas en un cobro (5/10/2026, pedido de Mato: "en
+// cobranzas, muchas veces tenemos retenciones") — ver impuestos.js. El
+// monto cobrado (efectivo/cheque/transferencia) es lo que entra a la
+// caja o banco; la retención cancela deuda del cliente sin que entre
+// plata, así que lo aplicado a la venta/cuenta corriente es cobrado +
+// retenciones.
+const { normalizarLineasImpuesto, TIPOS_RETENCION, sumarMontos, registrarRetencionesSufridas, tiposImpuestosHandler } = require('./impuestos');
 // Imprimibles (3/10/2026, pedido de Mato) — ver imprimibles.js.
 const { paginaImprimible, escapeHtml: escHtml, money: moneyImp, fechaLarga } = require('./imprimibles');
 
@@ -372,6 +380,8 @@ async function listarCuentasHabilitadas(db, req, coleccion, tipo) {
   const saldoPorId = new Map(saldos.map(s => [String(s.cuentaId), s.saldo]));
   return habilitadas.map(c => Object.assign({}, c, { saldo: saldoPorId.get(String(c._id)) || 0 }));
 }
+
+router.get('/tipos-impuestos', authOperar, tiposImpuestosHandler);
 
 router.get('/cajas', authOperar, async (req, res) => {
   try {
@@ -837,6 +847,8 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
     if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
     const nota = normalizarTexto(body.nota);
     const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const retenciones = normalizarLineasImpuesto(body.retenciones, TIPOS_RETENCION, 'Retenciones');
+    const totalRetenciones = sumarMontos(retenciones);
 
     let cuentaTipo = null, cuentaId = null;
     if (tipoValor !== 'cheque') {
@@ -908,9 +920,15 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
       }
 
       await registrarMovimientoCuentaCorriente(db, req, {
-        clienteId, clienteNombre, tipo: 'credito', monto, moneda,
-        concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId, observaciones: nota, fecha
+        clienteId, clienteNombre, tipo: 'credito', monto: monto + totalRetenciones, moneda,
+        concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId,
+        observaciones: [nota, retenciones.length ? 'Incluye retenciones: ' + retenciones.map(r => `${r.tipoNombre} $${r.monto}`).join(', ') : ''].filter(Boolean).join(' — '),
+        fecha
       });
+      // Las retenciones quedan indexadas con la referencia del recibo (para
+      // poder mostrarlas al imprimirlo) — ver GET /recibo-cuenta/:tipo/:id.
+      await registrarRetencionesSufridas(db, req, { origen: 'cobro_cuenta', retenciones, fecha, moneda,
+        referencia: { clienteId, clienteNombre, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId } });
 
       // Para el botón "Imprimir recibo" (ver imprimibles.js y
       // GET /recibo-cuenta/:tipo/:id más abajo) — el tipo le dice al
@@ -939,9 +957,11 @@ router.get('/recibo-cuenta/:tipo/:id', authOperar, async (req, res) => {
         : await db.collection('tesoreria_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!doc) throw err(404, 'No se encontró ese cobro');
       const org = await db.collection('organizaciones').findOne({ _id: doc.orgId });
-      return { doc, org };
+      const retenciones = await db.collection('retenciones_sufridas').find(Object.assign({ origen: 'cobro_cuenta', reciboId: id }, filtroOrg(req))).toArray();
+      return { doc, org, retenciones };
     });
-    const { doc, org } = resultado;
+    const { doc, org, retenciones } = resultado;
+    const totalRetenciones = retenciones.reduce((a, r) => a + (Number(r.monto) || 0), 0);
     const esMovimiento = tipo === 'movimiento';
     const clienteNombre = doc.clienteNombre || (esMovimiento ? (doc.motivo || '').replace('Cobro a cuenta — ', '') : '');
     const bodyHtml = `
@@ -949,7 +969,7 @@ router.get('/recibo-cuenta/:tipo/:id', authOperar, async (req, res) => {
       <div class="datos-doc">
         <div>
           <strong>Recibí de:</strong> ${escHtml(clienteNombre || '—')}<br>
-          <strong>La suma de:</strong> ${moneyImp(doc.monto, doc.moneda)}
+          <strong>La suma de:</strong> ${moneyImp(doc.monto, doc.moneda)}${retenciones.length ? `<br><strong>Retenciones practicadas:</strong> ${retenciones.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, doc.moneda)).join(' — ')}<br><strong>Total aplicado a la cuenta:</strong> ${moneyImp(doc.monto + totalRetenciones, doc.moneda)}` : ''}
         </div>
         <div>
           <strong>Fecha:</strong> ${fechaLarga(doc.fecha)}<br>

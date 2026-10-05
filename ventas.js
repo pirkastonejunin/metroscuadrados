@@ -81,6 +81,14 @@ const { aplicarMovimientoCuenta, cuentaHabilitada } = require('./tesoreria');
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
+
+// Retenciones sufridas en un cobro (5/10/2026, pedido de Mato: "en
+// cobranzas, muchas veces tenemos retenciones") — ver impuestos.js. El
+// monto cobrado (efectivo/cheque/transferencia) es lo que entra a la
+// caja o banco; la retención cancela deuda del cliente sin que entre
+// plata, así que lo aplicado a la venta/cuenta corriente es cobrado +
+// retenciones.
+const { normalizarLineasImpuesto, TIPOS_RETENCION, sumarMontos, registrarRetencionesSufridas, tiposImpuestosHandler } = require('./impuestos');
 // Imprimibles (3/10/2026, pedido de Mato) — plantilla de impresión
 // compartida (sin acceso a Mongo), ver el comentario grande al principio
 // de imprimibles.js.
@@ -239,6 +247,8 @@ function normalizarMontoNoNegativo(v, etiqueta) {
 // acá bajo el gate de Ventas para no exigir también el módulo 'clientes'
 // o 'stock' a quien solo carga ventas).
 // -----------------------------------------------------------------------
+
+router.get('/tipos-impuestos', authAdmin, tiposImpuestosHandler);
 
 router.get('/clientes', authAdmin, async (req, res) => {
   try {
@@ -1064,7 +1074,7 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
       <div class="datos-doc">
         <div>
           <strong>Recibí de:</strong> ${escHtml(venta.clienteNombre)}<br>
-          <strong>La suma de:</strong> ${moneyImp(pago.monto, venta.moneda)}
+          <strong>La suma de:</strong> ${moneyImp(pago.monto, venta.moneda)}${(pago.retenciones && pago.retenciones.length) ? `<br><strong>Retenciones practicadas:</strong> ${pago.retenciones.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(pago.monto + (pago.totalRetenciones || 0), venta.moneda)}` : ''}
         </div>
         <div>
           <strong>Fecha:</strong> ${fechaLarga(pago.fecha)}<br>
@@ -1424,6 +1434,8 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
     if (monto <= 0) throw err(400, 'El monto del cobro tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
+    const retenciones = normalizarLineasImpuesto(body.retenciones, TIPOS_RETENCION, 'Retenciones');
+    const totalRetenciones = sumarMontos(retenciones);
     // Fecha del cobro editable (2/10/2026, pedido de Mato: "la cobranza
     // deberia dejarnos cambiar la fecha por si en algun momento se pasa y
     // lo cargamos despues") — por defecto es ahora, como siempre fue.
@@ -1508,23 +1520,27 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
 
       const pago = Object.assign(
         { tipoValor, monto, fecha, nota, usuarioNombre },
+        retenciones.length ? { retenciones, totalRetenciones } : {},
         cuentaTipo ? { cuentaTipo, cuentaId } : {},
         chequeId ? { chequeId } : {},
         tarjetaDatos || {}
       );
-      const totalCobrado = (venta.totalCobrado || 0) + monto;
+      const totalCobrado = (venta.totalCobrado || 0) + monto + totalRetenciones; // las retenciones también cancelan deuda
       const saldoPendiente = Math.max(0, venta.total - totalCobrado);
       await db.collection('ventas').updateOne(
         { _id: id },
         { $push: { pagos: pago }, $set: { totalCobrado, saldoPendiente, updatedAt: new Date() } }
       );
+      await registrarRetencionesSufridas(db, req, { origen: 'cobro_venta', retenciones, fecha, moneda: venta.moneda || 'ARS',
+        referencia: { ventaId: id, ventaNumero: venta.numero, clienteId: venta.clienteId || null, clienteNombre: venta.clienteNombre || '' } });
 
       // Cuenta corriente del cliente (2/10/2026): el cobro reduce la
       // deuda, además del ingreso real en Tesorería (o el cheque en
       // cartera) ya aplicado arriba.
       await registrarMovimientoCuentaCorriente(db, req, {
-        clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto, moneda: venta.moneda || 'ARS',
-        concepto: `Cobro venta Nº ${venta.numero}`, origen: 'cobro_venta', ventaId: id, chequeId, fecha
+        clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto: monto + totalRetenciones, moneda: venta.moneda || 'ARS',
+        concepto: `Cobro venta Nº ${venta.numero}`, origen: 'cobro_venta', ventaId: id, chequeId, fecha,
+        observaciones: retenciones.length ? 'Incluye retenciones: ' + retenciones.map(r => `${r.tipoNombre} $${r.monto}`).join(', ') : ''
       });
 
       return db.collection('ventas').findOne({ _id: id });

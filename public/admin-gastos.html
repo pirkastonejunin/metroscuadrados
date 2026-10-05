@@ -10,6 +10,8 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/impuestos-ui.js"></script>
+<script src="/factura-ia-ui.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -260,6 +262,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarListasBase();
+  await ImpuestosUI.cargarTipos(BASE, headersAuth);
   await cargarGastos();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
@@ -372,6 +375,7 @@ function abrirNuevoGasto(){
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo gasto</h2>
+        ${FacturaIAUI.cajaHtml('ng', 'Sacá una foto o subí un PDF u otro archivo de la factura (luz, gas, teléfono, honorarios, etc.): la IA lee los datos y completa el formulario. Revisá todo antes de guardar.')}
         <div class="grid3">
           <div><label>Proveedor *</label><select id="ngProveedor" onchange="actualizarCondicionPago()">${opcionesProveedoresSelect()}</select></div>
           <div><label>Condición de pago</label><input id="ngCondicionPago" placeholder="Se autocompleta del proveedor"></div>
@@ -399,6 +403,7 @@ function abrirNuevoGasto(){
           <div><label>Descuento (%)</label><input id="ngDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesGasto()"></div>
           <div><label>Descuento ($)</label><input id="ngDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesGasto()"></div>
         </div>
+        ${ImpuestosUI.bloqueHtml('impNG', { extras: true, onChange: 'actualizarTotalesGasto', ayudaRetenciones: 'Retenciones que te practicó el proveedor (impuesto a tu favor). Se registran pero no cambian el total ni el saldo.' })}
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="ngObservaciones"></textarea></div>
 
         <div class="totales-box" id="ngTotales"></div>
@@ -408,6 +413,9 @@ function abrirNuevoGasto(){
     </div>
   `;
   agregarFilaGasto();
+  window._iaItemsPendientes = [];
+  window._iaTotalFactura = 0;
+  FacturaIAUI.registrar('ng', { url: BASE + '/leer-factura', headers: headersAuthJson, alResultado: aplicarFacturaLeida });
 }
 
 function actualizarCondicionPago(){
@@ -488,14 +496,184 @@ function actualizarTotalesGasto(){
     : '';
   const descPorc = Number(document.getElementById('ngDescuentoPorcentaje').value) || 0;
   const descMonto = Number(document.getElementById('ngDescuentoMonto').value) || 0;
-  let total = subtotal;
+  // 5/10/2026: el Total incluye el IVA de cada concepto (igual que Compras
+  // y que lo que se guarda) más los impuestos adicionales: percepciones,
+  // crédito/débito y otros.
+  let total = subtotal + totalIva;
   if (descPorc) total -= total * (descPorc / 100);
   if (descMonto) total -= descMonto;
   total = Math.max(0, total);
+  const impLineas = ImpuestosUI.lineasResumen('impNG');
+  total += impLineas.reduce((a, l) => a + l.monto, 0);
+  const totalFactura = window._iaTotalFactura || 0;
+  const difFactura = Math.abs(Math.round(total * 100) / 100 - Math.round(totalFactura * 100) / 100);
   document.getElementById('ngTotales').innerHTML = `
     <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    ${totalIva ? `<div class="fila-total"><span>IVA</span><span>${money(totalIva)}</span></div>` : ''}
+    ${impLineas.map(l => `<div class="fila-total"><span>${escapeHtml(l.etiqueta)}</span><span>${money(l.monto)}</span></div>`).join('')}
     <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+    ${totalFactura > 0 ? `<div class="fila-total" style="${difFactura > 1 ? 'color:var(--danger);font-weight:700' : 'opacity:.7'}"><span>Total de la factura (leído por la IA)</span><span>${money(totalFactura)}${difFactura > 1 ? ' — diferencia ' + money(difFactura) : ' ✓'}</span></div>` : ''}
   `;
+}
+
+// -------------------------------------------------------------------
+// Cargar la factura con IA (5/10/2026, pedido de Mato) — foto, PDF u otro
+// archivo → el servidor lee la factura (facturaIA.js) y acá se completa el
+// formulario. Proveedor que no existe: se ofrece crearlo. Conceptos que no
+// coinciden con los del catálogo: se PREGUNTA (usar uno existente, crear
+// uno nuevo u omitir); no se puede guardar mientras haya ítems sin resolver.
+// -------------------------------------------------------------------
+let iaSeq = 0;
+function iaSetearValor(id, valor){
+  const el = document.getElementById(id);
+  if (el && valor !== undefined && valor !== null && valor !== '') el.value = valor;
+}
+function iaPend(id){ return (window._iaItemsPendientes || []).find(x => x._iaId === id); }
+function iaQuitarPend(id){
+  window._iaItemsPendientes = (window._iaItemsPendientes || []).filter(x => x._iaId !== id);
+  iaRenderPendientes();
+  actualizarTotalesGasto();
+}
+function iaAsegurarConcepto(c){
+  if (!conceptosCache.some(x => String(x._id) === String(c._id))) {
+    conceptosCache.push({ _id: c._id, nombre: c.nombre });
+    conceptosCache.sort((a,b) => a.nombre.localeCompare(b.nombre));
+  }
+  document.querySelectorAll('#ngFilasItems select.select-concepto').forEach(s => {
+    const actual = s.value === '__nuevo__' ? '' : s.value;
+    s.innerHTML = opcionesConceptosGasto(actual);
+  });
+}
+
+async function aplicarFacturaLeida(d){
+  document.getElementById('ngFiaRevision').innerHTML = '<div id="ngIaProveedor"></div><div id="ngIaItems"></div>';
+  const c = d.comprobante || {};
+  if (c.tipoComprobante) iaSetearValor('ngTipoComprobante', c.tipoComprobante);
+  iaSetearValor('ngPuntoVenta', c.puntoVenta);
+  iaSetearValor('ngComprobanteNumero', c.comprobanteNumero);
+  iaSetearValor('ngFecha', c.fecha);
+  iaSetearValor('ngMoneda', c.moneda);
+  window._iaTotalFactura = (d.totales && d.totales.total) || 0;
+  iaRenderProveedor(d);
+
+  document.getElementById('ngFilasItems').innerHTML = '';
+  window._iaItemsPendientes = [];
+  for (const it of (d.items || [])) {
+    if (it.concepto) iaAgregarFilaConConcepto(it, it.concepto);
+    else { it._iaId = ++iaSeq; window._iaItemsPendientes.push(it); }
+  }
+  if (!document.querySelector('#ngFilasItems .fila-item') && !window._iaItemsPendientes.length) agregarFilaGasto();
+  iaRenderPendientes();
+
+  ImpuestosUI.cargar('impNG', d.impuestos);
+  const avisos = (d.avisos || []).slice();
+  if (d.duplicado) avisos.unshift('Esta factura ya está cargada para ese proveedor (gasto #' + d.duplicado.numero + '). Si la guardás de nuevo, el sistema la va a rechazar.');
+  FacturaIAUI.avisos('ng', avisos);
+  actualizarTotalesGasto();
+}
+
+function iaRenderProveedor(d){
+  const cont = document.getElementById('ngIaProveedor');
+  const sel = document.getElementById('ngProveedor');
+  const co = d.proveedorCoincidencia;
+  if (co) {
+    if (!proveedoresCache.some(p => String(p._id) === String(co._id))) proveedoresCache.push({ _id: co._id, razonSocial: co.razonSocial, condicionPago: co.condicionPago || '' });
+    sel.innerHTML = opcionesProveedoresSelect(String(co._id));
+    sel.value = String(co._id);
+    actualizarCondicionPago();
+    cont.innerHTML = `<div class="muted" style="margin-top:8px">Proveedor reconocido: <strong>${escapeHtml(co.razonSocial)}</strong> (${co.criterio === 'cuit' ? 'por CUIT' : 'por nombre'}).</div>`;
+    return;
+  }
+  const p = d.proveedor || {};
+  window._iaProvDomicilio = p.domicilio || '';
+  sel.value = '';
+  cont.innerHTML = `
+    <div class="fia-item">
+      <h4>⚠ Proveedor nuevo: todavía no está cargado</h4>
+      <div class="grid2">
+        <div><label>Razón social *</label><input id="iaProvNombre" value="${escapeHtml(p.razonSocial || '')}"></div>
+        <div><label>CUIT</label><input id="iaProvCuit" value="${escapeHtml(p.cuit || '')}"></div>
+      </div>
+      <div class="fia-acciones"><button class="btn small" onclick="iaCrearProveedor()">Crear proveedor y usarlo</button><span class="muted">O elegí uno existente en "Proveedor".</span></div>
+      <div class="err" id="iaProvErr"></div>
+    </div>`;
+}
+
+async function iaCrearProveedor(){
+  const razonSocial = document.getElementById('iaProvNombre').value.trim();
+  const cuit = document.getElementById('iaProvCuit').value.trim();
+  const errEl = document.getElementById('iaProvErr');
+  errEl.textContent = '';
+  if (!razonSocial) { errEl.textContent = 'Falta la razón social'; return; }
+  try{
+    const r = await fetch(BASE + '/proveedor-rapido', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ razonSocial, cuit, domicilio: window._iaProvDomicilio || '' })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo crear el proveedor');
+    proveedoresCache.push(data);
+    const sel = document.getElementById('ngProveedor');
+    sel.innerHTML = opcionesProveedoresSelect(String(data._id));
+    sel.value = String(data._id);
+    actualizarCondicionPago();
+    document.getElementById('ngIaProveedor').innerHTML = `<div class="muted" style="margin-top:8px">Proveedor creado y elegido: <strong>${escapeHtml(data.razonSocial)}</strong>.</div>`;
+  }catch(e){ errEl.textContent = e.message; }
+}
+
+function iaAgregarFilaConConcepto(it, concepto){
+  iaAsegurarConcepto(concepto);
+  agregarFilaGasto();
+  const filas = document.querySelectorAll('#ngFilasItems .fila-item');
+  const fila = filas[filas.length - 1];
+  fila.querySelector('select.select-concepto').value = String(concepto._id);
+  fila.querySelector('.campo-cant input').value = it.cantidad;
+  fila.querySelector('.campo-precio input').value = it.precioUnitario;
+  fila.querySelector('select.select-iva').value = String(it.alicuotaIva);
+  actualizarTotalesGasto();
+}
+
+function iaRenderPendientes(){
+  const cont = document.getElementById('ngIaItems');
+  if (!cont) return;
+  const pend = window._iaItemsPendientes || [];
+  if (!pend.length) { cont.innerHTML = ''; return; }
+  const opcionesConceptos = '<option value="">Elegí un concepto existente…</option>' + conceptosCache.map(c => `<option value="${c._id}">${escapeHtml(c.nombre)}</option>`).join('');
+  cont.innerHTML = `<div style="margin-top:10px;font-size:13px"><strong>${pend.length} línea(s) de la factura no coinciden con tus conceptos de gasto.</strong> Elegí qué hacer con cada una:</div>` + pend.map(it => `
+    <div class="fia-item" id="iaPend${it._iaId}">
+      <h4>${escapeHtml(it.descripcion)}</h4>
+      <div class="muted">${it.cantidad} × ${money(it.precioUnitario)} — IVA ${it.alicuotaIva}%</div>
+      ${(it.candidatos || []).length ? `<div class="muted" style="margin-top:6px">¿Será alguno de estos?</div><div class="fia-sug">${it.candidatos.map(c => `<button class="btn small secondary" onclick="iaUsarConcepto(${it._iaId}, '${c._id}')">${escapeHtml(c.nombre)}</button>`).join('')}</div>` : ''}
+      <div class="grid2" style="margin-top:6px">
+        <select id="iaSel${it._iaId}">${opcionesConceptos}</select>
+        <button class="btn small secondary" onclick="iaUsarConcepto(${it._iaId}, document.getElementById('iaSel${it._iaId}').value)">Usar este concepto</button>
+      </div>
+      <div class="fia-acciones">
+        <button class="btn small" onclick="iaCrearConcepto(${it._iaId})">Crear concepto «${escapeHtml(it.descripcion.length > 40 ? it.descripcion.slice(0, 40) + '…' : it.descripcion)}»</button>
+        <button class="btn small secondary" onclick="iaQuitarPend(${it._iaId})">No cargar este ítem</button>
+      </div>
+      <div class="err" id="iaPendErr${it._iaId}"></div>
+    </div>`).join('');
+}
+
+function iaUsarConcepto(id, conceptoId){
+  const it = iaPend(id);
+  if (!it) return;
+  const concepto = conceptosCache.find(c => String(c._id) === String(conceptoId));
+  if (!concepto) { const el = document.getElementById('iaPendErr' + id); if (el) el.textContent = 'Elegí un concepto de la lista'; return; }
+  iaAgregarFilaConConcepto(it, concepto);
+  iaQuitarPend(id);
+}
+
+async function iaCrearConcepto(id){
+  const it = iaPend(id);
+  if (!it) return;
+  const errEl = document.getElementById('iaPendErr' + id);
+  errEl.textContent = '';
+  try{
+    const r = await fetch(BASE + '/conceptos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ nombre: it.descripcion })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al crear el concepto');
+    iaAgregarFilaConConcepto(it, data);
+    iaQuitarPend(id);
+  }catch(e){ errEl.textContent = e.message; }
 }
 
 async function guardarNuevoGasto(){
@@ -513,9 +691,12 @@ async function guardarNuevoGasto(){
     puntoVenta: document.getElementById('ngPuntoVenta').value.trim(),
     comprobanteNumero: document.getElementById('ngComprobanteNumero').value.trim(),
   };
+  Object.assign(body, ImpuestosUI.leer('impNG'));
   document.getElementById('ngErrNueva').textContent = '';
   if (!body.proveedorId) { document.getElementById('ngErrNueva').textContent = 'Elegí un proveedor'; return; }
   if (!items.length) { document.getElementById('ngErrNueva').textContent = 'Agregá al menos un concepto'; return; }
+  const pendientesIA = (window._iaItemsPendientes || []).length;
+  if (pendientesIA) { document.getElementById('ngErrNueva').textContent = 'Todavía hay ' + pendientesIA + ' ítem(s) de la factura sin resolver (están arriba): elegí un concepto, creá uno nuevo o elegí "No cargar este ítem".'; return; }
   if (!body.puntoVenta) { document.getElementById('ngErrNueva').textContent = 'Falta el punto de venta del comprobante'; return; }
   if (!body.comprobanteNumero) { document.getElementById('ngErrNueva').textContent = 'Falta el número del comprobante'; return; }
   try{
@@ -574,6 +755,7 @@ function verDetalle(id){
           <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(g.saldoPendiente)}</span></div>
         </div>
 
+        ${ImpuestosUI.detalleHtml(g, money)}
         ${g.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(g.observaciones)}</p>` : ''}
 
         <div class="section-title">Pagos</div>

@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/impuestos-ui.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -274,6 +275,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarListasBase();
+  await ImpuestosUI.cargarTipos(BASE, headersAuth);
   await cargarVentas();
   abrirVentaDesdePresupuestoSiCorresponde();
 }
@@ -1304,7 +1306,7 @@ function verDetalle(id){
     </tr>
   `; }).join('');
   const filasPagos = (v.pagos||[]).length
-    ? v.pagos.map((p, i) => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)} ${botonesImprimible(BASE+'/'+v._id+'/pagos/'+i+'/recibo')}</span></div>`).join('')
+    ? v.pagos.map((p, i) => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}${(p.retenciones||[]).length ? ' — Retenciones: ' + p.retenciones.map(r => escapeHtml(r.tipoNombre||r.tipo) + ' ' + money(r.monto)).join(', ') : ''}</span><span>${money(p.monto)} ${botonesImprimible(BASE+'/'+v._id+'/pagos/'+i+'/recibo')}</span></div>`).join('')
     : '<p class="muted">Sin cobros registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
@@ -1566,9 +1568,32 @@ function actualizarTipoValorCobro(){
     document.getElementById('ncCuenta').innerHTML = opcionesCuentaCobro(tipoValor);
   }
 }
+// Retenciones en el cobro (5/10/2026, pedido de Mato): si el cliente nos
+// retiene impuestos al pagar, se cargan acá. "Monto cobrado" es lo que
+// realmente entra (caja/banco/cheque); las retenciones cancelan deuda sin
+// que entre plata, así que lo aplicado a la venta es cobrado + retenciones.
+let ventaCobroActual = null;
+let montoCobroTocado = false;
+function actualizarResumenCobro(){
+  const v = ventaCobroActual;
+  const input = document.getElementById('ncMonto');
+  if (!v || !input) return;
+  const ret = ImpuestosUI.totales('impCV').retenciones;
+  // Mientras no se haya tocado el monto a mano, se sugiere el saldo menos las retenciones.
+  if (!montoCobroTocado) input.value = Math.max(0, Math.round((v.saldoPendiente - ret) * 100) / 100);
+  const monto = Number(input.value) || 0;
+  const aplicado = monto + ret;
+  const restante = Math.max(0, Math.round((v.saldoPendiente - aplicado) * 100) / 100);
+  document.getElementById('ncResumenCobro').innerHTML = ret > 0
+    ? `Cobrado ${money(monto)} + retenciones ${money(ret)} = <strong>aplicado a la venta ${money(aplicado)}</strong> — saldo restante ${money(restante)}`
+    : '';
+}
+
 function abrirCobro(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
+  ventaCobroActual = v;
+  montoCobroTocado = false;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
@@ -1577,7 +1602,7 @@ function abrirCobro(id){
         <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
         <div class="grid2">
           <div><label>Tipo de valor *</label><select id="ncTipoValor" onchange="actualizarTipoValorCobro()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
-          <div><label>Monto *</label><input id="ncMonto" type="number" min="0.01" step="0.01" value="${v.saldoPendiente}"></div>
+          <div><label>Monto cobrado *</label><input id="ncMonto" type="number" min="0.01" step="0.01" value="${v.saldoPendiente}" oninput="montoCobroTocado = true; actualizarResumenCobro()"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="ncCuentaWrap"><label id="ncCuentaLabel">¿A qué caja va? *</label><select id="ncCuenta">${opcionesCuentaCobro('efectivo')}</select></div>
@@ -1611,12 +1636,15 @@ function abrirCobro(id){
             <div><label>Código de autorización</label><input id="ncTarjetaCodigoAutorizacion" placeholder="Opcional"></div>
           </div>
         </div>
+        ${ImpuestosUI.bloqueHtml('impCV', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCobro' })}
+        <div class="muted" id="ncResumenCobro" style="margin-top:6px"></div>
         <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
         <div class="err" id="ncErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarCobro('${id}')">Registrar</button>
       </div>
     </div>
   `;
+  actualizarResumenCobro();
 }
 
 async function confirmarCobro(id){
@@ -1625,7 +1653,8 @@ async function confirmarCobro(id){
     tipoValor,
     monto: Number(document.getElementById('ncMonto').value),
     fecha: document.getElementById('ncFecha').value,
-    nota: document.getElementById('ncNota').value.trim()
+    nota: document.getElementById('ncNota').value.trim(),
+    retenciones: ImpuestosUI.leer('impCV').retenciones
   };
   if (!body.monto || body.monto <= 0) { document.getElementById('ncErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
   if (tipoValor === 'cheque') {

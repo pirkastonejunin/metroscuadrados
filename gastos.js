@@ -62,6 +62,10 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
+// Impuestos (5/10/2026): percepciones, retenciones, crédito/débito y otros
+// — ver impuestos.js. Lectura de facturas con IA — ver facturaIA.js.
+const { normalizarImpuestosComprobante, calcularTotalConImpuestos, registrarRetencionesSufridas, tiposImpuestosHandler } = require('./impuestos');
+const { registrarRutasFacturaIA } = require('./facturaIA');
 // Tesorería (igual que Compras): un pago en efectivo/cuenta/tarjeta sale
 // YA de una caja/banco real; un pago en cheque propio crea el cheque
 // "emitido" (sin mover plata hasta que se confirme el pago, desde
@@ -159,6 +163,11 @@ const COLUMNAS_GASTOS_EXPORT = [
   { clave: 'importeIva', titulo: 'Importe IVA', tipo: 'numero' },
   { clave: 'importeExento', titulo: 'Importe exento', tipo: 'numero' },
   { clave: 'importeTotalComprobante', titulo: 'Total comprobante', tipo: 'numero' },
+  { clave: 'totalPercepciones', titulo: 'Percepciones', tipo: 'numero' },
+  { clave: 'totalRetenciones', titulo: 'Retenciones (a favor)', tipo: 'numero' },
+  { clave: 'impuestoCredito', titulo: 'Impuesto al crédito', tipo: 'numero' },
+  { clave: 'impuestoDebito', titulo: 'Impuesto al débito', tipo: 'numero' },
+  { clave: 'otrosImpuestos', titulo: 'Otros impuestos', tipo: 'numero' },
   { clave: 'subtotal', titulo: 'Subtotal', tipo: 'numero' },
   { clave: 'descuentoPorcentaje', titulo: 'Descuento %', tipo: 'numero' },
   { clave: 'descuentoMonto', titulo: 'Descuento $', tipo: 'numero' },
@@ -186,6 +195,9 @@ function normalizarMontoNoNegativo(v, etiqueta) {
 // organización (misma colección que usa Compras) y conceptos de gasto
 // activos.
 // -----------------------------------------------------------------------
+
+router.get('/tipos-impuestos', authAdmin, tiposImpuestosHandler);
+registrarRutasFacturaIA(router, { modo: 'gastos', authAdmin, getDb, conReintento, filtroOrg });
 
 router.get('/proveedores', authAdmin, async (req, res) => {
   try {
@@ -474,6 +486,7 @@ router.post('/', authAdmin, async (req, res) => {
     // Comprobante fiscal (4/10/2026) — numeración real del proveedor +
     // IVA discriminado, para el Libro IVA Compras.
     const comprobante = normalizarComprobante(body);
+    const impuestosCbte = normalizarImpuestosComprobante(body);
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -489,8 +502,12 @@ router.post('/', authAdmin, async (req, res) => {
       }, filtroOrg(req)));
       if (dupe) throw err(400, `Ya hay un gasto cargado con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es el gasto #${dupe.numero}.`);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
-      const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const fiscalItems = calcularComprobanteDesdeItems(items);
+      // 5/10/2026: el total guardado incluye el IVA de los ítems (antes
+      // quedaba sin IVA, distinto de lo que se ve en pantalla) y los
+      // cargos de impuestos (percepciones, crédito/débito y otros). Las
+      // retenciones se registran pero no tocan el total ni el saldo.
+      const total = calcularTotalConImpuestos(subtotal, fiscalItems.importeIva, descuentoPorcentaje, descuentoMonto, impuestosCbte.cargosSobreTotal);
       const numero = await proximoNumero(db, req.orgId);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
@@ -505,6 +522,13 @@ router.post('/', authAdmin, async (req, res) => {
         importeIva: fiscalItems.importeIva,
         importeExento: fiscalItems.importeExento,
         importeTotalComprobante: fiscalItems.importeTotalComprobante,
+        percepciones: impuestosCbte.percepciones,
+        retenciones: impuestosCbte.retenciones,
+        impuestoCredito: impuestosCbte.impuestoCredito,
+        impuestoDebito: impuestosCbte.impuestoDebito,
+        otrosImpuestos: impuestosCbte.otrosImpuestos,
+        totalPercepciones: impuestosCbte.totalPercepciones,
+        totalRetenciones: impuestosCbte.totalRetenciones,
         proveedorId,
         proveedorNombre: proveedor.razonSocial || proveedor.nombreFantasia || '',
         fecha,
@@ -532,6 +556,8 @@ router.post('/', authAdmin, async (req, res) => {
 
       const r = await db.collection('gastos').insertOne(gasto);
       gasto._id = r.insertedId;
+      await registrarRetencionesSufridas(db, req, { origen: 'gasto', retenciones: impuestosCbte.retenciones, fecha, moneda,
+        referencia: { gastoId: gasto._id, gastoNumero: gasto.numero, proveedorId: gasto.proveedorId, proveedorNombre: gasto.proveedorNombre } });
       return gasto;
     });
     res.json(resultado);

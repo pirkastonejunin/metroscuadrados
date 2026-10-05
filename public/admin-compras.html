@@ -10,6 +10,8 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/impuestos-ui.js"></script>
+<script src="/factura-ia-ui.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -509,6 +511,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarListasBase();
+  await ImpuestosUI.cargarTipos(BASE, headersAuth);
   await cargarCompras();
   // Acceso rápido desde la Cuenta corriente del proveedor (4/10/2026,
   // pedido de Mato: "que nos deje generar pagos como acceso rapido") —
@@ -641,6 +644,7 @@ function abrirNuevaCompra(){
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nueva compra</h2>
+        ${FacturaIAUI.cajaHtml('nc')}
         <div class="grid3">
           <div><label>Proveedor *</label><select id="ncProveedor" onchange="actualizarCondicionPago()">${opcionesProveedoresSelect()}</select></div>
           <div><label>Condición de pago</label><input id="ncCondicionPago" placeholder="Se autocompleta del proveedor"></div>
@@ -670,6 +674,7 @@ function abrirNuevaCompra(){
           <div><label>Descuento (%)</label><input id="ncDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()"></div>
           <div><label>Descuento ($)</label><input id="ncDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()"></div>
         </div>
+        ${ImpuestosUI.bloqueHtml('impNC', { extras: true, onChange: 'actualizarTotalesCompra', ayudaRetenciones: 'Retenciones que te practicó el proveedor (impuesto a tu favor). Se registran pero no cambian el total ni el saldo.' })}
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="ncObservaciones"></textarea></div>
 
         <div class="totales-box" id="ncTotales"></div>
@@ -681,6 +686,9 @@ function abrirNuevaCompra(){
   agregarFilaCompra();
   actualizarVisibilidadDepositoCompra();
   actualizarVisibilidadCotizacion('ncCotizacionWrap', 'ncMoneda', 'ncCotizacionDolar');
+  window._iaItemsPendientes = [];
+  window._iaTotalFactura = 0;
+  FacturaIAUI.registrar('nc', { url: BASE + '/leer-factura', headers: headersAuthJson, alResultado: aplicarFacturaLeida });
 }
 
 function actualizarCondicionPago(){
@@ -792,10 +800,218 @@ function actualizarTotalesCompra(){
   if (descPorc) total -= total * (descPorc / 100);
   if (descMonto) total -= descMonto;
   total = Math.max(0, total);
+  // Impuestos adicionales (5/10/2026): percepciones, crédito/débito y otros suman al total.
+  const impLineas = ImpuestosUI.lineasResumen('impNC');
+  total += impLineas.reduce((a, l) => a + l.monto, 0);
+  const totalFactura = window._iaTotalFactura || 0;
+  const difFactura = Math.abs(redondear2(total) - redondear2(totalFactura));
   document.getElementById('ncTotales').innerHTML = `
     <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    ${totalIva ? `<div class="fila-total"><span>IVA</span><span>${money(totalIva)}</span></div>` : ''}
+    ${impLineas.map(l => `<div class="fila-total"><span>${escapeHtml(l.etiqueta)}</span><span>${money(l.monto)}</span></div>`).join('')}
     <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+    ${totalFactura > 0 ? `<div class="fila-total" style="${difFactura > 1 ? 'color:var(--danger);font-weight:700' : 'opacity:.7'}"><span>Total de la factura (leído por la IA)</span><span>${money(totalFactura)}${difFactura > 1 ? ' — diferencia ' + money(difFactura) : ' ✓'}</span></div>` : ''}
   `;
+}
+
+// -------------------------------------------------------------------
+// Cargar la factura con IA (5/10/2026, pedido de Mato) — foto, PDF u otro
+// archivo → el servidor lee la factura (facturaIA.js) y acá se completa el
+// formulario. Proveedor que no existe: se ofrece crearlo. Ítems que no
+// coinciden con el catálogo: se PREGUNTA (vincular a uno existente, crear
+// uno nuevo u omitir); no se puede guardar mientras haya ítems sin resolver.
+// -------------------------------------------------------------------
+let iaSeq = 0;
+function iaSetearValor(id, valor){
+  const el = document.getElementById(id);
+  if (el && valor !== undefined && valor !== null && valor !== '') el.value = valor;
+}
+function iaPend(id){ return (window._iaItemsPendientes || []).find(x => x._iaId === id); }
+function iaQuitarPend(id){
+  window._iaItemsPendientes = (window._iaItemsPendientes || []).filter(x => x._iaId !== id);
+  iaRenderPendientes();
+  actualizarTotalesCompra();
+}
+
+async function aplicarFacturaLeida(d){
+  document.getElementById('ncFiaRevision').innerHTML = '<div id="ncIaProveedor"></div><div id="ncIaItems"></div>';
+  const c = d.comprobante || {};
+  if (c.tipoComprobante) iaSetearValor('ncTipoComprobante', c.tipoComprobante);
+  iaSetearValor('ncPuntoVenta', c.puntoVenta);
+  iaSetearValor('ncComprobanteNumero', c.comprobanteNumero);
+  iaSetearValor('ncFecha', c.fecha);
+  if (c.moneda) {
+    iaSetearValor('ncMoneda', c.moneda);
+    actualizarVisibilidadCotizacion('ncCotizacionWrap', 'ncMoneda', 'ncCotizacionDolar');
+  }
+  window._iaTotalFactura = (d.totales && d.totales.total) || 0;
+  iaRenderProveedor(d);
+
+  document.getElementById('ncFilasItems').innerHTML = '';
+  window._iaItemsPendientes = [];
+  for (const it of (d.items || [])) {
+    if (it.producto) await iaAgregarFilaConProducto(it, it.producto._id);
+    else { it._iaId = ++iaSeq; window._iaItemsPendientes.push(it); }
+  }
+  if (!document.querySelector('#ncFilasItems .fila-item') && !window._iaItemsPendientes.length) agregarFilaCompra();
+  iaRenderPendientes();
+
+  ImpuestosUI.cargar('impNC', d.impuestos);
+  const avisos = (d.avisos || []).slice();
+  if (d.duplicado) avisos.unshift('Esta factura ya está cargada para ese proveedor (compra #' + d.duplicado.numero + '). Si la guardás de nuevo, el sistema la va a rechazar.');
+  FacturaIAUI.avisos('nc', avisos);
+  actualizarTotalesCompra();
+}
+
+function iaRenderProveedor(d){
+  const cont = document.getElementById('ncIaProveedor');
+  const sel = document.getElementById('ncProveedor');
+  const co = d.proveedorCoincidencia;
+  if (co) {
+    if (!proveedoresCache.some(p => String(p._id) === String(co._id))) proveedoresCache.push({ _id: co._id, razonSocial: co.razonSocial, condicionPago: co.condicionPago || '' });
+    sel.innerHTML = opcionesProveedoresSelect(String(co._id));
+    sel.value = String(co._id);
+    actualizarCondicionPago();
+    cont.innerHTML = `<div class="muted" style="margin-top:8px">Proveedor reconocido: <strong>${escapeHtml(co.razonSocial)}</strong> (${co.criterio === 'cuit' ? 'por CUIT' : 'por nombre'}).</div>`;
+    return;
+  }
+  const p = d.proveedor || {};
+  window._iaProvDomicilio = p.domicilio || '';
+  sel.value = '';
+  cont.innerHTML = `
+    <div class="fia-item">
+      <h4>⚠ Proveedor nuevo: todavía no está cargado</h4>
+      <div class="grid2">
+        <div><label>Razón social *</label><input id="iaProvNombre" value="${escapeHtml(p.razonSocial || '')}"></div>
+        <div><label>CUIT</label><input id="iaProvCuit" value="${escapeHtml(p.cuit || '')}"></div>
+      </div>
+      <div class="fia-acciones"><button class="btn small" onclick="iaCrearProveedor()">Crear proveedor y usarlo</button><span class="muted">O elegí uno existente en "Proveedor".</span></div>
+      <div class="err" id="iaProvErr"></div>
+    </div>`;
+}
+
+async function iaCrearProveedor(){
+  const razonSocial = document.getElementById('iaProvNombre').value.trim();
+  const cuit = document.getElementById('iaProvCuit').value.trim();
+  const errEl = document.getElementById('iaProvErr');
+  errEl.textContent = '';
+  if (!razonSocial) { errEl.textContent = 'Falta la razón social'; return; }
+  try{
+    const r = await fetch(BASE + '/proveedor-rapido', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ razonSocial, cuit, domicilio: window._iaProvDomicilio || '' })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo crear el proveedor');
+    proveedoresCache.push(data);
+    const sel = document.getElementById('ncProveedor');
+    sel.innerHTML = opcionesProveedoresSelect(String(data._id));
+    sel.value = String(data._id);
+    actualizarCondicionPago();
+    document.getElementById('ncIaProveedor').innerHTML = `<div class="muted" style="margin-top:8px">Proveedor creado y elegido: <strong>${escapeHtml(data.razonSocial)}</strong>.</div>`;
+  }catch(e){ errEl.textContent = e.message; }
+}
+
+async function iaAgregarFilaConProducto(it, productoId){
+  await asegurarProductos([productoId]);
+  agregarFilaCompra();
+  const filas = document.querySelectorAll('#ncFilasItems .fila-item');
+  const fila = filas[filas.length - 1];
+  const producto = productosCache.find(p => String(p._id) === String(productoId));
+  fila.querySelector('.producto-id').value = String(productoId);
+  fila.querySelector('.producto-buscar').value = producto ? textoProducto(producto) : it.descripcion;
+  actualizarFilaCompra(fila);
+  // Lo que vale es lo que dice la factura, no el costo de la ficha.
+  fila.querySelector('.campo-precio input').value = it.precioUnitario;
+  fila.querySelector('select.select-iva').value = String(it.alicuotaIva);
+  const cant = fila.querySelector('.cant-unidad');
+  cant.value = it.cantidad;
+  sincronizarCantidadCompra(cant, 'unidad', productosCache, actualizarTotalesCompra);
+}
+
+function iaRenderPendientes(){
+  const cont = document.getElementById('ncIaItems');
+  if (!cont) return;
+  const pend = window._iaItemsPendientes || [];
+  if (!pend.length) { cont.innerHTML = ''; return; }
+  cont.innerHTML = `<div style="margin-top:10px;font-size:13px"><strong>${pend.length} ítem(s) de la factura no coinciden con tu catálogo.</strong> Elegí qué hacer con cada uno:</div>` + pend.map(it => `
+    <div class="fia-item" id="iaPend${it._iaId}">
+      <h4>${escapeHtml(it.descripcion)}${it.codigo ? ' <span class="muted">(código ' + escapeHtml(it.codigo) + ')</span>' : ''}</h4>
+      <div class="muted">${it.cantidad} × ${money(it.precioUnitario)} — IVA ${it.alicuotaIva}%</div>
+      ${(it.candidatos || []).length ? `<div class="muted" style="margin-top:6px">¿Será alguno de estos?</div><div class="fia-sug">${it.candidatos.map(c => `<button class="btn small secondary" onclick="iaVincular(${it._iaId}, '${c._id}')">${escapeHtml(textoProducto(c))}</button>`).join('')}</div>` : ''}
+      <div class="fia-buscar"><input type="text" placeholder="Buscar otro producto por SKU o nombre…" autocomplete="off" oninput="iaBuscarProducto(${it._iaId}, this)"><div class="fia-opciones hidden" id="iaOpc${it._iaId}"></div></div>
+      <div class="fia-acciones">
+        <button class="btn small" onclick="iaAbrirAlta(${it._iaId})">Crear producto nuevo</button>
+        <button class="btn small secondary" onclick="iaQuitarPend(${it._iaId})">No cargar este ítem</button>
+      </div>
+      <div id="iaAlta${it._iaId}"></div>
+      <div class="err" id="iaPendErr${it._iaId}"></div>
+    </div>`).join('');
+}
+
+function iaBuscarProducto(id, input){
+  const cont = document.getElementById('iaOpc' + id);
+  const q = input.value.trim();
+  clearTimeout(input._t);
+  if (!q) { cont.classList.add('hidden'); return; }
+  cont.innerHTML = '<div class="sin-resultados">Buscando…</div>';
+  cont.classList.remove('hidden');
+  input._t = setTimeout(async () => {
+    try{
+      const r = await fetch(BASE + '/productos?limit=15&q=' + encodeURIComponent(q), {headers: headersAuth()});
+      if (!r.ok) throw new Error('estado ' + r.status);
+      const lista = await r.json();
+      lista.forEach(agregarAlCacheProductos);
+      cont.innerHTML = lista.length
+        ? lista.map(p => `<div class="opcion" onclick="iaVincular(${id}, '${p._id}')">${escapeHtml(textoProducto(p))}</div>`).join('')
+        : '<div class="sin-resultados">Sin resultados para esa búsqueda</div>';
+    }catch(e){ cont.innerHTML = '<div class="sin-resultados">No se pudo buscar. Probá de nuevo.</div>'; }
+  }, 250);
+}
+
+async function iaVincular(id, productoId){
+  const it = iaPend(id);
+  if (!it) return;
+  try{
+    await iaAgregarFilaConProducto(it, productoId);
+    iaQuitarPend(id);
+  }catch(e){
+    const el = document.getElementById('iaPendErr' + id);
+    if (el) el.textContent = e.message;
+  }
+}
+
+function iaAbrirAlta(id){
+  const it = iaPend(id);
+  if (!it) return;
+  document.getElementById('iaAlta' + id).innerHTML = `
+    <div class="grid2" style="margin-top:8px">
+      <div><label>SKU (código) *</label><input id="iaSku${id}" value="${escapeHtml(it.codigo || '')}"></div>
+      <div><label>Nombre *</label><input id="iaNom${id}" value="${escapeHtml(it.descripcion || '')}"></div>
+    </div>
+    <div class="grid2" style="margin-top:8px">
+      <div><label>Costo</label><input id="iaCosto${id}" type="number" min="0" step="0.01" value="${it.precioUnitario}"></div>
+      <div><label>Unidad</label><input id="iaUni${id}" value="unidad"></div>
+    </div>
+    <button class="btn small" style="margin-top:8px" onclick="iaConfirmarAlta(${id})">Crear y usar</button>`;
+}
+
+async function iaConfirmarAlta(id){
+  const it = iaPend(id);
+  if (!it) return;
+  const errEl = document.getElementById('iaPendErr' + id);
+  errEl.textContent = '';
+  const sku = document.getElementById('iaSku' + id).value.trim();
+  const nombre = document.getElementById('iaNom' + id).value.trim();
+  const costo = document.getElementById('iaCosto' + id).value;
+  const unidad = document.getElementById('iaUni' + id).value.trim() || 'unidad';
+  if (!sku) { errEl.textContent = 'El SKU es obligatorio'; return; }
+  if (!nombre) { errEl.textContent = 'El nombre es obligatorio'; return; }
+  try{
+    const r = await fetch(BASE + '/productos-rapido', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ sku, nombre, costo: costo === '' ? null : Number(costo), unidad })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error al crear el producto');
+    agregarAlCacheProductos(data);
+    await iaAgregarFilaConProducto(it, data._id);
+    iaQuitarPend(id);
+  }catch(e){ errEl.textContent = e.message; }
 }
 
 async function guardarNuevaCompra(){
@@ -817,9 +1033,12 @@ async function guardarNuevaCompra(){
     puntoVenta: document.getElementById('ncPuntoVenta').value.trim(),
     comprobanteNumero: document.getElementById('ncComprobanteNumero').value.trim()
   };
+  Object.assign(body, ImpuestosUI.leer('impNC'));
   document.getElementById('ncErrNueva').textContent = '';
   if (!body.proveedorId) { document.getElementById('ncErrNueva').textContent = 'Elegí un proveedor'; return; }
   if (!items.length) { document.getElementById('ncErrNueva').textContent = 'Agregá al menos un producto'; return; }
+  const pendientesIA = (window._iaItemsPendientes || []).length;
+  if (pendientesIA) { document.getElementById('ncErrNueva').textContent = 'Todavía hay ' + pendientesIA + ' ítem(s) de la factura sin resolver (están arriba): vinculalos a un producto, creá uno nuevo o elegí "No cargar este ítem".'; return; }
   if (tipoRecepcion === 'inmediata' && !body.depositoId) { document.getElementById('ncErrNueva').textContent = 'Elegí a qué depósito le vas a ingresar el stock'; return; }
   if (!body.puntoVenta) { document.getElementById('ncErrNueva').textContent = 'Falta el punto de venta del comprobante'; return; }
   if (!body.comprobanteNumero) { document.getElementById('ncErrNueva').textContent = 'Falta el número del comprobante'; return; }
@@ -880,6 +1099,7 @@ function verDetalle(id){
           <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(c.saldoPendiente)}</span></div>
         </div>
 
+        ${ImpuestosUI.detalleHtml(c, money)}
         ${c.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(c.observaciones)}</p>` : ''}
 
         <div class="section-title">Pagos</div>
@@ -1772,6 +1992,7 @@ async function abrirConvertirOrden(id){
           <div><label>Descuento (%)</label><input id="coDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesConvertirOrden()"></div>
           <div><label>Descuento ($)</label><input id="coDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesConvertirOrden()"></div>
         </div>
+        ${ImpuestosUI.bloqueHtml('impCO', { extras: true, onChange: 'actualizarTotalesConvertirOrden', ayudaRetenciones: 'Retenciones que te practicó el proveedor (impuesto a tu favor). Se registran pero no cambian el total ni el saldo.' })}
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="coObservaciones"></textarea></div>
 
         <div class="totales-box" id="coTotales"></div>
@@ -1829,9 +2050,13 @@ function actualizarTotalesConvertirOrden(){
   if (descPorc) total -= total * (descPorc / 100);
   if (descMonto) total -= descMonto;
   total = Math.max(0, total);
+  const impLineasCO = ImpuestosUI.lineasResumen('impCO');
+  total += impLineasCO.reduce((a, l) => a + l.monto, 0);
   document.getElementById('coTotales').innerHTML = `
     ${lineasIva.length ? `<div class="muted" style="margin-bottom:6px">${lineasIva.join(' — ')}</div>` : ''}
     <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
+    ${totalIva ? `<div class="fila-total"><span>IVA</span><span>${money(totalIva)}</span></div>` : ''}
+    ${impLineasCO.map(l => `<div class="fila-total"><span>${escapeHtml(l.etiqueta)}</span><span>${money(l.monto)}</span></div>`).join('')}
     <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
   `;
 }
@@ -1863,6 +2088,7 @@ async function confirmarConvertirOrden(id){
     observaciones: document.getElementById('coObservaciones').value.trim(),
     items
   };
+  Object.assign(body, ImpuestosUI.leer('impCO'));
   const errEl = document.getElementById('coErr');
   errEl.textContent = '';
   if (!items.length) { errEl.textContent = 'Elegí al menos un ítem para convertir'; return; }
