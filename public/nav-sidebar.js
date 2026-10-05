@@ -251,13 +251,13 @@
     const wrap = document.createElement('div');
     wrap.className = 'pn-usermenu';
     wrap.innerHTML = `
-      <button type="button" class="pn-usermenu-btn" aria-haspopup="true" aria-expanded="false">
+      <button type="button" data-iconizado="1" class="pn-usermenu-btn" aria-haspopup="true" aria-expanded="false">
         ${ICONOS.usuarios}<span class="pn-nom">${escapeHtml(nombreUsuario || 'Mi usuario')}</span>${ICONOS.chevron}
       </button>
       <div class="pn-usermenu-menu" role="menu">
         ${items.map(it => `<a href="${it.href}" class="${it.key === paginaActual ? 'pn-activo' : ''}">${it.icon}<span>${escapeHtml(it.label)}</span></a>`).join('')}
         ${items.length ? '<hr>' : ''}
-        <button type="button" class="pn-um-item pn-um-salir">${ICONOS.salir}<span>Cerrar sesión</span></button>
+        <button type="button" data-iconizado="1" class="pn-um-item pn-um-salir">${ICONOS.salir}<span>Cerrar sesión</span></button>
       </div>
     `;
     spanUser.style.display = 'none';
