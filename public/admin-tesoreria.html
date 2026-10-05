@@ -949,6 +949,15 @@ function opcionesCuentaTransferencia(){
 // CAJA DIARIA (planilla para liquidar) — 4/10/2026
 // -------------------------------------------------------------------
 let cajaDiariaActual = null;
+let cajaCentral = { _id: null };
+async function cargarCajaCentral(){
+  try { const r = await fetch(BASE + '/caja-central', {headers: headersAuth()}); if (r.ok) cajaCentral = await r.json(); } catch (e) {}
+}
+async function elegirCajaCentral(valor){
+  const r = await fetch(BASE + '/caja-central', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({cajaId: valor || null})});
+  if (!r.ok) { let m = 'No se pudo guardar'; try { m = (await r.json()).error || m; } catch(e){} alert(m + ' (solo un administrador puede cambiarla)'); }
+  await cargarCajaCentral(); await cargarCajaDiaria();
+}
 function hoyLocalISO(){ const d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
 async function iniciarCajaDiaria(){
   if (!cajasCache.length && !bancosCache.length) {
@@ -962,6 +971,7 @@ async function iniciarCajaDiaria(){
     bancosCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (${escapeHtml(b.moneda)})</option>`).join('');
   if (previo) sel.value = previo;
   if (!document.getElementById('cdDia').value) document.getElementById('cdDia').value = hoyLocalISO();
+  await cargarCajaCentral();
   if (!sel.options.length) { document.getElementById('cdContenido').innerHTML = '<p class="muted">No tenés ninguna caja habilitada.</p>'; return; }
   await cargarCajaDiaria();
 }
@@ -1006,6 +1016,9 @@ async function cargarResumenDia(dia){
   document.getElementById('cdResumenDia').innerHTML = `
     <div class="card" style="border-color:var(--accent)">
       <h3 style="margin-top:0">Resumen del día — toda la Tesorería</h3>
+      ${(d.cierresDia && d.cierresDia.length) ? `<div style="margin-bottom:14px"><h4 style="margin:0 0 6px">Cierres enviados a administración</h4><div style="overflow-x:auto"><table>
+        <thead><tr><th>Caja</th><th>Contado</th><th>Sistema</th><th>Diferencia</th><th>Transferido a</th><th>Cerró</th></tr></thead>
+        <tbody>${d.cierresDia.map(c => `<tr><td>${escapeHtml(c.cuentaNombre)}</td><td>${moneyMoneda(c.efectivoContado, c.moneda)}</td><td>${moneyMoneda(c.saldoSistema, c.moneda)}</td><td class="${c.diferencia<0?'vencido':''}">${c.diferencia===0?'Cuadra':moneyMoneda(c.diferencia, c.moneda)}</td><td>${c.montoTransferido>0 ? moneyMoneda(c.montoTransferido, c.moneda) + ' → ' + escapeHtml(c.cajaCentralNombre) : '—'}</td><td class="muted">${escapeHtml(c.usuarioNombre||'')} · ${new Date(c.createdAt).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
       <div class="kpis">
         ${kpiHtml('Cobrado en efectivo', f(d.cobros.efectivo), n(d.cobros.efectivo))}
         ${kpiHtml('Cobrado en cuenta', f(d.cobros.transferencia), n(d.cobros.transferencia))}
@@ -1069,20 +1082,30 @@ function renderCajaDiaria(){
           ${kpiHtml('Saldo según sistema', moneyMoneda(cierre.saldoSistema, m), 'Al momento del cierre')}
           ${kpiHtml('Diferencia', moneyMoneda(cierre.diferencia, m), cierre.diferencia === 0 ? 'Caja cuadrada' : (cierre.diferencia > 0 ? 'Sobrante' : 'Faltante'), cierre.diferencia < 0)}
         </div>
+        ${cierre.montoTransferido > 0 ? `<p>✅ Cierre enviado a administración. Se transfirieron <strong>${moneyMoneda(cierre.montoTransferido, m)}</strong> a «${escapeHtml(cierre.cajaCentralNombre||'caja central')}».</p>` : '<p>✅ Cierre enviado a administración (sin transferencia de efectivo).</p>'}
         ${cierre.observaciones ? `<p class="muted">${escapeHtml(cierre.observaciones)}</p>` : ''}
-        <button class="btn small danger" onclick="reabrirCajaDiaria('${cierre._id}')">Reabrir día</button>
+        <button class="btn small danger" onclick="reabrirCajaDiaria('${cierre._id}', ${cierre.montoTransferido > 0})">Reabrir día</button>
       ` : `
-        <p class="muted" style="margin-top:0">Contá el efectivo que hay en la caja y cargalo: se compara contra el saldo del sistema y se guarda el cierre del día.</p>
+        <p class="muted" style="margin-top:0">Contá el efectivo que hay en la caja y cargalo: se compara contra el saldo del sistema, se envía el cierre a administración${(d.cuenta.tipo === 'caja' && cajaCentral._id) ? ' y <strong>todo el efectivo contado se transfiere a «' + escapeHtml(cajaCentral.nombre) + '»</strong>' : ''}.</p>
+        ${(d.cuenta.tipo === 'caja' && !cajaCentral._id) ? '<p class="muted" style="color:var(--warn)">No hay caja central de administración elegida: el cierre se guarda pero el efectivo no se transfiere. Elegila abajo, en "Caja central de administración".</p>' : ''}
         <div class="row">
           <div style="min-width:200px"><label>Efectivo contado *</label><input id="cdContado" type="number" min="0" step="0.01" oninput="actualizarDiferenciaCajaDiaria()"></div>
           <div style="min-width:200px"><label>Diferencia</label><div id="cdDif" style="padding:9px 0;font-weight:800">—</div></div>
           <div style="flex:1;min-width:220px"><label>Observaciones</label><input id="cdObs" placeholder="Ej: faltante de $500 por vuelto"></div>
         </div>
         <div class="err" id="cdErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="cerrarCajaDiaria()">Cerrar caja del día</button>
+        <button class="btn" style="margin-top:10px" onclick="cerrarCajaDiaria()">${(d.cuenta.tipo === 'caja' && cajaCentral._id) ? 'Cerrar caja y enviar a administración' : 'Cerrar caja del día'}</button>
       `}
       <button class="btn secondary" style="margin-top:10px;margin-left:6px" onclick="imprimirCajaDiaria()">🖨️ Imprimir planilla</button>
       ${d.cuenta.tipo === 'caja' ? `<button class="btn secondary" style="margin-top:10px;margin-left:6px" onclick="abrirTransferencia()">🔁 Transferir a banco</button>` : ''}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Caja central de administración</h3>
+      <p class="muted" style="margin-top:0">Al cerrar una caja, el efectivo contado se transfiere a esta caja. La elige un administrador.</p>
+      <select id="cdCentral" onchange="elegirCajaCentral(this.value)" style="max-width:340px">
+        <option value="">— Sin caja central —</option>
+        ${cajasCache.map(c => `<option value="${c._id}" ${String(c._id)===String(cajaCentral._id)?'selected':''}>${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)})</option>`).join('')}
+      </select>
     </div>
     ${cierresPrev.length ? `<div class="card"><h3 style="margin-top:0">Últimos cierres</h3><table><thead><tr><th>Día</th><th>Sistema</th><th>Contado</th><th>Diferencia</th><th></th></tr></thead><tbody>
       ${cierresPrev.map(c => `<tr><td>${c.dia.split('-').reverse().join('/')}</td><td>${moneyMoneda(c.saldoSistema, m)}</td><td>${moneyMoneda(c.efectivoContado, m)}</td><td class="${c.diferencia<0?'vencido':''}">${moneyMoneda(c.diferencia, m)}</td><td><a href="#" onclick="event.preventDefault(); document.getElementById('cdDia').value='${c.dia}'; cargarCajaDiaria()">Ver</a></td></tr>`).join('')}
@@ -1111,9 +1134,12 @@ async function cerrarCajaDiaria(){
     await cargarCajaDiaria();
   }catch(e){ errEl.textContent = e.message; }
 }
-async function reabrirCajaDiaria(id){
-  if (!confirm('¿Reabrir este día? Se borra el cierre guardado y se puede volver a cerrar.')) return;
-  const r = await fetch(BASE + '/caja-diaria/cierre/' + id, {method:'DELETE', headers: headersAuth()});
+async function reabrirCajaDiaria(id, transferido){
+  const msg = transferido
+    ? '¿Reabrir este día? El efectivo transferido a la caja central VUELVE a esta caja y se borra el cierre.'
+    : '¿Reabrir este día? Se borra el cierre guardado y se puede volver a cerrar.';
+  if (!confirm(msg)) return;
+  const r = await fetch(BASE + '/caja-diaria/cierre/' + id + (transferido ? '?revertirTransferencia=1' : ''), {method:'DELETE', headers: headersAuth()});
   if (!r.ok) { let m = 'No se pudo reabrir'; try { m = (await r.json()).error || m; } catch(e){} alert(m); return; }
   await cargarCajaDiaria();
 }

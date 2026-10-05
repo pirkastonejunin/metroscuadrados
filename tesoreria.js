@@ -192,13 +192,14 @@ function normalizarIdsArray(raw) {
 // conviene compartir: es lógica de negocio sensible al dinero, no una
 // lectura liviana para armar un formulario).
 // -----------------------------------------------------------------------
-async function aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, monto, moneda, motivo, observaciones, origen, ventaId, compraId, chequeId, fecha }) {
+async function aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, monto, moneda, motivo, observaciones, origen, ventaId, compraId, chequeId, fecha, omitirPermiso }) {
   if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'cuentaTipo inválido (caja o banco)');
   if (!TIPOS_MOVIMIENTO_VALIDOS.includes(tipo)) throw err(400, 'Tipo de movimiento inválido');
   const coleccion = cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos';
   const cuenta = await db.collection(coleccion).findOne({ _id: cuentaId });
   if (!cuenta) throw err(404, `${cuentaTipo === 'caja' ? 'Caja' : 'Banco'} no encontrado`);
-  if (!cuentaHabilitada(cuenta, req)) throw err(403, `No tenés habilitada esta ${cuentaTipo === 'caja' ? 'caja' : 'cuenta bancaria'} en esta sucursal.`);
+  // omitirPermiso: solo para el pase del cierre de caja a la caja central de administración (la cajera no necesariamente tiene habilitada esa caja).
+  if (!omitirPermiso && !cuentaHabilitada(cuenta, req)) throw err(403, `No tenés habilitada esta ${cuentaTipo === 'caja' ? 'caja' : 'cuenta bancaria'} en esta sucursal.`);
   const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
   const movimiento = {
     cuentaTipo, cuentaId, tipo, monto, moneda: moneda || cuenta.moneda || 'ARS',
@@ -626,8 +627,11 @@ router.get('/caja-diaria/resumen', authOperar, async (req, res) => {
       }));
       const recibidos = delDia.filter(c => c.tipo === 'tercero'), emitidos = delDia.filter(c => c.tipo === 'propio');
       const sumaCh = (l) => { const t = {}; l.forEach(c => { t[c.moneda] = (t[c.moneda] || 0) + c.monto; }); return t; };
+      const idsCuentas = planes.map(pl => pl.cuenta._id);
+      const cierresDia = await db.collection('tesoreria_cierres').find({ dia, cuentaId: { $in: idsCuentas } }).sort({ createdAt: 1 }).toArray();
       return {
         dia,
+        cierresDia: cierresDia.map(c => ({ _id: c._id, cuentaNombre: c.cuentaNombre, moneda: c.moneda, saldoSistema: c.saldoSistema, efectivoContado: c.efectivoContado, diferencia: c.diferencia, montoTransferido: c.montoTransferido || 0, cajaCentralNombre: c.cajaCentralNombre || '', usuarioNombre: c.usuarioNombre, createdAt: c.createdAt, observaciones: c.observaciones })),
         cobros, pagos,
         cheques: { recibidos, totalRecibidos: sumaCh(recibidos), emitidos, totalEmitidos: sumaCh(emitidos) },
         cuentas: planes.map(pl => ({ tipo: pl.cuenta.tipo, nombre: pl.cuenta.nombre, moneda: pl.cuenta.moneda, saldoInicial: pl.saldoInicial, ingresos: pl.ingresos, egresos: pl.egresos, saldoFinal: pl.saldoFinal, cierre: pl.cierre ? { diferencia: pl.cierre.diferencia, efectivoContado: pl.cierre.efectivoContado } : null })),
@@ -635,6 +639,36 @@ router.get('/caja-diaria/resumen', authOperar, async (req, res) => {
       };
     });
     res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Caja central de administración (4/10/2026, pedido de Mato: al cerrar la caja
+// se manda el cierre y se transfiere todo a una caja central). Se designa una
+// vez (solo administradores) y queda guardada para toda la empresa.
+async function obtenerCajaCentral(db) {
+  const cfg = await db.collection('config_general').findOne({ clave: 'cajaCentralAdmin' });
+  if (!cfg || !cfg.cuentaId) return null;
+  const caja = await db.collection('tesoreria_cajas').findOne({ _id: cfg.cuentaId });
+  return (caja && caja.activa !== false) ? caja : null;
+}
+router.get('/caja-central', authOperar, async (req, res) => {
+  try {
+    const caja = await conReintento(async () => obtenerCajaCentral(await getDb()));
+    res.json(caja ? { _id: caja._id, nombre: caja.nombre, moneda: caja.moneda || 'ARS' } : { _id: null });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/caja-central', authConfig, async (req, res) => {
+  try {
+    const cuentaId = (req.body && req.body.cajaId) ? toObjectId(req.body.cajaId) : null;
+    await conReintento(async () => {
+      const db = await getDb();
+      if (cuentaId) {
+        const caja = await db.collection('tesoreria_cajas').findOne({ _id: cuentaId });
+        if (!caja) throw err(404, 'Caja no encontrada');
+      }
+      await db.collection('config_general').updateOne({ clave: 'cajaCentralAdmin' }, { $set: { clave: 'cajaCentralAdmin', cuentaId, updatedAt: new Date() } }, { upsert: true });
+    });
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -651,16 +685,51 @@ router.post('/caja-diaria/cierre', authOperar, async (req, res) => {
       const db = await getDb();
       const plan = await armarCajaDiaria(db, req, cuentaTipo, cuentaId, dia);
       if (plan.cierre) throw err(400, 'Este día ya está cerrado. Reabrilo si necesitás corregirlo.');
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      // Pase a la caja central: todo el efectivo contado, si hay caja central
+      // configurada, la caja que se cierra es una caja (no un banco) y no es la central misma.
+      let central = null;
+      if (cuentaTipo === 'caja' && b.transferirACentral !== false) {
+        const c = await obtenerCajaCentral(db);
+        if (c && String(c._id) !== String(cuentaId)) {
+          if ((c.moneda || 'ARS') !== plan.cuenta.moneda) throw err(400, `La caja central es en ${c.moneda || 'ARS'} y esta caja en ${plan.cuenta.moneda}; no se puede transferir.`);
+          central = c;
+        }
+      }
       const doc = {
         cuentaTipo, cuentaId, cuentaNombre: plan.cuenta.nombre, moneda: plan.cuenta.moneda, dia,
         saldoInicial: plan.saldoInicial, ingresos: plan.ingresos, egresos: plan.egresos, saldoSistema: plan.saldoFinal,
         efectivoContado: contado, diferencia: Math.round((contado - plan.saldoFinal) * 100) / 100,
-        observaciones: normalizarTexto(b.observaciones),
-        usuarioNombre: (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '',
+        observaciones: normalizarTexto(b.observaciones), usuarioNombre,
+        enviadoAAdministracion: true, cajaCentralId: central ? central._id : null, cajaCentralNombre: central ? central.nombre : '',
+        montoTransferido: 0,
         orgId: req.orgId, createdAt: new Date()
       };
       const { insertedId } = await db.collection('tesoreria_cierres').insertOne(doc);
       doc._id = insertedId;
+      if (central && contado > 0) {
+        try {
+          const fechaMov = new Date();
+          await aplicarMovimientoCuenta(db, req, {
+            cuentaTipo: 'caja', cuentaId, tipo: 'egreso', monto: contado, moneda: plan.cuenta.moneda,
+            motivo: `Cierre de caja ${dia}: pase a ${central.nombre}`, observaciones: normalizarTexto(b.observaciones), origen: 'transferencia', fecha: fechaMov
+          });
+          try {
+            await aplicarMovimientoCuenta(db, req, {
+              cuentaTipo: 'caja', cuentaId: central._id, tipo: 'ingreso', monto: contado, moneda: plan.cuenta.moneda,
+              motivo: `Cierre de caja ${dia}: recibido de ${plan.cuenta.nombre}`, observaciones: normalizarTexto(b.observaciones), origen: 'transferencia', fecha: fechaMov, omitirPermiso: true
+            });
+          } catch (e2) {
+            await aplicarMovimientoCuenta(db, req, { cuentaTipo: 'caja', cuentaId, tipo: 'ingreso', monto: contado, moneda: plan.cuenta.moneda, motivo: 'Reversión de pase fallido', observaciones: e2.message, origen: 'transferencia', fecha: new Date() });
+            throw e2;
+          }
+          doc.montoTransferido = contado;
+          await db.collection('tesoreria_cierres').updateOne({ _id: insertedId }, { $set: { montoTransferido: contado } });
+        } catch (e) {
+          await db.collection('tesoreria_cierres').deleteOne({ _id: insertedId });
+          throw e;
+        }
+      }
       return doc;
     });
     res.json(resultado);
@@ -677,6 +746,12 @@ router.delete('/caja-diaria/cierre/:id', authOperar, async (req, res) => {
       const coleccion = c.cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos';
       const cuenta = await db.collection(coleccion).findOne({ _id: c.cuentaId });
       if (!cuentaHabilitada(cuenta, req)) throw err(403, 'No tenés habilitada esta cuenta en esta sucursal.');
+      if (c.montoTransferido > 0) {
+        if (req.query.revertirTransferencia !== '1') throw err(409, `Este cierre ya transfirió ${c.montoTransferido} a ${c.cajaCentralNombre || 'la caja central'}. Reabrirlo devuelve ese dinero a la caja.`);
+        const ahora = new Date();
+        await aplicarMovimientoCuenta(db, req, { cuentaTipo: 'caja', cuentaId: c.cajaCentralId, tipo: 'egreso', monto: c.montoTransferido, moneda: c.moneda, motivo: `Reapertura de cierre ${c.dia}: devolución a ${c.cuentaNombre}`, origen: 'transferencia', fecha: ahora, omitirPermiso: true });
+        await aplicarMovimientoCuenta(db, req, { cuentaTipo: 'caja', cuentaId: c.cuentaId, tipo: 'ingreso', monto: c.montoTransferido, moneda: c.moneda, motivo: `Reapertura de cierre ${c.dia}: devuelto desde ${c.cajaCentralNombre || 'caja central'}`, origen: 'transferencia', fecha: ahora });
+      }
       await db.collection('tesoreria_cierres').deleteOne({ _id: id });
     });
     res.json({ ok: true });
