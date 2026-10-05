@@ -51,6 +51,7 @@
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
   .pill.ingreso,.pill.en_cartera,.pill.pagado{background:var(--ok-soft);color:var(--ok);}
   .pill.egreso,.pill.rechazado{background:var(--danger-soft);color:var(--danger);}
+  .pill.cobrado{background:var(--ok-soft);color:var(--ok);}
   .pill.depositado,.pill.emitido{background:var(--info-soft);color:var(--info);}
   .pill.endosado,.pill.anulado{background:var(--warn-soft);color:var(--warn);}
   .muted{color:var(--muted);font-size:12px;}
@@ -148,7 +149,8 @@
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h3 style="margin:0">Cajas</h3>
-          <button class="btn small" onclick="abrirMovimientoManual()">+ Movimiento manual</button>
+          <div class="row"><button class="btn small" onclick="abrirTransferencia()">⇄ Transferir entre cuentas</button>
+          <button class="btn small secondary" onclick="abrirMovimientoManual()">+ Movimiento manual</button></div>
         </div>
         <div id="saldosCajas" style="margin-top:10px"></div>
       </div>
@@ -226,6 +228,7 @@
                 <option value="">Todos</option>
                 <option value="en_cartera">En cartera</option>
                 <option value="depositado">Depositado</option>
+                <option value="cobrado">Cobrado en caja</option>
                 <option value="emitido">Emitido</option>
                 <option value="pagado">Pagado</option>
                 <option value="endosado">Endosado</option>
@@ -387,7 +390,7 @@ async function cargarResumenTesoreria(){
       <thead><tr><th>Estado</th><th>Cant.</th><th>Total</th><th>Vencidos</th><th>Vencen en 7 días</th><th>Vencen en 30 días</th></tr></thead>
       <tbody>
         ${filaGrupo('En cartera (de terceros)', ch.cartera)}
-        ${filaGrupo('Depositados (de terceros)', ch.depositados)}
+        ${filaGrupo('Depositados / cobrados (de terceros)', ch.depositados)}
         ${filaGrupo('Emitidos (propios, a pagar)', ch.emitidos)}
       </tbody>
     </table></div>${prox}
@@ -737,7 +740,7 @@ async function cargarMovimientos(){
   if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
   const movimientos = await r.json();
   if (!movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos todavía.</td></tr>'; return; }
-  const ORIGEN_LABEL = { manual: 'Manual', venta: 'Venta', compra: 'Compra', cheque: 'Cheque' };
+  const ORIGEN_LABEL = { manual: 'Manual', venta: 'Venta', compra: 'Compra', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta' };
   body.innerHTML = movimientos.map(m => `
     <tr>
       <td class="muted">${fechaHora(m.fecha)}</td>
@@ -754,7 +757,7 @@ async function cargarMovimientos(){
 // -------------------------------------------------------------------
 // CHEQUES
 // -------------------------------------------------------------------
-const ESTADO_CHEQUE_LABEL = { en_cartera: 'En cartera', depositado: 'Depositado', rechazado: 'Rechazado', endosado: 'Endosado', anulado: 'Anulado', emitido: 'Emitido', pagado: 'Pagado' };
+const ESTADO_CHEQUE_LABEL = { en_cartera: 'En cartera', depositado: 'Depositado', cobrado: 'Cobrado en caja', rechazado: 'Rechazado', endosado: 'Endosado', anulado: 'Anulado', emitido: 'Emitido', pagado: 'Pagado' };
 let chequesCache = [];
 async function cargarCheques(){
   const params = new URLSearchParams();
@@ -851,11 +854,12 @@ function verCheque(id){
   if (!c) return;
   const acciones = [];
   if (c.tipo === 'tercero' && c.estado === 'en_cartera') {
-    acciones.push(`<button class="btn secondary" onclick="abrirDepositarCheque('${id}')">Depositar</button>`);
+    acciones.push(`<button class="btn secondary" onclick="abrirDepositarCheque('${id}','banco')">Depositar en banco</button>`);
+    acciones.push(`<button class="btn secondary" onclick="abrirDepositarCheque('${id}','caja')">Cobrar en caja</button>`);
     acciones.push(`<button class="btn secondary" onclick="endosarCheque('${id}')">Endosar</button>`);
     acciones.push(`<button class="btn danger" onclick="anularCheque('${id}')">Anular</button>`);
   }
-  if (c.tipo === 'tercero' && c.estado === 'depositado') {
+  if (c.tipo === 'tercero' && (c.estado === 'depositado' || c.estado === 'cobrado')) {
     acciones.push(`<button class="btn danger" onclick="rechazarCheque('${id}')">Rechazar</button>`);
   }
   if (c.tipo === 'propio' && c.estado === 'emitido') {
@@ -889,31 +893,83 @@ function verCheque(id){
   `;
 }
 
-function abrirDepositarCheque(id){
+function opcionesCajaCheque(){
+  return cajasCache.map(c => `<option value="${c._id}">${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)})</option>`).join('')
+    || '<option value="">No tenés ninguna caja habilitada</option>';
+}
+function abrirDepositarCheque(id, tipo){
+  tipo = tipo === 'caja' ? 'caja' : 'banco';
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Depositar cheque</h2>
-        <label>¿En qué banco lo depositás? *</label>
-        <select id="dqCuenta">${opcionesBancoCheque()}</select>
+        <h2>${tipo === 'caja' ? 'Cobrar cheque en caja' : 'Depositar cheque'}</h2>
+        <label>${tipo === 'caja' ? '¿En qué caja entra el efectivo? *' : '¿En qué banco lo depositás? *'}</label>
+        <select id="dqCuenta">${tipo === 'caja' ? opcionesCajaCheque() : opcionesBancoCheque()}</select>
         <div class="err" id="dqErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="confirmarDepositarCheque('${id}')">Confirmar depósito</button>
+        <button class="btn" style="margin-top:10px" onclick="confirmarDepositarCheque('${id}','${tipo}')">${tipo === 'caja' ? 'Confirmar cobro' : 'Confirmar depósito'}</button>
       </div>
     </div>
   `;
 }
-async function confirmarDepositarCheque(id){
+async function confirmarDepositarCheque(id, tipo){
   const cuentaId = document.getElementById('dqCuenta').value;
-  if (!cuentaId) { document.getElementById('dqErr').textContent = 'Elegí un banco'; return; }
+  if (!cuentaId) { document.getElementById('dqErr').textContent = tipo === 'caja' ? 'Elegí una caja' : 'Elegí un banco'; return; }
   try{
-    const r = await fetch(BASE + '/cheques/' + id + '/depositar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({cuentaId})});
+    const r = await fetch(BASE + '/cheques/' + id + '/depositar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({cuentaId, cuentaTipo: tipo})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
     await cargarCheques();
     await cargarSaldos();
   }catch(e){ document.getElementById('dqErr').textContent = e.message; }
+}
+
+// Transferencia entre cajas y bancos (4/10/2026)
+function opcionesCuentaTransferencia(){
+  return cajasCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)}, saldo ${money(c.saldo)})</option>`).join('') +
+    bancosCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (${escapeHtml(b.moneda)}, saldo ${money(b.saldo)})</option>`).join('');
+}
+function abrirTransferencia(){
+  const opciones = opcionesCuentaTransferencia();
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Transferir entre cuentas</h2>
+        <p class="muted" style="margin-top:-8px">Caja ⇄ banco, caja ⇄ caja o banco ⇄ banco (misma moneda).</p>
+        <div><label>Desde *</label><select id="trOrigen"><option value="">Elegí…</option>${opciones}</select></div>
+        <div style="margin-top:10px"><label>Hacia *</label><select id="trDestino"><option value="">Elegí…</option>${opciones}</select></div>
+        <div class="grid2" style="margin-top:10px">
+          <div><label>Monto *</label><input id="trMonto" type="number" min="0.01" step="0.01"></div>
+          <div><label>Fecha</label><input id="trFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observaciones</label><textarea id="trObs" placeholder="Ej: Depósito de la recaudación del día"></textarea></div>
+        <div class="err" id="trErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarTransferencia()">Transferir</button>
+      </div>
+    </div>
+  `;
+}
+async function guardarTransferencia(){
+  const errEl = document.getElementById('trErr'); errEl.textContent = '';
+  const o = document.getElementById('trOrigen').value, d = document.getElementById('trDestino').value;
+  if (!o || !d) { errEl.textContent = 'Elegí origen y destino'; return; }
+  if (o === d) { errEl.textContent = 'El origen y el destino no pueden ser el mismo'; return; }
+  const monto = Number(document.getElementById('trMonto').value);
+  if (!monto || monto <= 0) { errEl.textContent = 'El monto tiene que ser mayor a 0'; return; }
+  const [origenTipo, origenId] = o.split(':'), [destinoTipo, destinoId] = d.split(':');
+  try{
+    const r = await fetch(BASE + '/transferencias', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({
+      origenTipo, origenId, destinoTipo, destinoId, monto,
+      fecha: document.getElementById('trFecha').value, observaciones: document.getElementById('trObs').value.trim()
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal();
+    await cargarSaldos();
+    if (!document.getElementById('tab-movimientos').classList.contains('hidden')) await cargarMovimientos();
+  }catch(e){ errEl.textContent = e.message; }
 }
 
 async function endosarCheque(id){

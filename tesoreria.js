@@ -157,7 +157,7 @@ function normalizarMontoPositivo(v, etiqueta) {
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_CUENTA_BANCARIA_VALIDOS = ['cuenta_corriente', 'caja_ahorro'];
 const TIPOS_MOVIMIENTO_VALIDOS = ['ingreso', 'egreso'];
-const ESTADOS_CHEQUE_TERCERO = ['en_cartera', 'depositado', 'rechazado', 'endosado', 'anulado'];
+const ESTADOS_CHEQUE_TERCERO = ['en_cartera', 'depositado', 'cobrado', 'rechazado', 'endosado', 'anulado'];
 const ESTADOS_CHEQUE_PROPIO = ['emitido', 'pagado', 'rechazado', 'anulado'];
 // Mismas formas de valor que un cobro de venta (ventas.js) — ver
 // POST /cobros-cuenta-cliente más abajo.
@@ -399,7 +399,7 @@ router.get('/resumen', authOperar, async (req, res) => {
       const [cajas, bancos, cheques, ventasTarjeta, movTarjeta] = await Promise.all([
         listarCuentasHabilitadas(db, req, 'tesoreria_cajas', 'caja'),
         listarCuentasHabilitadas(db, req, 'tesoreria_bancos', 'banco'),
-        db.collection('cheques').find(Object.assign({ estado: { $in: ['en_cartera', 'depositado', 'emitido'] } }, filtroOrg(req)))
+        db.collection('cheques').find(Object.assign({ estado: { $in: ['en_cartera', 'depositado', 'cobrado', 'emitido'] } }, filtroOrg(req)))
           .sort({ fechaVencimiento: 1 }).limit(1000).toArray(),
         db.collection('ventas').find(Object.assign({ estado: { $ne: 'anulada' }, 'pagos.tipoValor': 'tarjeta' }, filtroOrg(req)))
           .project({ numero: 1, clienteNombre: 1, moneda: 1, pagos: 1 }).sort({ createdAt: -1 }).limit(500).toArray(),
@@ -416,7 +416,7 @@ router.get('/resumen', authOperar, async (req, res) => {
       const grupos = { cartera: [], depositados: [], emitidos: [] };
       cheques.forEach(c => {
         if (c.tipo === 'tercero' && c.estado === 'en_cartera') grupos.cartera.push(c);
-        else if (c.tipo === 'tercero' && c.estado === 'depositado') grupos.depositados.push(c);
+        else if (c.tipo === 'tercero' && (c.estado === 'depositado' || c.estado === 'cobrado')) grupos.depositados.push(c);
         else if (c.tipo === 'propio' && c.estado === 'emitido') grupos.emitidos.push(c);
       });
       const venc = (c) => c.fechaVencimiento ? new Date(c.fechaVencimiento) : null;
@@ -468,6 +468,55 @@ router.get('/resumen', authOperar, async (req, res) => {
       };
     });
     res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Transferencia entre cajas y/o bancos (4/10/2026, pedido de Mato): una
+// caja→banco (depósito de efectivo), banco→caja (extracción), caja→caja o
+// banco→banco. Genera un egreso en el origen y un ingreso en el destino, en
+// la misma moneda. Si el segundo falla, se revierte el primero.
+router.post('/transferencias', authOperar, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const origenTipo = normalizarTexto(b.origenTipo), destinoTipo = normalizarTexto(b.destinoTipo);
+    if (!['caja', 'banco'].includes(origenTipo) || !['caja', 'banco'].includes(destinoTipo)) throw err(400, 'Elegí origen y destino');
+    const origenId = toObjectId(b.origenId), destinoId = toObjectId(b.destinoId);
+    if (!origenId || !destinoId) throw err(400, 'Elegí origen y destino');
+    if (origenTipo === destinoTipo && String(origenId) === String(destinoId)) throw err(400, 'El origen y el destino no pueden ser la misma cuenta');
+    const monto = normalizarMontoPositivo(b.monto, 'El monto');
+    const nota = normalizarTexto(b.observaciones);
+    const fecha = b.fecha ? new Date(b.fecha) : new Date();
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const col = (t) => t === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos';
+      const [orig, dest] = await Promise.all([
+        db.collection(col(origenTipo)).findOne({ _id: origenId }),
+        db.collection(col(destinoTipo)).findOne({ _id: destinoId })
+      ]);
+      if (!orig || !dest) throw err(404, 'No se encontró la cuenta de origen o destino');
+      const monedaO = orig.moneda || 'ARS', monedaD = dest.moneda || 'ARS';
+      if (monedaO !== monedaD) throw err(400, `No se puede transferir entre monedas distintas (${monedaO} → ${monedaD}). Registrá la compra/venta de divisas como movimientos manuales.`);
+      const nombreO = orig.nombre, nombreD = dest.nombre;
+      const egreso = await aplicarMovimientoCuenta(db, req, {
+        cuentaTipo: origenTipo, cuentaId: origenId, tipo: 'egreso', monto, moneda: monedaO,
+        motivo: `Transferencia a ${destinoTipo === 'caja' ? 'caja' : 'banco'} ${nombreD}`, observaciones: nota, origen: 'transferencia', fecha
+      });
+      try {
+        await aplicarMovimientoCuenta(db, req, {
+          cuentaTipo: destinoTipo, cuentaId: destinoId, tipo: 'ingreso', monto, moneda: monedaD,
+          motivo: `Transferencia desde ${origenTipo === 'caja' ? 'caja' : 'banco'} ${nombreO}`, observaciones: nota, origen: 'transferencia', fecha
+        });
+      } catch (e) {
+        // Revierte el egreso para no perder plata en el camino.
+        await aplicarMovimientoCuenta(db, req, {
+          cuentaTipo: origenTipo, cuentaId: origenId, tipo: 'ingreso', monto, moneda: monedaO,
+          motivo: 'Reversión de transferencia fallida', observaciones: e.message, origen: 'transferencia', fecha: new Date()
+        });
+        throw e;
+      }
+      return { ok: true };
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -752,19 +801,21 @@ router.post('/cheques/:id/depositar', authOperar, async (req, res) => {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const cuentaId = toObjectId(req.body && req.body.cuentaId);
-    if (!cuentaId) throw err(400, 'Elegí en qué banco lo depositás');
+    // cuentaTipo 'banco' = depositar; 'caja' = cobrarlo en efectivo y mandarlo a una caja.
+    const cuentaTipo = (req.body && req.body.cuentaTipo) === 'caja' ? 'caja' : 'banco';
+    if (!cuentaId) throw err(400, cuentaTipo === 'caja' ? 'Elegí en qué caja lo cobrás' : 'Elegí en qué banco lo depositás');
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const cheque = await buscarCheque(db, id);
       if (cheque.tipo !== 'tercero') throw err(400, 'Solo se depositan cheques de terceros');
-      if (cheque.estado !== 'en_cartera') throw err(400, `Este cheque ya está "${cheque.estado}", no se puede depositar.`);
+      if (cheque.estado !== 'en_cartera') throw err(400, `Este cheque ya está "${cheque.estado}", no se puede ${cuentaTipo === 'caja' ? 'cobrar' : 'depositar'}.`);
       await aplicarMovimientoCuenta(db, req, {
-        cuentaTipo: 'banco', cuentaId, tipo: 'ingreso', monto: cheque.monto, moneda: cheque.moneda,
-        motivo: 'Depósito de cheque de tercero', observaciones: `Cheque ${cheque.numero || ''} — ${cheque.clienteNombre || ''}`.trim(),
+        cuentaTipo, cuentaId, tipo: 'ingreso', monto: cheque.monto, moneda: cheque.moneda,
+        motivo: cuentaTipo === 'caja' ? 'Cobro de cheque de tercero en caja' : 'Depósito de cheque de tercero', observaciones: `Cheque ${cheque.numero || ''} — ${cheque.clienteNombre || ''}`.trim(),
         origen: 'cheque', ventaId: cheque.ventaId, chequeId: cheque._id
       });
       const ahora = new Date();
-      await db.collection('cheques').updateOne({ _id: id }, { $set: { estado: 'depositado', depositadoEnCuentaId: cuentaId, updatedAt: ahora } });
+      await db.collection('cheques').updateOne({ _id: id }, { $set: { estado: cuentaTipo === 'caja' ? 'cobrado' : 'depositado', depositadoEnCuentaId: cuentaId, depositadoEnCuentaTipo: cuentaTipo, updatedAt: ahora } });
       return buscarCheque(db, id);
     });
     res.json(resultado);
@@ -784,9 +835,9 @@ router.post('/cheques/:id/rechazar', authOperar, async (req, res) => {
       const db = await getDb();
       const cheque = await buscarCheque(db, id);
       if (cheque.estado === 'rechazado' || cheque.estado === 'anulado') throw err(400, `Este cheque ya está "${cheque.estado}".`);
-      if (cheque.tipo === 'tercero' && cheque.estado === 'depositado') {
+      if (cheque.tipo === 'tercero' && (cheque.estado === 'depositado' || cheque.estado === 'cobrado')) {
         await aplicarMovimientoCuenta(db, req, {
-          cuentaTipo: 'banco', cuentaId: cheque.depositadoEnCuentaId, tipo: 'egreso', monto: cheque.monto, moneda: cheque.moneda,
+          cuentaTipo: cheque.depositadoEnCuentaTipo || 'banco', cuentaId: cheque.depositadoEnCuentaId, tipo: 'egreso', monto: cheque.monto, moneda: cheque.moneda,
           motivo: 'Rechazo de cheque de tercero depositado', observaciones: `Cheque ${cheque.numero || ''}`.trim(),
           origen: 'cheque', ventaId: cheque.ventaId, chequeId: cheque._id
         });
