@@ -520,6 +520,110 @@ router.post('/transferencias', authOperar, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Planilla de caja diaria (4/10/2026, pedido de Mato: "una planilla de caja
+// diaria para poder liquidar"). Para una caja (o banco) y un día: saldo
+// inicial, ingresos y egresos por origen, saldo final según el sistema, el
+// detalle de movimientos y el cierre del día (arqueo: efectivo contado vs
+// sistema). Un movimiento cargado con solo fecha ("2026-10-04") se guarda a
+// las 00:00 UTC, así que ese caso cuenta para ESE día; los movimientos con
+// hora real se asignan al día según la hora argentina (UTC-3).
+function diaDeMovimiento(f) {
+  const d = new Date(f);
+  const soloFecha = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0;
+  return soloFecha ? d.toISOString().slice(0, 10) : new Date(d.getTime() - 3 * 3600000).toISOString().slice(0, 10);
+}
+function validarDia(v) {
+  const t = normalizarTexto(v);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) throw err(400, 'Fecha inválida (AAAA-MM-DD)');
+  return t;
+}
+async function armarCajaDiaria(db, req, cuentaTipo, cuentaId, dia) {
+  const coleccion = cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos';
+  const cuenta = await db.collection(coleccion).findOne({ _id: cuentaId });
+  if (!cuenta) throw err(404, 'Cuenta no encontrada');
+  if (!cuentaHabilitada(cuenta, req)) throw err(403, 'No tenés habilitada esta cuenta en esta sucursal.');
+  const saldoDoc = await db.collection('tesoreria_saldos').findOne({ cuentaTipo, cuentaId });
+  const saldoActual = (saldoDoc && saldoDoc.saldo) || 0;
+  const desde = new Date(new Date(dia + 'T00:00:00Z').getTime() - 86400000);
+  const movs = await db.collection('tesoreria_movimientos').find({ cuentaTipo, cuentaId, fecha: { $gte: desde } }).sort({ fecha: 1, createdAt: 1 }).toArray();
+  const delta = (m) => m.tipo === 'ingreso' ? m.monto : -m.monto;
+  const desdeElDia = movs.filter(m => diaDeMovimiento(m.fecha) >= dia);
+  const delDia = desdeElDia.filter(m => diaDeMovimiento(m.fecha) === dia);
+  const netoDesdeElDia = desdeElDia.reduce((a, m) => a + delta(m), 0);
+  const saldoInicial = saldoActual - netoDesdeElDia;
+  const ingresos = delDia.filter(m => m.tipo === 'ingreso').reduce((a, m) => a + m.monto, 0);
+  const egresos = delDia.filter(m => m.tipo === 'egreso').reduce((a, m) => a + m.monto, 0);
+  const porOrigenMap = {};
+  delDia.forEach(m => {
+    const k = m.origen || 'manual';
+    porOrigenMap[k] = porOrigenMap[k] || { origen: k, ingresos: 0, egresos: 0, cantidad: 0 };
+    porOrigenMap[k][m.tipo === 'ingreso' ? 'ingresos' : 'egresos'] += m.monto;
+    porOrigenMap[k].cantidad++;
+  });
+  const cierre = await db.collection('tesoreria_cierres').findOne({ cuentaTipo, cuentaId, dia });
+  const cierres = await db.collection('tesoreria_cierres').find({ cuentaTipo, cuentaId }).sort({ dia: -1 }).limit(10).toArray();
+  return {
+    cuenta: { _id: cuenta._id, nombre: cuenta.nombre, moneda: cuenta.moneda || 'ARS', tipo: cuentaTipo, banco: cuenta.banco || '' },
+    dia, saldoInicial, ingresos, egresos, saldoFinal: saldoInicial + ingresos - egresos,
+    porOrigen: Object.keys(porOrigenMap).map(k => porOrigenMap[k]),
+    movimientos: delDia.map(m => ({ _id: m._id, fecha: m.fecha, tipo: m.tipo, monto: m.monto, motivo: m.motivo, observaciones: m.observaciones, origen: m.origen, usuarioNombre: m.usuarioNombre })),
+    cierre, cierres
+  };
+}
+router.get('/caja-diaria', authOperar, async (req, res) => {
+  try {
+    const cuentaTipo = req.query.cuentaTipo === 'banco' ? 'banco' : 'caja';
+    const cuentaId = toObjectId(req.query.cuentaId);
+    if (!cuentaId) throw err(400, 'Elegí una cuenta');
+    const dia = validarDia(req.query.dia);
+    res.json(await conReintento(async () => armarCajaDiaria(await getDb(), req, cuentaTipo, cuentaId, dia)));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/caja-diaria/cierre', authOperar, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const cuentaTipo = b.cuentaTipo === 'banco' ? 'banco' : 'caja';
+    const cuentaId = toObjectId(b.cuentaId);
+    if (!cuentaId) throw err(400, 'Elegí una cuenta');
+    const dia = validarDia(b.dia);
+    const contado = Number(b.efectivoContado);
+    if (!isFinite(contado) || contado < 0 || b.efectivoContado === '' || b.efectivoContado == null) throw err(400, 'Cargá el efectivo contado (puede ser 0).');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const plan = await armarCajaDiaria(db, req, cuentaTipo, cuentaId, dia);
+      if (plan.cierre) throw err(400, 'Este día ya está cerrado. Reabrilo si necesitás corregirlo.');
+      const doc = {
+        cuentaTipo, cuentaId, cuentaNombre: plan.cuenta.nombre, moneda: plan.cuenta.moneda, dia,
+        saldoInicial: plan.saldoInicial, ingresos: plan.ingresos, egresos: plan.egresos, saldoSistema: plan.saldoFinal,
+        efectivoContado: contado, diferencia: Math.round((contado - plan.saldoFinal) * 100) / 100,
+        observaciones: normalizarTexto(b.observaciones),
+        usuarioNombre: (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '',
+        orgId: req.orgId, createdAt: new Date()
+      };
+      const { insertedId } = await db.collection('tesoreria_cierres').insertOne(doc);
+      doc._id = insertedId;
+      return doc;
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/caja-diaria/cierre/:id', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const c = await db.collection('tesoreria_cierres').findOne({ _id: id });
+      if (!c) throw err(404, 'Cierre no encontrado');
+      const coleccion = c.cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos';
+      const cuenta = await db.collection(coleccion).findOne({ _id: c.cuentaId });
+      if (!cuentaHabilitada(cuenta, req)) throw err(403, 'No tenés habilitada esta cuenta en esta sucursal.');
+      await db.collection('tesoreria_cierres').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/movimientos', authOperar, async (req, res) => {
   try {
     const match = {};

@@ -139,6 +139,7 @@
   <nav>
     <button data-tab="saldos" class="active" onclick="showTab('saldos')">Saldos</button>
     <button data-tab="movimientos" onclick="showTab('movimientos')">Movimientos</button>
+    <button data-tab="cajadiaria" onclick="showTab('cajadiaria')">Caja diaria</button>
     <button data-tab="cheques" onclick="showTab('cheques')">Cheques</button>
   </nav>
   <main>
@@ -210,6 +211,18 @@
     </section>
 
     <!-- CHEQUES -->
+    <!-- CAJA DIARIA -->
+    <section id="tab-cajadiaria" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div style="min-width:240px;flex:1"><label>Caja / cuenta</label><select id="cdCuenta" onchange="cargarCajaDiaria()"></select></div>
+          <div style="min-width:170px"><label>Día</label><input id="cdDia" type="date" onchange="cargarCajaDiaria()"></div>
+          <div class="row"><button class="btn small secondary" onclick="cambiarDiaCajaDiaria(-1)">◀ Día anterior</button><button class="btn small secondary" onclick="cambiarDiaCajaDiaria(1)">Día siguiente ▶</button></div>
+        </div>
+      </div>
+      <div id="cdContenido"></div>
+    </section>
+
     <section id="tab-cheques" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between">
@@ -338,6 +351,7 @@ function showTab(tab){
   if (tab === 'saldos') cargarSaldos();
   if (tab === 'movimientos') cargarMovimientos();
   if (tab === 'cheques') cargarCheques();
+  if (tab === 'cajadiaria') iniciarCajaDiaria();
 }
 
 // -------------------------------------------------------------------
@@ -930,6 +944,153 @@ function opcionesCuentaTransferencia(){
   return cajasCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)}, saldo ${money(c.saldo)})</option>`).join('') +
     bancosCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (${escapeHtml(b.moneda)}, saldo ${money(b.saldo)})</option>`).join('');
 }
+// -------------------------------------------------------------------
+// CAJA DIARIA (planilla para liquidar) — 4/10/2026
+// -------------------------------------------------------------------
+let cajaDiariaActual = null;
+function hoyLocalISO(){ const d = new Date(Date.now() - 3*3600000); return d.toISOString().slice(0,10); }
+async function iniciarCajaDiaria(){
+  if (!cajasCache.length && !bancosCache.length) {
+    const [rc, rb] = await Promise.all([fetch(BASE + '/cajas', {headers: headersAuth()}), fetch(BASE + '/bancos', {headers: headersAuth()})]);
+    cajasCache = rc.ok ? await rc.json() : [];
+    bancosCache = rb.ok ? await rb.json() : [];
+  }
+  const sel = document.getElementById('cdCuenta');
+  const previo = sel.value;
+  sel.innerHTML = cajasCache.map(c => `<option value="caja:${c._id}">Caja — ${escapeHtml(c.nombre)} (${escapeHtml(c.moneda)})</option>`).join('') +
+    bancosCache.map(b => `<option value="banco:${b._id}">Banco — ${escapeHtml(b.nombre)} (${escapeHtml(b.moneda)})</option>`).join('');
+  if (previo) sel.value = previo;
+  if (!document.getElementById('cdDia').value) document.getElementById('cdDia').value = hoyLocalISO();
+  if (!sel.options.length) { document.getElementById('cdContenido').innerHTML = '<p class="muted">No tenés ninguna caja habilitada.</p>'; return; }
+  await cargarCajaDiaria();
+}
+function cambiarDiaCajaDiaria(delta){
+  const el = document.getElementById('cdDia');
+  const d = new Date((el.value || hoyLocalISO()) + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + delta);
+  el.value = d.toISOString().slice(0,10);
+  cargarCajaDiaria();
+}
+async function cargarCajaDiaria(){
+  const v = document.getElementById('cdCuenta').value;
+  const dia = document.getElementById('cdDia').value;
+  const cont = document.getElementById('cdContenido');
+  if (!v || !dia) { cont.innerHTML = ''; return; }
+  const [cuentaTipo, cuentaId] = v.split(':');
+  cont.innerHTML = '<p class="muted">Cargando…</p>';
+  let r;
+  try { r = await fetch(BASE + '/caja-diaria?cuentaTipo=' + cuentaTipo + '&cuentaId=' + cuentaId + '&dia=' + dia, {headers: headersAuth()}); } catch (e) { r = null; }
+  if (!r || !r.ok) { let m = 'No se pudo cargar la planilla.'; try { m = (await r.json()).error || m; } catch(e){} cont.innerHTML = `<p class="err">${escapeHtml(m)}</p>`; return; }
+  cajaDiariaActual = await r.json();
+  renderCajaDiaria();
+}
+function renderCajaDiaria(){
+  const d = cajaDiariaActual, m = d.cuenta.moneda, cont = document.getElementById('cdContenido');
+  const ORIG = { manual:'Manual', venta:'Cobro de venta', compra:'Pago de compra', cheque:'Cheque', transferencia:'Transferencia', cobro_cuenta:'Cobro a cuenta' };
+  const cierre = d.cierre;
+  const cierresPrev = (d.cierres || []).filter(c => c.dia !== d.dia);
+  cont.innerHTML = `
+    <div class="kpis">
+      ${kpiHtml('Saldo inicial', moneyMoneda(d.saldoInicial, m), 'Al comenzar el día')}
+      ${kpiHtml('Ingresos', moneyMoneda(d.ingresos, m), d.movimientos.filter(x=>x.tipo==='ingreso').length + ' movimientos')}
+      ${kpiHtml('Egresos', moneyMoneda(d.egresos, m), d.movimientos.filter(x=>x.tipo==='egreso').length + ' movimientos')}
+      ${kpiHtml('Saldo final (sistema)', moneyMoneda(d.saldoFinal, m), 'Lo que debería haber', d.saldoFinal < 0)}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Resumen por concepto</h3>
+      ${d.porOrigen.length ? `<table><thead><tr><th>Concepto</th><th>Mov.</th><th>Ingresos</th><th>Egresos</th></tr></thead><tbody>
+        ${d.porOrigen.map(o => `<tr><td>${ORIG[o.origen] || escapeHtml(o.origen)}</td><td>${o.cantidad}</td><td>${o.ingresos ? moneyMoneda(o.ingresos, m) : '—'}</td><td>${o.egresos ? moneyMoneda(o.egresos, m) : '—'}</td></tr>`).join('')}
+        <tr><td><strong>Total</strong></td><td></td><td><strong>${moneyMoneda(d.ingresos, m)}</strong></td><td><strong>${moneyMoneda(d.egresos, m)}</strong></td></tr>
+      </tbody></table>` : '<p class="muted">Sin movimientos en este día.</p>'}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Detalle de movimientos</h3>
+      ${d.movimientos.length ? `<div style="overflow-x:auto"><table><thead><tr><th>Hora</th><th>Concepto</th><th>Detalle</th><th>Usuario</th><th>Ingreso</th><th>Egreso</th></tr></thead><tbody>
+        ${d.movimientos.map(x => `<tr>
+          <td class="muted">${new Date(x.fecha).getUTCHours()===0 && new Date(x.fecha).getUTCMinutes()===0 ? '—' : new Date(x.fecha).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</td>
+          <td>${ORIG[x.origen] || escapeHtml(x.origen||'')}</td>
+          <td>${escapeHtml(x.motivo||'')}${x.observaciones ? ' <span class="muted">— ' + escapeHtml(x.observaciones) + '</span>' : ''}</td>
+          <td class="muted">${escapeHtml(x.usuarioNombre||'')}</td>
+          <td>${x.tipo==='ingreso' ? moneyMoneda(x.monto, m) : ''}</td><td>${x.tipo==='egreso' ? moneyMoneda(x.monto, m) : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted">Sin movimientos.</p>'}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Cierre y arqueo</h3>
+      ${cierre ? `
+        <div class="kpis">
+          ${kpiHtml('Efectivo contado', moneyMoneda(cierre.efectivoContado, m), 'Cerrado por ' + escapeHtml(cierre.usuarioNombre||'') + ' el ' + fechaHora(cierre.createdAt))}
+          ${kpiHtml('Saldo según sistema', moneyMoneda(cierre.saldoSistema, m), 'Al momento del cierre')}
+          ${kpiHtml('Diferencia', moneyMoneda(cierre.diferencia, m), cierre.diferencia === 0 ? 'Caja cuadrada' : (cierre.diferencia > 0 ? 'Sobrante' : 'Faltante'), cierre.diferencia < 0)}
+        </div>
+        ${cierre.observaciones ? `<p class="muted">${escapeHtml(cierre.observaciones)}</p>` : ''}
+        <button class="btn small danger" onclick="reabrirCajaDiaria('${cierre._id}')">Reabrir día</button>
+      ` : `
+        <p class="muted" style="margin-top:0">Contá el efectivo que hay en la caja y cargalo: se compara contra el saldo del sistema y se guarda el cierre del día.</p>
+        <div class="row">
+          <div style="min-width:200px"><label>Efectivo contado *</label><input id="cdContado" type="number" min="0" step="0.01" oninput="actualizarDiferenciaCajaDiaria()"></div>
+          <div style="min-width:200px"><label>Diferencia</label><div id="cdDif" style="padding:9px 0;font-weight:800">—</div></div>
+          <div style="flex:1;min-width:220px"><label>Observaciones</label><input id="cdObs" placeholder="Ej: faltante de $500 por vuelto"></div>
+        </div>
+        <div class="err" id="cdErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="cerrarCajaDiaria()">Cerrar caja del día</button>
+      `}
+      <button class="btn secondary" style="margin-top:10px;margin-left:6px" onclick="imprimirCajaDiaria()">🖨️ Imprimir planilla</button>
+      ${d.cuenta.tipo === 'caja' ? `<button class="btn secondary" style="margin-top:10px;margin-left:6px" onclick="abrirTransferencia()">🔁 Transferir a banco</button>` : ''}
+    </div>
+    ${cierresPrev.length ? `<div class="card"><h3 style="margin-top:0">Últimos cierres</h3><table><thead><tr><th>Día</th><th>Sistema</th><th>Contado</th><th>Diferencia</th><th></th></tr></thead><tbody>
+      ${cierresPrev.map(c => `<tr><td>${c.dia.split('-').reverse().join('/')}</td><td>${moneyMoneda(c.saldoSistema, m)}</td><td>${moneyMoneda(c.efectivoContado, m)}</td><td class="${c.diferencia<0?'vencido':''}">${moneyMoneda(c.diferencia, m)}</td><td><a href="#" onclick="event.preventDefault(); document.getElementById('cdDia').value='${c.dia}'; cargarCajaDiaria()">Ver</a></td></tr>`).join('')}
+    </tbody></table></div>` : ''}
+  `;
+}
+function actualizarDiferenciaCajaDiaria(){
+  const v = document.getElementById('cdContado').value;
+  const el = document.getElementById('cdDif');
+  if (v === '') { el.textContent = '—'; el.className = ''; return; }
+  const dif = Math.round((Number(v) - cajaDiariaActual.saldoFinal) * 100) / 100;
+  el.textContent = moneyMoneda(dif, cajaDiariaActual.cuenta.moneda) + (dif === 0 ? ' — cuadra' : dif > 0 ? ' (sobrante)' : ' (faltante)');
+  el.className = dif < 0 ? 'vencido' : '';
+}
+async function cerrarCajaDiaria(){
+  const errEl = document.getElementById('cdErr'); errEl.textContent = '';
+  const contado = document.getElementById('cdContado').value;
+  if (contado === '') { errEl.textContent = 'Cargá el efectivo contado'; return; }
+  const d = cajaDiariaActual;
+  try{
+    const r = await fetch(BASE + '/caja-diaria/cierre', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({
+      cuentaTipo: d.cuenta.tipo, cuentaId: d.cuenta._id, dia: d.dia, efectivoContado: contado, observaciones: document.getElementById('cdObs').value.trim()
+    })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCajaDiaria();
+  }catch(e){ errEl.textContent = e.message; }
+}
+async function reabrirCajaDiaria(id){
+  if (!confirm('¿Reabrir este día? Se borra el cierre guardado y se puede volver a cerrar.')) return;
+  const r = await fetch(BASE + '/caja-diaria/cierre/' + id, {method:'DELETE', headers: headersAuth()});
+  if (!r.ok) { let m = 'No se pudo reabrir'; try { m = (await r.json()).error || m; } catch(e){} alert(m); return; }
+  await cargarCajaDiaria();
+}
+function imprimirCajaDiaria(){
+  const d = cajaDiariaActual; if (!d) return;
+  const m = d.cuenta.moneda;
+  const w = window.open('', '_blank');
+  if (!w) { alert('Permití las ventanas emergentes para imprimir.'); return; }
+  const filas = d.movimientos.map(x => `<tr><td>${escapeHtml(x.motivo||'')}${x.observaciones ? ' — ' + escapeHtml(x.observaciones) : ''}</td><td style="text-align:right">${x.tipo==='ingreso' ? moneyMoneda(x.monto, m) : ''}</td><td style="text-align:right">${x.tipo==='egreso' ? moneyMoneda(x.monto, m) : ''}</td></tr>`).join('');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Caja diaria ${d.dia}</title>
+    <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px}h2{margin:0 0 4px}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #ccc;padding:5px 6px;text-align:left}th{font-size:11px;text-transform:uppercase}.r{text-align:right}.firma{margin-top:60px;display:flex;gap:60px}.firma div{border-top:1px solid #000;width:200px;text-align:center;padding-top:4px}</style></head><body>
+    <h2>Planilla de caja diaria</h2>
+    <div>${escapeHtml(d.cuenta.nombre)} (${m}) — ${d.dia.split('-').reverse().join('/')}</div>
+    <table><tr><td>Saldo inicial</td><td class="r">${moneyMoneda(d.saldoInicial, m)}</td></tr>
+    <tr><td>Ingresos</td><td class="r">${moneyMoneda(d.ingresos, m)}</td></tr>
+    <tr><td>Egresos</td><td class="r">${moneyMoneda(d.egresos, m)}</td></tr>
+    <tr><td><strong>Saldo final (sistema)</strong></td><td class="r"><strong>${moneyMoneda(d.saldoFinal, m)}</strong></td></tr>
+    ${d.cierre ? `<tr><td>Efectivo contado</td><td class="r">${moneyMoneda(d.cierre.efectivoContado, m)}</td></tr><tr><td>Diferencia</td><td class="r">${moneyMoneda(d.cierre.diferencia, m)}</td></tr>` : ''}</table>
+    <table><thead><tr><th>Detalle</th><th class="r">Ingreso</th><th class="r">Egreso</th></tr></thead><tbody>${filas || '<tr><td colspan="3">Sin movimientos</td></tr>'}</tbody></table>
+    <div class="firma"><div>Responsable de caja</div><div>Control</div></div>
+    <script>window.onload=function(){window.print();}<\/script></body></html>`);
+  w.document.close();
+}
+
 function abrirTransferencia(){
   const opciones = opcionesCuentaTransferencia();
   document.getElementById('modalRoot').innerHTML = `
@@ -968,6 +1129,7 @@ async function guardarTransferencia(){
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
     await cargarSaldos();
+    if (!document.getElementById('tab-cajadiaria').classList.contains('hidden')) await cargarCajaDiaria();
     if (!document.getElementById('tab-movimientos').classList.contains('hidden')) await cargarMovimientos();
   }catch(e){ errEl.textContent = e.message; }
 }
