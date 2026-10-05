@@ -112,15 +112,15 @@
     // alta/habilitación de cajas y bancos vive en Configuración, no acá.
     { nombre: 'Tesorería', items: [
       { key: 'tesoreria', href: '/admin-tesoreria.html', modulo: 'tesoreria', label: 'Tesorería', icon: ICONOS.tesoreria }
-    ]},
-    { nombre: 'Configuración', items: [
-      { key: 'usuarios', href: '/admin-usuarios.html', modulo: 'usuarios', label: 'Usuarios y roles', icon: ICONOS.usuarios },
-      // Bases y catálogos (1/10/2026): gestión de rubros/subrubros (y lo
-      // que se vaya sumando) que antes eran texto libre en Productos. Bajo
-      // el módulo de Productos porque es de ahí que cuelga (mismo criterio
-      // que /proveedores-lite en productos.js).
-      { key: 'bases', href: '/admin-config-bases.html', modulo: 'productos', label: 'Bases y catálogos', icon: ICONOS.bases }
     ]}
+  ];
+
+  // Configuración (4/10/2026, pedido de Mato): ya no es un grupo del menú
+  // lateral — vive en el desplegable del usuario, arriba a la derecha, junto
+  // con "Cerrar sesión".
+  const ITEMS_CONFIGURACION = [
+    { key: 'usuarios', href: '/admin-usuarios.html', modulo: 'usuarios', label: 'Configuración (usuarios, roles, notificaciones)', icon: ICONOS.usuarios },
+    { key: 'bases', href: '/admin-config-bases.html', modulo: 'productos', label: 'Bases y catálogos', icon: ICONOS.bases }
   ];
 
   function tieneModulo(rol, claveCombinada) {
@@ -190,6 +190,29 @@
       .pn-sidebar-footer button { display: flex; align-items: center; gap: 7px; width: 100%; background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; font-family: inherit; font-weight: 600; }
       .pn-sidebar-footer button:hover { border-color: var(--danger, #c53030); color: var(--danger, #c53030); }
       .pn-sidebar-footer button svg { width: 15px; height: 15px; }
+      .pn-usermenu { position: relative; display: inline-block; }
+      .pn-usermenu > button.pn-usermenu-btn {
+        display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--border);
+        color: var(--pn-ink); padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; font-weight: 600; max-width: 240px;
+      }
+      .pn-usermenu > button.pn-usermenu-btn:hover { border-color: var(--accent, #555); color: var(--accent, #555); }
+      .pn-usermenu-btn .pn-nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pn-usermenu-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+      .pn-usermenu-menu {
+        display: none; position: absolute; right: 0; top: calc(100% + 6px); min-width: 250px; z-index: 400;
+        background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 6px;
+        box-shadow: var(--shadow, 0 8px 24px rgba(0,0,0,.18));
+      }
+      .pn-usermenu.pn-abierto .pn-usermenu-menu { display: block; }
+      .pn-usermenu-menu a, .pn-usermenu-menu button.pn-um-item {
+        display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; border: none; background: none;
+        text-decoration: none; color: var(--pn-ink); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; text-align: left;
+      }
+      .pn-usermenu-menu a:hover, .pn-usermenu-menu button.pn-um-item:hover { background: var(--bg); }
+      .pn-usermenu-menu a.pn-activo { background: var(--accent-soft); color: var(--accent); }
+      .pn-usermenu-menu svg { width: 16px; height: 16px; flex-shrink: 0; }
+      .pn-usermenu-menu hr { border: none; border-top: 1px solid var(--border); margin: 5px 4px; }
+      .pn-usermenu-menu button.pn-um-salir:hover { color: var(--danger, #c53030); }
       .pn-toggle {
         display: none; position: fixed; top: 12px; left: 12px; z-index: 301; width: 38px; height: 38px;
         border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--pn-ink);
@@ -208,6 +231,49 @@
     const tag = document.createElement('style');
     tag.textContent = css;
     document.head.appendChild(tag);
+  }
+
+  function cerrarSesionPN() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ORG_KEY);
+    location.href = '/inicio.html';
+  }
+  // Reemplaza el "nombre + Cerrar sesión" de la barra de arriba de cada
+  // pantalla por un desplegable: nombre ▾ → Configuración, Bases y catálogos
+  // y Cerrar sesión. Se engancha al #topbarUser que ya tienen las pantallas.
+  function montarMenuUsuario(me, paginaActual, nombreUsuario) {
+    const spanUser = document.getElementById('topbarUser') || document.getElementById('oficinaNombre');
+    if (!spanUser || document.querySelector('.pn-usermenu')) return;
+    const raiz = spanUser.parentElement;
+    const btnLogoutOriginal = Array.from(raiz.querySelectorAll('button')).find(b => /logout/i.test(b.getAttribute('onclick') || '')) || null;
+    const contenedor = btnLogoutOriginal ? btnLogoutOriginal.parentElement : raiz;
+    const items = ITEMS_CONFIGURACION.filter(it => itemVisible(it, me));
+    const wrap = document.createElement('div');
+    wrap.className = 'pn-usermenu';
+    wrap.innerHTML = `
+      <button type="button" class="pn-usermenu-btn" aria-haspopup="true" aria-expanded="false">
+        ${ICONOS.usuarios}<span class="pn-nom">${escapeHtml(nombreUsuario || 'Mi usuario')}</span>${ICONOS.chevron}
+      </button>
+      <div class="pn-usermenu-menu" role="menu">
+        ${items.map(it => `<a href="${it.href}" class="${it.key === paginaActual ? 'pn-activo' : ''}">${it.icon}<span>${escapeHtml(it.label)}</span></a>`).join('')}
+        ${items.length ? '<hr>' : ''}
+        <button type="button" class="pn-um-item pn-um-salir">${ICONOS.salir}<span>Cerrar sesión</span></button>
+      </div>
+    `;
+    spanUser.style.display = 'none';
+    if (btnLogoutOriginal) btnLogoutOriginal.style.display = 'none';
+    if (btnLogoutOriginal) contenedor.insertBefore(wrap, btnLogoutOriginal); else contenedor.appendChild(wrap);
+    const btn = wrap.querySelector('.pn-usermenu-btn');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const abierto = wrap.classList.toggle('pn-abierto');
+      btn.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+    });
+    document.addEventListener('click', function (e) { if (!wrap.contains(e.target)) wrap.classList.remove('pn-abierto'); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') wrap.classList.remove('pn-abierto'); });
+    wrap.querySelector('.pn-um-salir').addEventListener('click', function () {
+      if (btnLogoutOriginal) btnLogoutOriginal.click(); else cerrarSesionPN();
+    });
   }
 
   function render(me, paginaActual, opts) {
@@ -284,10 +350,10 @@
         </div>
       ` : ''}
       <div class="pn-sidebar-nav">${gruposHtml}</div>
-      <div class="pn-sidebar-footer">
+      ${(document.getElementById('topbarUser') || document.getElementById('oficinaNombre')) ? '' : `<div class="pn-sidebar-footer">
         ${nombreUsuario ? `<span class="pn-nombre">${escapeHtml(nombreUsuario)}</span>` : ''}
         <button id="pnSidebarLogout">${ICONOS.salir}Cerrar sesión</button>
-      </div>
+      </div>`}
     `;
 
     document.body.insertBefore(aside, document.body.firstChild);
@@ -311,11 +377,9 @@
         location.reload();
       });
     }
-    document.getElementById('pnSidebarLogout').addEventListener('click', function () {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(ORG_KEY);
-      location.href = '/inicio.html';
-    });
+    const btnSidebarLogout = document.getElementById('pnSidebarLogout');
+    if (btnSidebarLogout) btnSidebarLogout.addEventListener('click', cerrarSesionPN);
+    montarMenuUsuario(me, paginaActual, nombreUsuario);
 
     function cerrarSidebarMovil() {
       document.body.classList.remove('pn-sidebar-abierta');
