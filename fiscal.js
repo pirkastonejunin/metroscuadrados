@@ -69,7 +69,9 @@ function estadoPublico(cfg) {
     ivaDefecto: cfg.ivaDefecto === undefined ? emision.IVA_DEFECTO : cfg.ivaDefecto,
     tieneClave: !!cfg.keyEnc, tieneCertificado: !!cfg.certPem,
     certVence: cfg.certVence || null, certSujeto: cfg.certSujeto || '',
-    solicitudPendiente: !!(cfg.keyEnc && !cfg.certPem),
+    solicitudPendiente: !!(cfg.keyEnc && !cfg.certPem && !cfg.certOrigenOrgId),
+    certOrigen: cfg.certOrigenOrgId ? { id: String(cfg.certOrigenOrgId), nombre: cfg.certOrigenNombre || '', invalido: !!cfg.certOrigenInvalido } : null,
+    organizacion: org.nombre || '',
     cuit: arca.soloDigitos(org.cuit), cuitValido: arca.cuitValido(org.cuit),
     razonSocial: org.razonSocial || org.nombre || '', condicionIva: org.condicionIva || null,
     secretoPropio: arca.usaSecretoPropio(),
@@ -82,18 +84,56 @@ router.get('/config', authFiscal, async (req, res) => {
   try {
     const orgId = exigirOrg(req);
     const cfg = await conReintento(async () => emision.getConfig(await getDb(), orgId));
-    res.json(estadoPublico(cfg));
+    const out = estadoPublico(cfg);
+    out.certificadosCompartibles = await conReintento(async () => candidatosCertificado(await getDb(), req, orgId, arca.soloDigitos((cfg.org || {}).cuit)));
+    res.json(out);
   } catch (e) { responder(res, e); }
 });
+
+// Sucursales con el MISMO CUIT que ya tienen un certificado propio cargado,
+// a las que el usuario tiene acceso: se puede reutilizar su certificado.
+async function candidatosCertificado(db, req, orgId, cuit) {
+  if (!arca.cuitValido(cuit)) return [];
+  const orgs = await orgsAccesibles(db, req);
+  const mismas = orgs.filter(o => String(o._id) !== String(orgId) && arca.soloDigitos(o.cuit) === cuit);
+  const out = [];
+  for (const o of mismas) {
+    const c = await db.collection('arca_config').findOne({ orgId: o._id });
+    if (c && c.certPem && c.keyEnc && !c.certOrigenOrgId) out.push({ id: String(o._id), nombre: o.nombre, puntoVenta: c.puntoVenta || null });
+  }
+  return out;
+}
+async function orgsAccesibles(db, req) {
+  if (req.usuario.rol.protegido) return db.collection('organizaciones').find({}).toArray();
+  const ids = req.usuario.orgIds.map(toObjectId).filter(Boolean);
+  return db.collection('organizaciones').find({ _id: { $in: ids } }).toArray();
+}
 
 router.put('/config', authFiscal, async (req, res) => {
   try {
     const orgId = exigirOrg(req);
     const b = req.body || {};
     const set = { updatedAt: new Date() };
+    const unset = {};
+    if (b.certOrigenOrgId !== undefined) {
+      if (!b.certOrigenOrgId) unset.certOrigenOrgId = '';
+      else {
+        const origen = toObjectId(b.certOrigenOrgId);
+        const okOrigen = origen && await conReintento(async () => {
+          const db = await getDb();
+          const cfgActual = await emision.getConfig(db, orgId);
+          const cands = await candidatosCertificado(db, req, orgId, arca.soloDigitos((cfgActual.org || {}).cuit));
+          return cands.some(c => c.id === String(origen));
+        });
+        if (!okOrigen) throw err(400, 'Esa sucursal no sirve para compartir el certificado: tiene que tener el mismo CUIT y un certificado propio ya cargado.');
+        set.certOrigenOrgId = origen;
+      }
+    }
     if (b.entorno !== undefined) {
       if (!['homologacion', 'produccion'].includes(b.entorno)) throw err(400, 'Entorno inválido (homologacion o produccion)');
-      set.entorno = b.entorno;
+      const actual = await conReintento(async () => emision.getConfig(await getDb(), orgId));
+      if (actual.certOrigenOrgId && !unset.certOrigenOrgId && b.entorno !== actual.entorno) throw err(400, `Esta sucursal usa el certificado de ${actual.certOrigenNombre || 'otra sucursal'}: el entorno lo define esa sucursal.`);
+      if (!(actual.certOrigenOrgId && !unset.certOrigenOrgId)) set.entorno = b.entorno;
     }
     if (b.puntoVenta !== undefined) {
       const n = Number(b.puntoVenta);
@@ -115,7 +155,7 @@ router.put('/config', authFiscal, async (req, res) => {
       if (set.entorno && previo && previo.entorno !== set.entorno) {
         await db.collection('arca_tickets').deleteMany({ orgId });
       }
-      await db.collection('arca_config').updateOne({ orgId }, { $set: set, $setOnInsert: { orgId, createdAt: new Date() } }, { upsert: true });
+      await db.collection('arca_config').updateOne({ orgId }, Object.assign({ $set: set, $setOnInsert: { orgId, createdAt: new Date() } }, Object.keys(unset).length ? { $unset: unset } : {}), { upsert: true });
       return emision.getConfig(db, orgId);
     });
     res.json(estadoPublico(cfg));
@@ -126,7 +166,7 @@ router.post('/csr', authFiscal, async (req, res) => {
   try {
     const orgId = exigirOrg(req);
     const cfg = await conReintento(async () => emision.getConfig(await getDb(), orgId));
-    if (cfg.certPem && !(req.body && req.body.confirmar)) {
+    if (cfg.certPem && !cfg.certOrigenOrgId && !(req.body && req.body.confirmar)) {
       throw err(409, 'Ya hay un certificado cargado. Si generás una solicitud nueva, el certificado actual deja de funcionar. Confirmalo para seguir.');
     }
     const org = cfg.org || {};
@@ -135,7 +175,7 @@ router.post('/csr', authFiscal, async (req, res) => {
       const db = await getDb();
       await db.collection('arca_config').updateOne({ orgId }, {
         $set: { keyEnc: arca.cifrar(keyPem), csrPem, updatedAt: new Date() },
-        $unset: { certPem: '', certVence: '', certSujeto: '', certHuella: '' },
+        $unset: { certPem: '', certVence: '', certSujeto: '', certHuella: '', certOrigenOrgId: '' },
         $setOnInsert: { orgId, createdAt: new Date(), entorno: 'homologacion' }
       }, { upsert: true });
       await db.collection('arca_tickets').deleteMany({ orgId });
@@ -237,6 +277,16 @@ function rangoFechas(q) {
   if (q.hasta) { const d = new Date(q.hasta + 'T23:59:59.999-03:00'); if (isNaN(d)) throw err(400, 'Fecha "hasta" inválida'); m.$lte = d; }
   return Object.keys(m).length ? m : null;
 }
+// Libros "consolidados": todas las sucursales (a las que el usuario tiene
+// acceso) con el mismo CUIT que la actual — el Libro IVA se presenta por
+// CUIT, no por sucursal. Sin ?consolidado=1 es solo la sucursal actual.
+async function ambitoLibro(db, req, orgId) {
+  if (String(req.query.consolidado || '') !== '1') return orgId;
+  const cfg = await emision.getConfig(db, orgId);
+  if (!arca.cuitValido(cfg.cuit)) return orgId;
+  const ids = (await orgsAccesibles(db, req)).filter(o => arca.soloDigitos(o.cuit) === cfg.cuit).map(o => o._id);
+  return ids.length > 1 ? { $in: ids } : orgId;
+}
 function r2(n) { return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100; }
 function fechaDDMMAAAA(d) {
   if (!d) return '';
@@ -294,10 +344,10 @@ router.get('/libro-iva-ventas', authFiscal, async (req, res) => {
   try {
     const orgId = exigirOrg(req);
     rangoFechas(req.query); // valida el formato
-    const match = { orgId, esFiscal: true, cae: { $exists: true }, estado: { $ne: 'anulada' } };
     const { ventas: ventasTodas, entorno } = await conReintento(async () => {
       const db = await getDb();
       const cfg = await emision.getConfig(db, orgId);
+      const match = { orgId: await ambitoLibro(db, req, orgId), esFiscal: true, cae: { $exists: true }, estado: { $ne: 'anulada' } };
       return { entorno: cfg.entorno, ventas: await db.collection('ventas').find(match).sort({ fiscalFecha: 1, numeroFiscal: 1 }).toArray() };
     });
     // En producción el libro NO incluye lo emitido en homologación (no tiene validez fiscal).
@@ -330,9 +380,9 @@ router.get('/libro-iva-compras', authFiscal, async (req, res) => {
   try {
     const orgId = exigirOrg(req);
     const rango = rangoFechas(req.query);
-    const match = { orgId, esFiscal: true, estado: { $ne: 'anulada' } };
-    if (rango) match.fecha = rango;
     const db = await getDb();
+    const match = { orgId: await ambitoLibro(db, req, orgId), esFiscal: true, estado: { $ne: 'anulada' } };
+    if (rango) match.fecha = rango;
     const [compras, gastos] = await Promise.all([
       db.collection('compras').find(match).sort({ fecha: 1 }).toArray(),
       db.collection('gastos').find(match).sort({ fecha: 1 }).toArray()
@@ -389,7 +439,7 @@ router.get('/retenciones', authFiscal, async (req, res) => {
   try {
     const orgId = exigirOrg(req);
     const rango = rangoFechas(req.query);
-    const match = { orgId };
+    const match = { orgId: await conReintento(async () => ambitoLibro(await getDb(), req, orgId)) };
     if (rango) match.fecha = rango;
     const lista = await conReintento(async () => (await getDb()).collection('retenciones_sufridas').find(match).sort({ fecha: 1 }).toArray());
     const ORIGEN = { cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', compra: 'Compra', gasto: 'Gasto' };

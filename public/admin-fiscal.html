@@ -121,13 +121,24 @@
 
     <section id="tab-conexion">
       <div class="card">
-        <h2 style="margin:0 0 6px;font-size:16px">Estado de la conexión</h2>
+        <h2 style="margin:0 0 6px;font-size:16px">Estado de la conexión <span id="sucursalNombre" class="muted" style="font-weight:600"></span></h2>
+        <div class="muted" style="margin-bottom:6px">Cada sucursal tiene su propio punto de venta. Elegí la sucursal en el selector del menú lateral.</div>
         <div id="estado"></div>
         <div id="estadoMsg"></div>
       </div>
 
       <div class="card">
         <h2 style="margin:0 0 6px;font-size:16px">Cómo conectar</h2>
+        <div class="paso hidden" id="bloqueCompartir">
+          <h3>Certificado compartido</h3>
+          <div class="muted">Si otra sucursal tiene el mismo CUIT, podés usar su certificado y no repetir los pasos 1 a 3. Solo falta el punto de venta de esta sucursal.</div>
+          <div class="row" style="margin-top:8px">
+            <select id="cfgCertOrigen" style="max-width:360px"></select>
+            <button data-iconizado="1" class="btn" onclick="guardarCertOrigen()">Aplicar</button>
+          </div>
+          <div id="certOrigenMsg"></div>
+        </div>
+        <div id="pasosCert">
         <div class="paso">
           <h3>Paso 1 · Generar la solicitud de certificado</h3>
           <div class="muted">El sistema crea una clave privada (queda guardada cifrada en el servidor, nunca sale) y una solicitud (CSR) para pedirle el certificado a ARCA.</div>
@@ -153,12 +164,13 @@
           <div class="row" style="margin-top:8px"><button data-iconizado="1" class="btn" onclick="guardarCert()">Guardar certificado</button></div>
           <div id="certMsg"></div>
         </div>
+        </div>
         <div class="paso">
           <h3>Paso 4 · Configuración y prueba</h3>
           <div class="grid3">
             <div><label>Entorno</label>
               <select id="cfgEntorno"><option value="homologacion">Homologación (pruebas, sin validez fiscal)</option><option value="produccion">Producción (facturas reales)</option></select></div>
-            <div><label>Punto de venta (web service)</label><input id="cfgPv" type="number" min="1" max="99998" placeholder="Ej. 3"></div>
+            <div><label>Punto de venta de esta sucursal</label><input id="cfgPv" type="number" min="1" max="99998" placeholder="Ej. 3"></div>
             <div><label>IVA por defecto de productos</label>
               <select id="cfgIva"><option value="21">21 %</option><option value="10.5">10,5 %</option><option value="27">27 %</option><option value="5">5 %</option><option value="2.5">2,5 %</option><option value="0">0 %</option></select></div>
           </div>
@@ -189,6 +201,7 @@
     <section id="tab-libro" class="hidden">
       <div class="card">
         <div class="row">
+          <label style="display:flex;gap:6px;align-items:center;align-self:flex-end;margin:0"><input type="checkbox" id="fConsol" onchange="cargarLibro()"> Todas las sucursales con el mismo CUIT</label>
           <div><label>Desde</label><input type="date" id="fDesde"></div>
           <div><label>Hasta</label><input type="date" id="fHasta"></div>
           <button data-iconizado="1" class="btn" onclick="cargarLibro()">Ver</button>
@@ -266,7 +279,7 @@ async function iniciarApp(){
     if (!tieneAcceso) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
   }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
   resolverOrgActiva(me);
-  PiedraSidebar.render(me, 'fiscal', { ocultarOrg: true });
+  PiedraSidebar.render(me, 'fiscal');
   $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
   $('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
   const hoy = new Date(), ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
@@ -297,6 +310,16 @@ function pintarEstado(c){
     fila(c.entorno === 'produccion', 'Entorno: <b>' + (c.entorno === 'produccion' ? 'Producción' : 'Homologación (pruebas)') + '</b>') +
     fila(!!c.listo, c.listo ? '<b>Listo para emitir</b>' : escapeHtml(c.faltante || '—'));
   $('estadoMsg').innerHTML = c.entorno === 'produccion' ? '' : '<div class="aviso">Estás en <b>homologación</b>: las facturas que se emitan tienen CAE de prueba y <b>no tienen validez fiscal</b>. Seguí facturando por Dux hasta pasar a producción.</div>';
+  $('sucursalNombre').textContent = c.organizacion ? '· ' + c.organizacion : '';
+  const comp = c.certOrigen;
+  $('pasosCert').classList.toggle('hidden', !!comp);
+  $('cfgEntorno').disabled = !!comp;
+  const cand = c.certificadosCompartibles || [];
+  $('bloqueCompartir').classList.toggle('hidden', !(comp || cand.length));
+  $('cfgCertOrigen').innerHTML = '<option value="">Usar certificado propio</option>' + cand.map(o => '<option value="' + escapeHtml(o.id) + '">Usar el de ' + escapeHtml(o.nombre) + '</option>').join('') +
+    (comp && !cand.some(o => o.id === comp.id) ? '<option value="' + escapeHtml(comp.id) + '">Usar el de ' + escapeHtml(comp.nombre) + '</option>' : '');
+  $('cfgCertOrigen').value = comp ? comp.id : '';
+  $('certOrigenMsg').innerHTML = comp ? '<div class="' + (comp.invalido ? 'err' : 'okmsg') + '">' + (comp.invalido ? 'El certificado de ' + escapeHtml(comp.nombre) + ' ya no es válido para esta sucursal (¿cambió el CUIT o se borró?).' : 'Esta sucursal usa el certificado de ' + escapeHtml(comp.nombre) + '.') + '</div>' : '';
   $('cfgEntorno').value = c.entorno || 'homologacion';
   $('cfgPv').value = c.puntoVenta || '';
   $('cfgIva').value = String(c.ivaDefecto == null ? 21 : c.ivaDefecto);
@@ -342,6 +365,14 @@ async function guardarCert(){
     msg('certMsg','Certificado guardado y verificado contra la clave y el CUIT.', true);
   }catch(e){ msg('certMsg', e.message); }
 }
+async function guardarCertOrigen(){
+  msg('certOrigenMsg','');
+  try{
+    const v = $('cfgCertOrigen').value;
+    pintarEstado(await api('/config', {method:'PUT', body: JSON.stringify({certOrigenOrgId: v || null})}));
+    await cargarCfg();
+  }catch(e){ msg('certOrigenMsg', e.message); }
+}
 async function guardarCfg(){
   msg('cfgMsg','');
   try{
@@ -351,7 +382,7 @@ async function guardarCfg(){
     }
     const pv = $('cfgPv').value;
     const c = await api('/config', {method:'PUT', body: JSON.stringify({
-      entorno, puntoVenta: pv === '' ? null : Number(pv), ivaDefecto: Number($('cfgIva').value),
+      entorno: (CFG && CFG.certOrigen) ? undefined : entorno, puntoVenta: pv === '' ? null : Number(pv), ivaDefecto: Number($('cfgIva').value),
       preciosIncluyenIvaDefecto: $('cfgPrecios').value === '1', emisionAutomatica: $('cfgAuto').value === '1'
     })});
     pintarEstado(c);
@@ -383,6 +414,7 @@ function qsLibro(extra){
   const p = new URLSearchParams();
   if ($('fDesde').value) p.set('desde', $('fDesde').value);
   if ($('fHasta').value) p.set('hasta', $('fHasta').value);
+  if ($('fConsol').checked) p.set('consolidado', '1');
   if (extra) p.set('formato', extra);
   return '?' + p.toString();
 }

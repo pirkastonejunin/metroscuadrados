@@ -214,12 +214,15 @@ const ticketsEnCurso = new Map();
 
 async function obtenerTicket(db, cfg, servicio) {
   if (!cfg || !cfg.certPem || !cfg.keyEnc) throw err(400, 'Todavía no hay un certificado cargado para conectarse con ARCA (Fiscal → Configuración).');
-  const filtro = { orgId: cfg.orgId, entorno: cfg.entorno, servicio };
+  // Si el certificado se comparte entre sucursales, el ticket también: ARCA no
+  // da un segundo ticket vigente para el mismo certificado y servicio.
+  const dueno = cfg.ticketOrgId || cfg.orgId;
+  const filtro = { orgId: dueno, entorno: cfg.entorno, servicio };
   const guardado = await db.collection('arca_tickets').findOne(filtro);
   if (guardado && guardado.expira > new Date(Date.now() + 5 * 60 * 1000) && guardado.certHuella === cfg.certHuella) {
     return { token: guardado.token, sign: guardado.sign };
   }
-  const clave = `${cfg.orgId}|${cfg.entorno}|${servicio}`;
+  const clave = `${dueno}|${cfg.entorno}|${servicio}`;
   if (ticketsEnCurso.has(clave)) return ticketsEnCurso.get(clave);
   const p = (async () => {
     const tra = `<?xml version="1.0" encoding="UTF-8"?><loginTicketRequest version="1.0"><header><uniqueId>${Math.floor(Date.now() / 1000)}</uniqueId><generationTime>${isoAR(-10 * 60 * 1000)}</generationTime><expirationTime>${isoAR(10 * 60 * 1000)}</expirationTime></header><service>${esc(servicio)}</service></loginTicketRequest>`;

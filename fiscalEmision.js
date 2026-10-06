@@ -32,6 +32,23 @@ async function getConfig(db, orgId) {
   if (!cfg) return { orgId, entorno: 'homologacion', puntoVenta: null, org, vacia: true, emisionAutomatica: true, preciosIncluyenIvaDefecto: true, ivaDefecto: IVA_DEFECTO };
   cfg.org = org;
   cfg.cuit = arca.soloDigitos(org && org.cuit);
+  // Certificado compartido (sucursales con el mismo CUIT): se usan la clave,
+  // el certificado y el entorno de la sucursal "dueña"; el punto de venta y
+  // el resto de la configuración siguen siendo propios de esta.
+  if (cfg.certOrigenOrgId) {
+    const srcCfg = await db.collection('arca_config').findOne({ orgId: cfg.certOrigenOrgId });
+    const srcOrg = await db.collection('organizaciones').findOne({ _id: cfg.certOrigenOrgId });
+    if (srcCfg && srcCfg.certPem && srcCfg.keyEnc && srcOrg && arca.soloDigitos(srcOrg.cuit) === cfg.cuit) {
+      cfg.certPem = srcCfg.certPem; cfg.keyEnc = srcCfg.keyEnc; cfg.certHuella = srcCfg.certHuella;
+      cfg.certVence = srcCfg.certVence; cfg.certSujeto = srcCfg.certSujeto;
+      cfg.entorno = srcCfg.entorno || 'homologacion';
+      cfg.ticketOrgId = cfg.certOrigenOrgId;
+      cfg.certOrigenNombre = srcOrg.nombre;
+    } else {
+      cfg.certOrigenInvalido = true;
+      delete cfg.certPem; delete cfg.keyEnc;
+    }
+  }
   if (cfg.emisionAutomatica === undefined) cfg.emisionAutomatica = true;
   if (cfg.preciosIncluyenIvaDefecto === undefined) cfg.preciosIncluyenIvaDefecto = true;
   if (cfg.ivaDefecto === undefined) cfg.ivaDefecto = IVA_DEFECTO;
