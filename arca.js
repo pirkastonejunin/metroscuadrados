@@ -32,12 +32,12 @@ const DESTINOS = {
   homologacion: {
     wsaa: 'https://wsaahomo.afip.gov.ar/ws/services/LoginCms',
     wsfe: 'https://wswhomo.afip.gov.ar/wsfev1/service.asmx',
-    padron: 'https://awshomo.arca.gov.ar/sr-padron/webservices/personaServiceA5'
+    padron: 'https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5'
   },
   produccion: {
     wsaa: 'https://wsaa.afip.gov.ar/ws/services/LoginCms',
     wsfe: 'https://servicios1.afip.gov.ar/wsfev1/service.asmx',
-    padron: 'https://aws.arca.gov.ar/sr-padron/webservices/personaServiceA5'
+    padron: 'https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5'
   }
 };
 function destino(entorno, cual) {

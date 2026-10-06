@@ -924,32 +924,98 @@ function abrirNuevoClienteDesdeVenta(){
   sub.className = 'modal-bg';
   sub.style.zIndex = '60';
   sub.onclick = function(e){ if (e.target === sub) sub.remove(); };
+  // El CUIT va primero (5/10/2026, pedido de Mato): sin CUIT no se puede
+  // facturar, y al cargarlo se consulta ARCA y se completan los datos solos.
   sub.innerHTML = `
     <div class="modal">
       <span class="close-x" onclick="this.closest('.modal-bg').remove()">✕</span>
       <h2>Nuevo cliente</h2>
-      <div><label>Apellido / Razón social *</label><input id="ncvNombre"></div>
+      <div><label>CUIT / CUIL</label><input id="ncvCuit" inputmode="numeric" placeholder="20-12345678-9" oninput="ncvCuitCambio()"></div>
+      <div class="muted" id="ncvArcaMsg" style="margin-top:4px;font-size:12px">Al cargar el CUIT completo se traen los datos desde ARCA.</div>
+      <div style="margin-top:10px"><label>Apellido / Razón social *</label><input id="ncvNombre"></div>
       <div style="margin-top:10px"><label>Categoría fiscal *</label><select id="ncvCategoriaFiscal">${CATEGORIA_FISCAL_OPCIONES.map(o=>`<option value="${o.v}">${o.l}</option>`).join('')}</select></div>
+      <div style="margin-top:10px"><label>Domicilio</label><input id="ncvDomicilio"></div>
       <div class="grid2" style="margin-top:10px">
-        <div><label>Teléfono</label><input id="ncvTelefono"></div>
-        <div><label>Email</label><input id="ncvEmail" type="email"></div>
+        <div><label>Localidad</label><input id="ncvLocalidad"></div>
+        <div><label>Provincia</label><input id="ncvProvincia"></div>
       </div>
+      <div class="grid2" style="margin-top:10px">
+        <div><label>Código postal</label><input id="ncvCodigoPostal"></div>
+        <div><label>Teléfono</label><input id="ncvTelefono"></div>
+      </div>
+      <div style="margin-top:10px"><label>Email</label><input id="ncvEmail" type="email"></div>
       <div class="err" id="ncvErr"></div>
       <button class="btn" style="margin-top:10px" onclick="guardarNuevoClienteDesdeVenta()">Guardar cliente</button>
     </div>
   `;
   document.body.appendChild(sub);
+  document.getElementById('ncvCuit').focus();
+}
+function ncvFormatoCuit(d){ return d.length === 11 ? d.slice(0,2) + '-' + d.slice(2,10) + '-' + d.slice(10) : d; }
+let ncvTimer = null, ncvUltimaConsulta = '';
+function ncvCuitCambio(){
+  const inp = document.getElementById('ncvCuit');
+  const digitos = inp.value.replace(/\D/g, '').slice(0, 11);
+  inp.value = ncvFormatoCuit(digitos);
+  clearTimeout(ncvTimer);
+  const msg = document.getElementById('ncvArcaMsg');
+  if (digitos.length < 11) { msg.textContent = 'Al cargar el CUIT completo se traen los datos desde ARCA.'; ncvUltimaConsulta = ''; return; }
+  if (digitos === ncvUltimaConsulta) return;
+  // ¿Ya existe un cliente con ese CUIT? Se avisa y se ofrece usarlo.
+  const existente = clientesCache.find(c => String(c.cuit || '').replace(/\D/g, '') === digitos);
+  if (existente) {
+    msg.innerHTML = 'Ya existe un cliente con este CUIT: <strong>' + escapeHtml(existente.apellidoRazonSocial || '') + '</strong>. <a href="#" onclick="ncvUsarExistente(\'' + existente._id + '\');return false">Usar ese cliente</a>';
+    return;
+  }
+  ncvTimer = setTimeout(() => ncvConsultarArca(digitos), 250);
+}
+function ncvUsarExistente(id){
+  document.getElementById('nvCliente').value = id;
+  const c = clientesCache.find(x => String(x._id) === String(id));
+  if (c) document.getElementById('nvBuscar').value = textoCliente(c);
+  document.getElementById('ncvModalBg').remove();
+}
+async function ncvConsultarArca(digitos){
+  const msg = document.getElementById('ncvArcaMsg');
+  ncvUltimaConsulta = digitos;
+  msg.textContent = 'Consultando ARCA…';
+  try{
+    const r = await fetch('/api/fiscal/consulta-cuit/' + digitos, {headers: headersAuthOrg(ventaOrgSeleccionada)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo consultar ARCA');
+    if (!document.getElementById('ncvCuit') || document.getElementById('ncvCuit').value.replace(/\D/g,'') !== digitos) return; // el usuario ya cambió el CUIT
+    const poner = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    poner('ncvNombre', d.razonSocial); poner('ncvDomicilio', d.domicilio); poner('ncvLocalidad', d.localidad);
+    poner('ncvProvincia', d.provincia); poner('ncvCodigoPostal', d.codigoPostal);
+    if (d.categoriaFiscal) poner('ncvCategoriaFiscal', d.categoriaFiscal);
+    msg.textContent = 'Datos traídos de ARCA: ' + (d.razonSocial || '') + (d.categoriaFiscal ? '' : ' (revisá la categoría fiscal)') + '.';
+    if (d.estadoClave && String(d.estadoClave).toUpperCase() !== 'ACTIVO') msg.textContent += ' Ojo: ARCA informa la clave como ' + d.estadoClave + '.';
+  }catch(e){
+    ncvUltimaConsulta = '';
+    msg.textContent = e.message + ' — Podés completar los datos a mano.';
+  }
 }
 async function guardarNuevoClienteDesdeVenta(){
+  const cuitDigitos = document.getElementById('ncvCuit').value.replace(/\D/g, '');
   const body = {
     apellidoRazonSocial: document.getElementById('ncvNombre').value.trim(),
     categoriaFiscal: document.getElementById('ncvCategoriaFiscal').value,
+    cuit: cuitDigitos ? ncvFormatoCuit(cuitDigitos) : '',
+    domicilio: document.getElementById('ncvDomicilio').value.trim(),
+    localidad: document.getElementById('ncvLocalidad').value.trim(),
+    provincia: document.getElementById('ncvProvincia').value.trim(),
+    codigoPostal: document.getElementById('ncvCodigoPostal').value.trim(),
     telefono: document.getElementById('ncvTelefono').value.trim(),
     email: document.getElementById('ncvEmail').value.trim()
   };
   const errDiv = document.getElementById('ncvErr');
   errDiv.textContent = '';
   if (!body.apellidoRazonSocial) { errDiv.textContent = 'El apellido / razón social es obligatorio'; return; }
+  if (cuitDigitos && cuitDigitos.length !== 11) { errDiv.textContent = 'El CUIT tiene 11 dígitos'; return; }
+  // Factura A (Responsable Inscripto o Monotributista) exige CUIT.
+  if (!cuitDigitos && (body.categoriaFiscal === 'responsable_inscripto' || body.categoriaFiscal === 'monotributista')) {
+    errDiv.textContent = 'Para facturar a un Responsable Inscripto o Monotributista hace falta el CUIT.'; return;
+  }
   try{
     const r = await fetch('/api/clientes', {method:'POST', headers: headersAuthJsonOrg(ventaOrgSeleccionada), body: JSON.stringify(body)});
     const data = await r.json();

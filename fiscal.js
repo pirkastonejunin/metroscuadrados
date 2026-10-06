@@ -49,9 +49,9 @@ function err(status, message) { return Object.assign(new Error(message), { statu
 function responder(res, e) { res.status(e.status || 500).json({ error: e.message }); }
 
 const authFiscal = [authUsuario, resolverOrg, requiereModulo('fiscal')];
-// La consulta de CUIT la usan también Clientes y Proveedores.
+// La consulta de CUIT la usan también Clientes, Proveedores y Ventas (cliente nuevo desde una venta).
 const authConsultaCuit = [authUsuario, resolverOrg, (req, res, next) => {
-  if (['fiscal', 'clientes', 'proveedores'].some(m => tieneModulo(req.usuario, m))) return next();
+  if (['fiscal', 'clientes', 'proveedores', 'ventas'].some(m => tieneModulo(req.usuario, m))) return next();
   res.status(403).json({ error: 'Tu usuario no tiene acceso a este módulo. Pedile a un administrador que te lo habilite.' });
 }];
 

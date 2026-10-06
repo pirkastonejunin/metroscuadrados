@@ -377,7 +377,7 @@ function formularioCliente(c){
       <div><label>Número documento</label><input id="fcNumeroDocumento" value="${escapeHtml(c.numeroDocumento||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div><label>CUIT / CUIL</label><input id="fcCuit" value="${escapeHtml(c.cuit||'')}" placeholder="20-12345678-9">
+      <div><label>CUIT / CUIL</label><input id="fcCuit" oninput="autoBuscarCuit('fc')" value="${escapeHtml(c.cuit||'')}" placeholder="20-12345678-9">
         <button type="button" data-iconizado="1" class="btn small secondary" style="margin-top:4px" onclick="buscarCuitEnArca('fc','fcApellidoRazonSocial',true)">Buscar en ARCA</button></div>
       <div><label>Lista de precio por defecto</label><select id="fcListaPrecioPorDefecto">${opcionesListaPrecioCliente(c.listaPrecioPorDefecto)}</select></div>
       <div><label>Condición de pago</label><input id="fcCondicionPago" value="${escapeHtml(c.condicionPago||'')}"></div>
@@ -894,6 +894,16 @@ async function confirmarImportar(){
 // Consulta de CUIT en ARCA (5/10/2026): completa razón social, domicilio y
 // categoría fiscal con los datos del padrón. No pisa lo que ya está cargado
 // salvo la categoría fiscal; si falla, el formulario sigue igual.
+let autoCuitUltimo = '';
+// Al completar los 11 dígitos se consulta ARCA solo (sin pisar lo ya cargado).
+function autoBuscarCuit(pref){
+  const d = document.getElementById(pref + 'Cuit').value.replace(/\D/g, '');
+  if (d.length !== 11) { autoCuitUltimo = ''; return; }
+  if (d === autoCuitUltimo) return;
+  autoCuitUltimo = d;
+  const nombreId = pref === 'fc' ? 'fcApellidoRazonSocial' : 'fpRazonSocial';
+  buscarCuitEnArca(pref, nombreId, pref === 'fc');
+}
 async function buscarCuitEnArca(pref, idNombre, conCategoria){
   const inp = document.getElementById(pref + 'Cuit');
   const err = document.getElementById(pref + 'Err');
