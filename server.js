@@ -74,6 +74,10 @@ app.use('/api/gastos', gastosRouter);
 const tesoreriaRouter = require('./tesoreria');
 app.use('/api/tesoreria', tesoreriaRouter);
 
+// Fiscal (5/10/2026): conexión con ARCA, facturación electrónica, libros de IVA.
+const fiscalRouter = require('./fiscal');
+app.use('/api/fiscal', fiscalRouter);
+
 const API_BASE = 'https://api.tiendanube.com/v1';
 const NAMESPACE = process.env.METAFIELD_NAMESPACE || 'calculadora_m2';
 const KEY_COBERTURA = 'cobertura_m2_caja';

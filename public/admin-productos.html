@@ -1083,7 +1083,7 @@ function renderListasPrecioModal(){
   cont.innerHTML = `
     <div style="overflow-x:auto">
     <table>
-      <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Aplica a</th><th>Cálculo</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>% sobre costo</th><th>Aplica a</th><th>Cálculo</th><th>Precios</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         ${listasPrecioModalCache.map(l => {
           const nombreEsc = escapeHtml(l.nombre).replace(/'/g,"\\'");
@@ -1106,6 +1106,13 @@ function renderListasPrecioModal(){
                      <option value="costo_porcentaje" ${l.formula!=='cf_x_bulto'?'selected':''}>Costo + %</option>
                      <option value="cf_x_bulto" ${l.formula==='cf_x_bulto'?'selected':''}>Consumidor Final × bulto</option>
                    </select>`}
+            </td>
+            <td>
+              <select style="width:170px" title="Para facturar: ¿los precios de esta lista ya incluyen el IVA?" onchange="cambiarIncluyeIvaLista('${l._id}', this.value)">
+                <option value="" ${typeof l.incluyeIva!=='boolean'?'selected':''}>Criterio por defecto</option>
+                <option value="si" ${l.incluyeIva===true?'selected':''}>Incluyen IVA</option>
+                <option value="no" ${l.incluyeIva===false?'selected':''}>Son netos (+ IVA)</option>
+              </select>
             </td>
             <td><span class="pill ${l.activa!==false?'activo':'inactivo'}">${l.activa!==false?'Activa':'Inactiva'}</span></td>
             <td style="white-space:nowrap">
@@ -1151,6 +1158,21 @@ async function cambiarFormulaLista(id, valor){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarListasPrecioModal();
+  }catch(e){
+    alert(e.message);
+    await cargarListasPrecioModal();
+  }
+}
+
+// Si los precios de la lista incluyen IVA (5/10/2026, parte fiscal): decide
+// cómo se discrimina el IVA al facturar. "Criterio por defecto" usa el de
+// Fiscal → Configuración.
+async function cambiarIncluyeIvaLista(id, valor){
+  try{
+    const incluyeIva = valor === 'si' ? true : (valor === 'no' ? false : null);
+    const r = await fetch(BASE + '/listas-precio/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({incluyeIva})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
   }catch(e){
     alert(e.message);
     await cargarListasPrecioModal();

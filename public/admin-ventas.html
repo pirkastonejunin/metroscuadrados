@@ -447,6 +447,8 @@ function listaPrecioSeleccionadaVenta(){
 // Listado de ventas
 // -------------------------------------------------------------------
 const ESTADO_LABEL = { pendiente: 'Pendiente (stock comprometido)', parcialmente_entregada: 'Entrega parcial', entregada: 'Entregada (remito generado)', anulada: 'Anulada' };
+// Fecha de hoy en la hora local (toISOString da la de UTC: después de las 21 h en Argentina ya es "mañana").
+function hoyLocal(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 let ventasCache = [];
 
 async function cargarVentas(){
@@ -462,7 +464,7 @@ async function cargarVentas(){
   if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
   body.innerHTML = ventasCache.map(v => `
     <tr>
-      <td><strong>${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}</strong></td>
+      <td><strong>${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}</strong>${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>
       <td class="muted">${fechaCorta(v.fecha)}</td>
       <td>${escapeHtml(v.clienteNombre)}</td>
       <td>${money(v.total)}</td>
@@ -671,7 +673,7 @@ function puedeElegirSucursal(){
 // verdad, es solo para separar la numeración de antemano.
 const TIPO_COMPROBANTE_LABEL = {
   comprobante_x: 'Comprobante X (interno, no fiscal)',
-  fiscal: 'Fiscal (para cuando esté ARCA)',
+  fiscal: 'Factura electrónica (ARCA)',
   nota_credito: 'Nota de Crédito',
   nota_debito: 'Nota de Débito'
 };
@@ -749,7 +751,7 @@ async function abrirNuevaVenta(prefill){
             </div>
           </div>
           <div><label>Vendedor</label><select id="nvVendedor">${opcionesVendedorVenta(NOMBRE_USUARIO)}</select></div>
-          <div><label>Fecha</label><input id="nvFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="nvFecha" type="date" value="${hoyLocal()}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Moneda</label><select id="nvMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
@@ -1256,6 +1258,10 @@ async function guardarNuevaVenta(){
     // avisoRemito (2/10/2026): la venta se guardó igual aunque elegiste
     // entrega inmediata — no había stock físico para generar el remito
     // en el momento, así que quedó pendiente con el stock comprometido.
+    // avisoFiscal (5/10/2026): la venta se guardó pero ARCA no autorizó el
+    // comprobante (conexión sin configurar, rechazo o corte): queda
+    // pendiente y se reintenta desde el detalle.
+    if (data.avisoFiscal) alert('La venta se guardó, pero el comprobante todavía NO tiene CAE de ARCA:\n\n' + data.avisoFiscal + '\n\nQuedó pendiente — podés reintentar desde el detalle de la venta.');
     if (data.avisoRemito) alert('La venta se guardó, pero no se pudo generar el remito todavía:\n\n' + data.avisoRemito + '\n\nQuedó pendiente — generá el remito desde el detalle cuando haya stock.');
     // Si esta venta viene de "Convertir en venta" en Presupuestos, se
     // deja la trazabilidad del lado del presupuesto (no bloquea la venta
@@ -1330,6 +1336,7 @@ function verDetalle(id){
           <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(v.saldoPendiente)}</span></div>
         </div>
 
+        ${bloqueFiscal(v)}
         ${v.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(v.observaciones)}</p>` : ''}
         ${v.estado === 'pendiente' ? `<p class="muted" style="margin-top:10px">Stock comprometido, remito sin generar todavía.</p>` : ''}
 
@@ -1341,7 +1348,8 @@ function verDetalle(id){
           <span class="muted" style="font-size:12px">Comprobante:</span>
           ${botonesImprimible(BASE+'/'+v._id+'/comprobante')}
           ${(v.estado !== 'anulada' && (v.tipoComprobante === 'fiscal' || v.tipoComprobante === 'comprobante_x')) ? `<button class="btn small secondary" onclick="generarNotaCreditoDesdeVenta('${v._id}')">Generar Nota de Crédito</button>` : ''}
-          ${v.estado !== 'anulada' ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
+          ${(v.estado !== 'anulada' && !v.cae) ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
+          ${v.cae ? `<span class="muted" style="font-size:12px">Con CAE no se anula: corregilo con una Nota de Crédito.</span>` : ''}
         </div>
         <div class="section-title" style="margin-top:14px">Remitos</div>
         <div id="dvRemitos"><p class="muted">Cargando...</p></div>
@@ -1606,7 +1614,7 @@ function abrirCobro(id){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="ncCuentaWrap"><label id="ncCuentaLabel">¿A qué caja va? *</label><select id="ncCuenta">${opcionesCuentaCobro('efectivo')}</select></div>
-          <div><label>Fecha *</label><input id="ncFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha *</label><input id="ncFecha" type="date" value="${hoyLocal()}"></div>
         </div>
         <div id="ncChequeWrap" class="hidden" style="margin-top:10px">
           <div class="grid2">
@@ -1618,7 +1626,7 @@ function abrirCobro(id){
             <div><label>CUIT del librador</label><input id="ncChequeCuit" placeholder="Opcional"></div>
           </div>
           <div class="grid2" style="margin-top:10px">
-            <div><label>Fecha de emisión</label><input id="ncChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Fecha de emisión</label><input id="ncChequeFechaEmision" type="date" value="${hoyLocal()}"></div>
             <div><label>Vencimiento *</label><input id="ncChequeVencimiento" type="date"></div>
           </div>
         </div>
@@ -1720,6 +1728,38 @@ function generarNotaCreditoDesdeVenta(id){
       precioUnitario: it.precioUnitario
     }))
   });
+}
+
+// Estado fiscal (5/10/2026): CAE y número de ARCA, o el motivo por el que
+// todavía no hay y el botón para reintentar.
+function bloqueFiscal(v){
+  if (!v.esFiscal || v.tipoComprobante === 'comprobante_x') return '';
+  const homo = v.fiscalEntorno && v.fiscalEntorno !== 'produccion';
+  if (v.cae) {
+    const cv = String(v.caeVto || '').replace(/-/g, '').slice(0, 8);
+    const vto = cv.length === 8 ? cv.slice(6,8)+'/'+cv.slice(4,6)+'/'+cv.slice(0,4) : '';
+    return `<div class="section-title">Comprobante fiscal</div>
+      <p class="muted" style="margin:4px 0"><strong>N° ${String(v.puntoVenta).padStart(4,'0')}-${String(v.numeroFiscal).padStart(8,'0')}</strong> — CAE ${escapeHtml(String(v.cae))}${vto ? ' (vence ' + vto + ')' : ''}${homo ? ' — <strong>HOMOLOGACIÓN: sin validez fiscal</strong>' : ''}</p>`;
+  }
+  const est = v.fiscalEstado || 'pendiente';
+  const txt = est === 'autorizando' ? 'Autorizando en ARCA…' : (est === 'rechazada' ? 'ARCA rechazó el comprobante' : 'Pendiente de autorización en ARCA');
+  return `<div class="section-title">Comprobante fiscal</div>
+    <p class="muted" style="margin:4px 0"><strong>${txt}.</strong> ${escapeHtml(v.fiscalMensaje || '')}</p>
+    ${v.estado !== 'anulada' ? `<div class="row" style="margin-top:6px"><button data-iconizado="1" class="btn small" id="btnAutorizarArca" onclick="autorizarEnArca('${v._id}')">Pedir CAE a ARCA</button></div>` : ''}`;
+}
+async function autorizarEnArca(id){
+  const btn = document.getElementById('btnAutorizarArca');
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Consultando a ARCA…'; }
+  try{
+    const r = await fetch('/api/fiscal/ventas/' + id + '/autorizar', {method:'POST', headers: headersAuthJson(), body: '{}'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas();
+    verDetalle(id);
+  }catch(e){
+    alert(e.message);
+    try { await cargarVentas(); verDetalle(id); } catch(_) {}
+  }
 }
 
 async function anularVenta(id){

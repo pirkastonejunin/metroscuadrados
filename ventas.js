@@ -81,6 +81,11 @@ const { aplicarMovimientoCuenta, cuentaHabilitada } = require('./tesoreria');
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
+// Fiscal (5/10/2026, "parte fiscal") — IVA por alícuota y autorización en
+// ARCA (CAE) de las ventas fiscales. Ver fiscalEmision.js / arca.js.
+const emisionFiscal = require('./fiscalEmision');
+const arcaLib = require('./arca');
+const QRCode = require('qrcode');
 
 // Retenciones sufridas en un cobro (5/10/2026, pedido de Mato: "en
 // cobranzas, muchas veces tenemos retenciones") — ver impuestos.js. El
@@ -198,7 +203,10 @@ function prefijoComprobante(tipo) { return PREFIJO_COMPROBANTE[tipo] || 'X'; }
 // parte fiscal") — por ahora el comprobante sigue imprimiéndose como
 // "<letra>-<correlativo>".
 function letraFiscalParaCliente(cliente) {
-  return (cliente && cliente.categoriaFiscal === 'responsable_inscripto') ? 'A' : 'B';
+  // Un Responsable Inscripto emite A a otro Responsable Inscripto y también al
+  // monotributista; B al resto (consumidor final, exento, no alcanzado).
+  const cat = cliente && cliente.categoriaFiscal;
+  return (cat === 'responsable_inscripto' || cat === 'monotributista') ? 'A' : 'B';
 }
 
 // Columnas del Excel de export (30/9/2026, pedido de Mato: "todas las
@@ -691,7 +699,11 @@ async function normalizarItems(db, req, itemsRaw) {
     // cantidadEntregada (3/10/2026, pedido de Mato: "una venta puede
     // tener varios remitos" — el cliente puede retirar parcialmente) va
     // acumulando cuánto de este ítem ya salió por remito; arranca en 0.
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, cantidadEntregada: 0 });
+    // porcentajeIva (5/10/2026, parte fiscal): alícuota de IVA del producto al
+    // momento de la venta; null si el producto no la tiene cargada (para una
+    // venta fiscal se usa entonces la alícuota por defecto de Fiscal).
+    const porcentajeIva = (producto && producto.porcentajeIva !== undefined && producto.porcentajeIva !== null && producto.porcentajeIva !== '') ? Number(producto.porcentajeIva) : null;
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, porcentajeIva, cantidadEntregada: 0 });
   }
   return { items, subtotal };
 }
@@ -903,7 +915,12 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     // no hay punto de venta propio (sin AFIP, ver "Decisiones de alcance
     // v1" más arriba), así que se imprime solo el correlativo interno,
     // con el mismo relleno de ceros a la izquierda.
-    const numeroDigitos = String(venta.numero).padStart(5, '0');
+    const numeroDigitos = venta.cae
+      ? `${String(venta.puntoVenta).padStart(4, '0')}-${String(venta.numeroFiscal).padStart(8, '0')}`
+      : String(venta.numero).padStart(5, '0');
+    // Factura electrónica (5/10/2026): si la venta tiene bloque fiscal, el
+    // detalle muestra neto, alícuota y total con IVA de cada línea.
+    const fiscalV = (venta.fiscal && venta.fiscal.discriminaIva && Array.isArray(venta.fiscal.items) && venta.fiscal.items.length === (venta.items || []).length) ? venta.fiscal : null;
     // Columna "Bultos" propia (3/10/2026, 2da vuelta — pedido de Mato: "no
     // aparecen los bultos... quiero que lo hagas tal cual dux"), en vez de
     // una línea chica debajo de la cantidad: Dux siempre tiene esa
@@ -916,8 +933,9 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     // cerámicas por m2) donde un bulto es MENOS de 1 m2 —
     // `unidadesPorBulto` queda como 0.4, no como un entero mayor a 1.
     // Esa condición descartaba justo esos casos. Tiene que ser `> 0`.
-    const filas = (venta.items || []).map(it => {
+    const filas = (venta.items || []).map((it, idx) => {
       const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
+      const fl = fiscalV ? fiscalV.items[idx] : null;
       const unidad = (prod && prod.unidad) ? prod.unidad : '';
       const cantidadHtml = `${numImp(it.cantidad)}${unidad ? ' ' + escHtml(unidad) : ''}`;
       const bultosHtml = (prod && prod.unidadesPorBulto > 0) ? numImp(it.cantidad / prod.unidadesPorBulto) : '—';
@@ -926,15 +944,21 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
           <td>${escHtml(it.sku || '—')} - ${escHtml(it.nombre)}</td>
           <td class="num">${cantidadHtml}</td>
           <td class="num">${bultosHtml}</td>
-          <td class="num">${moneyImp(it.precioUnitario, venta.moneda)}</td>
-          <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
-          <td class="num">0%</td>
-          <td class="num">${moneyImp(it.subtotal, venta.moneda)}</td>
+          <td class="num">${moneyImp(fl ? (it.cantidad ? fl.neto / it.cantidad : 0) : it.precioUnitario, venta.moneda)}</td>
+          <td class="num">${moneyImp(fl ? fl.neto : it.subtotal, venta.moneda)}</td>
+          <td class="num">${fl ? String(fl.porcentajeIva).replace('.', ',') + '%' : '0%'}</td>
+          <td class="num">${moneyImp(fl ? fl.total : it.subtotal, venta.moneda)}</td>
         </tr>
       `;
     }).join('');
     const esNota = venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito';
-    const ivaClienteLabel = (cliente && cliente.categoriaFiscal && CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal]) || '';
+    // Con CAE, el receptor impreso es el que se mandó a ARCA, no el dato vivo
+    // del cliente (que pudo editarse después).
+    const catFiscalImpresa = (venta.cae && venta.fiscalCondIvaReceptor)
+      ? (Object.keys(arcaLib.COND_IVA_RECEPTOR).find(k => arcaLib.COND_IVA_RECEPTOR[k] === venta.fiscalCondIvaReceptor) || (cliente && cliente.categoriaFiscal))
+      : (cliente && cliente.categoriaFiscal);
+    const ivaClienteLabel = (catFiscalImpresa && CATEGORIA_FISCAL_LABEL[catFiscalImpresa]) || '';
+    const cuitImpreso = (venta.cae && venta.fiscalDocNro && venta.fiscalDocNro !== '0') ? String(venta.fiscalDocNro) : (cliente ? cliente.cuit : '');
     const detalleVenta = [];
     if (venta.vendedor) detalleVenta.push(`Vendedor: ${escHtml(venta.vendedor)}`);
     if (venta.moneda && venta.moneda !== 'ARS') detalleVenta.push(`Moneda: ${escHtml(venta.moneda)}`);
@@ -946,14 +970,40 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     const headerHtml = encabezadoComprobante(org, {
       letra: prefijo,
       numeroFmt: numeroDigitos,
-      fecha: fechaCorta(venta.fecha),
-      tituloGrande: TITULO_COMPROBANTE[venta.tipoComprobante] || 'COMPROBANTE'
+      fecha: (venta.cae && /^\d{8}$/.test(String(venta.fiscalFecha || ''))) ? `${String(venta.fiscalFecha).slice(6, 8)}/${String(venta.fiscalFecha).slice(4, 6)}/${String(venta.fiscalFecha).slice(0, 4)}` : fechaCorta(venta.fecha),
+      tituloGrande: TITULO_COMPROBANTE[venta.tipoComprobante] || 'COMPROBANTE',
+      codigo: venta.cae ? String(venta.cbteTipo).padStart(3, '0') : null
     });
+    // Aviso y pie fiscal (5/10/2026): CAE + QR si está autorizada; carteles
+    // claros si está pendiente de autorizar o si se autorizó en el entorno de
+    // PRUEBA de ARCA (esa factura no tiene validez fiscal).
+    let avisoFiscalHtml = '';
+    let pieFiscalHtml = '';
+    if (venta.esFiscal && !venta.cae) {
+      avisoFiscalHtml = '<div class="cmp-homologacion">COMPROBANTE PENDIENTE DE AUTORIZACIÓN EN ARCA — TODAVÍA SIN VALOR FISCAL</div>';
+    }
+    if (venta.cae) {
+      if (venta.fiscalEntorno !== 'produccion') avisoFiscalHtml = '<div class="cmp-homologacion">AUTORIZADO EN EL ENTORNO DE PRUEBA DE ARCA (HOMOLOGACIÓN) — NO TIENE VALIDEZ FISCAL</div>';
+      const urlQr = arcaLib.urlQr({ fecha: venta.fiscalFecha, cuit: org && org.cuit, ptoVta: venta.puntoVenta, cbteTipo: venta.cbteTipo, cbteNro: venta.numeroFiscal,
+        importe: venta.total, moneda: venta.fiscalMoneda || 'PES', cotiz: venta.fiscalCotiz || 1, docTipo: venta.fiscalDocTipo, docNro: venta.fiscalDocNro, cae: venta.cae });
+      const qrImg = await QRCode.toDataURL(urlQr, { margin: 0, width: 220 });
+      const vto = venta.caeVto ? fechaCorta(venta.caeVto) : '';
+      pieFiscalHtml = `
+        <div class="cmp-fiscal-pie">
+          <img src="${qrImg}" alt="QR de ARCA">
+          <div class="cmp-cae">
+            <div><strong>CAE Nº:</strong> ${escHtml(venta.cae)}</div>
+            <div><strong>Fecha de vencimiento del CAE:</strong> ${escHtml(vto)}</div>
+            <div class="muted" style="font-size:11px">Comprobante autorizado por ARCA.</div>
+          </div>
+        </div>`;
+    }
     const bodyHtml = `
+      ${avisoFiscalHtml}
       ${recuadroClienteComprobante({
         nombre: venta.clienteNombre,
         iva: ivaClienteLabel,
-        cuit: cliente ? cliente.cuit : '',
+        cuit: cuitImpreso,
         domicilio: cliente ? cliente.domicilio : '',
         localidad: cliente ? cliente.localidad : '',
         provincia: cliente ? cliente.provincia : '',
@@ -967,14 +1017,19 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
         <tbody>${filas || '<tr><td colspan="7" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
       <table class="totales">
+        ${fiscalV ? `
+        <tr><td>Subtotal neto</td><td class="num">${moneyImp(fiscalV.neto, venta.moneda)}</td></tr>
+        ${(fiscalV.grupos || []).map(g => `<tr><td>IVA ${String(g.porcentaje).replace('.', ',')}%</td><td class="num">${moneyImp(g.importe, venta.moneda)}</td></tr>`).join('')}
+        ` : `
         <tr><td>Subtotal</td><td class="num">${moneyImp(venta.subtotal, venta.moneda)}</td></tr>
         ${venta.descuentoMonto ? `<tr><td>Descuento</td><td class="num">-${moneyImp(venta.descuentoMonto, venta.moneda)}</td></tr>` : ''}
-        <tr><td>Monto IVA</td><td class="num">${moneyImp(0, venta.moneda)}</td></tr>
+        <tr><td>Monto IVA</td><td class="num">${moneyImp(0, venta.moneda)}</td></tr>`}
         <tr class="total-final"><td>Total</td><td class="num">${moneyImp(venta.total, venta.moneda)}</td></tr>
         ${venta.tipoComprobante === 'nota_credito' ? '' : `<tr><td>Cobrado</td><td class="num">${moneyImp(venta.totalCobrado, venta.moneda)}</td></tr>`}
         ${venta.saldoPendiente > 0 ? `<tr><td>Saldo pendiente</td><td class="num">${moneyImp(venta.saldoPendiente, venta.moneda)}</td></tr>` : ''}
       </table>
       ${org && org.condicionVenta ? `<div class="cmp-condicion-venta"><strong>Condición de venta:</strong><br>${escHtml(org.condicionVenta)}</div>` : ''}
+      ${pieFiscalHtml}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(paginaImprimible({
@@ -1131,7 +1186,10 @@ router.post('/', authAdmin, async (req, res) => {
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    // "2026-10-05" (solo día) se toma como mediodía de Argentina: con new Date()
+    // directo sería medianoche UTC = el día anterior a las 21 h, y la factura
+    // saldría con la fecha corrida.
+    const fecha = body.fecha ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(body.fecha)) ? `${body.fecha}T12:00:00-03:00` : body.fecha) : new Date();
     // Comprobante de origen (botón "Generar Nota de Crédito" desde una
     // venta ya cargada, precarga estos datos) — opcional, solo
     // informativo/para imprimir la referencia en el PDF.
@@ -1157,7 +1215,7 @@ router.post('/', authAdmin, async (req, res) => {
         ? 'X'
         : tipoComprobante === 'fiscal'
           ? letraFiscalParaCliente(cliente)
-          : (esFiscalNota ? letraFiscalParaCliente(cliente) : 'X');
+          : (esFiscalNota ? ((comprobanteOrigenLetra === 'A' || comprobanteOrigenLetra === 'B') ? comprobanteOrigenLetra : letraFiscalParaCliente(cliente)) : 'X');
       const esFiscal = letra !== 'X';
       if (depositoId) {
         const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
@@ -1168,7 +1226,20 @@ router.post('/', authAdmin, async (req, res) => {
       // Mato) — puede quedar pendiente de retiro mientras entra
       // mercadería o se fabrica. No hay validación de stock acá; el
       // chequeo real es al generar el remito (ver generarRemitoDeVenta).
-      const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
+      let total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
+      // Bloque fiscal (5/10/2026): para un comprobante fiscal se discrimina el
+      // IVA según la alícuota de cada producto. Si los precios de la lista
+      // son NETOS, el IVA se suma y el total de la venta pasa a ser el de la
+      // factura (si ya incluyen IVA, el total no cambia).
+      let fiscal = null;
+      if (esFiscal) {
+        const cfgFiscal = await emisionFiscal.getConfig(db, req.orgId);
+        const incluyeIva = await emisionFiscal.preciosIncluyenIvaDe(db, cfgFiscal, body.listaPrecioId ? toObjectId(body.listaPrecioId) : null);
+        try {
+          fiscal = emisionFiscal.calcularFiscalVenta({ items, descuentoPorcentaje, descuentoMonto, preciosIncluyenIva: incluyeIva, letra, ivaDefecto: cfgFiscal.ivaDefecto });
+        } catch (eFiscal) { throw err(400, eFiscal.message); }
+        total = fiscal.total;
+      }
       // Comprobante X sigue contando con la clave de siempre (no romper
       // la numeración histórica); Factura y Nota de Crédito/Débito ahora
       // cuentan por separado para cada letra (A, B o X), como realmente
@@ -1222,6 +1293,9 @@ router.post('/', authAdmin, async (req, res) => {
         descuentoMonto,
         subtotal,
         total,
+        fiscal,
+        fiscalEstado: esFiscal ? 'pendiente' : null,
+        fiscalMensaje: null,
         pagos: [],
         totalCobrado: 0,
         // Una Nota de Crédito no se "cobra" — ya quedó resuelta al
@@ -1311,9 +1385,33 @@ router.post('/', authAdmin, async (req, res) => {
       }
       return venta;
     });
-    res.json(resultado);
+    res.json(await autorizarAlGuardar(req, resultado));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+
+// Autorización automática en ARCA al guardar una venta fiscal (5/10/2026,
+// pedido de Mato: "automático al guardar"). Si ARCA falla o no está
+// configurado, la venta NO se pierde: queda 'pendiente' con el motivo en
+// `avisoFiscal`, y se reintenta con el botón "Autorizar en ARCA".
+async function autorizarAlGuardar(req, venta) {
+  if (!venta || !venta.esFiscal) return venta;
+  try {
+    const db = await getDb();
+    const cfg = await emisionFiscal.getConfig(db, req.orgId);
+    if (cfg.emisionAutomatica === false) return venta;
+    if (emisionFiscal.listoParaEmitir(cfg)) {
+      // Sin configurar todavía: se guarda igual, avisando una sola línea.
+      return Object.assign({}, venta, { avisoFiscal: 'Venta guardada. La factura quedó pendiente de autorizar: ' + emisionFiscal.listoParaEmitir(cfg) });
+    }
+    return await emisionFiscal.autorizarVenta(db, { orgId: req.orgId, ventaId: venta._id, usuarioNombre: (req.usuario && req.usuario.nombre) || '' });
+  } catch (e) {
+    try {
+      const db = await getDb();
+      const actual = await db.collection('ventas').findOne({ _id: venta._id });
+      return Object.assign({}, actual || venta, { avisoFiscal: 'La venta se guardó, pero no se pudo autorizar en ARCA: ' + e.message + ' Podés reintentar con "Autorizar en ARCA".' });
+    } catch (e2) { return Object.assign({}, venta, { avisoFiscal: 'La venta se guardó, pero no se pudo autorizar en ARCA: ' + e.message }); }
+  }
+}
 
 // Genera un remito de una venta "pendiente" o "parcialmente_entregada"
 // — recién ahí se descuenta de verdad el stock que ya estaba
@@ -1380,6 +1478,10 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta ya está anulada.');
+      // Un comprobante con CAE existe para ARCA: no se borra, se compensa (5/10/2026).
+      if (venta.cae) throw err(400, `Este comprobante ya fue autorizado por ARCA (CAE ${venta.cae}) y no se puede anular: hacé una Nota de Crédito.`);
+      if (venta.fiscalEstado === 'autorizando') throw err(409, 'Se está autorizando en ARCA en este momento. Esperá unos segundos.');
+      if (venta.fiscalIntento) throw err(409, 'La autorización en ARCA de este comprobante quedó incierta (se cortó la conexión). Pedí el CAE de nuevo desde el detalle para confirmar si ARCA lo emitió; después, si hace falta, hacé una Nota de Crédito.');
 
       // (3/10/2026) una sola función cubre los tres casos — pendiente sin
       // nada entregado, entregada del todo, o con uno o varios remitos
@@ -1412,7 +1514,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       const ahora = new Date();
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       await db.collection('ventas').updateOne(
-        { _id: id },
+        { _id: id, cae: { $exists: false }, fiscalEstado: { $ne: 'autorizando' } },
         { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
       );
       return db.collection('ventas').findOne({ _id: id });

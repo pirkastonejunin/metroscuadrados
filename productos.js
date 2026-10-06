@@ -840,6 +840,10 @@ router.post('/listas-precio', authAdmin, async (req, res) => {
       const ahora = new Date();
       const nueva = {
         nombre, porcentaje, predeterminada: false, activa: true, alcance, formula, productosIds: [],
+        // incluyeIva (5/10/2026, parte fiscal): true = los precios de esta lista YA
+        // incluyen IVA; false = son netos y el IVA se suma; null = usar el
+        // criterio por defecto de Fiscal.
+        incluyeIva: typeof (req.body || {}).incluyeIva === 'boolean' ? req.body.incluyeIva : null,
         orden: 100, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
       };
       const r = await db.collection('productos_listas_precio').insertOne(nueva);
@@ -864,6 +868,11 @@ router.put('/listas-precio/:id', authAdmin, async (req, res) => {
       const porcentaje = Number(body.porcentaje);
       if (!Number.isFinite(porcentaje)) throw err(400, 'El % de margen tiene que ser un número');
       set.porcentaje = porcentaje;
+    }
+    // Se puede cambiar también en la lista predeterminada (5/10/2026).
+    if (body.incluyeIva !== undefined) {
+      if (body.incluyeIva !== null && typeof body.incluyeIva !== 'boolean') throw err(400, 'incluyeIva tiene que ser true, false o null');
+      set.incluyeIva = body.incluyeIva;
     }
     const doc = await conReintento(async () => {
       const db = await getDb();

@@ -335,7 +335,8 @@ function formularioProveedor(p){
       <div><label>Número documento</label><input id="fpNumeroDocumento" value="${escapeHtml(p.numeroDocumento||'')}"></div>
     </div>
     <div class="grid3" style="margin-top:10px">
-      <div><label>CUIT / CUIL</label><input id="fpCuit" value="${escapeHtml(p.cuit||'')}" placeholder="30-12345678-9"></div>
+      <div><label>CUIT / CUIL</label><input id="fpCuit" value="${escapeHtml(p.cuit||'')}" placeholder="30-12345678-9">
+        <button type="button" data-iconizado="1" class="btn small secondary" style="margin-top:4px" onclick="buscarCuitEnArca('fp','fpRazonSocial',false)">Buscar en ARCA</button></div>
       <div><label>Condición de pago</label><input id="fpCondicionPago" value="${escapeHtml(p.condicionPago||'')}" placeholder="Ej: 30 días fecha factura"></div>
       <div><label>Días de pago</label><input id="fpDiasPago" type="number" min="0" step="1" value="${p.diasPago!=null?p.diasPago:''}"></div>
     </div>
@@ -682,6 +683,31 @@ function cerrarDetalleMovimientoProveedor(){
   if (el) el.remove();
 }
 
+
+// Consulta de CUIT en ARCA (5/10/2026): completa razón social, domicilio y
+// categoría fiscal con los datos del padrón. No pisa lo que ya está cargado
+// salvo la categoría fiscal; si falla, el formulario sigue igual.
+async function buscarCuitEnArca(pref, idNombre, conCategoria){
+  const inp = document.getElementById(pref + 'Cuit');
+  const err = document.getElementById(pref + 'Err');
+  const cuit = (inp.value || '').replace(/\D/g, '');
+  if (cuit.length !== 11) { err.textContent = 'Cargá el CUIT completo (11 dígitos) para buscarlo en ARCA'; return; }
+  err.textContent = 'Consultando ARCA…';
+  try{
+    const r = await fetch('/api/fiscal/consulta-cuit/' + cuit, {headers: headersAuth()});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo consultar ARCA');
+    const poner = (id, val, forzar) => { const el = document.getElementById(id); if (el && val && (forzar || !el.value.trim())) el.value = val; };
+    poner(idNombre, d.razonSocial);
+    poner(pref + 'Domicilio', d.domicilio);
+    poner(pref + 'Localidad', d.localidad);
+    poner(pref + 'Provincia', d.provincia);
+    poner(pref + 'CodigoPostal', d.codigoPostal);
+    if (conCategoria) poner(pref + 'CategoriaFiscal', d.categoriaFiscal, true);
+    err.textContent = '';
+    if (d.estadoClave && String(d.estadoClave).toUpperCase() !== 'ACTIVO') err.textContent = 'Ojo: ARCA informa la clave como ' + d.estadoClave + '.';
+  }catch(e){ err.textContent = e.message; }
+}
 </script>
 </body>
 </html>

@@ -86,7 +86,7 @@ function encabezadoNegocio(org) {
 // usando el recibo y el remito) porque este formato es específico del
 // comprobante: una vez que se construya la Factura real (AFIP), lo más
 // probable es que reuse este mismo encabezado.
-function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande }) {
+function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande, codigo }) {
   org = org || {};
   const lineaFiscal1 = [];
   if (org.condicionIva && CONDICION_IVA_LABEL[org.condicionIva]) lineaFiscal1.push(CONDICION_IVA_LABEL[org.condicionIva].toUpperCase());
@@ -120,7 +120,7 @@ function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande }) {
           ${org.telefono ? `<div>TEL: ${escapeHtml(org.telefono)}</div>` : ''}
         </div>
       </div>
-      <div class="cmp-letra">${escapeHtml(letra)}</div>
+      <div class="cmp-letra">${escapeHtml(letra)}${codigo ? `<span class="cmp-cod">COD. ${escapeHtml(codigo)}</span>` : ''}</div>
       <div class="cmp-titulo">
         <div class="cmp-titulo-grande">${escapeHtml(tituloGrande || 'COMPROBANTE')}</div>
         <div class="cmp-numero">Nº ${escapeHtml(numeroFmt)}</div>
@@ -214,7 +214,13 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
   .cmp-negocio { text-align: left; }
   .cmp-negocio .cmp-razon { font-size: 19px; font-weight: bold; margin-bottom: 3px; }
   .cmp-negocio div { line-height: 1.4; color: #222; font-size: 12px; }
-  .cmp-letra { justify-self: center; width: 44px; min-width: 44px; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
+  .cmp-letra { justify-self: center; width: 44px; min-width: 44px; border: 2px solid #333; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 26px; font-weight: bold; }
+  .cmp-letra .cmp-cod { font-size: 8.5px; font-weight: bold; white-space: nowrap; margin: 2px -10px 0; }
+  /* Factura electrónica (5/10/2026): bloque de CAE + QR al pie. */
+  .cmp-fiscal-pie { display: flex; gap: 14px; align-items: center; margin-top: 18px; border-top: 1px solid #999; padding-top: 10px; font-size: 12px; }
+  .cmp-fiscal-pie img { width: 110px; height: 110px; }
+  .cmp-fiscal-pie .cmp-cae { line-height: 1.6; }
+  .cmp-homologacion { margin: 0 0 10px 0; padding: 6px 10px; border: 2px dashed #b00020; color: #b00020; font-weight: bold; text-align: center; font-size: 12px; }
   .cmp-titulo { width: 230px; min-width: 190px; text-align: right; }
   .cmp-titulo-grande { font-size: 19px; font-weight: bold; }
   .cmp-titulo .cmp-numero { font-size: 15px; margin-top: 2px; }

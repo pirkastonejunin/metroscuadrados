@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fiscal - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+  .tab{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;color:var(--muted);}
+  .tab.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
+  .chk{display:flex;gap:8px;align-items:flex-start;padding:5px 0;font-size:13px;}
+  .chk .dot{flex:0 0 18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;margin-top:1px;}
+  .chk .dot.ok{background:var(--ok-soft);color:var(--ok);} .chk .dot.no{background:var(--danger-soft);color:var(--danger);}
+  .paso{border-left:3px solid var(--accent);padding-left:12px;margin:14px 0;}
+  .paso h3{margin:0 0 6px;font-size:14px;}
+  .paso ol{margin:6px 0 6px 18px;padding:0;font-size:13px;line-height:1.55;}
+  textarea.mono{font-family:ui-monospace,Menlo,monospace;font-size:11px;height:130px;}
+  .aviso{background:var(--info-soft);color:var(--info);border-radius:10px;padding:10px 12px;font-size:13px;margin:10px 0;}
+  .aviso.warn{background:var(--danger-soft);color:var(--danger);}
+  .okmsg{color:var(--ok);font-size:13px;margin:6px 0;font-weight:600;}
+  .scroll{overflow-x:auto;}
+  td.num,th.num{text-align:right;white-space:nowrap;}
+  tfoot td{font-weight:800;border-top:2px solid var(--border);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (max-width:640px){.grid2,.grid3{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Fiscal</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button data-iconizado="1" class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo Fiscal. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button data-iconizado="1" class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><h1>Fiscal (ARCA)</h1></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+    </div>
+  </header>
+  <main>
+    <div class="tabs">
+      <button data-iconizado="1" class="tab on" data-tab="conexion" onclick="irTab('conexion')">Conexión con ARCA</button>
+      <button data-iconizado="1" class="tab" data-tab="libro-iva-ventas" onclick="irTab('libro-iva-ventas')">Libro IVA Ventas</button>
+      <button data-iconizado="1" class="tab" data-tab="libro-iva-compras" onclick="irTab('libro-iva-compras')">Libro IVA Compras</button>
+      <button data-iconizado="1" class="tab" data-tab="retenciones" onclick="irTab('retenciones')">Percepciones y retenciones</button>
+    </div>
+
+    <section id="tab-conexion">
+      <div class="card">
+        <h2 style="margin:0 0 6px;font-size:16px">Estado de la conexión</h2>
+        <div id="estado"></div>
+        <div id="estadoMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 6px;font-size:16px">Cómo conectar</h2>
+        <div class="paso">
+          <h3>Paso 1 · Generar la solicitud de certificado</h3>
+          <div class="muted">El sistema crea una clave privada (queda guardada cifrada en el servidor, nunca sale) y una solicitud (CSR) para pedirle el certificado a ARCA.</div>
+          <div class="row" style="margin-top:8px">
+            <button data-iconizado="1" class="btn" id="btnGenCsr" onclick="generarCsr()">Generar solicitud (CSR)</button>
+            <button data-iconizado="1" class="btn secondary" id="btnBajarCsr" onclick="bajarCsr()">Descargar archivo .csr</button>
+            <button data-iconizado="1" class="btn secondary" id="btnCopiarCsr" onclick="copiarCsr()">Copiar texto</button>
+          </div>
+          <textarea id="csrTexto" class="mono hidden" readonly style="margin-top:8px"></textarea>
+        </div>
+        <div class="paso">
+          <h3>Paso 2 · Pedir el certificado en ARCA</h3>
+          <ol>
+            <li>Entrá a ARCA con tu clave fiscal y abrí el servicio <b>“Administración de Certificados Digitales”</b> (si no lo tenés, adheríte desde el Administrador de Relaciones). Para probar en homologación se usa <b>“WSASS – Autoservicio de Acceso a WebServices (homologación)”</b>.</li>
+            <li>Creá un alias nuevo, pegá el texto de la solicitud (o subí el .csr) y descargá el certificado (.crt) que te devuelve.</li>
+            <li>En el <b>Administrador de Relaciones de Clave Fiscal</b> asociá el certificado (alias) a los servicios <b>wsfe</b> (Facturación electrónica) y <b>ws_sr_constancia_inscripcion</b> (consulta de padrón).</li>
+            <li>En <b>“Administración de puntos de venta y domicilios”</b> creá un punto de venta con sistema <b>“RECE para aplicativo y web services”</b> y anotá el número.</li>
+          </ol>
+        </div>
+        <div class="paso">
+          <h3>Paso 3 · Pegar el certificado acá</h3>
+          <textarea id="certTexto" class="mono" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+          <div class="row" style="margin-top:8px"><button data-iconizado="1" class="btn" onclick="guardarCert()">Guardar certificado</button></div>
+          <div id="certMsg"></div>
+        </div>
+        <div class="paso">
+          <h3>Paso 4 · Configuración y prueba</h3>
+          <div class="grid3">
+            <div><label>Entorno</label>
+              <select id="cfgEntorno"><option value="homologacion">Homologación (pruebas, sin validez fiscal)</option><option value="produccion">Producción (facturas reales)</option></select></div>
+            <div><label>Punto de venta (web service)</label><input id="cfgPv" type="number" min="1" max="99998" placeholder="Ej. 3"></div>
+            <div><label>IVA por defecto de productos</label>
+              <select id="cfgIva"><option value="21">21 %</option><option value="10.5">10,5 %</option><option value="27">27 %</option><option value="5">5 %</option><option value="2.5">2,5 %</option><option value="0">0 %</option></select></div>
+          </div>
+          <div class="grid2" style="margin-top:10px">
+            <div><label>Los precios de las listas…</label>
+              <select id="cfgPrecios"><option value="1">ya incluyen IVA (criterio por defecto)</option><option value="0">son netos, se suma el IVA (criterio por defecto)</option></select>
+              <div class="muted">Cada lista de precios puede cambiar este criterio en Productos.</div></div>
+            <div><label>Pedir CAE a ARCA</label>
+              <select id="cfgAuto"><option value="1">Automáticamente al guardar la venta</option><option value="0">Solo cuando yo lo pida</option></select></div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button data-iconizado="1" class="btn" onclick="guardarCfg()">Guardar configuración</button>
+            <button data-iconizado="1" class="btn secondary" onclick="probar()">Probar conexión con ARCA</button>
+          </div>
+          <div id="cfgMsg"></div>
+          <div id="probarRes"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin:0 0 6px;font-size:16px">Consultar un CUIT</h2>
+        <div class="row"><div style="flex:1;min-width:200px"><label>CUIT</label><input id="cuitQ" placeholder="30-12345678-9" onkeydown="if(event.key==='Enter')consultarCuit()"></div>
+        <button data-iconizado="1" class="btn secondary" onclick="consultarCuit()">Consultar</button></div>
+        <pre id="cuitRes" class="muted" style="white-space:pre-wrap"></pre>
+      </div>
+    </section>
+
+    <section id="tab-libro" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div><label>Desde</label><input type="date" id="fDesde"></div>
+          <div><label>Hasta</label><input type="date" id="fHasta"></div>
+          <button data-iconizado="1" class="btn" onclick="cargarLibro()">Ver</button>
+          <button data-iconizado="1" class="btn secondary" onclick="bajarLibro()">Descargar Excel</button>
+        </div>
+        <div id="libroMsg"></div>
+      </div>
+      <div class="card"><div class="scroll" id="libroTabla"></div></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const BASE = '/api/fiscal';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function $(id){ return document.getElementById(id); }
+function msg(id, texto, ok){ $(id).innerHTML = texto ? '<div class="' + (ok ? 'okmsg' : 'err') + '">' + escapeHtml(texto) + '</div>' : ''; }
+async function api(path, opts){
+  const o = Object.assign({}, opts || {});
+  o.headers = headersAuth(o.body ? {'Content-Type':'application/json'} : {});
+  const r = await fetch(BASE + path, o);
+  let data = null; try { data = await r.json(); } catch(e) {}
+  if (!r.ok) throw new Error((data && data.error) || ('Error ' + r.status));
+  return data;
+}
+async function bajar(path, nombre){
+  const r = await fetch(BASE + path, {headers: headersAuth()});
+  if (!r.ok) { let d=null; try{ d = await r.json(); }catch(e){} throw new Error((d && d.error) || ('Error ' + r.status)); }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = nombre; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+async function login(){
+  const usuario = $('loginUser').value, pass = $('loginPass').value;
+  $('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){ $('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+
+const ORG_KEY = 'obras_org_activo';
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const haySeleccionValida = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (haySeleccionValida) return;
+  const orgPorDefecto = orgs.find(o => o.nombre === 'Piedra Negra');
+  const elegido = orgs.length === 1 ? orgs[0]._id
+    : (orgPorDefecto ? orgPorDefecto._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  ORG = elegido;
+  if (elegido) localStorage.setItem(ORG_KEY, elegido); else localStorage.removeItem(ORG_KEY);
+}
+
+let CFG = null, TAB = 'conexion';
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; $('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('fiscal'));
+    if (!tieneAcceso) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'fiscal', { ocultarOrg: true });
+  $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
+  const hoy = new Date(), ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const f = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  $('fDesde').value = f(ini); $('fHasta').value = f(hoy);
+  await cargarCfg();
+}
+if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
+
+function irTab(t){
+  TAB = t;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  $('tab-conexion').classList.toggle('hidden', t !== 'conexion');
+  $('tab-libro').classList.toggle('hidden', t === 'conexion');
+  if (t !== 'conexion') { $('libroTabla').innerHTML = ''; msg('libroMsg',''); cargarLibro(); }
+}
+
+function fila(ok, texto){ return '<div class="chk"><span class="dot ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '!') + '</span><span>' + texto + '</span></div>'; }
+function pintarEstado(c){
+  CFG = c;
+  const venc = c.certVence ? new Date(c.certVence).toLocaleDateString('es-AR') : '';
+  $('estado').innerHTML =
+    fila(!!c.cuitValido, 'CUIT de la empresa: <b>' + escapeHtml(c.cuit || 'sin cargar') + '</b>' + (c.razonSocial ? ' · ' + escapeHtml(c.razonSocial) : '') + (c.cuitValido ? '' : ' — completalo en los datos de la organización')) +
+    fila(!c.condicionIva || c.condicionIva === 'responsable_inscripto' || /inscripto/i.test(c.condicionIva||''), 'Condición frente al IVA: <b>' + escapeHtml(c.condicionIva || 'sin cargar') + '</b> (solo se emite siendo Responsable Inscripto)') +
+    fila(!!c.tieneClave, 'Clave privada generada') +
+    fila(!!c.tieneCertificado, 'Certificado cargado' + (venc ? ' · vence el <b>' + venc + '</b>' : '')) +
+    fila(!!c.puntoVenta, 'Punto de venta: <b>' + (c.puntoVenta || 'sin cargar') + '</b>') +
+    fila(c.entorno === 'produccion', 'Entorno: <b>' + (c.entorno === 'produccion' ? 'Producción' : 'Homologación (pruebas)') + '</b>') +
+    fila(!!c.listo, c.listo ? '<b>Listo para emitir</b>' : escapeHtml(c.faltante || '—'));
+  $('estadoMsg').innerHTML = c.entorno === 'produccion' ? '' : '<div class="aviso">Estás en <b>homologación</b>: las facturas que se emitan tienen CAE de prueba y <b>no tienen validez fiscal</b>. Seguí facturando por Dux hasta pasar a producción.</div>';
+  $('cfgEntorno').value = c.entorno || 'homologacion';
+  $('cfgPv').value = c.puntoVenta || '';
+  $('cfgIva').value = String(c.ivaDefecto == null ? 21 : c.ivaDefecto);
+  $('cfgPrecios').value = c.preciosIncluyenIvaDefecto === false ? '0' : '1';
+  $('cfgAuto').value = c.emisionAutomatica === false ? '0' : '1';
+  $('btnBajarCsr').classList.toggle('hidden', !c.solicitudPendiente);
+  $('btnCopiarCsr').classList.toggle('hidden', !c.solicitudPendiente);
+  $('btnGenCsr').textContent = c.tieneClave ? 'Generar una solicitud nueva' : 'Generar solicitud (CSR)';
+}
+async function cargarCfg(){
+  try { pintarEstado(await api('/config')); }
+  catch(e){ $('estado').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
+}
+
+async function generarCsr(){
+  msg('certMsg','');
+  try{
+    let confirmar = false;
+    if (CFG && CFG.tieneCertificado) {
+      if (!confirm('Ya hay un certificado cargado. Si generás una solicitud nueva se reemplaza la clave y el certificado actual deja de servir. ¿Seguro?')) return;
+      confirmar = true;
+    }
+    const d = await api('/csr', {method:'POST', body: JSON.stringify({confirmar})});
+    $('csrTexto').value = d.csr; $('csrTexto').classList.remove('hidden');
+    await cargarCfg();
+  }catch(e){ alert(e.message); }
+}
+async function bajarCsr(){ try{ await bajar('/csr', 'solicitud-certificado-arca.csr'); }catch(e){ alert(e.message); } }
+async function copiarCsr(){
+  try{
+    let t = $('csrTexto').value;
+    if (!t) { await bajar('/csr','solicitud-certificado-arca.csr'); return; }
+    await navigator.clipboard.writeText(t); alert('Texto copiado.');
+  }catch(e){ $('csrTexto').classList.remove('hidden'); $('csrTexto').select(); }
+}
+async function guardarCert(){
+  msg('certMsg','');
+  try{
+    const t = $('certTexto').value.trim();
+    if (!t) throw new Error('Pegá el texto del certificado');
+    pintarEstado(await api('/certificado', {method:'POST', body: JSON.stringify({certificado: t})}));
+    $('certTexto').value = '';
+    msg('certMsg','Certificado guardado y verificado contra la clave y el CUIT.', true);
+  }catch(e){ msg('certMsg', e.message); }
+}
+async function guardarCfg(){
+  msg('cfgMsg','');
+  try{
+    const entorno = $('cfgEntorno').value;
+    if (entorno === 'produccion' && CFG && CFG.entorno !== 'produccion') {
+      if (!confirm('Vas a pasar a PRODUCCIÓN: las facturas que se emitan tendrán validez fiscal real y consumen numeración de ARCA. Hace falta un certificado de producción (el de homologación no sirve). ¿Confirmás?')) return;
+    }
+    const pv = $('cfgPv').value;
+    const c = await api('/config', {method:'PUT', body: JSON.stringify({
+      entorno, puntoVenta: pv === '' ? null : Number(pv), ivaDefecto: Number($('cfgIva').value),
+      preciosIncluyenIvaDefecto: $('cfgPrecios').value === '1', emisionAutomatica: $('cfgAuto').value === '1'
+    })});
+    pintarEstado(c);
+    msg('cfgMsg','Configuración guardada.', true);
+  }catch(e){ msg('cfgMsg', e.message); }
+}
+async function probar(){
+  $('probarRes').innerHTML = '<div class="muted">Probando…</div>';
+  try{
+    const d = await api('/probar', {method:'POST', body: '{}'});
+    $('probarRes').innerHTML = (d.pasos||[]).map(p => fila(p.ok, '<b>' + escapeHtml(p.nombre) + '</b>' + (p.detalle ? ' — ' + escapeHtml(p.detalle) : ''))).join('') +
+      '<div class="' + (d.ok ? 'okmsg' : 'err') + '">' + (d.ok ? 'La conexión funciona.' : 'La conexión no está lista.') + '</div>';
+  }catch(e){ $('probarRes').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
+}
+async function consultarCuit(){
+  const c = $('cuitQ').value.replace(/\D/g,'');
+  if (c.length !== 11) { $('cuitRes').textContent = 'El CUIT tiene 11 dígitos.'; return; }
+  $('cuitRes').textContent = 'Consultando…';
+  try{ $('cuitRes').textContent = JSON.stringify(await api('/consulta-cuit/' + c), null, 2); }
+  catch(e){ $('cuitRes').textContent = e.message; }
+}
+
+let ULTIMO = null;
+function fmt(v, clave, cols){
+  if (typeof v === 'number') return v.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  return escapeHtml(v == null ? '' : v);
+}
+function qsLibro(extra){
+  const p = new URLSearchParams();
+  if ($('fDesde').value) p.set('desde', $('fDesde').value);
+  if ($('fHasta').value) p.set('hasta', $('fHasta').value);
+  if (extra) p.set('formato', extra);
+  return '?' + p.toString();
+}
+async function cargarLibro(){
+  msg('libroMsg','');
+  $('libroTabla').innerHTML = '<div class="muted">Cargando…</div>';
+  try{
+    const d = await api('/' + TAB + qsLibro());
+    ULTIMO = d;
+    if (!d.filas.length) { $('libroTabla').innerHTML = '<div class="muted">No hay comprobantes en ese período.</div>'; return; }
+    const num = c => { const f = d.filas.find(x => typeof x[c.clave] === 'number'); return !!f || (d.totales && d.totales[c.clave] !== undefined); };
+    let h = '<table><thead><tr>' + d.columnas.map(c => '<th class="' + (num(c) ? 'num' : '') + '">' + escapeHtml(c.titulo) + '</th>').join('') + '</tr></thead><tbody>';
+    d.filas.forEach(f => { h += '<tr>' + d.columnas.map(c => '<td class="' + (num(c) ? 'num' : '') + '">' + fmt(f[c.clave]) + '</td>').join('') + '</tr>'; });
+    h += '</tbody><tfoot><tr>' + d.columnas.map((c,i) => '<td class="' + (num(c) ? 'num' : '') + '">' + (i === 0 ? 'TOTALES' : (d.totales && d.totales[c.clave] !== undefined ? fmt(d.totales[c.clave]) : '')) + '</td>').join('') + '</tr></tfoot></table>';
+    $('libroTabla').innerHTML = h;
+  }catch(e){ $('libroTabla').innerHTML = ''; msg('libroMsg', e.message); }
+}
+async function bajarLibro(){
+  try{ await bajar('/' + TAB + qsLibro('xlsx'), TAB + '.xlsx'); }catch(e){ msg('libroMsg', e.message); }
+}
+</script>
+</body>
+</html>

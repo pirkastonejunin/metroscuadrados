@@ -42,6 +42,7 @@
     ventas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>',
     compras: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>',
     bases: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+    fiscal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><polyline points="14 3 14 8 19 8"/><polyline points="9 14 11 16 15 12"/></svg>',
     tesoreria: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="21" x2="22" y2="21"/><path d="M4 21V10l8-6 8 6v11"/><line x1="9" y1="21" x2="9" y2="13"/><line x1="15" y1="21" x2="15" y2="13"/></svg>',
     // Remitos (3/10/2026, pedido de Mato: "tenemos que tener en el menu
     // comercial un submenu para ver los remitos emitidos") — mismo ícono
@@ -112,6 +113,10 @@
     // alta/habilitación de cajas y bancos vive en Configuración, no acá.
     { nombre: 'Tesorería', items: [
       { key: 'tesoreria', href: '/admin-tesoreria.html', modulo: 'tesoreria', label: 'Tesorería', icon: ICONOS.tesoreria }
+    ]},
+    // Fiscal (5/10/2026): conexión con ARCA, facturación electrónica y libros.
+    { nombre: 'Fiscal', items: [
+      { key: 'fiscal', href: '/admin-fiscal.html', modulo: 'fiscal', label: 'Fiscal (ARCA)', icon: ICONOS.fiscal }
     ]}
   ];
 
