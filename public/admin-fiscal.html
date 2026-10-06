@@ -106,19 +106,12 @@
 
 <div id="app" class="hidden">
   <header>
-    <div class="brand"><h1>Fiscal (ARCA)</h1></div>
+    <div class="brand"><h1>Fiscal · Puntos de venta y conexión con ARCA</h1></div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
     </div>
   </header>
   <main>
-    <div class="tabs">
-      <button data-iconizado="1" class="tab on" data-tab="conexion" onclick="irTab('conexion')">Conexión con ARCA</button>
-      <button data-iconizado="1" class="tab" data-tab="libro-iva-ventas" onclick="irTab('libro-iva-ventas')">Libro IVA Ventas</button>
-      <button data-iconizado="1" class="tab" data-tab="libro-iva-compras" onclick="irTab('libro-iva-compras')">Libro IVA Compras</button>
-      <button data-iconizado="1" class="tab" data-tab="retenciones" onclick="irTab('retenciones')">Percepciones y retenciones</button>
-    </div>
-
     <section id="tab-conexion">
       <div class="card">
         <h2 style="margin:0 0 6px;font-size:16px">Estado de la conexión <span id="sucursalNombre" class="muted" style="font-weight:600"></span></h2>
@@ -198,19 +191,6 @@
       </div>
     </section>
 
-    <section id="tab-libro" class="hidden">
-      <div class="card">
-        <div class="row">
-          <label style="display:flex;gap:6px;align-items:center;align-self:flex-end;margin:0"><input type="checkbox" id="fConsol" onchange="cargarLibro()"> Todas las sucursales con el mismo CUIT</label>
-          <div><label>Desde</label><input type="date" id="fDesde"></div>
-          <div><label>Hasta</label><input type="date" id="fHasta"></div>
-          <button data-iconizado="1" class="btn" onclick="cargarLibro()">Ver</button>
-          <button data-iconizado="1" class="btn secondary" onclick="bajarLibro()">Descargar Excel</button>
-        </div>
-        <div id="libroMsg"></div>
-      </div>
-      <div class="card"><div class="scroll" id="libroTabla"></div></div>
-    </section>
   </main>
 </div>
 
@@ -268,7 +248,7 @@ function resolverOrgActiva(me){
   if (elegido) localStorage.setItem(ORG_KEY, elegido); else localStorage.removeItem(ORG_KEY);
 }
 
-let CFG = null, TAB = 'conexion';
+let CFG = null;
 async function iniciarApp(){
   let me;
   try{
@@ -279,23 +259,12 @@ async function iniciarApp(){
     if (!tieneAcceso) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
   }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
   resolverOrgActiva(me);
-  PiedraSidebar.render(me, 'fiscal');
+  PiedraSidebar.render(me, 'fiscal-config');
   $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
   $('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
-  const hoy = new Date(), ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-  const f = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-  $('fDesde').value = f(ini); $('fHasta').value = f(hoy);
   await cargarCfg();
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
-
-function irTab(t){
-  TAB = t;
-  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  $('tab-conexion').classList.toggle('hidden', t !== 'conexion');
-  $('tab-libro').classList.toggle('hidden', t === 'conexion');
-  if (t !== 'conexion') { $('libroTabla').innerHTML = ''; msg('libroMsg',''); cargarLibro(); }
-}
 
 function fila(ok, texto){ return '<div class="chk"><span class="dot ' + (ok ? 'ok' : 'no') + '">' + (ok ? '✓' : '!') + '</span><span>' + texto + '</span></div>'; }
 function pintarEstado(c){
@@ -405,36 +374,6 @@ async function consultarCuit(){
   catch(e){ $('cuitRes').textContent = e.message; }
 }
 
-let ULTIMO = null;
-function fmt(v, clave, cols){
-  if (typeof v === 'number') return v.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
-  return escapeHtml(v == null ? '' : v);
-}
-function qsLibro(extra){
-  const p = new URLSearchParams();
-  if ($('fDesde').value) p.set('desde', $('fDesde').value);
-  if ($('fHasta').value) p.set('hasta', $('fHasta').value);
-  if ($('fConsol').checked) p.set('consolidado', '1');
-  if (extra) p.set('formato', extra);
-  return '?' + p.toString();
-}
-async function cargarLibro(){
-  msg('libroMsg','');
-  $('libroTabla').innerHTML = '<div class="muted">Cargando…</div>';
-  try{
-    const d = await api('/' + TAB + qsLibro());
-    ULTIMO = d;
-    if (!d.filas.length) { $('libroTabla').innerHTML = '<div class="muted">No hay comprobantes en ese período.</div>'; return; }
-    const num = c => { const f = d.filas.find(x => typeof x[c.clave] === 'number'); return !!f || (d.totales && d.totales[c.clave] !== undefined); };
-    let h = '<table><thead><tr>' + d.columnas.map(c => '<th class="' + (num(c) ? 'num' : '') + '">' + escapeHtml(c.titulo) + '</th>').join('') + '</tr></thead><tbody>';
-    d.filas.forEach(f => { h += '<tr>' + d.columnas.map(c => '<td class="' + (num(c) ? 'num' : '') + '">' + fmt(f[c.clave]) + '</td>').join('') + '</tr>'; });
-    h += '</tbody><tfoot><tr>' + d.columnas.map((c,i) => '<td class="' + (num(c) ? 'num' : '') + '">' + (i === 0 ? 'TOTALES' : (d.totales && d.totales[c.clave] !== undefined ? fmt(d.totales[c.clave]) : '')) + '</td>').join('') + '</tr></tfoot></table>';
-    $('libroTabla').innerHTML = h;
-  }catch(e){ $('libroTabla').innerHTML = ''; msg('libroMsg', e.message); }
-}
-async function bajarLibro(){
-  try{ await bajar('/' + TAB + qsLibro('xlsx'), TAB + '.xlsx'); }catch(e){ msg('libroMsg', e.message); }
-}
 </script>
 </body>
 </html>

@@ -116,7 +116,10 @@
     ]},
     // Fiscal (5/10/2026): conexión con ARCA, facturación electrónica y libros.
     { nombre: 'Fiscal', items: [
-      { key: 'fiscal', href: '/admin-fiscal.html', modulo: 'fiscal', label: 'Fiscal (ARCA)', icon: ICONOS.fiscal }
+      { key: 'fiscal-config', href: '/admin-fiscal.html', modulo: 'fiscal', label: 'Puntos de venta y ARCA', icon: ICONOS.fiscal },
+      { key: 'fiscal-ventas', href: '/admin-fiscal-libros.html?vista=ventas', modulo: 'fiscal', label: 'Libro IVA Ventas', icon: ICONOS.fiscal },
+      { key: 'fiscal-compras', href: '/admin-fiscal-libros.html?vista=compras', modulo: 'fiscal', label: 'Libro IVA Compras', icon: ICONOS.fiscal },
+      { key: 'fiscal-retenciones', href: '/admin-fiscal-libros.html?vista=retenciones', modulo: 'fiscal', label: 'Percepciones y retenciones', icon: ICONOS.fiscal }
     ]}
   ];
 
@@ -218,11 +221,6 @@
       .pn-usermenu-menu svg { width: 16px; height: 16px; flex-shrink: 0; }
       .pn-usermenu-menu hr { border: none; border-top: 1px solid var(--border); margin: 5px 4px; }
       .pn-usermenu-menu button.pn-um-salir:hover { color: var(--danger, #c53030); }
-      /* Ventanas (modales) por encima del menú lateral (6/10/2026, "en otra
-         máquina la pantalla de venta queda tapada con el menú"): el modal es
-         fijo y se centra en TODA la pantalla, y el menú (z-index 300) lo
-         tapaba por la izquierda cuando la ventana era más angosta. */
-      .modal-bg, .modal-overlay { z-index: 500 !important; }
       .pn-toggle {
         display: none; position: fixed; top: 12px; left: 12px; z-index: 301; width: 38px; height: 38px;
         border-radius: 10px; background: var(--card); border: 1px solid var(--border); color: var(--pn-ink);
