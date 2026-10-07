@@ -184,14 +184,14 @@
         <div class="row">
           <div style="flex:1"><label>Nombre</label><input id="nuevoVendNombre" placeholder="Nombre y apellido"></div>
           <div style="flex:1"><label>Teléfono</label><input id="nuevoVendTelefono"></div>
-          <div style="width:120px"><label title="Porcentaje sobre las ventas netas (sin IVA) del mes. Lo usa el módulo Sueldos para calcular la comisión.">Comisión %</label><input id="nuevoVendComision" type="number" min="0" max="100" step="any" value="0"></div>
+          <div style="width:120px"><label title="Porcentaje sobre las ventas del mes con IVA incluido. Lo usa el módulo Sueldos para calcular la comisión.">Comisión %</label><input id="nuevoVendComision" type="number" min="0" max="100" step="any" value="0"></div>
           <button class="btn" onclick="crearVendedor()">Agregar</button>
         </div>
       </div>
       <div class="card">
         <p class="muted">Calendario Google: poné el mail de la cuenta de Google del vendedor y tocá "Crear calendario" — la app crea un calendario propio para esa persona y se lo comparte sola (no hace falta entrar a Google Calendar a mano). A partir de ahí sus visitas le llegan ahí. Si nadie tiene calendario propio cargado, las visitas caen al calendario general de respaldo (si hay uno configurado).</p>
         <table>
-          <thead><tr><th>Nombre</th><th>Teléfono</th><th title="Porcentaje sobre las ventas netas (sin IVA) del mes. El módulo Sueldos lo usa para calcular la comisión del vendedor.">Comisión %</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th title="Porcentaje sobre las ventas del mes con IVA incluido. El módulo Sueldos lo usa para calcular la comisión del vendedor.">Comisión %</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
           <tbody id="vendedoresBody"></tbody>
         </table>
       </div>

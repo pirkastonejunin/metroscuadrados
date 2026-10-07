@@ -21,7 +21,7 @@
 //
 // Comisiones por ventas (7/10/2026): cada vendedor (Configuración > Vendedores) tiene
 // un % de comisión. Si el empleado está vinculado a un vendedor, la liquidación
-// calcula la comisión del mes = % x ventas netas del vendedor en el mes (sin IVA,
+// calcula la comisión del mes = % x ventas del vendedor en el mes (valor CON IVA,
 // en pesos, las notas de crédito restan, sin anuladas; se atribuyen por el usuario
 // vinculado al vendedor, igual que en el tablero). Es devengada: cuenta por fecha
 // de venta, se cobre o no. El monto queda editable en la liquidación.
@@ -212,11 +212,11 @@ router.delete('/empleados/:id', authSueldos, async (req, res) => {
 // Comisión por ventas del mes de un empleado vinculado a un vendedor
 // ---------------------------------------------------------------------------
 function inicioMes(p) { return new Date(p + '-01T00:00:00.000-03:00'); }
+// Base de comisión: total de la venta CON IVA, en pesos (la nota de crédito resta).
 function netoVenta(v) {
   const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
   const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
-  const iva = (v.esFiscal && v.cae && v.fiscal) ? Number(v.fiscal.iva || 0) * ((v.fiscalMoneda === 'DOL' && Number(v.fiscalCotiz) > 0) ? Number(v.fiscalCotiz) : 1) : 0;
-  return (Number(v.total || 0) * usd - iva) * nc;
+  return Number(v.total || 0) * usd * nc;
 }
 async function calcularComision(db, req, emp, periodo) {
   if (!emp || !emp.vendedorId) return { vinculado: false, pct: 0, base: 0, monto: 0, ventas: 0, notasCredito: 0, avisos: [] };
