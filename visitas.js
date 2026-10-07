@@ -265,13 +265,23 @@ router.get('/vendedores', authAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Comisión por ventas: porcentaje entre 0 y 100 (vacío = sin comisión).
+function normalizarComisionPct(v) {
+  if (v === undefined || v === null || v === '') return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100) throw err(400, 'La comisión tiene que ser un porcentaje entre 0 y 100.');
+  return Math.round(n * 100) / 100;
+}
+
 router.post('/vendedores', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear un vendedor.');
-    const { nombre, telefono, googleCalendarId } = req.body || {};
+    const { nombre, telefono, googleCalendarId, comisionPct } = req.body || {};
     if (!nombre) throw err(400, 'Nombre obligatorio');
     const doc = {
       nombre, telefono: telefono || '',
+      // Comisión por ventas (7/10/2026): % sobre las ventas netas del vendedor; el módulo Sueldos la usa para calcular la comisión del mes.
+      comisionPct: normalizarComisionPct(comisionPct),
       orgId: req.orgId,
       // Calendario de Google propio de este vendedor, para que sus visitas
       // le lleguen ahí (ver google-calendar.js) — opcional, si lo deja
@@ -293,8 +303,9 @@ router.put('/vendedores/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const { nombre, telefono, activo, googleCalendarId } = req.body || {};
+    const { nombre, telefono, activo, googleCalendarId, comisionPct } = req.body || {};
     const set = {};
+    if (comisionPct !== undefined) set.comisionPct = normalizarComisionPct(comisionPct);
     if (nombre !== undefined) set.nombre = nombre;
     if (telefono !== undefined) set.telefono = telefono;
     if (activo !== undefined) set.activo = activo;

@@ -7,19 +7,27 @@
 // banco). NO calcula la liquidación legal ni emite recibos de sueldo.
 //
 // Colecciones nuevas:
-//   empleados : { nombre, cuil, sector (produccion|administracion|ventas|
+//   empleados : { nombre, cuil, vendedorId (opcional, vincula con Vendedores), sector (produccion|administracion|ventas|
 //     logistica|otro), sueldoBasico (referencia), fechaIngreso, notas, activo,
 //     orgId, createdAt, updatedAt }
 //   sueldos_liquidaciones : { empleadoId, empleadoNombre, sector, periodo
-//     ('AAAA-MM'), sueldo, adicionales, aguinaldo, cargasSociales, descuentos,
+//     ('AAAA-MM'), sueldo, adicionales, comisiones (+ comisionPct, comisionBase),
+//     aguinaldo, cargasSociales, descuentos,
 //     adelantosDescontados, observaciones, bruto, costoEmpresa, neto,
 //     pagos: [{ monto, fecha, cuentaTipo, cuentaId, nota, usuarioNombre }],
 //     totalPagado, estado (pendiente|parcial|pagada), orgId, ... }
 //   sueldos_adelantos : { empleadoId, empleadoNombre, monto, fecha, nota,
 //     cuentaTipo, cuentaId, estado (pendiente|descontado), liquidacionId, orgId }
 //
+// Comisiones por ventas (7/10/2026): cada vendedor (Configuración > Vendedores) tiene
+// un % de comisión. Si el empleado está vinculado a un vendedor, la liquidación
+// calcula la comisión del mes = % x ventas netas del vendedor en el mes (sin IVA,
+// en pesos, las notas de crédito restan, sin anuladas; se atribuyen por el usuario
+// vinculado al vendedor, igual que en el tablero). Es devengada: cuenta por fecha
+// de venta, se cobre o no. El monto queda editable en la liquidación.
+//
 // Cuentas:
-//   bruto = sueldo + adicionales + aguinaldo
+//   bruto = sueldo + adicionales + comisiones + aguinaldo
 //   costo para la empresa = bruto + cargas sociales
 //   neto a pagar al empleado = bruto - descuentos - adelantos descontados
 //   (los descuentos son aportes y retenciones: ya están dentro del bruto, o sea
@@ -111,7 +119,7 @@ function estadoPago(l) {
   return pagado + 0.005 >= neto ? 'pagada' : 'parcial';
 }
 function calcular(l) {
-  l.bruto = r2(l.sueldo + l.adicionales + l.aguinaldo);
+  l.bruto = r2(l.sueldo + l.adicionales + (l.comisiones || 0) + l.aguinaldo);
   l.costoEmpresa = r2(l.bruto + l.cargasSociales);
   l.neto = r2(l.bruto - l.descuentos - (l.adelantosDescontados || 0));
   l.estado = estadoPago(l);
@@ -145,6 +153,13 @@ async function egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo,
   return tesoreria.aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId: id, tipo: tipo || 'egreso', monto: m, moneda: 'ARS', motivo, observaciones, origen, fecha });
 }
 
+router.get('/vendedores', authSueldos, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('visitas_vendedores').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ nombre: 1, comisionPct: 1 }).sort({ nombre: 1 }).toArray());
+    res.json(lista.map(v => ({ _id: String(v._id), nombre: v.nombre, comisionPct: v.comisionPct || 0 })));
+  } catch (e) { responder(res, e); }
+});
+
 // ---------------------------------------------------------------------------
 // Empleados (legajo)
 // ---------------------------------------------------------------------------
@@ -155,7 +170,9 @@ function datosEmpleado(b) {
   if (!SECTORES[sector]) throw err(400, 'Sector inválido.');
   let fechaIngreso = null;
   if (b.fechaIngreso) fechaIngreso = fechaDe(b.fechaIngreso);
-  return { nombre, cuil: texto(b.cuil), sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas) };
+  const vendedorId = b.vendedorId ? toObjectId(b.vendedorId) : null;
+  if (b.vendedorId && !vendedorId) throw err(400, 'vendedorId inválido');
+  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas) };
 }
 router.get('/empleados', authSueldos, async (req, res) => {
   try {
@@ -192,6 +209,51 @@ router.delete('/empleados/:id', authSueldos, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Comisión por ventas del mes de un empleado vinculado a un vendedor
+// ---------------------------------------------------------------------------
+function inicioMes(p) { return new Date(p + '-01T00:00:00.000-03:00'); }
+function netoVenta(v) {
+  const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
+  const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
+  const iva = (v.esFiscal && v.cae && v.fiscal) ? Number(v.fiscal.iva || 0) * ((v.fiscalMoneda === 'DOL' && Number(v.fiscalCotiz) > 0) ? Number(v.fiscalCotiz) : 1) : 0;
+  return (Number(v.total || 0) * usd - iva) * nc;
+}
+async function calcularComision(db, req, emp, periodo) {
+  if (!emp || !emp.vendedorId) return { vinculado: false, pct: 0, base: 0, monto: 0, ventas: 0, notasCredito: 0, avisos: [] };
+  const vend = await db.collection('visitas_vendedores').findOne({ _id: emp.vendedorId });
+  const pct = vend && Number(vend.comisionPct) > 0 ? Number(vend.comisionPct) : 0;
+  const avisos = [];
+  if (!vend) avisos.push('El vendedor vinculado ya no existe.');
+  else if (!pct) avisos.push('El vendedor ' + vend.nombre + ' no tiene un % de comisión cargado (Configuración > Vendedores).');
+  const usuarios = await db.collection('usuarios').find({ vendedorId: emp.vendedorId }).project({ nombre: 1 }).toArray();
+  if (!usuarios.length) avisos.push('El vendedor no tiene un usuario vinculado: no se pueden atribuir ventas.');
+  let base = 0, ventas = 0, nc = 0;
+  if (usuarios.length) {
+    const d0 = inicioMes(periodo), d1 = finPeriodo(periodo);
+    const lista = await db.collection('ventas').find({
+      orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 },
+      $or: [{ usuarioId: { $in: usuarios.map(u => u._id) } }, { usuarioId: { $exists: false }, usuarioNombre: { $in: usuarios.map(u => u.nombre) } }]
+    }).project({ total: 1, moneda: 1, cotizacionDolar: 1, tipoComprobante: 1, esFiscal: 1, cae: 1, fiscal: 1, fiscalMoneda: 1, fiscalCotiz: 1 }).toArray();
+    lista.forEach(v => { base += netoVenta(v); if (v.tipoComprobante === 'nota_credito') nc++; else ventas++; });
+  }
+  base = Math.max(0, r2(base));
+  return { vinculado: true, vendedor: vend ? vend.nombre : '', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
+}
+router.get('/comision', authSueldos, async (req, res) => {
+  try {
+    const periodo = validarPeriodo(req.query.periodo);
+    const empId = toObjectId(req.query.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const emp = await db.collection('empleados').findOne(Object.assign({ _id: empId }, filtroOrg(req)));
+      if (!emp) throw err(404, 'Empleado no encontrado.');
+      return calcularComision(db, req, emp, periodo);
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
 // Liquidaciones mensuales
 // ---------------------------------------------------------------------------
 async function liberarAdelantos(db, liquidacionId) {
@@ -200,7 +262,7 @@ async function liberarAdelantos(db, liquidacionId) {
 // Aplica adelantos pendientes del empleado (más viejos primero) sin pasar el neto de 0.
 async function aplicarAdelantos(db, orgId, liq, piso) {
   const pend = await db.collection('sueldos_adelantos').find({ orgId, empleadoId: liq.empleadoId, estado: 'pendiente', fecha: { $lte: finPeriodo(liq.periodo) } }).sort({ fecha: 1 }).toArray();
-  let disponible = liq.sueldo + liq.adicionales + liq.aguinaldo - liq.descuentos - (piso || 0), total = 0;
+  let disponible = liq.sueldo + liq.adicionales + (liq.comisiones || 0) + liq.aguinaldo - liq.descuentos - (piso || 0), total = 0;
   for (const a of pend) {
     if (a.monto > disponible + 0.005) break;
     disponible -= a.monto; total += a.monto;
@@ -212,16 +274,17 @@ async function aplicarAdelantos(db, orgId, liq, piso) {
 async function guardarLiquidacion(db, req, b, emp) {
   const periodo = validarPeriodo(b.periodo);
   const datos = {
-    sueldo: monto(b.sueldo, 'El sueldo'), adicionales: monto(b.adicionales, 'Los adicionales'), aguinaldo: monto(b.aguinaldo, 'El aguinaldo'),
+    sueldo: monto(b.sueldo, 'El sueldo'), adicionales: monto(b.adicionales, 'Los adicionales'), comisiones: monto(b.comisiones, 'Las comisiones'),
+    comisionPct: monto(b.comisionPct, 'El % de comisión'), comisionBase: monto(b.comisionBase, 'La base de comisión'), aguinaldo: monto(b.aguinaldo, 'El aguinaldo'),
     cargasSociales: monto(b.cargasSociales, 'Las cargas sociales'), descuentos: monto(b.descuentos, 'Los descuentos'), observaciones: texto(b.observaciones)
   };
-  if (datos.descuentos > datos.sueldo + datos.adicionales + datos.aguinaldo + 0.005) throw err(400, 'Los descuentos no pueden superar el bruto (sueldo + adicionales + aguinaldo).');
+  if (datos.descuentos > datos.sueldo + datos.adicionales + datos.comisiones + datos.aguinaldo + 0.005) throw err(400, 'Los descuentos no pueden superar el bruto (sueldo + adicionales + comisiones + aguinaldo).');
   const col = db.collection('sueldos_liquidaciones');
   const existente = await col.findOne({ orgId: req.orgId, empleadoId: emp._id, periodo });
   const base = Object.assign({ empleadoId: emp._id, empleadoNombre: emp.nombre, sector: emp.sector, periodo, adelantosDescontados: 0 }, datos);
   if (existente) {
     const pagado = existente.totalPagado || 0;
-    if (datos.sueldo + datos.adicionales + datos.aguinaldo - datos.descuentos + 0.005 < pagado) throw err(400, 'El neto no puede quedar por debajo de lo que ya se pagó (' + r2(pagado) + ').');
+    if (datos.sueldo + datos.adicionales + datos.comisiones + datos.aguinaldo - datos.descuentos + 0.005 < pagado) throw err(400, 'El neto no puede quedar por debajo de lo que ya se pagó (' + r2(pagado) + ').');
     await liberarAdelantos(db, existente._id);
     const liq = Object.assign({}, existente, base, { _id: existente._id });
     liq.adelantosDescontados = await aplicarAdelantos(db, req.orgId, liq, pagado);
@@ -303,9 +366,11 @@ router.post('/liquidaciones/copiar', authSueldos, async (req, res) => {
         if (tiene.has(String(emp._id))) continue;
         const prev = await db.collection('sueldos_liquidaciones').find({ orgId: req.orgId, empleadoId: emp._id, periodo: { $lt: periodo } }).sort({ periodo: -1 }).limit(1).toArray();
         const p = prev[0];
+        const com = await calcularComision(db, req, emp, periodo); // la comisión no se copia: se recalcula con las ventas del mes
+        const c = { comisiones: com.monto, comisionPct: com.pct, comisionBase: com.base };
         await guardarLiquidacion(db, req, p
-          ? { periodo, sueldo: p.sueldo, adicionales: p.adicionales, aguinaldo: 0, cargasSociales: p.cargasSociales, descuentos: p.descuentos }
-          : { periodo, sueldo: emp.sueldoBasico }, emp);
+          ? Object.assign({ periodo, sueldo: p.sueldo, adicionales: p.adicionales, aguinaldo: 0, cargasSociales: p.cargasSociales, descuentos: p.descuentos }, c)
+          : Object.assign({ periodo, sueldo: emp.sueldoBasico }, c), emp);
         creadas++;
       }
       return creadas;
@@ -358,12 +423,12 @@ router.get('/liquidaciones/export', authSueldos, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
     const liqs = await conReintento(async () => (await getDb()).collection('sueldos_liquidaciones').find(Object.assign({ periodo }, filtroOrg(req))).sort({ empleadoNombre: 1 }).toArray());
-    const filas = liqs.map(l => ({ empleado: l.empleadoNombre, sector: SECTORES[l.sector] || l.sector, sueldo: l.sueldo, adicionales: l.adicionales, aguinaldo: l.aguinaldo, cargas: l.cargasSociales,
+    const filas = liqs.map(l => ({ empleado: l.empleadoNombre, sector: SECTORES[l.sector] || l.sector, sueldo: l.sueldo, adicionales: l.adicionales, comisiones: l.comisiones || 0, aguinaldo: l.aguinaldo, cargas: l.cargasSociales,
       costo: l.costoEmpresa, descuentos: l.descuentos, adelantos: l.adelantosDescontados, neto: l.neto, pagado: l.totalPagado || 0, saldo: r2(l.neto - (l.totalPagado || 0)), estado: l.estado }));
     const t = resumir(liqs);
     filas.push({ empleado: 'TOTAL', costo: t.costoEmpresa, cargas: t.cargasSociales, neto: t.neto, pagado: t.pagado, saldo: t.saldo });
     exportarXlsx(res, 'sueldos-' + periodo + '.xlsx', [
-      { clave: 'empleado', titulo: 'Empleado' }, { clave: 'sector', titulo: 'Sector' }, { clave: 'sueldo', titulo: 'Sueldo', tipo: 'numero' }, { clave: 'adicionales', titulo: 'Adicionales', tipo: 'numero' },
+      { clave: 'empleado', titulo: 'Empleado' }, { clave: 'sector', titulo: 'Sector' }, { clave: 'sueldo', titulo: 'Sueldo', tipo: 'numero' }, { clave: 'adicionales', titulo: 'Adicionales', tipo: 'numero' }, { clave: 'comisiones', titulo: 'Comisiones', tipo: 'numero' },
       { clave: 'aguinaldo', titulo: 'Aguinaldo', tipo: 'numero' }, { clave: 'cargas', titulo: 'Cargas sociales', tipo: 'numero' }, { clave: 'costo', titulo: 'Costo empresa', tipo: 'numero' },
       { clave: 'descuentos', titulo: 'Descuentos', tipo: 'numero' }, { clave: 'adelantos', titulo: 'Adelantos descontados', tipo: 'numero' }, { clave: 'neto', titulo: 'Neto a pagar', tipo: 'numero' },
       { clave: 'pagado', titulo: 'Pagado', tipo: 'numero' }, { clave: 'saldo', titulo: 'Saldo', tipo: 'numero' }, { clave: 'estado', titulo: 'Estado' }

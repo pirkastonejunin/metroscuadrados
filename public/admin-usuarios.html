@@ -184,13 +184,14 @@
         <div class="row">
           <div style="flex:1"><label>Nombre</label><input id="nuevoVendNombre" placeholder="Nombre y apellido"></div>
           <div style="flex:1"><label>Teléfono</label><input id="nuevoVendTelefono"></div>
+          <div style="width:120px"><label title="Porcentaje sobre las ventas netas (sin IVA) del mes. Lo usa el módulo Sueldos para calcular la comisión.">Comisión %</label><input id="nuevoVendComision" type="number" min="0" max="100" step="any" value="0"></div>
           <button class="btn" onclick="crearVendedor()">Agregar</button>
         </div>
       </div>
       <div class="card">
         <p class="muted">Calendario Google: poné el mail de la cuenta de Google del vendedor y tocá "Crear calendario" — la app crea un calendario propio para esa persona y se lo comparte sola (no hace falta entrar a Google Calendar a mano). A partir de ahí sus visitas le llegan ahí. Si nadie tiene calendario propio cargado, las visitas caen al calendario general de respaldo (si hay uno configurado).</p>
         <table>
-          <thead><tr><th>Nombre</th><th>Teléfono</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Nombre</th><th>Teléfono</th><th title="Porcentaje sobre las ventas netas (sin IVA) del mes. El módulo Sueldos lo usa para calcular la comisión del vendedor.">Comisión %</th><th>Calendario Google</th><th>Estado</th><th></th></tr></thead>
           <tbody id="vendedoresBody"></tbody>
         </table>
       </div>
@@ -786,12 +787,13 @@ async function cargarVendedores(){
   document.getElementById('vendedoresBody').innerHTML = VENDEDORES.map(v=>`
     <tr>
       <td>${escapeHtml(v.nombre)}</td><td>${escapeHtml(v.telefono||'')}</td>
+      <td><input type="number" min="0" max="100" step="any" value="${v.comisionPct||0}" style="width:80px" onchange="guardarComisionVendedor('${v._id}', this)"> %</td>
       <td>${celdaCalendarioVendedor(v)}</td>
       <td>${v.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
       <td style="white-space:nowrap">
         <button class="btn small secondary" onclick="toggleVendedor('${v._id}', ${v.activo===false})">${v.activo===false?'Reactivar':'Desactivar'}</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">Todavía no hay vendedores cargados.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">Todavía no hay vendedores cargados.</td></tr>';
 }
 function celdaCalendarioVendedor(persona){
   if (persona.googleCalendarId) {
@@ -814,10 +816,18 @@ async function crearVendedor(){
   const nombre = document.getElementById('nuevoVendNombre').value.trim();
   const telefono = document.getElementById('nuevoVendTelefono').value.trim();
   if (!nombre) return;
-  await apiVisitas('/vendedores', {method:'POST', body:{nombre, telefono}});
+  const comisionPct = document.getElementById('nuevoVendComision').value;
+  await apiVisitas('/vendedores', {method:'POST', body:{nombre, telefono, comisionPct}});
+  document.getElementById('nuevoVendComision').value='0';
   document.getElementById('nuevoVendNombre').value='';
   document.getElementById('nuevoVendTelefono').value='';
   cargarVendedores();
+}
+async function guardarComisionVendedor(id, input){
+  try{
+    await apiVisitas(`/vendedores/${id}`, {method:'PUT', body:{comisionPct: input.value}});
+    input.style.outline = '2px solid #1f8a5f'; setTimeout(()=>{ input.style.outline = ''; }, 1200);
+  }catch(e){ alert('No se pudo guardar la comisión: ' + e.message); cargarVendedores(); }
 }
 async function toggleVendedor(id, activar){
   await apiVisitas(`/vendedores/${id}`, {method:'PUT', body:{activo: activar}});
