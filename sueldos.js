@@ -8,7 +8,7 @@
 //
 // Colecciones nuevas:
 //   empleados : { nombre, cuil, vendedorId (opcional, vincula con Vendedores), sector (produccion|administracion|ventas|
-//     logistica|otro), sueldoBasico (referencia), fechaIngreso, notas, activo,
+//     logistica|obra|otro), sueldoBasico (referencia), fechaIngreso, notas, activo,
 //     frecuencia (semanal|quincenal|mensual: cada cuánto cobra; la liquidación sigue siendo mensual),
 //     comisionPago (fin_de_mes: comisiones todas juntas un día | con_sueldo: se suman a cada pago),
 //     comisionTipo (porcentaje | por_visita), usuarioId, montoVisita, pctMostrador (esquema por visita),
@@ -90,7 +90,7 @@ const authSueldos = [authUsuario, resolverOrg, requiereModulo('sueldos'), (req, 
   next();
 }];
 
-const SECTORES = { produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
+const SECTORES = { obra: 'Obra', produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
 // Frecuencia de pago: el sueldo se liquida igual una vez por mes, pero se paga en cuotas.
 const FRECUENCIAS = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
 const CUOTAS = { semanal: 4, quincenal: 2, mensual: 1 };

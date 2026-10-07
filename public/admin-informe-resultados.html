@@ -169,6 +169,12 @@ async function iniciarApp(){
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 
+let SUELDOS_ABIERTO = true;
+function toggleSueldos(){
+  SUELDOS_ABIERTO = !SUELDOS_ABIERTO;
+  document.querySelectorAll('.sueldo-sub').forEach(tr => { tr.style.display = SUELDOS_ABIERTO ? '' : 'none'; });
+  const f = document.getElementById('flechaSueldos'); if (f) f.textContent = SUELDOS_ABIERTO ? '▾' : '▸';
+}
 function params(extra){
   const q = new URLSearchParams({desde: $('fDesde').value, hasta: $('fHasta').value, alcance: $('fAlcance').value});
   Object.keys(extra||{}).forEach(k => q.set(k, extra[k]));
@@ -196,7 +202,12 @@ async function cargar(){
   h += '<tr class="sub"><td>Margen bruto</td>' + col(m => pesos(m.margenBruto), m => cls(m.margenBruto)) + '</tr>';
   h += '<tr class="pct"><td>% sobre ventas</td>' + col(m => pct(m.margenPct)) + '</tr>';
   h += '<tr class="sec"><td colspan="' + (M.length + 2) + '">Gastos</td></tr>';
-  h += d.conceptos.length ? d.conceptos.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
+  const otros = d.conceptosOtros || d.conceptos, sueldos = d.conceptosSueldos || [], PREF = 'Sueldos y cargas · ';
+  h += (otros.length || sueldos.length) ? otros.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
+  if (sueldos.length) {
+    h += '<tr class="ind grp" onclick="toggleSueldos()" title="Tocá para abrir o cerrar el detalle por sector" style="cursor:pointer"><td><span class="flecha" id="flechaSueldos">' + (SUELDOS_ABIERTO ? '▾' : '▸') + '</span> <b>Sueldos y cargas</b></td>' + col(m => { const t = sueldos.reduce((a, c) => a + (m.gastos[c] || 0), 0); return t ? pesos(-t) : '–'; }) + '</tr>';
+    h += sueldos.map(c => '<tr class="ind sueldo-sub"' + (SUELDOS_ABIERTO ? '' : ' style="display:none"') + '><td style="padding-left:54px">' + escapeHtml(c.slice(PREF.length)) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('');
+  }
   h += '<tr class="sub"><td>Total gastos</td>' + col(m => pesos(-m.gastosTotal), m => m.gastosTotal ? 'neg' : '') + '</tr>';
   if (T.enCosto) h += '<tr class="pct" title="Estos importes ya están contados: dentro del costo de producción de los productos o en el módulo Sueldos (sector Producción). Se muestran para que los veas, pero no se restan de nuevo."><td>Ya contados en el costo o en Sueldos (no se restan)</td>' + col(m => m.enCosto ? pesos(-m.enCosto) : '–') + '</tr>';
   if (T.manoObraDescontada) h += '<tr class="pct" title="Los sueldos de producción se muestran como gasto. Para no contarlos dos veces, se sacó del costo de cada producto vendido la mano de obra de su receta (Costos de Producción). Los precios no cambian."><td>Mano de obra de receta descontada del costo de lo vendido</td>' + col(m => m.manoObraDescontada ? pesos(m.manoObraDescontada) : '–') + '</tr>';
@@ -213,15 +224,16 @@ async function panelCfg(){
   try{
     const r = await fetch(BASE + '/resultados/config', {headers: headersAuth()}); const c = await r.json(); if (!r.ok) throw new Error(c.error || 'Error');
     const sel = new Set(c.enCosto);
-    p.innerHTML = '<div class="lista-cfg" style="margin:0 0 14px"><label style="align-items:flex-start;gap:8px;font-size:13px"><input type="checkbox" id="cfgSpg"' + (c.sueldosProduccionGasto ? ' checked' : '') + ' style="margin-top:3px;flex:none"><span><b>Mostrar los sueldos de producción como gasto</b><span class="muted" style="display:block;margin-top:2px">Hoy están dentro del costo de los productos y no se ven como gasto. Si lo activás, el costo de empresa de los sueldos de Producción aparece en Gastos y se descuenta del costo de cada producto vendido la mano de obra de su receta, para no contarla dos veces. Los precios no cambian: la receta sigue llevando la mano de obra. Los productos de producción sin receta vinculada no se ajustan.</span></span></label></div>' +
+    p.innerHTML = '<div class="lista-cfg" style="margin:0 0 6px"><label style="align-items:flex-start;gap:8px;font-size:13px"><input type="checkbox" id="cfgCog"' + (c.colocacionGasto ? ' checked' : '') + ' style="margin-top:3px;flex:none"><span><b>Mostrar lo que se paga a los colocadores como gasto (Sueldos y cargas · Obra)</b><span class="muted" style="display:block;margin-top:2px">Se calcula desde Gestión de Obras: por cada tarea terminada, los m² por el costo por m² del colocador, en el mes en que se terminó. Si ya cargás esos pagos como un concepto en Gastos, tildalo abajo en "ya contados" para no sumarlo dos veces.</span></span></label></div>' +
+      '<div class="lista-cfg" style="margin:0 0 14px"><label style="align-items:flex-start;gap:8px;font-size:13px"><input type="checkbox" id="cfgSpg"' + (c.sueldosProduccionGasto ? ' checked' : '') + ' style="margin-top:3px;flex:none"><span><b>Mostrar los sueldos de producción como gasto</b><span class="muted" style="display:block;margin-top:2px">Hoy están dentro del costo de los productos y no se ven como gasto. Si lo activás, el costo de empresa de los sueldos de Producción aparece en Gastos y se descuenta del costo de cada producto vendido la mano de obra de su receta, para no contarla dos veces. Los precios no cambian: la receta sigue llevando la mano de obra. Los productos de producción sin receta vinculada no se ajustan.</span></span></label></div>' +
       '<b>Gastos que ya están contados en otro lado</b><div class="muted" style="margin-top:2px">Tildá los conceptos que ya forman parte del costo de tus productos (por ejemplo la mano de obra) o que ya entran por el módulo Sueldos (por ejemplo el pago de cargas sociales), para que no se resten otra vez como gasto. Vale para la sucursal elegida arriba.</div><div class="lista-cfg">' +
       (c.conceptos.length ? c.conceptos.map(n => '<label><input type="checkbox" value="' + escapeHtml(n) + '"' + (sel.has(n) ? ' checked' : '') + '> ' + escapeHtml(n) + '</label>').join('') : '<span class="muted">Todavía no hay conceptos de gasto cargados.</span>') +
       '</div><button data-iconizado="1" class="btn" onclick="guardarCfg()">Guardar</button>';
   }catch(e){ p.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
 }
 async function guardarCfg(){
-  const enCosto = [...document.querySelectorAll('#cfgPanel .lista-cfg input[type=checkbox]:checked')].map(i => i.value);
-  const r = await fetch(BASE + '/resultados/config', {method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({enCosto, sueldosProduccionGasto: $('cfgSpg').checked})});
+  const enCosto = [...document.querySelectorAll('#cfgPanel .lista-cfg input[type=checkbox]:checked:not(#cfgSpg):not(#cfgCog)')].map(i => i.value);
+  const r = await fetch(BASE + '/resultados/config', {method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({enCosto, sueldosProduccionGasto: $('cfgSpg').checked, colocacionGasto: $('cfgCog').checked})});
   const d = await r.json(); if (!r.ok) { alert(d.error || 'No se pudo guardar'); return; }
   $('cfgPanel').classList.add('hidden'); cargar();
 }

@@ -149,7 +149,7 @@ const BASE = '/api/sueldos';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
 let VENDEDORES = [], USUARIOS = [], COM = null, EMPLEADOS = [], CUENTAS = {cajas:[], bancos:[]}, LIQ = null;
-const SECTORES = {produccion:'Producción', administracion:'Administración', ventas:'Ventas', logistica:'Logística', otro:'Otros'};
+const SECTORES = {obra:'Obra', produccion:'Producción', administracion:'Administración', ventas:'Ventas', logistica:'Logística', otro:'Otros'};
 const FRECUENCIAS = {semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
 const COMISION_TIPO = {porcentaje:'Porcentaje de ventas', por_visita:'Por visita + ventas de mostrador'};
 const COMISION_PAGO = {fin_de_mes:'Todas juntas, un solo día', con_sueldo:'Se suman a cada pago'};
