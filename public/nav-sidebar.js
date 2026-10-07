@@ -100,10 +100,6 @@
       // cotizador. Reusa el módulo 'ventas' (no es un módulo nuevo).
       { key: 'presupuestos', href: '/admin-presupuestos.html', modulo: 'ventas', label: 'Presupuestos', icon: ICONOS.presupuestos }
     ]},
-    // Reportes (7/10/2026, pedido de Mato): tableros comparativos.
-    { nombre: 'Reportes', items: [
-      { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
-    ]},
     { nombre: 'Inventario', items: [
       { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos },
       { key: 'stock', href: '/admin-stock.html', modulo: 'stock', label: 'Stock', icon: ICONOS.stock }
@@ -124,6 +120,11 @@
       { key: 'fiscal-ventas', href: '/admin-fiscal-libros.html?vista=ventas', modulo: 'fiscal', label: 'Libro IVA Ventas', icon: ICONOS.fiscal },
       { key: 'fiscal-compras', href: '/admin-fiscal-libros.html?vista=compras', modulo: 'fiscal', label: 'Libro IVA Compras', icon: ICONOS.fiscal },
       { key: 'fiscal-retenciones', href: '/admin-fiscal-libros.html?vista=retenciones', modulo: 'fiscal', label: 'Percepciones y retenciones', icon: ICONOS.fiscal }
+    ]},
+    // Reportes (7/10/2026, pedido de Mato): siempre al final del menú, separados
+    // de la parte operativa. Los reportes nuevos van acá adentro.
+    { nombre: 'Reportes', items: [
+      { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
     ]}
   ];
 
