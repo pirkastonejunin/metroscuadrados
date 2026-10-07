@@ -35,32 +35,26 @@
   .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
   .tb-filtros select,.tb-filtros input{width:auto;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);}
   .tb-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:12px;font-weight:800;cursor:help;margin-left:auto;}
-  .tb-hero{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(0,1.6fr);gap:24px;padding:20px 24px;border-radius:20px;color:#f3f1ee;margin-bottom:14px;
-    background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);}
-  .tb-hero-et{font-size:13px;font-weight:600;color:#aeb2b8;}
-  .tb-hero-valor{font-size:clamp(1.9rem,3.6vw,2.9rem);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-top:4px;white-space:nowrap;}
-  .tb-hero-sub{font-size:12px;color:#aeb2b8;margin-top:6px;font-weight:600;}
-  .barras{display:flex;flex-direction:column;gap:9px;justify-content:center;}
-  .barra{display:grid;grid-template-columns:minmax(80px,150px) 1fr 110px;gap:10px;align-items:center;font-size:13px;}
-  .barra .nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .barra .pista{height:14px;border-radius:7px;background:rgba(127,127,127,.16);overflow:hidden;}
-  .barra .pista > div{height:100%;border-radius:7px;background:var(--accent);transition:width .5s ease;}
-  .barra .val{font-weight:800;text-align:right;white-space:nowrap;}
-  .tb-hero .barra .pista{background:rgba(255,255,255,.1);}
-  .tres{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
-  .panel{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;min-width:0;}
-  .panel h3{margin:0;font-size:15px;font-weight:800;}
-  .panel .res{margin:6px 0 12px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
-  .panel .res b{font-size:clamp(1.4rem,2.2vw,1.9rem);font-weight:800;letter-spacing:-.01em;}
-  .tag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;}
+  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:18px 20px;min-width:0;}
+  .kpi .et{font-size:13px;font-weight:700;color:var(--muted);}
+  .kpi .val{font-size:clamp(1.5rem,2.4vw,2.1rem);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:6px 0 8px;white-space:nowrap;}
+  .kpi .det{font-size:12px;font-weight:600;color:var(--muted);min-height:1.2em;}
+  .kpi.oscuro{color:#f3f1ee;border:0;background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);}
+  .kpi.oscuro .et,.kpi.oscuro .det{color:#aeb2b8;}
+  .tag{display:inline-block;font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;}
   .tag.ok{background:var(--ok-soft);color:var(--ok);} .tag.mal{background:var(--danger-soft);color:var(--danger);} .tag.neu{background:var(--bg);color:var(--muted);}
-  .suc{padding:10px 0;border-top:1px solid var(--border);}
-  .suc .t{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:800;font-size:13px;margin-bottom:6px;}
-  .doble{display:grid;grid-template-columns:84px 1fr 96px;gap:8px;align-items:center;font-size:12px;margin:3px 0;}
-  .doble .pista{height:9px;border-radius:5px;background:var(--bg);overflow:hidden;} .doble .pista > div{height:100%;border-radius:5px;transition:width .5s ease;}
-  .doble .a{background:var(--accent);} .doble .b{background:var(--piedra);}
-  .doble .l{color:var(--muted);font-weight:700;} .doble .v{text-align:right;font-weight:800;white-space:nowrap;}
-  @media (max-width:1000px){.tres{grid-template-columns:1fr;} .tb-hero{grid-template-columns:1fr;}}
+  .tabla{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:6px 18px 10px;overflow-x:auto;}
+  .tabla h3{margin:14px 0 6px;font-size:15px;font-weight:800;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{padding:11px 8px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;}
+  th:first-child,td:first-child{text-align:left;font-weight:700;}
+  th{font-size:12px;color:var(--muted);font-weight:700;}
+  tbody tr:last-child td{border-bottom:0;}
+  tr.total td{font-weight:800;border-top:2px solid var(--border);}
+  td.pos{color:var(--ok);font-weight:700;} td.neg{color:var(--danger);font-weight:700;}
+  @media (max-width:1000px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media (max-width:520px){.kpis{grid-template-columns:1fr;}}
 </style>
 </head>
 <body>
@@ -99,19 +93,10 @@
     </div>
     <div id="err"></div>
 
-    <section class="tb-hero">
-      <div>
-        <div class="tb-hero-et">Facturación del período</div>
-        <div class="tb-hero-valor" id="hTotal">$ —</div>
-        <div class="tb-hero-sub" id="hSub"></div>
-      </div>
-      <div class="barras" id="hBarras"></div>
-    </section>
-
-    <div class="tres">
-      <section class="panel"><h3>Cobros y pagos</h3><div class="res" id="cpRes"></div><div id="cpLista"></div></section>
-      <section class="panel"><h3>Posición fiscal</h3><div class="res" id="pfRes"></div><div id="pfLista"></div></section>
-      <section class="panel"><h3>Saldos de deuda</h3><div class="res" id="sdRes"></div><div id="sdLista"></div></section>
+    <div class="kpis" id="kpis"></div>
+    <div class="tabla hidden" id="tablaBox">
+      <h3>Por sucursal</h3>
+      <table><thead><tr><th>Sucursal</th><th>Facturado</th><th>Cobros</th><th>Pagos</th><th>Posición fiscal</th><th>Saldo de deuda</th></tr></thead><tbody id="tabla"></tbody></table>
     </div>
   </main>
 </div>
@@ -170,19 +155,11 @@ async function iniciarApp(){
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 
-function barra(nombre, valor, max, clase){
-  return '<div class="barra"><span class="nom" title="' + escapeHtml(nombre) + '">' + escapeHtml(nombre) + '</span><div class="pista"><div style="width:' + (max > 0 ? Math.max(0, valor) / max * 100 : 0) + '%"></div></div><span class="val">' + pesos(valor) + '</span></div>';
-}
-function doble(l1, v1, l2, v2){
-  const m = Math.max(Math.abs(v1), Math.abs(v2), 1);
-  return '<div class="doble"><span class="l">' + l1 + '</span><div class="pista"><div class="a" style="width:' + Math.abs(v1) / m * 100 + '%"></div></div><span class="v">' + pesos(v1) + '</span></div>' +
-         '<div class="doble"><span class="l">' + l2 + '</span><div class="pista"><div class="b" style="width:' + Math.abs(v2) / m * 100 + '%"></div></div><span class="v">' + pesos(v2) + '</span></div>';
+const clase = n => n > 0 ? 'pos' : (n < 0 ? 'neg' : '');
+function kpi(et, valor, det, oscuro, tip){
+  return '<div class="kpi' + (oscuro ? ' oscuro' : '') + '" title="' + escapeHtml(tip || '') + '"><div class="et">' + et + '</div><div class="val">' + valor + '</div><div class="det">' + det + '</div></div>';
 }
 function tag(texto, tipo){ return '<span class="tag ' + tipo + '">' + texto + '</span>'; }
-function filas(d, fn){
-  const lista = d.sucursales.length > 1 ? [Object.assign({ nombre: 'Todas las sucursales', _t: true }, d.total)].concat(d.sucursales) : d.sucursales;
-  return lista.map(s => '<div class="suc"><div class="t"><span>' + escapeHtml(s.nombre) + '</span>' + fn.tag(s) + '</div>' + fn.cuerpo(s) + '</div>').join('');
-}
 
 async function cargar(){
   $('err').innerHTML = '';
@@ -193,26 +170,20 @@ async function cargar(){
     d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
   }catch(e){ $('err').innerHTML = '<div class="err">No se pudo cargar: ' + escapeHtml(e.message) + '</div>'; return; }
   const T = d.total, S = d.sucursales.slice().sort((a, b) => b.facturado - a.facturado);
-
-  // Facturación
-  $('hTotal').textContent = pesos(T.facturado);
-  $('hSub').textContent = S.length > 1 ? S.length + ' sucursales' : (S[0] ? S[0].nombre : '');
-  const maxF = Math.max(1, ...S.map(s => s.facturado));
-  $('hBarras').innerHTML = S.map(s => barra(s.nombre, s.facturado, maxF)).join('') || '<div class="muted">No hay sucursales asignadas.</div>';
-
-  // Cobros y pagos
-  $('cpRes').innerHTML = '<b>' + pesos(T.flujoNeto) + '</b>' + tag(T.flujoNeto >= 0 ? 'cobraste más de lo que pagaste' : 'pagaste más de lo que cobraste', T.flujoNeto >= 0 ? 'ok' : 'mal');
-  $('cpLista').innerHTML = filas({ total: d.total, sucursales: S }, { tag: s => tag(pesos(s.flujoNeto), s.flujoNeto >= 0 ? 'ok' : 'mal'), cuerpo: s => doble('Cobros', s.cobros, 'Pagos', s.pagos) });
-
-  // Posición fiscal
   const pf = T.posicionFiscal;
-  $('pfRes').innerHTML = '<b>' + pesos(Math.abs(pf)) + '</b>' + tag(pf > 0 ? 'IVA a pagar' : (pf < 0 ? 'saldo a favor' : 'sin saldo'), pf > 0 ? 'mal' : (pf < 0 ? 'ok' : 'neu'));
-  $('pfLista').innerHTML = filas({ total: d.total, sucursales: S }, { tag: s => tag((s.posicionFiscal > 0 ? 'a pagar ' : s.posicionFiscal < 0 ? 'a favor ' : '') + pesos(Math.abs(s.posicionFiscal)), s.posicionFiscal > 0 ? 'mal' : (s.posicionFiscal < 0 ? 'ok' : 'neu')), cuerpo: s => doble('IVA ventas', s.ivaVentas, 'IVA compras', s.ivaCompras) });
+  $('kpis').innerHTML =
+    kpi('Facturación', pesos(T.facturado), S.length > 1 ? S.length + ' sucursales' : (S[0] ? escapeHtml(S[0].nombre) : ''), true, 'Ventas del período con IVA, restando notas de crédito') +
+    kpi('Cobros menos pagos', pesos(T.flujoNeto), tag(T.flujoNeto >= 0 ? 'cobraste más' : 'pagaste más', T.flujoNeto >= 0 ? 'ok' : 'mal'), false, 'Cobros ' + pesos(T.cobros) + ' · Pagos ' + pesos(T.pagos)) +
+    kpi('Posición fiscal', pesos(Math.abs(pf)), tag(pf > 0 ? 'IVA a pagar' : (pf < 0 ? 'saldo a favor' : 'sin saldo'), pf > 0 ? 'mal' : (pf < 0 ? 'ok' : 'neu')), false, 'IVA ventas ' + pesos(T.ivaVentas) + ' · IVA compras ' + pesos(T.ivaCompras)) +
+    kpi('Saldo de deuda', pesos(T.saldoNeto), tag(T.saldoNeto >= 0 ? 'te deben más' : 'debés más', T.saldoNeto >= 0 ? 'ok' : 'mal'), false, 'Por cobrar ' + pesos(T.porCobrar) + ' · Por pagar ' + pesos(T.porPagar));
 
-  // Saldos de deuda
-  const sn = T.saldoNeto;
-  $('sdRes').innerHTML = '<b>' + pesos(sn) + '</b>' + tag(sn >= 0 ? 'te deben más de lo que debés' : 'debés más de lo que te deben', sn >= 0 ? 'ok' : 'mal');
-  $('sdLista').innerHTML = filas({ total: d.total, sucursales: S }, { tag: s => tag(pesos(s.saldoNeto), s.saldoNeto >= 0 ? 'ok' : 'mal'), cuerpo: s => doble('Por cobrar', s.porCobrar, 'Por pagar', s.porPagar) });
+  // Tabla por sucursal (solo si hay más de una)
+  $('tablaBox').classList.toggle('hidden', S.length < 2);
+  const fila = (s, cls) => '<tr class="' + (cls || '') + '"><td>' + escapeHtml(s.nombre) + '</td><td>' + pesos(s.facturado) + '</td>' +
+    '<td title="Cobros del período">' + pesos(s.cobros) + '</td><td title="Pagos del período">' + pesos(s.pagos) + '</td>' +
+    '<td class="' + (s.posicionFiscal > 0 ? 'neg' : (s.posicionFiscal < 0 ? 'pos' : '')) + '" title="IVA ventas ' + pesos(s.ivaVentas) + ' · IVA compras ' + pesos(s.ivaCompras) + '">' + (s.posicionFiscal > 0 ? 'a pagar ' : (s.posicionFiscal < 0 ? 'a favor ' : '')) + pesos(Math.abs(s.posicionFiscal)) + '</td>' +
+    '<td class="' + clase(s.saldoNeto) + '" title="Por cobrar ' + pesos(s.porCobrar) + ' · Por pagar ' + pesos(s.porPagar) + '">' + pesos(s.saldoNeto) + '</td></tr>';
+  $('tabla').innerHTML = S.map(s => fila(s)).join('') + fila(Object.assign({ nombre: 'Total' }, T), 'total');
 }
 </script>
 </body>
