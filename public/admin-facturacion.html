@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Facturación por sucursal - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea; --danger:#c53030; --danger-soft:#fbe4e1; --piedra:#5d646d;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8; --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316; --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f; --piedra:#9aa0a8; --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5); }
+  }
+  :root[data-theme="dark"] { --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8; --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316; --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f; --piedra:#9aa0a8; --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5); }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  main{padding:20px;max-width:1280px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .muted{color:var(--muted);font-size:12px;} .hidden{display:none !important;} .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;} #loginScreen .card{width:300px;text-align:center;}
+  .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+  .tb-filtros select,.tb-filtros input{width:auto;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);}
+  .tb-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:12px;font-weight:800;cursor:help;margin-left:auto;}
+  .tb-hero{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(0,1.6fr);gap:24px;padding:20px 24px;border-radius:20px;color:#f3f1ee;margin-bottom:14px;
+    background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);}
+  .tb-hero-et{font-size:13px;font-weight:600;color:#aeb2b8;}
+  .tb-hero-valor{font-size:clamp(1.9rem,3.6vw,2.9rem);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-top:4px;white-space:nowrap;}
+  .tb-hero-sub{font-size:12px;color:#aeb2b8;margin-top:6px;font-weight:600;}
+  .barras{display:flex;flex-direction:column;gap:9px;justify-content:center;}
+  .barra{display:grid;grid-template-columns:minmax(80px,150px) 1fr 110px;gap:10px;align-items:center;font-size:13px;}
+  .barra .nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .barra .pista{height:14px;border-radius:7px;background:rgba(127,127,127,.16);overflow:hidden;}
+  .barra .pista > div{height:100%;border-radius:7px;background:var(--accent);transition:width .5s ease;}
+  .barra .val{font-weight:800;text-align:right;white-space:nowrap;}
+  .tb-hero .barra .pista{background:rgba(255,255,255,.1);}
+  .tres{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:16px 18px;min-width:0;}
+  .panel h3{margin:0;font-size:15px;font-weight:800;}
+  .panel .res{margin:6px 0 12px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+  .panel .res b{font-size:clamp(1.4rem,2.2vw,1.9rem);font-weight:800;letter-spacing:-.01em;}
+  .tag{font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;}
+  .tag.ok{background:var(--ok-soft);color:var(--ok);} .tag.mal{background:var(--danger-soft);color:var(--danger);} .tag.neu{background:var(--bg);color:var(--muted);}
+  .suc{padding:10px 0;border-top:1px solid var(--border);}
+  .suc .t{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:800;font-size:13px;margin-bottom:6px;}
+  .doble{display:grid;grid-template-columns:84px 1fr 96px;gap:8px;align-items:center;font-size:12px;margin:3px 0;}
+  .doble .pista{height:9px;border-radius:5px;background:var(--bg);overflow:hidden;} .doble .pista > div{height:100%;border-radius:5px;transition:width .5s ease;}
+  .doble .a{background:var(--accent);} .doble .b{background:var(--piedra);}
+  .doble .l{color:var(--muted);font-weight:700;} .doble .v{text-align:right;font-weight:800;white-space:nowrap;}
+  @media (max-width:1000px){.tres{grid-template-columns:1fr;} .tb-hero{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Facturación</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button data-iconizado="1" class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el tablero de facturación. Pedile a un administrador que lo habilite desde Usuarios y roles.</p>
+    <button data-iconizado="1" class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <main>
+    <div class="tb-filtros">
+      <select id="fPeriodo" aria-label="Período" onchange="preset(this.value)">
+        <option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes" selected>Este mes</option>
+        <option value="mespasado">Mes pasado</option><option value="30">Últimos 30 días</option><option value="anio">Este año</option><option value="custom">Personalizado</option>
+      </select>
+      <input type="date" id="fDesde" aria-label="Desde" onchange="$('fPeriodo').value='custom';cargar()">
+      <input type="date" id="fHasta" aria-label="Hasta" onchange="$('fPeriodo').value='custom';cargar()">
+      <span class="muted" id="topbarUser" style="margin-left:6px"></span>
+      <span class="tb-info" title="Facturación: ventas del período con IVA, restando notas de crédito. Cobros: lo cobrado a clientes en el período. Pagos: lo pagado a proveedores y gastos en el período. Posición fiscal: IVA de ventas menos IVA de compras del período (positivo = IVA a pagar, negativo = saldo a favor); no incluye percepciones ni retenciones. Saldos de deuda: lo que falta cobrar menos lo que falta pagar, a hoy (no depende del período). Ves las sucursales que tenés asignadas.">i</span>
+    </div>
+    <div id="err"></div>
+
+    <section class="tb-hero">
+      <div>
+        <div class="tb-hero-et">Facturación del período</div>
+        <div class="tb-hero-valor" id="hTotal">$ —</div>
+        <div class="tb-hero-sub" id="hSub"></div>
+      </div>
+      <div class="barras" id="hBarras"></div>
+    </section>
+
+    <div class="tres">
+      <section class="panel"><h3>Cobros y pagos</h3><div class="res" id="cpRes"></div><div id="cpLista"></div></section>
+      <section class="panel"><h3>Posición fiscal</h3><div class="res" id="pfRes"></div><div id="pfLista"></div></section>
+      <section class="panel"><h3>Saldos de deuda</h3><div class="res" id="sdRes"></div><div id="sdLista"></div></section>
+    </div>
+  </main>
+</div>
+
+<script>
+const BASE = '/api/facturacion';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function $(id){ return document.getElementById(id); }
+const pesos = n => (n < 0 ? '-$ ' : '$ ') + Math.round(Math.abs(n || 0)).toLocaleString('es-AR');
+
+async function login(){
+  const usuario = $('loginUser').value, pass = $('loginPass').value;
+  $('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){ $('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+
+const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+function preset(v){
+  if (v === 'custom') return;
+  const hoy = new Date(); hoy.setHours(12,0,0,0);
+  let d = new Date(hoy), h = new Date(hoy);
+  if (v === 'semana') d.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
+  else if (v === 'mes') d = new Date(hoy.getFullYear(), hoy.getMonth(), 1, 12);
+  else if (v === 'mespasado') { d = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1, 12); h = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 12); }
+  else if (v === '30') d.setDate(hoy.getDate() - 29);
+  else if (v === 'anio') d = new Date(hoy.getFullYear(), 0, 1, 12);
+  $('fDesde').value = iso(d); $('fHasta').value = iso(h);
+  if (!$('app').classList.contains('hidden')) cargar();
+}
+
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; $('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    const ok = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('tablero_facturacion'));
+    if (!ok) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  PiedraSidebar.render(me, 'facturacion');
+  document.title = 'Facturación por sucursal - Piedra Negra';
+  $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
+  preset('mes');
+  await cargar();
+}
+if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
+
+function barra(nombre, valor, max, clase){
+  return '<div class="barra"><span class="nom" title="' + escapeHtml(nombre) + '">' + escapeHtml(nombre) + '</span><div class="pista"><div style="width:' + (max > 0 ? Math.max(0, valor) / max * 100 : 0) + '%"></div></div><span class="val">' + pesos(valor) + '</span></div>';
+}
+function doble(l1, v1, l2, v2){
+  const m = Math.max(Math.abs(v1), Math.abs(v2), 1);
+  return '<div class="doble"><span class="l">' + l1 + '</span><div class="pista"><div class="a" style="width:' + Math.abs(v1) / m * 100 + '%"></div></div><span class="v">' + pesos(v1) + '</span></div>' +
+         '<div class="doble"><span class="l">' + l2 + '</span><div class="pista"><div class="b" style="width:' + Math.abs(v2) / m * 100 + '%"></div></div><span class="v">' + pesos(v2) + '</span></div>';
+}
+function tag(texto, tipo){ return '<span class="tag ' + tipo + '">' + texto + '</span>'; }
+function filas(d, fn){
+  const lista = d.sucursales.length > 1 ? [Object.assign({ nombre: 'Todas las sucursales', _t: true }, d.total)].concat(d.sucursales) : d.sucursales;
+  return lista.map(s => '<div class="suc"><div class="t"><span>' + escapeHtml(s.nombre) + '</span>' + fn.tag(s) + '</div>' + fn.cuerpo(s) + '</div>').join('');
+}
+
+async function cargar(){
+  $('err').innerHTML = '';
+  const qs = new URLSearchParams({desde: $('fDesde').value, hasta: $('fHasta').value});
+  let d;
+  try{
+    const r = await fetch(BASE + '/resumen?' + qs, {headers: headersAuth()});
+    d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+  }catch(e){ $('err').innerHTML = '<div class="err">No se pudo cargar: ' + escapeHtml(e.message) + '</div>'; return; }
+  const T = d.total, S = d.sucursales.slice().sort((a, b) => b.facturado - a.facturado);
+
+  // Facturación
+  $('hTotal').textContent = pesos(T.facturado);
+  $('hSub').textContent = S.length > 1 ? S.length + ' sucursales' : (S[0] ? S[0].nombre : '');
+  const maxF = Math.max(1, ...S.map(s => s.facturado));
+  $('hBarras').innerHTML = S.map(s => barra(s.nombre, s.facturado, maxF)).join('') || '<div class="muted">No hay sucursales asignadas.</div>';
+
+  // Cobros y pagos
+  $('cpRes').innerHTML = '<b>' + pesos(T.flujoNeto) + '</b>' + tag(T.flujoNeto >= 0 ? 'cobraste más de lo que pagaste' : 'pagaste más de lo que cobraste', T.flujoNeto >= 0 ? 'ok' : 'mal');
+  $('cpLista').innerHTML = filas({ total: d.total, sucursales: S }, { tag: s => tag(pesos(s.flujoNeto), s.flujoNeto >= 0 ? 'ok' : 'mal'), cuerpo: s => doble('Cobros', s.cobros, 'Pagos', s.pagos) });
+
+  // Posición fiscal
+  const pf = T.posicionFiscal;
+  $('pfRes').innerHTML = '<b>' + pesos(Math.abs(pf)) + '</b>' + tag(pf > 0 ? 'IVA a pagar' : (pf < 0 ? 'saldo a favor' : 'sin saldo'), pf > 0 ? 'mal' : (pf < 0 ? 'ok' : 'neu'));
+  $('pfLista').innerHTML = filas({ total: d.total, sucursales: S }, { tag: s => tag((s.posicionFiscal > 0 ? 'a pagar ' : s.posicionFiscal < 0 ? 'a favor ' : '') + pesos(Math.abs(s.posicionFiscal)), s.posicionFiscal > 0 ? 'mal' : (s.posicionFiscal < 0 ? 'ok' : 'neu')), cuerpo: s => doble('IVA ventas', s.ivaVentas, 'IVA compras', s.ivaCompras) });
+
+  // Saldos de deuda
+  const sn = T.saldoNeto;
+  $('sdRes').innerHTML = '<b>' + pesos(sn) + '</b>' + tag(sn >= 0 ? 'te deben más de lo que debés' : 'debés más de lo que te deben', sn >= 0 ? 'ok' : 'mal');
+  $('sdLista').innerHTML = filas({ total: d.total, sucursales: S }, { tag: s => tag(pesos(s.saldoNeto), s.saldoNeto >= 0 ? 'ok' : 'mal'), cuerpo: s => doble('Por cobrar', s.porCobrar, 'Por pagar', s.porPagar) });
+}
+</script>
+</body>
+</html>

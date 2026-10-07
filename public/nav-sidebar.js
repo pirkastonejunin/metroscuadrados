@@ -100,6 +100,10 @@
       // cotizador. Reusa el módulo 'ventas' (no es un módulo nuevo).
       { key: 'presupuestos', href: '/admin-presupuestos.html', modulo: 'ventas', label: 'Presupuestos', icon: ICONOS.presupuestos }
     ]},
+    // Reportes (7/10/2026, pedido de Mato): tableros comparativos.
+    { nombre: 'Reportes', items: [
+      { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
+    ]},
     { nombre: 'Inventario', items: [
       { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos },
       { key: 'stock', href: '/admin-stock.html', modulo: 'stock', label: 'Stock', icon: ICONOS.stock }

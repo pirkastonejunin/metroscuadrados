@@ -77,6 +77,8 @@ app.use('/api/tesoreria', tesoreriaRouter);
 // Tablero comercial (7/10/2026): embudo CRM -> visitas -> presupuestos -> ventas.
 const tableroRouter = require('./tablero');
 app.use('/api/tablero', tableroRouter);
+// Tablero de facturación por sucursal (7/10/2026, pedido de Mato).
+app.use('/api/facturacion', require('./facturacion'));
 
 // Fiscal (5/10/2026): conexión con ARCA, facturación electrónica, libros de IVA.
 const fiscalRouter = require('./fiscal');
