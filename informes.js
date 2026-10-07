@@ -255,17 +255,36 @@ async function conceptosEnCosto(db, orgId) {
   return (d && Array.isArray(d.valor)) ? d.valor : [];
 }
 
+async function sueldosProduccionGasto(db, orgId) {
+  const d = await db.collection('config_general').findOne({ orgId, clave: 'resultadosSueldosProduccionGasto' });
+  return !!(d && d.valor === true);
+}
+
 async function resultadosOrg(db, orgId, d0, d1) {
   const meses = {};
-  const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, gastos: {} });
+  const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, gastos: {} });
+  const sueldosGasto = await sueldosProduccionGasto(db, orgId);
   const cotDoc = await db.collection('config_general').findOne({ orgId, clave: 'cotizacionDolar' });
   const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
 
   const ventas = await db.collection('ventas').find({ orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
   const ids = new Set();
   ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
-  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1 }).toArray() : [];
+  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1, tipoProducto: 1, costoProductoId: 1 }).toArray() : [];
   const pm = new Map(prods.map(p => [String(p._id), p]));
+  // Mano de obra por unidad de cada producto con receta (jornales x costo del jornal), solo si los sueldos de
+  // producción se muestran como gasto: hay que sacarla del costo de la mercadería para no contarla dos veces.
+  const manoObraPorReceta = new Map();
+  if (sueldosGasto) {
+    const links = [...new Set(prods.map(p => p.costoProductoId).filter(Boolean).map(String))];
+    if (links.length) {
+      const recetas = await db.collection('costos_productos').find({ orgId, _id: { $in: links.map(toObjectId) } }).project({ receta: 1 }).toArray();
+      const insIds = [...new Set(recetas.flatMap(r => (r.receta || []).map(f => String(f.insumoId))))];
+      const ins = insIds.length ? await db.collection('costos_insumos').find({ orgId, _id: { $in: insIds.map(toObjectId) } }).project({ unidad: 1, costoActual: 1 }).toArray() : [];
+      const im = new Map(ins.map(i => [String(i._id), i]));
+      recetas.forEach(r => manoObraPorReceta.set(String(r._id), (r.receta || []).reduce((a, f) => { const i = im.get(String(f.insumoId)); return a + (i && i.unidad === 'jornal' ? Number(f.cantidad || 0) * Number(i.costoActual || 0) : 0); }, 0)));
+    }
+  }
   ventas.forEach(v => {
     const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
     const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
@@ -280,7 +299,14 @@ async function resultadosOrg(db, orgId, d0, d1) {
       let costoU = null;
       if (p && p.costo != null) costoU = p.moneda === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? p.costo * (cotVigente || Number(v.cotizacionDolar)) : null) : Number(p.costo);
       if (costoU == null) { m.sinCosto += neto * (sub > 0 ? Number(it.subtotal || 0) / sub : (items.length ? 1 / items.length : 0)); return; }
-      m.costo += Number(it.cantidad || 0) * costoU * nc;
+      let costoEf = costoU;
+      const cant = Number(it.cantidad || 0);
+      if (sueldosGasto && p) {
+        const mo = p.costoProductoId ? (manoObraPorReceta.get(String(p.costoProductoId)) || 0) : 0;
+        if (mo > 0) { costoEf = Math.max(0, costoU - mo); m.manoObra += cant * (costoU - costoEf) * nc; }
+        else if (p.tipoProducto === 'produccion' && !p.costoProductoId) m.sinReceta += cant * costoU * nc;
+      }
+      m.costo += cant * costoEf * nc;
     });
   });
 
@@ -303,12 +329,12 @@ async function resultadosOrg(db, orgId, d0, d1) {
 
   // Sueldos (módulo Sueldos): el costo de empresa de cada liquidación entra en su período.
   // Producción: ya está dentro del costo de los productos (solo informativo); el resto es gasto.
-  const SECTORES = { administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
+  const SECTORES = { produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
   const periodos = mesesEntre(fechaAR(d0), fechaAR(d1));
   const liqs = await db.collection('sueldos_liquidaciones').find({ orgId, periodo: { $in: periodos } }).project({ periodo: 1, sector: 1, costoEmpresa: 1 }).toArray();
   liqs.forEach(l => {
     const m = mes(l.periodo);
-    if (l.sector === 'produccion') m.enCosto += Number(l.costoEmpresa || 0);
+    if (l.sector === 'produccion' && !sueldosGasto) m.enCosto += Number(l.costoEmpresa || 0);
     else { const c = 'Sueldos y cargas · ' + (SECTORES[l.sector] || 'Otros'); m.gastos[c] = (m.gastos[c] || 0) + Number(l.costoEmpresa || 0); }
   });
   return meses;
@@ -337,8 +363,8 @@ async function armarResultados(req) {
     const claves = mesesEntre(desdeS, hastaS);
     const conceptos = new Set();
     const cols = claves.map(k => {
-      const c = { mes: k, ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, gastos: {} };
-      partes.forEach(p => { const m = p[k]; if (!m) return; c.ventas += m.ventas; c.costo += m.costo; c.sinCosto += m.sinCosto; c.enCosto += m.enCosto; Object.keys(m.gastos).forEach(g => { conceptos.add(g); c.gastos[g] = (c.gastos[g] || 0) + m.gastos[g]; }); });
+      const c = { mes: k, ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, gastos: {} };
+      partes.forEach(p => { const m = p[k]; if (!m) return; c.ventas += m.ventas; c.costo += m.costo; c.sinCosto += m.sinCosto; c.enCosto += m.enCosto; c.manoObra += m.manoObra; c.sinReceta += m.sinReceta; Object.keys(m.gastos).forEach(g => { conceptos.add(g); c.gastos[g] = (c.gastos[g] || 0) + m.gastos[g]; }); });
       return c;
     });
     const listaConceptos = [...conceptos].sort((a, b) => a.localeCompare(b, 'es'));
@@ -347,12 +373,12 @@ async function armarResultados(req) {
       const margen = c.ventas - c.costo;
       return { mes: c.mes, ventasNetas: r2(c.ventas), costo: r2(c.costo), margenBruto: r2(margen), margenPct: c.ventas ? r2(margen / c.ventas * 100) : null,
         gastos: Object.fromEntries(listaConceptos.map(g => [g, r2(c.gastos[g] || 0)])), gastosTotal: r2(gastosTotal),
-        resultado: r2(margen - gastosTotal), resultadoPct: c.ventas ? r2((margen - gastosTotal) / c.ventas * 100) : null, sinCosto: r2(c.sinCosto), enCosto: r2(c.enCosto) };
+        resultado: r2(margen - gastosTotal), resultadoPct: c.ventas ? r2((margen - gastosTotal) / c.ventas * 100) : null, sinCosto: r2(c.sinCosto), enCosto: r2(c.enCosto), manoObraDescontada: r2(c.manoObra), sinReceta: r2(c.sinReceta) };
     };
     const total = fin(cols.reduce((a, c) => {
-      a.ventas += c.ventas; a.costo += c.costo; a.sinCosto += c.sinCosto; a.enCosto += c.enCosto;
+      a.ventas += c.ventas; a.costo += c.costo; a.sinCosto += c.sinCosto; a.enCosto += c.enCosto; a.manoObra += c.manoObra; a.sinReceta += c.sinReceta;
       Object.keys(c.gastos).forEach(g => { a.gastos[g] = (a.gastos[g] || 0) + c.gastos[g]; }); return a;
-    }, { mes: 'total', ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, gastos: {} }));
+    }, { mes: 'total', ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, gastos: {} }));
     return { desde: desdeS, hasta: hastaS, alcance: todas ? 'todas' : 'actual', sucursales: orgIds.length, conceptos: listaConceptos, meses: cols.map(fin), total };
   });
 }
@@ -362,13 +388,14 @@ router.get('/resultados/config', authInforme('informe_resultados'), async (req, 
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const out = await conReintento(async () => {
       const db = await getDb();
-      const [catalogo, usados, excluidos] = await Promise.all([
+      const [catalogo, usados, excluidos, spg] = await Promise.all([
         db.collection('gastos_conceptos').find({ orgId: req.orgId }).project({ nombre: 1 }).toArray(),
         db.collection('gastos').distinct('items.conceptoNombre', { orgId: req.orgId }),
-        conceptosEnCosto(db, req.orgId)
+        conceptosEnCosto(db, req.orgId),
+        sueldosProduccionGasto(db, req.orgId)
       ]);
       const set = new Set([...catalogo.map(c => c.nombre), ...usados, ...excluidos].filter(Boolean));
-      return { conceptos: [...set].sort((a, b) => a.localeCompare(b, 'es')), enCosto: excluidos };
+      return { conceptos: [...set].sort((a, b) => a.localeCompare(b, 'es')), enCosto: excluidos, sueldosProduccionGasto: spg };
     });
     res.json(Object.assign(out, { puedeEditar: !!req.usuario.rol.protegido }));
   } catch (e) { responder(res, e); }
@@ -378,14 +405,17 @@ router.put('/resultados/config', authInforme('informe_resultados'), async (req, 
     if (!req.usuario.rol.protegido) throw err(403, 'Solo un administrador puede elegir qué gastos ya están incluidos en el costo.');
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const lista = Array.isArray(req.body && req.body.enCosto) ? req.body.enCosto : null;
-    if (!lista) throw err(400, 'Falta la lista de conceptos.');
-    const valor = [...new Set(lista.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 100);
+    const spg = req.body && typeof req.body.sueldosProduccionGasto === 'boolean' ? req.body.sueldosProduccionGasto : null;
+    if (!lista && spg === null) throw err(400, 'Falta la lista de conceptos.');
+    const valor = lista ? [...new Set(lista.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 100) : null;
     await conReintento(async () => {
       const db = await getDb(); const ahora = new Date();
-      await db.collection('config_general').updateOne({ orgId: req.orgId, clave: 'resultadosConceptosEnCosto' },
-        { $set: { valor, updatedAt: ahora }, $setOnInsert: { orgId: req.orgId, clave: 'resultadosConceptosEnCosto', createdAt: ahora } }, { upsert: true });
+      const guardar = (clave, v) => db.collection('config_general').updateOne({ orgId: req.orgId, clave },
+        { $set: { valor: v, updatedAt: ahora }, $setOnInsert: { orgId: req.orgId, clave, createdAt: ahora } }, { upsert: true });
+      if (valor) await guardar('resultadosConceptosEnCosto', valor);
+      if (spg !== null) await guardar('resultadosSueldosProduccionGasto', spg);
     });
-    res.json({ enCosto: valor });
+    res.json({ enCosto: valor, sueldosProduccionGasto: spg });
   } catch (e) { responder(res, e); }
 });
 
@@ -400,7 +430,7 @@ router.get('/resultados', authInforme('informe_resultados'), async (req, res) =>
     const aoa = [enc,
       fila('Ventas netas (sin IVA)', m => m.ventasNetas), fila('Costo de mercadería vendida', m => -m.costo), fila('Margen bruto', m => m.margenBruto),
       fila('Margen bruto %', m => m.margenPct == null ? '' : m.margenPct), [], ['Gastos']
-    ].concat(d.conceptos.map(c => fila('  ' + c, m => -m.gastos[c])), [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Informativo: gastos ya contados de producción (no se restan de nuevo)', m => -m.enCosto), fila('Informativo: ventas sin costo cargado', m => m.sinCosto)]);
+    ].concat(d.conceptos.map(c => fila('  ' + c, m => -m.gastos[c])), [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Informativo: gastos ya contados de producción (no se restan de nuevo)', m => -m.enCosto), fila('Informativo: ventas sin costo cargado', m => m.sinCosto)], (d.total.manoObraDescontada || d.total.sinReceta) ? [fila('Informativo: mano de obra de receta descontada del costo de lo vendido', m => -m.manoObraDescontada), fila('Informativo: costo de productos de producción sin receta vinculada (no se les descontó mano de obra)', m => m.sinReceta)] : []);
     const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 38 }].concat(enc.slice(1).map(() => ({ wch: 15 })));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Estado de resultados');
     res.setHeader('Content-Disposition', 'attachment; filename="estado-de-resultados-' + d.desde + '_' + d.hasta + '.xlsx"');
