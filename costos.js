@@ -59,7 +59,7 @@ const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const XLSX = require('xlsx');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId, tieneModulo } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId, tieneModulo, asegurarOrgPorDefecto } = require('./usuarios');
 
 const router = express.Router();
 
@@ -227,7 +227,22 @@ function requiereModuloAlguno(...claves) {
     next();
   };
 }
-const authProduccion = [authUsuario, resolverOrg, requiereModuloAlguno('fabrica', 'costos')];
+// La producción es única para todo el grupo (pedido de Mato, 7/10/2026): la fábrica
+// no depende de la sucursal elegida arriba (PN Factory es una sucursal virtual que
+// solo vende a mayoristas), así que todas las pantallas y rutas de producción
+// trabajan siempre con la organización de la planta (la de por defecto, "Piedra
+// Negra", donde están los productos y recetas) y su depósito Junín.
+async function fijarOrgProduccion(req, res, next) {
+  try {
+    req.orgId = await conReintento(async () => asegurarOrgPorDefecto(await getDb()));
+    next();
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}
+const authProduccion = [authUsuario, resolverOrg, requiereModuloAlguno('fabrica', 'costos'), fijarOrgProduccion];
+// Depósito donde entra toda la producción: el depósito Junín de la planta.
+async function depositoProduccion(db, orgId) {
+  return db.collection('depositos').findOne({ orgId, activo: { $ne: false }, nombre: /jun[ií]n/i });
+}
 
 // ---------------------------------------------------------------------
 // Insumos por defecto — se crean solos la primera vez que una
@@ -846,12 +861,8 @@ router.post('/produccion', authProduccion, async (req, res) => {
 // producción (authProduccion) en vez del de Stock (authAdmin de stock.js).
 router.get('/produccion/depositos', authProduccion, async (req, res) => {
   try {
-    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
-    const lista = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('depositos').find(match).sort({ nombre: 1 }).toArray();
-    });
-    res.json(lista);
+    const dep = await conReintento(async () => depositoProduccion(await getDb(), req.orgId));
+    res.json(dep ? [dep] : []);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -861,8 +872,6 @@ router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de ingresar a stock.');
     const fecha = validarFecha(req.params.fecha);
-    const depositoId = toObjectId(req.body && req.body.depositoId);
-    if (!depositoId) throw err(400, 'Elegí a qué depósito va a ingresar lo fabricado.');
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -874,8 +883,9 @@ router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res
         const detalle = [quien, cuando].filter(Boolean).join(', ');
         throw err(400, `La producción de este día ya se ingresó a stock${detalle ? ' (' + detalle + ')' : ''}. Si hace falta corregir, cargá un movimiento de ajuste a mano en el módulo Stock.`);
       }
-      const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
-      if (!deposito) throw err(404, 'Depósito no encontrado');
+      const deposito = await depositoProduccion(db, req.orgId);
+      if (!deposito) throw err(400, 'No existe el depósito Junín. Crealo en Stock con ese nombre: toda la producción entra ahí.');
+      const depositoId = deposito._id;
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const fechaMovimiento = new Date(fecha + 'T12:00:00');

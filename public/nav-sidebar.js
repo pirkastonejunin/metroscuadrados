@@ -134,6 +134,10 @@
       { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
     ]}
   ];
+  // Orden del menú (7/10/2026, pedido de Mato): primero lo comercial, después
+  // lo que se compra y se guarda, la plata, producción, personal, fiscal y reportes.
+  const ORDEN_GRUPOS = ['CRM', 'Comercial', 'Proveedores', 'Inventario', 'Tesorería', 'Producción', 'Personal', 'Fiscal', 'Reportes'];
+  GRUPOS.sort((a, b) => { const i = ORDEN_GRUPOS.indexOf(a.nombre), j = ORDEN_GRUPOS.indexOf(b.nombre); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j); });
 
   // Configuración (4/10/2026, pedido de Mato): ya no es un grupo del menú
   // lateral — vive en el desplegable del usuario, arriba a la derecha, junto
@@ -174,9 +178,9 @@
         font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         color: var(--pn-ink); transition: transform 0.2s ease;
       }
-      .pn-sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid var(--border); text-decoration: none; color: inherit; }
+      .pn-sidebar-brand { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px 16px 12px; border-bottom: 1px solid var(--border); text-decoration: none; color: inherit; }
       .pn-sidebar-brand img { height: 22px; width: auto; display: block; flex-shrink: 0; }
-      .pn-sidebar-brand span { font-size: 13px; font-weight: 700; color: var(--pn-ink); }
+      .pn-sidebar-brand select { flex: 1 1 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; font-weight: 600; background: var(--bg); color: var(--pn-ink); font-family: inherit; }
       .pn-sidebar-org { padding: 12px 16px; border-bottom: 1px solid var(--border); }
       .pn-sidebar-org label { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 5px; }
       .pn-sidebar-org select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; background: var(--bg); color: var(--pn-ink); font-family: inherit; }
@@ -356,19 +360,13 @@
     const aside = document.createElement('aside');
     aside.className = 'pn-sidebar';
     aside.innerHTML = `
-      <a class="pn-sidebar-brand" href="/inicio.html">
-        <img src="/assets/logo-piedra-negra.png" onerror="this.style.display='none'" alt="">
-        ${ICONOS.inicio}<span>Piedra Negra</span>
-      </a>
-      ${mostrarOrgSelect ? `
-        <div class="pn-sidebar-org">
-          <label>Organización</label>
-          <select id="pnSidebarOrg">
-            ${orgs.map(o => `<option value="${o._id}" ${o._id === orgActiva ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
-            ${me.puedeVerTodas ? `<option value="todas" ${orgActiva === 'todas' ? 'selected' : ''}>Todas las organizaciones</option>` : ''}
-          </select>
-        </div>
-      ` : ''}
+      <div class="pn-sidebar-brand">
+        <a href="/inicio.html" title="Inicio" style="display:flex;align-items:center;flex-shrink:0"><img src="/assets/logo-piedra-negra.png" onerror="this.outerHTML='<b style=&quot;font-size:13px&quot;>Piedra Negra</b>'" alt="Piedra Negra"></a>
+        ${mostrarOrgSelect ? `<select id="pnSidebarOrg" aria-label="Organización" title="Organización con la que estás trabajando">
+          ${orgs.map(o => `<option value="${o._id}" ${o._id === orgActiva ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
+          ${me.puedeVerTodas ? `<option value="todas" ${orgActiva === 'todas' ? 'selected' : ''}>Todas las organizaciones</option>` : ''}
+        </select>` : ''}
+      </div>
       <div class="pn-sidebar-nav">${gruposHtml}</div>
       ${(document.getElementById('topbarUser') || document.getElementById('oficinaNombre')) ? '' : `<div class="pn-sidebar-footer">
         ${nombreUsuario ? `<span class="pn-nombre">${escapeHtml(nombreUsuario)}</span>` : ''}
