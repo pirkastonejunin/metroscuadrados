@@ -470,7 +470,9 @@ async function toggleActivoSubrubroAdm(id, activar){
   catch(e){ errArbol(e.message); }
 }
 // Productos de un rubro / subrubro ('__sin__' = sin subrubro; rubro '' = sin rubro).
+let ultimaListaRubroAdm = null;
 async function verProductosRubroAdm(rubro, subrubro){
+  ultimaListaRubroAdm = [rubro, subrubro];
   const titulo = rubro ? (subrubro === '__sin__' ? `${rubro} › Sin subrubro` : (subrubro ? `${rubro} › ${subrubro}` : rubro)) : 'Sin rubro';
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
@@ -481,20 +483,22 @@ async function verProductosRubroAdm(rubro, subrubro){
       </div>
     </div>`;
   try{
-    const params = new URLSearchParams({pagina: 1, porPagina: 500, campos: 'sku,nombre,marca,rubro,activo'});
+    const params = new URLSearchParams({pagina: 1, porPagina: 500});
     if (rubro) params.set('rubro', rubro);
     if (subrubro) params.set('subrubro', subrubro);
     let data = await bAdm('?' + params.toString());
     let lista = data.productos || [];
+    // Se suman al caché de Productos para poder abrir la ficha completa de cada uno.
+    lista.forEach(pr => { const i = productosCache.findIndex(x => x._id === pr._id); if (i >= 0) productosCache[i] = pr; else productosCache.push(pr); });
     // Sin rubro: el filtro por rubro vacío no existe en la lista, se filtra acá.
     if (!rubro) lista = lista.filter(p => !p.rubro);
     const total = rubro ? data.total : lista.length;
     const cont = document.getElementById('rpContenido');
     if (!cont) return;
     cont.innerHTML = lista.length ? `
-      <p class="muted" style="margin-top:0">${total} producto${total === 1 ? '' : 's'}${data.total > lista.length && rubro ? ` (mostrando ${lista.length})` : ''}</p>
+      <p class="muted" style="margin-top:0">${total} producto${total === 1 ? '' : 's'} · tocá uno para abrirlo${data.total > lista.length && rubro ? ` (mostrando ${lista.length})` : ''}</p>
       <table><thead><tr><th>SKU</th><th>Producto</th><th>Marca</th></tr></thead>
-      <tbody>${lista.map(p => `<tr><td><strong>${escapeHtml(p.sku || '')}</strong></td><td>${escapeHtml(p.nombre || '')}</td><td class="muted">${escapeHtml(p.marca || '—')}</td></tr>`).join('')}</tbody></table>`
+      <tbody>${lista.map(p => `<tr onclick="abrirEditarProducto('${p._id}')" style="cursor:pointer" title="Abrir el producto"><td><strong>${escapeHtml(p.sku || '')}</strong></td><td>${escapeHtml(p.nombre || '')}</td><td class="muted">${escapeHtml(p.marca || '—')}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No hay productos acá.</p>';
   }catch(e){ const c = document.getElementById('rpContenido'); if (c) c.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
 }
@@ -916,6 +920,11 @@ async function guardarEdicionProducto(id){
     cerrarModal();
     await cargarRubros();
     await cargarProductos();
+    // Si se abrió desde la lista de un rubro, se actualiza el árbol y se vuelve a esa lista.
+    if (!document.getElementById('tabRubros').classList.contains('hidden')) {
+      await cargarArbolAdm();
+      if (ultimaListaRubroAdm) verProductosRubroAdm(ultimaListaRubroAdm[0], ultimaListaRubroAdm[1]);
+    }
   }catch(e){
     document.getElementById('fpErr').textContent = e.message;
   }
