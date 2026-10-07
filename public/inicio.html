@@ -242,7 +242,7 @@
           <div id="tabRubrosPanel" class="hidden"></div>
           <div id="tabRubros"></div>
         </div>
-        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. Son los números de todo el equipo de la sucursal. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador. No se cuentan visitas canceladas ni ventas anuladas.</div>
+        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. Son los números de todo el equipo de la sucursal. El ticket promedio es el total de las ventas (con IVA) sobre la cantidad de ventas; el m2 promedio se calcula sobre las ventas que tienen m2. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador. No se cuentan visitas canceladas ni ventas anuladas.</div>
       </div>
     </div>
 
@@ -760,6 +760,15 @@ async function cargarTablero(){
       barra: e.cantidad / max * 100
     }));
     tarjetas.push(tabKpi({ clase: 'tab-total destacado', titulo: 'Efectividad total', valor: tabFmtPct(data.efectividadTotal), detalle: 'ventas sobre presupuestos cargados' }));
+    try{
+      const rp = await fetch('/api/tablero/promedios?' + qs.toString(), {headers: headersAuth()});
+      const p = await rp.json();
+      if (rp.ok) {
+        const fm = n => n === null ? '—' : n.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'Ticket promedio', valor: p.ticketPromedio === null ? '—' : '$ ' + fm(p.ticketPromedio), detalle: 'por venta · ' + p.ventas.toLocaleString('es-AR') + ' ventas' }));
+        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'm2 promedio por venta', valor: p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', detalle: 'en ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas con m2' }));
+      }
+    }catch(e){ /* los promedios son un extra: si fallan, el embudo se muestra igual */ }
     cont.innerHTML = '<div class="tab-grid">' + tarjetas.join('') + '</div>';
     document.getElementById('tabAvisos').innerHTML = (data.avisos || []).map(a => '<div class="tab-aviso">' + notifEscapeHtml(a) + '</div>').join('');
   }catch(e){

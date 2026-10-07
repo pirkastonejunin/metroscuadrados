@@ -216,4 +216,47 @@ router.put('/rubros-config', authTablero, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
+// ---------------------------------------------------------------------------
+// Promedios de venta (7/10/2026, pedido de Mato): ticket promedio en $ y m2
+// promedio por venta, del mismo período/vendedor que el embudo.
+//   - Ticket promedio: total de las ventas no anuladas / cantidad de ventas.
+//     Es el total tal como figura en la venta (con IVA y descuentos); las
+//     ventas en USD se pasan a pesos con la cotización guardada en la venta.
+//   - m2 promedio: m2 vendidos (ítems de productos con unidad m2) / ventas
+//     que tienen al menos un ítem en m2 (las ventas sin m2 no diluyen el dato).
+// ---------------------------------------------------------------------------
+router.get('/promedios', authTablero, async (req, res) => {
+  try {
+    const { desdeS, hastaS, rango } = rangoDe(req);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const { filtroUsr } = await resolverAlcance(db, req);
+      const match = Object.assign({}, filtroOrg(req), filtroUsr, { estado: { $ne: 'anulada' }, createdAt: rango });
+      const [tk, m2] = await Promise.all([
+        db.collection('ventas').aggregate([
+          { $match: match },
+          { $group: { _id: null, ventas: { $sum: 1 },
+              total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] }] } } } }
+        ]).toArray(),
+        db.collection('ventas').aggregate([
+          { $match: match },
+          { $unwind: '$items' },
+          { $lookup: { from: 'productos_catalogo', localField: 'items.productoId', foreignField: '_id', as: 'prod' } },
+          { $match: { 'prod.0.unidad': 'm2' } },
+          { $group: { _id: '$_id', m2: { $sum: '$items.cantidad' } } },
+          { $group: { _id: null, ventas: { $sum: 1 }, m2: { $sum: '$m2' } } }
+        ]).toArray()
+      ]);
+      const t = tk[0] || { ventas: 0, total: 0 }, m = m2[0] || { ventas: 0, m2: 0 };
+      return {
+        ventas: t.ventas, totalVendido: Math.round(t.total * 100) / 100,
+        ticketPromedio: t.ventas ? Math.round(t.total / t.ventas * 100) / 100 : null,
+        ventasConM2: m.ventas, m2Total: Math.round(m.m2 * 100) / 100,
+        m2Promedio: m.ventas ? Math.round(m.m2 / m.ventas * 100) / 100 : null
+      };
+    });
+    res.json(Object.assign({ desde: desdeS, hasta: hastaS }, out));
+  } catch (e) { responder(res, e); }
+});
+
 module.exports = router;
