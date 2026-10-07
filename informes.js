@@ -13,6 +13,9 @@
 //     de crédito restan.
 //   - Si se filtra o se agrupa por producto/rubro, el total del comprobante se
 //     reparte entre sus ítems en proporción al subtotal de cada ítem.
+//   - Cantidad de ventas: las notas de crédito (anulación o devolución) restan
+//     importe y m2 pero NO cuentan como una venta; el ticket (venta promedio)
+//     es el importe neto sobre esa cantidad.
 //   - m2 = cantidad de ítems cuyo producto se vende en m2.
 //   - Datos de la sucursal elegida arriba (igual que Ventas).
 //
@@ -169,7 +172,8 @@ async function armarInformeVentas(req) {
       lineas.forEach(l => {
         const k = clave(l);
         const g = por.get(k) || { nombre: k, ids: new Set(), m2: 0, importe: 0 };
-        g.ids.add(String(l.v._id)); g.m2 += l.m2; g.importe += l.importe; por.set(k, g);
+        if (l.v.tipoComprobante !== 'nota_credito') g.ids.add(String(l.v._id));
+        g.m2 += l.m2; g.importe += l.importe; por.set(k, g);
       });
       const totalImp = [...por.values()].reduce((a, g) => a + g.importe, 0);
       filas = [...por.values()].map(g => ({
@@ -177,11 +181,13 @@ async function armarInformeVentas(req) {
         ticket: g.ids.size ? r2(g.importe / g.ids.size) : 0, participacion: totalImp ? r2(g.importe / totalImp * 100) : 0
       })).sort((a, b) => b.importe - a.importe);
     }
-    const cant = new Set(lineas.map(l => String(l.v._id))).size;
+    // Las notas de crédito (anulación o devolución) restan importe y m2, pero no cuentan como una venta más.
+    const cant = new Set(lineas.filter(l => l.v.tipoComprobante !== 'nota_credito').map(l => String(l.v._id))).size;
+    const cantNC = new Set(lineas.filter(l => l.v.tipoComprobante === 'nota_credito').map(l => String(l.v._id))).size;
     const totalImporte = r2(lineas.reduce((a, l) => a + l.importe, 0));
     return {
       desde: desdeS, hasta: hastaS, agrupar, filas,
-      totales: { ventas: cant, m2: r2(lineas.reduce((a, l) => a + l.m2, 0)), importe: totalImporte, ticket: cant ? r2(totalImporte / cant) : 0 },
+      totales: { ventas: cant, notasCredito: cantNC, m2: r2(lineas.reduce((a, l) => a + l.m2, 0)), importe: totalImporte, ticket: cant ? r2(totalImporte / cant) : 0 },
       truncado: ventas.length >= 20000
     };
   });
@@ -203,6 +209,144 @@ router.get('/ventas', authInforme('informe_ventas'), async (req, res) => {
     const filas = d.filas.slice();
     filas.push(det ? { fecha: 'TOTAL', m2: d.totales.m2, importe: d.totales.importe } : { nombre: 'TOTAL', ventas: d.totales.ventas, m2: d.totales.m2, importe: d.totales.importe, ticket: d.totales.ticket, participacion: 100 });
     exportarXlsx(res, 'informe-ventas-' + d.agrupar + '-' + d.desde + '_' + d.hasta + '.xlsx', columnas, filas);
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
+// Estado de resultados:  GET /api/informes/resultados  (módulo 'informe_resultados')
+//   Filtros: desde, hasta, alcance = actual (sucursal elegida arriba) | todas
+//   (suma las sucursales que el usuario tiene asignadas). formato=xlsx descarga.
+//   Columnas = meses del período.
+//
+// Criterios (para poder auditar los números):
+//   - Ventas netas: ventas no anuladas por fecha, SIN IVA (se descuenta el IVA
+//     de los comprobantes fiscales), en pesos (USD con la cotización de la venta);
+//     las notas de crédito restan.
+//   - Costo de mercadería vendida: cantidad de cada ítem x costo ACTUAL del
+//     producto en la ficha (USD con la cotización vigente de la sucursal; si
+//     no hay, la de la venta); las notas de crédito restan. Es una aproximación:
+//     si el costo cambió desde la venta, usa el de hoy. Lo vendido sin costo
+//     cargado se informa aparte ("sin costo") y no entra en el costo.
+//   - Gastos: gastos activos por fecha, sin IVA, por concepto (descuentos
+//     aplicados; USD con la cotización del gasto). Las compras de mercadería
+//     NO son gasto: ya están representadas por el costo de mercadería vendida.
+//   - Resultado = ventas netas - costo de mercadería - gastos. Es un resultado
+//     operativo de gestión: no incluye impuestos a las ganancias ni intereses.
+// ---------------------------------------------------------------------------
+function mesDe(d) { return fechaAR(d).slice(0, 7); }
+function mesesEntre(desdeS, hastaS) {
+  const out = []; let [y, m] = desdeS.slice(0, 7).split('-').map(Number); const fin = hastaS.slice(0, 7);
+  for (;;) { const k = y + '-' + String(m).padStart(2, '0'); out.push(k); if (k >= fin) break; m++; if (m > 12) { m = 1; y++; } if (out.length > 60) break; }
+  return out;
+}
+
+async function resultadosOrg(db, orgId, d0, d1) {
+  const meses = {};
+  const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, gastos: {} });
+  const cotDoc = await db.collection('config_general').findOne({ orgId, clave: 'cotizacionDolar' });
+  const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
+
+  const ventas = await db.collection('ventas').find({ orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+  const ids = new Set();
+  ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
+  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1 }).toArray() : [];
+  const pm = new Map(prods.map(p => [String(p._id), p]));
+  ventas.forEach(v => {
+    const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
+    const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
+    // IVA en pesos de los comprobantes fiscales (mismo criterio que el Libro IVA Ventas).
+    const iva = (v.esFiscal && v.cae && v.fiscal) ? Number(v.fiscal.iva || 0) * ((v.fiscalMoneda === 'DOL' && Number(v.fiscalCotiz) > 0) ? Number(v.fiscalCotiz) : 1) : 0;
+    const neto = (Number(v.total || 0) * usd - iva) * nc;
+    const m = mes(mesDe(v.fecha));
+    m.ventas += neto;
+    const items = v.items || [], sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
+    items.forEach(it => {
+      const p = it.productoId ? pm.get(String(it.productoId)) : null;
+      let costoU = null;
+      if (p && p.costo != null) costoU = p.moneda === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? p.costo * (cotVigente || Number(v.cotizacionDolar)) : null) : Number(p.costo);
+      if (costoU == null) { m.sinCosto += neto * (sub > 0 ? Number(it.subtotal || 0) / sub : (items.length ? 1 / items.length : 0)); return; }
+      m.costo += Number(it.cantidad || 0) * costoU * nc;
+    });
+  });
+
+  const gastos = await db.collection('gastos').find({ orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+  gastos.forEach(g => {
+    const signo = /^nota_credito/.test(g.tipoComprobante) ? -1 : 1;
+    const items = g.items || [], sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
+    let conDesc = sub;
+    if (g.descuentoPorcentaje) conDesc -= conDesc * (g.descuentoPorcentaje / 100);
+    if (g.descuentoMonto) conDesc -= g.descuentoMonto;
+    const factor = sub > 0 ? Math.max(0, conDesc) / sub : 1;
+    const usd = g.moneda === 'USD' && Number(g.cotizacionDolar) > 0 ? Number(g.cotizacionDolar) : 1;
+    const m = mes(mesDe(g.fecha));
+    items.forEach(it => {
+      const c = it.conceptoNombre || 'Sin concepto';
+      m.gastos[c] = (m.gastos[c] || 0) + signo * Number(it.subtotal || 0) * factor * usd;
+    });
+  });
+  return meses;
+}
+
+async function armarResultados(req) {
+  const hoy = fechaAR(new Date());
+  const desdeS = req.query.desde || hoy.slice(0, 4) + '-01-01';
+  const hastaS = req.query.hasta || hoy;
+  if (!validarFecha(desdeS) || !validarFecha(hastaS)) throw err(400, 'Las fechas tienen que tener el formato AAAA-MM-DD.');
+  if (desdeS > hastaS) throw err(400, 'La fecha "desde" no puede ser posterior a "hasta".');
+  const todas = req.query.alcance === 'todas';
+  return conReintento(async () => {
+    const db = await getDb();
+    let orgIds;
+    if (todas) {
+      const u = req.usuario;
+      const orgs = u.rol.protegido ? await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()
+        : (u.orgIds || []).map(toObjectId).filter(Boolean).map(_id => ({ _id }));
+      orgIds = orgs.map(o => o._id);
+    } else {
+      if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+      orgIds = [req.orgId];
+    }
+    const partes = await Promise.all(orgIds.map(id => resultadosOrg(db, id, inicioDia(desdeS), finDia(hastaS))));
+    const claves = mesesEntre(desdeS, hastaS);
+    const conceptos = new Set();
+    const cols = claves.map(k => {
+      const c = { mes: k, ventas: 0, costo: 0, sinCosto: 0, gastos: {} };
+      partes.forEach(p => { const m = p[k]; if (!m) return; c.ventas += m.ventas; c.costo += m.costo; c.sinCosto += m.sinCosto; Object.keys(m.gastos).forEach(g => { conceptos.add(g); c.gastos[g] = (c.gastos[g] || 0) + m.gastos[g]; }); });
+      return c;
+    });
+    const listaConceptos = [...conceptos].sort((a, b) => a.localeCompare(b, 'es'));
+    const fin = c => {
+      const gastosTotal = Object.values(c.gastos).reduce((a, x) => a + x, 0);
+      const margen = c.ventas - c.costo;
+      return { mes: c.mes, ventasNetas: r2(c.ventas), costo: r2(c.costo), margenBruto: r2(margen), margenPct: c.ventas ? r2(margen / c.ventas * 100) : null,
+        gastos: Object.fromEntries(listaConceptos.map(g => [g, r2(c.gastos[g] || 0)])), gastosTotal: r2(gastosTotal),
+        resultado: r2(margen - gastosTotal), resultadoPct: c.ventas ? r2((margen - gastosTotal) / c.ventas * 100) : null, sinCosto: r2(c.sinCosto) };
+    };
+    const total = fin(cols.reduce((a, c) => {
+      a.ventas += c.ventas; a.costo += c.costo; a.sinCosto += c.sinCosto;
+      Object.keys(c.gastos).forEach(g => { a.gastos[g] = (a.gastos[g] || 0) + c.gastos[g]; }); return a;
+    }, { mes: 'total', ventas: 0, costo: 0, sinCosto: 0, gastos: {} }));
+    return { desde: desdeS, hasta: hastaS, alcance: todas ? 'todas' : 'actual', sucursales: orgIds.length, conceptos: listaConceptos, meses: cols.map(fin), total };
+  });
+}
+
+const NOMBRES_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+router.get('/resultados', authInforme('informe_resultados'), async (req, res) => {
+  try {
+    const d = await armarResultados(req);
+    if (req.query.formato !== 'xlsx') return res.json(d);
+    const XLSX = require('xlsx');
+    const enc = ['Concepto'].concat(d.meses.map(m => NOMBRES_MES[+m.mes.slice(5) - 1] + ' ' + m.mes.slice(0, 4)), ['Total']);
+    const fila = (n, f) => [n].concat(d.meses.map(f), [f(d.total)]);
+    const aoa = [enc,
+      fila('Ventas netas (sin IVA)', m => m.ventasNetas), fila('Costo de mercadería vendida', m => -m.costo), fila('Margen bruto', m => m.margenBruto),
+      fila('Margen bruto %', m => m.margenPct == null ? '' : m.margenPct), [], ['Gastos']
+    ].concat(d.conceptos.map(c => fila('  ' + c, m => -m.gastos[c])), [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Ventas sin costo cargado (informativo)', m => m.sinCosto)]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 38 }].concat(enc.slice(1).map(() => ({ wch: 15 })));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Estado de resultados');
+    res.setHeader('Content-Disposition', 'attachment; filename="estado-de-resultados-' + d.desde + '_' + d.hasta + '.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
   } catch (e) { responder(res, e); }
 });
 

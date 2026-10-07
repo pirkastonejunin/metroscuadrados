@@ -125,6 +125,7 @@
     // de la parte operativa. Los reportes nuevos van acá adentro.
     { nombre: 'Reportes', items: [
       { key: 'informe-ventas', href: '/admin-informe-ventas.html', modulo: 'informe_ventas', label: 'Informe de ventas', icon: ICONOS.ventas || ICONOS.fiscal },
+      { key: 'informe-resultados', href: '/admin-informe-resultados.html', modulo: 'informe_resultados', label: 'Estado de resultados', icon: ICONOS.fiscal },
       { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
     ]}
   ];

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Informe de ventas - Piedra Negra</title>
+<title>Estado de resultados - Piedra Negra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -54,13 +54,20 @@
   .vacio{padding:28px;text-align:center;color:var(--muted);}
   .tb-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:12px;font-weight:800;cursor:help;}
   @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .tabla{overflow-x:auto;}}
+  .tabla td.neg,.tabla .neg{color:var(--danger);} .tabla .pos{color:var(--ok);}
+  .tabla tr.sec td{background:var(--bg);font-weight:800;font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .tabla tr.sub td{font-weight:800;border-top:1px solid var(--border);} .tabla tr.ind td:first-child{padding-left:30px;color:var(--muted);}
+  .tabla tr.res td{font-weight:800;font-size:14px;background:var(--bg);} .tabla td.tot,.tabla th.tot{border-left:1px solid var(--border);font-weight:800;}
+  .tabla tr.pct td{font-size:11.5px;color:var(--muted);padding-top:0;border-top:0;}
+  .tabla{overflow-x:auto;} .tabla td:first-child,.tabla th:first-child{white-space:nowrap;position:sticky;left:0;background:var(--card);z-index:1;min-width:210px;} .tabla tr.sec td:first-child,.tabla tr.res td:first-child{background:var(--bg);}
+  .aviso{background:var(--accent-soft);color:var(--text);border-radius:12px;padding:8px 14px;font-size:12.5px;margin-bottom:12px;}
 </style>
 </head>
 <body>
 
 <div id="loginScreen" class="hidden">
   <div class="card">
-    <h2 style="margin-top:0;margin-bottom:14px">Informe de ventas</h2>
+    <h2 style="margin-top:0;margin-bottom:14px">Estado de resultados</h2>
     <label>Usuario</label>
     <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
     <label style="margin-top:8px">Contraseña</label>
@@ -73,7 +80,7 @@
 <div id="sinAccesoScreen" class="hidden">
   <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
     <h2 style="margin-top:0">Sin acceso</h2>
-    <p class="muted">Tu usuario no tiene habilitado el informe de ventas. Pedile a un administrador que lo habilite desde Usuarios y roles.</p>
+    <p class="muted">Tu usuario no tiene habilitado el estado de resultados. Pedile a un administrador que lo habilite desde Usuarios y roles.</p>
     <button data-iconizado="1" class="btn secondary" onclick="logout()">Cerrar sesión</button>
   </div>
 </div>
@@ -82,34 +89,23 @@
   <main>
     <div class="tb-filtros">
       <select id="fPeriodo" aria-label="Período" onchange="preset(this.value)">
-        <option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes" selected>Este mes</option>
-        <option value="mespasado">Mes pasado</option><option value="30">Últimos 30 días</option><option value="anio">Este año</option><option value="custom">Personalizado</option>
+        <option value="anio" selected>Este año</option><option value="mes">Este mes</option><option value="mespasado">Mes pasado</option>
+        <option value="3m">Últimos 3 meses</option><option value="6m">Últimos 6 meses</option><option value="aniopasado">Año pasado</option><option value="custom">Personalizado</option>
       </select>
       <input type="date" id="fDesde" aria-label="Desde" onchange="$('fPeriodo').value='custom';cargar()">
       <input type="date" id="fHasta" aria-label="Hasta" onchange="$('fPeriodo').value='custom';cargar()">
-      <select id="fVendedor" aria-label="Vendedor" onchange="cargar()"><option value="">Todos los vendedores</option></select>
-      <input type="text" id="fCliente" list="dlClientes" placeholder="Cliente…" aria-label="Cliente" onchange="cargar()">
-      <input type="text" id="fProducto" list="dlProductos" placeholder="Producto…" aria-label="Producto" onchange="cargar()">
-      <select id="fRubro" aria-label="Rubro" onchange="cargar()"><option value="">Todos los rubros</option></select>
-      <label class="chk"><input type="checkbox" id="fAnuladas" onchange="cargar()"> Incluir anuladas</label>
-      <datalist id="dlClientes"></datalist><datalist id="dlProductos"></datalist>
+      <select id="fAlcance" aria-label="Sucursales" onchange="cargar()"><option value="actual">Sucursal elegida arriba</option><option value="todas">Todas mis sucursales</option></select>
+      <button data-iconizado="1" class="btn secondary" style="margin-left:auto" onclick="exportar()" title="Descargar este estado de resultados en Excel">Exportar a Excel</button>
+      <span class="tb-info" title="Ventas netas: ventas del período sin IVA, restando notas de crédito. Costo de mercadería: cantidad vendida por el costo actual de cada producto (aproximado: si el costo cambió, usa el de hoy). Gastos: gastos cargados sin IVA, por concepto; las compras de mercadería no son gasto, ya están en el costo. Resultado = ventas netas - costo - gastos; no incluye impuesto a las ganancias ni intereses.">i</span>
     </div>
-    <div class="tb-filtros">
-      <span class="muted">Agrupar por</span>
-      <div class="seg" id="seg">
-        <button data-a="cliente" class="on">Cliente</button><button data-a="vendedor">Vendedor</button><button data-a="producto">Producto</button><button data-a="rubro">Rubro</button><button data-a="comprobante">Comprobante</button>
-      </div>
-      <button data-iconizado="1" class="btn secondary" style="margin-left:auto" onclick="exportar()" title="Descargar este informe en Excel">Exportar a Excel</button>
-      <span class="tb-info" title="Importe: total de cada comprobante (con IVA y descuentos) en pesos; las ventas en dólares van con la cotización guardada y las notas de crédito restan. Si filtrás o agrupás por producto o rubro, el total del comprobante se reparte entre sus ítems según el subtotal de cada uno. m2: cantidad de ítems vendidos en m2. Venta promedio: importe sobre cantidad de ventas. Las notas de crédito (anulaciones o devoluciones) restan importe y m2 pero no cuentan como una venta. Hacé clic en una fila para ver sus comprobantes. Muestra la sucursal elegida arriba. Por defecto no cuenta las ventas anuladas.">i</span>
-    </div>
-    <div id="err"></div>
+    <div id="err"></div><div id="aviso"></div>
     <div class="kpis">
-      <div class="kpi main"><div class="et">Vendido</div><div class="val" id="kImp">$ —</div></div>
-      <div class="kpi" title="Cantidad de ventas. Las notas de crédito (anulaciones o devoluciones) restan importe y m2, pero no cuentan como una venta."><div class="et">Ventas</div><div class="val" id="kVen">—</div></div>
-      <div class="kpi"><div class="et">Venta promedio</div><div class="val" id="kTic">—</div></div>
-      <div class="kpi"><div class="et">m2 vendidos</div><div class="val" id="kM2">—</div></div>
+      <div class="kpi"><div class="et">Ventas netas</div><div class="val" id="kVen">$ —</div></div>
+      <div class="kpi" title="Ventas netas menos costo de mercadería vendida"><div class="et">Margen bruto</div><div class="val" id="kMar">—</div></div>
+      <div class="kpi"><div class="et">Gastos</div><div class="val" id="kGas">—</div></div>
+      <div class="kpi main"><div class="et">Resultado</div><div class="val" id="kRes">$ —</div></div>
     </div>
-    <div class="tabla"><table><thead id="tHead"></thead><tbody id="tBody"></tbody><tfoot id="tFoot"></tfoot></table></div>
+    <div class="tabla"><table><thead id="tHead"></thead><tbody id="tBody"></tbody></table></div>
   </main>
 </div>
 
@@ -117,12 +113,13 @@
 const BASE = '/api/informes';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
-let AGRUPAR = 'cliente', CLIENTES = [], PRODUCTOS = [];
 function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function $(id){ return document.getElementById(id); }
 const pesos = n => (n < 0 ? '-$ ' : '$ ') + Math.round(Math.abs(n || 0)).toLocaleString('es-AR');
-const num = n => (n || 0).toLocaleString('es-AR', {maximumFractionDigits:1});
+const pct = n => n == null ? '—' : n.toLocaleString('es-AR', {maximumFractionDigits:1}) + ' %';
+const MES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const etMes = k => MES[+k.slice(5) - 1] + ' ' + k.slice(2, 4);
 
 async function login(){
   const usuario = $('loginUser').value, pass = $('loginPass').value;
@@ -141,12 +138,12 @@ const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') 
 function preset(v){
   if (v === 'custom') return;
   const hoy = new Date(); hoy.setHours(12,0,0,0);
-  let d = new Date(hoy), h = new Date(hoy);
-  if (v === 'semana') d.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
-  else if (v === 'mes') d = new Date(hoy.getFullYear(), hoy.getMonth(), 1, 12);
+  let d = new Date(hoy.getFullYear(), 0, 1, 12), h = new Date(hoy);
+  if (v === 'mes') d = new Date(hoy.getFullYear(), hoy.getMonth(), 1, 12);
   else if (v === 'mespasado') { d = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1, 12); h = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 12); }
-  else if (v === '30') d.setDate(hoy.getDate() - 29);
-  else if (v === 'anio') d = new Date(hoy.getFullYear(), 0, 1, 12);
+  else if (v === '3m') d = new Date(hoy.getFullYear(), hoy.getMonth() - 2, 1, 12);
+  else if (v === '6m') d = new Date(hoy.getFullYear(), hoy.getMonth() - 5, 1, 12);
+  else if (v === 'aniopasado') { d = new Date(hoy.getFullYear() - 1, 0, 1, 12); h = new Date(hoy.getFullYear() - 1, 11, 31, 12); }
   $('fDesde').value = iso(d); $('fHasta').value = iso(h);
   if (!$('app').classList.contains('hidden')) cargar();
 }
@@ -157,84 +154,57 @@ async function iniciarApp(){
     const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; $('loginScreen').classList.remove('hidden'); return; }
     me = await r.json();
-    const ok = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('informe_ventas'));
+    const ok = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('informe_resultados'));
     if (!ok) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
   }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
-  PiedraSidebar.render(me, 'informe-ventas');
-  document.title = 'Informe de ventas - Piedra Negra';
+  PiedraSidebar.render(me, 'informe-resultados');
+  document.title = 'Estado de resultados - Piedra Negra';
   $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
-  preset('mes');
-  try{
-    const r = await fetch(BASE + '/ventas/opciones', {headers: headersAuth()}); const o = await r.json();
-    if (r.ok) {
-      CLIENTES = o.clientes; PRODUCTOS = o.productos.map(p => Object.assign(p, {etiqueta: (p.sku ? p.sku + ' — ' : '') + p.nombre}));
-      $('fVendedor').innerHTML += o.vendedores.map(v => '<option>' + escapeHtml(v) + '</option>').join('');
-      $('fRubro').innerHTML += o.rubros.map(v => '<option>' + escapeHtml(v) + '</option>').join('');
-      $('dlClientes').innerHTML = CLIENTES.map(c => '<option value="' + escapeHtml(c.nombre) + '">').join('');
-      $('dlProductos').innerHTML = PRODUCTOS.map(p => '<option value="' + escapeHtml(p.etiqueta) + '">').join('');
-    }
-  }catch(e){}
+  preset('anio');
   await cargar();
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 
-document.addEventListener('click', e => {
-  const b = e.target.closest('#seg button'); if (!b) return;
-  AGRUPAR = b.dataset.a; [...document.querySelectorAll('#seg button')].forEach(x => x.classList.toggle('on', x === b)); cargar();
-});
-
 function params(extra){
-  const q = new URLSearchParams({desde: $('fDesde').value, hasta: $('fHasta').value, agrupar: AGRUPAR});
-  if ($('fVendedor').value) q.set('vendedor', $('fVendedor').value);
-  if ($('fRubro').value) q.set('rubro', $('fRubro').value);
-  if ($('fAnuladas').checked) q.set('incluirAnuladas', '1');
-  const c = CLIENTES.find(x => x.nombre.toLowerCase() === $('fCliente').value.trim().toLowerCase()); if (c) q.set('clienteId', c._id);
-  const p = PRODUCTOS.find(x => x.etiqueta.toLowerCase() === $('fProducto').value.trim().toLowerCase()); if (p) q.set('productoId', p._id);
+  const q = new URLSearchParams({desde: $('fDesde').value, hasta: $('fHasta').value, alcance: $('fAlcance').value});
   Object.keys(extra||{}).forEach(k => q.set(k, extra[k]));
   return q;
 }
+const cls = n => n > 0 ? 'pos' : (n < 0 ? 'neg' : '');
 
-const TITULO = { cliente:'Cliente', vendedor:'Vendedor', producto:'Producto', rubro:'Rubro' };
 async function cargar(){
-  $('err').innerHTML = '';
+  $('err').innerHTML = ''; $('aviso').innerHTML = '';
   let d;
   try{
-    const r = await fetch(BASE + '/ventas?' + params(), {headers: headersAuth()});
+    const r = await fetch(BASE + '/resultados?' + params(), {headers: headersAuth()});
     d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
   }catch(e){ $('err').innerHTML = '<div class="err">No se pudo cargar: ' + escapeHtml(e.message) + '</div>'; return; }
-  const T = d.totales;
-  $('kImp').textContent = pesos(T.importe); $('kVen').textContent = T.ventas.toLocaleString('es-AR');
-  $('kTic').textContent = T.ventas ? pesos(T.ticket) : '—'; $('kM2').textContent = num(T.m2);
-  const det = d.agrupar === 'comprobante';
-  if (!d.filas.length) { $('tHead').innerHTML = ''; $('tFoot').innerHTML = ''; $('tBody').innerHTML = '<tr><td class="vacio">No hay ventas con estos filtros.</td></tr>'; return; }
-  if (det) {
-    $('tHead').innerHTML = '<tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th>Vendedor</th><th>Estado</th><th class="n">m2</th><th class="n">Importe</th></tr>';
-    $('tBody').innerHTML = d.filas.map(f => { const [y,m,dd] = f.fecha.split('-'); return '<tr><td>' + dd + '/' + m + '/' + y + '</td><td>' + escapeHtml(f.comprobante) + '</td><td>' + escapeHtml(f.cliente) + '</td><td>' + escapeHtml(f.vendedor) + '</td><td>' + escapeHtml(f.estado) + '</td><td class="n">' + (f.m2 ? num(f.m2) : '') + '</td><td class="n">' + pesos(f.importe) + '</td></tr>'; }).join('');
-    $('tFoot').innerHTML = '<tr><td colspan="5">Total · ' + T.ventas + ' ventas' + (T.notasCredito ? ' y ' + T.notasCredito + ' nota' + (T.notasCredito > 1 ? 's' : '') + ' de crédito' : '') + '</td><td class="n">' + num(T.m2) + '</td><td class="n">' + pesos(T.importe) + '</td></tr>';
-  } else {
-    const max = Math.max(1, ...d.filas.map(f => Math.abs(f.importe)));
-    $('tHead').innerHTML = '<tr><th>' + TITULO[d.agrupar] + '</th><th class="n" title="Cantidad de ventas. Las notas de crédito no cuentan como venta.">Ventas</th><th class="n" title="Metros cuadrados vendidos (solo productos que se venden por m2), netos de notas de crédito.">m2</th><th class="n" title="Importe dividido cantidad de ventas.">Venta promedio</th><th class="n" title="Parte del total vendido en el período.">% del total</th><th class="n" title="Total con IVA y descuentos, en pesos, neto de notas de crédito.">Importe</th></tr>';
-    $('tBody').innerHTML = d.filas.map((f, i) => '<tr class="clic" data-i="' + i + '" title="Ver los comprobantes de ' + escapeHtml(f.nombre) + '"><td>' + escapeHtml(f.nombre) + '</td><td class="n">' + f.ventas + '</td><td class="n">' + (f.m2 ? num(f.m2) : '') + '</td><td class="n">' + pesos(f.ticket) + '</td><td class="n">' + num(f.participacion) + ' %</td><td class="n"><div class="barra-imp"><div class="pista"><div style="width:' + Math.max(0, f.importe) / max * 100 + '%"></div></div>' + pesos(f.importe) + '</div></td></tr>').join('');
-    $('tFoot').innerHTML = '<tr><td>Total</td><td class="n">' + T.ventas + '</td><td class="n">' + num(T.m2) + '</td><td class="n">' + pesos(T.ticket) + '</td><td class="n">100 %</td><td class="n">' + pesos(T.importe) + '</td></tr>';
-    $('tBody').onclick = e => {
-      const tr = e.target.closest('tr.clic'); if (!tr) return;
-      const f = d.filas[+tr.dataset.i];
-      if (d.agrupar === 'cliente') $('fCliente').value = f.nombre;
-      else if (d.agrupar === 'vendedor') $('fVendedor').value = f.nombre;
-      else if (d.agrupar === 'rubro') $('fRubro').value = f.nombre;
-      else { const p = PRODUCTOS.find(x => x.nombre === f.nombre); if (p) $('fProducto').value = p.etiqueta; else return; }
-      AGRUPAR = 'comprobante'; [...document.querySelectorAll('#seg button')].forEach(x => x.classList.toggle('on', x.dataset.a === 'comprobante')); cargar();
-    };
-  }
+  const T = d.total;
+  $('kVen').textContent = pesos(T.ventasNetas);
+  $('kMar').innerHTML = pesos(T.margenBruto) + ' <span class="muted" style="font-weight:700">' + pct(T.margenPct) + '</span>';
+  $('kGas').textContent = pesos(T.gastosTotal);
+  $('kRes').innerHTML = pesos(T.resultado) + ' <span style="font-size:.8rem;font-weight:700;color:#aeb2b8">' + pct(T.resultadoPct) + '</span>';
+  if (T.sinCosto) $('aviso').innerHTML = '<div class="aviso">Hay ' + pesos(T.sinCosto) + ' vendidos en productos <b>sin costo cargado</b>: no entran en el costo y el margen puede estar sobrestimado. Cargá el costo en la ficha del producto.</div>';
+  const M = d.meses, col = (f, c) => M.map(m => '<td class="n ' + (c ? c(m) : '') + '">' + f(m) + '</td>').join('') + '<td class="n tot ' + (c ? c(T) : '') + '">' + f(T) + '</td>';
+  $('tHead').innerHTML = '<tr><th></th>' + M.map(m => '<th class="n">' + etMes(m.mes) + '</th>').join('') + '<th class="n tot">Total</th></tr>';
+  let h = '<tr class="sub"><td>Ventas netas</td>' + col(m => pesos(m.ventasNetas)) + '</tr>';
+  h += '<tr class="ind"><td>(-) Costo de mercadería vendida</td>' + col(m => pesos(-m.costo), m => m.costo ? 'neg' : '') + '</tr>';
+  h += '<tr class="sub"><td>Margen bruto</td>' + col(m => pesos(m.margenBruto), m => cls(m.margenBruto)) + '</tr>';
+  h += '<tr class="pct"><td>% sobre ventas</td>' + col(m => pct(m.margenPct)) + '</tr>';
+  h += '<tr class="sec"><td colspan="' + (M.length + 2) + '">Gastos</td></tr>';
+  h += d.conceptos.length ? d.conceptos.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
+  h += '<tr class="sub"><td>Total gastos</td>' + col(m => pesos(-m.gastosTotal), m => m.gastosTotal ? 'neg' : '') + '</tr>';
+  h += '<tr class="res"><td>RESULTADO</td>' + col(m => pesos(m.resultado), m => cls(m.resultado)) + '</tr>';
+  h += '<tr class="pct"><td>% sobre ventas</td>' + col(m => pct(m.resultadoPct)) + '</tr>';
+  $('tBody').innerHTML = h;
 }
 
 async function exportar(){
   try{
-    const r = await fetch(BASE + '/ventas?' + params({formato: 'xlsx'}), {headers: headersAuth()});
+    const r = await fetch(BASE + '/resultados?' + params({formato: 'xlsx'}), {headers: headersAuth()});
     if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'No se pudo exportar'); }
     const blob = await r.blob(), a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'informe-ventas-' + AGRUPAR + '-' + $('fDesde').value + '_' + $('fHasta').value + '.xlsx';
+    a.href = URL.createObjectURL(blob); a.download = 'estado-de-resultados-' + $('fDesde').value + '_' + $('fHasta').value + '.xlsx';
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }catch(e){ $('err').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
 }
