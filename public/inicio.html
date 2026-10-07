@@ -187,23 +187,26 @@
   .venc-detalle-vacio{padding:10px 2px;text-align:center;color:var(--muted);font-size:12.5px;}
 
   /* ---- Tablero comercial (embudo) ---- */
-  .tab-card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:12px;}
+  .tab-card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:16px 18px;}
+  .tab-info{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--border);color:var(--muted);font-size:0.72rem;font-weight:800;cursor:help;margin-left:auto;align-self:center;}
   .tab-filtros{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:flex-end;margin-bottom:10px;}
   .tab-filtros label{display:block;font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px;}
   .tab-filtros select,.tab-filtros input{font-family:inherit;font-size:0.8rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);}
   .tab-filtros button{font-family:inherit;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink,#fff);cursor:pointer;}
-  .tab-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;}
-  .tab-kpi{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0;position:relative;overflow:hidden;}
-  .tab-kpi-titulo{font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);line-height:1.15;min-height:2.3em;}
-  .tab-kpi-valor{font-size:1.7rem;font-weight:800;line-height:1.1;}
-  .tab-kpi-det{font-size:0.68rem;font-weight:600;color:var(--muted);min-height:1em;}
+  .tab-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;}
+  .wrap.ancho{max-width:1280px !important;}
+  .tab-kpi{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;cursor:default;transition:transform .12s,box-shadow .12s;min-width:0;position:relative;overflow:hidden;}
+  .tab-kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
+  .tab-kpi-titulo{font-size:0.78rem;font-weight:700;color:var(--muted);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .tab-kpi-valor{font-size:clamp(1.6rem,2.6vw,2.3rem);font-weight:800;line-height:1.1;white-space:nowrap;}
+  .tab-kpi-det{font-size:0.78rem;font-weight:700;color:var(--muted);min-height:1.1em;}
   .tab-kpi-det b{color:var(--ink);}
-  .tab-kpi-barra{height:4px;border-radius:2px;background:var(--border);margin-top:6px;overflow:hidden;}
+  .tab-kpi-barra{height:5px;border-radius:2px;background:var(--border);margin-top:6px;overflow:hidden;}
   .tab-kpi-barra > div{height:100%;background:var(--accent);border-radius:2px;transition:width .35s ease;}
   .tab-kpi.destacado{background:var(--accent);border-color:var(--accent);}
   .tab-kpi.destacado .tab-kpi-titulo,.tab-kpi.destacado .tab-kpi-det,.tab-kpi.destacado .tab-kpi-valor{color:var(--accent-ink,#fff);}
   .tab-aviso{background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:6px 10px;font-size:0.76rem;color:var(--muted);margin-bottom:8px;}
-  .tab-sub{display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px;font-size:0.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
+  .tab-sub{display:flex;align-items:center;justify-content:space-between;margin:18px 0 8px;font-size:0.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
   .tab-sub button{font-size:0.7rem;padding:3px 9px;}
   #tabRubrosPanel{border:1px solid var(--border,#ddd);border-radius:10px;padding:8px 10px;margin-bottom:8px;}
   .tab-rubros-lista{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:8px;font-size:0.8rem;}
@@ -220,7 +223,7 @@
     </header>
 
     <div class="grupo hidden" id="grupoTablero">
-      <h2>Tablero comercial</h2>
+      <h2>Tablero</h2>
       <div class="tab-card">
         <div class="tab-filtros">
           <div><label for="tabPeriodo">Período</label>
@@ -228,21 +231,20 @@
               <option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes" selected>Este mes</option>
               <option value="mespasado">Mes pasado</option><option value="30">Últimos 30 días</option><option value="anio">Este año</option><option value="custom">Personalizado</option>
             </select></div>
-          <div><label for="tabDesde">Desde</label><input type="date" id="tabDesde" onchange="document.getElementById('tabPeriodo').value='custom'"></div>
-          <div><label for="tabHasta">Hasta</label><input type="date" id="tabHasta" onchange="document.getElementById('tabPeriodo').value='custom'"></div>
+          <div><label for="tabDesde">Desde</label><input type="date" id="tabDesde" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()"></div>
+          <div><label for="tabHasta">Hasta</label><input type="date" id="tabHasta" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()"></div>
           <div id="tabVendedorBox" class="hidden"><label for="tabVendedor">Vendedor</label>
             <select id="tabVendedor" onchange="cargarTablero()"><option value="">Todos</option></select></div>
-          <button data-iconizado="1" onclick="cargarTablero()">Ver</button>
+          <span class="tab-info" title="Cada número cuenta lo cargado dentro del período elegido, de todo el equipo de la sucursal (o del vendedor elegido). No se cuentan visitas canceladas ni ventas anuladas. Ticket promedio: total de las ventas (con IVA) dividido la cantidad de ventas. m2 por venta: m2 vendidos sobre las ventas que tienen m2. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador.">i</span>
         </div>
         <div id="tabAvisos"></div>
         <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
         <div id="tabRubrosBox" class="hidden">
-          <div class="tab-sub"><span>Unidades vendidas por rubro</span>
+          <div class="tab-sub"><span>Unidades por rubro</span>
             <button id="tabRubrosEditar" class="hidden" data-iconizado="1" onclick="tabRubrosPanel()">Elegir rubros</button></div>
           <div id="tabRubrosPanel" class="hidden"></div>
           <div id="tabRubros"></div>
         </div>
-        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. Son los números de todo el equipo de la sucursal. El ticket promedio es el total de las ventas (con IVA) sobre la cantidad de ventas; el m2 promedio se calcula sobre las ventas que tienen m2. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador. No se cuentan visitas canceladas ni ventas anuladas.</div>
       </div>
     </div>
 
@@ -700,7 +702,7 @@ function tabPreset(v){
 // Una tarjeta de indicador. Para sumar indicadores nuevos al tablero alcanza
 // con agregar otra tarjeta a la lista (ver cargarTablero).
 function tabKpi(o){
-  return '<div class="tab-kpi ' + (o.clase || '') + '"><div class="tab-kpi-titulo" title="' + notifEscapeHtml(o.titulo) + '">' + notifEscapeHtml(o.titulo) + '</div>' +
+  return '<div class="tab-kpi ' + (o.clase || '') + '" title="' + notifEscapeHtml(o.tip || o.titulo) + '"><div class="tab-kpi-titulo">' + notifEscapeHtml(o.titulo) + '</div>' +
     '<div class="tab-kpi-valor">' + o.valor + '</div><div class="tab-kpi-det">' + (o.detalle || '') + '</div>' +
     (o.barra !== undefined ? '<div class="tab-kpi-barra"><div style="width:' + Math.max(0, Math.min(100, o.barra)) + '%"></div></div>' : '') + '</div>';
 }
@@ -714,7 +716,7 @@ async function cargarRubrosTablero(qs){
     if (!data.rubros.length) {
       cont.innerHTML = '<div class="muted">' + (TAB_PUEDE_EDITAR_RUBROS ? 'Todavía no elegiste rubros para mostrar.' : 'No hay rubros configurados para mostrar.') + '</div>';
     } else {
-      cont.innerHTML = '<div class="tab-grid">' + data.rubros.map(x => tabKpi({ clase: 'tab-rubro', titulo: x.rubro, valor: x.unidades.toLocaleString('es-AR'), detalle: 'unidades vendidas' })).join('') + '</div>';
+      cont.innerHTML = '<div class="tab-grid">' + data.rubros.map(x => tabKpi({ clase: 'tab-rubro', titulo: x.rubro, valor: x.unidades.toLocaleString('es-AR', {maximumFractionDigits:1}), tip: x.rubro + ': ' + x.unidades.toLocaleString('es-AR') + ' unidades vendidas', detalle: '&nbsp;' })).join('') + '</div>';
     }
   }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudieron cargar los rubros: ' + notifEscapeHtml(e.message) + '</div>'; }
 }
@@ -754,19 +756,22 @@ async function cargarTablero(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
     const max = Math.max(1, ...data.etapas.map(e => e.cantidad));
+    const corto = {crm:'CRM', visitas:'Visitas', presupuestos:'Presupuestos', ventas:'Ventas'};
     const tarjetas = data.etapas.map((e, i) => tabKpi({
-      clase: 'tab-etapa', titulo: e.titulo, valor: e.cantidad.toLocaleString('es-AR'),
-      detalle: i === 0 ? 'punto de partida' : '<b>' + tabFmtPct(e.pctAnterior) + '</b> de ' + notifEscapeHtml(data.etapas[i-1].titulo.toLowerCase()),
+      clase: 'tab-etapa', titulo: corto[e.clave] || e.titulo, valor: e.cantidad.toLocaleString('es-AR'),
+      tip: e.titulo + (i === 0 ? '' : ' — ' + tabFmtPct(e.pctAnterior) + ' de ' + data.etapas[i-1].titulo.toLowerCase()),
+      detalle: i === 0 ? '&nbsp;' : '<b>' + tabFmtPct(e.pctAnterior) + '</b> ↳',
       barra: e.cantidad / max * 100
     }));
-    tarjetas.push(tabKpi({ clase: 'tab-total destacado', titulo: 'Efectividad total', valor: tabFmtPct(data.efectividadTotal), detalle: 'ventas sobre presupuestos cargados' }));
+    tarjetas.push(tabKpi({ clase: 'tab-total destacado', titulo: 'Efectividad', valor: tabFmtPct(data.efectividadTotal), tip: 'Efectividad total: ventas realizadas sobre presupuestos cargados', detalle: 'ventas / presupuestos' }));
     try{
       const rp = await fetch('/api/tablero/promedios?' + qs.toString(), {headers: headersAuth()});
       const p = await rp.json();
       if (rp.ok) {
-        const fm = n => n === null ? '—' : n.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
-        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'Ticket promedio', valor: p.ticketPromedio === null ? '—' : '$ ' + fm(p.ticketPromedio), detalle: 'por venta · ' + p.ventas.toLocaleString('es-AR') + ' ventas' }));
-        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'm2 promedio por venta', valor: p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', detalle: 'en ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas con m2' }));
+        const fm = n => n === null ? '—' : n.toLocaleString('es-AR', {maximumFractionDigits:2});
+        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'Total vendido', valor: '$ ' + Math.round(p.totalVendido).toLocaleString('es-AR'), tip: 'Suma de las ventas del período (con IVA, sin anuladas): ' + p.ventas.toLocaleString('es-AR') + ' ventas', detalle: '&nbsp;' }));
+        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'Ticket promedio', valor: p.ticketPromedio === null ? '—' : '$ ' + Math.round(p.ticketPromedio).toLocaleString('es-AR'), tip: 'Total vendido (con IVA) dividido la cantidad de ventas: ' + p.ventas.toLocaleString('es-AR') + ' ventas', detalle: '&nbsp;' }));
+        tarjetas.push(tabKpi({ clase: 'tab-prom', titulo: 'm2 por venta', valor: p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', tip: 'm2 vendidos sobre las ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas que tienen m2', detalle: '&nbsp;' }));
       }
     }catch(e){ /* los promedios son un extra: si fallan, el embudo se muestra igual */ }
     cont.innerHTML = '<div class="tab-grid">' + tarjetas.join('') + '</div>';
@@ -780,6 +785,7 @@ async function iniciarTablero(me){
   // tablero (administrador incluido): los accesos quedan en el menú lateral.
   const simple = true;
   TABLERO_VISIBLE = true;
+  document.querySelector('.wrap').classList.add('ancho');
   TAB_PUEDE_EDITAR_RUBROS = !!(me.rol && me.rol.protegido);
   if (TAB_PUEDE_EDITAR_RUBROS) document.getElementById('tabRubrosEditar').classList.remove('hidden');
   document.getElementById('grupoTablero').classList.remove('hidden');
