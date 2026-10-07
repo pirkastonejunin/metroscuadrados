@@ -172,6 +172,24 @@
     </div>
 
     <div class="card">
+      <button type="button" class="section-title seccion-toggle" id="toggleTiposTrabajo" onclick="toggleSeccion('TiposTrabajo')">
+        <span>Tipos de trabajo (obras)</span><span class="chev">▾</span>
+      </button>
+      <div id="contTiposTrabajo">
+        <p class="muted" style="margin-top:0">Los tipos de trabajo que se ofrecen al armar una obra y que usan los colocadores (Piso, Piedra, Placa…). Un tipo desactivado deja de ofrecerse pero no se pierde en las obras que ya lo usan.</p>
+        <div class="row" style="margin-bottom:12px">
+          <div style="flex:1"><label>Nuevo tipo de trabajo</label><input id="nuevoTipoNombre" placeholder="Ej: Colocación de pisos" onkeydown="if(event.key==='Enter')crearTipoTrabajo()"></div>
+          <div><button class="btn" onclick="crearTipoTrabajo()">Agregar</button></div>
+        </div>
+        <div class="err" id="tiposTrabajoErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="tiposTrabajoBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
       <button type="button" class="section-title seccion-toggle" id="toggleMapeo" onclick="toggleSeccion('Mapeo')">
         <span>Tipos de obra del cotizador → tipos de trabajo</span><span class="chev">▾</span>
       </button>
@@ -301,6 +319,7 @@ async function iniciarApp(){
   await cargarDepositos();
   await cargarConceptosGasto();
   await cargarCotizacionDolar();
+  await cargarTiposTrabajo();
   await cargarMapeo();
   // Sincroniza solo al entrar (1/10/2026, pedido de Mato: que la base
   // quede sincronizada con lo que ya tienen cargado los productos, sin
@@ -322,7 +341,7 @@ function toggleSeccion(nombre){
   try { localStorage.setItem('pn_bases_seccion_' + nombre, colapsada ? '0' : '1'); } catch(e){}
 }
 function restaurarSecciones(){
-  ['Rubros', 'Subrubros', 'Depositos', 'Mapeo', 'ConceptosGasto', 'Cotizacion'].forEach(nombre => {
+  ['Rubros', 'Subrubros', 'Depositos', 'TiposTrabajo', 'Mapeo', 'ConceptosGasto', 'Cotizacion'].forEach(nombre => {
     let abierta = true;
     try {
       const guardado = localStorage.getItem('pn_bases_seccion_' + nombre);
@@ -805,6 +824,38 @@ async function guardarMapeo(){
 async function borrarMapeo(id){
   if (!confirm('¿Eliminar este mapeo?')) return;
   try{ await apiVisitas('/mapeo/' + id, {method:'DELETE'}); await cargarMapeo(); }catch(e){ document.getElementById('mapErr').textContent = e.message; }
+}
+
+// -------------------------------------------------------------------
+// Tipos de trabajo de Obras (movido desde el Panel de Obras, 7/10/2026,
+// pedido de Mato). Mismas rutas de siempre: /api/obras/tipos-trabajo.
+// -------------------------------------------------------------------
+async function apiObras(ruta, opts){
+  opts = opts || {};
+  const r = await fetch('/api/obras' + ruta, { method: opts.method || 'GET', headers: opts.body ? headersAuthJson() : headersAuth(), body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Error de red');
+  return data;
+}
+async function cargarTiposTrabajo(){
+  let lista;
+  try{ lista = await apiObras('/tipos-trabajo'); }
+  catch(e){ document.getElementById('tiposTrabajoBody').innerHTML = '<tr><td colspan="3" class="muted">' + escapeHtml(e.message) + '</td></tr>'; return; }
+  document.getElementById('tiposTrabajoBody').innerHTML = lista.map(t => `
+    <tr><td>${escapeHtml(t.nombre)}</td><td>${t.activo !== false ? '<span class="pill activo">Activo</span>' : '<span class="pill inactivo">Inactivo</span>'}</td>
+    <td><button class="btn small secondary" onclick="toggleTipoTrabajo('${t._id}', ${t.activo === false})">${t.activo === false ? 'Reactivar' : 'Desactivar'}</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted">Todavía no hay tipos de trabajo</td></tr>';
+}
+async function crearTipoTrabajo(){
+  const input = document.getElementById('nuevoTipoNombre'), nombre = input.value.trim();
+  if (!nombre) return;
+  document.getElementById('tiposTrabajoErr').textContent = '';
+  try{ await apiObras('/tipos-trabajo', {method:'POST', body:{nombre}}); input.value = ''; await cargarTiposTrabajo(); await cargarMapeo(); }
+  catch(e){ document.getElementById('tiposTrabajoErr').textContent = e.message; }
+}
+async function toggleTipoTrabajo(id, activar){
+  document.getElementById('tiposTrabajoErr').textContent = '';
+  try{ await apiObras('/tipos-trabajo/' + id, {method:'PUT', body:{activo: activar}}); await cargarTiposTrabajo(); await cargarMapeo(); }
+  catch(e){ document.getElementById('tiposTrabajoErr').textContent = e.message; }
 }
 </script>
 </body>

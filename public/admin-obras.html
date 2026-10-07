@@ -134,8 +134,6 @@
   <nav>
     <button data-tab="obras" class="active" onclick="showTab('obras')">Obras</button>
     <button data-tab="historial" onclick="showTab('historial')">Historial</button>
-    <button data-tab="tipos" onclick="showTab('tipos')">Tipos de trabajo</button>
-    <button data-tab="reportes" onclick="showTab('reportes')">Reportes</button>
   </nav>
   <main>
 
@@ -176,43 +174,6 @@
           <thead><tr><th>#</th><th>Cliente</th><th>Dirección</th><th>Fecha venta</th><th>Tareas</th><th>Estado</th><th></th></tr></thead>
           <tbody id="historialBody"></tbody>
         </table>
-      </div>
-    </section>
-
-    <!-- TIPOS DE TRABAJO -->
-    <section id="tab-tipos" class="hidden">
-      <div class="card">
-        <div class="row">
-          <div style="flex:1"><label>Nuevo tipo de trabajo</label><input id="nuevoTipoNombre" placeholder="Ej: Colocación de pisos"></div>
-          <button class="btn" onclick="crearTipoTrabajo()">Agregar</button>
-        </div>
-      </div>
-      <div class="card">
-        <table>
-          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="tiposBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- REPORTES -->
-    <section id="tab-reportes" class="hidden">
-      <div class="card">
-        <div class="row">
-          <div><label>Desde</label><input type="date" id="repDesde"></div>
-          <div><label>Hasta</label><input type="date" id="repHasta"></div>
-          <div><label>Colocador</label><select id="repColocador"><option value="">Todos</option></select></div>
-          <div><label>Tipo de trabajo</label><select id="repTipo"><option value="">Todos</option></select></div>
-          <button class="btn" onclick="cargarReporte()">Generar</button>
-          <button class="btn secondary" onclick="exportarCSV()">Exportar CSV</button>
-        </div>
-      </div>
-      <div class="card">
-        <table>
-          <thead><tr><th>Colocador</th><th>Tipo de trabajo</th><th>m² (tareas terminadas)</th><th>Monto a pagar</th></tr></thead>
-          <tbody id="reporteBody"></tbody>
-        </table>
-        <div class="total-box" id="reporteTotal"></div>
       </div>
     </section>
 
@@ -302,7 +263,6 @@ function showTab(tab){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
   document.getElementById('tab-'+tab).classList.remove('hidden');
-  if (tab==='reportes') cargarReporte();
   if (tab==='historial') cargarHistorial();
 }
 
@@ -378,31 +338,14 @@ async function guardarMateriales(obraId, tareaId){
 
 async function cargarColocadores(){
   COLOCADORES = await api('/colocadores');
-  // refrescar selects que dependen de colocadores
-  const sel = document.getElementById('repColocador');
-  if (sel) sel.innerHTML = '<option value="">Todos</option>' + COLOCADORES.map(c=>`<option value="${c._id}">${c.nombre}</option>`).join('');
 }
 
-// ---------------- TIPOS DE TRABAJO ----------------
+// ---------------- TIPOS DE TRABAJO (solo lectura) ----------------
 
+// Los tipos de trabajo se administran en Configuración > Bases y catálogos; acá solo se leen
+// para los desplegables (solo los activos).
 async function cargarTipos(){
-  TIPOS = await api('/tipos-trabajo');
-  document.getElementById('tiposBody').innerHTML = TIPOS.map(t=>`
-    <tr><td>${t.nombre}</td><td>${t.activo!==false?'Activo':'<span class="muted">Inactivo</span>'}</td>
-    <td><button class="btn small secondary" onclick="toggleTipo('${t._id}', ${t.activo===false})">${t.activo===false?'Reactivar':'Desactivar'}</button></td></tr>`).join('');
-  const sel = document.getElementById('repTipo');
-  if (sel) sel.innerHTML = '<option value="">Todos</option>' + TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
-}
-async function crearTipoTrabajo(){
-  const nombre = document.getElementById('nuevoTipoNombre').value.trim();
-  if (!nombre) return;
-  await api('/tipos-trabajo', {method:'POST', body:{nombre}});
-  document.getElementById('nuevoTipoNombre').value='';
-  cargarTipos();
-}
-async function toggleTipo(id, activar){
-  await api(`/tipos-trabajo/${id}`, {method:'PUT', body:{activo: activar}});
-  cargarTipos();
+  TIPOS = (await api('/tipos-trabajo')).filter(t => t.activo !== false);
 }
 
 // ---------------- OBRAS ----------------
@@ -653,44 +596,6 @@ async function agregarTarea(obraId){
   abrirObra(obraId);
   cargarObras();
 }
-// ---------------- REPORTES ----------------
-
-let ULTIMO_REPORTE = [];
-
-async function cargarReporte(){
-  if (COLOCADORES.length && document.getElementById('repColocador').options.length<=1){
-    document.getElementById('repColocador').innerHTML = '<option value="">Todos</option>' + COLOCADORES.map(c=>`<option value="${c._id}">${c.nombre}</option>`).join('');
-  }
-  const params = new URLSearchParams();
-  const desde = document.getElementById('repDesde').value;
-  const hasta = document.getElementById('repHasta').value;
-  const colocadorId = document.getElementById('repColocador').value;
-  const tipoTrabajo = document.getElementById('repTipo').value;
-  if (desde) params.set('desde', desde);
-  if (hasta) params.set('hasta', hasta);
-  if (colocadorId) params.set('colocadorId', colocadorId);
-  if (tipoTrabajo) params.set('tipoTrabajo', tipoTrabajo);
-  const filas = await api('/reportes/m2?' + params.toString());
-  ULTIMO_REPORTE = filas;
-  document.getElementById('reporteBody').innerHTML = filas.map(f=>`
-    <tr><td>${f.colocador}</td><td>${f.tipoTrabajo}</td><td>${f.m2Total}</td><td>$${f.montoTotal.toLocaleString('es-AR')}</td></tr>
-  `).join('') || '<tr><td colspan="4" class="muted">Sin datos para este filtro</td></tr>';
-  const totalM2 = filas.reduce((s,f)=>s+f.m2Total,0);
-  const totalMonto = filas.reduce((s,f)=>s+f.montoTotal,0);
-  document.getElementById('reporteTotal').textContent = `Total: ${totalM2.toLocaleString('es-AR')} m² — $${totalMonto.toLocaleString('es-AR')}`;
-}
-
-function exportarCSV(){
-  if (!ULTIMO_REPORTE.length) { alert('Generá el reporte primero'); return; }
-  const filas = [['Colocador','Tipo de trabajo','m2 (tareas terminadas)','Monto a pagar'], ...ULTIMO_REPORTE.map(f=>[f.colocador,f.tipoTrabajo,f.m2Total,f.montoTotal])];
-  const csv = filas.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `reporte_obras_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}
-
 </script>
 </body>
 </html>
