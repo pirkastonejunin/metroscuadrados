@@ -96,7 +96,7 @@
 
 <div id="app" class="hidden">
   <main>
-    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="pag">Pagos</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button></div>
+    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="pag">Pagos</button><button data-v="col">Colocadores</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button></div>
     <div id="err"></div><div id="ok"></div>
 
     <div class="vista" id="v-liq">
@@ -129,6 +129,22 @@
       <div id="gAviso"></div>
       <div class="tabla"><table><thead><tr><th style="width:34px"><input type="checkbox" id="gTodos" onchange="marcarTodos(this.checked)" aria-label="Marcar todos"></th><th>Empleado</th><th class="n" title="Neto de la liquidación menos lo ya pagado">Falta pagar</th><th class="n" style="width:130px">Sueldo</th><th class="n" style="width:130px">Comisión</th><th class="n">Total</th></tr></thead><tbody id="tPag"></tbody></table></div>
       <div class="acciones" style="margin-top:12px"><button data-iconizado="1" class="btn" id="gBtn" onclick="pagarLote()">Pagar seleccionados</button><span class="muted" id="gTotal"></span></div>
+    </div>
+
+    <div class="vista hidden" id="v-col">
+      <div class="tb-filtros">
+        <input type="month" id="cPeriodo" aria-label="Mes" onchange="cargarCol()">
+        <button data-iconizado="1" class="btn secondary" onclick="liquidarCol()" title="Liquida todas las tareas terminadas del mes que todavía no se liquidaron">Liquidar lo pendiente</button>
+        <span class="tb-info" title="Lo que se les paga a los colocadores por las obras: m² de cada tarea terminada por el costo por m² del colocador, en el mes en que se terminó la tarea (así figura también en el Estado de resultados, como Sueldos y cargas · Obra). Liquidás por colocador y mes, y vas pagando en cuotas (por ejemplo semanales) desde Tesorería. Si se termina otra tarea más tarde, volvé a liquidar y se suma.">i</span>
+      </div>
+      <div class="kpis">
+        <div class="kpi main"><div class="et">Devengado del mes</div><div class="val" id="cDev">$ —</div></div>
+        <div class="kpi"><div class="et">Sin liquidar</div><div class="val" id="cPen">—</div></div>
+        <div class="kpi"><div class="et">Pagado</div><div class="val" id="cPag">—</div></div>
+        <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="cSal">—</div></div>
+      </div>
+      <div class="panel hidden" id="pCol"></div>
+      <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
     </div>
 
     <div class="vista hidden" id="v-emp">
@@ -204,8 +220,8 @@ if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 document.addEventListener('click', e => {
   const b = e.target.closest('#tabs button'); if (!b) return;
   [...document.querySelectorAll('#tabs button')].forEach(x => x.classList.toggle('on', x === b));
-  ['liq','pag','emp','ade'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
-  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'pag') iniciarPagos(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else { formAde(); cargarAde(); }
+  ['liq','pag','col','emp','ade'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
+  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'pag') iniciarPagos(); else if (b.dataset.v === 'col') iniciarCol(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else { formAde(); cargarAde(); }
 });
 
 // ---------------- Liquidaciones ----------------
@@ -351,6 +367,42 @@ async function pagarLote(){
     else exito('Listo: se pagaron ' + r.pagados + ' sueldo' + (r.pagados > 1 ? 's' : '') + ' por ' + pesos(r.total) + '.');
   }catch(e){ error(e); }
   await cargarPagos();
+}
+
+// ---------------- Colocadores ----------------
+let COL = null, COL_ABIERTO = {};
+const m2f = n => (Math.round(Number(n || 0) * 100) / 100).toLocaleString('es-AR');
+function iniciarCol(){ if (!$('cPeriodo').value) $('cPeriodo').value = $('fPeriodo').value || hoyISO().slice(0, 7); cargarCol(); }
+async function cargarCol(){
+  $('pCol').classList.add('hidden');
+  try{ COL = await api('GET', '/colocadores?periodo=' + $('cPeriodo').value); }catch(e){ error(e); return; }
+  const t = COL.totales;
+  $('cDev').textContent = pesos(t.devengado); $('cPen').textContent = pesos(t.pendienteLiquidar); $('cPag').textContent = pesos(t.pagado); $('cSal').textContent = pesos(t.saldo);
+  $('tCol').innerHTML = COL.colocadores.length ? COL.colocadores.map((f, i) => {
+    const l = f.liquidacion, est = l ? ESTADO[l.estado] : null, ab = !!COL_ABIERTO[f.colocadorId];
+    const det = ab ? '<tr class="sin"><td colspan="9" style="padding:0"><table style="width:100%"><thead><tr><th>Obra</th><th>Trabajo</th><th>Terminada</th><th class="n">m²</th><th class="n">$/m²</th><th class="n">Monto</th><th></th></tr></thead><tbody>' + f.tareas.map(x => '<tr><td>' + escapeHtml(x.obra) + '</td><td>' + escapeHtml(x.tipoTrabajo) + '</td><td>' + fmtF(x.fecha) + '</td><td class="n">' + m2f(x.m2) + '</td><td class="n">' + pesos(x.costoPorM2) + '</td><td class="n">' + pesos(x.monto) + '</td><td>' + (x.liquidada ? '<span class="chip ok">liquidada</span>' : '<span class="chip mal">sin liquidar</span>') + '</td></tr>').join('') + '</tbody></table>' + (l && l.pagos.length ? '<div class="muted" style="padding:6px 10px">Pagos: ' + l.pagos.map(p => fmtF(p.fecha) + ' ' + pesos(p.monto)).join(' · ') + '</div>' : '') + '</td></tr>' : '';
+    return '<tr class="clic" onclick="abrirCol(\'' + f.colocadorId + '\')"><td>' + (ab ? '▾ ' : '▸ ') + escapeHtml(f.nombre) + ' <span class="muted">' + f.tareas.length + ' tarea' + (f.tareas.length === 1 ? '' : 's') + '</span></td><td class="n">' + m2f(f.m2) + '</td><td class="n">' + pesos(f.devengado) + '</td><td class="n">' + pesos(f.pendienteLiquidar) + '</td><td class="n">' + (l ? pesos(l.total) : '—') + '</td><td class="n">' + (l ? pesos(l.totalPagado) : '—') + '</td><td class="n">' + (l ? pesos(l.saldo) : '—') + '</td><td>' + (est ? '<span class="chip ' + est[1] + '">' + est[0] + '</span>' : '<span class="muted">sin liquidar</span>') + '</td><td class="acc" onclick="event.stopPropagation()">' +
+      (f.pendienteLiquidar > 0 ? '<button class="btn secondary" onclick="liquidarCol(\'' + f.colocadorId + '\')">Liquidar</button> ' : '') + (l && l.saldo > 0 ? '<button class="btn" onclick="formPagoCol(\'' + l._id + '\',' + i + ')">Pagar</button> ' : '') + (l && !l.totalPagado ? '<button class="btn secondary" onclick="deshacerCol(\'' + l._id + '\')" title="Borra la liquidación; las tareas vuelven a quedar sin liquidar">Deshacer</button>' : '') + '</td></tr>' + det;
+  }).join('') : '<tr><td colspan="9" class="vacio">No hay tareas terminadas por colocadores en este mes.</td></tr>';
+}
+function abrirCol(id){ COL_ABIERTO[id] = !COL_ABIERTO[id]; cargarCol(); }
+async function liquidarCol(colocadorId){
+  try{ const r = await api('POST', '/colocadores/liquidar', {periodo: $('cPeriodo').value, colocadorId}); exito(r.tareas ? 'Se liquidaron ' + r.tareas + ' tarea' + (r.tareas > 1 ? 's' : '') + ' de ' + r.liquidados + ' colocador' + (r.liquidados > 1 ? 'es' : '') + '.' : 'No hay tareas pendientes de liquidar.'); await cargarCol(); }catch(e){ error(e); }
+}
+async function deshacerCol(id){
+  if (!confirm('¿Deshacer esta liquidación? Las tareas vuelven a quedar sin liquidar.')) return;
+  try{ await api('DELETE', '/colocadores/liquidaciones/' + id); await cargarCol(); }catch(e){ error(e); }
+}
+function formPagoCol(id, i){
+  const f = COL.colocadores[i], l = f.liquidacion;
+  $('pCol').innerHTML = '<h3>Pagar colocación · ' + escapeHtml(f.nombre) + ' · falta pagar ' + pesos(l.saldo) + '</h3><div class="form" data-id="' + id + '"><div><label>Monto</label><input type="number" min="0" step="any" id="cpMonto" value="' + l.saldo + '"></div>' +
+    '<div><label>Sale de</label><select id="cpCuenta">' + opcionesCuentas() + '</select></div><div><label>Fecha</label><input type="date" id="cpFecha" value="' + hoyISO() + '"></div><div class="ancho"><label>Nota</label><input type="text" id="cpNota" placeholder="Transferencia, efectivo…"></div></div>' +
+    '<div class="acciones"><button data-iconizado="1" class="btn" onclick="pagarCol()">Registrar pago</button><button data-iconizado="1" class="btn secondary" onclick="$(\'pCol\').classList.add(\'hidden\')">Cancelar</button><span class="muted">El pago descuenta de la caja o banco elegido en Tesorería.</span></div>';
+  $('pCol').classList.remove('hidden'); $('pCol').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+async function pagarCol(){
+  const id = document.querySelector('#pCol .form').dataset.id;
+  try{ await api('POST', '/colocadores/liquidaciones/' + id + '/pagos', Object.assign({monto: n$('cpMonto'), fecha: $('cpFecha').value, nota: $('cpNota').value}, cuentaElegida('cpCuenta'))); exito('Pago registrado.'); await cargarCol(); }catch(e){ error(e); }
 }
 
 // ---------------- Empleados ----------------

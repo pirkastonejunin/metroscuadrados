@@ -693,5 +693,131 @@ router.delete('/adelantos/:id', authSueldos, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
+// ---------------------------------------------------------------------------
+// Colocadores (Gestión de Obras). Se les paga por m² de cada tarea terminada (100 % de los m² x el costo por m²
+// que quedó aplicado a la tarea), en el mes en que se terminó la tarea (devengado). Acá se ven por mes, se
+// liquidan (por colocador y mes, se puede ir completando a medida que se terminan tareas) y se pagan desde
+// Tesorería, en pagos parciales (por ejemplo semanales).
+//   sueldos_colocadores : { colocadorId, colocadorNombre, periodo, tareas: [{ obraId, tareaId, obra, tipoTrabajo,
+//     m2, costoPorM2, monto, fecha }], total, pagos: [...], totalPagado, estado, orgId, ... }
+// ---------------------------------------------------------------------------
+function rangoPeriodo(p) { return { d0: new Date(p + '-01T00:00:00.000-03:00'), d1: finPeriodo(p) }; }
+
+async function tareasTerminadasDelPeriodo(db, req, periodo) {
+  const { d0, d1 } = rangoPeriodo(periodo);
+  const filas = await db.collection('obras').aggregate([
+    { $match: Object.assign({ 'tareas.estado': 'terminada' }, filtroOrg(req)) }, { $unwind: '$tareas' },
+    { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
+    { $project: { numero: 1, cliente: '$cliente.nombre', t: '$tareas' } }
+  ]).toArray();
+  return filas.map(f => {
+    const m2 = Number(f.t.m2Presupuestados || 0), costo = Number(f.t.costoPorM2Aplicado || 0);
+    return { colocadorId: f.t.colocadorId, obraId: f._id, tareaId: f.t._id, obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', m2, costoPorM2: costo, monto: r2(m2 * costo), fecha: f.t.fechaFinReal };
+  });
+}
+
+async function armarColocadores(db, req, periodo) {
+  const org = filtroOrg(req);
+  const tareas = await tareasTerminadasDelPeriodo(db, req, periodo);
+  const liqs = await db.collection('sueldos_colocadores').find(Object.assign({ periodo }, org)).toArray();
+  const ids = tareas.map(t => t.tareaId);
+  const yaLiq = new Set();
+  if (ids.length) (await db.collection('sueldos_colocadores').find(Object.assign({ 'tareas.tareaId': { $in: ids } }, org)).project({ 'tareas.tareaId': 1 }).toArray()).forEach(l => (l.tareas || []).forEach(t => yaLiq.add(String(t.tareaId))));
+  const colIds = [...new Set([...tareas.map(t => String(t.colocadorId)), ...liqs.map(l => String(l.colocadorId))])];
+  const cols = colIds.length ? await db.collection('obras_colocadores').find({ _id: { $in: colIds.map(toObjectId) } }).project({ nombre: 1 }).toArray() : [];
+  const nombre = Object.fromEntries(cols.map(c => [String(c._id), c.nombre]));
+  const out = colIds.map(cid => {
+    const mias = tareas.filter(t => String(t.colocadorId) === cid).map(t => Object.assign({}, t, { liquidada: yaLiq.has(String(t.tareaId)) })).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+    const l = liqs.find(x => String(x.colocadorId) === cid) || null;
+    const pendiente = r2(mias.filter(t => !t.liquidada).reduce((s, t) => s + t.monto, 0));
+    return {
+      colocadorId: cid, nombre: nombre[cid] || (l && l.colocadorNombre) || '(desconocido)',
+      m2: r2(mias.reduce((s, t) => s + t.m2, 0)), devengado: r2(mias.reduce((s, t) => s + t.monto, 0)), pendienteLiquidar: pendiente,
+      tareas: mias,
+      liquidacion: l ? { _id: String(l._id), total: l.total, totalPagado: l.totalPagado || 0, saldo: r2(l.total - (l.totalPagado || 0)), estado: l.estado, pagos: l.pagos || [], cantTareas: (l.tareas || []).length } : null
+    };
+  }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  return out;
+}
+
+router.get('/colocadores', authSueldos, async (req, res) => {
+  try {
+    const periodo = validarPeriodo(req.query.periodo || periodoActual());
+    const filas = await conReintento(async () => armarColocadores(await getDb(), req, periodo));
+    const sum = k => r2(filas.reduce((s, f) => s + (k === 'saldo' ? (f.liquidacion ? f.liquidacion.saldo : 0) : k === 'pagado' ? (f.liquidacion ? f.liquidacion.totalPagado : 0) : k === 'liquidado' ? (f.liquidacion ? f.liquidacion.total : 0) : f[k]), 0));
+    res.json({ periodo, colocadores: filas, totales: { m2: sum('m2'), devengado: sum('devengado'), pendienteLiquidar: sum('pendienteLiquidar'), liquidado: sum('liquidado'), pagado: sum('pagado'), saldo: sum('saldo') } });
+  } catch (e) { responder(res, e); }
+});
+
+// Liquida las tareas terminadas del mes que todavía no se liquidaron (de un colocador o de todos).
+router.post('/colocadores/liquidar', authSueldos, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const periodo = validarPeriodo(b.periodo);
+    const soloCol = b.colocadorId ? String(b.colocadorId) : null;
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const filas = await armarColocadores(db, req, periodo);
+      let n = 0, tareasN = 0;
+      for (const f of filas) {
+        if (soloCol && f.colocadorId !== soloCol) continue;
+        const nuevas = f.tareas.filter(t => !t.liquidada);
+        if (!nuevas.length) continue;
+        const docs = nuevas.map(t => ({ obraId: t.obraId, tareaId: t.tareaId, obra: t.obra, tipoTrabajo: t.tipoTrabajo, m2: t.m2, costoPorM2: t.costoPorM2, monto: t.monto, fecha: t.fecha }));
+        const add = r2(docs.reduce((s, t) => s + t.monto, 0));
+        const col = db.collection('sueldos_colocadores');
+        const ex = await col.findOne(Object.assign({ periodo, colocadorId: toObjectId(f.colocadorId) }, filtroOrg(req)));
+        if (ex) {
+          const total = r2(ex.total + add);
+          await col.updateOne({ _id: ex._id }, { $push: { tareas: { $each: docs } }, $set: { total, estado: estadoPago({ neto: total, totalPagado: ex.totalPagado || 0 }), updatedAt: new Date() } });
+        } else {
+          await col.insertOne({ colocadorId: toObjectId(f.colocadorId), colocadorNombre: f.nombre, periodo, tareas: docs, total: add, pagos: [], totalPagado: 0, estado: add > 0 ? 'pendiente' : 'pagada', orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
+        }
+        n++; tareasN += docs.length;
+      }
+      return { liquidados: n, tareas: tareasN };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
+router.post('/colocadores/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const m = monto(b.monto, 'El monto'); if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
+    const fecha = fechaDe(b.fecha), nota = texto(b.nota);
+    const l = await conReintento(async () => {
+      const db = await getDb();
+      const l = await db.collection('sueldos_colocadores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!l) throw err(404, 'Liquidación no encontrada.');
+      const saldo = r2(l.total - (l.totalPagado || 0));
+      if (m > saldo + 0.005) throw err(400, 'El monto supera lo que falta pagar (' + saldo + ').');
+      await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Colocación ' + l.colocadorNombre + ' ' + l.periodo, observaciones: nota, origen: 'sueldo_colocador', fecha });
+      l.pagos = (l.pagos || []).concat([{ monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '' }]);
+      l.totalPagado = r2((l.totalPagado || 0) + m);
+      l.estado = estadoPago({ neto: l.total, totalPagado: l.totalPagado });
+      await db.collection('sueldos_colocadores').updateOne({ _id: id }, { $set: { pagos: l.pagos, totalPagado: l.totalPagado, estado: l.estado, updatedAt: new Date() } });
+      return l;
+    });
+    res.json(l);
+  } catch (e) { responder(res, e); }
+});
+
+// Deshacer una liquidación sin pagos: las tareas vuelven a quedar pendientes de liquidar.
+router.delete('/colocadores/liquidaciones/:id', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const l = await db.collection('sueldos_colocadores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!l) throw err(404, 'Liquidación no encontrada.');
+      if ((l.totalPagado || 0) > 0) throw err(400, 'Esta liquidación ya tiene pagos registrados, no se puede borrar.');
+      await db.collection('sueldos_colocadores').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+
 module.exports = router;
 module.exports.SECTORES = SECTORES;

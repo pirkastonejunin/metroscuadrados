@@ -265,7 +265,7 @@ async function sueldosProduccionGasto(db, orgId) {
 // Es el mismo criterio del reporte de m² de Obras. Se muestra como gasto si se activa en la configuración.
 async function colocacionComoGasto(db, orgId) {
   const d = await db.collection('config_general').findOne({ orgId, clave: 'resultadosColocacionGasto' });
-  return !!(d && d.valor === true);
+  return d ? d.valor === true : true; // por defecto se muestra: los colocadores se liquidan desde Sueldos
 }
 
 async function resultadosOrg(db, orgId, d0, d1) {
