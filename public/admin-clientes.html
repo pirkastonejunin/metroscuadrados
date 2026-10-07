@@ -513,6 +513,9 @@ function abrirEditarCliente(id){
         <div class="modal-tabs">
           <button class="active" data-tab="datos" onclick="mostrarTabCliente('datos')">Datos del cliente</button>
           <button data-tab="cuenta-corriente" onclick="mostrarTabCliente('cuenta-corriente', '${id}')">Cuenta corriente</button>
+          <button data-tab="presupuestos" onclick="mostrarTabCliente('presupuestos', '${id}')">Presupuestos</button>
+          <button data-tab="productos" onclick="mostrarTabCliente('productos', '${id}')">Productos comprados</button>
+          <button data-tab="obras" onclick="mostrarTabCliente('obras', '${id}')">Obras</button>
         </div>
         <div id="tabClienteDatos">
           ${formularioCliente(c)}
@@ -522,6 +525,9 @@ function abrirEditarCliente(id){
         <div id="tabClienteCuentaCorriente" class="hidden">
           <div id="ccContenido" class="muted">Cargando...</div>
         </div>
+        <div id="tabClientePresupuestos" class="hidden"><div id="presContenido" class="muted">Cargando...</div></div>
+        <div id="tabClienteProductos" class="hidden"><div id="prodContenido" class="muted">Cargando...</div></div>
+        <div id="tabClienteObras" class="hidden"><div id="obrasContenido" class="muted">Cargando...</div></div>
       </div>
     </div>
   `;
@@ -531,7 +537,89 @@ function mostrarTabCliente(tab, clienteId){
   document.querySelectorAll('.modal-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('tabClienteDatos').classList.toggle('hidden', tab !== 'datos');
   document.getElementById('tabClienteCuentaCorriente').classList.toggle('hidden', tab !== 'cuenta-corriente');
+  document.getElementById('tabClientePresupuestos').classList.toggle('hidden', tab !== 'presupuestos');
+  document.getElementById('tabClienteProductos').classList.toggle('hidden', tab !== 'productos');
+  document.getElementById('tabClienteObras').classList.toggle('hidden', tab !== 'obras');
   if (tab === 'cuenta-corriente') cargarCuentaCorrienteTab(clienteId);
+  if (tab === 'presupuestos') cargarPresupuestosTab(clienteId);
+  if (tab === 'productos') cargarProductosTab(clienteId);
+  if (tab === 'obras') cargarObrasTab(clienteId);
+}
+
+function moneyMon(n, mon){ return (mon && mon !== 'ARS' ? mon + ' ' : '') + money(n); }
+async function traerTab(id, ruta, contId){
+  const cont = document.getElementById(contId);
+  if (cont) cont.innerHTML = 'Cargando...';
+  const r = await fetch(BASE + '/' + id + '/' + ruta, {headers: headersAuth()});
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Error al cargar');
+  return data;
+}
+function errTab(contId, e){ const c = document.getElementById(contId); if (c) c.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+
+const ESTADO_PRES_LABEL = {presupuestado:'Presupuestado', en_seguimiento:'En seguimiento', aprobado:'Aprobado', rechazado:'Rechazado'};
+async function cargarPresupuestosTab(id){
+  try{
+    const lista = await traerTab(id, 'presupuestos', 'presContenido');
+    const cont = document.getElementById('presContenido'); if (!cont) return;
+    cont.innerHTML = `<table>
+      <thead><tr><th>N°</th><th>Fecha</th><th>Estado</th><th>Vendedor</th><th>Total</th><th></th></tr></thead>
+      <tbody>${lista.length ? lista.map(p => `<tr>
+        <td>${escapeHtml(p.numero)}</td><td>${fechaCorta(p.fecha)}</td>
+        <td>${ESTADO_PRES_LABEL[p.estado] || escapeHtml(p.estado || '—')}</td>
+        <td class="muted">${escapeHtml(p.vendedor || '—')}</td>
+        <td>${moneyMon(p.total, p.moneda)}</td>
+        <td><a href="javascript:void(0)" onclick="imprimirDocumento('/api/presupuestos/${p._id}/imprimir')" style="text-decoration:underline">Ver</a></td>
+      </tr>`).join('') : '<tr><td colspan="6" class="muted">Este cliente todavía no tiene presupuestos.</td></tr>'}</tbody></table>`;
+  }catch(e){ errTab('presContenido', e); }
+}
+
+async function cargarProductosTab(id){
+  try{
+    const data = await traerTab(id, 'productos', 'prodContenido');
+    const cont = document.getElementById('prodContenido'); if (!cont) return;
+    const lista = data.productos;
+    cont.innerHTML = `<p class="muted" style="margin-top:0">${lista.length} producto(s) en ${data.ventas} venta(s) (sin contar anuladas).</p>
+      <table>
+      <thead><tr><th>SKU</th><th>Producto</th><th>Cantidad</th><th>Veces</th><th>Total comprado</th><th>Última compra</th></tr></thead>
+      <tbody>${lista.length ? lista.map(p => `<tr>
+        <td class="muted">${escapeHtml(p.sku || '—')}</td><td>${escapeHtml(p.nombre)}</td>
+        <td>${p.cantidad}</td><td>${p.compras}</td>
+        <td>${Object.keys(p.monto).map(m => moneyMon(p.monto[m], m)).join(' + ')}</td>
+        <td>${fechaCorta(p.ultimaCompra)}</td>
+      </tr>`).join('') : '<tr><td colspan="6" class="muted">Este cliente todavía no compró productos.</td></tr>'}</tbody></table>`;
+  }catch(e){ errTab('prodContenido', e); }
+}
+
+const ESTADO_OBRA_LABEL = {pendiente:'Pendiente', asignado:'Asignada', en_curso:'En curso', terminada:'Terminada', cancelada:'Cancelada'};
+function srcFoto(f){ const d = (f && typeof f === 'object') ? f.data : f; return typeof d === 'string' ? d : ''; }
+async function cargarObrasTab(id){
+  try{
+    const lista = await traerTab(id, 'obras', 'obrasContenido');
+    const cont = document.getElementById('obrasContenido'); if (!cont) return;
+    if (!lista.length) { cont.innerHTML = '<p class="muted">Este cliente no tiene obras.</p>'; return; }
+    cont.innerHTML = lista.map(o => {
+      const fotos = (o.fotos || []).map(srcFoto).filter(Boolean);
+      const m2 = (o.tareas || []).reduce((a, t) => a + (Number(t.m2Presupuestados) || 0), 0);
+      const tipos = [...new Set((o.tareas || []).map(t => t.tipoTrabajo).filter(Boolean))].join(', ');
+      return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <strong>Obra #${escapeHtml(o.numero)} · ${ESTADO_OBRA_LABEL[o.estado] || escapeHtml(o.estado || '')}</strong>
+          <span class="muted">${fechaCorta(o.fechaVenta)}</span>
+        </div>
+        <div class="muted" style="margin:4px 0 8px">${escapeHtml((o.cliente && o.cliente.direccion) || '')}${o.cliente && o.cliente.localidad ? ', ' + escapeHtml(o.cliente.localidad) : ''}${tipos ? ' · ' + escapeHtml(tipos) : ''}${m2 ? ' · ' + m2 + ' m²' : ''}</div>
+        ${fotos.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${fotos.map(f => `<img src="${f}" alt="Foto de la obra" loading="lazy" style="width:110px;height:110px;object-fit:cover;border-radius:8px;cursor:zoom-in" onclick="verFotoObra(this.src)">`).join('')}</div>` : '<div class="muted">Sin fotos.</div>'}
+      </div>`;
+    }).join('');
+  }catch(e){ errTab('obrasContenido', e); }
+}
+function verFotoObra(src){
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+  d.innerHTML = '<img style="max-width:94vw;max-height:94vh;border-radius:8px">';
+  d.firstChild.src = src;
+  d.onclick = () => d.remove();
+  document.body.appendChild(d);
 }
 
 async function guardarEdicionCliente(id){

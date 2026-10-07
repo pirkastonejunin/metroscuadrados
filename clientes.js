@@ -481,4 +481,92 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// -----------------------------------------------------------------------
+// Pestañas de la ficha del cliente (7/10/2026, pedido de Mato): presupuestos,
+// productos comprados y obras del cliente (con sus fotos).
+// -----------------------------------------------------------------------
+async function clienteDeLaOrg(db, req) {
+  const id = toObjectId(req.params.id);
+  if (!id) throw err(400, 'id inválido');
+  const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+  if (!cliente) throw err(404, 'Cliente no encontrado');
+  return cliente;
+}
+
+router.get('/:id/presupuestos', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await clienteDeLaOrg(db, req);
+      return db.collection('presupuestos')
+        .find(Object.assign({ clienteId: cliente._id }, filtroOrg(req)))
+        .project({ numero: 1, fecha: 1, moneda: 1, total: 1, estado: 1, observaciones: 1, vendedor: 1, ventaId: 1 })
+        .sort({ fecha: -1, numero: -1 }).limit(300).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Productos comprados: se agrupan por producto a partir de las ventas no
+// anuladas del cliente (cantidad total, monto, última compra).
+router.get('/:id/productos', authAdmin, async (req, res) => {
+  try {
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await clienteDeLaOrg(db, req);
+      const ventas = await db.collection('ventas')
+        .find(Object.assign({ clienteId: cliente._id, estado: { $ne: 'anulada' } }, filtroOrg(req)))
+        .project({ numero: 1, fecha: 1, moneda: 1, items: 1 }).sort({ fecha: -1 }).limit(1000).toArray();
+      const mapa = new Map();
+      for (const v of ventas) {
+        for (const it of (v.items || [])) {
+          const clave = String(it.productoId || it.sku || it.nombre);
+          let p = mapa.get(clave);
+          if (!p) {
+            p = { productoId: it.productoId || null, sku: it.sku || '', nombre: it.nombre || '', cantidad: 0, monto: {}, compras: 0, ultimaCompra: v.fecha, ultimoPrecio: it.precioUnitario, ultimaMoneda: v.moneda || 'ARS' };
+            mapa.set(clave, p);
+          }
+          p.cantidad += Number(it.cantidad) || 0;
+          const mon = v.moneda || 'ARS';
+          p.monto[mon] = (p.monto[mon] || 0) + (Number(it.subtotal) || 0);
+          p.compras += 1;
+        }
+      }
+      return { ventas: ventas.length, productos: [...mapa.values()].sort((a, b) => new Date(b.ultimaCompra) - new Date(a.ultimaCompra)) };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Obras: hoy la obra guarda al cliente como texto (nombre/teléfono), no con
+// un clienteId; se la asocia por nombre o teléfono coincidente.
+function soloDigitosCli(s) { return String(s || '').replace(/\D/g, ''); }
+function escRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+router.get('/:id/obras', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const c = await clienteDeLaOrg(db, req);
+      const nombres = [c.apellidoRazonSocial, c.nombreFantasia, [c.nombre, c.apellidoRazonSocial].filter(Boolean).join(' '), [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ')]
+        .map(x => String(x || '').trim()).filter(Boolean);
+      const tels = [c.telefono, c.celular].map(soloDigitosCli).filter(t => t.length >= 6);
+      const or = nombres.map(n => ({ 'cliente.nombre': { $regex: '^\\s*' + escRegex(n) + '\\s*$', $options: 'i' } }));
+      if (!or.length) return [];
+      const obras = await db.collection('obras').find(Object.assign({ $or: or }, filtroOrg(req)))
+        .sort({ numero: -1 }).limit(100).toArray();
+      // Por teléfono (comparando solo dígitos, en memoria) para no perder las que cambian de nombre.
+      if (tels.length) {
+        const ids = new Set(obras.map(o => String(o._id)));
+        const otras = await db.collection('obras').find(Object.assign({ 'cliente.telefono': { $exists: true, $ne: '' } }, filtroOrg(req))).sort({ numero: -1 }).limit(2000).toArray();
+        for (const o of otras) {
+          if (!ids.has(String(o._id)) && tels.includes(soloDigitosCli(o.cliente && o.cliente.telefono))) obras.push(o);
+        }
+        obras.sort((a, b) => (b.numero || 0) - (a.numero || 0));
+      }
+      return obras;
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;
