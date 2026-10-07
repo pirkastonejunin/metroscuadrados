@@ -180,6 +180,25 @@
   .venc-dia-num{font-size:0.72rem;font-weight:700;}
   .venc-dia-dot{width:6px;height:6px;border-radius:50%;background:#c53030;}
   .venc-detalle-vacio{padding:10px 2px;text-align:center;color:var(--muted);font-size:12.5px;}
+
+  /* ---- Tablero comercial (embudo) ---- */
+  .tab-card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px;}
+  .tab-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:14px;}
+  .tab-filtros label{display:block;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:3px;}
+  .tab-filtros select,.tab-filtros input{font-family:inherit;font-size:0.85rem;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);}
+  .tab-filtros button{font-family:inherit;font-size:0.82rem;font-weight:700;padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink,#fff);cursor:pointer;}
+  .tab-etapa{display:grid;grid-template-columns:150px 1fr 150px;gap:12px;align-items:center;padding:8px 0;}
+  .tab-etapa-nombre{font-weight:700;font-size:0.85rem;}
+  .tab-barra{background:var(--bg);border-radius:8px;height:34px;overflow:hidden;}
+  .tab-barra > div{height:100%;background:var(--accent);border-radius:8px;transition:width .35s ease;min-width:4px;}
+  .tab-cant{font-weight:800;font-size:1.35rem;line-height:1;text-align:right;}
+  .tab-pct{display:block;font-weight:600;font-size:0.7rem;color:var(--muted);margin-top:3px;}
+  .tab-total{margin-top:10px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+  .tab-total strong{font-size:1.5rem;color:var(--accent);}
+  .tab-aviso{background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:8px 10px;font-size:0.8rem;color:var(--muted);margin-bottom:10px;}
+  .tab-nota{font-size:0.7rem;color:var(--muted);margin-top:8px;}
+  .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
+  @media (max-width:560px){.tab-etapa{grid-template-columns:1fr 90px;}.tab-barra{grid-column:1 / span 2;order:3;}}
 </style>
 </head>
 <body>
@@ -188,6 +207,32 @@
       <img class="logo" src="data:image/png;base64,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" alt="Piedra Negra">
       <p>Accesos a las herramientas de obras y visitas</p>
     </header>
+
+    <div class="grupo hidden" id="grupoTablero">
+      <h2>Tablero comercial</h2>
+      <div class="tab-card">
+        <div class="tab-filtros">
+          <div><label for="tabPeriodo">Período</label>
+            <select id="tabPeriodo" onchange="tabPreset(this.value)">
+              <option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes" selected>Este mes</option>
+              <option value="mespasado">Mes pasado</option><option value="30">Últimos 30 días</option><option value="anio">Este año</option><option value="custom">Personalizado</option>
+            </select></div>
+          <div><label for="tabDesde">Desde</label><input type="date" id="tabDesde" onchange="document.getElementById('tabPeriodo').value='custom'"></div>
+          <div><label for="tabHasta">Hasta</label><input type="date" id="tabHasta" onchange="document.getElementById('tabPeriodo').value='custom'"></div>
+          <div id="tabVendedorBox" class="hidden"><label for="tabVendedor">Vendedor</label>
+            <select id="tabVendedor" onchange="cargarTablero()"><option value="">Todos</option></select></div>
+          <button data-iconizado="1" onclick="cargarTablero()">Ver</button>
+        </div>
+        <div id="tabAvisos"></div>
+        <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
+        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. No se cuentan visitas canceladas ni ventas anuladas.</div>
+      </div>
+    </div>
+
+    <div class="grupo hidden" id="grupoTabCalendario">
+      <h2>Calendario</h2>
+      <iframe id="tabCalendario" class="tab-cal" title="Calendario" loading="lazy"></iframe>
+    </div>
 
     <div class="grupo hidden" id="grupoVencimientos">
       <h2>Vencimientos</h2>
@@ -207,7 +252,7 @@
     </div>
 
     <div class="grupo" id="grupoOficina">
-      <h2>Oficina</h2>
+      <h2 id="tituloOficina">Oficina</h2>
 
       <div class="card-login" id="oficinaLogin">
         <label>Usuario</label>
@@ -439,6 +484,7 @@ function elegirOrganizacion(orgId){
   ORG_ACTIVA = orgId;
   if (orgId) localStorage.setItem(ORG_KEY, orgId);
   else localStorage.removeItem(ORG_KEY);
+  if (typeof TABLERO_VISIBLE !== 'undefined' && TABLERO_VISIBLE) cargarTablero();
 }
 
 function headersAuth(extra){
@@ -568,12 +614,16 @@ async function revisarSesionOficina(){
     lista.classList.remove('hidden');
     sinModulos.classList.toggle('hidden', algunoVisible);
     document.getElementById('grupoVencimientos').classList.remove('hidden');
+    const verTablero = tieneModulo(me.rol, 'tablero');
+    document.getElementById('grupoTablero').classList.toggle('hidden', !verTablero);
+    if (!verTablero) { TABLERO_VISIBLE = false; document.getElementById('grupoTabCalendario').classList.add('hidden'); }
 
     // Panel lateral, igual que en el resto de las pantallas de Oficina —
     // acá ya tenemos nuestro propio selector de organización arriba
     // (#orgSelectorBox), así que se le pide al panel que no repita el suyo.
     if (window.PiedraSidebar) PiedraSidebar.render(me, 'inicio', { ocultarOrg: true });
 
+    if (verTablero) iniciarTablero(me);
     cargarNotificaciones();
     if (!notifIntervalIniciado) {
       notifIntervalIniciado = true;
@@ -589,6 +639,8 @@ async function revisarSesionOficina(){
     sinModulos.classList.add('hidden');
     grupoVendedores.classList.add('hidden');
     document.getElementById('grupoVencimientos').classList.add('hidden');
+    document.getElementById('grupoTablero').classList.add('hidden');
+    document.getElementById('grupoTabCalendario').classList.add('hidden');
   }
 }
 
@@ -609,6 +661,81 @@ revisarSesionOficina();
     }
   }catch(e){ /* si falla, el link se queda como estaba */ }
 })();
+
+
+// ---------------- Tablero comercial (embudo) ----------------
+var TABLERO_VISIBLE = false;
+function tabIso(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function tabPreset(v){
+  if (v === 'custom') return;
+  const hoy = new Date(); hoy.setHours(12,0,0,0);
+  let d = new Date(hoy), h = new Date(hoy);
+  if (v === 'semana') { d.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7)); }
+  else if (v === 'mes') { d = new Date(hoy.getFullYear(), hoy.getMonth(), 1, 12); }
+  else if (v === 'mespasado') { d = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1, 12); h = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 12); }
+  else if (v === '30') { d.setDate(hoy.getDate() - 29); }
+  else if (v === 'anio') { d = new Date(hoy.getFullYear(), 0, 1, 12); }
+  document.getElementById('tabDesde').value = tabIso(d);
+  document.getElementById('tabHasta').value = tabIso(h);
+  if (TABLERO_VISIBLE) cargarTablero();
+}
+function tabFmtPct(p){ return p === null || p === undefined ? '—' : p.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:1}) + ' %'; }
+async function cargarTablero(){
+  const cont = document.getElementById('tabEmbudo');
+  const qs = new URLSearchParams();
+  const d = document.getElementById('tabDesde').value, h = document.getElementById('tabHasta').value;
+  if (d) qs.set('desde', d); if (h) qs.set('hasta', h);
+  const vend = document.getElementById('tabVendedor').value; if (vend) qs.set('vendedorId', vend);
+  cont.innerHTML = '<div class="muted">Cargando…</div>'; document.getElementById('tabAvisos').innerHTML = '';
+  try{
+    const r = await fetch('/api/tablero/embudo?' + qs.toString(), {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
+    const max = Math.max(1, ...data.etapas.map(e => e.cantidad));
+    cont.innerHTML = data.etapas.map((e, i) =>
+      '<div class="tab-etapa"><div class="tab-etapa-nombre">' + notifEscapeHtml(e.titulo) + '</div>' +
+      '<div class="tab-barra"><div style="width:' + Math.max(e.cantidad / max * 100, 0) + '%;opacity:' + (1 - i * 0.18) + '"></div></div>' +
+      '<div class="tab-cant">' + e.cantidad.toLocaleString('es-AR') + '<span class="tab-pct">' + (i === 0 ? 'punto de partida' : tabFmtPct(e.pctAnterior) + ' de ' + notifEscapeHtml(data.etapas[i-1].titulo.toLowerCase())) + '</span></div></div>'
+    ).join('') +
+    '<div class="tab-total"><span>Efectividad total (ventas sobre datos del CRM)</span><strong>' + tabFmtPct(data.efectividadTotal) + '</strong></div>';
+    document.getElementById('tabAvisos').innerHTML = (data.avisos || []).map(a => '<div class="tab-aviso">' + notifEscapeHtml(a) + '</div>').join('');
+  }catch(e){
+    cont.innerHTML = '<div class="tab-aviso">No se pudo cargar el tablero: ' + notifEscapeHtml(e.message) + '</div>';
+  }
+}
+async function iniciarTablero(me){
+  const esAdmin = !!(me.rol && me.rol.protegido);
+  const simple = !esAdmin;
+  TABLERO_VISIBLE = true;
+  document.getElementById('grupoTablero').classList.remove('hidden');
+  // Para quien no es administrador la pantalla de inicio es SOLO el tablero
+  // y el calendario: se ocultan los accesos (siguen en el menú lateral).
+  document.getElementById('grupoTabCalendario').classList.toggle('hidden', !simple);
+  if (simple) {
+    // La barra de sesión (saludo, campanita, salir) queda arriba de todo.
+    const ofi = document.getElementById('grupoOficina'), tab = document.getElementById('grupoTablero');
+    if (ofi && tab && ofi.parentNode === tab.parentNode) tab.parentNode.insertBefore(ofi, tab);
+    ['oficinaLista','oficinaSinModulos','grupoVendedores','grupoVencimientos','tituloOficina'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    const f = document.getElementById('tabCalendario');
+    if (!f.getAttribute('src')) f.setAttribute('src', '/calendario.html?embed=1');
+  }
+  document.getElementById('tabVendedorBox').classList.toggle('hidden', !esAdmin);
+  if (esAdmin) {
+    try{
+      const r = await fetch('/api/tablero/vendedores', {headers: headersAuth()});
+      const lista = r.ok ? await r.json() : [];
+      const sel = document.getElementById('tabVendedor'), actual = sel.value;
+      sel.innerHTML = '<option value="">Todos</option>' + lista.map(v => '<option value="' + v._id + '">' + notifEscapeHtml(v.nombre) + '</option>').join('');
+      sel.value = actual;
+    }catch(e){}
+  }
+  if (!document.getElementById('tabDesde').value) tabPreset('mes'); else cargarTablero();
+}
+window.addEventListener('message', ev => {
+  if (ev.origin === location.origin && ev.data && ev.data.tipo === 'calendario-alto') {
+    const f = document.getElementById('tabCalendario'); if (f) f.style.height = Math.max(520, Number(ev.data.alto) || 0) + 'px';
+  }
+});
 
 // ---------------- Notificaciones (campanita de vencimientos) ----------------
 // Única instancia de la campanita en toda la app — vive acá (menú de

@@ -1270,6 +1270,7 @@ router.post('/', authAdmin, async (req, res) => {
         clienteId,
         clienteNombre: cliente.apellidoRazonSocial || cliente.nombre || '',
         vendedor,
+        usuarioId: (req.usuario && req.usuario._id) || null,
         fecha,
         moneda,
         listaPrecioId,

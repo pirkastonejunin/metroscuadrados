@@ -166,6 +166,8 @@
     --danger: #ff8080;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 20px -12px rgba(0, 0, 0, 0.5);
   }
+  body.embed { background: transparent; }
+  body.embed .wrap { padding: 0; max-width: none; margin: 0; }
 </style>
 </head>
 <body>
@@ -223,6 +225,8 @@
 <script>
 const BASE_VISITAS = '/api/visitas';
 const BASE_OBRAS = '/api/obras';
+const EMBED = new URLSearchParams(location.search).get('embed') === '1'; // incrustado en el tablero de inicio: solo las visitas propias
+let ME = null;
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || ''; // organización elegida en inicio.html — se manda como x-org-id
 function headersAuth(extra){
@@ -271,14 +275,22 @@ async function entrar() {
   const me = await r.json();
   // El calendario combina Visitas y Obras (ver usuarios.js) — hace falta
   // tener los dos módulos habilitados para verlo completo.
-  const tieneAcceso = me.rol && (me.rol.protegido || ((me.rol.modulos||[]).includes('visitas') && (me.rol.modulos||[]).includes('obras')));
+  ME = me;
+  const modsMe = (me.rol && me.rol.modulos) || [];
+  const tieneAcceso = me.rol && (me.rol.protegido || (EMBED ? modsMe.includes('visitas') : (modsMe.includes('visitas') && modsMe.includes('obras'))));
   if (!tieneAcceso) {
     document.getElementById('loginScreen').classList.add('hidden');
     document.getElementById('sinAccesoScreen').classList.remove('hidden');
     return;
   }
-  PiedraSidebar.render(me, 'calendario');
-  await cargarColocadores();
+  if (EMBED) {
+    document.body.classList.add('embed');
+    const lg = document.querySelectorAll('.legend > span'); if (lg[1]) lg[1].style.display = 'none';
+    ['h1', '.sub'].forEach(sel => { const el = document.querySelector('#app ' + sel); if (el) el.style.display = 'none'; });
+  } else {
+    PiedraSidebar.render(me, 'calendario');
+    await cargarColocadores();
+  }
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -356,15 +368,24 @@ async function renderCalendario() {
   grid.innerHTML = celdas;
 
   if (diaSeleccionado) mostrarPanel(diaSeleccionado);
+  avisarAlto();
+}
+function avisarAlto() {
+  if (!EMBED || window.parent === window) return;
+  setTimeout(() => window.parent.postMessage({ tipo: 'calendario-alto', alto: document.documentElement.scrollHeight + 8 }, location.origin), 50);
 }
 
 async function cargarEventos(desde, hasta) {
   const desdeISO = fechaISO(desde);
   const hastaISO = fechaISO(hasta);
 
+  // Incrustado en el inicio: solo visitas, y para quien no es administrador
+  // únicamente las de su vendedor vinculado (sin tareas de obra).
+  let filtroVend = '';
+  if (EMBED && ME && !(ME.rol && ME.rol.protegido)) filtroVend = '&vendedorId=' + encodeURIComponent((ME.usuario && ME.usuario.vendedorId) || '000000000000000000000000');
   const [visitas, obras] = await Promise.all([
-    api(BASE_VISITAS, `/?desde=${desdeISO}&hasta=${hastaISO}`),
-    obrasCache ? Promise.resolve(obrasCache) : api(BASE_OBRAS, '/')
+    api(BASE_VISITAS, `/?desde=${desdeISO}&hasta=${hastaISO}${filtroVend}`),
+    EMBED ? Promise.resolve([]) : (obrasCache ? Promise.resolve(obrasCache) : api(BASE_OBRAS, '/'))
   ]);
   obrasCache = obras;
 
@@ -420,7 +441,8 @@ function mostrarPanel(dia) {
 
   if (!eventos.length) {
     body.className = 'vacio';
-    body.textContent = 'No hay visitas ni tareas con fecha ese día.';
+    body.textContent = EMBED ? 'No hay visitas ese día.' : 'No hay visitas ni tareas con fecha ese día.';
+    avisarAlto();
     return;
   }
 
