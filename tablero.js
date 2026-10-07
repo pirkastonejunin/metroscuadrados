@@ -218,6 +218,53 @@ router.put('/rubros-config', authTablero, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Informes del tablero (7/10/2026, pedido de Mato): el administrador elige qué
+// informes se muestran en la pantalla de inicio de cada sucursal. Por defecto
+// están todos activos; se guarda solo la lista de los desactivados.
+// "facturacion" además exige el módulo tablero_facturacion en el rol del
+// usuario (compara todas sus sucursales): 'permitido' lo informa al frontend.
+// ---------------------------------------------------------------------------
+const WIDGETS = [
+  { clave: 'embudo', titulo: 'Embudo comercial' },
+  { clave: 'ventas', titulo: 'Ventas del período' },
+  { clave: 'rubros', titulo: 'Unidades vendidas por rubro' },
+  { clave: 'produccion', titulo: 'Producción' },
+  { clave: 'facturacion', titulo: 'Facturación por sucursal' }
+];
+async function widgetsDesactivados(db, req) {
+  const c = await db.collection('tablero_config').findOne(Object.assign({ clave: 'widgets' }, filtroOrg(req)));
+  return (c && Array.isArray(c.desactivados)) ? c.desactivados : [];
+}
+router.get('/widgets', authTablero, async (req, res) => {
+  try {
+    const off = await conReintento(async () => widgetsDesactivados(await getDb(), req));
+    const r = req.usuario.rol;
+    const puedeFact = !!(r.protegido || (r.modulos || []).includes('tablero_facturacion'));
+    res.json({
+      puedeEditar: !!r.protegido,
+      widgets: WIDGETS.map(w => ({ clave: w.clave, titulo: w.titulo, activo: !off.includes(w.clave), permitido: w.clave === 'facturacion' ? puedeFact : true }))
+    });
+  } catch (e) { responder(res, e); }
+});
+router.put('/widgets', authTablero, async (req, res) => {
+  try {
+    if (!req.usuario.rol.protegido) throw err(403, 'Solo un administrador puede elegir los informes del tablero.');
+    const activos = Array.isArray(req.body && req.body.activos) ? req.body.activos.map(String) : null;
+    if (!activos) throw err(400, 'Falta la lista de informes activos.');
+    const desactivados = WIDGETS.map(w => w.clave).filter(k => !activos.includes(k));
+    await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('tablero_config').updateOne(
+        Object.assign({ clave: 'widgets' }, filtroOrg(req)),
+        { $set: { desactivados: desactivados, updatedAt: new Date(), updatedBy: req.usuario._id } },
+        { upsert: true }
+      );
+    });
+    res.json({ desactivados });
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
 // Promedios de venta (7/10/2026, pedido de Mato): ticket promedio en $ y m2
 // promedio por venta, del mismo período/vendedor que el embudo.
 //   - Ticket promedio: total de las ventas no anuladas / cantidad de ventas.

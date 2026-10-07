@@ -290,6 +290,38 @@
   .tb-top-fila .pista > div{height:100%;border-radius:6px;background:linear-gradient(90deg,#8d939b,#4f555d);}
   .tb-top-fila .val{font-weight:800;white-space:nowrap;text-align:right;}
   .tb-prod-sub{font-size:0.72rem;font-weight:700;color:var(--muted);margin:2px 0 6px;}
+  /* ---- informes del tablero: activar/desactivar + facturación por sucursal ---- */
+  .tb-off{display:none !important;}
+  .tb-dos.tb-uno{grid-template-columns:1fr;}
+  .tb-informes-btn{margin-left:auto;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:999px;padding:5px 14px;font-size:0.8rem;font-weight:700;font-family:inherit;cursor:pointer;box-shadow:var(--shadow);}
+  .tb-informes-btn ~ .tab-info{margin-left:0;}
+  #tabWidgetsPanel{border:1px solid var(--border,#ddd);border-radius:10px;padding:8px 12px;margin-bottom:10px;background:var(--card);}
+  #tabWidgetsPanel .tab-rubros-lista{margin-bottom:8px;}
+  .fc-hero{display:grid;grid-template-columns:minmax(170px,.6fr) minmax(0,1.6fr);gap:18px;align-items:center;padding:14px 20px;border-radius:18px;color:#f3f1ee;margin-bottom:12px;
+    background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);}
+  .fc-hero .et{font-size:0.78rem;font-weight:600;color:#aeb2b8;}
+  .fc-hero .val{font-size:clamp(1.5rem,2.6vw,2.1rem);font-weight:800;letter-spacing:-.02em;line-height:1.05;white-space:nowrap;}
+  .fc-barras{display:flex;flex-direction:column;gap:6px;}
+  .fc-barra{display:grid;grid-template-columns:minmax(80px,140px) 1fr 104px;gap:10px;align-items:center;font-size:0.76rem;}
+  .fc-barra .nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .fc-barra .pista{height:9px;border-radius:5px;background:rgba(255,255,255,.1);overflow:hidden;}
+  .fc-barra .pista > div{height:100%;border-radius:5px;background:var(--accent);transition:width .5s ease;}
+  .fc-barra .v{font-weight:800;text-align:right;white-space:nowrap;}
+  .fc-tres{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  .fc-panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px 16px;min-width:0;}
+  .fc-panel .tt{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:0.8rem;font-weight:700;color:var(--muted);}
+  .fc-panel .big{font-size:clamp(1.2rem,1.8vw,1.55rem);font-weight:800;letter-spacing:-.01em;margin:3px 0 8px;white-space:nowrap;}
+  .fc-tag{display:inline-block;font-size:0.68rem;font-weight:800;padding:2px 9px;border-radius:999px;white-space:nowrap;}
+  .fc-tag.ok{background:rgba(31,138,95,.14);color:#1f8a5f;} .fc-tag.mal{background:rgba(197,48,48,.13);color:#c53030;} .fc-tag.neu{background:var(--bg);color:var(--muted);}
+  .fc-fila{display:grid;grid-template-columns:minmax(70px,120px) 1fr 90px;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--border);font-size:0.76rem;}
+  .fc-fila .nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .fc-dobles{display:flex;flex-direction:column;gap:3px;}
+  .fc-dobles .pista{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;} .fc-dobles .pista > div{height:100%;border-radius:3px;transition:width .5s ease;}
+  .fc-dobles .a{background:var(--accent);} .fc-dobles .b{background:#5d646d;}
+  .fc-fila .v{text-align:right;font-weight:800;white-space:nowrap;}
+  .fc-fila .v.pos{color:#1f8a5f;} .fc-fila .v.neg{color:#c53030;}
+  #tabFactBox{margin-bottom:14px;}
+  @media (max-width:1000px){.fc-tres{grid-template-columns:1fr;} .fc-hero{grid-template-columns:1fr;}}
   .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
 </style>
 </head>
@@ -309,17 +341,19 @@
         <input type="date" id="tabDesde" aria-label="Desde" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()">
         <input type="date" id="tabHasta" aria-label="Hasta" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()">
         <span id="tabVendedorBox" class="hidden"><select id="tabVendedor" aria-label="Vendedor" onchange="cargarTablero()"><option value="">Todo el equipo</option></select></span>
+        <button id="tabWidgetsBtn" class="hidden tb-informes-btn" data-iconizado="1" onclick="tabWidgetsPanel()" title="Elegir qué informes se muestran en esta pantalla">Informes</button>
         <span class="tab-info" title="Cada número cuenta lo cargado dentro del período elegido, de todo el equipo de la sucursal (o del vendedor elegido). No se cuentan visitas canceladas ni ventas anuladas. Ticket promedio: total de las ventas (con IVA) dividido la cantidad de ventas. m2 por venta: m2 vendidos sobre las ventas que tienen m2. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador.">i</span>
       </div>
+      <div id="tabWidgetsPanel" class="hidden"></div>
       <div id="tabAvisos"></div>
 
-      <div class="tb-dos">
-      <section class="tb-panel tb-embudo-panel">
+      <div class="tb-dos" id="tabFila1">
+      <section class="tb-panel tb-embudo-panel" id="tabWEmbudo">
         <h3>Embudo comercial</h3>
         <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
       </section>
 
-      <section class="tb-hero">
+      <section class="tb-hero" id="tabWVentas">
         <div class="tb-hero-izq">
           <div class="tb-hero-et">Ventas · total del período</div>
           <div class="tb-hero-valor" id="tabHeroValor">$ —</div>
@@ -329,8 +363,8 @@
       </section>
       </div>
 
-      <div class="tb-dos">
-      <section class="tb-panel hidden" id="tabRubrosBox">
+      <div class="tb-dos" id="tabFila2">
+      <section class="tb-panel" id="tabRubrosBox">
         <h3>Unidades vendidas por rubro <button id="tabRubrosEditar" class="hidden" data-iconizado="1" onclick="tabRubrosPanel()" title="Elegir qué rubros se muestran">Elegir rubros</button></h3>
         <div id="tabRubrosPanel" class="hidden"></div>
         <div id="tabRubros"></div>
@@ -339,6 +373,18 @@
         <h3>Producción <span class="tb-h3-val" id="tabProdTotal"></span></h3>
         <div id="tabProd"><div class="muted">Cargando…</div></div>
       </section>
+      </div>
+
+      <div id="tabFactBox" class="tb-off">
+        <section class="fc-hero">
+          <div><div class="et">Facturación del período · todas tus sucursales</div><div class="val" id="fcTotal">$ —</div></div>
+          <div class="fc-barras" id="fcBarras"></div>
+        </section>
+        <div class="fc-tres">
+          <section class="fc-panel"><div class="tt"><span>Cobros y pagos</span><span id="fcCpTag"></span></div><div class="big" id="fcCpBig"></div><div id="fcCpLista"></div></section>
+          <section class="fc-panel"><div class="tt"><span>Posición fiscal</span><span id="fcPfTag"></span></div><div class="big" id="fcPfBig"></div><div id="fcPfLista"></div></section>
+          <section class="fc-panel"><div class="tt"><span>Saldos de deuda</span><span id="fcSdTag"></span></div><div class="big" id="fcSdBig"></div><div id="fcSdLista"></div></section>
+        </div>
       </div>
     </div>
 
@@ -917,17 +963,84 @@ async function cargarProduccionTablero(qs){
     cont.innerHTML = '<div class="tb-prod-graf">' + svg + '</div><div class="tb-prod-sub">Más producidos, por m2</div><div class="tb-top">' + top + '</div>';
   }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudo cargar la producción: ' + notifEscapeHtml(e.message) + '</div>'; }
 }
+var TAB_WIDGETS = null;
+function tabWOn(k){ if (!TAB_WIDGETS) return true; const w = TAB_WIDGETS.widgets.find(x => x.clave === k); return !w || (w.activo && w.permitido); }
+function tabAplicarWidgets(){
+  const mapa = { embudo:'tabWEmbudo', ventas:'tabWVentas', rubros:'tabRubrosBox', produccion:'tabProdBox', facturacion:'tabFactBox' };
+  Object.keys(mapa).forEach(k => document.getElementById(mapa[k]).classList.toggle('tb-off', !tabWOn(k)));
+  ['tabFila1','tabFila2'].forEach(id => {
+    const f = document.getElementById(id), vis = [...f.children].filter(c => !c.classList.contains('tb-off')).length;
+    f.classList.toggle('tb-off', vis === 0); f.classList.toggle('tb-uno', vis === 1);
+  });
+}
+async function tabCargarWidgets(){
+  try{ TAB_WIDGETS = await tabGet('widgets', new URLSearchParams()); }catch(e){ TAB_WIDGETS = null; }
+  tabAplicarWidgets();
+  const b = document.getElementById('tabWidgetsBtn');
+  if (b) b.classList.toggle('hidden', !(TAB_WIDGETS && TAB_WIDGETS.puedeEditar));
+}
+function tabWidgetsPanel(){
+  const p = document.getElementById('tabWidgetsPanel');
+  if (!p.classList.contains('hidden')) { p.classList.add('hidden'); return; }
+  if (!TAB_WIDGETS) return;
+  p.innerHTML = '<div class="tab-rubros-lista">' + TAB_WIDGETS.widgets.map(w =>
+    '<label title="' + (w.permitido ? '' : 'Tu usuario no tiene el módulo de facturación por sucursal') + '"><input type="checkbox" value="' + w.clave + '"' + (w.activo ? ' checked' : '') + '> ' + notifEscapeHtml(w.titulo) + '</label>').join('') +
+    '</div><button data-iconizado="1" onclick="tabWidgetsGuardar()">Guardar</button> <span class="muted">Los informes desactivados se ocultan para todos los usuarios de esta sucursal.</span>';
+  p.classList.remove('hidden');
+}
+async function tabWidgetsGuardar(){
+  const activos = [...document.querySelectorAll('#tabWidgetsPanel input[type=checkbox]:checked')].map(i => i.value);
+  const r = await fetch('/api/tablero/widgets', {method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, headersAuth()), body: JSON.stringify({activos})});
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || 'No se pudo guardar'); return; }
+  document.getElementById('tabWidgetsPanel').classList.add('hidden');
+  cargarTablero();
+}
+const fcPesos = n => (n < 0 ? '-$ ' : '$ ') + Math.round(Math.abs(n || 0)).toLocaleString('es-AR');
+const fcTag = (t, tipo) => '<span class="fc-tag ' + tipo + '">' + t + '</span>';
+const fcCls = n => n > 0 ? 'pos' : (n < 0 ? 'neg' : '');
+function fcFila(nombre, v1, v2, neto, claseNeto, tip, textoNeto){
+  const m = Math.max(Math.abs(v1), Math.abs(v2), 1);
+  return '<div class="fc-fila" title="' + notifEscapeHtml(tip) + '"><span class="nom">' + notifEscapeHtml(nombre) + '</span><div class="fc-dobles"><div class="pista"><div class="a" style="width:' + Math.abs(v1) / m * 100 + '%"></div></div><div class="pista"><div class="b" style="width:' + Math.abs(v2) / m * 100 + '%"></div></div></div><span class="v ' + claseNeto + '">' + (textoNeto || fcPesos(neto)) + '</span></div>';
+}
+async function cargarFacturacionTablero(qs){
+  const q = new URLSearchParams(); if (qs.get('desde')) q.set('desde', qs.get('desde')); if (qs.get('hasta')) q.set('hasta', qs.get('hasta'));
+  const el = id => document.getElementById(id);
+  let d;
+  try{
+    const r = await fetch('/api/facturacion/resumen?' + q, {headers: headersAuth()});
+    d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+  }catch(e){ el('fcBarras').innerHTML = '<div class="tab-aviso">No se pudo cargar la facturación: ' + notifEscapeHtml(e.message) + '</div>'; return; }
+  const T = d.total, S = d.sucursales.slice().sort((a, b) => b.facturado - a.facturado);
+  el('fcTotal').textContent = fcPesos(T.facturado);
+  const maxF = Math.max(1, ...S.map(s => s.facturado));
+  el('fcBarras').innerHTML = S.map(s => '<div class="fc-barra"><span class="nom" title="' + notifEscapeHtml(s.nombre) + '">' + notifEscapeHtml(s.nombre) + '</span><div class="pista"><div style="width:' + Math.max(0, s.facturado) / maxF * 100 + '%"></div></div><span class="v">' + fcPesos(s.facturado) + '</span></div>').join('');
+  el('fcCpBig').textContent = fcPesos(T.flujoNeto);
+  el('fcCpTag').innerHTML = fcTag(T.flujoNeto >= 0 ? 'cobraste más' : 'pagaste más', T.flujoNeto >= 0 ? 'ok' : 'mal');
+  el('fcCpLista').innerHTML = S.map(s => fcFila(s.nombre, s.cobros, s.pagos, s.flujoNeto, fcCls(s.flujoNeto), 'Cobros ' + fcPesos(s.cobros) + ' · Pagos ' + fcPesos(s.pagos))).join('');
+  const pf = T.posicionFiscal;
+  el('fcPfBig').textContent = fcPesos(Math.abs(pf));
+  el('fcPfTag').innerHTML = fcTag(pf > 0 ? 'IVA a pagar' : (pf < 0 ? 'a favor' : 'sin saldo'), pf > 0 ? 'mal' : (pf < 0 ? 'ok' : 'neu'));
+  el('fcPfLista').innerHTML = S.map(s => fcFila(s.nombre, s.ivaVentas, s.ivaCompras, s.posicionFiscal, s.posicionFiscal > 0 ? 'neg' : (s.posicionFiscal < 0 ? 'pos' : ''), 'IVA ventas ' + fcPesos(s.ivaVentas) + ' · IVA compras ' + fcPesos(s.ivaCompras), fcPesos(Math.abs(s.posicionFiscal)))).join('');
+  el('fcSdBig').textContent = fcPesos(T.saldoNeto);
+  el('fcSdTag').innerHTML = fcTag(T.saldoNeto >= 0 ? 'te deben más' : 'debés más', T.saldoNeto >= 0 ? 'ok' : 'mal');
+  el('fcSdLista').innerHTML = S.map(s => fcFila(s.nombre, s.porCobrar, s.porPagar, s.saldoNeto, fcCls(s.saldoNeto), 'Por cobrar ' + fcPesos(s.porCobrar) + ' · Por pagar ' + fcPesos(s.porPagar))).join('');
+}
 async function cargarTablero(){
   const qs = new URLSearchParams();
   const d = document.getElementById('tabDesde').value, h = document.getElementById('tabHasta').value;
   if (d) qs.set('desde', d); if (h) qs.set('hasta', h);
   const vend = document.getElementById('tabVendedor').value; if (vend) qs.set('vendedorId', vend);
   document.getElementById('tabAvisos').innerHTML = '';
-  document.getElementById('tabRubrosBox').classList.remove('hidden');
-  cargarRubrosTablero(qs);
-  cargarProduccionTablero(qs);
-  tabGet('promedios', qs).then(tabPintarHero).catch(() => {});
-  tabGet('serie', qs).then(tabPintarSerie).catch(e => { document.getElementById('tabSerie').innerHTML = '<div class="vacio">No se pudo cargar el gráfico.</div>'; });
+  await tabCargarWidgets();
+  if (tabWOn('rubros')) cargarRubrosTablero(qs);
+  if (tabWOn('produccion')) cargarProduccionTablero(qs);
+  if (tabWOn('facturacion')) cargarFacturacionTablero(qs);
+  if (tabWOn('ventas')) {
+    tabGet('promedios', qs).then(tabPintarHero).catch(() => {});
+    tabGet('serie', qs).then(tabPintarSerie).catch(e => { document.getElementById('tabSerie').innerHTML = '<div class="vacio">No se pudo cargar el gráfico.</div>'; });
+  }
+  if (!tabWOn('embudo')) return;
   try{
     const data = await tabGet('embudo', qs);
     tabPintarEmbudo(data);
