@@ -94,7 +94,6 @@
   .mini-cal-dia.sel{background:var(--accent-soft);border-color:var(--accent);}
   .mini-cal-dia .n{font-weight:700;}
   .mini-cal-dia .c{font-size:9px;color:var(--accent);font-weight:700;}
-  .regla-row{display:flex;gap:8px;margin-bottom:6px;align-items:center;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
   .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
   .section-title{font-weight:700;margin-bottom:10px;font-size:14px;}
@@ -163,7 +162,6 @@
   <nav>
     <button data-tab="crm" onclick="showTab('crm')">CRM</button>
     <button data-tab="visitas" class="active" onclick="showTab('visitas')">Visitas</button>
-    <button data-tab="mapeo" onclick="showTab('mapeo')">Mapeo tipo de obra → tipo de trabajo</button>
     <button data-tab="reportes" onclick="showTab('reportes')">Reportes</button>
   </nav>
   <main>
@@ -237,50 +235,6 @@
       </div>
     </section>
 
-    <!-- MAPEO -->
-    <section id="tab-mapeo" class="hidden">
-      <div class="card">
-        <p class="muted">Definí a qué tipo(s) de trabajo del panel de Obras corresponde cada tipo de obra del cotizador. Se usa para armar las tareas solas cuando el vendedor presupuesta con el cotizador (no hace falta si presupuesta a mano).</p>
-        <div class="row">
-          <div style="flex:1;min-width:200px"><label>Tipo de obra (cotizador)</label><select id="mapTipoObra"></select></div>
-          <button class="btn" onclick="agregarReglaMapeo()">+ Agregar regla</button>
-        </div>
-        <div id="mapReglas" style="margin-top:10px"></div>
-        <div class="err" id="mapErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarMapeo()">Guardar mapeo de este tipo de obra</button>
-      </div>
-      <div class="card">
-        <table>
-          <thead><tr><th>Tipo de obra</th><th>Reglas</th><th></th></tr></thead>
-          <tbody id="mapeoBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- REPORTES: embudo de ventas -->
-    <section id="tab-reportes" class="hidden">
-      <div class="card">
-        <p class="muted">Cuántas visitas se cargaron, cuántas llegaron a presupuesto y cuántas se vendieron, con el desglose por tipo de producto (mismo catálogo de "tipo de trabajo" del panel de Obras).</p>
-        <div class="row">
-          <div><label>Desde</label><input type="date" id="repDesde"></div>
-          <div><label>Hasta</label><input type="date" id="repHasta"></div>
-          <button class="btn" onclick="cargarEmbudo()">Generar</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="section-title">Embudo de ventas</div>
-        <div id="embudoGeneral"></div>
-      </div>
-      <div class="card">
-        <div class="section-title">Por tipo de producto</div>
-        <table>
-          <thead><tr><th>Tipo de producto</th><th>Presupuestos</th><th>Vendidos</th><th>Conversión</th></tr></thead>
-          <tbody id="embudoTipoBody"></tbody>
-        </table>
-        <div class="muted" id="embudoSinClasificar" style="margin-top:8px"></div>
-      </div>
-    </section>
-
   </main>
 </div>
 
@@ -297,14 +251,6 @@ function headersAuth(extra){
 }
 let VENDEDORES = [];
 let TIPOS_TRABAJO = [];
-let TIPOS_OBRA = [];
-let MAPEOS = [];
-
-const CAMPOS_OBRA = [
-  {valor:'m2Pisos', label:'m² de piso'},
-  {valor:'mlZocalos', label:'ml de zócalo'},
-  {valor:'cantidadPuertas', label:'cantidad de puertas'}
-];
 
 function api(path, opts={}) {
   opts.headers = headersAuth(Object.assign({'Content-Type':'application/json'}, opts.headers||{}));
@@ -410,7 +356,6 @@ function showTab(tab){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   document.querySelectorAll('main > section').forEach(s=>s.classList.add('hidden'));
   document.getElementById('tab-'+tab).classList.remove('hidden');
-  if (tab==='mapeo') cargarMapeo();
   if (tab==='reportes') cargarEmbudo();
   if (tab==='crm') cargarOportunidades();
 }
@@ -713,7 +658,7 @@ async function cargarEmbudo(){
   }).join('') || '<tr><td colspan="4" class="muted">Sin presupuestos clasificados en este rango.</td></tr>';
 
   document.getElementById('embudoSinClasificar').textContent = data.sinClasificar
-    ? `${data.sinClasificar} presupuesto(s) no se pudieron clasificar por tipo de producto (falta el mapeo tipo de obra → tipo de trabajo, o la cotización ya no existe).`
+    ? `${data.sinClasificar} presupuesto(s) no se pudieron clasificar por tipo de producto (falta el mapeo de tipos de obra en Configuración → Bases y catálogos, o la cotización ya no existe).`
     : '';
 }
 
@@ -1346,70 +1291,6 @@ async function guardarReprogramar(id){
     renderDetalleVisita(actualizado, false);
   }catch(e){ if (errEl) errEl.textContent = e.message; }
 }
-
-// ---------------- MAPEO ----------------
-
-async function cargarMapeo(){
-  const storeId = new URLSearchParams(location.search).get('store_id'); // opcional, para depurar
-  try{
-    TIPOS_OBRA = await api('/catalogo/tipos-obra');
-  }catch(e){
-    document.getElementById('mapeoBody').innerHTML = `<tr><td colspan="3" class="err">${e.message}</td></tr>`;
-    return;
-  }
-  MAPEOS = await api('/mapeo');
-  document.getElementById('mapTipoObra').innerHTML = TIPOS_OBRA.map(t=>`<option value="${t._id}" data-nombre="${t.nombre}">${t.nombre}</option>`).join('');
-  cargarReglasDelSeleccionado();
-  document.getElementById('mapTipoObra').onchange = cargarReglasDelSeleccionado;
-
-  document.getElementById('mapeoBody').innerHTML = MAPEOS.map(m=>`
-    <tr>
-      <td>${m.tipoObraNombre||m.tipoObraId}</td>
-      <td>${m.reglas.map(r=>`${(CAMPOS_OBRA.find(c=>c.valor===r.campoObra)||{}).label||r.campoObra} → ${r.tipoTrabajo}`).join('<br>')}</td>
-      <td><button class="btn small danger" onclick="borrarMapeo('${m._id}')">Eliminar</button></td>
-    </tr>`).join('') || '<tr><td colspan="3" class="muted">Todavía no hay mapeos definidos</td></tr>';
-}
-
-function cargarReglasDelSeleccionado(){
-  const sel = document.getElementById('mapTipoObra');
-  const tipoObraId = sel.value;
-  const existente = MAPEOS.find(m=>m.tipoObraId===tipoObraId);
-  const reglas = existente ? existente.reglas : [{campoObra:'m2Pisos', tipoTrabajo:''}];
-  document.getElementById('mapReglas').innerHTML = reglas.map(r=>filaRegla(r.campoObra, r.tipoTrabajo)).join('');
-}
-function filaRegla(campoObra='m2Pisos', tipoTrabajo=''){
-  const opcionesCampo = CAMPOS_OBRA.map(c=>`<option value="${c.valor}" ${c.valor===campoObra?'selected':''}>${c.label}</option>`).join('');
-  const opcionesTipo = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}" ${t.nombre===tipoTrabajo?'selected':''}>${t.nombre}</option>`).join('');
-  return `<div class="regla-row">
-    <select class="reglaCampo" style="flex:1">${opcionesCampo}</select>
-    <span class="muted">→</span>
-    <select class="reglaTipo" style="flex:1">${opcionesTipo}</select>
-    <button class="btn small secondary" type="button" onclick="this.parentElement.remove()">Quitar</button>
-  </div>`;
-}
-function agregarReglaMapeo(){
-  document.getElementById('mapReglas').insertAdjacentHTML('beforeend', filaRegla());
-}
-async function guardarMapeo(){
-  const sel = document.getElementById('mapTipoObra');
-  const tipoObraId = sel.value;
-  const tipoObraNombre = sel.selectedOptions[0] ? sel.selectedOptions[0].dataset.nombre : '';
-  const reglas = [...document.querySelectorAll('#mapReglas .regla-row')].map(row=>({
-    campoObra: row.querySelector('.reglaCampo').value,
-    tipoTrabajo: row.querySelector('.reglaTipo').value
-  })).filter(r=>r.tipoTrabajo);
-  document.getElementById('mapErr').textContent = '';
-  try{
-    await api('/mapeo', {method:'POST', body:{tipoObraId, tipoObraNombre, reglas}});
-    cargarMapeo();
-  }catch(e){ document.getElementById('mapErr').textContent = e.message; }
-}
-async function borrarMapeo(id){
-  if (!confirm('¿Eliminar este mapeo?')) return;
-  await api(`/mapeo/${id}`, {method:'DELETE'});
-  cargarMapeo();
-}
-
 </script>
 </body>
 </html>
