@@ -1386,7 +1386,7 @@ async function tareasDesdeMapeo(db, presupuesto) {
   for (const c of cotizaciones) {
     const mapeo = await db.collection('visitas_mapeo_tipo_obra').findOne({ tipoObraId: String(c.tipoObraId) });
     if (!mapeo) {
-      throw err(400, `Definí el mapeo de tipos de trabajo para "${c.tipoObraNombre || c.tipoObraId}" antes de confirmar (panel de Visitas → Mapeo).`);
+      throw err(400, `Definí el mapeo de tipos de trabajo para "${c.tipoObraNombre || c.tipoObraId}" antes de confirmar (Configuración → Bases y catálogos → Tipos de obra del cotizador).`);
     }
     const cot = await db.collection('cotizaciones').findOne({ _id: c.cotizacionId });
     const obraCot = (cot && cot.obra) || {};
