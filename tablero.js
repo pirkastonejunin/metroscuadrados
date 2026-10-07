@@ -132,7 +132,8 @@ router.get('/embudo', authTablero, async (req, res) => {
     ];
     res.json({
       desde: desdeS, hasta: hastaS, alcance: out.alcance, vendedorId: out.vendedorId, avisos,
-      etapas, efectividadTotal: pct(out.ventas, out.presupuestos)
+      etapas, efectividadTotal: pct(out.ventas, out.presupuestos),
+      efectividadVisitas: pct(out.visitas, out.crm)
     });
   } catch (e) { responder(res, e); }
 });

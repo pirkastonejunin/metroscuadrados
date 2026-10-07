@@ -271,6 +271,11 @@
   .tb-rub-fila .pista{height:8px !important;}
   .tb-filtros select,.tb-filtros input{padding:5px 12px !important;font-size:0.8rem !important;}
   .tb-filtros{margin-bottom:10px !important;}
+  .tb-efect{display:grid !important;grid-template-columns:1fr 1fr;gap:12px !important;}
+  .tb-efect-i{display:flex;align-items:center;gap:10px;min-width:0;}
+  .tb-efect-i svg{width:52px;height:52px;flex:none;}
+  .tb-efect-i .tit{font-size:0.86rem;font-weight:800;}
+  .tb-efect-i .sub{font-size:0.7rem;color:var(--muted);font-weight:600;}
   @media (max-width:900px){.tb-dos{grid-template-columns:1fr;}}
   .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
 </style>
@@ -818,12 +823,16 @@ function tabPintarEmbudo(data){
       '<div class="tb-pista"><div style="width:' + (e.cantidad / max * 100) + '%;background:' + colores[i] + '"></div></div>' +
       '<div class="num">' + e.cantidad.toLocaleString('es-AR') + '</div><div class="pct">' + (i === 0 ? '' : '↳ ' + tabFmtPct(e.pctAnterior)) + '</div></div>';
   }).join('');
-  const ef = data.efectividadTotal, pc = ef === null ? 0 : Math.min(100, ef), R = 32, C = 2 * Math.PI * R;
-  const aro = '<svg viewBox="0 0 80 80" role="img" aria-label="Efectividad"><circle cx="40" cy="40" r="' + R + '" fill="none" stroke="var(--bg)" stroke-width="9"/>' +
-    '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + (C * pc / 100) + ' ' + C + '" transform="rotate(-90 40 40)"/>' +
-    '<text x="40" y="45" text-anchor="middle" font-size="15" font-weight="800" fill="currentColor">' + (ef === null ? '—' : Math.round(ef) + '%') + '</text></svg>';
-  cont.innerHTML = '<div class="tb-emb">' + filas + '</div>' +
-    '<div class="tb-efect" title="Efectividad total: ventas realizadas sobre presupuestos cargados">' + aro + '<div><div class="tit">Efectividad</div><div class="sub">ventas sobre presupuestos</div></div></div>';
+  const aro = (ef, tit, sub, tip) => {
+    const pc = ef === null || ef === undefined ? 0 : Math.min(100, ef), R = 32, C = 2 * Math.PI * R;
+    return '<div class="tb-efect-i" title="' + tip + '"><svg viewBox="0 0 80 80" role="img" aria-label="' + tit + '"><circle cx="40" cy="40" r="' + R + '" fill="none" stroke="var(--bg)" stroke-width="9"/>' +
+      '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + (C * pc / 100) + ' ' + C + '" transform="rotate(-90 40 40)"/>' +
+      '<text x="40" y="45" text-anchor="middle" font-size="15" font-weight="800" fill="currentColor">' + (ef === null || ef === undefined ? '—' : Math.round(ef) + '%') + '</text></svg>' +
+      '<div><div class="tit">' + tit + '</div><div class="sub">' + sub + '</div></div></div>';
+  };
+  cont.innerHTML = '<div class="tb-emb">' + filas + '</div><div class="tb-efect">' +
+    aro(data.efectividadVisitas, 'Visitas / datos', 'visitas sobre datos del CRM', 'Efectividad de visitas: visitas generadas sobre datos cargados en el CRM') +
+    aro(data.efectividadTotal, 'Ventas / presupuestos', 'ventas sobre presupuestos', 'Efectividad de ventas: ventas realizadas sobre presupuestos cargados') + '</div>';
 }
 function tabPintarHero(p){
   document.getElementById('tabHeroValor').textContent = tabPesos(p.totalVendido);
