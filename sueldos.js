@@ -276,8 +276,9 @@ async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase)
 //   cobra el mayor entre el variable y el básico: la liquidación lleva el básico como sueldo y la
 //   comisión es solo lo que el variable pasa del básico.
 // Visita hecha = estado presupuestada, vendido o instalado (vendida = vendido o instalado), por la fecha
-// de la visita, cargada por su usuario (visitas.creadaPor). Ventas de mostrador = ventas cargadas por su
-// usuario en el período (total con IVA en pesos, notas de crédito restan, sin anuladas).
+// de la visita, cargada por su usuario (visitas.creadaPor). Ventas de mostrador = ventas del período cuyo
+// "Vendedor" es ella (si carga una venta con otro vendedor, no suma; sin vendedor anotado cuenta quien la
+// cargó). Total con IVA en pesos, las notas de crédito restan, sin anuladas.
 async function calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase) {
   const avisos = [], M = Number(emp.montoVisita) || 0, pct = Number(emp.pctMostrador) || 0;
   const usr = emp.usuarioId ? await db.collection('usuarios').findOne({ _id: emp.usuarioId }, { projection: { nombre: 1 } }) : null;
@@ -290,7 +291,10 @@ async function calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase)
     hechas = vis.length; vendidas = vis.filter(v => v.estado === 'vendido' || v.estado === 'instalado').length;
     const lista = await db.collection('ventas').find({
       orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 },
-      $or: [{ usuarioId: usr._id }, { usuarioId: { $exists: false }, usuarioNombre: usr.nombre }]
+      // Cuenta la venta cuyo "Vendedor" es ella. Una venta que ella carga con otro vendedor no suma;
+      // una venta sin vendedor anotado se le atribuye a quien la cargó.
+      $or: [{ vendedor: new RegExp('^\\s*' + usr.nombre.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i') },
+        { $and: [{ $or: [{ vendedor: { $exists: false } }, { vendedor: '' }, { vendedor: null }] }, { $or: [{ usuarioId: usr._id }, { usuarioId: { $exists: false }, usuarioNombre: usr.nombre }] }] }]
     }).project({ total: 1, moneda: 1, cotizacionDolar: 1, tipoComprobante: 1 }).toArray();
     lista.forEach(v => { base += netoVenta(v); if (v.tipoComprobante === 'nota_credito') nc++; else ventas++; });
   }
