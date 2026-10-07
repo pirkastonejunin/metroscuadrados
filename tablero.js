@@ -283,4 +283,46 @@ router.get('/serie', authTablero, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
+// ---------------------------------------------------------------------------
+// Producción (7/10/2026, pedido de Mato): m2 producidos y productos más
+// producidos en el período, de la carga diaria de fábrica
+// (costos_produccion_diaria, ver costos.js). No depende del filtro de
+// vendedor (la producción es de la sucursal). m2 = ítems cuya cantidad
+// convertida está en m2; los productos por unidad/paquete se cuentan aparte.
+// El ranking ordena por PAQUETES (única medida comparable entre productos en
+// m2 y por unidad) y muestra la cantidad real con su unidad.
+// ---------------------------------------------------------------------------
+router.get('/produccion', authTablero, async (req, res) => {
+  try {
+    const { desdeS, hastaS } = rangoDe(req);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const match = Object.assign({}, filtroOrg(req), { fecha: { $gte: desdeS, $lte: hastaS } });
+      const docs = await db.collection('costos_produccion_diaria').find(match).project({ fecha: 1, items: 1 }).toArray();
+      const porDia = {}, porProd = {};
+      let m2Total = 0, paquetes = 0, unidadesTotal = 0;
+      for (const d of docs) {
+        for (const it of (d.items || [])) {
+          const paq = Number(it.paquetes) || 0, cant = Number(it.cantidadConvertida) || 0, u = it.unidadConvertida || 'paquete';
+          if (!paq && !cant) continue;
+          paquetes += paq;
+          if (u === 'm2') { m2Total += cant; porDia[d.fecha] = (porDia[d.fecha] || 0) + cant; }
+          else if (u === 'unidad') unidadesTotal += cant;
+          const k = String(it.productoId || it.sku || it.nombre);
+          const p = porProd[k] || (porProd[k] = { nombre: it.nombre || it.sku || 'Sin nombre', sku: it.sku || null, unidad: u, paquetes: 0, cantidad: 0 });
+          p.paquetes += paq; p.cantidad += cant;
+        }
+      }
+      const dias = [];
+      for (let d = inicioDia(desdeS), n = 0; fechaAR(d) <= hastaS && n < 400; d = new Date(d.getTime() + 864e5), n++) {
+        const k = fechaAR(d); dias.push({ dia: k, m2: Math.round((porDia[k] || 0) * 100) / 100 });
+      }
+      const top = Object.values(porProd).sort((a, b) => b.paquetes - a.paquetes || b.cantidad - a.cantidad).slice(0, 6)
+        .map(p => ({ nombre: p.nombre, sku: p.sku, unidad: p.unidad, paquetes: Math.round(p.paquetes * 100) / 100, cantidad: Math.round(p.cantidad * 100) / 100 }));
+      return { m2Total: Math.round(m2Total * 100) / 100, unidadesTotal: Math.round(unidadesTotal * 100) / 100, paquetes: Math.round(paquetes * 100) / 100, diasConProduccion: docs.length, dias, top };
+    });
+    res.json(Object.assign({ desde: desdeS, hasta: hastaS }, out));
+  } catch (e) { responder(res, e); }
+});
+
 module.exports = router;
