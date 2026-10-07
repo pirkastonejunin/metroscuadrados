@@ -866,6 +866,105 @@ router.get('/produccion/depositos', authProduccion, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Cargas del día (7/10/2026, pedido de Mato): se puede cargar producción varias veces por día. Cada carga
+// es un documento propio de costos_produccion_diaria que se guarda y se ingresa a Stock en un solo paso, en
+// el depósito Junín.
+router.post('/produccion/ingresar', authProduccion, async (req, res) => {
+  try {
+    const fecha = validarFecha(req.body && req.body.fecha);
+    const itemsRaw = Array.isArray(req.body && req.body.items) ? req.body.items : [];
+    if (!itemsRaw.length) throw err(400, 'Cargá al menos un producto con paquetes mayores a 0.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const deposito = await depositoProduccion(db, req.orgId);
+      if (!deposito) throw err(400, 'No existe el depósito Junín. Crealo en Stock con ese nombre: toda la producción entra ahí.');
+      const items = [];
+      for (const it of itemsRaw) {
+        const productoId = toObjectId(it.productoId);
+        if (!productoId) throw err(400, 'productoId inválido');
+        const paquetes = Number(it.paquetes);
+        if (!Number.isFinite(paquetes) || paquetes <= 0) throw err(400, 'La cantidad de paquetes tiene que ser un número mayor a 0');
+        const producto = await db.collection('costos_productos').findOne({ _id: productoId, orgId: req.orgId });
+        if (!producto) throw err(400, 'Uno de los productos cargados no existe');
+        items.push(convertirItemProduccion(producto, paquetes));
+      }
+      const ahora = new Date();
+      const doc = { orgId: req.orgId, fecha, items, actualizadoPor: { usuarioId: req.usuario._id, nombre: req.usuario.nombre }, createdAt: ahora, updatedAt: ahora };
+      const r = await db.collection('costos_produccion_diaria').insertOne(doc);
+      doc._id = r.insertedId;
+      const res2 = await aplicarProduccionAStock(db, req, doc, fecha, deposito);
+      return Object.assign(res2, { sinSku: items.filter(it => !it.sku).map(it => it.nombre) });
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Cargas de un día, para mostrarlas en la pantalla de producción.
+router.get('/produccion/cargas', authProduccion, async (req, res) => {
+  try {
+    const fecha = validarFecha(req.query.fecha);
+    const docs = await conReintento(async () => (await getDb()).collection('costos_produccion_diaria').find({ orgId: req.orgId, fecha }).sort({ createdAt: 1 }).toArray());
+    res.json(docs.map(d => ({ _id: d._id, hora: d.createdAt, por: d.actualizadoPor ? d.actualizadoPor.nombre : '', ingresada: !!d.stockIngresado, items: (d.items || []).map(it => ({ nombre: it.nombre, paquetes: it.paquetes, cantidad: it.cantidadConvertida, unidad: it.unidadConvertida })) })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Ingresa a Stock los ítems de una carga de producción (un documento de costos_produccion_diaria)
+// en el depósito dado y la marca como ingresada. Los movimientos de Stock son un libro inmutable,
+// por eso cada carga se ingresa una sola vez.
+async function aplicarProduccionAStock(db, req, doc, fecha, deposito) {
+  const depositoId = deposito._id;
+  const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+  const fechaMovimiento = new Date(fecha + 'T12:00:00');
+  const aplicados = [];
+  const sinCatalogo = [];
+  const sinConvertir = [];
+
+  for (const it of doc.items) {
+    if (!it.sku) continue; // ya se avisa por separado como "sinSku"
+    if (it.unidadConvertida === 'paquete') { sinConvertir.push(it.nombre); continue; }
+    const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku: it.sku, activo: { $ne: false } }, filtroOrg(req)));
+    if (!producto) { sinCatalogo.push(`${it.nombre} (SKU ${it.sku})`); continue; }
+
+    const cantidad = Number(it.cantidadConvertida);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) continue;
+
+    const movimiento = {
+      productoId: producto._id,
+      depositoId,
+      tipo: 'ingreso',
+      cantidad,
+      motivo: 'Producción de fábrica',
+      sucursal: '',
+      codigoExterno: '',
+      observaciones: `Carga de producción del ${fecha}`,
+      usuarioNombre,
+      fecha: fechaMovimiento,
+      orgId: req.orgId,
+      createdAt: new Date()
+    };
+    await db.collection('stock_movimientos').insertOne(movimiento);
+    await db.collection('stock_actual').findOneAndUpdate(
+      Object.assign({ productoId: producto._id, depositoId }, filtroOrg(req)),
+      {
+        $inc: { cantidad },
+        $set: { actualizadoEn: new Date() },
+        $setOnInsert: Object.assign({ productoId: producto._id, depositoId }, filtroOrg(req))
+      },
+      { upsert: true }
+    );
+    aplicados.push({ nombre: it.nombre, sku: it.sku, cantidad, unidad: it.unidadConvertida, deposito: deposito.nombre });
+  }
+
+  const ahora = new Date();
+  const stockIngresadoPor = { usuarioId: req.usuario._id, nombre: usuarioNombre };
+  await db.collection('costos_produccion_diaria').updateOne(
+    { _id: doc._id },
+    { $set: { depositoId, stockIngresado: true, stockIngresadoEn: ahora, stockIngresadoPor } }
+  );
+
+  return { aplicados, sinCatalogo, sinConvertir, stockIngresadoEn: ahora, stockIngresadoPor };
+}
+
 // Ingresa a Stock, de una sola vez, lo fabricado ese día — ver el comentario
 // grande más arriba ("Conexión con Stock") para el porqué del diseño.
 router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res) => {
@@ -887,56 +986,7 @@ router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res
       if (!deposito) throw err(400, 'No existe el depósito Junín. Crealo en Stock con ese nombre: toda la producción entra ahí.');
       const depositoId = deposito._id;
 
-      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
-      const fechaMovimiento = new Date(fecha + 'T12:00:00');
-      const aplicados = [];
-      const sinCatalogo = [];
-      const sinConvertir = [];
-
-      for (const it of doc.items) {
-        if (!it.sku) continue; // ya se avisa por separado como "sinSku"
-        if (it.unidadConvertida === 'paquete') { sinConvertir.push(it.nombre); continue; }
-        const producto = await db.collection('productos_catalogo').findOne(Object.assign({ sku: it.sku, activo: { $ne: false } }, filtroOrg(req)));
-        if (!producto) { sinCatalogo.push(`${it.nombre} (SKU ${it.sku})`); continue; }
-
-        const cantidad = Number(it.cantidadConvertida);
-        if (!Number.isFinite(cantidad) || cantidad <= 0) continue;
-
-        const movimiento = {
-          productoId: producto._id,
-          depositoId,
-          tipo: 'ingreso',
-          cantidad,
-          motivo: 'Producción de fábrica',
-          sucursal: '',
-          codigoExterno: '',
-          observaciones: `Carga de producción del ${fecha}`,
-          usuarioNombre,
-          fecha: fechaMovimiento,
-          orgId: req.orgId,
-          createdAt: new Date()
-        };
-        await db.collection('stock_movimientos').insertOne(movimiento);
-        await db.collection('stock_actual').findOneAndUpdate(
-          Object.assign({ productoId: producto._id, depositoId }, filtroOrg(req)),
-          {
-            $inc: { cantidad },
-            $set: { actualizadoEn: new Date() },
-            $setOnInsert: Object.assign({ productoId: producto._id, depositoId }, filtroOrg(req))
-          },
-          { upsert: true }
-        );
-        aplicados.push({ nombre: it.nombre, sku: it.sku, cantidad, unidad: it.unidadConvertida, deposito: deposito.nombre });
-      }
-
-      const ahora = new Date();
-      const stockIngresadoPor = { usuarioId: req.usuario._id, nombre: usuarioNombre };
-      await db.collection('costos_produccion_diaria').updateOne(
-        { _id: doc._id },
-        { $set: { depositoId, stockIngresado: true, stockIngresadoEn: ahora, stockIngresadoPor } }
-      );
-
-      return { aplicados, sinCatalogo, sinConvertir, stockIngresadoEn: ahora, stockIngresadoPor };
+      return aplicarProduccionAStock(db, req, doc, fecha, deposito);
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

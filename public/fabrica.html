@@ -104,23 +104,20 @@
     </div>
 
     <div class="card">
-      <h2 class="titulo-seccion">Lo fabricado hoy</h2>
+      <h2 class="titulo-seccion">Cargar producción</h2>
       <div id="avisoSku" class="aviso-sku hidden"></div>
       <div id="filasItems"></div>
       <button class="btn secondary" style="margin-bottom:10px" onclick="agregarFila()">+ Agregar producto</button>
       <div class="err" id="formErr"></div>
-      <div class="ok-msg" id="formOk"></div>
-      <button class="btn" onclick="guardarProduccion()">Guardar carga del día</button>
-      <p class="muted" id="ultimaActualizacion" style="margin-top:8px"></p>
+      <div id="avisoStockAvisos" class="aviso-sku hidden"></div>
+      <p class="muted" id="depositoInfo" style="margin:0 0 4px">Entra al depósito Junín.</p>
+      <button class="btn" id="btnIngresarStock" style="margin-top:6px" onclick="ingresarAStock()">Ingresar a stock</button>
+      <p class="muted" style="margin-top:8px">Podés cargar producción las veces que haga falta en el día: cada carga se suma al stock.</p>
     </div>
 
-    <div class="card" id="cardStock">
-      <h2 class="titulo-seccion">Ingresar a Stock</h2>
-      <div id="avisoStockOk" class="aviso-ok hidden"></div>
-      <div id="avisoStockAvisos" class="aviso-sku hidden"></div>
-      <div class="err" id="stockErr"></div>
-      <p class="muted" id="depositoInfo" style="margin:0 0 4px">Entra al depósito Junín.</p>
-      <button class="btn" id="btnIngresarStock" style="margin-top:10px" onclick="ingresarAStock()">Ingresar producción a stock</button>
+    <div class="card">
+      <h2 class="titulo-seccion">Cargado en el día</h2>
+      <div id="cargasDia" class="muted">Todavía no hay cargas.</div>
     </div>
 
   </main>
@@ -276,96 +273,57 @@ function mostrarAvisoSku(sinSku){
   }
 }
 
-// Refleja en la tarjeta "Ingresar a Stock" el estado que viene de
-// GET/POST /produccion (stockIngresado, depositoId, quién y cuándo).
-function actualizarEstadoStock(data){
-  const okDiv = document.getElementById('avisoStockOk');
-  const btn = document.getElementById('btnIngresarStock');
-  const hayItems = !!(data.items && data.items.length);
-  if (data.stockIngresado) {
-    const cuando = data.stockIngresadoEn ? new Date(data.stockIngresadoEn).toLocaleString('es-AR') : '';
-    const quien = data.stockIngresadoPor ? data.stockIngresadoPor.nombre : '';
-    okDiv.innerHTML = '<b>Ya ingresado a stock.</b>' + [quien, cuando].filter(Boolean).join(' — ') +
-      '. Si hace falta corregir, cargá un movimiento de ajuste en el módulo Stock.';
-    okDiv.classList.remove('hidden');
-    btn.disabled = true;
-    btn.textContent = 'Ya ingresado a stock';
-  } else {
-    okDiv.classList.add('hidden');
-    btn.disabled = !hayItems || SIN_JUNIN;
-    btn.textContent = 'Ingresar producción a stock';
-  }
+function renderCargas(cargas){
+  const div = document.getElementById('cargasDia');
+  if (!cargas.length) { div.innerHTML = 'Todavía no hay cargas.'; return; }
+  let total = 0;
+  div.innerHTML = cargas.map(c => {
+    const hora = c.hora ? new Date(c.hora).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'}) : '';
+    return '<div style="padding:8px 0;border-top:1px solid var(--border)"><b>' + hora + '</b> <span class="muted">' + escapeHtml(c.por || '') + (c.ingresada ? '' : ' · sin ingresar a stock') + '</span>' +
+      c.items.map(it => '<div>• ' + escapeHtml(it.nombre) + ': ' + it.paquetes + ' paquete' + (it.paquetes === 1 ? '' : 's') + ' = ' + Number(it.cantidad).toLocaleString('es-AR', {maximumFractionDigits:2}) + ' ' + (it.unidad === 'm2' ? 'm²' : it.unidad === 'unidad' ? 'unidades' : 'paquetes') + '</div>').join('') + '</div>';
+  }).join('');
 }
 
 async function cargarProduccion(){
   const fecha = document.getElementById('fecha').value || hoyISO();
   document.getElementById('formErr').textContent = '';
-  document.getElementById('formOk').textContent = '';
-  document.getElementById('stockErr').textContent = '';
   document.getElementById('avisoStockAvisos').classList.add('hidden');
-  const r = await fetch(BASE + '/produccion?fecha=' + encodeURIComponent(fecha), {headers: headersAuth()});
+  const r = await fetch(BASE + '/produccion/cargas?fecha=' + encodeURIComponent(fecha), {headers: headersAuth()});
   const data = await r.json();
   if (!r.ok) { document.getElementById('formErr').textContent = data.error || 'No se pudo cargar.'; return; }
-  document.getElementById('filasItems').innerHTML = '';
-  if (data.items && data.items.length) {
-    data.items.forEach(it => agregarFila(it.productoId, it.paquetes));
-  } else {
-    agregarFila();
-  }
-  mostrarAvisoSku(data.sinSku);
-  document.getElementById('ultimaActualizacion').textContent = data.actualizadoPor
-    ? `Última carga: ${data.actualizadoPor.nombre}${data.updatedAt ? ' — ' + new Date(data.updatedAt).toLocaleString('es-AR') : ''}`
-    : '';
-  actualizarEstadoStock(data);
-}
-
-async function guardarProduccion(){
-  const fecha = document.getElementById('fecha').value || hoyISO();
-  const items = juntarItems();
-  document.getElementById('formErr').textContent = '';
-  document.getElementById('formOk').textContent = '';
-  if (!items.length) { document.getElementById('formErr').textContent = 'Cargá al menos un producto con paquetes mayores a 0.'; return; }
-  try{
-    const r = await fetch(BASE + '/produccion', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({fecha, items})});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error al guardar');
-    document.getElementById('formOk').textContent = 'Guardado.';
-    mostrarAvisoSku(data.sinSku);
-    document.getElementById('ultimaActualizacion').textContent = data.actualizadoPor
-      ? `Última carga: ${data.actualizadoPor.nombre}${data.updatedAt ? ' — ' + new Date(data.updatedAt).toLocaleString('es-AR') : ''}`
-      : '';
-    actualizarEstadoStock(data);
-  }catch(e){
-    document.getElementById('formErr').textContent = e.message;
-  }
+  renderCargas(data);
+  if (!document.querySelector('#filasItems .fila-item-wrap')) agregarFila();
 }
 
 async function ingresarAStock(){
   const fecha = document.getElementById('fecha').value || hoyISO();
-  document.getElementById('stockErr').textContent = '';
+  const items = juntarItems();
+  document.getElementById('formErr').textContent = '';
   document.getElementById('avisoStockAvisos').classList.add('hidden');
-  if (!confirm(`¿Ingresar a stock lo fabricado el ${fecha}? Esta acción no se puede deshacer — una corrección después se hace con un movimiento a mano en Stock.`)) return;
+  if (!items.length) { document.getElementById('formErr').textContent = 'Cargá al menos un producto con paquetes mayores a 0.'; return; }
   const btn = document.getElementById('btnIngresarStock');
   btn.disabled = true;
   try{
-    const r = await fetch(BASE + '/produccion/' + encodeURIComponent(fecha) + '/ingresar-stock', {
-      method: 'POST', headers: headersAuthJson(), body: JSON.stringify({})
-    });
+    const r = await fetch(BASE + '/produccion/ingresar', { method: 'POST', headers: headersAuthJson(), body: JSON.stringify({ fecha, items }) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'No se pudo ingresar a stock.');
     const avisos = [];
+    if (data.sinSku && data.sinSku.length) avisos.push('Sin SKU asignado, no entraron a stock: ' + data.sinSku.join(', '));
     if (data.sinCatalogo && data.sinCatalogo.length) avisos.push('Sin producto correspondiente en el catálogo de Stock (revisá el SKU): ' + data.sinCatalogo.join(', '));
     if (data.sinConvertir && data.sinConvertir.length) avisos.push('Sin rendimiento por paquete configurado, no se pudo convertir a stock: ' + data.sinConvertir.join(', '));
     if (avisos.length) {
       const div = document.getElementById('avisoStockAvisos');
-      div.innerHTML = '<b>Ingresado con avisos:</b>' + avisos.join(' · ');
+      div.innerHTML = '<b>Ingresado con avisos:</b> ' + avisos.join(' · ');
       div.classList.remove('hidden');
     }
-    await cargarProduccion();
+    document.getElementById('filasItems').innerHTML = '';
+    agregarFila();
+    const cr = await fetch(BASE + '/produccion/cargas?fecha=' + encodeURIComponent(fecha), {headers: headersAuth()});
+    if (cr.ok) renderCargas(await cr.json());
   }catch(e){
-    document.getElementById('stockErr').textContent = e.message;
-    btn.disabled = false;
+    document.getElementById('formErr').textContent = e.message;
   }
+  btn.disabled = SIN_JUNIN;
 }
 
 </script>
