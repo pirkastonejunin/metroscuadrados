@@ -133,6 +133,7 @@
     </div>
 
     <div id="tabActual">
+      <div id="resumenDepositos" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:16px"></div>
       <div class="card">
         <div class="row" style="justify-content:space-between">
           <div class="row" style="flex:1">
@@ -367,7 +368,44 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 // -------------------------------------------------------------------
 let stockActualCache = [];
 
+// Tarjetas por depósito (7/10/2026): unidades y valor a costo. Tocar una tarjeta
+// filtra la tabla por ese depósito (de nuevo, quita el filtro).
+function montoDep(m){
+  const mons = Object.keys(m || {});
+  if (!mons.length) return '$ 0';
+  return mons.map(k => (k === 'ARS' ? '$ ' : k + ' ') + Math.round(m[k]).toLocaleString('es-AR')).join(' + ');
+}
+let RESUMEN_DEP = null, RESUMEN_DEP_T = 0;
+async function cargarResumenDepositos(){
+  const cont = document.getElementById('resumenDepositos');
+  try{
+    // No se vuelve a pedir en cada tecla de la búsqueda: se reutiliza 30 segundos.
+    if (!RESUMEN_DEP || Date.now() - RESUMEN_DEP_T > 30000) {
+      const r = await fetch(BASE + '/resumen-depositos', {headers: headersAuth()});
+      const dd = await r.json();
+      if (!r.ok) throw new Error(dd.error || '');
+      RESUMEN_DEP = dd; RESUMEN_DEP_T = Date.now();
+    }
+    const d = RESUMEN_DEP;
+    const sel = document.getElementById('faDeposito').value;
+    const tarjeta = (id, titulo, x, esTotal) => `
+      <div class="card" onclick="filtrarPorDepositoTarjeta('${id}')" style="margin:0;cursor:pointer;${esTotal ? 'border-left:4px solid var(--text);' : 'border-left:4px solid var(--accent);'}${sel === id && id ? 'outline:2px solid var(--accent);' : ''}">
+        <div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">${escapeHtml(titulo)}</div>
+        <div style="font-size:22px;font-weight:800;margin-top:4px">${Math.round(x.unidades).toLocaleString('es-AR')} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
+        <div style="font-weight:700;margin-top:2px">${montoDep(x.valor)} <span class="muted" style="font-weight:600">valor a costo</span></div>
+        <div class="muted" style="margin-top:2px">${x.productos} producto${x.productos === 1 ? '' : 's'}${x.comprometido ? ' · ' + Math.round(x.comprometido).toLocaleString('es-AR') + ' comprometidas' : ''}${x.sinCosto ? ' · ' + x.sinCosto + ' sin costo' : ''}</div>
+      </div>`;
+    cont.innerHTML = tarjeta('', 'Total', d.total, true) + d.depositos.map(x => tarjeta(String(x.depositoId), x.nombre, x, false)).join('');
+  }catch(e){ cont.innerHTML = ''; }
+}
+function filtrarPorDepositoTarjeta(id){
+  const sel = document.getElementById('faDeposito');
+  sel.value = (id && sel.value === id) ? '' : id;
+  cargarStockActual();
+  cargarResumenDepositos();
+}
 async function cargarStockActual(){
+  cargarResumenDepositos();
   const params = new URLSearchParams();
   if (document.getElementById('faBusqueda').value.trim()) params.set('q', document.getElementById('faBusqueda').value.trim());
   if (document.getElementById('faDeposito').value) params.set('depositoId', document.getElementById('faDeposito').value);

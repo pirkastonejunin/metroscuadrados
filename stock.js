@@ -404,6 +404,44 @@ router.get('/marcas', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Resumen por depósito (7/10/2026, pedido de Mato): unidades y valor (a costo)
+// de lo que hay en cada depósito, para las tarjetas de Stock actual. El valor
+// es cantidad física × costo del producto, por moneda; los productos sin costo
+// cargado no suman al valor y se cuentan aparte (`sinCosto`).
+router.get('/resumen-depositos', authAdmin, async (req, res) => {
+  try {
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const [existencias, depositos] = await Promise.all([
+        db.collection('stock_actual').find(Object.assign({ depositoId: { $ne: null } }, filtroOrg(req))).toArray(),
+        db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray()
+      ]);
+      const ids = Array.from(new Set(existencias.map(e => String(e.productoId)))).map(toObjectId).filter(Boolean);
+      const prods = ids.length ? await db.collection('productos_catalogo').find({ _id: { $in: ids } }).project({ costo: 1, moneda: 1 }).toArray() : [];
+      const porProd = new Map(prods.map(p => [String(p._id), p]));
+      const mapa = new Map(depositos.map(d => [String(d._id), { depositoId: d._id, nombre: d.nombre, unidades: 0, productos: 0, comprometido: 0, valor: {}, sinCosto: 0 }]));
+      const total = { unidades: 0, productos: 0, comprometido: 0, valor: {}, sinCosto: 0 };
+      for (const e of existencias) {
+        const d = mapa.get(String(e.depositoId));
+        if (!d) continue;
+        const cant = Number(e.cantidad) || 0;
+        const p = porProd.get(String(e.productoId));
+        const costo = p && Number(p.costo) > 0 ? Number(p.costo) : 0;
+        const mon = (p && p.moneda) || 'ARS';
+        for (const b of [d, total]) {
+          b.unidades += cant;
+          b.comprometido += Number(e.cantidadComprometida) || 0;
+          if (cant > 0) b.productos += 1;
+          if (cant > 0 && !costo) b.sinCosto += 1;
+          if (cant > 0 && costo) b.valor[mon] = (b.valor[mon] || 0) + cant * costo;
+        }
+      }
+      return { depositos: [...mapa.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')), total };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/actual', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
