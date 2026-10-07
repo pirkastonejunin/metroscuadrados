@@ -259,4 +259,27 @@ router.get('/promedios', authTablero, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
+// Serie diaria de ventas (gráfico del tablero): por día argentino, cantidad y
+// total en $ (USD pasado a pesos), mismo período/vendedor que el embudo.
+router.get('/serie', authTablero, async (req, res) => {
+  try {
+    const { desdeS, hastaS, rango } = rangoDe(req);
+    const filas = await conReintento(async () => {
+      const db = await getDb();
+      const { filtroUsr } = await resolverAlcance(db, req);
+      return db.collection('ventas').aggregate([
+        { $match: Object.assign({}, filtroOrg(req), filtroUsr, { estado: { $ne: 'anulada' }, createdAt: rango }) },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: '-03:00' } }, ventas: { $sum: 1 },
+            total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] }] } } } }
+      ]).toArray();
+    });
+    const mapa = {}; filas.forEach(f => { mapa[f._id] = { ventas: f.ventas, total: Math.round(f.total) }; });
+    const dias = [];
+    for (let d = inicioDia(desdeS), n = 0; fechaAR(d) <= hastaS && n < 400; d = new Date(d.getTime() + 864e5), n++) {
+      const k = fechaAR(d); dias.push({ dia: k, ventas: (mapa[k] || {}).ventas || 0, total: (mapa[k] || {}).total || 0 });
+    }
+    res.json({ desde: desdeS, hasta: hastaS, dias });
+  } catch (e) { responder(res, e); }
+});
+
 module.exports = router;
