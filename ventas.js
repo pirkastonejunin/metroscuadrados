@@ -719,6 +719,39 @@ function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
 // Ventas — CRUD + acciones
 // -----------------------------------------------------------------------
 
+// Resumen de ventas del día y del mes (7/10/2026, pedido de Mato): tarjetas
+// bajo los filtros del listado. Día/mes en horario de Argentina (-03:00).
+// No cuenta anuladas; las notas de crédito restan y las de débito suman al
+// monto, y ninguna de las dos cuenta como "venta" en la cantidad.
+router.get('/resumen', authAdmin, async (req, res) => {
+  try {
+    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+    const [y, m] = hoy.split('-');
+    const desdeDia = new Date(hoy + 'T00:00:00-03:00');
+    const desdeMes = new Date(`${y}-${m}-01T00:00:00-03:00`);
+    const ventas = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('ventas')
+        .find(Object.assign({ estado: { $ne: 'anulada' }, fecha: { $gte: desdeMes } }, filtroOrg(req)))
+        .project({ fecha: 1, total: 1, moneda: 1, tipoComprobante: 1 }).toArray();
+    });
+    const vacio = () => ({ cantidad: 0, monto: {} });
+    const out = { dia: vacio(), mes: vacio(), hoy };
+    for (const v of ventas) {
+      const mon = v.moneda || 'ARS';
+      const signo = v.tipoComprobante === 'nota_credito' ? -1 : 1;
+      const esNota = v.tipoComprobante === 'nota_credito' || v.tipoComprobante === 'nota_debito';
+      const buckets = [out.mes];
+      if (new Date(v.fecha) >= desdeDia) buckets.push(out.dia);
+      for (const b of buckets) {
+        b.monto[mon] = (b.monto[mon] || 0) + signo * (Number(v.total) || 0);
+        if (!esNota) b.cantidad += 1;
+      }
+    }
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));

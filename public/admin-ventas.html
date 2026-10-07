@@ -179,6 +179,12 @@
         </div>
       </div>
     </div>
+    <div id="resumenVentas" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Vendido hoy</div><div id="rvDiaMonto" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Ventas de hoy</div><div id="rvDiaCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Vendido en el mes</div><div id="rvMesMonto" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Ventas del mes</div><div id="rvMesCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+    </div>
     <div class="card">
       <table>
         <thead><tr><th>Nº</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
@@ -451,7 +457,24 @@ const ESTADO_LABEL = { pendiente: 'Pendiente (stock comprometido)', parcialmente
 function hoyLocal(){ const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 let ventasCache = [];
 
+function montoResumen(m){
+  const mons = Object.keys(m || {});
+  if (!mons.length) return money(0);
+  return mons.map(k => (k === 'ARS' ? '' : k + ' ') + money(m[k])).join(' + ');
+}
+async function cargarResumenVentas(){
+  try{
+    const r = await fetch(BASE + '/resumen', {headers: headersAuth()});
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('rvDiaMonto').textContent = montoResumen(d.dia.monto);
+    document.getElementById('rvDiaCant').textContent = d.dia.cantidad;
+    document.getElementById('rvMesMonto').textContent = montoResumen(d.mes.monto);
+    document.getElementById('rvMesCant').textContent = d.mes.cantidad;
+  }catch(e){}
+}
 async function cargarVentas(){
+  cargarResumenVentas();
   const params = new URLSearchParams();
   if (document.getElementById('fvCliente').value) params.set('clienteId', document.getElementById('fvCliente').value);
   if (document.getElementById('fvEstado').value) params.set('estado', document.getElementById('fvEstado').value);
