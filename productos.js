@@ -400,6 +400,20 @@ router.get('/marcas', authAdmin, async (req, res) => {
 // listas sueltas sin relación.
 // -----------------------------------------------------------------------
 
+// Cantidad de productos activos por rubro y subrubro (árbol de la pestaña Rubros y subrubros).
+router.get('/config/conteo', authAdmin, async (req, res) => {
+  try {
+    const filas = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_catalogo').aggregate([
+        { $match: Object.assign({ activo: { $ne: false } }, filtroOrg(req)) },
+        { $group: { _id: { rubro: { $ifNull: ['$rubro', ''] }, subrubro: { $ifNull: ['$subrubro', ''] } }, n: { $sum: 1 } } }
+      ]).toArray();
+    });
+    res.json(filas.map(f => ({ rubro: f._id.rubro, subrubro: f._id.subrubro, n: f.n })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/config/rubros', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
@@ -1456,6 +1470,8 @@ router.get('/', authAdmin, async (req, res) => {
     const match = Object.assign({}, filtroOrg(req));
     if (soloActivos) match.activo = { $ne: false };
     if (req.query.rubro) match.rubro = req.query.rubro;
+    // Subrubro (7/10/2026, pestaña Rubros y subrubros de Productos): '__sin__' = productos sin subrubro.
+    if (req.query.subrubro) match.subrubro = req.query.subrubro === '__sin__' ? { $in: [null, ''] } : req.query.subrubro;
     if (req.query.marca) match.marca = req.query.marca;
     if (req.query.proveedorId) {
       const pid = toObjectId(req.query.proveedorId);
