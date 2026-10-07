@@ -12,11 +12,10 @@
 //   - Ventas:       ventas no anuladas, por createdAt.
 //
 // Quién ve qué:
-//   - Administrador (rol protegido): todo lo de la organización activa, y
-//     puede filtrar por vendedor.
-//   - Cualquier otro rol con el módulo 'tablero': SOLO lo suyo. CRM y visitas
-//     se atribuyen por el vendedor vinculado a su usuario (vendedorId);
-//     presupuestos y ventas por el usuario que los cargó.
+//   - Administrador y cualquier rol con el módulo 'tablero': TODO el equipo
+//     de la sucursal (organización) activa, con la opción de filtrar por
+//     vendedor (CRM y visitas por el vendedor; presupuestos y ventas por el
+//     usuario vinculado a ese vendedor).
 //
 // Integración (server.js):  app.use('/api/tablero', require('./tablero'));
 // ---------------------------------------------------------------------------
@@ -82,7 +81,6 @@ router.get('/embudo', authTablero, async (req, res) => {
     if (!validarFecha(desdeS) || !validarFecha(hastaS)) throw err(400, 'Las fechas tienen que tener el formato AAAA-MM-DD.');
     if (desdeS > hastaS) throw err(400, 'La fecha "desde" no puede ser posterior a "hasta".');
     const rango = { $gte: inicioDia(desdeS), $lte: finDia(hastaS) };
-    const esAdmin = !!req.usuario.rol.protegido;
     const avisos = [];
 
     const out = await conReintento(async () => {
@@ -92,22 +90,15 @@ router.get('/embudo', authTablero, async (req, res) => {
       let vendedorId = null;      // ObjectId del vendedor (CRM y visitas)
       let usuarios = null;        // [{_id, nombre}] que cargaron presupuestos y ventas
       let alcance = 'todo';
-      if (esAdmin) {
-        const vf = req.query.vendedorId ? toObjectId(req.query.vendedorId) : null;
-        if (req.query.vendedorId && !vf) throw err(400, 'vendedorId inválido');
-        if (vf) {
-          alcance = 'vendedor';
-          vendedorId = vf;
-          usuarios = await db.collection('usuarios').find({ vendedorId: vf }).project({ nombre: 1 }).toArray();
-          if (!usuarios.length) avisos.push('Ese vendedor no tiene un usuario vinculado: presupuestos y ventas figuran en 0.');
-        }
-      } else {
-        alcance = 'propio';
-        vendedorId = toObjectId(req.usuario.vendedorId);
-        usuarios = [{ _id: req.usuario._id, nombre: req.usuario.nombre }];
-        if (!vendedorId) avisos.push('Tu usuario no está vinculado a un vendedor, por eso CRM y visitas figuran en 0. Pedile a un administrador que lo vincule desde Usuarios y roles.');
+      const vf = req.query.vendedorId ? toObjectId(req.query.vendedorId) : null;
+      if (req.query.vendedorId && !vf) throw err(400, 'vendedorId inválido');
+      if (vf) {
+        alcance = 'vendedor';
+        vendedorId = vf;
+        usuarios = await db.collection('usuarios').find({ vendedorId: vf }).project({ nombre: 1 }).toArray();
+        if (!usuarios.length) avisos.push('Ese vendedor no tiene un usuario vinculado: presupuestos y ventas figuran en 0.');
       }
-      const sinVinculo = alcance === 'propio' && !vendedorId;
+      const sinVinculo = false;
 
       const filtroVend = vendedorId ? { vendedorId } : (alcance === 'todo' ? {} : { _id: null });
       const filtroUsr = alcance === 'todo' ? {}
@@ -136,11 +127,10 @@ router.get('/embudo', authTablero, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
-// Vendedores para el filtro del administrador.
+// Vendedores de la sucursal activa, para el filtro.
 router.get('/vendedores', authTablero, async (req, res) => {
   try {
-    if (!req.usuario.rol.protegido) return res.json([]);
-    const lista = await conReintento(async () => (await getDb()).collection('visitas_vendedores').find({}).project({ nombre: 1 }).sort({ nombre: 1 }).toArray());
+    const lista = await conReintento(async () => (await getDb()).collection('visitas_vendedores').find(filtroOrg(req)).project({ nombre: 1 }).sort({ nombre: 1 }).toArray());
     res.json(lista.map(v => ({ _id: String(v._id), nombre: v.nombre })));
   } catch (e) { responder(res, e); }
 });

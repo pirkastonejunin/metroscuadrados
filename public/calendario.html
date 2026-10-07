@@ -379,10 +379,8 @@ async function cargarEventos(desde, hasta) {
   const desdeISO = fechaISO(desde);
   const hastaISO = fechaISO(hasta);
 
-  // Incrustado en el inicio: solo visitas, y para quien no es administrador
-  // únicamente las de su vendedor vinculado (sin tareas de obra).
-  let filtroVend = '';
-  if (EMBED && ME && !(ME.rol && ME.rol.protegido)) filtroVend = '&vendedorId=' + encodeURIComponent((ME.usuario && ME.usuario.vendedorId) || '000000000000000000000000');
+  // Incrustado en el inicio: solo las visitas de la sucursal (sin tareas de obra).
+  const filtroVend = '';
   const [visitas, obras] = await Promise.all([
     api(BASE_VISITAS, `/?desde=${desdeISO}&hasta=${hastaISO}${filtroVend}`),
     EMBED ? Promise.resolve([]) : (obrasCache ? Promise.resolve(obrasCache) : api(BASE_OBRAS, '/'))

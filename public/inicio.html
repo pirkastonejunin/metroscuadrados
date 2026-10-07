@@ -225,7 +225,7 @@
         </div>
         <div id="tabAvisos"></div>
         <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
-        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. No se cuentan visitas canceladas ni ventas anuladas.</div>
+        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. Son los números de todo el equipo de la sucursal. No se cuentan visitas canceladas ni ventas anuladas.</div>
       </div>
     </div>
 
@@ -719,8 +719,8 @@ async function iniciarTablero(me){
     const f = document.getElementById('tabCalendario');
     if (!f.getAttribute('src')) f.setAttribute('src', '/calendario.html?embed=1');
   }
-  document.getElementById('tabVendedorBox').classList.toggle('hidden', !esAdmin);
-  if (esAdmin) {
+  document.getElementById('tabVendedorBox').classList.remove('hidden');
+  {
     try{
       const r = await fetch('/api/tablero/vendedores', {headers: headersAuth()});
       const lista = r.ok ? await r.json() : [];
