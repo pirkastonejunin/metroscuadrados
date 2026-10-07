@@ -239,6 +239,29 @@ const COLUMNAS_PRODUCTOS = [
 
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function normalizarBooleano(v) { return !!v; }
+// Clave para detectar duplicados de rubro/subrubro: sin mayúsculas, tildes ni espacios de más
+// ("Revestimientos", "REVESTIMIENTOS " y "Revestímientos" son el mismo rubro).
+function claveRubro(v) {
+  return String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+// Puntaje para elegir con qué nombre se queda un grupo de duplicados: preferir el que está bien
+// escrito (sin espacios de más y no todo en mayúsculas); a igualdad, el que tenga más productos.
+function puntajeNombre(nombre) {
+  let p = 0;
+  if (String(nombre) === String(nombre).trim().replace(/\s+/g, ' ')) p += 2;
+  if (String(nombre) !== String(nombre).toUpperCase() || !/[a-zA-ZÁÉÍÓÚÑ]/.test(nombre)) p += 1;
+  return p;
+}
+// Serializa las operaciones que escriben la base de rubros por organización: dos pestañas/pedidos
+// simultáneos (ej. el sincronizar automático) no pueden crear el mismo rubro dos veces.
+const colaRubros = new Map();
+function enColaRubros(orgId, fn) {
+  const k = String(orgId || '');
+  const prev = colaRubros.get(k) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  colaRubros.set(k, next.catch(() => {}));
+  return next;
+}
 
 // .toUpperCase() acá (30/9/2026, bug detectado por Mato): antes el SKU se
 // guardaba tal cual venía escrito, así que "fibra1" y "FIBRA1" quedaban
@@ -432,16 +455,16 @@ router.post('/config/rubros', authAdmin, async (req, res) => {
     const nombre = normalizarTexto(req.body.nombre);
     if (!nombre) throw err(400, 'El nombre del rubro es obligatorio');
     const db = await conReintento(getDb);
-    const dupMatch = Object.assign(
-      { nombre: new RegExp('^' + nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
-      filtroOrg(req)
-    );
-    const existente = await db.collection('productos_rubros_base').findOne(dupMatch);
-    if (existente) throw err(400, 'Ya existe un rubro con ese nombre');
-    const ahora = new Date();
-    const doc = { nombre, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora };
-    const r = await db.collection('productos_rubros_base').insertOne(doc);
-    res.json(Object.assign({ _id: r.insertedId }, doc));
+    const doc = { nombre, activo: true, orgId: req.orgId };
+    await enColaRubros(req.orgId, async () => {
+      const todos = await db.collection('productos_rubros_base').find(filtroOrg(req)).project({ nombre: 1 }).toArray();
+      if (todos.some(r => claveRubro(r.nombre) === claveRubro(nombre))) throw err(400, 'Ya existe un rubro con ese nombre');
+      const ahora = new Date();
+      doc.createdAt = ahora; doc.updatedAt = ahora;
+      const r = await db.collection('productos_rubros_base').insertOne(doc);
+      doc._id = r.insertedId;
+    });
+    res.json(doc);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -457,6 +480,8 @@ router.put('/config/rubros/:id', authAdmin, async (req, res) => {
     if (req.body.nombre !== undefined) {
       const nombre = normalizarTexto(req.body.nombre);
       if (!nombre) throw err(400, 'El nombre no puede quedar vacío');
+      const otros = await db.collection('productos_rubros_base').find(Object.assign({ _id: { $ne: id } }, filtroOrg(req))).project({ nombre: 1 }).toArray();
+      if (otros.some(o => claveRubro(o.nombre) === claveRubro(nombre))) throw err(400, 'Ya existe otro rubro con ese nombre (usá "Unificar" para juntarlos)');
       update.nombre = nombre;
     }
     if (req.body.activo !== undefined) update.activo = !!req.body.activo;
@@ -518,16 +543,16 @@ router.post('/config/subrubros', authAdmin, async (req, res) => {
     const db = await conReintento(getDb);
     const rubro = await db.collection('productos_rubros_base').findOne(Object.assign({ _id: rubroId }, filtroOrg(req)));
     if (!rubro) throw err(400, 'El rubro elegido no existe');
-    const dupMatch = Object.assign(
-      { rubroId, nombre: new RegExp('^' + nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i') },
-      filtroOrg(req)
-    );
-    const existente = await db.collection('productos_subrubros_base').findOne(dupMatch);
-    if (existente) throw err(400, 'Ese rubro ya tiene un subrubro con ese nombre');
-    const ahora = new Date();
-    const doc = { nombre, rubroId, rubroNombre: rubro.nombre, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora };
-    const r = await db.collection('productos_subrubros_base').insertOne(doc);
-    res.json(Object.assign({ _id: r.insertedId }, doc));
+    const doc = { nombre, rubroId, rubroNombre: rubro.nombre, activo: true, orgId: req.orgId };
+    await enColaRubros(req.orgId, async () => {
+      const subs = await db.collection('productos_subrubros_base').find(Object.assign({ rubroId }, filtroOrg(req))).project({ nombre: 1 }).toArray();
+      if (subs.some(x => claveRubro(x.nombre) === claveRubro(nombre))) throw err(400, 'Ese rubro ya tiene un subrubro con ese nombre');
+      const ahora = new Date();
+      doc.createdAt = ahora; doc.updatedAt = ahora;
+      const r = await db.collection('productos_subrubros_base').insertOne(doc);
+      doc._id = r.insertedId;
+    });
+    res.json(doc);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -577,6 +602,7 @@ router.post('/config/rubros/importar-existentes', authAdmin, async (req, res) =>
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const db = await conReintento(getDb);
+    const resultado = await enColaRubros(req.orgId, async () => {
     const matchProd = Object.assign({}, filtroOrg(req));
     const productos = await db.collection('productos_catalogo')
       .find(matchProd, { projection: { rubro: 1, subrubro: 1 } }).toArray();
@@ -586,17 +612,17 @@ router.post('/config/rubros/importar-existentes', authAdmin, async (req, res) =>
     productos.forEach(p => {
       const rubro = normalizarTexto(p.rubro);
       if (!rubro) return;
-      const rubroKey = rubro.toLowerCase();
+      const rubroKey = claveRubro(rubro);
       if (!rubrosEncontrados.has(rubroKey)) rubrosEncontrados.set(rubroKey, rubro);
       const subrubro = normalizarTexto(p.subrubro);
       if (!subrubro) return;
       if (!subrubrosPorRubro.has(rubroKey)) subrubrosPorRubro.set(rubroKey, new Map());
       const subMap = subrubrosPorRubro.get(rubroKey);
-      if (!subMap.has(subrubro.toLowerCase())) subMap.set(subrubro.toLowerCase(), subrubro);
+      if (!subMap.has(claveRubro(subrubro))) subMap.set(claveRubro(subrubro), subrubro);
     });
 
     const existentesRubros = await db.collection('productos_rubros_base').find(filtroOrg(req)).toArray();
-    const rubrosPorKey = new Map(existentesRubros.map(r => [r.nombre.toLowerCase(), r]));
+    const rubrosPorKey = new Map(existentesRubros.map(r => [claveRubro(r.nombre), r]));
     const ahora = new Date();
     let rubrosCreados = 0, subrubrosCreados = 0;
 
@@ -613,7 +639,7 @@ router.post('/config/rubros/importar-existentes', authAdmin, async (req, res) =>
       if (!subMap) continue;
       const existentesSub = await db.collection('productos_subrubros_base')
         .find(Object.assign({ rubroId: rubroDoc._id }, filtroOrg(req))).toArray();
-      const subKeysExistentes = new Set(existentesSub.map(s => s.nombre.toLowerCase()));
+      const subKeysExistentes = new Set(existentesSub.map(s => claveRubro(s.nombre)));
       for (const [subKey, nombreSub] of subMap) {
         if (subKeysExistentes.has(subKey)) continue;
         await db.collection('productos_subrubros_base').insertOne({
@@ -623,7 +649,147 @@ router.post('/config/rubros/importar-existentes', authAdmin, async (req, res) =>
         subrubrosCreados++;
       }
     }
-    res.json({ rubrosCreados, subrubrosCreados });
+    return { rubrosCreados, subrubrosCreados };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// Unificar duplicados (7/10/2026). Mueve todo lo de un rubro/subrubro "origen" al
+// "destino" (productos, subrubros) y borra el origen. Los textos de los productos se
+// reescriben con el nombre del destino, incluidas variantes de mayúsculas/tildes.
+// ---------------------------------------------------------------------------
+async function variantesEnProductos(db, req, campo, clave, extra) {
+  const vals = await db.collection('productos_catalogo').distinct(campo, Object.assign({}, filtroOrg(req), extra || {}));
+  return vals.filter(v => v && claveRubro(v) === clave);
+}
+async function fusionarSubrubro(db, req, srcSub, dstSub, rubroNombreVariantes) {
+  // productos con el subrubro origen (de cualquier variante del rubro) pasan al nombre del destino
+  const rubroFiltro = rubroNombreVariantes.length ? { rubro: { $in: rubroNombreVariantes } } : {};
+  const vars = await variantesEnProductos(db, req, 'subrubro', claveRubro(srcSub.nombre), rubroFiltro);
+  if (vars.length) await db.collection('productos_catalogo').updateMany(
+    Object.assign({ subrubro: { $in: vars } }, rubroFiltro, filtroOrg(req)), { $set: { subrubro: dstSub.nombre, updatedAt: new Date() } });
+  if (srcSub.activo !== false && dstSub.activo === false) await db.collection('productos_subrubros_base').updateOne({ _id: dstSub._id }, { $set: { activo: true } });
+  await db.collection('productos_subrubros_base').deleteOne({ _id: srcSub._id });
+}
+async function fusionarRubro(db, req, src, dst) {
+  const variantes = await variantesEnProductos(db, req, 'rubro', claveRubro(src.nombre));
+  const variantesDst = await variantesEnProductos(db, req, 'rubro', claveRubro(dst.nombre));
+  const subsSrc = await db.collection('productos_subrubros_base').find(Object.assign({ rubroId: src._id }, filtroOrg(req))).toArray();
+  const subsDst = await db.collection('productos_subrubros_base').find(Object.assign({ rubroId: dst._id }, filtroOrg(req))).toArray();
+  const rubrosOrigen = Array.from(new Set([src.nombre].concat(variantes)));
+  for (const ss of subsSrc) {
+    const igual = subsDst.find(x => claveRubro(x.nombre) === claveRubro(ss.nombre));
+    if (igual) {
+      await fusionarSubrubro(db, req, ss, igual, rubrosOrigen);
+    } else {
+      await db.collection('productos_subrubros_base').updateOne({ _id: ss._id }, { $set: { rubroId: dst._id, rubroNombre: dst.nombre, updatedAt: new Date() } });
+      subsDst.push(Object.assign({}, ss, { rubroId: dst._id }));
+    }
+  }
+  const todas = Array.from(new Set(rubrosOrigen.concat(variantesDst)));
+  await db.collection('productos_catalogo').updateMany(
+    Object.assign({ rubro: { $in: todas } }, filtroOrg(req)), { $set: { rubro: dst.nombre, updatedAt: new Date() } });
+  if (src.activo !== false && dst.activo === false) await db.collection('productos_rubros_base').updateOne({ _id: dst._id }, { $set: { activo: true } });
+  await db.collection('productos_rubros_base').deleteOne({ _id: src._id });
+}
+
+router.post('/config/rubros/:id/unificar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id), destinoId = toObjectId(req.body.destinoId);
+    if (!id || !destinoId || String(id) === String(destinoId)) throw err(400, 'Elegí otro rubro para unificar');
+    const db = await conReintento(getDb);
+    await enColaRubros(req.orgId, async () => {
+      const [src, dst] = await Promise.all([
+        db.collection('productos_rubros_base').findOne(Object.assign({ _id: id }, filtroOrg(req))),
+        db.collection('productos_rubros_base').findOne(Object.assign({ _id: destinoId }, filtroOrg(req)))
+      ]);
+      if (!src || !dst) throw err(404, 'Rubro no encontrado');
+      await fusionarRubro(db, req, src, dst);
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/config/subrubros/:id/unificar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id), destinoId = toObjectId(req.body.destinoId);
+    if (!id || !destinoId || String(id) === String(destinoId)) throw err(400, 'Elegí otro subrubro para unificar');
+    const db = await conReintento(getDb);
+    await enColaRubros(req.orgId, async () => {
+      const [src, dst] = await Promise.all([
+        db.collection('productos_subrubros_base').findOne(Object.assign({ _id: id }, filtroOrg(req))),
+        db.collection('productos_subrubros_base').findOne(Object.assign({ _id: destinoId }, filtroOrg(req)))
+      ]);
+      if (!src || !dst) throw err(404, 'Subrubro no encontrado');
+      const rubro = await db.collection('productos_rubros_base').findOne({ _id: dst.rubroId });
+      const nombresRubro = rubro ? Array.from(new Set([rubro.nombre].concat(await variantesEnProductos(db, req, 'rubro', claveRubro(rubro.nombre))))) : [];
+      if (String(src.rubroId) !== String(dst.rubroId)) {
+        // Otro rubro: los productos del subrubro origen también cambian de rubro.
+        const rubroSrc = await db.collection('productos_rubros_base').findOne({ _id: src.rubroId });
+        const nombresSrc = rubroSrc ? Array.from(new Set([rubroSrc.nombre].concat(await variantesEnProductos(db, req, 'rubro', claveRubro(rubroSrc.nombre))))) : [];
+        if (nombresSrc.length && rubro) await db.collection('productos_catalogo').updateMany(
+          Object.assign({ rubro: { $in: nombresSrc }, subrubro: src.nombre }, filtroOrg(req)), { $set: { rubro: rubro.nombre, updatedAt: new Date() } });
+        await fusionarSubrubro(db, req, src, dst, rubro ? [rubro.nombre] : []);
+      } else {
+        await fusionarSubrubro(db, req, src, dst, nombresRubro);
+      }
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Unifica sola todo lo que es el mismo nombre (mayúsculas/tildes/espacios) y deja los
+// productos escritos con el nombre canónico. Devuelve cuánto unificó.
+router.post('/config/rubros/unificar-duplicados', authAdmin, async (req, res) => {
+  try {
+    const db = await conReintento(getDb);
+    const resumen = await enColaRubros(req.orgId, async () => {
+      let rubrosUnificados = 0, subrubrosUnificados = 0, productosNormalizados = 0;
+      const cuenta = async (campo, nombre) => db.collection('productos_catalogo').countDocuments(Object.assign({ activo: { $ne: false }, [campo]: nombre }, filtroOrg(req)));
+      // 1) Rubros repetidos
+      let rubros = await db.collection('productos_rubros_base').find(filtroOrg(req)).sort({ createdAt: 1 }).toArray();
+      const grupos = new Map();
+      rubros.forEach(r => { const k = claveRubro(r.nombre); if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(r); });
+      for (const lista of grupos.values()) {
+        if (lista.length < 2) continue;
+        const conN = await Promise.all(lista.map(async r => ({ r, n: await cuenta('rubro', r.nombre) })));
+        conN.sort((a, b) => puntajeNombre(b.r.nombre) - puntajeNombre(a.r.nombre) || b.n - a.n || String(a.r.createdAt).localeCompare(String(b.r.createdAt)));
+        const dst = conN[0].r;
+        for (const { r } of conN.slice(1)) { await fusionarRubro(db, req, r, dst); rubrosUnificados++; }
+      }
+      // 2) Subrubros repetidos dentro de cada rubro
+      rubros = await db.collection('productos_rubros_base').find(filtroOrg(req)).toArray();
+      for (const r of rubros) {
+        const subs = await db.collection('productos_subrubros_base').find(Object.assign({ rubroId: r._id }, filtroOrg(req))).sort({ createdAt: 1 }).toArray();
+        const g = new Map();
+        subs.forEach(x => { const k = claveRubro(x.nombre); if (!g.has(k)) g.set(k, []); g.get(k).push(x); });
+        const nombresRubro = Array.from(new Set([r.nombre].concat(await variantesEnProductos(db, req, 'rubro', claveRubro(r.nombre)))));
+        for (const lista of g.values()) {
+          if (lista.length < 2) continue;
+          lista.sort((a, b) => puntajeNombre(b.nombre) - puntajeNombre(a.nombre) || String(a.createdAt).localeCompare(String(b.createdAt)));
+          const dst = lista[0];
+          for (const x of lista.slice(1)) { await fusionarSubrubro(db, req, x, dst, nombresRubro); subrubrosUnificados++; }
+        }
+        // 3) Productos escritos con otra variante (mayúsculas/tildes) del nombre del rubro / subrubro
+        const varRub = (await variantesEnProductos(db, req, 'rubro', claveRubro(r.nombre))).filter(v => v !== r.nombre);
+        if (varRub.length) {
+          const x = await db.collection('productos_catalogo').updateMany(Object.assign({ rubro: { $in: varRub } }, filtroOrg(req)), { $set: { rubro: r.nombre, updatedAt: new Date() } });
+          productosNormalizados += x.modifiedCount;
+        }
+        const subsAct = await db.collection('productos_subrubros_base').find(Object.assign({ rubroId: r._id }, filtroOrg(req))).toArray();
+        for (const sb of subsAct) {
+          const vs = (await variantesEnProductos(db, req, 'subrubro', claveRubro(sb.nombre), { rubro: r.nombre })).filter(v => v !== sb.nombre);
+          if (vs.length) {
+            const x = await db.collection('productos_catalogo').updateMany(Object.assign({ rubro: r.nombre, subrubro: { $in: vs } }, filtroOrg(req)), { $set: { subrubro: sb.nombre, updatedAt: new Date() } });
+            productosNormalizados += x.modifiedCount;
+          }
+        }
+      }
+      return { rubrosUnificados, subrubrosUnificados, productosNormalizados };
+    });
+    res.json(resumen);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

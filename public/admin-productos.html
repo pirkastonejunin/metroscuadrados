@@ -174,6 +174,7 @@
         </div>
         <span class="muted" id="importarResultado"></span>
         <div class="err" id="rubrosErr"></div>
+        <div id="avisoDuplicados"></div>
       </div>
       <div class="card" id="arbolRubros"><p class="muted">Cargando...</p></div>
     </div>
@@ -376,6 +377,7 @@ function nProductosAdm(rubro, subrubro){
   return conteoAdm.filter(c => c.rubro === rubro && (subrubro === undefined || c.subrubro === subrubro)).reduce((a, c) => a + c.n, 0);
 }
 function renderArbolAdm(){
+  renderAvisoDuplicadosAdm();
   const cont = document.getElementById('arbolRubros');
   if (!rubrosAdmCache.length) { cont.innerHTML = '<p class="muted">Todavía no hay rubros cargados.</p>'; return; }
   const sinRubro = nProductosAdm('', undefined);
@@ -394,6 +396,7 @@ function renderArbolAdm(){
         <span style="white-space:nowrap" onclick="event.stopPropagation()">
           <button class="btn small secondary" title="Ver productos" onclick="verProductosRubroAdm(${JSON.stringify(r.nombre).replace(/"/g, '&quot;')}, '')">Ver productos</button>
           <button class="btn small secondary" title="Renombrar" onclick="renombrarRubroAdm('${r._id}')">Renombrar</button>
+          <button class="btn small secondary" title="Unificar con otro rubro" onclick="abrirUnificarAdm('rubro', '${r._id}')">Unificar</button>
           <button class="btn small secondary" onclick="toggleActivoRubroAdm('${r._id}', ${inactivo})">${inactivo ? 'Activar' : 'Desactivar'}</button>
         </span>
       </div>
@@ -408,6 +411,7 @@ function renderArbolAdm(){
             <span style="white-space:nowrap">
               <button class="btn small secondary" title="Ver productos" onclick="verProductosRubroAdm(${JSON.stringify(r.nombre).replace(/"/g, '&quot;')}, ${JSON.stringify(s.nombre).replace(/"/g, '&quot;')})">Ver productos</button>
               <button class="btn small secondary" title="Renombrar" onclick="renombrarSubrubroAdm('${s._id}')">Renombrar</button>
+              <button class="btn small secondary" title="Unificar con otro subrubro" onclick="abrirUnificarAdm('subrubro', '${s._id}')">Unificar</button>
               <button class="btn small secondary" onclick="toggleActivoSubrubroAdm('${s._id}', ${ina})">${ina ? 'Activar' : 'Desactivar'}</button>
             </span>
           </div>`;
@@ -501,6 +505,62 @@ async function verProductosRubroAdm(rubro, subrubro){
       <tbody>${lista.map(p => `<tr onclick="abrirEditarProducto('${p._id}')" style="cursor:pointer" title="Abrir el producto"><td><strong>${escapeHtml(p.sku || '')}</strong></td><td>${escapeHtml(p.nombre || '')}</td><td class="muted">${escapeHtml(p.marca || '—')}</td></tr>`).join('')}</tbody></table>`
       : '<p class="muted">No hay productos acá.</p>';
   }catch(e){ const c = document.getElementById('rpContenido'); if (c) c.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+}
+
+// Detecta nombres que son el mismo salvo mayúsculas/tildes/espacios (en la base y en lo escrito en los productos).
+function claveAdm(v){ return String(v == null ? '' : v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function renderAvisoDuplicadosAdm(){
+  const cont = document.getElementById('avisoDuplicados'); if (!cont) return;
+  let n = 0;
+  const g = new Map();
+  rubrosAdmCache.forEach(r => { const k = claveAdm(r.nombre); g.set(k, (g.get(k) || 0) + 1); });
+  g.forEach(c => { if (c > 1) n += c - 1; });
+  const vars = new Map();
+  conteoAdm.forEach(c => { if (!c.rubro) return; const k = claveAdm(c.rubro); if (!vars.has(k)) vars.set(k, new Set()); vars.get(k).add(c.rubro); });
+  vars.forEach(set => { if (set.size > 1) n += set.size - 1; });
+  const gs = new Map();
+  subrubrosAdmCache.forEach(s => { const k = String(s.rubroId) + '|' + claveAdm(s.nombre); gs.set(k, (gs.get(k) || 0) + 1); });
+  gs.forEach(c => { if (c > 1) n += c - 1; });
+  cont.innerHTML = n
+    ? `<div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--warn-soft, #fff4d6);display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:200px">Hay ${n} nombre${n === 1 ? '' : 's'} repetido${n === 1 ? '' : 's'} (iguales salvo mayúsculas, tildes o espacios).</span><button class="btn small" onclick="unificarDuplicadosAdm()">Unificar automáticamente</button></div>`
+    : '<p class="muted" style="margin:8px 0 0">No hay nombres repetidos.</p>';
+}
+async function unificarDuplicadosAdm(){
+  if (!confirm('Se van a juntar los rubros y subrubros repetidos y los productos quedarán con un único nombre. ¿Seguimos?')) return;
+  errArbol();
+  try{
+    const d = await bAdm('/config/rubros/unificar-duplicados', {method:'POST'});
+    document.getElementById('importarResultado').textContent = `Unificado: ${d.rubrosUnificados} rubro(s), ${d.subrubrosUnificados} subrubro(s), ${d.productosNormalizados} producto(s) corregidos.`;
+    await cargarArbolAdm(); refrescarBasesDeProductos();
+  }catch(e){ errArbol(e.message); }
+}
+// Unificar a mano (para repetidos que no son idénticos, ej. "Pegamento" y "Pegamentos").
+function abrirUnificarAdm(tipo, id){
+  id = String(id);
+  const origen = (tipo === 'rubro' ? rubrosAdmCache : subrubrosAdmCache).find(x => String(x._id) === id); if (!origen) return;
+  const opciones = tipo === 'rubro'
+    ? rubrosAdmCache.filter(x => String(x._id) !== id)
+    : subrubrosAdmCache.filter(x => String(x._id) !== id && String(x.rubroId) === String(origen.rubroId));
+  if (!opciones.length) { errArbol('No hay otro ' + tipo + ' con el que unificar.'); return; }
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Unificar ${tipo}</h2>
+        <p>Todo lo de <strong>${escapeHtml(origen.nombre)}</strong> (productos${tipo === 'rubro' ? ' y subrubros' : ''}) pasa al ${tipo} que elijas, y "${escapeHtml(origen.nombre)}" se elimina.</p>
+        <label>Dejar como</label>
+        <select id="unifDestino">${opciones.map(o => `<option value="${o._id}">${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <div class="err" id="unifErr"></div>
+        <button class="btn" style="margin-top:12px" onclick="confirmarUnificarAdm('${tipo}', '${id}')">Unificar</button>
+      </div>
+    </div>`;
+}
+async function confirmarUnificarAdm(tipo, id){
+  const destinoId = document.getElementById('unifDestino').value;
+  try{
+    await bAdm('/config/' + (tipo === 'rubro' ? 'rubros' : 'subrubros') + '/' + id + '/unificar', {method:'POST', body: JSON.stringify({destinoId})});
+    cerrarModal(); await cargarArbolAdm(); refrescarBasesDeProductos();
+  }catch(e){ document.getElementById('unifErr').textContent = e.message; }
 }
 async function importarExistentesAdm(silencioso){
   const btn = document.getElementById('btnImportar');
