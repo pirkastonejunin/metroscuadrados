@@ -111,47 +111,6 @@
   </header>
   <main>
     <div class="card">
-      <p class="muted" style="margin-top:0">Acá se administran las listas de valores que antes se tipeaban a mano en la ficha de producto (rubro y subrubro), para que queden siempre iguales y no se dupliquen por errores de tipeo. Se usan en Productos al cargar o editar un producto. Esta pantalla se sincroniza sola con lo que ya está cargado en Productos cada vez que entrás.</p>
-      <button class="btn secondary" id="btnImportar" onclick="importarExistentes()">Volver a sincronizar ahora</button>
-      <span class="muted" id="importarResultado" style="margin-left:10px"></span>
-    </div>
-
-    <div class="card">
-      <button type="button" class="section-title seccion-toggle" id="toggleRubros" onclick="toggleSeccion('Rubros')">
-        <span>Rubros</span><span class="chev">▾</span>
-      </button>
-      <div id="contRubros">
-        <div class="row" style="margin-bottom:12px;margin-top:8px">
-          <div style="flex:1"><label>Nuevo rubro</label><input id="nrNombre" placeholder="Ej: Revestimientos" onkeydown="if(event.key==='Enter')crearRubro()"></div>
-          <div><button class="btn" onclick="crearRubro()">Agregar</button></div>
-        </div>
-        <div class="err" id="rubrosErr"></div>
-        <table>
-          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="rubrosBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
-      <button type="button" class="section-title seccion-toggle" id="toggleSubrubros" onclick="toggleSeccion('Subrubros')">
-        <span>Subrubros</span><span class="chev">▾</span>
-      </button>
-      <div id="contSubrubros">
-        <div class="row" style="margin-bottom:12px;margin-top:8px">
-          <div style="min-width:200px"><label>Rubro</label><select id="srRubroId" onchange="renderSubrubros()"></select></div>
-          <div style="flex:1"><label>Nuevo subrubro</label><input id="srNombre" placeholder="Ej: Piedra" onkeydown="if(event.key==='Enter')crearSubrubro()"></div>
-          <div><button class="btn" onclick="crearSubrubro()">Agregar</button></div>
-        </div>
-        <div class="err" id="subrubrosErr"></div>
-        <table>
-          <thead><tr><th>Nombre</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="subrubrosBody"><tr><td colspan="4" class="muted">Cargando...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="card">
       <button type="button" class="section-title seccion-toggle" id="toggleDepositos" onclick="toggleSeccion('Depositos')">
         <span>Depósitos</span><span class="chev">▾</span>
       </button>
@@ -314,19 +273,11 @@ async function iniciarApp(){
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
-  await cargarRubros();
-  await cargarSubrubros();
   await cargarDepositos();
   await cargarConceptosGasto();
   await cargarCotizacionDolar();
   await cargarTiposTrabajo();
   await cargarMapeo();
-  // Sincroniza solo al entrar (1/10/2026, pedido de Mato: que la base
-  // quede sincronizada con lo que ya tienen cargado los productos, sin
-  // tener que acordarse de apretar un botón). Es rápido e idempotente —
-  // si no hay nada nuevo no cambia nada — así que no molesta hacerlo cada
-  // vez que se abre esta pantalla.
-  await importarExistentes(true);
   restaurarSecciones();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
@@ -341,7 +292,7 @@ function toggleSeccion(nombre){
   try { localStorage.setItem('pn_bases_seccion_' + nombre, colapsada ? '0' : '1'); } catch(e){}
 }
 function restaurarSecciones(){
-  ['Rubros', 'Subrubros', 'Depositos', 'TiposTrabajo', 'Mapeo', 'ConceptosGasto', 'Cotizacion'].forEach(nombre => {
+  ['Depositos', 'TiposTrabajo', 'Mapeo', 'ConceptosGasto', 'Cotizacion'].forEach(nombre => {
     let abierta = true;
     try {
       const guardado = localStorage.getItem('pn_bases_seccion_' + nombre);
@@ -352,83 +303,6 @@ function restaurarSecciones(){
       document.getElementById('toggle' + nombre).classList.add('colapsada');
     }
   });
-}
-
-// -------------------------------------------------------------------
-// Rubros
-// -------------------------------------------------------------------
-let rubrosCache = [];
-async function cargarRubros(){
-  const body = document.getElementById('rubrosBody');
-  try{
-    const r = await fetch(BASE + '/config/rubros?incluirInactivos=1', {headers: headersAuthJson()});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    rubrosCache = data;
-    renderRubros();
-    renderSelectRubroSubrubro();
-  }catch(e){
-    body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
-  }
-}
-
-function renderRubros(){
-  const body = document.getElementById('rubrosBody');
-  if (!rubrosCache.length) { body.innerHTML = '<tr><td colspan="3" class="muted">Todavía no hay rubros cargados.</td></tr>'; return; }
-  body.innerHTML = rubrosCache.map(r => `
-    <tr>
-      <td>
-        <input value="${escapeHtml(r.nombre)}" style="width:auto;min-width:220px" id="rn_${r._id}" onkeydown="if(event.key==='Enter')guardarNombreRubro('${r._id}')">
-      </td>
-      <td><span class="pill ${r.activo!==false?'activo':'inactivo'}">${r.activo!==false?'Activo':'Inactivo'}</span></td>
-      <td style="white-space:nowrap">
-        <button class="btn small secondary" onclick="guardarNombreRubro('${r._id}')">Guardar nombre</button>
-        <button class="btn small secondary" onclick="toggleActivoRubro('${r._id}', ${r.activo===false})">${r.activo===false?'Activar':'Desactivar'}</button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-async function crearRubro(){
-  const input = document.getElementById('nrNombre');
-  const nombre = input.value.trim();
-  document.getElementById('rubrosErr').textContent = '';
-  if (!nombre) { document.getElementById('rubrosErr').textContent = 'Poné un nombre para el rubro'; return; }
-  try{
-    const r = await fetch(BASE + '/config/rubros', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre})});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    input.value = '';
-    await cargarRubros();
-  }catch(e){
-    document.getElementById('rubrosErr').textContent = e.message;
-  }
-}
-
-async function guardarNombreRubro(id){
-  const nombre = document.getElementById('rn_' + id).value.trim();
-  document.getElementById('rubrosErr').textContent = '';
-  if (!nombre) { document.getElementById('rubrosErr').textContent = 'El nombre no puede quedar vacío'; return; }
-  try{
-    const r = await fetch(BASE + '/config/rubros/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    await cargarRubros();
-    await cargarSubrubros();
-  }catch(e){
-    document.getElementById('rubrosErr').textContent = e.message;
-  }
-}
-
-async function toggleActivoRubro(id, activar){
-  try{
-    const r = await fetch(BASE + '/config/rubros/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    await cargarRubros();
-  }catch(e){
-    alert(e.message);
-  }
 }
 
 // -------------------------------------------------------------------
@@ -504,124 +378,6 @@ async function toggleActivoConceptoGasto(id, activar){
     await cargarConceptosGasto();
   }catch(e){
     alert(e.message);
-  }
-}
-
-// -------------------------------------------------------------------
-// Subrubros (cuelgan de un rubro)
-// -------------------------------------------------------------------
-let subrubrosCache = [];
-async function cargarSubrubros(){
-  try{
-    const r = await fetch(BASE + '/config/subrubros?incluirInactivos=1', {headers: headersAuthJson()});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    subrubrosCache = data;
-    renderSubrubros();
-  }catch(e){
-    document.getElementById('subrubrosBody').innerHTML = `<tr><td colspan="4" class="err">${escapeHtml(e.message)}</td></tr>`;
-  }
-}
-
-function renderSelectRubroSubrubro(){
-  const select = document.getElementById('srRubroId');
-  const actual = select.value;
-  const activos = rubrosCache.filter(r => r.activo !== false);
-  select.innerHTML = '<option value="">Todos los rubros</option>' + activos.map(r =>
-    `<option value="${r._id}" ${r._id===actual?'selected':''}>${escapeHtml(r.nombre)}</option>`
-  ).join('');
-}
-
-function renderSubrubros(){
-  const body = document.getElementById('subrubrosBody');
-  const filtroId = document.getElementById('srRubroId').value;
-  const lista = filtroId ? subrubrosCache.filter(s => String(s.rubroId) === String(filtroId)) : subrubrosCache;
-  if (!lista.length) { body.innerHTML = '<tr><td colspan="4" class="muted">No hay subrubros cargados todavía.</td></tr>'; return; }
-  body.innerHTML = lista.map(s => `
-    <tr>
-      <td><input value="${escapeHtml(s.nombre)}" style="width:auto;min-width:200px" id="sn_${s._id}" onkeydown="if(event.key==='Enter')guardarNombreSubrubro('${s._id}')"></td>
-      <td class="muted">${escapeHtml(s.rubroNombre)}</td>
-      <td><span class="pill ${s.activo!==false?'activo':'inactivo'}">${s.activo!==false?'Activo':'Inactivo'}</span></td>
-      <td style="white-space:nowrap">
-        <button class="btn small secondary" onclick="guardarNombreSubrubro('${s._id}')">Guardar nombre</button>
-        <button class="btn small secondary" onclick="toggleActivoSubrubro('${s._id}', ${s.activo===false})">${s.activo===false?'Activar':'Desactivar'}</button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-async function crearSubrubro(){
-  const rubroId = document.getElementById('srRubroId').value;
-  const input = document.getElementById('srNombre');
-  const nombre = input.value.trim();
-  document.getElementById('subrubrosErr').textContent = '';
-  if (!rubroId) { document.getElementById('subrubrosErr').textContent = 'Elegí a qué rubro pertenece'; return; }
-  if (!nombre) { document.getElementById('subrubrosErr').textContent = 'Poné un nombre para el subrubro'; return; }
-  try{
-    const r = await fetch(BASE + '/config/subrubros', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, rubroId})});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    input.value = '';
-    await cargarSubrubros();
-  }catch(e){
-    document.getElementById('subrubrosErr').textContent = e.message;
-  }
-}
-
-async function guardarNombreSubrubro(id){
-  const nombre = document.getElementById('sn_' + id).value.trim();
-  document.getElementById('subrubrosErr').textContent = '';
-  if (!nombre) { document.getElementById('subrubrosErr').textContent = 'El nombre no puede quedar vacío'; return; }
-  try{
-    const r = await fetch(BASE + '/config/subrubros/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    await cargarSubrubros();
-  }catch(e){
-    document.getElementById('subrubrosErr').textContent = e.message;
-  }
-}
-
-async function toggleActivoSubrubro(id, activar){
-  try{
-    const r = await fetch(BASE + '/config/subrubros/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    await cargarSubrubros();
-  }catch(e){
-    alert(e.message);
-  }
-}
-
-// -------------------------------------------------------------------
-// Sincronizar con lo ya cargado en Productos (1/10/2026). Esto corre
-// solo cada vez que se abre esta pantalla (ver iniciarApp) — el botón de
-// acá abajo queda como "volver a sincronizar ahora" para el caso de, por
-// ejemplo, importar un lote nuevo de Dux y querer verlo reflejado en el
-// momento sin recargar la página. Es idempotente: nunca duplica, solo
-// agrega lo que todavía no está.
-// `silencioso` evita el alert() en la pasada automática al entrar — un
-// error ahí no debería interrumpir al usuario, solo queda sin sincronizar
-// hasta que reintente a mano con el botón.
-async function importarExistentes(silencioso){
-  const btn = document.getElementById('btnImportar');
-  const resultado = document.getElementById('importarResultado');
-  btn.disabled = true;
-  resultado.textContent = silencioso ? 'Sincronizando...' : 'Importando...';
-  try{
-    const r = await fetch(BASE + '/config/rubros/importar-existentes', {method:'POST', headers: headersAuthJson()});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    resultado.textContent = (data.rubrosCreados || data.subrubrosCreados)
-      ? `Sincronizado: ${data.rubrosCreados} rubro(s) y ${data.subrubrosCreados} subrubro(s) nuevos.`
-      : 'Ya está todo sincronizado.';
-    await cargarRubros();
-    await cargarSubrubros();
-  }catch(e){
-    resultado.textContent = '';
-    if (!silencioso) alert(e.message);
-  }finally{
-    btn.disabled = false;
   }
 }
 

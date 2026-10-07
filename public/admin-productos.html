@@ -48,6 +48,9 @@
   .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
   .muted{color:var(--muted);font-size:12px;}
   .hidden{display:none !important;}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;}
+  .tab-btn{background:var(--card);color:var(--muted);border:1px solid var(--border);padding:8px 16px;border-radius:999px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+  .tab-btn.activa{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
   .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
   .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
   .modal h2{margin-top:0;font-size:16px;}
@@ -109,6 +112,11 @@
     </div>
   </header>
   <main>
+    <div class="tabs">
+      <button class="tab-btn activa" id="tabBtnProductos" onclick="cambiarTabProductos('productos')">Productos</button>
+      <button class="tab-btn" id="tabBtnRubros" onclick="cambiarTabProductos('rubros')">Rubros y subrubros</button>
+    </div>
+    <div id="tabProductos">
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div class="row" style="flex:1">
@@ -154,6 +162,47 @@
       </table>
       </div>
       <div class="row" id="productosPager" style="justify-content:space-between;margin-top:10px"></div>
+    </div>
+    </div>
+    <div id="tabRubros" class="hidden">
+    <div class="card">
+      <p class="muted" style="margin-top:0">Listas de valores del rubro y subrubro de cada producto, para que queden siempre iguales y no se dupliquen por errores de tipeo. Se usan al cargar o editar un producto. Esta pestaña se sincroniza sola con lo que ya está cargado en los productos cada vez que entrás.</p>
+      <button class="btn secondary" id="btnImportar" onclick="importarExistentesAdm()">Volver a sincronizar ahora</button>
+      <span class="muted" id="importarResultado" style="margin-left:10px"></span>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Rubros</div>
+      <div id="contRubros">
+        <div class="row" style="margin-bottom:12px;margin-top:8px">
+          <div style="flex:1"><label>Nuevo rubro</label><input id="nrNombre" placeholder="Ej: Revestimientos" onkeydown="if(event.key==='Enter')crearRubroAdm()"></div>
+          <div><button class="btn" onclick="crearRubroAdm()">Agregar</button></div>
+        </div>
+        <div class="err" id="rubrosErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="rubrosBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Subrubros</div>
+      <div id="contSubrubros">
+        <div class="row" style="margin-bottom:12px;margin-top:8px">
+          <div style="min-width:200px"><label>Rubro</label><select id="srRubroId" onchange="renderSubrubrosAdm()"></select></div>
+          <div style="flex:1"><label>Nuevo subrubro</label><input id="srNombre" placeholder="Ej: Piedra" onkeydown="if(event.key==='Enter')crearSubrubroAdm()"></div>
+          <div><button class="btn" onclick="crearSubrubroAdm()">Agregar</button></div>
+        </div>
+        <div class="err" id="subrubrosErr"></div>
+        <table>
+          <thead><tr><th>Nombre</th><th>Rubro</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="subrubrosBody"><tr><td colspan="4" class="muted">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+
     </div>
   </main>
 </div>
@@ -325,6 +374,221 @@ function opcionesSubrubroSelect(rubroNombre, seleccionado){
 function cambiarRubroFormulario(){
   const rubro = document.getElementById('fpRubro').value;
   document.getElementById('fpSubrubro').innerHTML = opcionesSubrubroSelect(rubro, '');
+}
+
+// -------------------------------------------------------------------
+// Pestaña Rubros y subrubros (7/10/2026, pedido de Mato: antes estaba en
+// Configuración → Bases y catálogos).
+// -------------------------------------------------------------------
+// -------------------------------------------------------------------
+// Rubros
+// -------------------------------------------------------------------
+let rubrosAdmCache = [];
+async function cargarRubrosAdm(){
+  const body = document.getElementById('rubrosBody');
+  try{
+    const r = await fetch(BASE + '/config/rubros?incluirInactivos=1', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    rubrosAdmCache = data;
+    renderRubrosAdm();
+    renderSelectRubroSubrubroAdm();
+  }catch(e){
+    body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderRubrosAdm(){
+  const body = document.getElementById('rubrosBody');
+  if (!rubrosAdmCache.length) { body.innerHTML = '<tr><td colspan="3" class="muted">Todavía no hay rubros cargados.</td></tr>'; return; }
+  body.innerHTML = rubrosAdmCache.map(r => `
+    <tr>
+      <td>
+        <input value="${escapeHtml(r.nombre)}" style="width:auto;min-width:220px" id="rn_${r._id}" onkeydown="if(event.key==='Enter')guardarNombreRubroAdm('${r._id}')">
+      </td>
+      <td><span class="pill ${r.activo!==false?'activo':'inactivo'}">${r.activo!==false?'Activo':'Inactivo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarNombreRubroAdm('${r._id}')">Guardar nombre</button>
+        <button class="btn small secondary" onclick="toggleActivoRubroAdm('${r._id}', ${r.activo===false})">${r.activo===false?'Activar':'Desactivar'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function crearRubroAdm(){
+  const input = document.getElementById('nrNombre');
+  const nombre = input.value.trim();
+  document.getElementById('rubrosErr').textContent = '';
+  if (!nombre) { document.getElementById('rubrosErr').textContent = 'Poné un nombre para el rubro'; return; }
+  try{
+    const r = await fetch(BASE + '/config/rubros', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    input.value = '';
+    await cargarRubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    document.getElementById('rubrosErr').textContent = e.message;
+  }
+}
+
+async function guardarNombreRubroAdm(id){
+  const nombre = document.getElementById('rn_' + id).value.trim();
+  document.getElementById('rubrosErr').textContent = '';
+  if (!nombre) { document.getElementById('rubrosErr').textContent = 'El nombre no puede quedar vacío'; return; }
+  try{
+    const r = await fetch(BASE + '/config/rubros/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarRubrosAdm(); refrescarBasesDeProductos();
+    await cargarSubrubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    document.getElementById('rubrosErr').textContent = e.message;
+  }
+}
+
+async function toggleActivoRubroAdm(id, activar){
+  try{
+    const r = await fetch(BASE + '/config/rubros/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarRubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+let subrubrosAdmCache = [];
+async function cargarSubrubrosAdm(){
+  try{
+    const r = await fetch(BASE + '/config/subrubros?incluirInactivos=1', {headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    subrubrosAdmCache = data;
+    renderSubrubrosAdm();
+  }catch(e){
+    document.getElementById('subrubrosBody').innerHTML = `<tr><td colspan="4" class="err">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderSelectRubroSubrubroAdm(){
+  const select = document.getElementById('srRubroId');
+  const actual = select.value;
+  const activos = rubrosAdmCache.filter(r => r.activo !== false);
+  select.innerHTML = '<option value="">Todos los rubros</option>' + activos.map(r =>
+    `<option value="${r._id}" ${r._id===actual?'selected':''}>${escapeHtml(r.nombre)}</option>`
+  ).join('');
+}
+
+function renderSubrubrosAdm(){
+  const body = document.getElementById('subrubrosBody');
+  const filtroId = document.getElementById('srRubroId').value;
+  const lista = filtroId ? subrubrosAdmCache.filter(s => String(s.rubroId) === String(filtroId)) : subrubrosAdmCache;
+  if (!lista.length) { body.innerHTML = '<tr><td colspan="4" class="muted">No hay subrubros cargados todavía.</td></tr>'; return; }
+  body.innerHTML = lista.map(s => `
+    <tr>
+      <td><input value="${escapeHtml(s.nombre)}" style="width:auto;min-width:200px" id="sn_${s._id}" onkeydown="if(event.key==='Enter')guardarNombreSubrubroAdm('${s._id}')"></td>
+      <td class="muted">${escapeHtml(s.rubroNombre)}</td>
+      <td><span class="pill ${s.activo!==false?'activo':'inactivo'}">${s.activo!==false?'Activo':'Inactivo'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn small secondary" onclick="guardarNombreSubrubroAdm('${s._id}')">Guardar nombre</button>
+        <button class="btn small secondary" onclick="toggleActivoSubrubroAdm('${s._id}', ${s.activo===false})">${s.activo===false?'Activar':'Desactivar'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function crearSubrubroAdm(){
+  const rubroId = document.getElementById('srRubroId').value;
+  const input = document.getElementById('srNombre');
+  const nombre = input.value.trim();
+  document.getElementById('subrubrosErr').textContent = '';
+  if (!rubroId) { document.getElementById('subrubrosErr').textContent = 'Elegí a qué rubro pertenece'; return; }
+  if (!nombre) { document.getElementById('subrubrosErr').textContent = 'Poné un nombre para el subrubro'; return; }
+  try{
+    const r = await fetch(BASE + '/config/subrubros', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, rubroId})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    input.value = '';
+    await cargarSubrubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    document.getElementById('subrubrosErr').textContent = e.message;
+  }
+}
+
+async function guardarNombreSubrubroAdm(id){
+  const nombre = document.getElementById('sn_' + id).value.trim();
+  document.getElementById('subrubrosErr').textContent = '';
+  if (!nombre) { document.getElementById('subrubrosErr').textContent = 'El nombre no puede quedar vacío'; return; }
+  try{
+    const r = await fetch(BASE + '/config/subrubros/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarSubrubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    document.getElementById('subrubrosErr').textContent = e.message;
+  }
+}
+
+async function toggleActivoSubrubroAdm(id, activar){
+  try{
+    const r = await fetch(BASE + '/config/subrubros/' + id, {method: activar ? 'PUT' : 'DELETE', headers: headersAuthJson(), body: activar ? JSON.stringify({activo:true}) : undefined});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarSubrubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+// -------------------------------------------------------------------
+// Sincronizar con lo ya cargado en Productos (1/10/2026). Esto corre
+// solo cada vez que se abre esta pantalla (ver iniciarApp) — el botón de
+// acá abajo queda como "volver a sincronizar ahora" para el caso de, por
+// ejemplo, importar un lote nuevo de Dux y querer verlo reflejado en el
+// momento sin recargar la página. Es idempotente: nunca duplica, solo
+// agrega lo que todavía no está.
+// `silencioso` evita el alert() en la pasada automática al entrar — un
+// error ahí no debería interrumpir al usuario, solo queda sin sincronizar
+// hasta que reintente a mano con el botón.
+async function importarExistentesAdm(silencioso){
+  const btn = document.getElementById('btnImportar');
+  const resultado = document.getElementById('importarResultado');
+  btn.disabled = true;
+  resultado.textContent = silencioso ? 'Sincronizando...' : 'Importando...';
+  try{
+    const r = await fetch(BASE + '/config/rubros/importar-existentes', {method:'POST', headers: headersAuthJson()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    resultado.textContent = (data.rubrosCreados || data.subrubrosCreados)
+      ? `Sincronizado: ${data.rubrosCreados} rubro(s) y ${data.subrubrosCreados} subrubro(s) nuevos.`
+      : 'Ya está todo sincronizado.';
+    await cargarRubrosAdm(); refrescarBasesDeProductos();
+    await cargarSubrubrosAdm(); refrescarBasesDeProductos();
+  }catch(e){
+    resultado.textContent = '';
+    if (!silencioso) alert(e.message);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+
+// Cada cambio acá se refleja enseguida en los desplegables de la ficha y en el filtro de Rubro.
+async function refrescarBasesDeProductos(){
+  try { await Promise.all([cargarRubrosBase(), cargarSubrubrosBase(), cargarRubros()]); } catch(e){}
+}
+let rubrosTabIniciado = false;
+async function entrarTabRubros(){
+  await cargarRubrosAdm();
+  await cargarSubrubrosAdm();
+  if (!rubrosTabIniciado) { rubrosTabIniciado = true; await importarExistentesAdm(true); } // sincroniza solo la primera vez que se abre
+}
+function cambiarTabProductos(tab){
+  document.getElementById('tabProductos').classList.toggle('hidden', tab !== 'productos');
+  document.getElementById('tabRubros').classList.toggle('hidden', tab !== 'rubros');
+  document.getElementById('tabBtnProductos').classList.toggle('activa', tab === 'productos');
+  document.getElementById('tabBtnRubros').classList.toggle('activa', tab === 'rubros');
+  if (tab === 'rubros') entrarTabRubros();
 }
 
 let productosCache = [];
