@@ -289,8 +289,8 @@ router.get('/serie', authTablero, async (req, res) => {
 // (costos_produccion_diaria, ver costos.js). No depende del filtro de
 // vendedor (la producción es de la sucursal). m2 = ítems cuya cantidad
 // convertida está en m2; los productos por unidad/paquete se cuentan aparte.
-// El ranking ordena por PAQUETES (única medida comparable entre productos en
-// m2 y por unidad) y muestra la cantidad real con su unidad.
+// El ranking de más producidos es solo de productos en m2, ordenado por m2
+// (pedido de Mato: "quiero por m2"); lo que se mide por unidad no entra.
 // ---------------------------------------------------------------------------
 router.get('/produccion', authTablero, async (req, res) => {
   try {
@@ -317,7 +317,7 @@ router.get('/produccion', authTablero, async (req, res) => {
       for (let d = inicioDia(desdeS), n = 0; fechaAR(d) <= hastaS && n < 400; d = new Date(d.getTime() + 864e5), n++) {
         const k = fechaAR(d); dias.push({ dia: k, m2: Math.round((porDia[k] || 0) * 100) / 100 });
       }
-      const top = Object.values(porProd).sort((a, b) => b.paquetes - a.paquetes || b.cantidad - a.cantidad).slice(0, 6)
+      const top = Object.values(porProd).filter(p => p.unidad === 'm2').sort((a, b) => b.cantidad - a.cantidad).slice(0, 6)
         .map(p => ({ nombre: p.nombre, sku: p.sku, unidad: p.unidad, paquetes: Math.round(p.paquetes * 100) / 100, cantidad: Math.round(p.cantidad * 100) / 100 }));
       return { m2Total: Math.round(m2Total * 100) / 100, unidadesTotal: Math.round(unidadesTotal * 100) / 100, paquetes: Math.round(paquetes * 100) / 100, diasConProduccion: docs.length, dias, top };
     });

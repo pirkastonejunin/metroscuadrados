@@ -911,10 +911,10 @@ async function cargarProduccionTablero(qs){
       if (i % pe === 0) svg += '<text x="' + cx + '" y="75" text-anchor="middle">' + f[2] + '/' + f[1] + '</text>';
     });
     svg += '</svg>';
-    const maxP = Math.max(1, ...p.top.map(x => x.paquetes));
+    const maxP = Math.max(1, ...p.top.map(x => x.cantidad));
     const un = { m2: 'm2', unidad: 'un', paquete: 'paq' };
-    const top = p.top.map(x => '<div class="tb-top-fila" title="' + notifEscapeHtml(x.nombre + ': ' + fm(x.paquetes) + ' paquetes = ' + fm(x.cantidad) + ' ' + (un[x.unidad] || x.unidad)) + '"><span class="nom">' + notifEscapeHtml(x.nombre) + '</span><div class="pista"><div style="width:' + (x.paquetes / maxP * 100) + '%"></div></div><span class="val">' + fm(x.cantidad) + ' ' + (un[x.unidad] || x.unidad) + '</span></div>').join('');
-    cont.innerHTML = '<div class="tb-prod-graf">' + svg + '</div><div class="tb-prod-sub">Más producidos</div><div class="tb-top">' + top + '</div>';
+    const top = p.top.map(x => '<div class="tb-top-fila" title="' + notifEscapeHtml(x.nombre + ': ' + fm(x.cantidad) + ' m2 (' + fm(x.paquetes) + ' paquetes)') + '"><span class="nom">' + notifEscapeHtml(x.nombre) + '</span><div class="pista"><div style="width:' + (x.cantidad / maxP * 100) + '%"></div></div><span class="val">' + fm(x.cantidad) + ' ' + (un[x.unidad] || x.unidad) + '</span></div>').join('');
+    cont.innerHTML = '<div class="tb-prod-graf">' + svg + '</div><div class="tb-prod-sub">Más producidos, por m2</div><div class="tb-top">' + top + '</div>';
   }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudo cargar la producción: ' + notifEscapeHtml(e.message) + '</div>'; }
 }
 async function cargarTablero(){
