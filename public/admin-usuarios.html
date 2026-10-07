@@ -660,7 +660,7 @@ async function cargarUsuarios(){
     <tr>
       <td>${escapeHtml(u.nombre)}</td>
       <td>${escapeHtml(u.usuario)}</td>
-      <td>${escapeHtml(u.rolNombre)}</td>
+      <td>${escapeHtml(u.rolNombre)}${u.vendedorNombre ? ' <span class="muted" title="Vendedor vinculado">· vendedor: ' + escapeHtml(u.vendedorNombre) + '</span>' : ''}</td>
       <td>${(u.orgNombres&&u.orgNombres.length) ? u.orgNombres.map(n=>escapeHtml(n)).join(', ') : '<span class="muted">—</span>'}</td>
       <td><span class="pill ${u.activo ? 'on' : 'off'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
       <td style="white-space:nowrap">
@@ -670,8 +670,18 @@ async function cargarUsuarios(){
     </tr>`).join('') || '<tr><td colspan="6" class="muted">Todavía no hay usuarios cargados.</td></tr>';
 }
 
-function abrirNuevoUsuario(){
+// Selector "Vendedor vinculado": liga esta cuenta con un vendedor (Configuración > Vendedores).
+// Sirve para que sus ventas se le atribuyan (tablero, comisiones en Sueldos, Mis visitas).
+async function opcionesVendedores(actual){
+  let lista = [];
+  try{ lista = await apiVisitas('/vendedores'); }catch(e){}
+  return '<option value="">— Ninguno —</option>' + lista.filter(v => v.activo !== false || v._id === actual)
+    .map(v => `<option value="${v._id}" ${v._id === actual ? 'selected' : ''}>${escapeHtml(v.nombre)}</option>`).join('');
+}
+const HTML_AYUDA_VENDEDOR = '<p class="muted" style="margin:2px 0 6px">Si esta persona vende, vinculá su cuenta con su vendedor: así se le atribuyen sus ventas y Sueldos le calcula la comisión.</p>';
+async function abrirNuevoUsuario(){
   if (!ROLES.length) { alert('Primero creá al menos un rol (aparte de Administrador) en la pestaña Roles.'); return; }
+  const optsVend = await opcionesVendedores('');
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
       <div class="modal">
@@ -682,6 +692,7 @@ function abrirNuevoUsuario(){
         <div class="campo-edit"><label>Contraseña</label><input type="password" id="usrPassword" placeholder="Mínimo 6 caracteres"></div>
         <div class="campo-edit"><label>Rol</label><select id="usrRol">${opcionesRoles()}</select></div>
         <div class="campo-edit"><label>Organizaciones</label>${checkboxesOrganizaciones()}</div>
+        <div class="campo-edit"><label>Vendedor vinculado (opcional)</label>${HTML_AYUDA_VENDEDOR}<select id="usrVendedor">${optsVend}</select></div>
         <div class="err" id="usrErr"></div>
         <button class="btn" style="width:100%;margin-top:6px" onclick="guardarNuevoUsuario()">Crear usuario</button>
       </div>
@@ -696,15 +707,16 @@ async function guardarNuevoUsuario(){
   const errEl = document.getElementById('usrErr');
   errEl.textContent = '';
   try{
-    await api('/', {method:'POST', body:{nombre, usuario, password, rolId, orgIds}});
+    await api('/', {method:'POST', body:{nombre, usuario, password, rolId, orgIds, vendedorId: document.getElementById('usrVendedor').value || undefined}});
     cerrarModal();
     await cargarUsuarios();
   }catch(e){ errEl.textContent = e.message; }
 }
 
-function abrirEditarUsuario(id){
+async function abrirEditarUsuario(id){
   const u = USUARIOS.find(x => x._id === id);
   if (!u) return;
+  const optsVend = await opcionesVendedores(u.vendedorId ? String(u.vendedorId) : '');
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
       <div class="modal">
@@ -714,6 +726,7 @@ function abrirEditarUsuario(id){
         <div class="campo-edit"><label>Usuario</label><input value="${escapeHtml(u.usuario)}" disabled></div>
         <div class="campo-edit"><label>Rol</label><select id="usrRol">${opcionesRoles(u.rolId)}</select></div>
         <div class="campo-edit"><label>Organizaciones</label>${checkboxesOrganizaciones(u.orgIds)}</div>
+        <div class="campo-edit"><label>Vendedor vinculado (opcional)</label>${HTML_AYUDA_VENDEDOR}<select id="usrVendedor">${optsVend}</select></div>
         <div class="campo-edit">
           <label><input type="checkbox" id="usrActivo" ${u.activo ? 'checked' : ''} style="width:auto;margin-right:6px">Usuario activo</label>
         </div>
@@ -736,7 +749,7 @@ async function guardarEdicionUsuario(id){
   const orgIds = orgIdsSeleccionados();
   const errEl = document.getElementById('usrErr');
   errEl.textContent = '';
-  const body = {nombre, rolId, activo, orgIds};
+  const body = {nombre, rolId, activo, orgIds, vendedorId: document.getElementById('usrVendedor').value};
   if (password) body.password = password;
   try{
     await api('/'+id, {method:'PUT', body});

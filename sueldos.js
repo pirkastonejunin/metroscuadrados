@@ -226,7 +226,7 @@ async function calcularComision(db, req, emp, periodo) {
   if (!vend) avisos.push('El vendedor vinculado ya no existe.');
   else if (!pct) avisos.push('El vendedor ' + vend.nombre + ' no tiene un % de comisión cargado (Configuración > Vendedores).');
   const usuarios = await db.collection('usuarios').find({ vendedorId: emp.vendedorId }).project({ nombre: 1 }).toArray();
-  if (!usuarios.length) avisos.push('El vendedor no tiene un usuario vinculado: no se pueden atribuir ventas.');
+  if (!usuarios.length) avisos.push('El vendedor no tiene un usuario vinculado, así que no se le pueden atribuir ventas. Vinculalo en Configuración > Usuarios > Editar > "Vendedor vinculado".');
   let base = 0, ventas = 0, nc = 0;
   if (usuarios.length) {
     const d0 = inicioMes(periodo), d1 = finPeriodo(periodo);
