@@ -43,6 +43,7 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
+const { elegirClienteUnico, clientesActivos } = require('./clienteVinculo');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -538,31 +539,33 @@ router.get('/:id/productos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Obras: hoy la obra guarda al cliente como texto (nombre/teléfono), no con
-// un clienteId; se la asocia por nombre o teléfono coincidente.
-function soloDigitosCli(s) { return String(s || '').replace(/\D/g, ''); }
-function escRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Obras: ver clienteVinculo.js (se vinculan por clienteId; las viejas, solo si el cliente es el único que coincide).
 router.get('/:id/obras', authAdmin, async (req, res) => {
   try {
     const lista = await conReintento(async () => {
       const db = await getDb();
       const c = await clienteDeLaOrg(db, req);
-      const nombres = [c.apellidoRazonSocial, c.nombreFantasia, [c.nombre, c.apellidoRazonSocial].filter(Boolean).join(' '), [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ')]
-        .map(x => String(x || '').trim()).filter(Boolean);
-      const tels = [c.telefono, c.celular].map(soloDigitosCli).filter(t => t.length >= 6);
-      const or = nombres.map(n => ({ 'cliente.nombre': { $regex: '^\\s*' + escRegex(n) + '\\s*$', $options: 'i' } }));
-      if (!or.length) return [];
-      const obras = await db.collection('obras').find(Object.assign({ $or: or }, filtroOrg(req)))
-        .sort({ numero: -1 }).limit(100).toArray();
-      // Por teléfono (comparando solo dígitos, en memoria) para no perder las que cambian de nombre.
-      if (tels.length) {
-        const ids = new Set(obras.map(o => String(o._id)));
-        const otras = await db.collection('obras').find(Object.assign({ 'cliente.telefono': { $exists: true, $ne: '' } }, filtroOrg(req))).sort({ numero: -1 }).limit(2000).toArray();
-        for (const o of otras) {
-          if (!ids.has(String(o._id)) && tels.includes(soloDigitosCli(o.cliente && o.cliente.telefono))) obras.push(o);
+      const org = filtroOrg(req);
+      // 1) Las ya vinculadas por clienteId.
+      const obras = await db.collection('obras').find(Object.assign({ clienteId: c._id }, org)).toArray();
+      const ya = new Set(obras.map(o => String(o._id)));
+      // 2) Las viejas sin vínculo: se vinculan solo si este cliente es el ÚNICO que coincide
+      //    por nombre/teléfono (si hubiera dos clientes parecidos no se asigna ninguna).
+      const sinVinculo = await db.collection('obras').find(Object.assign({ clienteId: { $exists: false } }, org)).sort({ numero: -1 }).limit(3000).toArray();
+      if (sinVinculo.length) {
+        const clientes = await clientesActivos(db, req.orgId);
+        const nuevas = [];
+        for (const o of sinVinculo) {
+          if (ya.has(String(o._id))) continue;
+          const elegido = elegirClienteUnico(clientes, { nombre: o.cliente && o.cliente.nombre, telefono: o.cliente && o.cliente.telefono });
+          if (elegido && String(elegido) === String(c._id)) { nuevas.push(o); }
         }
-        obras.sort((a, b) => (b.numero || 0) - (a.numero || 0));
+        if (nuevas.length) {
+          await db.collection('obras').updateMany({ _id: { $in: nuevas.map(o => o._id) } }, { $set: { clienteId: c._id } });
+          obras.push(...nuevas);
+        }
       }
+      obras.sort((a, b) => (b.numero || 0) - (a.numero || 0));
       return obras;
     });
     res.json(lista);

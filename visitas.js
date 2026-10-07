@@ -46,6 +46,7 @@ const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const PDFDocument = require('pdfkit');
 const googleCalendar = require('./google-calendar');
+const { buscarClienteUnico } = require('./clienteVinculo');
 const { authUsuario, requiereModulo, requiereVendedorPropio, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 
 const router = express.Router();
@@ -1535,6 +1536,8 @@ async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSelecc
       createdAt: new Date(),
       updatedAt: new Date()
     };
+    const clienteIdObra = await buscarClienteUnico(db, obraDoc.orgId, obraDoc.cliente);
+    if (clienteIdObra) obraDoc.clienteId = clienteIdObra; // sin crear clientes: solo si hay uno único que coincida
     const r = await db.collection('obras').insertOne(obraDoc);
     obraDoc._id = r.insertedId;
 

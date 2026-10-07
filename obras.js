@@ -32,6 +32,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const googleCalendar = require('./google-calendar');
+const { buscarClienteUnico } = require('./clienteVinculo');
 const { authUsuario, requiereModulo, tieneModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 
 const router = express.Router();
@@ -606,6 +607,11 @@ router.post('/', authAdmin, async (req, res) => {
     };
     await conReintento(async () => {
       const db = await getDb();
+      // Vínculo con el cliente (sin crear clientes nuevos): el elegido a mano, o el único que coincida.
+      let cid = req.body.clienteId ? toObjectId(req.body.clienteId) : null;
+      if (cid && !(await db.collection('clientes').findOne(Object.assign({ _id: cid }, filtroOrg(req)), { projection: { _id: 1 } }))) cid = null;
+      if (!cid) cid = await buscarClienteUnico(db, req.orgId, doc.cliente);
+      if (cid) doc.clienteId = cid;
       const r = await db.collection('obras').insertOne(doc);
       doc._id = r.insertedId;
     });
