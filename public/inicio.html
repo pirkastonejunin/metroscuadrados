@@ -34,7 +34,11 @@
   .wrap { max-width: 640px; margin: 0 auto; }
 
   header { margin-bottom: 34px; position: relative; }
-  header .notif-wrap.notif-arriba { position: absolute; top: 0; right: 0; }
+  header.barra-superior { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  header.barra-superior .card-login { background: transparent; border: 0; box-shadow: none; padding: 0; margin: 0 !important; display: flex; align-items: center; gap: 8px; width: auto; max-width: none; }
+  header.barra-superior .card-login label { margin: 0; font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  header.barra-superior .card-login select { width: auto; min-width: 170px; padding: 5px 8px; font-size: 0.82rem; font-family: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  header.barra-superior .notif-wrap { margin-left: auto; }
   header .logo { height: 30px; width: auto; display: block; margin-bottom: 12px; }
   header p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
@@ -623,7 +627,7 @@ async function revisarSesionOficina(){
     // Panel lateral, igual que en el resto de las pantallas de Oficina —
     // acá ya tenemos nuestro propio selector de organización arriba
     // (#orgSelectorBox), así que se le pide al panel que no repita el suyo.
-    if (window.PiedraSidebar) PiedraSidebar.render(me, 'inicio', { ocultarOrg: !verTablero });
+    if (window.PiedraSidebar) PiedraSidebar.render(me, 'inicio', { ocultarOrg: true });
 
     if (verTablero) iniciarTablero(me);
     cargarNotificaciones();
@@ -721,18 +725,24 @@ async function iniciarTablero(me){
   document.getElementById('grupoTablero').classList.remove('hidden');
   // Para quien no es administrador la pantalla de inicio es SOLO el tablero
   // y el calendario: se ocultan los accesos (siguen en el menú lateral).
-  document.getElementById('grupoTabCalendario').classList.toggle('hidden', !simple);
+  // El calendario es de visitas: solo se ofrece a quien tiene ese módulo.
+  document.getElementById('grupoTabCalendario').classList.toggle('hidden', !(simple && tieneModulo(me.rol, 'visitas')));
   if (simple) {
-    // Solo queda la campanita, arriba a la derecha de la pantalla. El saludo y
-    // "Cerrar sesión" viven en el menú de usuario del panel lateral, y el
-    // selector de organización también (ver PiedraSidebar.render más arriba).
-    const hdr = document.querySelector('header'), campana = document.getElementById('notifWrap');
-    if (hdr && campana && campana.parentNode !== hdr) { campana.classList.add('notif-arriba'); hdr.appendChild(campana); }
-    const sub = document.querySelector('header p'); if (sub) sub.classList.add('hidden');
-    ['oficinaSesion','orgSelectorBox'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    // Barra superior compacta (sin logo ni subtítulo, que ya están en el panel
+    // lateral): a la izquierda la organización, a la derecha la campanita.
+    // El saludo y "Cerrar sesión" viven en el menú de usuario del panel lateral.
+    const hdr = document.querySelector('header'), campana = document.getElementById('notifWrap'), orgBox = document.getElementById('orgSelectorBox');
+    if (hdr && campana) {
+      hdr.classList.add('barra-superior');
+      hdr.querySelectorAll('.logo, p').forEach(el => el.classList.add('hidden'));
+      if (orgBox) hdr.appendChild(orgBox);
+      campana.classList.add('notif-arriba');
+      hdr.appendChild(campana);
+    }
+    document.getElementById('oficinaSesion').classList.add('hidden');
     ['oficinaLista','oficinaSinModulos','grupoVendedores','grupoVencimientos','tituloOficina'].forEach(id => document.getElementById(id).classList.add('hidden'));
     const f = document.getElementById('tabCalendario');
-    if (!f.getAttribute('src')) f.setAttribute('src', '/calendario.html?embed=1');
+    if (!f.getAttribute('src') && tieneModulo(me.rol, 'visitas')) f.setAttribute('src', '/calendario.html?embed=1');
   }
   document.getElementById('tabVendedorBox').classList.remove('hidden');
   {
