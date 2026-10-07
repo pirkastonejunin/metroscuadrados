@@ -115,6 +115,33 @@
   </header>
   <main>
     <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;flex:1">
+          <div style="min-width:220px"><label>Cliente</label><input id="lcCliente" placeholder="Buscar por nombre…" oninput="renderListaCobranzas()"></div>
+          <div style="min-width:150px"><label>Forma</label>
+            <select id="lcForma" onchange="cargarListaCobranzas()">
+              <option value="">Todas</option><option value="efectivo">Efectivo</option><option value="cuenta">Transferencia</option><option value="cheque">Cheque</option><option value="tarjeta">Tarjeta</option>
+            </select></div>
+          <div style="min-width:140px"><label>Desde</label><input id="lcDesde" type="date" onchange="cargarListaCobranzas()"></div>
+          <div style="min-width:140px"><label>Hasta</label><input id="lcHasta" type="date" onchange="cargarListaCobranzas()"></div>
+        </div>
+        <button class="btn" onclick="toggleNuevaCobranza(true)">+ Nueva cobranza</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Cobrado hoy</div><div id="rcDiaMonto" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Cobranzas de hoy</div><div id="rcDiaCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Cobrado en el mes</div><div id="rcMesMonto" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Cobranzas del mes</div><div id="rcMesCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Fecha</th><th>Cliente</th><th>Concepto</th><th>Forma</th><th>Monto</th><th></th></tr></thead>
+        <tbody id="cobranzasBody"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card hidden" id="nuevaCobranzaCard">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span></span><button class="btn small secondary" onclick="toggleNuevaCobranza(false)">Cerrar</button></div>
       <h3 style="margin-top:0">Recibo a cuenta de cliente</h3>
       <p class="muted" style="margin-top:-6px">Un cobro que no está atado a una venta puntual — reduce directamente el saldo de la cuenta corriente del cliente.</p>
       <div><label>Cliente *</label><div id="cbClienteCombo"></div></div>
@@ -250,6 +277,7 @@ async function iniciarApp(){
   await Promise.all([cargarCajasYBancosCB(), asegurarClientesCargadosCB()]);
   document.getElementById('cbClienteCombo').innerHTML = comboClienteHtmlCB();
   document.getElementById('cbFecha').value = new Date().toISOString().slice(0,10);
+  cargarListaCobranzas();
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
 }
@@ -463,8 +491,55 @@ async function confirmarReciboCB(){
     ImpuestosUI.cargar('impCB', {});
     await Promise.all([cargarCajasYBancosCB(), mostrarClienteSeleccionadoCB(clienteId)]);
     actualizarTipoValorCB();
+    cargarListaCobranzas();
     okEl.innerHTML = 'Recibo registrado.' + (reciboUrl ? ` <button class="btn small secondary" onclick="imprimirDocumento('${reciboUrl}')">Imprimir recibo</button>` : '');
   }catch(e){ errEl.textContent = e.message; }
+}
+
+
+// -------------------------------------------------------------------
+// Listado de cobranzas (7/10/2026) — mismo esquema que el listado de Ventas.
+// -------------------------------------------------------------------
+let cobranzasCache = [];
+function montoResumenCB(m){
+  const mons = Object.keys(m || {});
+  if (!mons.length) return money(0);
+  return mons.map(k => (k === 'ARS' ? '' : k + ' ') + money(m[k])).join(' + ');
+}
+async function cargarListaCobranzas(){
+  const params = new URLSearchParams();
+  ['Forma:forma','Desde:desde','Hasta:hasta'].forEach(x => { const [id, k] = x.split(':'); const v = document.getElementById('lc' + id).value; if (v) params.set(k, v); });
+  const body = document.getElementById('cobranzasBody');
+  try{
+    const r = await fetch(BASE + '/cobranzas?' + params.toString(), {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo cargar.');
+    cobranzasCache = data.cobranzas;
+    document.getElementById('rcDiaMonto').textContent = montoResumenCB(data.resumen.dia.monto);
+    document.getElementById('rcDiaCant').textContent = data.resumen.dia.cantidad;
+    document.getElementById('rcMesMonto').textContent = montoResumenCB(data.resumen.mes.monto);
+    document.getElementById('rcMesCant').textContent = data.resumen.mes.cantidad;
+    renderListaCobranzas();
+  }catch(e){ body.innerHTML = `<tr><td colspan="6" class="err">${escapeHtml(e.message)}</td></tr>`; }
+}
+function renderListaCobranzas(){
+  const q = document.getElementById('lcCliente').value.trim().toLowerCase();
+  const lista = cobranzasCache.filter(c => !q || String(c.clienteNombre || '').toLowerCase().includes(q));
+  const body = document.getElementById('cobranzasBody');
+  if (!lista.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No hay cobranzas para estos filtros.</td></tr>'; return; }
+  body.innerHTML = lista.map(c => `
+    <tr>
+      <td class="muted">${fechaCorta(c.fecha)}</td>
+      <td>${escapeHtml(c.clienteNombre || '—')}</td>
+      <td>${escapeHtml(c.concepto || '—')}${c.observaciones ? `<div class="muted">${escapeHtml(c.observaciones)}</div>` : ''}</td>
+      <td>${escapeHtml(c.formaLabel)}</td>
+      <td>${(c.moneda && c.moneda !== 'ARS' ? c.moneda + ' ' : '') + money(c.monto)}</td>
+      <td style="white-space:nowrap">${c.reciboUrl ? botonesImprimible(c.reciboUrl) : ''}</td>
+    </tr>`).join('');
+}
+function toggleNuevaCobranza(mostrar){
+  document.getElementById('nuevaCobranzaCard').classList.toggle('hidden', !mostrar);
+  if (mostrar) document.getElementById('nuevaCobranzaCard').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 // Imprimibles (3/10/2026) — ver el mismo helper en admin-ventas.html.

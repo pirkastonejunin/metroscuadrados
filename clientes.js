@@ -148,7 +148,7 @@ const TIPOS_MOVIMIENTO_CC_VALIDOS = ['debito', 'credito'];
 //     por cliente, actualizado con $inc en cada movimiento (saldo > 0 =
 //     el cliente debe; saldo < 0 = tiene a favor / pagó por adelantado).
 // -----------------------------------------------------------------------
-async function registrarMovimientoCuentaCorriente(db, req, { clienteId, clienteNombre, tipo, monto, moneda, concepto, origen, ventaId, chequeId, observaciones, fecha }) {
+async function registrarMovimientoCuentaCorriente(db, req, { clienteId, clienteNombre, tipo, monto, moneda, concepto, origen, ventaId, chequeId, observaciones, fecha, extra }) {
   if (!clienteId) throw err(400, 'Falta el cliente');
   if (!TIPOS_MOVIMIENTO_CC_VALIDOS.includes(tipo)) throw err(400, 'Tipo de movimiento de cuenta corriente inválido');
   const montoNum = Number(monto);
@@ -160,6 +160,7 @@ async function registrarMovimientoCuentaCorriente(db, req, { clienteId, clienteN
     ventaId: ventaId || null, chequeId: chequeId || null, observaciones: observaciones || '',
     usuarioNombre, fecha: fecha || new Date(), orgId: req.orgId, createdAt: new Date()
   };
+  if (extra) Object.assign(movimiento, extra); // ej. tipoValor/recibo del cobro (listado de Cobranza)
   await db.collection('cuenta_corriente_movimientos').insertOne(movimiento);
   const delta = tipo === 'debito' ? montoNum : -montoNum;
   await db.collection('cuenta_corriente_saldos').updateOne(

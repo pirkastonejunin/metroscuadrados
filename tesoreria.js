@@ -825,6 +825,80 @@ router.post('/movimientos', authOperar, async (req, res) => {
 });
 
 // -----------------------------------------------------------------------
+// Listado de cobranzas (7/10/2026, pedido de Mato: que Cobranza liste los
+// cobros como Ventas lista las ventas). Sale de los créditos de cuenta
+// corriente por cobro (de una venta o a cuenta). La forma de pago y el
+// recibo se toman del propio movimiento (cobros nuevos) o, en los viejos,
+// se infieren del cobro de la venta / del movimiento de caja o banco.
+const FORMA_LABEL_COBRANZA = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', transferencia: 'Transferencia', tarjeta: 'Tarjeta' };
+router.get('/cobranzas', authOperar, async (req, res) => {
+  try {
+    const match = Object.assign({ tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] } }, filtroOrg(req));
+    if (req.query.clienteId) {
+      const cid = toObjectId(req.query.clienteId);
+      if (!cid) throw err(400, 'clienteId inválido');
+      match.clienteId = cid;
+    }
+    if (req.query.origen && ['cobro_venta', 'cobro_cuenta'].includes(req.query.origen)) match.origen = req.query.origen;
+    if (req.query.desde || req.query.hasta) {
+      match.fecha = {};
+      if (req.query.desde) match.fecha.$gte = new Date(req.query.desde + 'T00:00:00-03:00');
+      if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59-03:00');
+    }
+    const limite = Math.min(Number(req.query.limite) || 300, 1000);
+    const forma = String(req.query.forma || '');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const movs = await db.collection('cuenta_corriente_movimientos').find(match).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray();
+      const ventaIds = [...new Set(movs.filter(m => m.ventaId).map(m => String(m.ventaId)))].map(toObjectId).filter(Boolean);
+      const ventas = ventaIds.length ? await db.collection('ventas').find({ _id: { $in: ventaIds } }).project({ numero: 1, pagos: 1, tipoComprobante: 1, letra: 1 }).toArray() : [];
+      const ventaPorId = {}; ventas.forEach(v => { ventaPorId[String(v._id)] = v; });
+      const fechasCuenta = movs.filter(m => m.origen === 'cobro_cuenta' && !m.tipoValor && !m.chequeId).map(m => m.fecha);
+      const tesoMovs = fechasCuenta.length
+        ? await db.collection('tesoreria_movimientos').find(Object.assign({ origen: 'cobro_cuenta', fecha: { $in: fechasCuenta } }, filtroOrg(req))).toArray() : [];
+      const items = movs.map(m => {
+        let f = m.tipoValor || null, recibo = null;
+        if (m.origen === 'cobro_venta') {
+          const v = m.ventaId ? ventaPorId[String(m.ventaId)] : null;
+          const idx = v ? (v.pagos || []).findIndex(p => new Date(p.fecha).getTime() === new Date(m.fecha).getTime() && (!m.chequeId || p.tipoValor === 'cheque')) : -1;
+          if (idx >= 0) { f = f || v.pagos[idx].tipoValor; recibo = `/api/ventas/${m.ventaId}/pagos/${idx}/recibo`; }
+        } else {
+          if (m.reciboTipo && m.reciboId) recibo = `/api/tesoreria/recibo-cuenta/${m.reciboTipo}/${m.reciboId}`;
+          else if (m.chequeId) { f = f || 'cheque'; recibo = `/api/tesoreria/recibo-cuenta/cheque/${m.chequeId}`; }
+          else {
+            const tm = tesoMovs.find(x => new Date(x.fecha).getTime() === new Date(m.fecha).getTime() && String(x.motivo || '').endsWith(m.clienteNombre || ''));
+            if (tm) {
+              f = f || (tm.cuentaTipo === 'caja' ? 'efectivo' : (/Lote .* \/ Cup/.test(tm.observaciones || '') ? 'tarjeta' : 'cuenta'));
+              recibo = `/api/tesoreria/recibo-cuenta/movimiento/${tm._id}`;
+            }
+          }
+        }
+        const v = m.ventaId ? ventaPorId[String(m.ventaId)] : null;
+        return { _id: m._id, fecha: m.fecha, clienteId: m.clienteId, clienteNombre: m.clienteNombre, origen: m.origen,
+          concepto: m.concepto, ventaId: m.ventaId || null, ventaNumero: v ? v.numero : null, monto: m.monto, moneda: m.moneda || 'ARS',
+          forma: f, formaLabel: f ? (FORMA_LABEL_COBRANZA[f] || f) : '—', observaciones: m.observaciones || '', usuarioNombre: m.usuarioNombre || '', reciboUrl: recibo };
+      });
+      const lista = forma ? items.filter(i => i.forma === forma || (forma === 'cuenta' && i.forma === 'transferencia')) : items;
+
+      // Resumen de hoy y del mes (sin filtros), horario de Argentina.
+      const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
+      const desdeDia = new Date(hoy + 'T00:00:00-03:00');
+      const desdeMes = new Date(hoy.slice(0, 7) + '-01T00:00:00-03:00');
+      const delMes = await db.collection('cuenta_corriente_movimientos')
+        .find(Object.assign({ tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, fecha: { $gte: desdeMes } }, filtroOrg(req)))
+        .project({ fecha: 1, monto: 1, moneda: 1 }).toArray();
+      const resumen = { dia: { cantidad: 0, monto: {} }, mes: { cantidad: 0, monto: {} } };
+      for (const m of delMes) {
+        const mon = m.moneda || 'ARS';
+        const bs = [resumen.mes]; if (new Date(m.fecha) >= desdeDia) bs.push(resumen.dia);
+        bs.forEach(b => { b.cantidad++; b.monto[mon] = (b.monto[mon] || 0) + (Number(m.monto) || 0); });
+      }
+      return { cobranzas: lista, resumen };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Cobro a cuenta de un cliente — un cobro que no está atado a una venta
 // puntual. Pedido de Mato (2/10/2026): "tambien en tesoreria deberiamos
 // poder realizar una cobranza en la cuenta del cliente". Reduce el saldo
@@ -923,7 +997,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
         clienteId, clienteNombre, tipo: 'credito', monto: monto + totalRetenciones, moneda,
         concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId,
         observaciones: [nota, retenciones.length ? 'Incluye retenciones: ' + retenciones.map(r => `${r.tipoNombre} $${r.monto}`).join(', ') : ''].filter(Boolean).join(' — '),
-        fecha
+        fecha, extra: { tipoValor, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId }
       });
       // Las retenciones quedan indexadas con la referencia del recibo (para
       // poder mostrarlas al imprimirlo) — ver GET /recibo-cuenta/:tipo/:id.
