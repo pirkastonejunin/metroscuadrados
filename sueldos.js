@@ -9,6 +9,8 @@
 // Colecciones nuevas:
 //   empleados : { nombre, cuil, vendedorId (opcional, vincula con Vendedores), sector (produccion|administracion|ventas|
 //     logistica|otro), sueldoBasico (referencia), fechaIngreso, notas, activo,
+//     frecuencia (semanal|quincenal|mensual: cada cuánto cobra; la liquidación sigue siendo mensual),
+//     comisionPago (fin_de_mes: comisiones todas juntas un día | con_sueldo: se suman a cada pago),
 //     orgId, createdAt, updatedAt }
 //   sueldos_liquidaciones : { empleadoId, empleadoNombre, sector, periodo
 //     ('AAAA-MM'), sueldo, adicionales, comisiones (+ comisionPct, comisionBase),
@@ -88,6 +90,11 @@ const authSueldos = [authUsuario, resolverOrg, requiereModulo('sueldos'), (req, 
 }];
 
 const SECTORES = { produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
+// Frecuencia de pago: el sueldo se liquida igual una vez por mes, pero se paga en cuotas.
+const FRECUENCIAS = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
+const CUOTAS = { semanal: 4, quincenal: 2, mensual: 1 };
+// Cómo cobra las comisiones quien no cobra por mes: sumadas a cada pago o todas juntas al cierre del mes.
+const COMISION_PAGO = { fin_de_mes: 'Todas juntas, un solo día', con_sueldo: 'Se suman a cada pago' };
 
 function monto(v, etiqueta) {
   if (v === undefined || v === null || v === '') return 0;
@@ -172,7 +179,11 @@ function datosEmpleado(b) {
   if (b.fechaIngreso) fechaIngreso = fechaDe(b.fechaIngreso);
   const vendedorId = b.vendedorId ? toObjectId(b.vendedorId) : null;
   if (b.vendedorId && !vendedorId) throw err(400, 'vendedorId inválido');
-  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas) };
+  const frecuencia = texto(b.frecuencia) || 'mensual';
+  if (!FRECUENCIAS[frecuencia]) throw err(400, 'Frecuencia de pago inválida.');
+  const comisionPago = texto(b.comisionPago) || 'fin_de_mes';
+  if (!COMISION_PAGO[comisionPago]) throw err(400, 'Modo de pago de comisiones inválido.');
+  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas), frecuencia, comisionPago };
 }
 router.get('/empleados', authSueldos, async (req, res) => {
   try {
@@ -218,7 +229,8 @@ function netoVenta(v) {
   const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
   return Number(v.total || 0) * usd * nc;
 }
-async function calcularComision(db, req, emp, periodo) {
+// desde/hasta (opcionales): ventana de fechas distinta del mes completo (pagos semanales con comisión).
+async function calcularComision(db, req, emp, periodo, desde, hasta) {
   if (!emp || !emp.vendedorId) return { vinculado: false, pct: 0, base: 0, monto: 0, ventas: 0, notasCredito: 0, avisos: [] };
   const vend = await db.collection('visitas_vendedores').findOne({ _id: emp.vendedorId });
   const pct = vend && Number(vend.comisionPct) > 0 ? Number(vend.comisionPct) : 0;
@@ -229,9 +241,10 @@ async function calcularComision(db, req, emp, periodo) {
   if (!usuarios.length) avisos.push('El vendedor no tiene un usuario vinculado, así que no se le pueden atribuir ventas. Vinculalo en Configuración > Usuarios > Editar > "Vendedor vinculado".');
   let base = 0, ventas = 0, nc = 0;
   if (usuarios.length) {
-    const d0 = inicioMes(periodo), d1 = finPeriodo(periodo);
+    const d0 = desde || inicioMes(periodo), d1 = hasta || finPeriodo(periodo);
+    // Con ventana propia, "desde" es el corte del pago anterior: no se cuenta dos veces.
     const lista = await db.collection('ventas').find({
-      orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 },
+      orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: desde ? { $gt: d0, $lte: d1 } : { $gte: d0, $lte: d1 },
       $or: [{ usuarioId: { $in: usuarios.map(u => u._id) } }, { usuarioId: { $exists: false }, usuarioNombre: { $in: usuarios.map(u => u.nombre) } }]
     }).project({ total: 1, moneda: 1, cotizacionDolar: 1, tipoComprobante: 1, esFiscal: 1, cae: 1, fiscal: 1, fiscalMoneda: 1, fiscalCotiz: 1 }).toArray();
     lista.forEach(v => { base += netoVenta(v); if (v.tipoComprobante === 'nota_credito') nc++; else ventas++; });
@@ -367,7 +380,9 @@ router.post('/liquidaciones/copiar', authSueldos, async (req, res) => {
         const prev = await db.collection('sueldos_liquidaciones').find({ orgId: req.orgId, empleadoId: emp._id, periodo: { $lt: periodo } }).sort({ periodo: -1 }).limit(1).toArray();
         const p = prev[0];
         const com = await calcularComision(db, req, emp, periodo); // la comisión no se copia: se recalcula con las ventas del mes
-        const c = { comisiones: com.monto, comisionPct: com.pct, comisionBase: com.base };
+        // Quien cobra la comisión sumada a cada pago la va devengando con cada pago: arranca el mes en 0.
+        const conPagos = emp.frecuencia && emp.frecuencia !== 'mensual' && emp.comisionPago === 'con_sueldo';
+        const c = conPagos ? { comisiones: 0, comisionPct: com.pct, comisionBase: 0 } : { comisiones: com.monto, comisionPct: com.pct, comisionBase: com.base };
         await guardarLiquidacion(db, req, p
           ? Object.assign({ periodo, sueldo: p.sueldo, adicionales: p.adicionales, aguinaldo: 0, cargasSociales: p.cargasSociales, descuentos: p.descuentos }, c)
           : Object.assign({ periodo, sueldo: emp.sueldoBasico }, c), emp);
@@ -394,6 +409,153 @@ router.delete('/liquidaciones/:id', authSueldos, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
+// Registra un pago (egreso de Tesorería + renglón en la liquidación). montoComision: la parte del pago
+// que corresponde a comisiones (el resto es sueldo), para llevar por separado lo pagado de cada cosa.
+async function registrarPago(db, req, l, { monto: m, montoComision, fecha, cuentaTipo, cuentaId, nota }) {
+  const saldo = r2(l.neto - (l.totalPagado || 0));
+  if (m > saldo + 0.005) throw err(400, 'El monto supera lo que falta pagar (' + saldo + ').');
+  const dd = fecha.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+  await egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo: 'Sueldo ' + l.empleadoNombre + ' ' + l.periodo + (l.frecuenciaPago && l.frecuenciaPago !== 'mensual' ? ' · pago del ' + dd : ''), observaciones: nota, origen: 'sueldo', fecha });
+  const pago = { monto: m, fecha, cuentaTipo, cuentaId: toObjectId(cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '' };
+  if (montoComision > 0) pago.montoComision = r2(montoComision);
+  l.pagos = (l.pagos || []).concat([pago]);
+  l.totalPagado = r2((l.totalPagado || 0) + m);
+  l.estado = estadoPago(l);
+  await db.collection('sueldos_liquidaciones').updateOne({ _id: l._id }, { $set: { pagos: l.pagos, totalPagado: l.totalPagado, estado: l.estado, updatedAt: new Date() } });
+  return l;
+}
+
+// ---------------------------------------------------------------------------
+// Pagos del período: qué le toca cobrar a cada uno en una fecha, según su frecuencia.
+//  - Sueldo: la parte fija del neto se paga en cuotas (semanal 4, quincenal 2, mensual 1). En el último
+//    pago del mes se paga todo lo que falte, así que una quinta semana o el redondeo no dejan saldo suelto.
+//  - Comisiones: mensual -> todo junto con el sueldo. Semanal/quincenal "se suma a cada pago" -> se suma la
+//    comisión de las ventas desde el pago anterior hasta la fecha. "Todas juntas" -> se sugiere recién en
+//    el último pago del mes, con la comisión que ya tiene la liquidación.
+// ---------------------------------------------------------------------------
+function ultimoPagoDelMes(freq, periodo, fecha) {
+  const mes = fecha.slice(0, 7);
+  if (mes > periodo) return true;
+  if (mes < periodo) return false;
+  const [y, m, d] = fecha.split('-').map(Number);
+  const dias = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  if (freq === 'semanal') return d + 7 > dias;
+  if (freq === 'quincenal') return d >= 16;
+  return true;
+}
+function hoyAR() { return new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10); }
+
+async function armarPagos(db, req, periodo, fechaISO) {
+  fechaDe(fechaISO); // valida el formato
+  const org = filtroOrg(req);
+  const [empleados, liqs] = await Promise.all([
+    db.collection('empleados').find(Object.assign({ activo: { $ne: false } }, org)).sort({ nombre: 1 }).toArray(),
+    db.collection('sueldos_liquidaciones').find(Object.assign({ periodo }, org)).toArray()
+  ]);
+  const porEmp = new Map(liqs.map(l => [String(l.empleadoId), l]));
+  const finDia = new Date(fechaISO + 'T23:59:59.999-03:00');
+  const filas = [];
+  for (const emp of empleados) {
+    const freq = emp.frecuencia || 'mensual', modo = emp.comisionPago || 'fin_de_mes';
+    const f = { empleadoId: String(emp._id), nombre: emp.nombre, sector: emp.sector, frecuencia: freq, comisionPago: modo, sinLiquidacion: false };
+    const l = porEmp.get(String(emp._id));
+    if (!l) { f.sinLiquidacion = true; filas.push(f); continue; }
+    const saldo = Math.max(0, r2(l.neto - (l.totalPagado || 0)));
+    const pagos = l.pagos || [];
+    const comPag = pagos.reduce((s, p) => s + (p.montoComision || 0), 0);
+    const fijoPag = pagos.reduce((s, p) => s + p.monto - (p.montoComision || 0), 0);
+    const fijoTotal = Math.max(0, r2(l.neto - (l.comisiones || 0)));
+    const comTotal = r2(l.neto - fijoTotal);
+    const fijoSaldo = Math.min(Math.max(0, r2(fijoTotal - fijoPag)), saldo);
+    const comSaldo = Math.min(Math.max(0, r2(comTotal - comPag)), r2(saldo - fijoSaldo));
+    const ultimo = ultimoPagoDelMes(freq, periodo, fechaISO);
+    let comNueva = 0, comBase = 0, comHasta = null, avisos = [];
+    if (freq !== 'mensual' && modo === 'con_sueldo' && emp.vendedorId) {
+      const desde = l.comisionHasta ? new Date(l.comisionHasta) : null;
+      const tope = finPeriodo(periodo);
+      const hasta = finDia < tope ? finDia : tope;
+      if (!desde || desde < hasta) {
+        const c = await calcularComision(db, req, emp, periodo, desde, hasta);
+        comNueva = c.monto; comBase = c.base; comHasta = hasta; avisos = c.avisos;
+      }
+    }
+    const cuota = freq === 'mensual' || ultimo ? fijoSaldo : Math.min(fijoSaldo, r2(fijoTotal / CUOTAS[freq]));
+    let comSug = 0;
+    if (freq === 'mensual') comSug = comSaldo;
+    else if (modo === 'con_sueldo') comSug = r2(comSaldo + comNueva);
+    else comSug = ultimo ? comSaldo : 0;
+    Object.assign(f, {
+      liquidacionId: String(l._id), neto: l.neto, totalPagado: l.totalPagado || 0, saldo,
+      fijoSaldo, sugeridoFijo: r2(cuota), comisionDisponible: freq !== 'mensual' && modo === 'con_sueldo' ? r2(comSaldo + comNueva) : comSaldo,
+      sugeridaComision: r2(comSug), comisionNueva: comNueva, ultimoPago: ultimo, avisos,
+      saldado: saldo <= 0.005
+    });
+    f._interno = { comBase, comHasta };
+    filas.push(f);
+  }
+  return filas;
+}
+
+router.get('/pagos-periodo', authSueldos, async (req, res) => {
+  try {
+    const periodo = validarPeriodo(req.query.periodo || periodoActual());
+    const fecha = req.query.fecha || hoyAR();
+    const filas = await conReintento(async () => armarPagos(await getDb(), req, periodo, fecha));
+    filas.forEach(f => { delete f._interno; });
+    res.json({ periodo, fecha, filas });
+  } catch (e) { responder(res, e); }
+});
+
+// Paga a varios empleados juntos, desde la misma caja o banco. Cada uno es un egreso aparte.
+router.post('/pagar-lote', authSueldos, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const periodo = validarPeriodo(b.periodo);
+    const fechaISO = b.fecha || hoyAR();
+    const fecha = fechaDe(fechaISO);
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!items.length) throw err(400, 'No elegiste a nadie para pagar.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const filas = await armarPagos(db, req, periodo, fechaISO);
+      const resultados = [];
+      for (const it of items) {
+        const f = filas.find(x => x.empleadoId === String(it.empleadoId));
+        const nombre = f ? f.nombre : String(it.empleadoId);
+        try {
+          if (!f || f.sinLiquidacion) throw err(400, 'No tiene liquidación en ' + periodo + '.');
+          const fijo = monto(it.fijo, 'El sueldo'), com = monto(it.comision, 'La comisión');
+          if (fijo > f.fijoSaldo + 0.005) throw err(400, 'El sueldo supera lo que falta pagar (' + f.fijoSaldo + ').');
+          if (com > f.comisionDisponible + 0.005) throw err(400, 'La comisión supera lo disponible (' + f.comisionDisponible + ').');
+          const total = r2(fijo + com);
+          if (!(total > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
+          const col = db.collection('sueldos_liquidaciones');
+          let l = await col.findOne({ _id: toObjectId(f.liquidacionId) });
+          // Comisión nueva (ventas desde el pago anterior): pasa a la liquidación aunque se pague de menos;
+          // lo que no se pague queda como saldo de comisión para el próximo pago.
+          if (f.comisionNueva > 0) {
+            l.comisiones = r2((l.comisiones || 0) + f.comisionNueva);
+            l.comisionBase = r2((l.comisionBase || 0) + f._interno.comBase);
+            l.comisionHasta = f._interno.comHasta;
+            calcular(l);
+            await col.updateOne({ _id: l._id }, { $set: { comisiones: l.comisiones, comisionBase: l.comisionBase, comisionHasta: l.comisionHasta, bruto: l.bruto, costoEmpresa: l.costoEmpresa, neto: l.neto, estado: l.estado, updatedAt: new Date() } });
+          } else if (f._interno && f._interno.comHasta && f.frecuencia !== 'mensual') {
+            await col.updateOne({ _id: l._id }, { $set: { comisionHasta: f._interno.comHasta } });
+          }
+          l.frecuenciaPago = f.frecuencia;
+          await registrarPago(db, req, l, { monto: total, montoComision: com, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota: texto(b.nota) });
+          resultados.push({ empleadoId: f.empleadoId, nombre, ok: true, monto: total });
+        } catch (e) {
+          if (!e.status) throw e;
+          resultados.push({ empleadoId: String(it.empleadoId), nombre, ok: false, error: e.message });
+        }
+      }
+      return resultados;
+    });
+    res.json({ resultados: out, pagados: out.filter(r => r.ok).length, total: r2(out.filter(r => r.ok).reduce((s, r) => s + r.monto, 0)) });
+  } catch (e) { responder(res, e); }
+});
+
 router.post('/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
@@ -405,15 +567,7 @@ router.post('/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
       const db = await getDb();
       const l = await db.collection('sueldos_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!l) throw err(404, 'Liquidación no encontrada.');
-      const saldo = r2(l.neto - (l.totalPagado || 0));
-      if (m > saldo + 0.005) throw err(400, 'El monto supera lo que falta pagar (' + saldo + ').');
-      await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Sueldo ' + l.empleadoNombre + ' ' + l.periodo, observaciones: nota, origen: 'sueldo', fecha });
-      const pago = { monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '' };
-      l.pagos = (l.pagos || []).concat([pago]);
-      l.totalPagado = r2((l.totalPagado || 0) + m);
-      l.estado = estadoPago(l);
-      await db.collection('sueldos_liquidaciones').updateOne({ _id: id }, { $set: { pagos: l.pagos, totalPagado: l.totalPagado, estado: l.estado, updatedAt: new Date() } });
-      return l;
+      return registrarPago(db, req, l, { monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota });
     });
     res.json(liq);
   } catch (e) { responder(res, e); }
