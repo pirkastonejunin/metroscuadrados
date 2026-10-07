@@ -942,44 +942,6 @@ router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Archivo de ingreso de stock para Dux, con las columnas EXACTAS de su
-// plantilla de importación (mismo orden — Dux no publica que el orden
-// importe, pero para no arriesgar se respeta el de la plantilla real).
-// Solo entran las filas con SKU cargado (sin código no hay forma de
-// identificar el producto en Dux); TIPO MOVIMIENTO fijo en "INGRESO" (suma
-// a lo que ya había en stock, no lo pisa) y el resto de las columnas
-// (talle/color/cantidad mínima/trazabilidad) van vacías — estos productos
-// no tienen variantes ni son trazables.
-router.get('/produccion/:fecha/dux', authProduccion, async (req, res) => {
-  try {
-    const fecha = validarFecha(req.params.fecha);
-    const doc = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('costos_produccion_diaria').findOne(Object.assign({ fecha }, filtroOrg(req)));
-    });
-    const items = (doc && doc.items) || [];
-    const conSku = items.filter(it => it.sku);
-    if (!conSku.length) throw err(400, 'Ninguno de los productos cargados ese día tiene SKU asignado — no se puede generar el archivo para Dux.');
-
-    const filas = [
-      ['CODIGO', 'TALLE', 'COLOR', 'CANTIDAD DISPONIBLE', 'CANTIDAD MÍNIMA', 'TIPO MOVIMIENTO', 'NUMERO IDENTIFICACION TRAZABLE']
-    ];
-    conSku.forEach(it => filas.push([
-      it.sku, '', '', Number(it.cantidadConvertida.toFixed(4)), '', 'INGRESO', ''
-    ]));
-
-    const hoja = XLSX.utils.aoa_to_sheet(filas);
-    hoja['!cols'] = [{ wch: 16 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 24 }];
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, 'Stock');
-    const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
-
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="ingreso-stock-dux-' + fecha + '.xlsx"');
-    res.send(buffer);
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
-
 // ---------------------------------------------------------------------
 // Listas de precio — un % de markup fijo sobre el costo ACTUAL de cada
 // producto (ej: "Mayorista" +30%, "Consumidor final" +60%). No guardan un
