@@ -149,6 +149,7 @@
         </div>
       </div>
     </div>
+    <div id="resumenPresupuestos" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px"></div>
     <div class="card">
       <table>
         <thead><tr><th>Fecha</th><th>Nº</th><th>Cliente</th><th>Vendedor</th><th>Total</th><th>Estado</th><th>Próx. contacto</th><th></th></tr></thead>
@@ -278,13 +279,49 @@ async function cargarPresupuestos(){
     body.innerHTML = '<tr><td colspan="8" class="err">' + escapeHtml(e.message) + '</td></tr>';
   }
 }
+// Tarjetas de resumen por estado (7/10/2026, pedido de Mato): cantidad y total
+// de cada estado, sobre el rango de fechas y la búsqueda elegidos (sin aplicar el
+// filtro de estado, para ver siempre el panorama completo). Tocar una tarjeta filtra.
+const COLOR_ESTADO_TARJETA = { presupuestado: 'var(--info)', en_seguimiento: 'var(--warn)', aprobado: 'var(--ok)', rechazado: 'var(--danger)' };
+function montoTarjeta(m){
+  const mons = Object.keys(m);
+  if (!mons.length) return money(0);
+  return mons.map(k => (k === 'ARS' ? '' : k + ' ') + money(m[k])).join(' + ');
+}
+function renderResumenPresupuestos(base){
+  const estadoFiltro = document.getElementById('fEstado').value;
+  const acc = {};
+  Object.keys(ESTADO_LABEL).forEach(e => { acc[e] = { n: 0, m: {} }; });
+  const tot = { n: 0, m: {} };
+  base.forEach(p => {
+    const a = acc[p.estado]; if (!a) return;
+    const mon = p.moneda || 'ARS', t = Number(p.total) || 0;
+    a.n++; a.m[mon] = (a.m[mon] || 0) + t;
+    tot.n++; tot.m[mon] = (tot.m[mon] || 0) + t;
+  });
+  const tarjeta = (clave, titulo, d, color) => `
+    <div class="card" onclick="filtrarPorEstadoTarjeta('${clave}')" style="margin:0;cursor:pointer;border-left:4px solid ${color};${estadoFiltro === clave ? 'outline:2px solid ' + color + ';' : ''}">
+      <div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">${titulo}</div>
+      <div style="font-size:22px;font-weight:800;margin-top:4px">${montoTarjeta(d.m)}</div>
+      <div class="muted" style="margin-top:2px">${d.n} presupuesto${d.n === 1 ? '' : 's'}${tot.n && clave ? ' · ' + Math.round(d.n * 100 / tot.n) + '%' : ''}</div>
+    </div>`;
+  document.getElementById('resumenPresupuestos').innerHTML =
+    tarjeta('', 'Total', tot, 'var(--text)') +
+    Object.keys(ESTADO_LABEL).map(e => tarjeta(e, ESTADO_LABEL[e], acc[e], COLOR_ESTADO_TARJETA[e])).join('');
+}
+function filtrarPorEstadoTarjeta(estado){
+  const sel = document.getElementById('fEstado');
+  sel.value = (sel.value === estado) ? '' : estado;
+  renderPresupuestos();
+}
 function renderPresupuestos(){
   const body = document.getElementById('presupuestosBody');
   const q = (document.getElementById('fBusqueda').value || '').trim().toLowerCase();
   const estadoFiltro = document.getElementById('fEstado').value;
   let lista = presupuestosCache;
-  if (estadoFiltro) lista = lista.filter(p => p.estado === estadoFiltro);
   if (q) lista = lista.filter(p => (p.clienteNombre||'').toLowerCase().includes(q) || String(p.numero||'').includes(q));
+  renderResumenPresupuestos(lista);
+  if (estadoFiltro) lista = lista.filter(p => p.estado === estadoFiltro);
   if (!lista.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay presupuestos para este filtro.</td></tr>'; return; }
   body.innerHTML = lista.map(p => `
     <tr>
