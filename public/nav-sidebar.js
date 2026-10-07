@@ -124,6 +124,7 @@
     // Reportes (7/10/2026, pedido de Mato): siempre al final del menú, separados
     // de la parte operativa. Los reportes nuevos van acá adentro.
     { nombre: 'Reportes', items: [
+      { key: 'informe-ventas', href: '/admin-informe-ventas.html', modulo: 'informe_ventas', label: 'Informe de ventas', icon: ICONOS.ventas || ICONOS.fiscal },
       { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
     ]}
   ];
