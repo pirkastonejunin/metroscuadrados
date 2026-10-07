@@ -50,7 +50,6 @@
   .aviso-sku b{display:block;margin-bottom:2px;}
   .aviso-ok{background:var(--ok-soft);color:var(--ok);border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:12px;}
   .aviso-ok b{display:block;margin-bottom:2px;}
-  .resumen-box{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;white-space:pre-wrap;font-size:13px;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.5;}
   .acciones{display:flex;gap:8px;margin-top:10px;}
   .acciones .btn{flex:1;}
   h2.titulo-seccion{font-size:14px;margin:0 0 10px;}
@@ -124,14 +123,6 @@
       <button class="btn" id="btnIngresarStock" style="margin-top:10px" onclick="ingresarAStock()">Ingresar producción a stock</button>
     </div>
 
-    <div class="card" id="cardResumen">
-      <h2 class="titulo-seccion">Para mandar por WhatsApp</h2>
-      <div class="resumen-box" id="resumenTexto">Cargá y guardá al menos un producto para generar el resumen.</div>
-      <div class="acciones">
-        <button class="btn secondary" onclick="copiarResumen()">Copiar texto</button>
-        <button class="btn" id="btnDux" onclick="descargarDux()">Generar archivo para Dux</button>
-      </div>
-    </div>
   </main>
 </div>
 
@@ -278,21 +269,11 @@ function juntarItems(){
 function mostrarAvisoSku(sinSku){
   const div = document.getElementById('avisoSku');
   if (sinSku && sinSku.length) {
-    div.innerHTML = '<b>Sin SKU asignado (no van a entrar en el archivo de Dux):</b>' + sinSku.map(escapeHtml).join(', ');
+    div.innerHTML = '<b>Sin SKU asignado (no van a entrar a stock):</b>' + sinSku.map(escapeHtml).join(', ');
     div.classList.remove('hidden');
   } else {
     div.classList.add('hidden');
   }
-}
-
-function generarResumenTexto(fecha, items){
-  if (!items.length) return 'Cargá y guardá al menos un producto para generar el resumen.';
-  const lineas = items.map(it => {
-    const unidad = it.unidadConvertida === 'm2' ? 'm²' : (it.unidadConvertida === 'unidad' ? 'unidades' : 'paquetes');
-    const cant = Number(it.cantidadConvertida).toLocaleString('es-AR', {maximumFractionDigits:2});
-    return `• ${it.nombre}: ${it.paquetes} paquete${it.paquetes===1?'':'s'} = ${cant} ${unidad}`;
-  });
-  return `Producción del ${fecha}\n` + lineas.join('\n');
 }
 
 // Refleja en la tarjeta "Ingresar a Stock" el estado que viene de
@@ -335,8 +316,6 @@ async function cargarProduccion(){
   document.getElementById('ultimaActualizacion').textContent = data.actualizadoPor
     ? `Última carga: ${data.actualizadoPor.nombre}${data.updatedAt ? ' — ' + new Date(data.updatedAt).toLocaleString('es-AR') : ''}`
     : '';
-  document.getElementById('resumenTexto').textContent = generarResumenTexto(fecha, data.items || []);
-  document.getElementById('btnDux').disabled = !(data.items && data.items.some(it => it.sku));
   actualizarEstadoStock(data);
 }
 
@@ -355,8 +334,6 @@ async function guardarProduccion(){
     document.getElementById('ultimaActualizacion').textContent = data.actualizadoPor
       ? `Última carga: ${data.actualizadoPor.nombre}${data.updatedAt ? ' — ' + new Date(data.updatedAt).toLocaleString('es-AR') : ''}`
       : '';
-    document.getElementById('resumenTexto').textContent = generarResumenTexto(fecha, data.items || []);
-    document.getElementById('btnDux').disabled = !(data.items && data.items.some(it => it.sku));
     actualizarEstadoStock(data);
   }catch(e){
     document.getElementById('formErr').textContent = e.message;
@@ -391,36 +368,6 @@ async function ingresarAStock(){
   }
 }
 
-function copiarResumen(){
-  const texto = document.getElementById('resumenTexto').textContent;
-  navigator.clipboard.writeText(texto).then(() => {
-    document.getElementById('formOk').textContent = 'Texto copiado.';
-    setTimeout(() => { document.getElementById('formOk').textContent = ''; }, 2000);
-  }).catch(() => {});
-}
-
-async function descargarDux(){
-  const fecha = document.getElementById('fecha').value || hoyISO();
-  document.getElementById('formErr').textContent = '';
-  try{
-    const r = await fetch(BASE + '/produccion/' + encodeURIComponent(fecha) + '/dux', {headers: headersAuth()});
-    if (!r.ok) {
-      const data = await r.json().catch(() => ({}));
-      throw new Error(data.error || 'No se pudo generar el archivo.');
-    }
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'ingreso-stock-dux-' + fecha + '.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }catch(e){
-    document.getElementById('formErr').textContent = e.message;
-  }
-}
 </script>
 </body>
 </html>
