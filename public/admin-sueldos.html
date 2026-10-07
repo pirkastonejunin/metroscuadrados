@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sueldos - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea; --danger:#c53030; --danger-soft:#fbe4e1; --piedra:#5d646d;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8; --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316; --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f; --piedra:#9aa0a8; --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5); }
+  }
+  :root[data-theme="dark"] { --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8; --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316; --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f; --piedra:#9aa0a8; --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5); }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  main{padding:20px;max-width:1280px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .muted{color:var(--muted);font-size:12px;} .hidden{display:none !important;} .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;} #loginScreen .card{width:300px;text-align:center;}
+  .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+  .tb-filtros select,.tb-filtros input[type=date],.tb-filtros input[type=text]{width:auto;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);}
+  .tb-filtros input[type=text]{min-width:150px;}
+  .tb-filtros label.chk{display:flex;align-items:center;gap:5px;margin:0;font-size:12px;cursor:pointer;} .tb-filtros label.chk input{width:auto;}
+  .seg{display:inline-flex;background:var(--card);border-radius:999px;box-shadow:var(--shadow);padding:3px;gap:2px;border:1px solid var(--border);}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;font-weight:700;padding:5px 13px;border-radius:999px;cursor:pointer;}
+  .seg button.on{background:var(--accent);color:var(--accent-ink);}
+  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:12px 16px;}
+  .kpi .et{font-size:12px;font-weight:700;color:var(--muted);} .kpi .val{font-size:clamp(1.2rem,2vw,1.6rem);font-weight:800;letter-spacing:-.01em;white-space:nowrap;}
+  .kpi.main{background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);color:#f3f1ee;border:0;} .kpi.main .et{color:#aeb2b8;}
+  .tabla{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;}
+  .tabla table{width:100%;border-collapse:collapse;font-size:13px;}
+  .tabla th{text-align:left;font-size:11.5px;color:var(--muted);font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  .tabla td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  .tabla tr:last-child td{border-bottom:0;} .tabla .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;} .tabla th.n{text-align:right;}
+  .tabla tbody tr.clic{cursor:pointer;} .tabla tbody tr.clic:hover{background:var(--bg);}
+  .tabla tfoot td{font-weight:800;background:var(--bg);}
+  .barra-imp{display:flex;align-items:center;gap:8px;justify-content:flex-end;} .barra-imp .pista{width:90px;height:7px;border-radius:4px;background:var(--bg);overflow:hidden;flex:none;} .barra-imp .pista>div{height:100%;background:var(--accent);border-radius:4px;}
+  .vacio{padding:28px;text-align:center;color:var(--muted);}
+  .tb-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:12px;font-weight:800;cursor:help;}
+  @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .tabla{overflow-x:auto;}}
+  .tb-filtros input[type=month]{width:auto;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);}
+  .tabla{overflow-x:auto;} .tabla td,.tabla th{padding:8px 10px;} .tabla td:first-child{white-space:nowrap;} .tabla .btn{white-space:nowrap;}
+  .tabs{display:inline-flex;background:var(--card);border-radius:999px;box-shadow:var(--shadow);padding:3px;gap:2px;border:1px solid var(--border);margin-bottom:12px;}
+  .tabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:700;padding:6px 16px;border-radius:999px;cursor:pointer;}
+  .tabs button.on{background:var(--accent);color:var(--accent-ink);}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:14px 16px;margin-bottom:12px;}
+  .panel h3{margin:0 0 10px;font-size:14px;}
+  .form{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;align-items:end;}
+  .form .ancho{grid-column:span 2;} .acciones{display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap;}
+  .chip{display:inline-block;font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;background:var(--bg);color:var(--muted);white-space:nowrap;}
+  .chip.ok{background:var(--ok-soft);color:var(--ok);} .chip.mal{background:var(--danger-soft);color:var(--danger);} .chip.par{background:var(--accent-soft);color:var(--accent);}
+  .tabla td.acc{white-space:nowrap;text-align:right;} .tabla .btn{padding:4px 10px;font-size:12px;border-radius:999px;}
+  .tabla tr.sin td{color:var(--muted);} .vista.hidden{display:none;}
+  .preview{font-size:12.5px;color:var(--muted);margin-top:10px;} .preview b{color:var(--text);}
+  .sectores{font-size:12.5px;color:var(--muted);margin:-4px 0 12px;} .sectores b{color:var(--text);}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Sueldos</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button data-iconizado="1" class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado Sueldos. Pedile a un administrador que lo habilite desde Usuarios y roles.</p>
+    <button data-iconizado="1" class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <main>
+    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button></div>
+    <div id="err"></div><div id="ok"></div>
+
+    <div class="vista" id="v-liq">
+      <div class="tb-filtros">
+        <input type="month" id="fPeriodo" aria-label="Mes" onchange="cargarLiq()">
+        <button data-iconizado="1" class="btn secondary" onclick="copiarMes()" title="Crea la liquidación de este mes para los empleados que todavía no la tienen, copiando la del mes anterior (sin aguinaldo)">Copiar mes anterior</button>
+        <button data-iconizado="1" class="btn secondary" style="margin-left:auto" onclick="exportar()">Exportar a Excel</button>
+        <span class="tb-info" title="Costo para la empresa = sueldo + adicionales + aguinaldo + cargas sociales. Neto a pagar = sueldo + adicionales + aguinaldo - descuentos - adelantos descontados. Los descuentos (aportes y retenciones) ya están dentro del costo: solo bajan lo que se le deposita al empleado. Los adelantos pendientes se descuentan solos al cargar la liquidación. El pago de cargas sociales y aportes a ARCA se carga en Gastos.">i</span>
+      </div>
+      <div class="kpis">
+        <div class="kpi main"><div class="et">Costo para la empresa</div><div class="val" id="kCosto">$ —</div></div>
+        <div class="kpi"><div class="et">Neto a pagar</div><div class="val" id="kNeto">—</div></div>
+        <div class="kpi"><div class="et">Pagado</div><div class="val" id="kPag">—</div></div>
+        <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="kSal">—</div></div>
+      </div>
+      <div class="sectores" id="sectores"></div>
+      <div class="panel hidden" id="pLiq"></div>
+      <div class="panel hidden" id="pPago"></div>
+      <div class="tabla"><table><thead><tr><th>Empleado</th><th class="n" title="Sueldo + adicionales + aguinaldo (pasá el mouse por cada importe para ver el detalle)">Bruto</th><th class="n" title="Cargas sociales a cargo de la empresa">Cargas</th><th class="n" title="Sueldo + adicionales + aguinaldo + cargas sociales">Costo empresa</th><th class="n">Descuentos</th><th class="n">Adelantos</th><th class="n">Neto</th><th class="n">Pagado</th><th>Estado</th><th></th></tr></thead><tbody id="tLiq"></tbody></table></div>
+    </div>
+
+    <div class="vista hidden" id="v-emp">
+      <div class="panel" id="pEmp"></div>
+      <div class="tb-filtros"><label class="chk"><input type="checkbox" id="fBajas" onchange="cargarEmp()"> Ver también los dados de baja</label></div>
+      <div class="tabla"><table><thead><tr><th>Empleado</th><th>Sector</th><th class="n">Sueldo básico</th><th>Ingreso</th><th></th></tr></thead><tbody id="tEmp"></tbody></table></div>
+    </div>
+
+    <div class="vista hidden" id="v-ade">
+      <div class="panel" id="pAde"></div>
+      <div class="tabla"><table><thead><tr><th>Fecha</th><th>Empleado</th><th class="n">Monto</th><th>Estado</th><th>Nota</th><th></th></tr></thead><tbody id="tAde"></tbody></table></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const BASE = '/api/sueldos';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+let EMPLEADOS = [], CUENTAS = {cajas:[], bancos:[]}, LIQ = null;
+const SECTORES = {produccion:'Producción', administracion:'Administración', ventas:'Ventas', logistica:'Logística', otro:'Otros'};
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function $(id){ return document.getElementById(id); }
+const pesos = n => (n < 0 ? '-$ ' : '$ ') + Math.round(Math.abs(n || 0)).toLocaleString('es-AR');
+const hoyISO = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); };
+const fmtF = f => { if (!f) return ''; const d = new Date(f); return d.toLocaleDateString('es-AR'); };
+const isoF = f => { if (!f) return ''; const d = new Date(new Date(f).getTime() - 3*3600e3); return d.toISOString().slice(0,10); };
+
+async function api(metodo, ruta, body){
+  const r = await fetch(BASE + ruta, {method: metodo, headers: headersAuth(body ? {'Content-Type':'application/json'} : {}), body: body ? JSON.stringify(body) : undefined});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+  return d;
+}
+function error(e){ $('ok').innerHTML = ''; $('err').innerHTML = '<div class="err">' + escapeHtml(e.message || e) + '</div>'; }
+function exito(t){ $('err').innerHTML = ''; $('ok').innerHTML = '<div class="ok-msg">' + escapeHtml(t) + '</div>'; setTimeout(() => { $('ok').innerHTML = ''; }, 4000); }
+
+async function login(){
+  const usuario = $('loginUser').value, pass = $('loginPass').value;
+  $('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){ $('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; $('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    const ok = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('sueldos'));
+    if (!ok) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  PiedraSidebar.render(me, 'sueldos');
+  document.title = 'Sueldos - Piedra Negra';
+  $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('fPeriodo').value = hoyISO().slice(0, 7);
+  try{ CUENTAS = await api('GET', '/cuentas'); EMPLEADOS = await api('GET', '/empleados'); }catch(e){ error(e); }
+  await cargarLiq();
+}
+if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('#tabs button'); if (!b) return;
+  [...document.querySelectorAll('#tabs button')].forEach(x => x.classList.toggle('on', x === b));
+  ['liq','emp','ade'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
+  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else { formAde(); cargarAde(); }
+});
+
+// ---------------- Liquidaciones ----------------
+const ESTADO = { pendiente: ['Pendiente', 'mal'], parcial: ['Parcial', 'par'], pagada: ['Pagada', 'ok'] };
+async function cargarLiq(){
+  $('pLiq').classList.add('hidden'); $('pPago').classList.add('hidden');
+  try{ LIQ = await api('GET', '/liquidaciones?periodo=' + $('fPeriodo').value); }catch(e){ error(e); return; }
+  $('err').innerHTML = '';
+  const R = LIQ.resumen;
+  $('kCosto').textContent = pesos(R.costoEmpresa); $('kNeto').textContent = pesos(R.neto); $('kPag').textContent = pesos(R.pagado); $('kSal').textContent = pesos(R.saldo);
+  $('sectores').innerHTML = Object.keys(R.porSector).map(k => (SECTORES[k] || k) + ' <b>' + pesos(R.porSector[k]) + '</b>').join(' · ') || '';
+  let h = LIQ.liquidaciones.map(l => {
+    const [t, c] = ESTADO[l.estado] || [l.estado, ''];
+    return '<tr><td>' + escapeHtml(l.empleadoNombre) + ' <span class="chip">' + escapeHtml(SECTORES[l.sector] || l.sector) + '</span></td><td class="n" title="Sueldo ' + pesos(l.sueldo) + ' · Adicionales ' + pesos(l.adicionales) + ' · Aguinaldo ' + pesos(l.aguinaldo) + '">' + pesos(l.bruto) + '</td><td class="n">' + pesos(l.cargasSociales) + '</td><td class="n"><b>' + pesos(l.costoEmpresa) + '</b></td><td class="n">' + pesos(l.descuentos) + '</td><td class="n">' + pesos(l.adelantosDescontados) + '</td><td class="n"><b>' + pesos(l.neto) + '</b></td><td class="n">' + pesos(l.totalPagado) + '</td><td><span class="chip ' + c + '">' + t + '</span></td><td class="acc">' +
+      (l.estado !== 'pagada' ? '<button data-iconizado="1" class="btn" onclick="formPago(\'' + l._id + '\')">Pagar</button> ' : '') +
+      '<button data-iconizado="1" class="btn secondary" onclick="formLiq(\'' + l.empleadoId + '\')">Editar</button> ' +
+      (!(l.totalPagado > 0) ? '<button data-iconizado="1" class="btn secondary" onclick="borrarLiq(\'' + l._id + '\')" title="Borrar esta liquidación">✕</button>' : '') + '</td></tr>';
+  }).join('');
+  h += LIQ.sinCargar.map(e => '<tr class="sin"><td>' + escapeHtml(e.nombre) + ' <span class="chip">' + escapeHtml(SECTORES[e.sector] || e.sector) + '</span></td><td colspan="8">Sin cargar este mes</td><td class="acc"><button data-iconizado="1" class="btn" onclick="formLiq(\'' + e._id + '\')">Cargar</button></td></tr>').join('');
+  $('tLiq').innerHTML = h || '<tr><td colspan="10" class="vacio">Todavía no hay empleados. Cargalos en la solapa Empleados.</td></tr>';
+}
+function campo(id, etiqueta, valor, extra){ return '<div><label>' + etiqueta + '</label><input type="number" min="0" step="any" id="' + id + '" value="' + (valor || 0) + '" oninput="previewLiq()" ' + (extra || '') + '></div>'; }
+function formLiq(empId){
+  const e = EMPLEADOS.find(x => x._id === empId) || LIQ.sinCargar.find(x => x._id === empId);
+  const l = LIQ.liquidaciones.find(x => x.empleadoId === empId);
+  const v = l || { sueldo: e && e.sueldoBasico, adicionales: 0, aguinaldo: 0, cargasSociales: 0, descuentos: 0, observaciones: '' };
+  const pend = LIQ.adelantosPendientes[empId] || 0;
+  $('pPago').classList.add('hidden');
+  $('pLiq').innerHTML = '<h3>' + (l ? 'Editar' : 'Cargar') + ' liquidación · ' + escapeHtml(e ? e.nombre : l.empleadoNombre) + ' · ' + escapeHtml($('fPeriodo').value) + '</h3><div class="form" data-emp="' + empId + '">' +
+    campo('lSueldo', 'Sueldo', v.sueldo) + campo('lAdic', 'Adicionales', v.adicionales) + campo('lSac', 'Aguinaldo', v.aguinaldo) + campo('lCargas', 'Cargas sociales (empresa)', v.cargasSociales) + campo('lDesc', 'Descuentos (aportes, retenciones)', v.descuentos) +
+    '<div class="ancho"><label>Observaciones</label><input type="text" id="lObs" value="' + escapeHtml(v.observaciones || '') + '"></div></div>' +
+    '<div class="preview" id="lPrev"></div>' + (pend ? '<div class="preview">Tiene <b>' + pesos(pend) + '</b> en adelantos pendientes: se descuentan solos al guardar, hasta donde alcance el neto.</div>' : '') +
+    '<div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarLiq()">Guardar</button><button data-iconizado="1" class="btn secondary" onclick="$(\'pLiq\').classList.add(\'hidden\')">Cancelar</button></div>';
+  $('pLiq').classList.remove('hidden'); previewLiq(); $('pLiq').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+const n$ = id => Number($(id).value) || 0;
+function previewLiq(){
+  const bruto = n$('lSueldo') + n$('lAdic') + n$('lSac');
+  $('lPrev').innerHTML = 'Bruto <b>' + pesos(bruto) + '</b> · Costo para la empresa <b>' + pesos(bruto + n$('lCargas')) + '</b> · Neto antes de adelantos <b>' + pesos(bruto - n$('lDesc')) + '</b>';
+}
+async function guardarLiq(){
+  const empleadoId = document.querySelector('#pLiq .form').dataset.emp;
+  try{
+    await api('POST', '/liquidaciones', {empleadoId, periodo: $('fPeriodo').value, sueldo: n$('lSueldo'), adicionales: n$('lAdic'), aguinaldo: n$('lSac'), cargasSociales: n$('lCargas'), descuentos: n$('lDesc'), observaciones: $('lObs').value});
+    exito('Liquidación guardada.'); await cargarLiq();
+  }catch(e){ error(e); }
+}
+async function borrarLiq(id){
+  if (!confirm('¿Borrar esta liquidación? Los adelantos descontados vuelven a quedar pendientes.')) return;
+  try{ await api('DELETE', '/liquidaciones/' + id); await cargarLiq(); }catch(e){ error(e); }
+}
+async function copiarMes(){
+  try{ const r = await api('POST', '/liquidaciones/copiar', {periodo: $('fPeriodo').value}); exito(r.creadas ? 'Se crearon ' + r.creadas + ' liquidaciones copiando el mes anterior. Revisalas y ajustá lo que cambió.' : 'Todos los empleados ya tienen su liquidación este mes.'); await cargarLiq(); }catch(e){ error(e); }
+}
+function opcionesCuentas(){
+  const o = g => g.map(c => '<option value="' + c.t + ':' + c._id + '">' + escapeHtml(c.nombre) + '</option>').join('');
+  return '<optgroup label="Cajas">' + o(CUENTAS.cajas.map(c => ({...c, t:'caja'}))) + '</optgroup><optgroup label="Bancos">' + o(CUENTAS.bancos.map(c => ({...c, t:'banco'}))) + '</optgroup>';
+}
+function cuentaElegida(id){ const [t, i] = $(id).value.split(':'); return {cuentaTipo: t, cuentaId: i}; }
+function formPago(id){
+  const l = LIQ.liquidaciones.find(x => x._id === id), saldo = Math.round((l.neto - l.totalPagado) * 100) / 100;
+  $('pLiq').classList.add('hidden');
+  $('pPago').innerHTML = '<h3>Pagar sueldo · ' + escapeHtml(l.empleadoNombre) + ' · falta pagar ' + pesos(saldo) + '</h3><div class="form" data-id="' + id + '"><div><label>Monto</label><input type="number" min="0" step="any" id="pMonto" value="' + saldo + '"></div>' +
+    '<div><label>Sale de</label><select id="pCuenta">' + opcionesCuentas() + '</select></div><div><label>Fecha</label><input type="date" id="pFecha" value="' + hoyISO() + '"></div><div class="ancho"><label>Nota</label><input type="text" id="pNota" placeholder="Transferencia, efectivo…"></div></div>' +
+    '<div class="acciones"><button data-iconizado="1" class="btn" onclick="pagar()">Registrar pago</button><button data-iconizado="1" class="btn secondary" onclick="$(\'pPago\').classList.add(\'hidden\')">Cancelar</button><span class="muted">El pago descuenta de la caja o banco elegido en Tesorería.</span></div>';
+  $('pPago').classList.remove('hidden'); $('pPago').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+async function pagar(){
+  const id = document.querySelector('#pPago .form').dataset.id;
+  try{ await api('POST', '/liquidaciones/' + id + '/pagos', Object.assign({monto: n$('pMonto'), fecha: $('pFecha').value, nota: $('pNota').value}, cuentaElegida('pCuenta'))); exito('Pago registrado.'); await cargarLiq(); }catch(e){ error(e); }
+}
+async function exportar(){
+  try{
+    const r = await fetch(BASE + '/liquidaciones/export?periodo=' + $('fPeriodo').value, {headers: headersAuth()});
+    if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'No se pudo exportar'); }
+    const blob = await r.blob(), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'sueldos-' + $('fPeriodo').value + '.xlsx';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }catch(e){ error(e); }
+}
+
+// ---------------- Empleados ----------------
+let EMP_ED = null;
+function formEmp(e){
+  EMP_ED = e || null; const v = e || {nombre:'', cuil:'', sector:'produccion', sueldoBasico:0, fechaIngreso:null, notas:''};
+  $('pEmp').innerHTML = '<h3>' + (e ? 'Editar empleado' : 'Nuevo empleado') + '</h3><div class="form"><div class="ancho"><label>Nombre y apellido</label><input type="text" id="eNombre" value="' + escapeHtml(v.nombre) + '"></div>' +
+    '<div><label>CUIL</label><input type="text" id="eCuil" value="' + escapeHtml(v.cuil) + '"></div>' +
+    '<div><label title="Producción: el costo ya está dentro del costo de los productos. El resto se muestra como gasto en el Estado de resultados.">Sector</label><select id="eSector">' + Object.keys(SECTORES).map(k => '<option value="' + k + '"' + (v.sector === k ? ' selected' : '') + '>' + SECTORES[k] + '</option>').join('') + '</select></div>' +
+    '<div><label>Sueldo básico (referencia)</label><input type="number" min="0" step="any" id="eBasico" value="' + (v.sueldoBasico || 0) + '"></div><div><label>Ingreso</label><input type="date" id="eIngreso" value="' + isoF(v.fechaIngreso) + '"></div>' +
+    '<div class="ancho"><label>Notas</label><input type="text" id="eNotas" value="' + escapeHtml(v.notas || '') + '"></div></div>' +
+    '<div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarEmp()">Guardar</button>' + (e ? '<button data-iconizado="1" class="btn secondary" onclick="formEmp()">Cancelar</button>' : '') + '</div>';
+}
+function datosEmp(){ return {nombre: $('eNombre').value, cuil: $('eCuil').value, sector: $('eSector').value, sueldoBasico: n$('eBasico'), fechaIngreso: $('eIngreso').value, notas: $('eNotas').value}; }
+async function guardarEmp(){
+  try{
+    if (EMP_ED) await api('PUT', '/empleados/' + EMP_ED._id, datosEmp()); else await api('POST', '/empleados', datosEmp());
+    exito('Empleado guardado.'); EMPLEADOS = await api('GET', '/empleados'); formEmp(); await cargarEmp();
+  }catch(e){ error(e); }
+}
+async function cargarEmp(){
+  try{
+    const lista = await api('GET', '/empleados' + ($('fBajas').checked ? '?todos=1' : ''));
+    window.__EMP = lista;
+    $('tEmp').innerHTML = lista.map(e => '<tr' + (e.activo === false ? ' class="sin"' : '') + '><td>' + escapeHtml(e.nombre) + (e.activo === false ? ' <span class="chip">Baja</span>' : '') + '</td><td>' + escapeHtml(SECTORES[e.sector] || e.sector) + '</td><td class="n">' + pesos(e.sueldoBasico) + '</td><td>' + fmtF(e.fechaIngreso) + '</td><td class="acc"><button data-iconizado="1" class="btn secondary" onclick="editarEmp(\'' + e._id + '\')">Editar</button> ' +
+      (e.activo === false ? '<button data-iconizado="1" class="btn" onclick="reactivarEmp(\'' + e._id + '\')">Reactivar</button>' : '<button data-iconizado="1" class="btn secondary" onclick="bajaEmp(\'' + e._id + '\')">Dar de baja</button>') + '</td></tr>').join('') || '<tr><td colspan="5" class="vacio">Todavía no hay empleados.</td></tr>';
+  }catch(e){ error(e); }
+}
+function editarEmp(id){ formEmp(window.__EMP.find(x => x._id === id)); $('pEmp').scrollIntoView({behavior:'smooth', block:'nearest'}); }
+async function bajaEmp(id){ if (!confirm('¿Dar de baja a este empleado? Deja de aparecer en las liquidaciones nuevas; el historial queda.')) return; try{ await api('DELETE', '/empleados/' + id); EMPLEADOS = await api('GET', '/empleados'); await cargarEmp(); }catch(e){ error(e); } }
+async function reactivarEmp(id){
+  const e = window.__EMP.find(x => x._id === id);
+  try{ await api('PUT', '/empleados/' + id, {nombre: e.nombre, cuil: e.cuil, sector: e.sector, sueldoBasico: e.sueldoBasico, fechaIngreso: isoF(e.fechaIngreso), notas: e.notas, activo: true}); EMPLEADOS = await api('GET', '/empleados'); await cargarEmp(); }catch(x){ error(x); }
+}
+
+// ---------------- Adelantos ----------------
+function formAde(){
+  $('pAde').innerHTML = '<h3>Registrar adelanto</h3><div class="form"><div><label>Empleado</label><select id="aEmp">' + EMPLEADOS.map(e => '<option value="' + e._id + '">' + escapeHtml(e.nombre) + '</option>').join('') + '</select></div>' +
+    '<div><label>Monto</label><input type="number" min="0" step="any" id="aMonto" value="0"></div><div><label>Sale de</label><select id="aCuenta">' + opcionesCuentas() + '</select></div><div><label>Fecha</label><input type="date" id="aFecha" value="' + hoyISO() + '"></div>' +
+    '<div class="ancho"><label>Nota</label><input type="text" id="aNota"></div></div><div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarAde()">Registrar adelanto</button><span class="muted">Sale de la caja o banco en Tesorería y se descuenta solo en la próxima liquidación del empleado.</span></div>';
+}
+async function guardarAde(){
+  try{ await api('POST', '/adelantos', Object.assign({empleadoId: $('aEmp').value, monto: n$('aMonto'), fecha: $('aFecha').value, nota: $('aNota').value}, cuentaElegida('aCuenta'))); exito('Adelanto registrado.'); formAde(); await cargarAde(); }catch(e){ error(e); }
+}
+async function cargarAde(){
+  try{
+    const lista = await api('GET', '/adelantos');
+    $('tAde').innerHTML = lista.map(a => '<tr><td>' + fmtF(a.fecha) + '</td><td>' + escapeHtml(a.empleadoNombre) + '</td><td class="n">' + pesos(a.monto) + '</td><td><span class="chip ' + (a.estado === 'pendiente' ? 'par' : 'ok') + '">' + (a.estado === 'pendiente' ? 'Pendiente de descontar' : 'Descontado') + '</span></td><td>' + escapeHtml(a.nota || '') + '</td><td class="acc">' +
+      (a.estado === 'pendiente' ? '<button data-iconizado="1" class="btn secondary" onclick="anularAde(\'' + a._id + '\')" title="Anula el adelanto y devuelve la plata a la caja o banco">Anular</button>' : '') + '</td></tr>').join('') || '<tr><td colspan="6" class="vacio">No hay adelantos registrados.</td></tr>';
+  }catch(e){ error(e); }
+}
+async function anularAde(id){ if (!confirm('¿Anular este adelanto? La plata vuelve a la caja o banco de donde salió.')) return; try{ await api('DELETE', '/adelantos/' + id); await cargarAde(); }catch(e){ error(e); } }
+</script>
+</body>
+</html>

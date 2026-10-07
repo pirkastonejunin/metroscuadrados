@@ -1,0 +1,421 @@
+// ---------------------------------------------------------------------------
+// Sueldos — control de costo laboral (7/10/2026, pedido de Mato).
+//
+// Alcance (acordado con Mato): legajo de empleados con su sector, carga
+// mensual de lo que cuesta cada empleado (sueldo, adicionales, aguinaldo,
+// cargas sociales y descuentos), adelantos, y pago desde Tesorería (caja o
+// banco). NO calcula la liquidación legal ni emite recibos de sueldo.
+//
+// Colecciones nuevas:
+//   empleados : { nombre, cuil, sector (produccion|administracion|ventas|
+//     logistica|otro), sueldoBasico (referencia), fechaIngreso, notas, activo,
+//     orgId, createdAt, updatedAt }
+//   sueldos_liquidaciones : { empleadoId, empleadoNombre, sector, periodo
+//     ('AAAA-MM'), sueldo, adicionales, aguinaldo, cargasSociales, descuentos,
+//     adelantosDescontados, observaciones, bruto, costoEmpresa, neto,
+//     pagos: [{ monto, fecha, cuentaTipo, cuentaId, nota, usuarioNombre }],
+//     totalPagado, estado (pendiente|parcial|pagada), orgId, ... }
+//   sueldos_adelantos : { empleadoId, empleadoNombre, monto, fecha, nota,
+//     cuentaTipo, cuentaId, estado (pendiente|descontado), liquidacionId, orgId }
+//
+// Cuentas:
+//   bruto = sueldo + adicionales + aguinaldo
+//   costo para la empresa = bruto + cargas sociales
+//   neto a pagar al empleado = bruto - descuentos - adelantos descontados
+//   (los descuentos son aportes y retenciones: ya están dentro del bruto, o sea
+//   del costo; solo bajan lo que se le deposita al empleado).
+// Los adelantos pendientes del empleado se descuentan solos al cargar su
+// liquidación, del más viejo al más nuevo, mientras no hagan pasar el neto de 0.
+//
+// Pagos: salen de una caja/banco en pesos de Tesorería (egreso, origen
+// 'sueldo'). El pago de cargas sociales y aportes a ARCA se sigue cargando en
+// Gastos; ese concepto hay que marcarlo en el Estado de resultados como
+// "ya contado" para que no se reste dos veces (el costo ya viene de acá).
+//
+// Estado de resultados (informes.js): el costo de empresa de cada liquidación
+// entra por período; el sector Producción se muestra como "ya incluido en el
+// costo de los productos" y el resto como gasto "Sueldos y cargas · <sector>".
+//
+// Módulo con clave propia ('sueldos'), datos por organización.
+// Integración (server.js):  app.use('/api/sueldos', require('./sueldos'));
+// ---------------------------------------------------------------------------
+
+const express = require('express');
+const { MongoClient, ObjectId } = require('mongodb');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { exportarXlsx } = require('./importExport');
+const tesoreria = require('./tesoreria');
+
+const router = express.Router();
+const DB_NAME = 'calculadora_m2';
+
+let mongoClient;
+let mongoConectando = null;
+async function getDb() {
+  if (!mongoClient) {
+    if (!mongoConectando) {
+      const nuevo = new MongoClient(process.env.MONGODB_URI);
+      mongoConectando = nuevo.connect().then(
+        () => { mongoClient = nuevo; mongoConectando = null; },
+        (e) => { mongoConectando = null; throw e; }
+      );
+    }
+    await mongoConectando;
+  }
+  return mongoClient.db(DB_NAME);
+}
+async function conReintento(fn) {
+  try { return await fn(); }
+  catch (e) { if (e && e.status) throw e; mongoClient = null; return await fn(); }
+}
+function toObjectId(id) { try { return id ? new ObjectId(String(id)) : null; } catch (e) { return null; } }
+function err(status, message) { return Object.assign(new Error(message), { status }); }
+function responder(res, e) { res.status(e.status || 500).json({ error: e.message || 'Error' }); }
+function r2(n) { return Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100; }
+function texto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
+
+const authSueldos = [authUsuario, resolverOrg, requiereModulo('sueldos'), (req, res, next) => {
+  if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando.' });
+  next();
+}];
+
+const SECTORES = { produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
+
+function monto(v, etiqueta) {
+  if (v === undefined || v === null || v === '') return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw err(400, etiqueta + ' tiene que ser un número mayor o igual a 0.');
+  return r2(n);
+}
+function validarPeriodo(p) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(p || ''))) throw err(400, 'El período tiene que ser AAAA-MM.');
+  return p;
+}
+function periodoActual() {
+  const x = new Date(Date.now() - 3 * 3600e3);
+  return x.getUTCFullYear() + '-' + String(x.getUTCMonth() + 1).padStart(2, '0');
+}
+function finPeriodo(p) {
+  const [y, m] = p.split('-').map(Number);
+  const dia = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return new Date(p + '-' + String(dia).padStart(2, '0') + 'T23:59:59.999-03:00');
+}
+function fechaDe(s) {
+  if (!s) return new Date();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(s))) { const d = new Date(s + 'T12:00:00.000-03:00'); if (!isNaN(d.getTime())) return d; }
+  throw err(400, 'La fecha tiene que ser AAAA-MM-DD.');
+}
+function estadoPago(l) {
+  const neto = l.neto || 0, pagado = l.totalPagado || 0;
+  if (pagado <= 0 && neto > 0) return 'pendiente';
+  return pagado + 0.005 >= neto ? 'pagada' : 'parcial';
+}
+function calcular(l) {
+  l.bruto = r2(l.sueldo + l.adicionales + l.aguinaldo);
+  l.costoEmpresa = r2(l.bruto + l.cargasSociales);
+  l.neto = r2(l.bruto - l.descuentos - (l.adelantosDescontados || 0));
+  l.estado = estadoPago(l);
+  return l;
+}
+
+// ---------------------------------------------------------------------------
+// Cuentas de Tesorería habilitadas (para elegir de dónde sale el pago)
+// ---------------------------------------------------------------------------
+router.get('/cuentas', authSueldos, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const [cajas, bancos] = await Promise.all([db.collection('tesoreria_cajas').find({}).sort({ nombre: 1 }).toArray(), db.collection('tesoreria_bancos').find({}).sort({ nombre: 1 }).toArray()]);
+      const ok = c => (c.moneda || 'ARS') === 'ARS' && tesoreria.cuentaHabilitada(c, req);
+      return {
+        cajas: cajas.filter(ok).map(c => ({ _id: String(c._id), nombre: c.nombre })),
+        bancos: bancos.filter(ok).map(c => ({ _id: String(c._id), nombre: c.nombre }))
+      };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
+async function egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo, observaciones, origen, fecha, tipo }) {
+  const id = toObjectId(cuentaId);
+  if (!['caja', 'banco'].includes(cuentaTipo) || !id) throw err(400, 'Elegí la caja o el banco de donde sale el pago.');
+  const cuenta = await db.collection(cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos').findOne({ _id: id });
+  if (!cuenta) throw err(404, 'No se encontró la caja o el banco elegido.');
+  if ((cuenta.moneda || 'ARS') !== 'ARS') throw err(400, 'Los sueldos se pagan desde una caja o banco en pesos.');
+  return tesoreria.aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId: id, tipo: tipo || 'egreso', monto: m, moneda: 'ARS', motivo, observaciones, origen, fecha });
+}
+
+// ---------------------------------------------------------------------------
+// Empleados (legajo)
+// ---------------------------------------------------------------------------
+function datosEmpleado(b) {
+  const nombre = texto(b.nombre);
+  if (!nombre) throw err(400, 'El nombre es obligatorio.');
+  const sector = texto(b.sector) || 'otro';
+  if (!SECTORES[sector]) throw err(400, 'Sector inválido.');
+  let fechaIngreso = null;
+  if (b.fechaIngreso) fechaIngreso = fechaDe(b.fechaIngreso);
+  return { nombre, cuil: texto(b.cuil), sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas) };
+}
+router.get('/empleados', authSueldos, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.todos !== '1') match.activo = { $ne: false };
+    const lista = await conReintento(async () => (await getDb()).collection('empleados').find(match).sort({ nombre: 1 }).toArray());
+    res.json(lista);
+  } catch (e) { responder(res, e); }
+});
+router.post('/empleados', authSueldos, async (req, res) => {
+  try {
+    const doc = Object.assign(datosEmpleado(req.body || {}), { activo: true, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
+    const r = await conReintento(async () => (await getDb()).collection('empleados').insertOne(doc));
+    res.json(Object.assign(doc, { _id: r.insertedId }));
+  } catch (e) { responder(res, e); }
+});
+router.put('/empleados/:id', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const set = Object.assign(datosEmpleado(req.body || {}), { updatedAt: new Date() });
+    if (req.body && req.body.activo !== undefined) set.activo = !!req.body.activo;
+    const r = await conReintento(async () => (await getDb()).collection('empleados').updateOne(Object.assign({ _id: id }, filtroOrg(req)), { $set: set }));
+    if (!r.matchedCount) throw err(404, 'Empleado no encontrado.');
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+router.delete('/empleados/:id', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const r = await conReintento(async () => (await getDb()).collection('empleados').updateOne(Object.assign({ _id: id }, filtroOrg(req)), { $set: { activo: false, updatedAt: new Date() } }));
+    if (!r.matchedCount) throw err(404, 'Empleado no encontrado.');
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
+// Liquidaciones mensuales
+// ---------------------------------------------------------------------------
+async function liberarAdelantos(db, liquidacionId) {
+  await db.collection('sueldos_adelantos').updateMany({ liquidacionId }, { $set: { estado: 'pendiente', liquidacionId: null } });
+}
+// Aplica adelantos pendientes del empleado (más viejos primero) sin pasar el neto de 0.
+async function aplicarAdelantos(db, orgId, liq, piso) {
+  const pend = await db.collection('sueldos_adelantos').find({ orgId, empleadoId: liq.empleadoId, estado: 'pendiente', fecha: { $lte: finPeriodo(liq.periodo) } }).sort({ fecha: 1 }).toArray();
+  let disponible = liq.sueldo + liq.adicionales + liq.aguinaldo - liq.descuentos - (piso || 0), total = 0;
+  for (const a of pend) {
+    if (a.monto > disponible + 0.005) break;
+    disponible -= a.monto; total += a.monto;
+    await db.collection('sueldos_adelantos').updateOne({ _id: a._id }, { $set: { estado: 'descontado', liquidacionId: liq._id } });
+  }
+  return r2(total);
+}
+
+async function guardarLiquidacion(db, req, b, emp) {
+  const periodo = validarPeriodo(b.periodo);
+  const datos = {
+    sueldo: monto(b.sueldo, 'El sueldo'), adicionales: monto(b.adicionales, 'Los adicionales'), aguinaldo: monto(b.aguinaldo, 'El aguinaldo'),
+    cargasSociales: monto(b.cargasSociales, 'Las cargas sociales'), descuentos: monto(b.descuentos, 'Los descuentos'), observaciones: texto(b.observaciones)
+  };
+  if (datos.descuentos > datos.sueldo + datos.adicionales + datos.aguinaldo + 0.005) throw err(400, 'Los descuentos no pueden superar el bruto (sueldo + adicionales + aguinaldo).');
+  const col = db.collection('sueldos_liquidaciones');
+  const existente = await col.findOne({ orgId: req.orgId, empleadoId: emp._id, periodo });
+  const base = Object.assign({ empleadoId: emp._id, empleadoNombre: emp.nombre, sector: emp.sector, periodo, adelantosDescontados: 0 }, datos);
+  if (existente) {
+    const pagado = existente.totalPagado || 0;
+    if (datos.sueldo + datos.adicionales + datos.aguinaldo - datos.descuentos + 0.005 < pagado) throw err(400, 'El neto no puede quedar por debajo de lo que ya se pagó (' + r2(pagado) + ').');
+    await liberarAdelantos(db, existente._id);
+    const liq = Object.assign({}, existente, base, { _id: existente._id });
+    liq.adelantosDescontados = await aplicarAdelantos(db, req.orgId, liq, pagado);
+    calcular(liq);
+    liq.updatedAt = new Date();
+    const { _id: _omitido, ...resto } = liq;
+    await col.updateOne({ _id: existente._id }, { $set: resto });
+    return liq;
+  }
+  const liq = Object.assign(base, { pagos: [], totalPagado: 0, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
+  const ins = await col.insertOne(liq);
+  liq._id = ins.insertedId;
+  liq.adelantosDescontados = await aplicarAdelantos(db, req.orgId, liq);
+  calcular(liq);
+  await col.updateOne({ _id: liq._id }, { $set: { adelantosDescontados: liq.adelantosDescontados, bruto: liq.bruto, costoEmpresa: liq.costoEmpresa, neto: liq.neto, estado: liq.estado } });
+  return liq;
+}
+
+function resumir(liqs) {
+  const s = { empleados: liqs.length, bruto: 0, cargasSociales: 0, costoEmpresa: 0, neto: 0, pagado: 0, saldo: 0, porSector: {} };
+  liqs.forEach(l => {
+    s.bruto += l.bruto; s.cargasSociales += l.cargasSociales; s.costoEmpresa += l.costoEmpresa; s.neto += l.neto; s.pagado += l.totalPagado || 0;
+    s.saldo += Math.max(0, l.neto - (l.totalPagado || 0));
+    s.porSector[l.sector] = r2((s.porSector[l.sector] || 0) + l.costoEmpresa);
+  });
+  ['bruto', 'cargasSociales', 'costoEmpresa', 'neto', 'pagado', 'saldo'].forEach(k => { s[k] = r2(s[k]); });
+  return s;
+}
+
+router.get('/liquidaciones', authSueldos, async (req, res) => {
+  try {
+    const periodo = validarPeriodo(req.query.periodo || periodoActual());
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const org = filtroOrg(req);
+      const [empleados, liqs, pend] = await Promise.all([
+        db.collection('empleados').find(Object.assign({ activo: { $ne: false } }, org)).sort({ nombre: 1 }).toArray(),
+        db.collection('sueldos_liquidaciones').find(Object.assign({ periodo }, org)).sort({ empleadoNombre: 1 }).toArray(),
+        db.collection('sueldos_adelantos').aggregate([{ $match: Object.assign({ estado: 'pendiente' }, org) }, { $group: { _id: '$empleadoId', total: { $sum: '$monto' } } }]).toArray()
+      ]);
+      const conLiq = new Set(liqs.map(l => String(l.empleadoId)));
+      return {
+        periodo, liquidaciones: liqs, resumen: resumir(liqs),
+        sinCargar: empleados.filter(e => !conLiq.has(String(e._id))),
+        adelantosPendientes: Object.fromEntries(pend.map(p => [String(p._id), r2(p.total)]))
+      };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
+router.post('/liquidaciones', authSueldos, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
+    const liq = await conReintento(async () => {
+      const db = await getDb();
+      const emp = await db.collection('empleados').findOne(Object.assign({ _id: empId }, filtroOrg(req)));
+      if (!emp) throw err(404, 'Empleado no encontrado.');
+      return guardarLiquidacion(db, req, b, emp);
+    });
+    res.json(liq);
+  } catch (e) { responder(res, e); }
+});
+
+// Copia el mes anterior para los empleados que todavía no tienen liquidación en este período.
+router.post('/liquidaciones/copiar', authSueldos, async (req, res) => {
+  try {
+    const periodo = validarPeriodo((req.body || {}).periodo);
+    const n = await conReintento(async () => {
+      const db = await getDb(); const org = filtroOrg(req);
+      const [empleados, existentes] = await Promise.all([
+        db.collection('empleados').find(Object.assign({ activo: { $ne: false } }, org)).toArray(),
+        db.collection('sueldos_liquidaciones').find(Object.assign({ periodo }, org)).project({ empleadoId: 1 }).toArray()
+      ]);
+      const tiene = new Set(existentes.map(l => String(l.empleadoId)));
+      let creadas = 0;
+      for (const emp of empleados) {
+        if (tiene.has(String(emp._id))) continue;
+        const prev = await db.collection('sueldos_liquidaciones').find({ orgId: req.orgId, empleadoId: emp._id, periodo: { $lt: periodo } }).sort({ periodo: -1 }).limit(1).toArray();
+        const p = prev[0];
+        await guardarLiquidacion(db, req, p
+          ? { periodo, sueldo: p.sueldo, adicionales: p.adicionales, aguinaldo: 0, cargasSociales: p.cargasSociales, descuentos: p.descuentos }
+          : { periodo, sueldo: emp.sueldoBasico }, emp);
+        creadas++;
+      }
+      return creadas;
+    });
+    res.json({ creadas: n });
+  } catch (e) { responder(res, e); }
+});
+
+router.delete('/liquidaciones/:id', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const liq = await db.collection('sueldos_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!liq) throw err(404, 'Liquidación no encontrada.');
+      if ((liq.totalPagado || 0) > 0) throw err(400, 'Esta liquidación ya tiene pagos registrados, no se puede borrar.');
+      await liberarAdelantos(db, id);
+      await db.collection('sueldos_liquidaciones').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+
+router.post('/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const m = monto(b.monto, 'El monto');
+    if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
+    const fecha = fechaDe(b.fecha), nota = texto(b.nota);
+    const liq = await conReintento(async () => {
+      const db = await getDb();
+      const l = await db.collection('sueldos_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!l) throw err(404, 'Liquidación no encontrada.');
+      const saldo = r2(l.neto - (l.totalPagado || 0));
+      if (m > saldo + 0.005) throw err(400, 'El monto supera lo que falta pagar (' + saldo + ').');
+      await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Sueldo ' + l.empleadoNombre + ' ' + l.periodo, observaciones: nota, origen: 'sueldo', fecha });
+      const pago = { monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '' };
+      l.pagos = (l.pagos || []).concat([pago]);
+      l.totalPagado = r2((l.totalPagado || 0) + m);
+      l.estado = estadoPago(l);
+      await db.collection('sueldos_liquidaciones').updateOne({ _id: id }, { $set: { pagos: l.pagos, totalPagado: l.totalPagado, estado: l.estado, updatedAt: new Date() } });
+      return l;
+    });
+    res.json(liq);
+  } catch (e) { responder(res, e); }
+});
+
+router.get('/liquidaciones/export', authSueldos, async (req, res) => {
+  try {
+    const periodo = validarPeriodo(req.query.periodo || periodoActual());
+    const liqs = await conReintento(async () => (await getDb()).collection('sueldos_liquidaciones').find(Object.assign({ periodo }, filtroOrg(req))).sort({ empleadoNombre: 1 }).toArray());
+    const filas = liqs.map(l => ({ empleado: l.empleadoNombre, sector: SECTORES[l.sector] || l.sector, sueldo: l.sueldo, adicionales: l.adicionales, aguinaldo: l.aguinaldo, cargas: l.cargasSociales,
+      costo: l.costoEmpresa, descuentos: l.descuentos, adelantos: l.adelantosDescontados, neto: l.neto, pagado: l.totalPagado || 0, saldo: r2(l.neto - (l.totalPagado || 0)), estado: l.estado }));
+    const t = resumir(liqs);
+    filas.push({ empleado: 'TOTAL', costo: t.costoEmpresa, cargas: t.cargasSociales, neto: t.neto, pagado: t.pagado, saldo: t.saldo });
+    exportarXlsx(res, 'sueldos-' + periodo + '.xlsx', [
+      { clave: 'empleado', titulo: 'Empleado' }, { clave: 'sector', titulo: 'Sector' }, { clave: 'sueldo', titulo: 'Sueldo', tipo: 'numero' }, { clave: 'adicionales', titulo: 'Adicionales', tipo: 'numero' },
+      { clave: 'aguinaldo', titulo: 'Aguinaldo', tipo: 'numero' }, { clave: 'cargas', titulo: 'Cargas sociales', tipo: 'numero' }, { clave: 'costo', titulo: 'Costo empresa', tipo: 'numero' },
+      { clave: 'descuentos', titulo: 'Descuentos', tipo: 'numero' }, { clave: 'adelantos', titulo: 'Adelantos descontados', tipo: 'numero' }, { clave: 'neto', titulo: 'Neto a pagar', tipo: 'numero' },
+      { clave: 'pagado', titulo: 'Pagado', tipo: 'numero' }, { clave: 'saldo', titulo: 'Saldo', tipo: 'numero' }, { clave: 'estado', titulo: 'Estado' }
+    ], filas);
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
+// Adelantos
+// ---------------------------------------------------------------------------
+router.get('/adelantos', authSueldos, async (req, res) => {
+  try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.estado) match.estado = String(req.query.estado);
+    if (req.query.empleadoId) { const e = toObjectId(req.query.empleadoId); if (!e) throw err(400, 'empleadoId inválido'); match.empleadoId = e; }
+    const lista = await conReintento(async () => (await getDb()).collection('sueldos_adelantos').find(match).sort({ fecha: -1 }).limit(500).toArray());
+    res.json(lista);
+  } catch (e) { responder(res, e); }
+});
+router.post('/adelantos', authSueldos, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
+    const m = monto(b.monto, 'El monto'); if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
+    const fecha = fechaDe(b.fecha), nota = texto(b.nota);
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const emp = await db.collection('empleados').findOne(Object.assign({ _id: empId }, filtroOrg(req)));
+      if (!emp) throw err(404, 'Empleado no encontrado.');
+      await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Adelanto de sueldo ' + emp.nombre, observaciones: nota, origen: 'sueldo_adelanto', fecha });
+      const d = { empleadoId: empId, empleadoNombre: emp.nombre, monto: m, fecha, nota, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), estado: 'pendiente', liquidacionId: null, usuarioNombre: (req.usuario && req.usuario.nombre) || '', orgId: req.orgId, createdAt: new Date() };
+      const r = await db.collection('sueldos_adelantos').insertOne(d);
+      return Object.assign(d, { _id: r.insertedId });
+    });
+    res.json(doc);
+  } catch (e) { responder(res, e); }
+});
+// Anular un adelanto que todavía no se descontó: se devuelve la plata a la misma caja o banco.
+router.delete('/adelantos/:id', authSueldos, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const a = await db.collection('sueldos_adelantos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!a) throw err(404, 'Adelanto no encontrado.');
+      if (a.estado !== 'pendiente') throw err(400, 'Este adelanto ya se descontó en una liquidación, no se puede anular.');
+      await egresoDeCuenta(db, req, { cuentaTipo: a.cuentaTipo, cuentaId: a.cuentaId, monto: a.monto, motivo: 'Anulación adelanto de sueldo ' + a.empleadoNombre, origen: 'sueldo_adelanto_anulado', fecha: new Date(), tipo: 'ingreso' });
+      await db.collection('sueldos_adelantos').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+
+module.exports = router;
+module.exports.SECTORES = SECTORES;

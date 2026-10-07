@@ -235,6 +235,11 @@ router.get('/ventas', authInforme('informe_ventas'), async (req, res) => {
 //     gasto que el administrador marca como "incluidos en el costo de producción"
 //     (p. ej. sueldos de operarios) NO se restan de nuevo: se muestran aparte,
 //     como dato informativo. Se configura por sucursal (config_general).
+//   - Sueldos: si se usa el módulo Sueldos, el costo de empresa de cada
+//     liquidación entra por período (mes completo): sector Producción como "ya
+//     incluido en el costo" y los demás sectores como gasto "Sueldos y cargas".
+//     Los conceptos de Gastos con sueldos/cargas hay que marcarlos como "ya
+//     contados" para no duplicar.
 //   - Resultado = ventas netas - costo de mercadería - gastos. Es un resultado
 //     operativo de gestión: no incluye impuestos a las ganancias ni intereses.
 // ---------------------------------------------------------------------------
@@ -294,6 +299,17 @@ async function resultadosOrg(db, orgId, d0, d1) {
       const c = it.conceptoNombre || 'Sin concepto', monto = signo * Number(it.subtotal || 0) * factor * usd;
       if (excl.has(c)) m.enCosto += monto; else m.gastos[c] = (m.gastos[c] || 0) + monto;
     });
+  });
+
+  // Sueldos (módulo Sueldos): el costo de empresa de cada liquidación entra en su período.
+  // Producción: ya está dentro del costo de los productos (solo informativo); el resto es gasto.
+  const SECTORES = { administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
+  const periodos = mesesEntre(fechaAR(d0), fechaAR(d1));
+  const liqs = await db.collection('sueldos_liquidaciones').find({ orgId, periodo: { $in: periodos } }).project({ periodo: 1, sector: 1, costoEmpresa: 1 }).toArray();
+  liqs.forEach(l => {
+    const m = mes(l.periodo);
+    if (l.sector === 'produccion') m.enCosto += Number(l.costoEmpresa || 0);
+    else { const c = 'Sueldos y cargas · ' + (SECTORES[l.sector] || 'Otros'); m.gastos[c] = (m.gastos[c] || 0) + Number(l.costoEmpresa || 0); }
   });
   return meses;
 }
@@ -384,7 +400,7 @@ router.get('/resultados', authInforme('informe_resultados'), async (req, res) =>
     const aoa = [enc,
       fila('Ventas netas (sin IVA)', m => m.ventasNetas), fila('Costo de mercadería vendida', m => -m.costo), fila('Margen bruto', m => m.margenBruto),
       fila('Margen bruto %', m => m.margenPct == null ? '' : m.margenPct), [], ['Gastos']
-    ].concat(d.conceptos.map(c => fila('  ' + c, m => -m.gastos[c])), [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Informativo: gastos ya incluidos en el costo de producción (no se restan de nuevo)', m => -m.enCosto), fila('Informativo: ventas sin costo cargado', m => m.sinCosto)]);
+    ].concat(d.conceptos.map(c => fila('  ' + c, m => -m.gastos[c])), [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Informativo: gastos ya contados de producción (no se restan de nuevo)', m => -m.enCosto), fila('Informativo: ventas sin costo cargado', m => m.sinCosto)]);
     const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 38 }].concat(enc.slice(1).map(() => ({ wch: 15 })));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Estado de resultados');
     res.setHeader('Content-Disposition', 'attachment; filename="estado-de-resultados-' + d.desde + '_' + d.hasta + '.xlsx"');

@@ -111,6 +111,9 @@
     ]},
     // Tesorería (2/10/2026): cajas, bancos y cheques — el día a día. El
     // alta/habilitación de cajas y bancos vive en Configuración, no acá.
+    { nombre: 'Personal', items: [
+      { key: 'sueldos', href: '/admin-sueldos.html', modulo: 'sueldos', label: 'Sueldos', icon: ICONOS.usuarios }
+    ]},
     { nombre: 'Tesorería', items: [
       { key: 'tesoreria', href: '/admin-tesoreria.html', modulo: 'tesoreria', label: 'Tesorería', icon: ICONOS.tesoreria }
     ]},

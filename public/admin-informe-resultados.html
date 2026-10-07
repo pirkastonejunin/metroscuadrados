@@ -97,7 +97,7 @@
       <input type="date" id="fDesde" aria-label="Desde" onchange="$('fPeriodo').value='custom';cargar()">
       <input type="date" id="fHasta" aria-label="Hasta" onchange="$('fPeriodo').value='custom';cargar()">
       <select id="fAlcance" aria-label="Sucursales" onchange="cargar()"><option value="actual">Sucursal elegida arriba</option><option value="todas">Todas mis sucursales</option></select>
-      <button id="btnCfg" class="hidden btn secondary" style="margin-left:auto" onclick="panelCfg()" title="Elegir qué gastos ya están incluidos en el costo de producción (por ejemplo sueldos de operarios) para no restarlos dos veces">Gastos incluidos en el costo</button>
+      <button id="btnCfg" class="hidden btn secondary" style="margin-left:auto" onclick="panelCfg()" title="Elegir qué conceptos de gasto ya están contados en otro lado (en el costo de los productos o en el módulo Sueldos) para no restarlos dos veces">Gastos ya contados</button>
       <button data-iconizado="1" class="btn secondary" onclick="exportar()" title="Descargar este estado de resultados en Excel">Exportar a Excel</button>
       <span class="tb-info" title="Ventas netas: ventas del período sin IVA, restando notas de crédito. Costo de mercadería: cantidad vendida por el costo actual de cada producto (aproximado: si el costo cambió, usa el de hoy). Gastos: gastos cargados sin IVA, por concepto; las compras de mercadería no son gasto, ya están en el costo. Resultado = ventas netas - costo - gastos; no incluye impuesto a las ganancias ni intereses.">i</span>
     </div>
@@ -198,7 +198,7 @@ async function cargar(){
   h += '<tr class="sec"><td colspan="' + (M.length + 2) + '">Gastos</td></tr>';
   h += d.conceptos.length ? d.conceptos.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
   h += '<tr class="sub"><td>Total gastos</td>' + col(m => pesos(-m.gastosTotal), m => m.gastosTotal ? 'neg' : '') + '</tr>';
-  if (T.enCosto) h += '<tr class="pct" title="Estos gastos ya están dentro del costo de producción de los productos: se muestran para que los veas, pero no se restan de nuevo."><td>Incluidos en el costo (no se restan)</td>' + col(m => m.enCosto ? pesos(-m.enCosto) : '–') + '</tr>';
+  if (T.enCosto) h += '<tr class="pct" title="Estos importes ya están contados: dentro del costo de producción de los productos o en el módulo Sueldos (sector Producción). Se muestran para que los veas, pero no se restan de nuevo."><td>Ya contados en el costo o en Sueldos (no se restan)</td>' + col(m => m.enCosto ? pesos(-m.enCosto) : '–') + '</tr>';
   h += '<tr class="res"><td>RESULTADO</td>' + col(m => pesos(m.resultado), m => cls(m.resultado)) + '</tr>';
   h += '<tr class="pct"><td>% sobre ventas</td>' + col(m => pct(m.resultadoPct)) + '</tr>';
   $('tBody').innerHTML = h;
@@ -211,7 +211,7 @@ async function panelCfg(){
   try{
     const r = await fetch(BASE + '/resultados/config', {headers: headersAuth()}); const c = await r.json(); if (!r.ok) throw new Error(c.error || 'Error');
     const sel = new Set(c.enCosto);
-    p.innerHTML = '<b>Gastos que ya están dentro del costo de producción</b><div class="muted" style="margin-top:2px">Tildá los conceptos que ya forman parte del costo de tus productos (por ejemplo los sueldos de operarios) para que no se resten otra vez como gasto. Vale para la sucursal elegida arriba.</div><div class="lista-cfg">' +
+    p.innerHTML = '<b>Gastos que ya están contados en otro lado</b><div class="muted" style="margin-top:2px">Tildá los conceptos que ya forman parte del costo de tus productos (por ejemplo la mano de obra) o que ya entran por el módulo Sueldos (por ejemplo el pago de cargas sociales), para que no se resten otra vez como gasto. Vale para la sucursal elegida arriba.</div><div class="lista-cfg">' +
       (c.conceptos.length ? c.conceptos.map(n => '<label><input type="checkbox" value="' + escapeHtml(n) + '"' + (sel.has(n) ? ' checked' : '') + '> ' + escapeHtml(n) + '</label>').join('') : '<span class="muted">Todavía no hay conceptos de gasto cargados.</span>') +
       '</div><button data-iconizado="1" class="btn" onclick="guardarCfg()">Guardar</button>';
   }catch(e){ p.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
