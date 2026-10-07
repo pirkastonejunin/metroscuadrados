@@ -33,7 +33,8 @@
   }
   .wrap { max-width: 640px; margin: 0 auto; }
 
-  header { margin-bottom: 34px; }
+  header { margin-bottom: 34px; position: relative; }
+  header .notif-wrap.notif-arriba { position: absolute; top: 0; right: 0; }
   header .logo { height: 30px; width: auto; display: block; margin-bottom: 12px; }
   header p { margin: 0; color: var(--muted); font-size: 0.9rem; }
 
@@ -622,7 +623,7 @@ async function revisarSesionOficina(){
     // Panel lateral, igual que en el resto de las pantallas de Oficina —
     // acá ya tenemos nuestro propio selector de organización arriba
     // (#orgSelectorBox), así que se le pide al panel que no repita el suyo.
-    if (window.PiedraSidebar) PiedraSidebar.render(me, 'inicio', { ocultarOrg: true });
+    if (window.PiedraSidebar) PiedraSidebar.render(me, 'inicio', { ocultarOrg: !verTablero });
 
     if (verTablero) iniciarTablero(me);
     cargarNotificaciones();
@@ -722,9 +723,13 @@ async function iniciarTablero(me){
   // y el calendario: se ocultan los accesos (siguen en el menú lateral).
   document.getElementById('grupoTabCalendario').classList.toggle('hidden', !simple);
   if (simple) {
-    // La barra de sesión (saludo, campanita, salir) queda arriba de todo.
-    const ofi = document.getElementById('grupoOficina'), tab = document.getElementById('grupoTablero');
-    if (ofi && tab && ofi.parentNode === tab.parentNode) tab.parentNode.insertBefore(ofi, tab);
+    // Solo queda la campanita, arriba a la derecha de la pantalla. El saludo y
+    // "Cerrar sesión" viven en el menú de usuario del panel lateral, y el
+    // selector de organización también (ver PiedraSidebar.render más arriba).
+    const hdr = document.querySelector('header'), campana = document.getElementById('notifWrap');
+    if (hdr && campana && campana.parentNode !== hdr) { campana.classList.add('notif-arriba'); hdr.appendChild(campana); }
+    const sub = document.querySelector('header p'); if (sub) sub.classList.add('hidden');
+    ['oficinaSesion','orgSelectorBox'].forEach(id => document.getElementById(id).classList.add('hidden'));
     ['oficinaLista','oficinaSinModulos','grupoVendedores','grupoVencimientos','tituloOficina'].forEach(id => document.getElementById(id).classList.add('hidden'));
     const f = document.getElementById('tabCalendario');
     if (!f.getAttribute('src')) f.setAttribute('src', '/calendario.html?embed=1');
