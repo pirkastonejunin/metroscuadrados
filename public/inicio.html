@@ -187,39 +187,60 @@
   .venc-detalle-vacio{padding:10px 2px;text-align:center;color:var(--muted);font-size:12.5px;}
 
   /* ---- Tablero comercial (embudo) ---- */
-  .tab-card{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:16px 18px;}
-  .tab-info{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:1px solid var(--border);color:var(--muted);font-size:0.72rem;font-weight:800;cursor:help;margin-left:auto;align-self:center;}
-  .tab-filtros{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:flex-end;margin-bottom:10px;}
-  .tab-filtros label{display:block;font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px;}
-  .tab-filtros select,.tab-filtros input{font-family:inherit;font-size:0.8rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);}
-  .tab-filtros button{font-family:inherit;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink,#fff);cursor:pointer;}
-  .tab-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;}
   .wrap.ancho{max-width:1280px !important;}
-  .tab-kpi{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;cursor:default;transition:transform .12s,box-shadow .12s;min-width:0;position:relative;overflow:hidden;}
-  .tab-kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow);}
-  .tab-kpi-cab{display:flex;align-items:center;justify-content:space-between;gap:6px;}
-  .tab-ico{width:22px;height:22px;flex:none;color:var(--accent);opacity:.9;}
-  .tab-kpi.destacado .tab-ico{color:var(--accent-ink,#fff);}
-  .tab-kpi-titulo{font-size:0.78rem;font-weight:700;color:var(--muted);line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .tab-kpi-valor{font-size:clamp(1.6rem,2.6vw,2.3rem);font-weight:800;line-height:1.1;white-space:nowrap;}
-  .tab-kpi-det{font-size:0.78rem;font-weight:700;color:var(--muted);min-height:1.1em;}
-  .tab-kpi-det b{color:var(--ink);}
-  .tab-kpi-barra{height:5px;border-radius:2px;background:var(--border);margin-top:6px;overflow:hidden;}
-  .tab-kpi-barra > div{height:100%;background:var(--accent);border-radius:2px;transition:width .35s ease;}
-  .tab-kpi.destacado{background:var(--accent);border-color:var(--accent);}
-  .tab-kpi.destacado .tab-kpi-titulo,.tab-kpi.destacado .tab-kpi-det,.tab-kpi.destacado .tab-kpi-valor{color:var(--accent-ink,#fff);}
+  .tab-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:0.74rem;font-weight:800;cursor:help;margin-left:auto;}
+  .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;}
+  .tb-filtros select,.tb-filtros input{font-family:inherit;font-size:0.84rem;font-weight:600;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--card);color:var(--ink);box-shadow:var(--shadow);}
+  .tb-filtros select:focus,.tb-filtros input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+  /* Hero: panel de piedra oscura con el total vendido y las ventas día a día */
+  .tb-hero{display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,1.7fr);gap:24px;align-items:stretch;padding:26px 28px;border-radius:22px;color:#f3f1ee;
+    background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);margin-bottom:16px;}
+  .tb-hero-et{font-size:0.9rem;font-weight:600;color:#aeb2b8;}
+  .tb-hero-valor{font-size:clamp(2.2rem,4.6vw,3.6rem);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin:4px 0 18px;white-space:nowrap;}
+  .tb-chips{display:flex;flex-wrap:wrap;gap:8px;}
+  .tb-chip{display:flex;align-items:center;gap:9px;padding:9px 13px;border-radius:14px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);min-width:0;}
+  .tb-chip .tab-ico{width:20px;height:20px;color:var(--accent);}
+  .tb-chip b{display:block;font-size:1.05rem;font-weight:800;line-height:1.1;white-space:nowrap;}
+  .tb-chip span{display:block;font-size:0.72rem;color:#aeb2b8;font-weight:600;}
+  .tb-hero-graf{min-width:0;display:flex;align-items:flex-end;}
+  .tb-hero-graf svg{width:100%;height:190px;display:block;overflow:visible;}
+  .tb-hero-graf .vacio{color:#8c9097;font-size:0.9rem;align-self:center;}
+  .tab-serie rect.b{fill:var(--accent);}
+  .tab-serie g:hover rect.b{fill:#ff8a6b;}
+  .tab-serie text{font-size:11px;fill:#8c9097;font-family:inherit;}
+  .tab-serie line{stroke:rgba(255,255,255,.14);}
+  .tb-titulo{margin:22px 2px 10px;font-size:1.05rem;font-weight:800;}
+  .tb-embudo-panel{margin-bottom:6px;}
+  .tb-embudo-panel #tabEmbudo{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:28px;align-items:center;}
+  .tb-hero{margin-bottom:16px;}
+  .tb-panel{background:var(--card);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);padding:20px 22px;min-width:0;}
+  .tb-panel h3{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 14px;font-size:1rem;font-weight:800;}
+  .tb-panel h3 button{font-size:0.72rem;padding:4px 11px;border-radius:999px;}
+  /* Embudo: barras centradas que se angostan etapa a etapa */
+  .tb-emb{display:flex;flex-direction:column;gap:10px;}
+  .tb-etapa{display:grid;grid-template-columns:minmax(96px,128px) 1fr 58px 58px;align-items:center;gap:12px;}
+  .tb-etapa .nom{display:flex;align-items:center;gap:8px;font-weight:700;font-size:0.9rem;min-width:0;}
+  .tb-etapa .nom .tab-ico{width:20px;height:20px;color:var(--muted);flex:none;}
+  .tb-pista{height:30px;border-radius:10px;background:var(--bg);display:flex;justify-content:center;align-items:center;overflow:hidden;}
+  .tb-pista > div{height:100%;border-radius:10px;min-width:6px;transition:width .5s ease;}
+  .tb-etapa .num{font-size:1.25rem;font-weight:800;text-align:right;}
+  .tb-etapa .pct{font-size:0.78rem;font-weight:700;color:var(--muted);text-align:left;white-space:nowrap;}
+  .tb-efect{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding-left:24px;border-left:1px solid var(--border);}
+  .tb-efect svg{width:120px;height:120px;flex:none;}
+  .tb-efect .tit{font-weight:800;font-size:1rem;}
+  .tb-efect .sub{font-size:0.82rem;color:var(--muted);font-weight:600;}
+  /* Rubros: lista con barras */
+  .tb-rub{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 28px;}
+  .tb-rub-fila .arriba{display:flex;justify-content:space-between;gap:8px;font-weight:700;font-size:0.9rem;margin-bottom:5px;}
+  .tb-rub-fila .arriba b{font-weight:800;}
+  .tb-rub-fila .pista{height:10px;border-radius:6px;background:var(--bg);overflow:hidden;}
+  .tb-rub-fila .pista > div{height:100%;border-radius:6px;background:linear-gradient(90deg,#ff8a6b,var(--accent));transition:width .5s ease;}
+  .tab-ico{width:22px;height:22px;flex:none;}
+  @media (max-width:900px){.tb-hero{grid-template-columns:1fr;padding:20px}.tb-embudo-panel #tabEmbudo{grid-template-columns:1fr}.tb-efect{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:12px}.tb-etapa{grid-template-columns:96px 1fr 48px 48px;gap:8px}}
   .tab-aviso{background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:6px 10px;font-size:0.76rem;color:var(--muted);margin-bottom:8px;}
-  .tab-sub{display:flex;align-items:center;justify-content:space-between;margin:18px 0 8px;font-size:0.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
-  .tab-sub button{font-size:0.7rem;padding:3px 9px;}
   #tabRubrosPanel{border:1px solid var(--border,#ddd);border-radius:10px;padding:8px 10px;margin-bottom:8px;}
   .tab-rubros-lista{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:8px;font-size:0.8rem;}
   .tab-rubros-lista label{display:flex;gap:4px;align-items:center;}
-  .tab-serie{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:12px 14px 8px;}
-  .tab-serie svg{width:100%;height:150px;display:block;}
-  .tab-serie rect.b{fill:var(--accent);opacity:.85;}
-  .tab-serie rect.b:hover{opacity:1;}
-  .tab-serie text{font-size:10px;fill:var(--muted);font-family:inherit;}
-  .tab-nota{font-size:0.66rem;color:var(--muted);margin-top:8px;}
   .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
 </style>
 </head>
@@ -231,33 +252,38 @@
     </header>
 
     <div class="grupo hidden" id="grupoTablero">
-      <h2>Tablero</h2>
-      <div class="tab-card">
-        <div class="tab-filtros">
-          <div><label for="tabPeriodo">Período</label>
-            <select id="tabPeriodo" onchange="tabPreset(this.value)">
-              <option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes" selected>Este mes</option>
-              <option value="mespasado">Mes pasado</option><option value="30">Últimos 30 días</option><option value="anio">Este año</option><option value="custom">Personalizado</option>
-            </select></div>
-          <div><label for="tabDesde">Desde</label><input type="date" id="tabDesde" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()"></div>
-          <div><label for="tabHasta">Hasta</label><input type="date" id="tabHasta" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()"></div>
-          <div id="tabVendedorBox" class="hidden"><label for="tabVendedor">Vendedor</label>
-            <select id="tabVendedor" onchange="cargarTablero()"><option value="">Todos</option></select></div>
-          <span class="tab-info" title="Cada número cuenta lo cargado dentro del período elegido, de todo el equipo de la sucursal (o del vendedor elegido). No se cuentan visitas canceladas ni ventas anuladas. Ticket promedio: total de las ventas (con IVA) dividido la cantidad de ventas. m2 por venta: m2 vendidos sobre las ventas que tienen m2. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador.">i</span>
-        </div>
-        <div id="tabAvisos"></div>
-        <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
-        <div id="tabSerieBox" class="hidden">
-          <div class="tab-sub"><span>Ventas por día</span></div>
-          <div id="tabSerie" class="tab-serie"></div>
-        </div>
-        <div id="tabRubrosBox" class="hidden">
-          <div class="tab-sub"><span>Unidades por rubro</span>
-            <button id="tabRubrosEditar" class="hidden" data-iconizado="1" onclick="tabRubrosPanel()">Elegir rubros</button></div>
-          <div id="tabRubrosPanel" class="hidden"></div>
-          <div id="tabRubros"></div>
-        </div>
+      <div class="tb-filtros">
+        <select id="tabPeriodo" aria-label="Período" onchange="tabPreset(this.value)">
+          <option value="hoy">Hoy</option><option value="semana">Esta semana</option><option value="mes" selected>Este mes</option>
+          <option value="mespasado">Mes pasado</option><option value="30">Últimos 30 días</option><option value="anio">Este año</option><option value="custom">Personalizado</option>
+        </select>
+        <input type="date" id="tabDesde" aria-label="Desde" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()">
+        <input type="date" id="tabHasta" aria-label="Hasta" onchange="document.getElementById('tabPeriodo').value='custom';cargarTablero()">
+        <span id="tabVendedorBox" class="hidden"><select id="tabVendedor" aria-label="Vendedor" onchange="cargarTablero()"><option value="">Todo el equipo</option></select></span>
+        <span class="tab-info" title="Cada número cuenta lo cargado dentro del período elegido, de todo el equipo de la sucursal (o del vendedor elegido). No se cuentan visitas canceladas ni ventas anuladas. Ticket promedio: total de las ventas (con IVA) dividido la cantidad de ventas. m2 por venta: m2 vendidos sobre las ventas que tienen m2. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador.">i</span>
       </div>
+      <div id="tabAvisos"></div>
+
+      <section class="tb-panel tb-embudo-panel">
+        <h3>Embudo comercial</h3>
+        <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
+      </section>
+
+      <h3 class="tb-titulo">Ventas</h3>
+      <section class="tb-hero">
+        <div class="tb-hero-izq">
+          <div class="tb-hero-et">Vendido en el período</div>
+          <div class="tb-hero-valor" id="tabHeroValor">$ —</div>
+          <div class="tb-chips" id="tabChips"></div>
+        </div>
+        <div class="tb-hero-graf" id="tabSerie"></div>
+      </section>
+
+      <section class="tb-panel hidden" id="tabRubrosBox">
+        <h3>Unidades vendidas por rubro <button id="tabRubrosEditar" class="hidden" data-iconizado="1" onclick="tabRubrosPanel()" title="Elegir qué rubros se muestran">Elegir rubros</button></h3>
+        <div id="tabRubrosPanel" class="hidden"></div>
+        <div id="tabRubros"></div>
+      </section>
     </div>
 
     <div class="grupo hidden" id="grupoTabCalendario">
@@ -727,44 +753,66 @@ var TAB_ICONOS = {
 function tabIcono(k){
   return TAB_ICONOS[k] ? '<svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + TAB_ICONOS[k] + '</svg>' : '';
 }
-function tabKpi(o){
-  return '<div class="tab-kpi ' + (o.clase || '') + '" title="' + notifEscapeHtml(o.tip || o.titulo) + '"><div class="tab-kpi-cab"><div class="tab-kpi-titulo">' + notifEscapeHtml(o.titulo) + '</div>' + tabIcono(o.icono) + '</div>' +
-    '<div class="tab-kpi-valor">' + o.valor + '</div><div class="tab-kpi-det">' + (o.detalle || '') + '</div>' +
-    (o.barra !== undefined ? '<div class="tab-kpi-barra"><div style="width:' + Math.max(0, Math.min(100, o.barra)) + '%"></div></div>' : '') + '</div>';
+function tabFmtPct(p){ return p === null || p === undefined ? '—' : p.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:1}) + ' %'; }
+function tabPesos(n){ return '$ ' + Math.round(n || 0).toLocaleString('es-AR'); }
+async function tabGet(ruta, qs){
+  const r = await fetch('/api/tablero/' + ruta + '?' + qs.toString(), {headers: headersAuth()});
+  const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error ' + r.status);
+  return d;
 }
-async function cargarSerieTablero(qs){
-  const box = document.getElementById('tabSerieBox'), cont = document.getElementById('tabSerie');
-  try{
-    const r = await fetch('/api/tablero/serie?' + qs.toString(), {headers: headersAuth()});
-    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    const dias = d.dias; const max = Math.max(1, ...dias.map(x => x.total));
-    if (!dias.length || dias.every(x => x.total === 0)) { cont.innerHTML = '<div class="muted">Sin ventas en el período.</div>'; return; }
-    const W = 1000, H = 150, base = 128, alto = 108, paso = W / dias.length, ancho = Math.max(2, Math.min(34, paso * 0.7));
-    const fmt = n => '$ ' + n.toLocaleString('es-AR');
-    const pasoEtq = Math.ceil(dias.length / 12);
-    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Ventas por día"><line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '" stroke="currentColor" opacity=".15"/>';
-    dias.forEach((x, i) => {
-      const hh = x.total ? Math.max(3, x.total / max * alto) : 0, cx = i * paso + paso / 2, f = x.dia.split('-');
-      svg += '<g><title>' + f[2] + '/' + f[1] + ' — ' + fmt(x.total) + ' (' + x.ventas + (x.ventas === 1 ? ' venta' : ' ventas') + ')</title>' +
-        '<rect x="' + (i * paso) + '" y="0" width="' + paso + '" height="' + base + '" fill="transparent"/>' +
-        (hh ? '<rect class="b" x="' + (cx - ancho / 2) + '" y="' + (base - hh) + '" width="' + ancho + '" height="' + hh + '" rx="3"/>' : '') + '</g>';
-      if (i % pasoEtq === 0) svg += '<text x="' + cx + '" y="145" text-anchor="middle">' + f[2] + '/' + f[1] + '</text>';
-    });
-    cont.innerHTML = svg + '</svg>';
-  }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudo cargar el gráfico: ' + notifEscapeHtml(e.message) + '</div>'; }
+function tabPintarSerie(d){
+  const cont = document.getElementById('tabSerie'); cont.className = 'tb-hero-graf tab-serie';
+  const dias = d.dias, max = Math.max(1, ...dias.map(x => x.total));
+  if (!dias.length || dias.every(x => x.total === 0)) { cont.innerHTML = '<div class="vacio">Todavía no hay ventas en este período.</div>'; return; }
+  const W = 700, base = 168, alto = 150, paso = W / dias.length, ancho = Math.max(3, Math.min(30, paso * 0.66)), pasoEtq = Math.ceil(dias.length / 10);
+  let svg = '<svg viewBox="0 0 ' + W + ' 190" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ventas por día"><line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '"/>';
+  dias.forEach((x, i) => {
+    const hh = x.total ? Math.max(4, x.total / max * alto) : 0, cx = i * paso + paso / 2, f = x.dia.split('-');
+    svg += '<g><title>' + f[2] + '/' + f[1] + ' — ' + tabPesos(x.total) + ' (' + x.ventas + (x.ventas === 1 ? ' venta' : ' ventas') + ')</title>' +
+      '<rect x="' + (i * paso) + '" y="0" width="' + paso + '" height="' + base + '" fill="transparent"/>' +
+      (hh ? '<rect class="b" x="' + (cx - ancho / 2) + '" y="' + (base - hh) + '" width="' + ancho + '" height="' + hh + '" rx="' + Math.min(5, ancho / 2) + '"/>' : '') + '</g>';
+    if (i % pasoEtq === 0) svg += '<text x="' + cx + '" y="186" text-anchor="middle">' + f[2] + '/' + f[1] + '</text>';
+  });
+  cont.innerHTML = svg + '</svg>';
+}
+function tabPintarEmbudo(data){
+  const cont = document.getElementById('tabEmbudo');
+  const max = Math.max(1, ...data.etapas.map(e => e.cantidad));
+  const colores = ['#c5c9cf', '#9097a0', '#5d646d', 'var(--accent)'];
+  const nombres = {crm:'CRM', visitas:'Visitas', presupuestos:'Presupuestos', ventas:'Ventas'};
+  const filas = data.etapas.map((e, i) => {
+    const tip = e.titulo + (i === 0 ? '' : ': ' + tabFmtPct(e.pctAnterior) + ' de ' + data.etapas[i-1].titulo.toLowerCase());
+    return '<div class="tb-etapa tab-etapa" title="' + notifEscapeHtml(tip) + '"><div class="nom">' + tabIcono(e.clave) + notifEscapeHtml(nombres[e.clave] || e.titulo) + '</div>' +
+      '<div class="tb-pista"><div style="width:' + (e.cantidad / max * 100) + '%;background:' + colores[i] + '"></div></div>' +
+      '<div class="num">' + e.cantidad.toLocaleString('es-AR') + '</div><div class="pct">' + (i === 0 ? '' : '↳ ' + tabFmtPct(e.pctAnterior)) + '</div></div>';
+  }).join('');
+  const ef = data.efectividadTotal, pc = ef === null ? 0 : Math.min(100, ef), R = 32, C = 2 * Math.PI * R;
+  const aro = '<svg viewBox="0 0 80 80" role="img" aria-label="Efectividad"><circle cx="40" cy="40" r="' + R + '" fill="none" stroke="var(--bg)" stroke-width="9"/>' +
+    '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + (C * pc / 100) + ' ' + C + '" transform="rotate(-90 40 40)"/>' +
+    '<text x="40" y="45" text-anchor="middle" font-size="15" font-weight="800" fill="currentColor">' + (ef === null ? '—' : Math.round(ef) + '%') + '</text></svg>';
+  cont.innerHTML = '<div class="tb-emb">' + filas + '</div>' +
+    '<div class="tb-efect" title="Efectividad total: ventas realizadas sobre presupuestos cargados">' + aro + '<div><div class="tit">Efectividad</div><div class="sub">ventas sobre presupuestos</div></div></div>';
+}
+function tabPintarHero(p){
+  document.getElementById('tabHeroValor').textContent = tabPesos(p.totalVendido);
+  const fm = n => n === null ? '—' : n.toLocaleString('es-AR', {maximumFractionDigits:2});
+  const chip = (ico, valor, et, tip) => '<div class="tb-chip" title="' + notifEscapeHtml(tip) + '">' + tabIcono(ico) + '<div><b>' + valor + '</b><span>' + et + '</span></div></div>';
+  document.getElementById('tabChips').innerHTML =
+    chip('ventas', p.ventas.toLocaleString('es-AR'), p.ventas === 1 ? 'venta' : 'ventas', 'Ventas del período (sin anuladas)') +
+    chip('ticket', p.ticketPromedio === null ? '—' : tabPesos(p.ticketPromedio), 'ticket promedio', 'Total vendido (con IVA) dividido la cantidad de ventas') +
+    chip('m2', p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', 'por venta', 'm2 vendidos sobre las ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas que tienen m2');
 }
 async function cargarRubrosTablero(qs){
-  const box = document.getElementById('tabRubrosBox'), cont = document.getElementById('tabRubros');
+  const cont = document.getElementById('tabRubros');
   try{
-    const r = await fetch('/api/tablero/rubros?' + qs.toString(), {headers: headersAuth()});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
+    const data = await tabGet('rubros', qs);
     TAB_RUBROS_ELEGIDOS = data.rubros.map(x => x.rubro);
     if (!data.rubros.length) {
-      cont.innerHTML = '<div class="muted">' + (TAB_PUEDE_EDITAR_RUBROS ? 'Todavía no elegiste rubros para mostrar.' : 'No hay rubros configurados para mostrar.') + '</div>';
-    } else {
-      cont.innerHTML = '<div class="tab-grid">' + data.rubros.map(x => tabKpi({ barra: x.unidades / Math.max(1, ...data.rubros.map(y => y.unidades)) * 100, clase: 'tab-rubro', icono: 'rubro', titulo: x.rubro, valor: x.unidades.toLocaleString('es-AR', {maximumFractionDigits:1}), tip: x.rubro + ': ' + x.unidades.toLocaleString('es-AR') + ' unidades vendidas', detalle: '&nbsp;' })).join('') + '</div>';
+      cont.innerHTML = '<div class="muted">' + (TAB_PUEDE_EDITAR_RUBROS ? 'Elegí los rubros que querés ver acá.' : 'Todavía no hay rubros para mostrar.') + '</div>';
+      return;
     }
+    const max = Math.max(1, ...data.rubros.map(x => x.unidades));
+    cont.innerHTML = '<div class="tb-rub">' + data.rubros.map(x => '<div class="tb-rub-fila" title="' + notifEscapeHtml(x.rubro + ': ' + x.unidades.toLocaleString('es-AR') + ' unidades vendidas') + '"><div class="arriba"><span>' + notifEscapeHtml(x.rubro) + '</span><b>' + x.unidades.toLocaleString('es-AR', {maximumFractionDigits:1}) + '</b></div><div class="pista"><div style="width:' + (x.unidades / max * 100) + '%"></div></div></div>').join('') + '</div>';
   }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudieron cargar los rubros: ' + notifEscapeHtml(e.message) + '</div>'; }
 }
 async function tabRubrosPanel(){
@@ -772,8 +820,7 @@ async function tabRubrosPanel(){
   if (!p.classList.contains('hidden')) { p.classList.add('hidden'); return; }
   p.innerHTML = '<div class="muted">Cargando…</div>'; p.classList.remove('hidden');
   try{
-    const r = await fetch('/api/tablero/rubros-config', {headers: headersAuth()});
-    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const d = await tabGet('rubros-config', new URLSearchParams());
     const sel = new Set(d.elegidos);
     p.innerHTML = '<div class="tab-rubros-lista">' + (d.disponibles.length ? d.disponibles.map(n =>
       '<label><input type="checkbox" value="' + notifEscapeHtml(n) + '"' + (sel.has(n) ? ' checked' : '') + '> ' + notifEscapeHtml(n) + '</label>').join('') : '<span class="muted">No hay rubros cargados en los productos.</span>') +
@@ -788,45 +835,22 @@ async function tabRubrosGuardar(){
   document.getElementById('tabRubrosPanel').classList.add('hidden');
   cargarTablero();
 }
-function tabFmtPct(p){ return p === null || p === undefined ? '—' : p.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:1}) + ' %'; }
 async function cargarTablero(){
-  const cont = document.getElementById('tabEmbudo');
   const qs = new URLSearchParams();
   const d = document.getElementById('tabDesde').value, h = document.getElementById('tabHasta').value;
   if (d) qs.set('desde', d); if (h) qs.set('hasta', h);
   const vend = document.getElementById('tabVendedor').value; if (vend) qs.set('vendedorId', vend);
-  cont.innerHTML = '<div class="muted">Cargando…</div>'; document.getElementById('tabAvisos').innerHTML = '';
+  document.getElementById('tabAvisos').innerHTML = '';
   document.getElementById('tabRubrosBox').classList.remove('hidden');
-  document.getElementById('tabSerieBox').classList.remove('hidden');
-  cargarSerieTablero(qs);
   cargarRubrosTablero(qs);
+  tabGet('promedios', qs).then(tabPintarHero).catch(() => {});
+  tabGet('serie', qs).then(tabPintarSerie).catch(e => { document.getElementById('tabSerie').innerHTML = '<div class="vacio">No se pudo cargar el gráfico.</div>'; });
   try{
-    const r = await fetch('/api/tablero/embudo?' + qs.toString(), {headers: headersAuth()});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
-    const max = Math.max(1, ...data.etapas.map(e => e.cantidad));
-    const corto = {crm:'CRM', visitas:'Visitas', presupuestos:'Presupuestos', ventas:'Ventas'};
-    const tarjetas = data.etapas.map((e, i) => tabKpi({
-      clase: 'tab-etapa', icono: e.clave, titulo: corto[e.clave] || e.titulo, valor: e.cantidad.toLocaleString('es-AR'),
-      tip: e.titulo + (i === 0 ? '' : ' — ' + tabFmtPct(e.pctAnterior) + ' de ' + data.etapas[i-1].titulo.toLowerCase()),
-      detalle: i === 0 ? '&nbsp;' : '<b>' + tabFmtPct(e.pctAnterior) + '</b> ↳',
-      barra: e.cantidad / max * 100
-    }));
-    tarjetas.push(tabKpi({ clase: 'tab-total destacado', icono: 'efectividad', titulo: 'Efectividad', valor: tabFmtPct(data.efectividadTotal), tip: 'Efectividad total: ventas realizadas sobre presupuestos cargados', detalle: 'ventas / presupuestos' }));
-    try{
-      const rp = await fetch('/api/tablero/promedios?' + qs.toString(), {headers: headersAuth()});
-      const p = await rp.json();
-      if (rp.ok) {
-        const fm = n => n === null ? '—' : n.toLocaleString('es-AR', {maximumFractionDigits:2});
-        tarjetas.push(tabKpi({ clase: 'tab-prom', icono: 'total', titulo: 'Total vendido', valor: '$ ' + Math.round(p.totalVendido).toLocaleString('es-AR'), tip: 'Suma de las ventas del período (con IVA, sin anuladas): ' + p.ventas.toLocaleString('es-AR') + ' ventas', detalle: '&nbsp;' }));
-        tarjetas.push(tabKpi({ clase: 'tab-prom', icono: 'ticket', titulo: 'Ticket promedio', valor: p.ticketPromedio === null ? '—' : '$ ' + Math.round(p.ticketPromedio).toLocaleString('es-AR'), tip: 'Total vendido (con IVA) dividido la cantidad de ventas: ' + p.ventas.toLocaleString('es-AR') + ' ventas', detalle: '&nbsp;' }));
-        tarjetas.push(tabKpi({ clase: 'tab-prom', icono: 'm2', titulo: 'm2 por venta', valor: p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', tip: 'm2 vendidos sobre las ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas que tienen m2', detalle: '&nbsp;' }));
-      }
-    }catch(e){ /* los promedios son un extra: si fallan, el embudo se muestra igual */ }
-    cont.innerHTML = '<div class="tab-grid">' + tarjetas.join('') + '</div>';
+    const data = await tabGet('embudo', qs);
+    tabPintarEmbudo(data);
     document.getElementById('tabAvisos').innerHTML = (data.avisos || []).map(a => '<div class="tab-aviso">' + notifEscapeHtml(a) + '</div>').join('');
   }catch(e){
-    cont.innerHTML = '<div class="tab-aviso">No se pudo cargar el tablero: ' + notifEscapeHtml(e.message) + '</div>';
+    document.getElementById('tabEmbudo').innerHTML = '<div class="tab-aviso">No se pudo cargar el tablero: ' + notifEscapeHtml(e.message) + '</div>';
   }
 }
 async function iniciarTablero(me){
@@ -865,7 +889,7 @@ async function iniciarTablero(me){
       const r = await fetch('/api/tablero/vendedores', {headers: headersAuth()});
       const lista = r.ok ? await r.json() : [];
       const sel = document.getElementById('tabVendedor'), actual = sel.value;
-      sel.innerHTML = '<option value="">Todos</option>' + lista.map(v => '<option value="' + v._id + '">' + notifEscapeHtml(v.nombre) + '</option>').join('');
+      sel.innerHTML = '<option value="">Todo el equipo</option>' + lista.map(v => '<option value="' + v._id + '">' + notifEscapeHtml(v.nombre) + '</option>').join('');
       sel.value = actual;
     }catch(e){}
   }
