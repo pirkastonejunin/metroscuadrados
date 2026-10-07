@@ -182,23 +182,24 @@
   .venc-detalle-vacio{padding:10px 2px;text-align:center;color:var(--muted);font-size:12.5px;}
 
   /* ---- Tablero comercial (embudo) ---- */
-  .tab-card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:14px;}
-  .tab-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:14px;}
-  .tab-filtros label{display:block;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:3px;}
-  .tab-filtros select,.tab-filtros input{font-family:inherit;font-size:0.85rem;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);}
-  .tab-filtros button{font-family:inherit;font-size:0.82rem;font-weight:700;padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink,#fff);cursor:pointer;}
-  .tab-etapa{display:grid;grid-template-columns:150px 1fr 150px;gap:12px;align-items:center;padding:8px 0;}
-  .tab-etapa-nombre{font-weight:700;font-size:0.85rem;}
-  .tab-barra{background:var(--bg);border-radius:8px;height:34px;overflow:hidden;}
-  .tab-barra > div{height:100%;background:var(--accent);border-radius:8px;transition:width .35s ease;min-width:4px;}
-  .tab-cant{font-weight:800;font-size:1.35rem;line-height:1;text-align:right;}
-  .tab-pct{display:block;font-weight:600;font-size:0.7rem;color:var(--muted);margin-top:3px;}
-  .tab-total{margin-top:10px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
-  .tab-total strong{font-size:1.5rem;color:var(--accent);}
-  .tab-aviso{background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:8px 10px;font-size:0.8rem;color:var(--muted);margin-bottom:10px;}
-  .tab-nota{font-size:0.7rem;color:var(--muted);margin-top:8px;}
+  .tab-card{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:12px;}
+  .tab-filtros{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:flex-end;margin-bottom:10px;}
+  .tab-filtros label{display:block;font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px;}
+  .tab-filtros select,.tab-filtros input{font-family:inherit;font-size:0.8rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);}
+  .tab-filtros button{font-family:inherit;font-size:0.78rem;font-weight:700;padding:6px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink,#fff);cursor:pointer;}
+  .tab-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;}
+  .tab-kpi{background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0;position:relative;overflow:hidden;}
+  .tab-kpi-titulo{font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);line-height:1.15;min-height:2.3em;}
+  .tab-kpi-valor{font-size:1.7rem;font-weight:800;line-height:1.1;}
+  .tab-kpi-det{font-size:0.68rem;font-weight:600;color:var(--muted);min-height:1em;}
+  .tab-kpi-det b{color:var(--ink);}
+  .tab-kpi-barra{height:4px;border-radius:2px;background:var(--border);margin-top:6px;overflow:hidden;}
+  .tab-kpi-barra > div{height:100%;background:var(--accent);border-radius:2px;transition:width .35s ease;}
+  .tab-kpi.destacado{background:var(--accent);border-color:var(--accent);}
+  .tab-kpi.destacado .tab-kpi-titulo,.tab-kpi.destacado .tab-kpi-det,.tab-kpi.destacado .tab-kpi-valor{color:var(--accent-ink,#fff);}
+  .tab-aviso{background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:6px 10px;font-size:0.76rem;color:var(--muted);margin-bottom:8px;}
+  .tab-nota{font-size:0.66rem;color:var(--muted);margin-top:8px;}
   .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
-  @media (max-width:560px){.tab-etapa{grid-template-columns:1fr 90px;}.tab-barra{grid-column:1 / span 2;order:3;}}
 </style>
 </head>
 <body>
@@ -679,6 +680,13 @@ function tabPreset(v){
   document.getElementById('tabHasta').value = tabIso(h);
   if (TABLERO_VISIBLE) cargarTablero();
 }
+// Una tarjeta de indicador. Para sumar indicadores nuevos al tablero alcanza
+// con agregar otra tarjeta a la lista (ver cargarTablero).
+function tabKpi(o){
+  return '<div class="tab-kpi ' + (o.clase || '') + '"><div class="tab-kpi-titulo" title="' + notifEscapeHtml(o.titulo) + '">' + notifEscapeHtml(o.titulo) + '</div>' +
+    '<div class="tab-kpi-valor">' + o.valor + '</div><div class="tab-kpi-det">' + (o.detalle || '') + '</div>' +
+    (o.barra !== undefined ? '<div class="tab-kpi-barra"><div style="width:' + Math.max(0, Math.min(100, o.barra)) + '%"></div></div>' : '') + '</div>';
+}
 function tabFmtPct(p){ return p === null || p === undefined ? '—' : p.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:1}) + ' %'; }
 async function cargarTablero(){
   const cont = document.getElementById('tabEmbudo');
@@ -692,20 +700,22 @@ async function cargarTablero(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
     const max = Math.max(1, ...data.etapas.map(e => e.cantidad));
-    cont.innerHTML = data.etapas.map((e, i) =>
-      '<div class="tab-etapa"><div class="tab-etapa-nombre">' + notifEscapeHtml(e.titulo) + '</div>' +
-      '<div class="tab-barra"><div style="width:' + Math.max(e.cantidad / max * 100, 0) + '%;opacity:' + (1 - i * 0.18) + '"></div></div>' +
-      '<div class="tab-cant">' + e.cantidad.toLocaleString('es-AR') + '<span class="tab-pct">' + (i === 0 ? 'punto de partida' : tabFmtPct(e.pctAnterior) + ' de ' + notifEscapeHtml(data.etapas[i-1].titulo.toLowerCase())) + '</span></div></div>'
-    ).join('') +
-    '<div class="tab-total"><span>Efectividad total (ventas sobre datos del CRM)</span><strong>' + tabFmtPct(data.efectividadTotal) + '</strong></div>';
+    const tarjetas = data.etapas.map((e, i) => tabKpi({
+      clase: 'tab-etapa', titulo: e.titulo, valor: e.cantidad.toLocaleString('es-AR'),
+      detalle: i === 0 ? 'punto de partida' : '<b>' + tabFmtPct(e.pctAnterior) + '</b> de ' + notifEscapeHtml(data.etapas[i-1].titulo.toLowerCase()),
+      barra: e.cantidad / max * 100
+    }));
+    tarjetas.push(tabKpi({ clase: 'tab-total destacado', titulo: 'Efectividad total', valor: tabFmtPct(data.efectividadTotal), detalle: 'ventas sobre datos del CRM' }));
+    cont.innerHTML = '<div class="tab-grid">' + tarjetas.join('') + '</div>';
     document.getElementById('tabAvisos').innerHTML = (data.avisos || []).map(a => '<div class="tab-aviso">' + notifEscapeHtml(a) + '</div>').join('');
   }catch(e){
     cont.innerHTML = '<div class="tab-aviso">No se pudo cargar el tablero: ' + notifEscapeHtml(e.message) + '</div>';
   }
 }
 async function iniciarTablero(me){
-  const esAdmin = !!(me.rol && me.rol.protegido);
-  const simple = !esAdmin;
+  // Pantalla de inicio = tablero + calendario para todos los que tienen el
+  // tablero (administrador incluido): los accesos quedan en el menú lateral.
+  const simple = true;
   TABLERO_VISIBLE = true;
   document.getElementById('grupoTablero').classList.remove('hidden');
   // Para quien no es administrador la pantalla de inicio es SOLO el tablero
