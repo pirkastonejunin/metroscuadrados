@@ -451,6 +451,8 @@ function abrirEditarProveedor(id){
         <div class="modal-tabs">
           <button class="active" data-tab="datos" onclick="mostrarTabProveedor('datos')">Datos del proveedor</button>
           <button data-tab="cuenta-corriente" onclick="mostrarTabProveedor('cuenta-corriente', '${id}')">Cuenta corriente</button>
+          <button data-tab="productos" onclick="mostrarTabProveedor('productos', '${id}')">Productos comprados</button>
+          <button data-tab="ordenes" onclick="mostrarTabProveedor('ordenes', '${id}')">Órdenes de compra</button>
         </div>
         <div id="tabProveedorDatos">
           ${formularioProveedor(p)}
@@ -460,6 +462,8 @@ function abrirEditarProveedor(id){
         <div id="tabProveedorCuentaCorriente" class="hidden">
           <div id="pccContenido" class="muted">Cargando...</div>
         </div>
+        <div id="tabProveedorProductos" class="hidden"><div id="pprodContenido" class="muted">Cargando...</div></div>
+        <div id="tabProveedorOrdenes" class="hidden"><div id="pordContenido" class="muted">Cargando...</div></div>
       </div>
     </div>
   `;
@@ -469,7 +473,57 @@ function mostrarTabProveedor(tab, proveedorId){
   document.querySelectorAll('.modal-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('tabProveedorDatos').classList.toggle('hidden', tab !== 'datos');
   document.getElementById('tabProveedorCuentaCorriente').classList.toggle('hidden', tab !== 'cuenta-corriente');
+  document.getElementById('tabProveedorProductos').classList.toggle('hidden', tab !== 'productos');
+  document.getElementById('tabProveedorOrdenes').classList.toggle('hidden', tab !== 'ordenes');
   if (tab === 'cuenta-corriente') cargarCuentaCorrienteProveedorTab(proveedorId);
+  if (tab === 'productos') cargarProductosProveedorTab(proveedorId);
+  if (tab === 'ordenes') cargarOrdenesProveedorTab(proveedorId);
+}
+
+function moneyMonProv(n, mon){ return (mon && mon !== 'ARS' ? mon + ' ' : '') + money(n); }
+async function traerTabProv(id, ruta, contId){
+  const cont = document.getElementById(contId);
+  if (cont) cont.innerHTML = 'Cargando...';
+  const r = await fetch(BASE + '/' + id + '/' + ruta, {headers: headersAuth()});
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Error al cargar');
+  return data;
+}
+function errTabProv(contId, e){ const c = document.getElementById(contId); if (c) c.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+
+async function cargarProductosProveedorTab(id){
+  try{
+    const data = await traerTabProv(id, 'productos', 'pprodContenido');
+    const cont = document.getElementById('pprodContenido'); if (!cont) return;
+    const lista = data.productos;
+    cont.innerHTML = `<p class="muted" style="margin-top:0">${lista.length} producto(s) en ${data.compras} compra(s) (sin contar anuladas).</p>
+      <table>
+      <thead><tr><th>SKU</th><th>Producto</th><th>Cantidad</th><th>Veces</th><th>Total comprado</th><th>Último precio</th><th>Última compra</th></tr></thead>
+      <tbody>${lista.length ? lista.map(p => `<tr>
+        <td class="muted">${escapeHtml(p.sku || '—')}</td><td>${escapeHtml(p.nombre)}</td>
+        <td>${p.cantidad}</td><td>${p.compras}</td>
+        <td>${Object.keys(p.monto).map(m => moneyMonProv(p.monto[m], m)).join(' + ')}</td>
+        <td>${moneyMonProv(p.ultimoPrecio, p.ultimaMoneda)}</td>
+        <td>${fechaCorta(p.ultimaCompra)}</td>
+      </tr>`).join('') : '<tr><td colspan="7" class="muted">Todavía no le compraste productos a este proveedor.</td></tr>'}</tbody></table>`;
+  }catch(e){ errTabProv('pprodContenido', e); }
+}
+
+const ESTADO_ORDEN_LABEL_PROV = { pendiente: 'Pendiente', parcial: 'Parcial', convertida: 'Convertida', anulada: 'Anulada' };
+const ESTADO_RECEPCION_LABEL_PROV = { pendiente: 'Sin recibir', parcial: 'Recibida parcial', recibida: 'Recibida' };
+async function cargarOrdenesProveedorTab(id){
+  try{
+    const lista = await traerTabProv(id, 'ordenes', 'pordContenido');
+    const cont = document.getElementById('pordContenido'); if (!cont) return;
+    cont.innerHTML = `<table>
+      <thead><tr><th>N°</th><th>Fecha</th><th>Estado</th><th>Recepción</th><th>Total</th></tr></thead>
+      <tbody>${lista.length ? lista.map(o => `<tr>
+        <td><strong>${escapeHtml(o.numero)}</strong></td><td>${fechaCorta(o.fecha)}</td>
+        <td>${ESTADO_ORDEN_LABEL_PROV[o.estado] || escapeHtml(o.estado || '—')}</td>
+        <td class="muted">${ESTADO_RECEPCION_LABEL_PROV[o.estadoRecepcion] || 'Sin recibir'}</td>
+        <td>${moneyMonProv(o.total, o.moneda)}</td>
+      </tr>`).join('') : '<tr><td colspan="5" class="muted">Este proveedor todavía no tiene órdenes de compra.</td></tr>'}</tbody></table>`;
+  }catch(e){ errTabProv('pordContenido', e); }
 }
 
 async function guardarEdicionProveedor(id){

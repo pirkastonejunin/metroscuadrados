@@ -420,4 +420,60 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Pestañas de la ficha del proveedor (7/10/2026, pedido de Mato): productos
+// comprados y órdenes de compra.
+async function proveedorDeLaOrg(db, req) {
+  const id = toObjectId(req.params.id);
+  if (!id) throw err(400, 'id inválido');
+  const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+  if (!proveedor) throw err(404, 'Proveedor no encontrado');
+  return proveedor;
+}
+
+// Productos comprados: agrupados por producto a partir de las compras no
+// anuladas (cantidad total, monto, último precio y última compra).
+router.get('/:id/productos', authAdmin, async (req, res) => {
+  try {
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeLaOrg(db, req);
+      const compras = await db.collection('compras')
+        .find(Object.assign({ proveedorId: prov._id, estado: { $ne: 'anulada' } }, filtroOrg(req)))
+        .project({ fecha: 1, moneda: 1, items: 1 }).sort({ fecha: -1 }).limit(1000).toArray();
+      const mapa = new Map();
+      for (const c of compras) {
+        for (const it of (c.items || [])) {
+          const clave = String(it.productoId || it.sku || it.nombre);
+          let p = mapa.get(clave);
+          if (!p) {
+            p = { productoId: it.productoId || null, sku: it.sku || '', nombre: it.nombre || '', cantidad: 0, monto: {}, compras: 0,
+              ultimaCompra: c.fecha, ultimoPrecio: Number(it.precioUnitario) || 0, ultimaMoneda: c.moneda || 'ARS' };
+            mapa.set(clave, p);
+          }
+          const mon = c.moneda || 'ARS';
+          p.cantidad += Number(it.cantidad) || 0;
+          p.monto[mon] = (p.monto[mon] || 0) + (Number(it.subtotal) || 0);
+          p.compras += 1;
+        }
+      }
+      return { compras: compras.length, productos: [...mapa.values()].sort((a, b) => new Date(b.ultimaCompra) - new Date(a.ultimaCompra)) };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/:id/ordenes', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeLaOrg(db, req);
+      return db.collection('ordenes_compra')
+        .find(Object.assign({ proveedorId: prov._id }, filtroOrg(req)))
+        .project({ numero: 1, fecha: 1, moneda: 1, total: 1, estado: 1, estadoRecepcion: 1, observaciones: 1 })
+        .sort({ fecha: -1, numero: -1 }).limit(300).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;
