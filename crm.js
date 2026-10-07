@@ -329,7 +329,8 @@ router.post('/:id/asignar-visita', authAdmin, async (req, res) => {
         vendedorId: vendedorIdFinal,
         fechaHora,
         notasEmpleada: notasEmpleada || oportunidad.notas || '',
-        orgId: oportunidad.orgId
+        orgId: oportunidad.orgId,
+        creadaPor: req.usuario
       });
 
       await db.collection('oportunidades').updateOne(

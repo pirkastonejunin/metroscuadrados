@@ -566,7 +566,8 @@ router.get('/:id', authAdmin, async (req, res) => {
 // `.status`), igual que el resto del archivo — quien la llama los deja
 // propagar tal cual. `orgId` es opcional para no romper otros llamadores
 // viejos, pero visitas.js y crm.js siempre lo mandan.
-async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgId }) {
+// creadaPor (opcional): el usuario que carga la visita; se guarda para calcular comisiones por visita en Sueldos.
+async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgId, creadaPor }) {
   if (!cliente || !cliente.nombre) throw err(400, 'Falta el nombre del cliente');
   if (!cliente.direccion) throw err(400, 'Falta el domicilio de la visita');
   if (!vendedorId) throw err(400, 'Falta asignar un vendedor');
@@ -600,6 +601,7 @@ async function crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgI
       fechaHora: fechaHoraParsed,
       notasEmpleada: notasEmpleada || '',
       estado: 'sin_visita',
+      creadaPor: creadaPor && creadaPor._id ? { usuarioId: creadaPor._id, nombre: creadaPor.nombre || '' } : null,
       fotos: [],
       presupuesto: null,
       obraId: null,
@@ -619,7 +621,7 @@ router.post('/', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de crear una visita.');
     const { cliente, vendedorId, fechaHora, notasEmpleada } = req.body || {};
-    const resultado = await crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgId: req.orgId });
+    const resultado = await crearVisita({ cliente, vendedorId, fechaHora, notasEmpleada, orgId: req.orgId, creadaPor: req.usuario });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

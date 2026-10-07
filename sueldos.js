@@ -11,6 +11,7 @@
 //     logistica|otro), sueldoBasico (referencia), fechaIngreso, notas, activo,
 //     frecuencia (semanal|quincenal|mensual: cada cuánto cobra; la liquidación sigue siendo mensual),
 //     comisionPago (fin_de_mes: comisiones todas juntas un día | con_sueldo: se suman a cada pago),
+//     comisionTipo (porcentaje | por_visita), usuarioId, montoVisita, pctMostrador (esquema por visita),
 //     orgId, createdAt, updatedAt }
 //   sueldos_liquidaciones : { empleadoId, empleadoNombre, sector, periodo
 //     ('AAAA-MM'), sueldo, adicionales, comisiones (+ comisionPct, comisionBase),
@@ -94,6 +95,8 @@ const SECTORES = { produccion: 'Producción', administracion: 'Administración',
 const FRECUENCIAS = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
 const CUOTAS = { semanal: 4, quincenal: 2, mensual: 1 };
 // Cómo cobra las comisiones quien no cobra por mes: sumadas a cada pago o todas juntas al cierre del mes.
+// Tipo de comisión: % de las ventas del vendedor vinculado, o esquema por visita (ver calcularComisionVisitas).
+const COMISION_TIPO = { porcentaje: 'Porcentaje de ventas', por_visita: 'Por visita + ventas de mostrador' };
 const COMISION_PAGO = { fin_de_mes: 'Todas juntas, un solo día', con_sueldo: 'Se suman a cada pago' };
 
 function monto(v, etiqueta) {
@@ -160,6 +163,14 @@ async function egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo,
   return tesoreria.aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId: id, tipo: tipo || 'egreso', monto: m, moneda: 'ARS', motivo, observaciones, origen, fecha });
 }
 
+// Usuarios del sistema (para vincular a la persona que carga visitas y ventas).
+router.get('/usuarios', authSueldos, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('usuarios').find(Object.assign({ activo: { $ne: false } }, req.orgId ? { $or: [{ orgIds: req.orgId }, { orgIds: { $exists: false } }] } : {})).project({ nombre: 1 }).sort({ nombre: 1 }).toArray());
+    res.json(lista.map(u => ({ _id: String(u._id), nombre: u.nombre })));
+  } catch (e) { responder(res, e); }
+});
+
 router.get('/vendedores', authSueldos, async (req, res) => {
   try {
     const lista = await conReintento(async () => (await getDb()).collection('visitas_vendedores').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ nombre: 1, comisionPct: 1 }).sort({ nombre: 1 }).toArray());
@@ -179,11 +190,18 @@ function datosEmpleado(b) {
   if (b.fechaIngreso) fechaIngreso = fechaDe(b.fechaIngreso);
   const vendedorId = b.vendedorId ? toObjectId(b.vendedorId) : null;
   if (b.vendedorId && !vendedorId) throw err(400, 'vendedorId inválido');
+  const comisionTipo = texto(b.comisionTipo) || 'porcentaje';
+  if (!COMISION_TIPO[comisionTipo]) throw err(400, 'Tipo de comisión inválido.');
+  const usuarioId = b.usuarioId ? toObjectId(b.usuarioId) : null;
+  if (b.usuarioId && !usuarioId) throw err(400, 'usuarioId inválido');
+  const montoVisita = monto(b.montoVisita, 'El monto por visita'), pctMostrador = monto(b.pctMostrador, 'El % de ventas de mostrador');
+  if (pctMostrador > 100) throw err(400, 'El % de ventas de mostrador no puede pasar de 100.');
+  if (comisionTipo === 'por_visita' && !usuarioId) throw err(400, 'Elegí el usuario que carga las visitas y las ventas de esta persona.');
   const frecuencia = texto(b.frecuencia) || 'mensual';
   if (!FRECUENCIAS[frecuencia]) throw err(400, 'Frecuencia de pago inválida.');
   const comisionPago = texto(b.comisionPago) || 'fin_de_mes';
   if (!COMISION_PAGO[comisionPago]) throw err(400, 'Modo de pago de comisiones inválido.');
-  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas), frecuencia, comisionPago };
+  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas), frecuencia, comisionPago, comisionTipo, usuarioId: comisionTipo === 'por_visita' ? usuarioId : null, montoVisita, pctMostrador };
 }
 router.get('/empleados', authSueldos, async (req, res) => {
   try {
@@ -230,7 +248,8 @@ function netoVenta(v) {
   return Number(v.total || 0) * usd * nc;
 }
 // desde/hasta (opcionales): ventana de fechas distinta del mes completo (pagos semanales con comisión).
-async function calcularComision(db, req, emp, periodo, desde, hasta) {
+async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase) {
+  if (emp && emp.comisionTipo === 'por_visita') return calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase === undefined ? emp.sueldoBasico : sueldoBase);
   if (!emp || !emp.vendedorId) return { vinculado: false, pct: 0, base: 0, monto: 0, ventas: 0, notasCredito: 0, avisos: [] };
   const vend = await db.collection('visitas_vendedores').findOne({ _id: emp.vendedorId });
   const pct = vend && Number(vend.comisionPct) > 0 ? Number(vend.comisionPct) : 0;
@@ -251,6 +270,35 @@ async function calcularComision(db, req, emp, periodo, desde, hasta) {
   }
   base = Math.max(0, r2(base));
   return { vinculado: true, vendedor: vend ? vend.nombre : '', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
+}
+// Esquema por visita (la empleada que carga las visitas):
+//   variable = visitas hechas x monto + visitas vendidas x (2 x monto) + % x ventas de mostrador que cargó
+//   cobra el mayor entre el variable y el básico: la liquidación lleva el básico como sueldo y la
+//   comisión es solo lo que el variable pasa del básico.
+// Visita hecha = estado presupuestada, vendido o instalado (vendida = vendido o instalado), por la fecha
+// de la visita, cargada por su usuario (visitas.creadaPor). Ventas de mostrador = ventas cargadas por su
+// usuario en el período (total con IVA en pesos, notas de crédito restan, sin anuladas).
+async function calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase) {
+  const avisos = [], M = Number(emp.montoVisita) || 0, pct = Number(emp.pctMostrador) || 0;
+  const usr = emp.usuarioId ? await db.collection('usuarios').findOne({ _id: emp.usuarioId }, { projection: { nombre: 1 } }) : null;
+  if (!usr) avisos.push('El usuario vinculado ya no existe o no está elegido (solapa Empleados).');
+  if (!M && !pct) avisos.push('No tiene cargado el monto por visita ni el % de ventas de mostrador (solapa Empleados).');
+  const d0 = inicioMes(periodo), d1 = hasta || finPeriodo(periodo);
+  let hechas = 0, vendidas = 0, base = 0, ventas = 0, nc = 0;
+  if (usr) {
+    const vis = await db.collection('visitas').find({ orgId: req.orgId, 'creadaPor.usuarioId': usr._id, fechaHora: { $gte: d0, $lte: d1 }, estado: { $in: ['presupuestada', 'vendido', 'instalado'] } }).project({ estado: 1 }).toArray();
+    hechas = vis.length; vendidas = vis.filter(v => v.estado === 'vendido' || v.estado === 'instalado').length;
+    const lista = await db.collection('ventas').find({
+      orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 },
+      $or: [{ usuarioId: usr._id }, { usuarioId: { $exists: false }, usuarioNombre: usr.nombre }]
+    }).project({ total: 1, moneda: 1, cotizacionDolar: 1, tipoComprobante: 1 }).toArray();
+    lista.forEach(v => { base += netoVenta(v); if (v.tipoComprobante === 'nota_credito') nc++; else ventas++; });
+  }
+  base = Math.max(0, r2(base));
+  const porVisitas = r2(hechas * M + vendidas * 2 * M), porMostrador = r2(base * pct / 100), variable = r2(porVisitas + porMostrador);
+  const basico = r2(sueldoBase || 0);
+  return { vinculado: true, tipo: 'por_visita', vendedor: usr ? usr.nombre : '', pct, base, monto: Math.max(0, r2(variable - basico)), variable, basico, montoVisita: M,
+    visitas: hechas, visitasVendidas: vendidas, porVisitas, porMostrador, ventas, notasCredito: nc, avisos };
 }
 router.get('/comision', authSueldos, async (req, res) => {
   try {
@@ -379,7 +427,7 @@ router.post('/liquidaciones/copiar', authSueldos, async (req, res) => {
         if (tiene.has(String(emp._id))) continue;
         const prev = await db.collection('sueldos_liquidaciones').find({ orgId: req.orgId, empleadoId: emp._id, periodo: { $lt: periodo } }).sort({ periodo: -1 }).limit(1).toArray();
         const p = prev[0];
-        const com = await calcularComision(db, req, emp, periodo); // la comisión no se copia: se recalcula con las ventas del mes
+        const com = await calcularComision(db, req, emp, periodo, undefined, undefined, p ? p.sueldo : emp.sueldoBasico); // la comisión no se copia: se recalcula con las ventas del mes
         // Quien cobra la comisión sumada a cada pago la va devengando con cada pago: arranca el mes en 0.
         const conPagos = emp.frecuencia && emp.frecuencia !== 'mensual' && emp.comisionPago === 'con_sueldo';
         const c = conPagos ? { comisiones: 0, comisionPct: com.pct, comisionBase: 0 } : { comisiones: com.monto, comisionPct: com.pct, comisionBase: com.base };
@@ -470,7 +518,12 @@ async function armarPagos(db, req, periodo, fechaISO) {
     const comSaldo = Math.min(Math.max(0, r2(comTotal - comPag)), r2(saldo - fijoSaldo));
     const ultimo = ultimoPagoDelMes(freq, periodo, fechaISO);
     let comNueva = 0, comBase = 0, comHasta = null, avisos = [];
-    if (freq !== 'mensual' && modo === 'con_sueldo' && emp.vendedorId) {
+    if (freq !== 'mensual' && modo === 'con_sueldo' && emp.comisionTipo === 'por_visita') {
+      // Esquema por visita: acumulado del mes hasta la fecha menos lo ya devengado (así el piso del básico se respeta).
+      const tope = finPeriodo(periodo), hasta = finDia < tope ? finDia : tope;
+      const c = await calcularComisionVisitas(db, req, emp, periodo, hasta, l.sueldo);
+      comNueva = Math.max(0, r2(c.monto - (l.comisiones || 0))); comBase = 0; comHasta = hasta; avisos = c.avisos;
+    } else if (freq !== 'mensual' && modo === 'con_sueldo' && emp.vendedorId) {
       const desde = l.comisionHasta ? new Date(l.comisionHasta) : null;
       const tope = finPeriodo(periodo);
       const hasta = finDia < tope ? finDia : tope;
