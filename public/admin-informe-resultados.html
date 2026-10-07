@@ -60,6 +60,8 @@
   .tabla tr.res td{font-weight:800;font-size:14px;background:var(--bg);} .tabla td.tot,.tabla th.tot{border-left:1px solid var(--border);font-weight:800;}
   .tabla tr.pct td{font-size:11.5px;color:var(--muted);padding-top:0;border-top:0;}
   .tabla{overflow-x:auto;} .tabla td:first-child,.tabla th:first-child{white-space:nowrap;position:sticky;left:0;background:var(--card);z-index:1;min-width:210px;} .tabla tr.sec td:first-child,.tabla tr.res td:first-child{background:var(--bg);}
+  .tb-filtros .btn{padding:6px 14px;border-radius:999px;font-size:12.5px;} #btnCfg{margin-left:auto;}
+  .lista-cfg{display:flex;flex-wrap:wrap;gap:6px 16px;margin:8px 0;} .lista-cfg label{display:flex;gap:5px;align-items:center;margin:0;font-size:12.5px;color:var(--text);cursor:pointer;} .lista-cfg input{width:auto;}
   .aviso{background:var(--accent-soft);color:var(--text);border-radius:12px;padding:8px 14px;font-size:12.5px;margin-bottom:12px;}
 </style>
 </head>
@@ -95,10 +97,11 @@
       <input type="date" id="fDesde" aria-label="Desde" onchange="$('fPeriodo').value='custom';cargar()">
       <input type="date" id="fHasta" aria-label="Hasta" onchange="$('fPeriodo').value='custom';cargar()">
       <select id="fAlcance" aria-label="Sucursales" onchange="cargar()"><option value="actual">Sucursal elegida arriba</option><option value="todas">Todas mis sucursales</option></select>
-      <button data-iconizado="1" class="btn secondary" style="margin-left:auto" onclick="exportar()" title="Descargar este estado de resultados en Excel">Exportar a Excel</button>
+      <button id="btnCfg" class="hidden btn secondary" style="margin-left:auto" onclick="panelCfg()" title="Elegir qué gastos ya están incluidos en el costo de producción (por ejemplo sueldos de operarios) para no restarlos dos veces">Gastos incluidos en el costo</button>
+      <button data-iconizado="1" class="btn secondary" onclick="exportar()" title="Descargar este estado de resultados en Excel">Exportar a Excel</button>
       <span class="tb-info" title="Ventas netas: ventas del período sin IVA, restando notas de crédito. Costo de mercadería: cantidad vendida por el costo actual de cada producto (aproximado: si el costo cambió, usa el de hoy). Gastos: gastos cargados sin IVA, por concepto; las compras de mercadería no son gasto, ya están en el costo. Resultado = ventas netas - costo - gastos; no incluye impuesto a las ganancias ni intereses.">i</span>
     </div>
-    <div id="err"></div><div id="aviso"></div>
+    <div id="err"></div><div id="cfgPanel" class="hidden aviso" style="background:var(--card);border:1px solid var(--border)"></div><div id="aviso"></div>
     <div class="kpis">
       <div class="kpi"><div class="et">Ventas netas</div><div class="val" id="kVen">$ —</div></div>
       <div class="kpi" title="Ventas netas menos costo de mercadería vendida"><div class="et">Margen bruto</div><div class="val" id="kMar">—</div></div>
@@ -161,6 +164,7 @@ async function iniciarApp(){
   document.title = 'Estado de resultados - Piedra Negra';
   $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
   preset('anio');
+  try{ const r = await fetch(BASE + '/resultados/config', {headers: headersAuth()}); const c = await r.json(); if (r.ok && c.puedeEditar) $('btnCfg').classList.remove('hidden'); }catch(e){}
   await cargar();
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
@@ -194,11 +198,30 @@ async function cargar(){
   h += '<tr class="sec"><td colspan="' + (M.length + 2) + '">Gastos</td></tr>';
   h += d.conceptos.length ? d.conceptos.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
   h += '<tr class="sub"><td>Total gastos</td>' + col(m => pesos(-m.gastosTotal), m => m.gastosTotal ? 'neg' : '') + '</tr>';
+  if (T.enCosto) h += '<tr class="pct" title="Estos gastos ya están dentro del costo de producción de los productos: se muestran para que los veas, pero no se restan de nuevo."><td>Incluidos en el costo (no se restan)</td>' + col(m => m.enCosto ? pesos(-m.enCosto) : '–') + '</tr>';
   h += '<tr class="res"><td>RESULTADO</td>' + col(m => pesos(m.resultado), m => cls(m.resultado)) + '</tr>';
   h += '<tr class="pct"><td>% sobre ventas</td>' + col(m => pct(m.resultadoPct)) + '</tr>';
   $('tBody').innerHTML = h;
 }
 
+async function panelCfg(){
+  const p = $('cfgPanel');
+  if (!p.classList.contains('hidden')) { p.classList.add('hidden'); return; }
+  p.innerHTML = 'Cargando…'; p.classList.remove('hidden');
+  try{
+    const r = await fetch(BASE + '/resultados/config', {headers: headersAuth()}); const c = await r.json(); if (!r.ok) throw new Error(c.error || 'Error');
+    const sel = new Set(c.enCosto);
+    p.innerHTML = '<b>Gastos que ya están dentro del costo de producción</b><div class="muted" style="margin-top:2px">Tildá los conceptos que ya forman parte del costo de tus productos (por ejemplo los sueldos de operarios) para que no se resten otra vez como gasto. Vale para la sucursal elegida arriba.</div><div class="lista-cfg">' +
+      (c.conceptos.length ? c.conceptos.map(n => '<label><input type="checkbox" value="' + escapeHtml(n) + '"' + (sel.has(n) ? ' checked' : '') + '> ' + escapeHtml(n) + '</label>').join('') : '<span class="muted">Todavía no hay conceptos de gasto cargados.</span>') +
+      '</div><button data-iconizado="1" class="btn" onclick="guardarCfg()">Guardar</button>';
+  }catch(e){ p.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
+}
+async function guardarCfg(){
+  const enCosto = [...document.querySelectorAll('#cfgPanel input[type=checkbox]:checked')].map(i => i.value);
+  const r = await fetch(BASE + '/resultados/config', {method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({enCosto})});
+  const d = await r.json(); if (!r.ok) { alert(d.error || 'No se pudo guardar'); return; }
+  $('cfgPanel').classList.add('hidden'); cargar();
+}
 async function exportar(){
   try{
     const r = await fetch(BASE + '/resultados?' + params({formato: 'xlsx'}), {headers: headersAuth()});
