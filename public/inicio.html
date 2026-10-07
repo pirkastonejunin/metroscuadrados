@@ -706,7 +706,7 @@ async function cargarTablero(){
       detalle: i === 0 ? 'punto de partida' : '<b>' + tabFmtPct(e.pctAnterior) + '</b> de ' + notifEscapeHtml(data.etapas[i-1].titulo.toLowerCase()),
       barra: e.cantidad / max * 100
     }));
-    tarjetas.push(tabKpi({ clase: 'tab-total destacado', titulo: 'Efectividad total', valor: tabFmtPct(data.efectividadTotal), detalle: 'ventas sobre datos del CRM' }));
+    tarjetas.push(tabKpi({ clase: 'tab-total destacado', titulo: 'Efectividad total', valor: tabFmtPct(data.efectividadTotal), detalle: 'ventas sobre presupuestos cargados' }));
     cont.innerHTML = '<div class="tab-grid">' + tarjetas.join('') + '</div>';
     document.getElementById('tabAvisos').innerHTML = (data.avisos || []).map(a => '<div class="tab-aviso">' + notifEscapeHtml(a) + '</div>').join('');
   }catch(e){
