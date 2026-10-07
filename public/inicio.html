@@ -1073,6 +1073,11 @@ async function iniciarTablero(me){
       if (orgBox) hdr.appendChild(orgBox);
       campana.classList.add('notif-arriba');
       hdr.appendChild(campana);
+      // El menú de usuario (nombre ▾ → Configuración / Cerrar sesión) lo arma el
+      // panel lateral dentro de #oficinaSesion, que acá se oculta: lo traemos a la
+      // barra superior, al lado de la campanita, como en el resto de las pantallas.
+      const menuUsuario = document.querySelector('.pn-usermenu');
+      if (menuUsuario) hdr.appendChild(menuUsuario);
     }
     document.getElementById('oficinaSesion').classList.add('hidden');
     ['oficinaLista','oficinaSinModulos','grupoVendedores','grupoVencimientos','tituloOficina'].forEach(id => document.getElementById(id).classList.add('hidden'));
