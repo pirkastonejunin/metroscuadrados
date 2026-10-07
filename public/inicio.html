@@ -203,6 +203,11 @@
   .tab-kpi.destacado{background:var(--accent);border-color:var(--accent);}
   .tab-kpi.destacado .tab-kpi-titulo,.tab-kpi.destacado .tab-kpi-det,.tab-kpi.destacado .tab-kpi-valor{color:var(--accent-ink,#fff);}
   .tab-aviso{background:var(--bg);border:1px dashed var(--border);border-radius:8px;padding:6px 10px;font-size:0.76rem;color:var(--muted);margin-bottom:8px;}
+  .tab-sub{display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px;font-size:0.78rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;}
+  .tab-sub button{font-size:0.7rem;padding:3px 9px;}
+  #tabRubrosPanel{border:1px solid var(--border,#ddd);border-radius:10px;padding:8px 10px;margin-bottom:8px;}
+  .tab-rubros-lista{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:8px;font-size:0.8rem;}
+  .tab-rubros-lista label{display:flex;gap:4px;align-items:center;}
   .tab-nota{font-size:0.66rem;color:var(--muted);margin-top:8px;}
   .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
 </style>
@@ -231,7 +236,13 @@
         </div>
         <div id="tabAvisos"></div>
         <div id="tabEmbudo"><div class="muted">Cargando…</div></div>
-        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. Son los números de todo el equipo de la sucursal. No se cuentan visitas canceladas ni ventas anuladas.</div>
+        <div id="tabRubrosBox" class="hidden">
+          <div class="tab-sub"><span>Unidades vendidas por rubro</span>
+            <button id="tabRubrosEditar" class="hidden" data-iconizado="1" onclick="tabRubrosPanel()">Elegir rubros</button></div>
+          <div id="tabRubrosPanel" class="hidden"></div>
+          <div id="tabRubros"></div>
+        </div>
+        <div class="tab-nota">Cada etapa cuenta lo que se cargó dentro del período elegido. El % compara cada etapa con la anterior. Son los números de todo el equipo de la sucursal. Las unidades por rubro suman la cantidad vendida (m2, unidades, etc.) de los rubros elegidos por el administrador. No se cuentan visitas canceladas ni ventas anuladas.</div>
       </div>
     </div>
 
@@ -670,6 +681,7 @@ revisarSesionOficina();
 
 
 // ---------------- Tablero comercial (embudo) ----------------
+var TAB_RUBROS_ELEGIDOS = [], TAB_PUEDE_EDITAR_RUBROS = false;
 var TABLERO_VISIBLE = false;
 function tabIso(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function tabPreset(v){
@@ -692,6 +704,41 @@ function tabKpi(o){
     '<div class="tab-kpi-valor">' + o.valor + '</div><div class="tab-kpi-det">' + (o.detalle || '') + '</div>' +
     (o.barra !== undefined ? '<div class="tab-kpi-barra"><div style="width:' + Math.max(0, Math.min(100, o.barra)) + '%"></div></div>' : '') + '</div>';
 }
+async function cargarRubrosTablero(qs){
+  const box = document.getElementById('tabRubrosBox'), cont = document.getElementById('tabRubros');
+  try{
+    const r = await fetch('/api/tablero/rubros?' + qs.toString(), {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
+    TAB_RUBROS_ELEGIDOS = data.rubros.map(x => x.rubro);
+    if (!data.rubros.length) {
+      cont.innerHTML = '<div class="muted">' + (TAB_PUEDE_EDITAR_RUBROS ? 'Todavía no elegiste rubros para mostrar.' : 'No hay rubros configurados para mostrar.') + '</div>';
+    } else {
+      cont.innerHTML = '<div class="tab-grid">' + data.rubros.map(x => tabKpi({ clase: 'tab-rubro', titulo: x.rubro, valor: x.unidades.toLocaleString('es-AR'), detalle: 'unidades vendidas' })).join('') + '</div>';
+    }
+  }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudieron cargar los rubros: ' + notifEscapeHtml(e.message) + '</div>'; }
+}
+async function tabRubrosPanel(){
+  const p = document.getElementById('tabRubrosPanel');
+  if (!p.classList.contains('hidden')) { p.classList.add('hidden'); return; }
+  p.innerHTML = '<div class="muted">Cargando…</div>'; p.classList.remove('hidden');
+  try{
+    const r = await fetch('/api/tablero/rubros-config', {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const sel = new Set(d.elegidos);
+    p.innerHTML = '<div class="tab-rubros-lista">' + (d.disponibles.length ? d.disponibles.map(n =>
+      '<label><input type="checkbox" value="' + notifEscapeHtml(n) + '"' + (sel.has(n) ? ' checked' : '') + '> ' + notifEscapeHtml(n) + '</label>').join('') : '<span class="muted">No hay rubros cargados en los productos.</span>') +
+      '</div><button data-iconizado="1" onclick="tabRubrosGuardar()">Guardar</button>';
+  }catch(e){ p.innerHTML = '<div class="tab-aviso">' + notifEscapeHtml(e.message) + '</div>'; }
+}
+async function tabRubrosGuardar(){
+  const rubros = [...document.querySelectorAll('#tabRubrosPanel input[type=checkbox]:checked')].map(i => i.value);
+  const r = await fetch('/api/tablero/rubros-config', {method:'PUT', headers: Object.assign({'Content-Type':'application/json'}, headersAuth()), body: JSON.stringify({rubros})});
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || 'No se pudo guardar'); return; }
+  document.getElementById('tabRubrosPanel').classList.add('hidden');
+  cargarTablero();
+}
 function tabFmtPct(p){ return p === null || p === undefined ? '—' : p.toLocaleString('es-AR', {minimumFractionDigits:0, maximumFractionDigits:1}) + ' %'; }
 async function cargarTablero(){
   const cont = document.getElementById('tabEmbudo');
@@ -700,6 +747,8 @@ async function cargarTablero(){
   if (d) qs.set('desde', d); if (h) qs.set('hasta', h);
   const vend = document.getElementById('tabVendedor').value; if (vend) qs.set('vendedorId', vend);
   cont.innerHTML = '<div class="muted">Cargando…</div>'; document.getElementById('tabAvisos').innerHTML = '';
+  document.getElementById('tabRubrosBox').classList.remove('hidden');
+  cargarRubrosTablero(qs);
   try{
     const r = await fetch('/api/tablero/embudo?' + qs.toString(), {headers: headersAuth()});
     const data = await r.json();
@@ -722,6 +771,8 @@ async function iniciarTablero(me){
   // tablero (administrador incluido): los accesos quedan en el menú lateral.
   const simple = true;
   TABLERO_VISIBLE = true;
+  TAB_PUEDE_EDITAR_RUBROS = !!(me.rol && me.rol.protegido);
+  if (TAB_PUEDE_EDITAR_RUBROS) document.getElementById('tabRubrosEditar').classList.remove('hidden');
   document.getElementById('grupoTablero').classList.remove('hidden');
   // Para quien no es administrador la pantalla de inicio es SOLO el tablero
   // y el calendario: se ocultan los accesos (siguen en el menú lateral).
