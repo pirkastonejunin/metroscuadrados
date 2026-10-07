@@ -35,26 +35,30 @@
   .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
   .tb-filtros select,.tb-filtros input{width:auto;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);}
   .tb-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:12px;font-weight:800;cursor:help;margin-left:auto;}
-  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:16px;}
-  .kpi{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:18px 20px;min-width:0;}
-  .kpi .et{font-size:13px;font-weight:700;color:var(--muted);}
-  .kpi .val{font-size:clamp(1.5rem,2.4vw,2.1rem);font-weight:800;letter-spacing:-.02em;line-height:1.1;margin:6px 0 8px;white-space:nowrap;}
-  .kpi .det{font-size:12px;font-weight:600;color:var(--muted);min-height:1.2em;}
-  .kpi.oscuro{color:#f3f1ee;border:0;background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);}
-  .kpi.oscuro .et,.kpi.oscuro .det{color:#aeb2b8;}
-  .tag{display:inline-block;font-size:11px;font-weight:800;padding:3px 9px;border-radius:999px;}
+  .hero{display:grid;grid-template-columns:minmax(200px,.7fr) minmax(0,1.6fr);gap:20px;align-items:center;padding:16px 22px;border-radius:18px;color:#f3f1ee;margin-bottom:12px;
+    background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);box-shadow:0 18px 40px -24px rgba(0,0,0,.55);}
+  .hero .et{font-size:12px;font-weight:600;color:#aeb2b8;}
+  .hero .val{font-size:clamp(1.7rem,3vw,2.4rem);font-weight:800;letter-spacing:-.02em;line-height:1.05;white-space:nowrap;}
+  .barras{display:flex;flex-direction:column;gap:7px;}
+  .barra{display:grid;grid-template-columns:minmax(80px,140px) 1fr 104px;gap:10px;align-items:center;font-size:12px;}
+  .barra .nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .barra .pista{height:10px;border-radius:5px;background:rgba(255,255,255,.1);overflow:hidden;}
+  .barra .pista > div{height:100%;border-radius:5px;background:var(--accent);transition:width .5s ease;}
+  .barra .v{font-weight:800;text-align:right;white-space:nowrap;}
+  .tres{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:14px 16px;min-width:0;}
+  .panel .tt{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--muted);}
+  .panel .big{font-size:clamp(1.3rem,2vw,1.7rem);font-weight:800;letter-spacing:-.01em;margin:4px 0 10px;white-space:nowrap;}
+  .tag{display:inline-block;font-size:11px;font-weight:800;padding:2px 9px;border-radius:999px;white-space:nowrap;}
   .tag.ok{background:var(--ok-soft);color:var(--ok);} .tag.mal{background:var(--danger-soft);color:var(--danger);} .tag.neu{background:var(--bg);color:var(--muted);}
-  .tabla{background:var(--card);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:6px 18px 10px;overflow-x:auto;}
-  .tabla h3{margin:14px 0 6px;font-size:15px;font-weight:800;}
-  table{width:100%;border-collapse:collapse;font-size:14px;}
-  th,td{padding:11px 8px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;}
-  th:first-child,td:first-child{text-align:left;font-weight:700;}
-  th{font-size:12px;color:var(--muted);font-weight:700;}
-  tbody tr:last-child td{border-bottom:0;}
-  tr.total td{font-weight:800;border-top:2px solid var(--border);}
-  td.pos{color:var(--ok);font-weight:700;} td.neg{color:var(--danger);font-weight:700;}
-  @media (max-width:1000px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
-  @media (max-width:520px){.kpis{grid-template-columns:1fr;}}
+  .fila{display:grid;grid-template-columns:minmax(70px,128px) 1fr 92px;gap:10px;align-items:center;padding:7px 0;border-top:1px solid var(--border);font-size:12px;}
+  .fila .nom{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dobles{display:flex;flex-direction:column;gap:3px;}
+  .dobles .pista{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;} .dobles .pista > div{height:100%;border-radius:3px;transition:width .5s ease;}
+  .dobles .a{background:var(--accent);} .dobles .b{background:var(--piedra);}
+  .fila .v{text-align:right;font-weight:800;white-space:nowrap;}
+  .fila .v.pos{color:var(--ok);} .fila .v.neg{color:var(--danger);}
+  @media (max-width:1000px){.tres{grid-template-columns:1fr;} .hero{grid-template-columns:1fr;}}
 </style>
 </head>
 <body>
@@ -89,14 +93,18 @@
       <input type="date" id="fDesde" aria-label="Desde" onchange="$('fPeriodo').value='custom';cargar()">
       <input type="date" id="fHasta" aria-label="Hasta" onchange="$('fPeriodo').value='custom';cargar()">
       <span class="muted" id="topbarUser" style="margin-left:6px"></span>
-      <span class="tb-info" title="Facturación: ventas del período con IVA, restando notas de crédito. Cobros: lo cobrado a clientes en el período. Pagos: lo pagado a proveedores y gastos en el período. Posición fiscal: IVA de ventas menos IVA de compras del período (positivo = IVA a pagar, negativo = saldo a favor); no incluye percepciones ni retenciones. Saldos de deuda: lo que falta cobrar menos lo que falta pagar, a hoy (no depende del período). Ves las sucursales que tenés asignadas.">i</span>
+      <span class="tb-info" title="Facturación: ventas del período con IVA, restando notas de crédito. Cobros: lo cobrado a clientes en el período. Pagos: lo pagado a proveedores y gastos en el período. Posición fiscal: IVA de ventas menos IVA de compras del período (positivo = IVA a pagar, negativo = saldo a favor); no incluye percepciones ni retenciones. Saldos de deuda: lo que falta cobrar menos lo que falta pagar, a hoy (no depende del período). En los gráficos, naranja = lo que entra (cobros, IVA de ventas, por cobrar) y gris = lo que sale. Ves las sucursales que tenés asignadas.">i</span>
     </div>
     <div id="err"></div>
 
-    <div class="kpis" id="kpis"></div>
-    <div class="tabla hidden" id="tablaBox">
-      <h3>Por sucursal</h3>
-      <table><thead><tr><th>Sucursal</th><th>Facturado</th><th>Cobros</th><th>Pagos</th><th>Posición fiscal</th><th>Saldo de deuda</th></tr></thead><tbody id="tabla"></tbody></table>
+    <section class="hero">
+      <div><div class="et">Facturación del período</div><div class="val" id="hTotal">$ —</div></div>
+      <div class="barras" id="hBarras"></div>
+    </section>
+    <div class="tres">
+      <section class="panel"><div class="tt"><span>Cobros y pagos</span><span id="cpTag"></span></div><div class="big" id="cpBig"></div><div id="cpLista"></div></section>
+      <section class="panel"><div class="tt"><span>Posición fiscal</span><span id="pfTag"></span></div><div class="big" id="pfBig"></div><div id="pfLista"></div></section>
+      <section class="panel"><div class="tt"><span>Saldos de deuda</span><span id="sdTag"></span></div><div class="big" id="sdBig"></div><div id="sdLista"></div></section>
     </div>
   </main>
 </div>
@@ -155,11 +163,12 @@ async function iniciarApp(){
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 
-const clase = n => n > 0 ? 'pos' : (n < 0 ? 'neg' : '');
-function kpi(et, valor, det, oscuro, tip){
-  return '<div class="kpi' + (oscuro ? ' oscuro' : '') + '" title="' + escapeHtml(tip || '') + '"><div class="et">' + et + '</div><div class="val">' + valor + '</div><div class="det">' + det + '</div></div>';
-}
 function tag(texto, tipo){ return '<span class="tag ' + tipo + '">' + texto + '</span>'; }
+function fila(nombre, v1, v2, neto, claseNeto, tip, textoNeto){
+  const m = Math.max(Math.abs(v1), Math.abs(v2), 1);
+  return '<div class="fila" title="' + escapeHtml(tip) + '"><span class="nom">' + escapeHtml(nombre) + '</span><div class="dobles"><div class="pista"><div class="a" style="width:' + Math.abs(v1) / m * 100 + '%"></div></div><div class="pista"><div class="b" style="width:' + Math.abs(v2) / m * 100 + '%"></div></div></div><span class="v ' + claseNeto + '">' + (textoNeto || pesos(neto)) + '</span></div>';
+}
+const cls = n => n > 0 ? 'pos' : (n < 0 ? 'neg' : '');
 
 async function cargar(){
   $('err').innerHTML = '';
@@ -170,20 +179,26 @@ async function cargar(){
     d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
   }catch(e){ $('err').innerHTML = '<div class="err">No se pudo cargar: ' + escapeHtml(e.message) + '</div>'; return; }
   const T = d.total, S = d.sucursales.slice().sort((a, b) => b.facturado - a.facturado);
-  const pf = T.posicionFiscal;
-  $('kpis').innerHTML =
-    kpi('Facturación', pesos(T.facturado), S.length > 1 ? S.length + ' sucursales' : (S[0] ? escapeHtml(S[0].nombre) : ''), true, 'Ventas del período con IVA, restando notas de crédito') +
-    kpi('Cobros menos pagos', pesos(T.flujoNeto), tag(T.flujoNeto >= 0 ? 'cobraste más' : 'pagaste más', T.flujoNeto >= 0 ? 'ok' : 'mal'), false, 'Cobros ' + pesos(T.cobros) + ' · Pagos ' + pesos(T.pagos)) +
-    kpi('Posición fiscal', pesos(Math.abs(pf)), tag(pf > 0 ? 'IVA a pagar' : (pf < 0 ? 'saldo a favor' : 'sin saldo'), pf > 0 ? 'mal' : (pf < 0 ? 'ok' : 'neu')), false, 'IVA ventas ' + pesos(T.ivaVentas) + ' · IVA compras ' + pesos(T.ivaCompras)) +
-    kpi('Saldo de deuda', pesos(T.saldoNeto), tag(T.saldoNeto >= 0 ? 'te deben más' : 'debés más', T.saldoNeto >= 0 ? 'ok' : 'mal'), false, 'Por cobrar ' + pesos(T.porCobrar) + ' · Por pagar ' + pesos(T.porPagar));
 
-  // Tabla por sucursal (solo si hay más de una)
-  $('tablaBox').classList.toggle('hidden', S.length < 2);
-  const fila = (s, cls) => '<tr class="' + (cls || '') + '"><td>' + escapeHtml(s.nombre) + '</td><td>' + pesos(s.facturado) + '</td>' +
-    '<td title="Cobros del período">' + pesos(s.cobros) + '</td><td title="Pagos del período">' + pesos(s.pagos) + '</td>' +
-    '<td class="' + (s.posicionFiscal > 0 ? 'neg' : (s.posicionFiscal < 0 ? 'pos' : '')) + '" title="IVA ventas ' + pesos(s.ivaVentas) + ' · IVA compras ' + pesos(s.ivaCompras) + '">' + (s.posicionFiscal > 0 ? 'a pagar ' : (s.posicionFiscal < 0 ? 'a favor ' : '')) + pesos(Math.abs(s.posicionFiscal)) + '</td>' +
-    '<td class="' + clase(s.saldoNeto) + '" title="Por cobrar ' + pesos(s.porCobrar) + ' · Por pagar ' + pesos(s.porPagar) + '">' + pesos(s.saldoNeto) + '</td></tr>';
-  $('tabla').innerHTML = S.map(s => fila(s)).join('') + fila(Object.assign({ nombre: 'Total' }, T), 'total');
+  $('hTotal').textContent = pesos(T.facturado);
+  const maxF = Math.max(1, ...S.map(s => s.facturado));
+  $('hBarras').innerHTML = S.map(s => '<div class="barra"><span class="nom" title="' + escapeHtml(s.nombre) + '">' + escapeHtml(s.nombre) + '</span><div class="pista"><div style="width:' + Math.max(0, s.facturado) / maxF * 100 + '%"></div></div><span class="v">' + pesos(s.facturado) + '</span></div>').join('');
+
+  // Cobros y pagos (naranja = cobros, gris = pagos)
+  $('cpBig').textContent = pesos(T.flujoNeto);
+  $('cpTag').innerHTML = tag(T.flujoNeto >= 0 ? 'cobraste más' : 'pagaste más', T.flujoNeto >= 0 ? 'ok' : 'mal');
+  $('cpLista').innerHTML = S.map(s => fila(s.nombre, s.cobros, s.pagos, s.flujoNeto, cls(s.flujoNeto), 'Cobros ' + pesos(s.cobros) + ' · Pagos ' + pesos(s.pagos))).join('');
+
+  // Posición fiscal (naranja = IVA ventas, gris = IVA compras)
+  const pf = T.posicionFiscal;
+  $('pfBig').textContent = pesos(Math.abs(pf));
+  $('pfTag').innerHTML = tag(pf > 0 ? 'IVA a pagar' : (pf < 0 ? 'a favor' : 'sin saldo'), pf > 0 ? 'mal' : (pf < 0 ? 'ok' : 'neu'));
+  $('pfLista').innerHTML = S.map(s => fila(s.nombre, s.ivaVentas, s.ivaCompras, s.posicionFiscal, s.posicionFiscal > 0 ? 'neg' : (s.posicionFiscal < 0 ? 'pos' : ''), 'IVA ventas ' + pesos(s.ivaVentas) + ' · IVA compras ' + pesos(s.ivaCompras), pesos(Math.abs(s.posicionFiscal)))).join('');
+
+  // Saldos de deuda (naranja = por cobrar, gris = por pagar)
+  $('sdBig').textContent = pesos(T.saldoNeto);
+  $('sdTag').innerHTML = tag(T.saldoNeto >= 0 ? 'te deben más' : 'debés más', T.saldoNeto >= 0 ? 'ok' : 'mal');
+  $('sdLista').innerHTML = S.map(s => fila(s.nombre, s.porCobrar, s.porPagar, s.saldoNeto, cls(s.saldoNeto), 'Por cobrar ' + pesos(s.porCobrar) + ' · Por pagar ' + pesos(s.porPagar))).join('');
 }
 </script>
 </body>
