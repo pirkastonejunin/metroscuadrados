@@ -55,8 +55,28 @@
 
   function cerrarTodosLosMenus(exceptoPanel) {
     document.querySelectorAll('.menu-acciones-panel').forEach(function (p) {
-      if (p !== exceptoPanel) p.classList.remove('abierto');
+      if (p !== exceptoPanel) { p.classList.remove('abierto'); p.style.display = 'none'; }
     });
+  }
+
+  // El menú se ubica con position:fixed (7/10/2026, bug reportado por Mato en Clientes:
+  // el menú del engranaje quedaba fuera de pantalla). Así no lo recorta el
+  // contenedor de la tabla (overflow) y se acomoda: alineado al borde derecho del
+  // engranaje, y hacia arriba si abajo no entra.
+  function ubicarPanel(trigger, panel) {
+    var r = trigger.getBoundingClientRect();
+    var w = panel.offsetWidth, h = panel.offsetHeight, m = 8;
+    var left = r.right - w;
+    if (left + w > window.innerWidth - m) left = window.innerWidth - m - w;
+    if (left < m) left = m;
+    var top = r.bottom + 4;
+    if (top + h > window.innerHeight - m) top = Math.max(m, r.top - h - 4);
+    panel.style.position = 'fixed';
+    panel.style.left = left + 'px';
+    panel.style.top = top + 'px';
+    panel.style.right = 'auto';
+    panel.style.marginTop = '0';
+    panel.style.zIndex = '1000';
   }
 
   function armarMenu(cont) {
@@ -117,6 +137,7 @@
       cerrarTodosLosMenus(null);
       panel.classList.toggle('abierto', !yaAbierto);
       panel.style.display = panel.classList.contains('abierto') ? 'block' : 'none';
+      if (!yaAbierto) ubicarPanel(trigger, panel);
     });
 
     cont.insertBefore(envoltorio, elegibles[0]);
@@ -145,6 +166,8 @@
   function iniciar() {
     procesarDesde(document.body);
     document.addEventListener('click', function () { cerrarTodosLosMenus(null); });
+    window.addEventListener('resize', function () { cerrarTodosLosMenus(null); });
+    window.addEventListener('scroll', function () { cerrarTodosLosMenus(null); }, true);
     var obs = new MutationObserver(function (mutaciones) {
       for (var i = 0; i < mutaciones.length; i++) {
         var nodos = mutaciones[i].addedNodes;
