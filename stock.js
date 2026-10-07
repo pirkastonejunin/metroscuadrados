@@ -420,6 +420,16 @@ router.get('/resumen-depositos', authAdmin, async (req, res) => {
       const prods = ids.length ? await db.collection('productos_catalogo').find({ _id: { $in: ids } }).project({ costo: 1, moneda: 1 }).toArray() : [];
       const porProd = new Map(prods.map(p => [String(p._id), p]));
       const mapa = new Map(depositos.map(d => [String(d._id), { depositoId: d._id, nombre: d.nombre, unidades: 0, productos: 0, comprometido: 0, valor: {}, sinCosto: 0 }]));
+      // Comprometido y faltante (acceso rápido): sobre TODAS las existencias, incluida la
+      // demanda sin depósito asignado. Faltante = lo comprometido que supera el stock físico.
+      const todas = await db.collection('stock_actual').find(filtroOrg(req)).toArray();
+      const comprometidoTotal = { unidades: 0, filas: 0 }, faltante = { unidades: 0, filas: 0 };
+      for (const e of todas) {
+        const comp = Number(e.cantidadComprometida) || 0;
+        if (comp > 0) { comprometidoTotal.unidades += comp; comprometidoTotal.filas += 1; }
+        const disp = (Number(e.cantidad) || 0) - comp;
+        if (disp < 0) { faltante.unidades += -disp; faltante.filas += 1; }
+      }
       const total = { unidades: 0, productos: 0, comprometido: 0, valor: {}, sinCosto: 0 };
       for (const e of existencias) {
         const d = mapa.get(String(e.depositoId));
@@ -436,7 +446,7 @@ router.get('/resumen-depositos', authAdmin, async (req, res) => {
           if (cant > 0 && costo) b.valor[mon] = (b.valor[mon] || 0) + cant * costo;
         }
       }
-      return { depositos: [...mapa.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')), total };
+      return { depositos: [...mapa.values()].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')), total, comprometidoTotal, faltante };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -527,6 +537,8 @@ router.get('/actual', authAdmin, async (req, res) => {
           };
         });
       if (req.query.soloBajoMinimo === '1') filas = filas.filter(f => f.bajoMinimo);
+      if (req.query.soloComprometido === '1') filas = filas.filter(f => f.cantidadComprometida > 0);
+      if (req.query.soloFaltante === '1') filas = filas.filter(f => f.disponible < 0);
       filas.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
       return filas;
     });

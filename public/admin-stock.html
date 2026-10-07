@@ -368,13 +368,15 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 // -------------------------------------------------------------------
 let stockActualCache = [];
 
-// Tarjetas por depósito (7/10/2026): unidades y valor a costo. Tocar una tarjeta
-// filtra la tabla por ese depósito (de nuevo, quita el filtro).
+// Tarjetas de acceso rápido (7/10/2026): Depósito Junín, Stock comprometido y Stock
+// faltante. Tocar una filtra la tabla; tocarla de nuevo quita el filtro.
+let FILTRO_RAPIDO = ''; // '' | 'comprometido' | 'faltante'
 function montoDep(m){
   const mons = Object.keys(m || {});
   if (!mons.length) return '$ 0';
   return mons.map(k => (k === 'ARS' ? '$ ' : k + ' ') + Math.round(m[k]).toLocaleString('es-AR')).join(' + ');
 }
+const fmtN = n => Math.round(n).toLocaleString('es-AR');
 let RESUMEN_DEP = null, RESUMEN_DEP_T = 0;
 async function cargarResumenDepositos(){
   const cont = document.getElementById('resumenDepositos');
@@ -388,21 +390,37 @@ async function cargarResumenDepositos(){
     }
     const d = RESUMEN_DEP;
     const sel = document.getElementById('faDeposito').value;
-    const tarjeta = (id, titulo, x, esTotal) => `
-      <div class="card" onclick="filtrarPorDepositoTarjeta('${id}')" style="margin:0;cursor:pointer;${esTotal ? 'border-left:4px solid var(--text);' : 'border-left:4px solid var(--accent);'}${sel === id && id ? 'outline:2px solid var(--accent);' : ''}">
-        <div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">${escapeHtml(titulo)}</div>
-        <div style="font-size:22px;font-weight:800;margin-top:4px">${Math.round(x.unidades).toLocaleString('es-AR')} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
-        <div style="font-weight:700;margin-top:2px">${montoDep(x.valor)} <span class="muted" style="font-weight:600">valor a costo</span></div>
-        <div class="muted" style="margin-top:2px">${x.productos} producto${x.productos === 1 ? '' : 's'}${x.comprometido ? ' · ' + Math.round(x.comprometido).toLocaleString('es-AR') + ' comprometidas' : ''}${x.sinCosto ? ' · ' + x.sinCosto + ' sin costo' : ''}</div>
+    const junin = d.depositos.find(x => /jun[ií]n/i.test(x.nombre));
+    const caja = (clave, titulo, color, activa, cuerpo) => `
+      <div class="card" onclick="${clave}" style="margin:0;cursor:pointer;border-left:4px solid ${color};${activa ? 'outline:2px solid ' + color + ';' : ''}">
+        <div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">${titulo}</div>${cuerpo}
       </div>`;
-    cont.innerHTML = tarjeta('', 'Total', d.total, true) + d.depositos.map(x => tarjeta(String(x.depositoId), x.nombre, x, false)).join('');
+    let html = '';
+    if (junin) {
+      html += caja(`filtrarPorDepositoTarjeta('${junin.depositoId}')`, escapeHtml(junin.nombre), 'var(--accent)', sel === String(junin.depositoId) && !FILTRO_RAPIDO, `
+        <div style="font-size:22px;font-weight:800;margin-top:4px">${fmtN(junin.unidades)} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
+        <div style="font-weight:700;margin-top:2px">${montoDep(junin.valor)} <span class="muted" style="font-weight:600">valor a costo</span></div>
+        <div class="muted" style="margin-top:2px">${junin.productos} producto${junin.productos === 1 ? '' : 's'}${junin.sinCosto ? ' · ' + junin.sinCosto + ' sin costo' : ''}</div>`);
+    }
+    html += caja(`filtrarRapido('comprometido')`, 'Stock comprometido', 'var(--warn, #b45309)', FILTRO_RAPIDO === 'comprometido', `
+      <div style="font-size:22px;font-weight:800;margin-top:4px">${fmtN(d.comprometidoTotal.unidades)} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
+      <div class="muted" style="margin-top:2px">${d.comprometidoTotal.filas} producto${d.comprometidoTotal.filas === 1 ? '' : 's'} reservado${d.comprometidoTotal.filas === 1 ? '' : 's'} por ventas sin remito</div>`);
+    html += caja(`filtrarRapido('faltante')`, 'Stock faltante', 'var(--danger)', FILTRO_RAPIDO === 'faltante', `
+      <div style="font-size:22px;font-weight:800;margin-top:4px;${d.faltante.unidades ? 'color:var(--danger)' : ''}">${fmtN(d.faltante.unidades)} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
+      <div class="muted" style="margin-top:2px">${d.faltante.filas} producto${d.faltante.filas === 1 ? '' : 's'} con lo comprometido por encima del stock</div>`);
+    cont.innerHTML = html;
   }catch(e){ cont.innerHTML = ''; }
 }
 function filtrarPorDepositoTarjeta(id){
   const sel = document.getElementById('faDeposito');
-  sel.value = (id && sel.value === id) ? '' : id;
+  FILTRO_RAPIDO = '';
+  sel.value = (sel.value === id) ? '' : id;
   cargarStockActual();
-  cargarResumenDepositos();
+}
+function filtrarRapido(cual){
+  FILTRO_RAPIDO = (FILTRO_RAPIDO === cual) ? '' : cual;
+  document.getElementById('faDeposito').value = '';
+  cargarStockActual();
 }
 async function cargarStockActual(){
   cargarResumenDepositos();
@@ -412,6 +430,8 @@ async function cargarStockActual(){
   if (document.getElementById('faRubro').value) params.set('rubro', document.getElementById('faRubro').value);
   if (document.getElementById('faMarca').value) params.set('marca', document.getElementById('faMarca').value);
   if (document.getElementById('faBajoMinimo').checked) params.set('soloBajoMinimo', '1');
+  if (FILTRO_RAPIDO === 'comprometido') params.set('soloComprometido', '1');
+  if (FILTRO_RAPIDO === 'faltante') params.set('soloFaltante', '1');
   const r = await fetch(BASE + '/actual?' + params.toString(), {headers: headersAuth()});
   const body = document.getElementById('actualBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
