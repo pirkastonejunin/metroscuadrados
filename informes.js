@@ -409,4 +409,168 @@ router.get('/resultados', authInforme('informe_resultados'), async (req, res) =>
   } catch (e) { responder(res, e); }
 });
 
+// ---------------------------------------------------------------------------
+// Deudores y Proveedores (7/10/2026, pedido de Mato) — saldos al día de hoy.
+//
+// Deudores:    GET /api/informes/deudores   (módulo 'informe_deudores')
+//   Qué te deben los clientes: saldo pendiente de cobro de cada comprobante de
+//   venta (sin anuladas, sin notas de crédito), en pesos (las ventas en USD van
+//   con la cotización guardada en la venta). Es el mismo criterio de "por
+//   cobrar" del tablero de facturación.
+// Proveedores: GET /api/informes/proveedores (módulo 'informe_proveedores')
+//   Qué les debés a los proveedores: saldo pendiente de pago de Compras y de
+//   Gastos (sin anuladas), en pesos. Mismo criterio de "por pagar" del tablero.
+//
+// Antigüedad = días desde la fecha del comprobante hasta hoy (no hay fecha de
+// vencimiento cargada): 0-30, 31-60, 61-90 y más de 90 días.
+//   agrupar = cliente|proveedor (una fila por cuenta) | comprobante (detalle).
+//   formato=xlsx descarga lo mismo en Excel. Datos de la sucursal elegida arriba.
+// ---------------------------------------------------------------------------
+const TRAMOS = [{ k: 't0', t: '0-30 días', max: 30 }, { k: 't1', t: '31-60 días', max: 60 }, { k: 't2', t: '61-90 días', max: 90 }, { k: 't3', t: 'Más de 90 días', max: Infinity }];
+function diasDesde(fecha) {
+  const a = inicioDia(fechaAR(new Date())).getTime(), b = inicioDia(fechaAR(fecha)).getTime();
+  return Math.max(0, Math.round((a - b) / 86400e3));
+}
+function tramoDe(dias) { return TRAMOS.find(t => dias <= t.max).k; }
+function formaFechaCorta(s) { const [y, m, d] = s.split('-'); return d + '/' + m + '/' + y; }
+
+// Junta comprobantes ({cuenta, cuentaId, fecha, comprobante, tipo, saldo, ...}) en filas por cuenta o por comprobante.
+function armarSaldos(comps, agrupar, minDias) {
+  comps.forEach(c => { c.dias = diasDesde(c.fecha); c.tramo = tramoDe(c.dias); c.fechaS = fechaAR(c.fecha); });
+  const lista = comps.filter(c => c.dias >= minDias && c.saldo > 0.005);
+  const tot = { saldo: 0, comprobantes: lista.length, cuentas: new Set(), t0: 0, t1: 0, t2: 0, t3: 0 };
+  lista.forEach(c => { tot.saldo += c.saldo; tot[c.tramo] += c.saldo; tot.cuentas.add(c.cuenta); });
+  let filas;
+  if (agrupar === 'comprobante') {
+    filas = lista.sort((a, b) => b.dias - a.dias || b.saldo - a.saldo).map(c => ({
+      fecha: c.fechaS, comprobante: c.comprobante, cuenta: c.cuenta, tipo: c.tipo || '', vendedor: c.vendedor || '', dias: c.dias, saldo: r2(c.saldo)
+    }));
+  } else {
+    const por = new Map();
+    lista.forEach(c => {
+      const g = por.get(c.cuenta) || { nombre: c.cuenta, cuentaId: c.cuentaId ? String(c.cuentaId) : '', comprobantes: 0, saldo: 0, t0: 0, t1: 0, t2: 0, t3: 0, masAntiguo: 0, saldoCompras: 0, saldoGastos: 0 };
+      g.comprobantes++; g.saldo += c.saldo; g[c.tramo] += c.saldo; g.masAntiguo = Math.max(g.masAntiguo, c.dias);
+      if (c.tipo === 'Compra') g.saldoCompras += c.saldo; else if (c.tipo === 'Gasto') g.saldoGastos += c.saldo;
+      por.set(c.cuenta, g);
+    });
+    filas = [...por.values()].sort((a, b) => b.saldo - a.saldo).map(g => ({
+      nombre: g.nombre, cuentaId: g.cuentaId, comprobantes: g.comprobantes, saldo: r2(g.saldo), t0: r2(g.t0), t1: r2(g.t1), t2: r2(g.t2), t3: r2(g.t3),
+      masAntiguo: g.masAntiguo, saldoCompras: r2(g.saldoCompras), saldoGastos: r2(g.saldoGastos), participacion: tot.saldo ? r2(g.saldo / tot.saldo * 100) : 0
+    }));
+  }
+  return { agrupar, filas, totales: { saldo: r2(tot.saldo), comprobantes: tot.comprobantes, cuentas: tot.cuentas.size, t0: r2(tot.t0), t1: r2(tot.t1), t2: r2(tot.t2), t3: r2(tot.t3) } };
+}
+function minDiasQuery(req) {
+  const n = Number(req.query.minDias || 0);
+  if (!Number.isFinite(n) || n < 0) throw err(400, 'Los días mínimos tienen que ser un número positivo.');
+  return n;
+}
+function agruparQuery(req) {
+  const a = req.query.agrupar === 'comprobante' ? 'comprobante' : 'cuenta';
+  if (req.query.agrupar && !['cliente', 'proveedor', 'cuenta', 'comprobante'].includes(req.query.agrupar)) throw err(400, 'Agrupación inválida.');
+  return a;
+}
+function columnasSaldos(det, tituloCuenta, esProv) {
+  const tr = TRAMOS.map(t => ({ clave: t.k, titulo: t.t + ' ($)', tipo: 'numero' }));
+  return det
+    ? [{ clave: 'fecha', titulo: 'Fecha' }, { clave: 'comprobante', titulo: 'Comprobante' }, { clave: 'cuenta', titulo: tituloCuenta }].concat(esProv ? [{ clave: 'tipo', titulo: 'Tipo' }] : [{ clave: 'vendedor', titulo: 'Vendedor' }], [{ clave: 'dias', titulo: 'Días de antigüedad', tipo: 'numero' }, { clave: 'saldo', titulo: 'Saldo ($)', tipo: 'numero' }])
+    : [{ clave: 'nombre', titulo: tituloCuenta }, { clave: 'comprobantes', titulo: 'Comprobantes', tipo: 'numero' }].concat(esProv ? [{ clave: 'saldoCompras', titulo: 'Compras ($)', tipo: 'numero' }, { clave: 'saldoGastos', titulo: 'Gastos ($)', tipo: 'numero' }] : [], tr, [{ clave: 'masAntiguo', titulo: 'Más antiguo (días)', tipo: 'numero' }, { clave: 'saldo', titulo: 'Saldo total ($)', tipo: 'numero' }, { clave: 'participacion', titulo: '% del total', tipo: 'numero' }]);
+}
+function totalXlsx(d, det, esProv) {
+  const T = d.totales;
+  return det ? { fecha: 'TOTAL', saldo: T.saldo } : Object.assign({ nombre: 'TOTAL', comprobantes: T.comprobantes, t0: T.t0, t1: T.t1, t2: T.t2, t3: T.t3, saldo: T.saldo, participacion: 100 });
+}
+
+router.get('/deudores/opciones', authInforme('informe_deudores'), async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const base = Object.assign({ estado: { $ne: 'anulada' }, tipoComprobante: { $ne: 'nota_credito' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
+      const [vendedores, clientes] = await Promise.all([
+        db.collection('ventas').distinct('vendedor', Object.assign({ vendedor: { $nin: [null, ''] } }, base)),
+        db.collection('ventas').aggregate([{ $match: Object.assign({ clienteId: { $ne: null } }, base) }, { $group: { _id: '$clienteId', nombre: { $last: '$clienteNombre' } } }, { $sort: { nombre: 1 } }]).toArray()
+      ]);
+      return { vendedores: vendedores.sort((a, b) => a.localeCompare(b, 'es')), clientes: clientes.map(c => ({ _id: String(c._id), nombre: c.nombre || '(sin nombre)' })) };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
+async function armarDeudores(req) {
+  const agrupar = agruparQuery(req), minDias = minDiasQuery(req);
+  const clienteId = req.query.clienteId ? toObjectId(req.query.clienteId) : null;
+  if (req.query.clienteId && !clienteId) throw err(400, 'clienteId inválido');
+  const vendedor = String(req.query.vendedor || '').trim();
+  return conReintento(async () => {
+    const db = await getDb();
+    const match = Object.assign({ estado: { $ne: 'anulada' }, tipoComprobante: { $ne: 'nota_credito' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
+    if (clienteId) match.clienteId = clienteId;
+    if (vendedor) match.vendedor = vendedor;
+    const ventas = await db.collection('ventas').find(match).project({ fecha: 1, numero: 1, tipoComprobante: 1, letra: 1, clienteId: 1, clienteNombre: 1, vendedor: 1, moneda: 1, cotizacionDolar: 1, saldoPendiente: 1 }).limit(20000).toArray();
+    const comps = ventas.map(v => ({
+      cuenta: v.clienteNombre || '(sin cliente)', cuentaId: v.clienteId, fecha: v.fecha, comprobante: etiquetaComprobante(v), vendedor: v.vendedor || '',
+      saldo: Number(v.saldoPendiente || 0) * (v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1)
+    }));
+    return Object.assign(armarSaldos(comps, agrupar, minDias), { hoy: fechaAR(new Date()), truncado: ventas.length >= 20000 });
+  });
+}
+router.get('/deudores', authInforme('informe_deudores'), async (req, res) => {
+  try {
+    const d = await armarDeudores(req);
+    if (req.query.formato !== 'xlsx') return res.json(d);
+    const det = d.agrupar === 'comprobante';
+    const filas = d.filas.map(f => det ? Object.assign({}, f, { fecha: formaFechaCorta(f.fecha) }) : f).concat([totalXlsx(d, det, false)]);
+    exportarXlsx(res, 'deudores-' + (det ? 'comprobantes-' : 'clientes-') + d.hoy + '.xlsx', columnasSaldos(det, 'Cliente', false), filas);
+  } catch (e) { responder(res, e); }
+});
+
+router.get('/proveedores/opciones', authInforme('informe_proveedores'), async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const base = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
+      const grp = [{ $match: Object.assign({ proveedorId: { $ne: null } }, base) }, { $group: { _id: '$proveedorId', nombre: { $last: '$proveedorNombre' } } }];
+      const [a, b] = await Promise.all([db.collection('compras').aggregate(grp).toArray(), db.collection('gastos').aggregate(grp).toArray()]);
+      const m = new Map(); a.concat(b).forEach(p => m.set(String(p._id), p.nombre || '(sin nombre)'));
+      return { proveedores: [...m.entries()].map(([_id, nombre]) => ({ _id, nombre })).sort((x, y) => x.nombre.localeCompare(y.nombre, 'es')) };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
+async function armarProveedores(req) {
+  const agrupar = agruparQuery(req), minDias = minDiasQuery(req);
+  const proveedorId = req.query.proveedorId ? toObjectId(req.query.proveedorId) : null;
+  if (req.query.proveedorId && !proveedorId) throw err(400, 'proveedorId inválido');
+  const tipo = ['compras', 'gastos'].includes(req.query.tipo) ? req.query.tipo : 'todos';
+  return conReintento(async () => {
+    const db = await getDb();
+    const match = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
+    if (proveedorId) match.proveedorId = proveedorId;
+    const proj = { fecha: 1, numero: 1, comprobanteNumero: 1, proveedorId: 1, proveedorNombre: 1, moneda: 1, cotizacionDolar: 1, saldoPendiente: 1 };
+    const [compras, gastos] = await Promise.all([
+      tipo === 'gastos' ? [] : db.collection('compras').find(match).project(proj).limit(20000).toArray(),
+      tipo === 'compras' ? [] : db.collection('gastos').find(match).project(proj).limit(20000).toArray()
+    ]);
+    const conv = (x, t) => ({
+      cuenta: x.proveedorNombre || '(sin proveedor)', cuentaId: x.proveedorId, fecha: x.fecha, tipo: t,
+      comprobante: (t === 'Compra' ? 'Compra #' : 'Gasto #') + (x.numero != null ? x.numero : '') + (x.comprobanteNumero ? ' · ' + x.comprobanteNumero : ''),
+      saldo: Number(x.saldoPendiente || 0) * (x.moneda === 'USD' ? (Number(x.cotizacionDolar) || 1) : 1)
+    });
+    const comps = compras.map(c => conv(c, 'Compra')).concat(gastos.map(g => conv(g, 'Gasto')));
+    return Object.assign(armarSaldos(comps, agrupar, minDias), { hoy: fechaAR(new Date()), tipo, truncado: compras.length >= 20000 || gastos.length >= 20000 });
+  });
+}
+router.get('/proveedores', authInforme('informe_proveedores'), async (req, res) => {
+  try {
+    const d = await armarProveedores(req);
+    if (req.query.formato !== 'xlsx') return res.json(d);
+    const det = d.agrupar === 'comprobante';
+    const T = d.totales;
+    const filas = d.filas.map(f => det ? Object.assign({}, f, { fecha: formaFechaCorta(f.fecha) }) : f);
+    filas.push(det ? { fecha: 'TOTAL', saldo: T.saldo } : { nombre: 'TOTAL', comprobantes: T.comprobantes, saldoCompras: r2(d.filas.reduce((a, f) => a + f.saldoCompras, 0)), saldoGastos: r2(d.filas.reduce((a, f) => a + f.saldoGastos, 0)), t0: T.t0, t1: T.t1, t2: T.t2, t3: T.t3, saldo: T.saldo, participacion: 100 });
+    exportarXlsx(res, 'deuda-proveedores-' + (det ? 'comprobantes-' : 'proveedores-') + d.hoy + '.xlsx', columnasSaldos(det, 'Proveedor', true), filas);
+  } catch (e) { responder(res, e); }
+});
+
 module.exports = router;

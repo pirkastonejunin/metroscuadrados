@@ -129,6 +129,8 @@
     { nombre: 'Reportes', items: [
       { key: 'informe-ventas', href: '/admin-informe-ventas.html', modulo: 'informe_ventas', label: 'Informe de ventas', icon: ICONOS.ventas || ICONOS.fiscal },
       { key: 'informe-resultados', href: '/admin-informe-resultados.html', modulo: 'informe_resultados', label: 'Estado de resultados', icon: ICONOS.fiscal },
+      { key: 'informe-deudores', href: '/admin-informe-deudores.html', modulo: 'informe_deudores', label: 'Deudores (clientes)', icon: ICONOS.clientes },
+      { key: 'informe-proveedores', href: '/admin-informe-proveedores.html', modulo: 'informe_proveedores', label: 'Deuda con proveedores', icon: ICONOS.proveedores },
       { key: 'facturacion', href: '/admin-facturacion.html', modulo: 'tablero_facturacion', label: 'Facturación por sucursal', icon: ICONOS.fiscal }
     ]}
   ];

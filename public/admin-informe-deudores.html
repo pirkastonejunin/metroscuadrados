@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Informe de deudores - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea; --danger:#c53030; --danger-soft:#fbe4e1; --piedra:#5d646d;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8; --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316; --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f; --piedra:#9aa0a8; --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5); }
+  }
+  :root[data-theme="dark"] { --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8; --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316; --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f; --piedra:#9aa0a8; --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5); }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  main{padding:20px;max-width:1280px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--shadow);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .muted{color:var(--muted);font-size:12px;} .hidden{display:none !important;} .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;} #loginScreen .card{width:300px;text-align:center;}
+  .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+  .tb-filtros select,.tb-filtros input[type=date],.tb-filtros input[type=text]{width:auto;font-weight:600;font-size:13px;padding:6px 14px;border-radius:999px;background:var(--card);box-shadow:var(--shadow);}
+  .tb-filtros input[type=text]{min-width:150px;}
+  .tb-filtros label.chk{display:flex;align-items:center;gap:5px;margin:0;font-size:12px;cursor:pointer;} .tb-filtros label.chk input{width:auto;}
+  .seg{display:inline-flex;background:var(--card);border-radius:999px;box-shadow:var(--shadow);padding:3px;gap:2px;border:1px solid var(--border);}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;font-weight:700;padding:5px 13px;border-radius:999px;cursor:pointer;}
+  .seg button.on{background:var(--accent);color:var(--accent-ink);}
+  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:12px 16px;}
+  .kpi .et{font-size:12px;font-weight:700;color:var(--muted);} .kpi .val{font-size:clamp(1.2rem,2vw,1.6rem);font-weight:800;letter-spacing:-.01em;white-space:nowrap;}
+  .kpi.main{background:radial-gradient(120% 140% at 0% 0%,#34373c 0%,#1d1f22 55%,#141517 100%);color:#f3f1ee;border:0;} .kpi.main .et{color:#aeb2b8;}
+  .tabla{background:var(--card);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;}
+  .tabla table{width:100%;border-collapse:collapse;font-size:13px;}
+  .tabla th{text-align:left;font-size:11.5px;color:var(--muted);font-weight:700;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap;}
+  .tabla td{padding:9px 14px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  .tabla tr:last-child td{border-bottom:0;} .tabla .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;} .tabla th.n{text-align:right;}
+  .tabla tbody tr.clic{cursor:pointer;} .tabla tbody tr.clic:hover{background:var(--bg);}
+  .tabla tfoot td{font-weight:800;background:var(--bg);}
+  .barra-imp{display:flex;align-items:center;gap:8px;justify-content:flex-end;} .barra-imp .pista{width:90px;height:7px;border-radius:4px;background:var(--bg);overflow:hidden;flex:none;} .barra-imp .pista>div{height:100%;background:var(--accent);border-radius:4px;}
+  .vacio{padding:28px;text-align:center;color:var(--muted);}
+  .tb-info{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:12px;font-weight:800;cursor:help;}
+  @media (max-width:900px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .tabla{overflow-x:auto;}}
+  .tabla td.venc{color:var(--danger);font-weight:700;}
+  .tabla td.cero{color:var(--muted);}
+  .tabla tfoot td.n{white-space:nowrap;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Informe de deudores</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button data-iconizado="1" class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado este informe. Pedile a un administrador que lo habilite desde Usuarios y roles.</p>
+    <button data-iconizado="1" class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <main>
+    <div class="tb-filtros">
+      <select id="fVendedor" aria-label="Vendedor" onchange="cargar()"><option value="">Todos los vendedores</option></select>
+      <input type="text" id="fCuenta" list="dlCuentas" placeholder="Cliente…" aria-label="Cliente" onchange="cargar()">
+      <datalist id="dlCuentas"></datalist>
+      <select id="fAntig" aria-label="Antigüedad" onchange="cargar()">
+        <option value="0">Toda la deuda</option><option value="31">Más de 30 días</option><option value="61">Más de 60 días</option><option value="91">Más de 90 días</option>
+      </select>
+    </div>
+    <div class="tb-filtros">
+      <span class="muted">Ver por</span>
+      <div class="seg" id="seg">
+        <button data-a="cuenta" class="on">Cliente</button><button data-a="comprobante">Comprobante</button>
+      </div>
+      <button data-iconizado="1" class="btn secondary" style="margin-left:auto" onclick="exportar()" title="Descargar este informe en Excel">Exportar a Excel</button>
+      <span class="tb-info" title="Saldo pendiente de cobro de cada comprobante de venta (sin anuladas ni notas de crédito), en pesos; las ventas en dólares van con la cotización guardada en la venta. Es el mismo criterio de “por cobrar” del tablero de facturación. Antigüedad: días desde la fecha del comprobante hasta hoy (no hay fecha de vencimiento cargada). Muestra el saldo de hoy de la sucursal elegida arriba. Hacé clic en un cliente para ver sus comprobantes.">i</span>
+    </div>
+    <div id="err"></div>
+    <div class="kpis">
+      <div class="kpi main"><div class="et">Te deben</div><div class="val" id="kSaldo">$ —</div></div>
+      <div class="kpi"><div class="et">Clientes con saldo</div><div class="val" id="kCuentas">—</div></div>
+      <div class="kpi"><div class="et">Comprobantes</div><div class="val" id="kComp">—</div></div>
+      <div class="kpi" title="Saldo de comprobantes de más de 90 días de antigüedad."><div class="et">Más de 90 días</div><div class="val" id="kViejo">—</div></div>
+    </div>
+    <div class="tabla"><table><thead id="tHead"></thead><tbody id="tBody"></tbody><tfoot id="tFoot"></tfoot></table></div>
+  </main>
+</div>
+
+<script>
+const BASE = '/api/informes';
+const MODULO = 'informe_deudores', RUTA = 'deudores', PAGINA = 'informe-deudores';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+let VER = 'cuenta', CUENTAS = [];
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function $(id){ return document.getElementById(id); }
+const pesos = n => (n < 0 ? '-$ ' : '$ ') + Math.round(Math.abs(n || 0)).toLocaleString('es-AR');
+const celda = (n, cls) => '<td class="n ' + (n ? (cls || '') : 'cero') + '">' + (n ? pesos(n) : '—') + '</td>';
+const fecha = s => { const [y,m,d] = s.split('-'); return d + '/' + m + '/' + y; };
+
+async function login(){
+  const usuario = $('loginUser').value, pass = $('loginPass').value;
+  $('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN);
+    await iniciarApp();
+  }catch(e){ $('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; $('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    const ok = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes(MODULO));
+    if (!ok) { $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ $('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  PiedraSidebar.render(me, PAGINA);
+  $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
+  try{
+    const r = await fetch(BASE + '/' + RUTA + '/opciones', {headers: headersAuth()}); const o = await r.json();
+    if (r.ok) {
+      CUENTAS = o.clientes;
+      $('fVendedor').innerHTML += o.vendedores.map(v => '<option>' + escapeHtml(v) + '</option>').join('');
+      $('dlCuentas').innerHTML = CUENTAS.map(c => '<option value="' + escapeHtml(c.nombre) + '">').join('');
+    }
+  }catch(e){}
+  await cargar();
+}
+if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('#seg button'); if (!b) return;
+  VER = b.dataset.a; [...document.querySelectorAll('#seg button')].forEach(x => x.classList.toggle('on', x === b)); cargar();
+});
+
+function params(extra){
+  const q = new URLSearchParams({agrupar: VER, minDias: $('fAntig').value});
+  if ($('fVendedor').value) q.set('vendedor', $('fVendedor').value);
+  const c = CUENTAS.find(x => x.nombre.toLowerCase() === $('fCuenta').value.trim().toLowerCase()); if (c) q.set('clienteId', c._id);
+  Object.keys(extra||{}).forEach(k => q.set(k, extra[k]));
+  return q;
+}
+
+async function cargar(){
+  $('err').innerHTML = '';
+  let d;
+  try{
+    const r = await fetch(BASE + '/' + RUTA + '?' + params(), {headers: headersAuth()});
+    d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+  }catch(e){ $('err').innerHTML = '<div class="err">No se pudo cargar: ' + escapeHtml(e.message) + '</div>'; return; }
+  const T = d.totales;
+  $('kSaldo').textContent = pesos(T.saldo); $('kCuentas').textContent = T.cuentas.toLocaleString('es-AR'); $('kComp').textContent = T.comprobantes.toLocaleString('es-AR');
+  $('kViejo').textContent = pesos(T.t3) + (T.saldo ? ' · ' + Math.round(T.t3 / T.saldo * 100) + ' %' : '');
+  if (!d.filas.length) { $('tHead').innerHTML = ''; $('tFoot').innerHTML = ''; $('tBody').innerHTML = '<tr><td class="vacio">No hay clientes con saldo pendiente con estos filtros.</td></tr>'; return; }
+  if (d.agrupar === 'comprobante') {
+    $('tHead').innerHTML = '<tr><th>Fecha</th><th>Comprobante</th><th>Cliente</th><th>Vendedor</th><th class="n">Antigüedad</th><th class="n">Saldo</th></tr>';
+    $('tBody').innerHTML = d.filas.map(f => '<tr><td>' + fecha(f.fecha) + '</td><td>' + escapeHtml(f.comprobante) + '</td><td>' + escapeHtml(f.cuenta) + '</td><td>' + escapeHtml(f.vendedor) + '</td><td class="n ' + (f.dias > 90 ? 'venc' : '') + '">' + f.dias + ' días</td><td class="n">' + pesos(f.saldo) + '</td></tr>').join('');
+    $('tFoot').innerHTML = '<tr><td colspan="5">Total · ' + T.comprobantes + ' comprobantes</td><td class="n">' + pesos(T.saldo) + '</td></tr>';
+  } else {
+    const max = Math.max(1, ...d.filas.map(f => f.saldo));
+    $('tHead').innerHTML = '<tr><th>Cliente</th><th class="n">Comprob.</th><th class="n">0-30 días</th><th class="n">31-60 días</th><th class="n">61-90 días</th><th class="n">+90 días</th><th class="n" title="Días del comprobante más viejo con saldo.">Más viejo</th><th class="n">% del total</th><th class="n">Saldo</th></tr>';
+    $('tBody').innerHTML = d.filas.map((f, i) => '<tr class="clic" data-i="' + i + '" title="Ver los comprobantes de ' + escapeHtml(f.nombre) + '"><td>' + escapeHtml(f.nombre) + '</td><td class="n">' + f.comprobantes + '</td>' + celda(f.t0) + celda(f.t1) + celda(f.t2) + celda(f.t3, 'venc') + '<td class="n ' + (f.masAntiguo > 90 ? 'venc' : '') + '">' + f.masAntiguo + ' d</td><td class="n">' + f.participacion.toLocaleString('es-AR', {maximumFractionDigits:1}) + ' %</td><td class="n"><div class="barra-imp"><div class="pista"><div style="width:' + f.saldo / max * 100 + '%"></div></div>' + pesos(f.saldo) + '</div></td></tr>').join('');
+    $('tFoot').innerHTML = '<tr><td>Total</td><td class="n">' + T.comprobantes + '</td><td class="n">' + pesos(T.t0) + '</td><td class="n">' + pesos(T.t1) + '</td><td class="n">' + pesos(T.t2) + '</td><td class="n">' + pesos(T.t3) + '</td><td></td><td class="n">100 %</td><td class="n">' + pesos(T.saldo) + '</td></tr>';
+    $('tBody').onclick = e => {
+      const tr = e.target.closest('tr.clic'); if (!tr) return;
+      $('fCuenta').value = d.filas[+tr.dataset.i].nombre;
+      VER = 'comprobante'; [...document.querySelectorAll('#seg button')].forEach(x => x.classList.toggle('on', x.dataset.a === 'comprobante')); cargar();
+    };
+  }
+}
+
+async function exportar(){
+  try{
+    const r = await fetch(BASE + '/' + RUTA + '?' + params({formato: 'xlsx'}), {headers: headersAuth()});
+    if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'No se pudo exportar'); }
+    const blob = await r.blob(), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'deudores-' + (VER === 'comprobante' ? 'comprobantes' : 'clientes') + '-' + new Date().toISOString().slice(0,10) + '.xlsx';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }catch(e){ $('err').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
+}
+</script>
+</body>
+</html>
