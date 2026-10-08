@@ -93,6 +93,7 @@
         <button class="btn" onclick="guardarConfig()">Guardar</button>
         <button class="btn secondary" onclick="probar()">Probar conexión</button>
         <button class="btn secondary" onclick="cargarTerminales()">Buscar terminales</button>
+        <button class="btn secondary" onclick="activarPdv()">Activar modo PDV en la terminal elegida</button>
       </div>
       <div class="err" id="mpErr" style="color:var(--danger);margin-top:8px"></div>
       <div id="mpOk" style="color:var(--ok);margin-top:8px"></div>
@@ -180,6 +181,13 @@ async function cargarTerminales(silencioso){
   const sel=document.getElementById('mpTerminal'); const actual=CFG&&CFG.terminalId||'';
   sel.innerHTML='<option value="">— elegir al cobrar —</option>'+d.map(t=>`<option value="${escapeHtml(t.id)}" ${t.id===actual?'selected':''}>${escapeHtml(t.nombre||t.id)}${t.pdv?'':' (no está en modo PDV)'}</option>`).join('');
   if(!silencioso) msg(true,d.length?d.length+' terminal(es) encontradas.':'No hay terminales vinculadas a esta cuenta.');
+}
+async function activarPdv(){
+  const id=document.getElementById('mpTerminal').value;
+  if(!id) return msg(false,'Primero buscá las terminales y elegí una.');
+  const r=await fetch(BASE+'/terminales/'+encodeURIComponent(id)+'/pdv',{method:'POST',headers:headersAuthJson()}); const d=await r.json();
+  if(!r.ok) return msg(false,d.error||'No se pudo activar');
+  msg(true,d.aviso||'Listo.'); setTimeout(()=>cargarTerminales(true),1500);
 }
 function copiar(id){ const el=document.getElementById(id); el.select(); try{ navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand('copy'); } }
 const EST={pendiente:'Esperando pago',registrando:'Registrando',acreditado:'Cobrado',error:'Error al registrar',rechazado:'Rechazado',cancelado:'Cancelado'};

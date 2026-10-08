@@ -153,6 +153,18 @@ router.get('/terminales', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Pone una terminal en modo PDV (hace falta para que reciba cobros desde el sistema).
+router.post('/terminales/:id/pdv', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const cfg = await cargarConfig(db, req.orgId);
+    const id = txt(req.params.id);
+    if (!id) throw err(400, 'Falta la terminal.');
+    await mp(cfg, 'PATCH', '/terminals/v1/setup', { terminals: [{ id, operating_mode: 'PDV' }] });
+    res.json({ ok: true, aviso: 'Listo. Si la terminal no cambia sola, reiniciala (apagar y prender).' });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // ---------------------------------------------------------------------------
 // Crear cobros
 // ---------------------------------------------------------------------------
