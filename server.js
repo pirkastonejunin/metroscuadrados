@@ -867,7 +867,8 @@ app.listen(PORT, () => console.log('Corriendo en puerto ' + PORT));
 // Si no existen las colecciones, no hace nada.
 (async () => {
   try {
-    const db = await getDb();
+    await getStoresCollection();
+    const db = mongoClient.db('calculadora_m2');
     for (const nombre of ['tienda_imagenes', 'productos_tienda']) {
       const hay = await db.listCollections({ name: nombre }, { nameOnly: true }).toArray();
       if (hay.length) { await db.collection(nombre).drop(); console.log('Limpieza: colección ' + nombre + ' borrada.'); }
