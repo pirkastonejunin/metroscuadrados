@@ -92,12 +92,35 @@ async function publicados(db, orgId) {
   cache.set(k, { t: Date.now(), filas });
   return filas;
 }
-async function disponibles(db, orgId, depositoId, ids) {
+// Depósitos de los que sale el stock de la tienda (se suman). Compatible con la config vieja (depositoId).
+function depositosDe(cfg) {
+  if (!cfg) return [];
+  if (Array.isArray(cfg.depositosIds) && cfg.depositosIds.length) return cfg.depositosIds;
+  return cfg.depositoId ? [cfg.depositoId] : [];
+}
+async function disponibles(db, orgId, depositos, ids) {
   const out = new Map();
-  if (!depositoId || !ids.length) return out;
-  const rows = await db.collection('stock_actual').find({ orgId, depositoId, productoId: { $in: ids.map(oid).filter(Boolean) } }).toArray();
-  for (const r of rows) out.set(String(r.productoId), Math.max(0, redondear((r.cantidad || 0) - (r.cantidadComprometida || 0))));
+  const deps = (Array.isArray(depositos) ? depositos : [depositos]).filter(Boolean);
+  if (!deps.length || !ids.length) return out;
+  const rows = await db.collection('stock_actual').find({ orgId, depositoId: { $in: deps }, productoId: { $in: ids.map(oid).filter(Boolean) } }).toArray();
+  const acum = new Map();
+  for (const r of rows) acum.set(String(r.productoId), (acum.get(String(r.productoId)) || 0) + Math.max(0, (r.cantidad || 0) - (r.cantidadComprometida || 0)));
+  for (const [k, v] of acum) out.set(k, Math.max(0, redondear(v)));
   return out;
+}
+// Depósito donde se compromete la venta: el primero que cubre todo el pedido; si ninguno, el que más cubre.
+async function depositoParaPedido(db, orgId, depositos, items) {
+  if (!depositos.length) return null;
+  if (depositos.length === 1) return depositos[0];
+  let mejor = depositos[0], mejorPuntaje = -1;
+  for (const d of depositos) {
+    const m = await disponibles(db, orgId, [d], items.map(i => String(i.productoId)));
+    let cubre = true, puntaje = 0;
+    for (const i of items) { const dsp = m.get(String(i.productoId)) || 0; if (dsp < i.cantidad) cubre = false; puntaje += Math.min(dsp, i.cantidad); }
+    if (cubre) return d;
+    if (puntaje > mejorPuntaje) { mejorPuntaje = puntaje; mejor = d; }
+  }
+  return mejor;
 }
 function vista(f, disp) {
   return { id: f.id, sku: f.sku, nombre: f.nombre, marca: f.marca, rubro: f.rubro, subrubro: f.subrubro, precio: f.precio, unidad: f.unidad,
@@ -144,7 +167,7 @@ publico.get('/catalogo', async (req, res) => {
     const pagina = Math.max(1, parseInt(req.query.pagina, 10) || 1);
     const porPagina = Math.min(60, Math.max(1, parseInt(req.query.porPagina, 10) || 24));
     const pag = filas.slice((pagina - 1) * porPagina, pagina * porPagina);
-    const disp = await disponibles(db, cfg.orgId, cfg.depositoId, pag.map(f => f.id));
+    const disp = await disponibles(db, cfg.orgId, depositosDe(cfg), pag.map(f => f.id));
     res.json({ total, pagina, porPagina, productos: pag.map(f => vista(f, disp.get(f.id) || 0)) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -156,7 +179,7 @@ publico.get('/producto/:id', async (req, res) => {
     const f = filas.find(x => x.id === req.params.id);
     if (!f) throw err(404, 'Producto no disponible.');
     const t = await db.collection('productos_tienda').findOne({ orgId: cfg.orgId, productoId: oid(f.id) });
-    const disp = await disponibles(db, cfg.orgId, cfg.depositoId, [f.id]);
+    const disp = await disponibles(db, cfg.orgId, depositosDe(cfg), [f.id]);
     res.json(Object.assign(vista(f, disp.get(f.id) || 0), {
       imagenes: f.imagenes, descripcionHtml: (t && t.descripcionHtml) || '',
       seoTitulo: (t && t.tienda && t.tienda.seoTitulo) || '', seoDescripcion: (t && t.tienda && t.tienda.seoDescripcion) || ''
@@ -199,10 +222,10 @@ publico.post('/pedidos', async (req, res) => {
     const mpm = mpMod();
     const mpCfg = await mpm.cargarConfig(db, cfg.orgId);
     if (!mpCfg || !mpCfg.accessToken || !mpCfg.bancoId) throw err(503, 'Los pagos online no están disponibles por ahora.');
-    if (!cfg.depositoId) throw err(503, 'La tienda todavía no tiene depósito configurado.');
+    if (!depositosDe(cfg).length) throw err(503, 'La tienda todavía no tiene depósito configurado.');
     const filas = await publicados(db, cfg.orgId);
     const porId = new Map(filas.map(f => [f.id, f]));
-    const disp = await disponibles(db, cfg.orgId, cfg.depositoId, b.items.map(i => String(i.productoId)));
+    const disp = await disponibles(db, cfg.orgId, depositosDe(cfg), b.items.map(i => String(i.productoId)));
     const vistos = new Set(); const items = []; const faltan = [];
     for (const it of b.items) {
       const f = porId.get(String(it.productoId));
@@ -305,7 +328,7 @@ async function conciliarPedido(db, pedido) {
         orgId: p.orgId, usuario: { nombre: 'Tienda online' },
         body: {
           clienteId: String(clienteId), tipoEntrega: 'pendiente', tipoComprobante: 'comprobante_x', moneda: 'ARS',
-          depositoId: cfgT && cfgT.depositoId ? String(cfgT.depositoId) : undefined, vendedor: 'Tienda online',
+          depositoId: (dep => dep ? String(dep) : undefined)(await depositoParaPedido(db, p.orgId, depositosDe(cfgT), p.items)), vendedor: 'Tienda online',
           observaciones: `Pedido web #${p.numero} — RETIRO EN SUCURSAL. ${p.cliente.nombre} · ${p.cliente.telefono} · ${p.cliente.email}`,
           items: p.items.map(i => ({ productoId: String(i.productoId), cantidad: i.cantidad, precioUnitario: i.precioUnitario }))
         }
@@ -342,7 +365,7 @@ admin.get('/config', auth, async (req, res) => {
     const c = (await cargarCfgTienda(db, req.orgId)) || {};
     const depositos = await db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ nombre: 1 }).sort({ nombre: 1 }).toArray();
     const mp = await mpMod().cargarConfig(db, req.orgId);
-    res.json({ activa: !!c.activa, nombre: c.nombre || '', depositoId: c.depositoId ? String(c.depositoId) : '', direccionRetiro: c.direccionRetiro || '', mensajeRetiro: c.mensajeRetiro || '', whatsapp: c.whatsapp || '',
+    res.json({ activa: !!c.activa, nombre: c.nombre || '', depositoId: c.depositoId ? String(c.depositoId) : '', depositosIds: depositosDe(c).map(String), direccionRetiro: c.direccionRetiro || '', mensajeRetiro: c.mensajeRetiro || '', whatsapp: c.whatsapp || '',
       depositos, mercadoPagoListo: !!(mp && mp.accessToken && mp.bancoId), url: mpMod().baseUrl(req) + '/tienda' });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -356,15 +379,22 @@ admin.put('/config', auth, async (req, res) => {
     if (b.direccionRetiro !== undefined) set.direccionRetiro = txt(b.direccionRetiro).slice(0, 300);
     if (b.mensajeRetiro !== undefined) set.mensajeRetiro = txt(b.mensajeRetiro).slice(0, 600);
     if (b.whatsapp !== undefined) set.whatsapp = txt(b.whatsapp).replace(/[^\d+]/g, '').slice(0, 20);
-    if (b.depositoId !== undefined) {
-      const id = b.depositoId ? oid(b.depositoId) : null;
-      if (id && !(await db.collection('depositos').findOne(Object.assign({ _id: id }, filtroOrg(req))))) throw err(400, 'Ese depósito no existe.');
-      set.depositoId = id;
+    if (b.depositosIds !== undefined || b.depositoId !== undefined) {
+      const crudos = Array.isArray(b.depositosIds) ? b.depositosIds : (b.depositoId ? [b.depositoId] : []);
+      const ids = [];
+      for (const x of crudos) {
+        const id = oid(x);
+        if (!id) continue;
+        if (!(await db.collection('depositos').findOne(Object.assign({ _id: id }, filtroOrg(req))))) throw err(400, 'Ese depósito no existe.');
+        if (!ids.some(y => String(y) === String(id))) ids.push(id);
+      }
+      set.depositosIds = ids;
+      set.depositoId = ids[0] || null;
     }
     if (b.activa !== undefined) {
       if (b.activa) {
         const actual = Object.assign({}, await cargarCfgTienda(db, req.orgId), set);
-        if (!actual.depositoId) throw err(400, 'Elegí de qué depósito sale el stock antes de activar la tienda.');
+        if (!depositosDe(actual).length) throw err(400, 'Elegí de qué depósitos sale el stock antes de activar la tienda.');
         const mp = await mpMod().cargarConfig(db, req.orgId);
         if (!(mp && mp.accessToken && mp.bancoId)) throw err(400, 'Primero configurá Mercado Pago (token y banco) para poder cobrar.');
       }

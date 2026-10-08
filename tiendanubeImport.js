@@ -76,11 +76,21 @@ async function tnGet(store, ruta) {
 
 async function tiendaDeOrg(db, orgId) {
   const org = await db.collection('organizaciones').findOne({ _id: orgId }).catch(() => null);
-  const storeId = (org && org.tiendanubeStoreId) || process.env.TIENDA_REAL_STORE_ID;
-  if (!storeId) throw err(400, 'Esta organización no tiene una tienda de Tiendanube vinculada.');
-  const store = await cotizador.getStoreById(storeId);
-  if (!store || !store.access_token) throw err(400, 'La tienda de Tiendanube no tiene un token de acceso válido.');
-  return store;
+  const candidatos = [];
+  for (const id of [org && org.tiendanubeStoreId, process.env.TIENDA_REAL_STORE_ID]) {
+    if (id && !candidatos.includes(String(id).trim())) candidatos.push(String(id).trim());
+  }
+  if (!candidatos.length) throw err(400, 'Esta organización no tiene una tienda de Tiendanube vinculada (falta tiendanubeStoreId o TIENDA_REAL_STORE_ID).');
+  for (const id of candidatos) {
+    const store = await cotizador.getStoreById(id).catch(() => null);
+    if (store && store.access_token) return store;
+  }
+  // Último recurso: si hay una única tienda instalada con token, usar esa.
+  try {
+    const todas = await db.collection('stores').find({ access_token: { $exists: true, $ne: null } }).limit(3).toArray();
+    if (todas.length === 1) return todas[0];
+  } catch (e) { /* sigue al error */ }
+  throw err(400, 'No encuentro el token de acceso de la tienda de Tiendanube (probé con el ID ' + candidatos.join(' y ') + '). Revisá que ese ID coincida con una tienda instalada en la colección "stores".');
 }
 
 async function* productosTienda(store) {

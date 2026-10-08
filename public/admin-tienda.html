@@ -86,7 +86,7 @@
       <p id="tUrl" class="muted"></p>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:10px">
         <div><label>Nombre de la tienda</label><input id="tNombre" placeholder="Piedra Negra"></div>
-        <div><label>Depósito del que sale el stock *</label><select id="tDeposito"></select></div>
+        <div><label>Depósitos de los que sale el stock * (se suman)</label><div id="tDepositos" style="display:flex;flex-direction:column;gap:6px;padding:6px 0"></div></div>
         <div><label>WhatsApp de contacto</label><input id="tWpp" placeholder="+54 9 236 ..."></div>
         <div style="grid-column:1/-1"><label>Dirección de retiro</label><input id="tDir" placeholder="Av. San Martín 123, Junín"></div>
         <div style="grid-column:1/-1"><label>Mensaje para quien retira (horarios, qué traer)</label><textarea id="tMsg" rows="2"></textarea></div>
@@ -160,14 +160,14 @@ async function cargarConfig(){
   const r=await fetch(BASE+'/config',{headers:headersAuth()}); const c=r.ok?await r.json():{};
   document.getElementById('tNombre').value=c.nombre||''; document.getElementById('tWpp').value=c.whatsapp||'';
   document.getElementById('tDir').value=c.direccionRetiro||''; document.getElementById('tMsg').value=c.mensajeRetiro||'';
-  document.getElementById('tDeposito').innerHTML='<option value="">— elegir —</option>'+(c.depositos||[]).map(d=>`<option value="${d._id}" ${String(c.depositoId)===String(d._id)?'selected':''}>${escapeHtml(d.nombre)}</option>`).join('');
+  document.getElementById('tDepositos').innerHTML=(c.depositos||[]).map(d=>`<label style="display:flex;gap:8px;align-items:center;font-weight:normal"><input type="checkbox" class="tDep" value="${d._id}" ${(c.depositosIds||[]).includes(String(d._id))?'checked':''}> ${escapeHtml(d.nombre)}</label>`).join('')||'<em>No hay depósitos cargados.</em>';
   document.getElementById('tActiva').checked=!!c.activa;
   document.getElementById('tUrl').innerHTML='Dirección pública: <b>'+escapeHtml(c.url||'')+'</b>';
   document.getElementById('tVer').href=c.url||'#';
   document.getElementById('tMpAviso').innerHTML=c.mercadoPagoListo?'Mercado Pago listo para cobrar.':'<span style="color:var(--danger)">Falta configurar Mercado Pago (token y banco) para poder cobrar. Se hace en Tesorería → Mercado Pago.</span>';
 }
 async function guardarConfig(){
-  const body={nombre:document.getElementById('tNombre').value,whatsapp:document.getElementById('tWpp').value,direccionRetiro:document.getElementById('tDir').value,mensajeRetiro:document.getElementById('tMsg').value,depositoId:document.getElementById('tDeposito').value||null,activa:document.getElementById('tActiva').checked};
+  const body={nombre:document.getElementById('tNombre').value,whatsapp:document.getElementById('tWpp').value,direccionRetiro:document.getElementById('tDir').value,mensajeRetiro:document.getElementById('tMsg').value,depositosIds:[...document.querySelectorAll('.tDep:checked')].map(x=>x.value),activa:document.getElementById('tActiva').checked};
   const r=await fetch(BASE+'/config',{method:'PUT',headers:headersAuthJson(),body:JSON.stringify(body)}); const d=await r.json();
   if(!r.ok){ await cargarConfig(); return msg(false,d.error||'No se pudo guardar'); }
   msg(true,'Guardado.'); cargarConfig(); cargarResumen();
