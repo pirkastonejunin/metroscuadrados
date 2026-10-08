@@ -1996,13 +1996,24 @@ async function abrirImportarTienda(){
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error');
     const ej = (d.ejemplosSinCoincidencia || []).map(x => `<li>${escapeHtml(x.nombre)}${x.skus.length ? ' <span class="muted">(' + escapeHtml(x.skus.join(', ')) + ')</span>' : ' <span class="muted">(sin SKU)</span>'}</li>`).join('');
-    document.getElementById('itCont').innerHTML = `
+    let espacio = '';
+    try{
+      const ra = await fetch(TI + '/almacenamiento', {headers: headersAuthJson()}); const a = await ra.json();
+      if (ra.ok) espacio = `<div style="background:#f6f6f6;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px"><b>Espacio de la base: ${a.totalMb} MB de ${a.limiteMb} MB.</b> Fotos importadas: ${a.fotos} (${a.fotosMb} MB).<br><span class="muted">Más pesadas: ${a.top.slice(0,5).map(t => escapeHtml(t.coleccion) + ' ' + t.mb + ' MB').join(' · ')}</span>${a.fotos ? `<br><a href="#" onclick="borrarFotosImportadas();return false" style="color:#c0392b">Borrar todas las fotos importadas</a>` : ''}</div>`;
+    }catch(e){}
+    document.getElementById('itCont').innerHTML = espacio + `
       <p>En la tienda hay <b>${d.total}</b> productos (${d.fotos} fotos). <b>${d.coinciden}</b> coinciden por SKU con productos del sistema${d.yaImportados ? ` y <b>${d.yaImportados}</b> ya tienen fotos importadas` : ''}.</p>
       ${d.sinCoincidencia ? `<details style="margin:6px 0"><summary class="muted">${d.sinCoincidencia} no se pueden vincular (sin SKU o con SKU que no existe acá)</summary><ul style="margin:6px 0 0 18px;font-size:13px">${ej}</ul>${d.sinCoincidencia > 40 ? '<div class="muted">…y más.</div>' : ''}</details>` : ''}
       <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="itSobre" style="width:auto"> Volver a traer también lo que ya importé (pisa fotos y descripciones editadas a mano)</label>
       <div class="err" id="itErr"></div><div id="itProg" class="muted" style="margin-top:8px"></div>
       <button class="btn" id="itBtn" style="margin-top:10px" onclick="correrImportTienda()" ${d.coinciden ? '' : 'disabled'}>Importar ahora</button>`;
   }catch(e){ document.getElementById('itCont').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+}
+async function borrarFotosImportadas(){
+  if (!confirm('Se borran todas las fotos importadas de Tiendanube de esta organización (las descripciones quedan). ¿Seguro?')) return;
+  const r = await fetch(TI + '/imagenes', {method:'DELETE', headers: headersAuthJson()}); const d = await r.json();
+  if (!r.ok) { alert(d.error || 'Error'); return; }
+  abrirImportarTienda();
 }
 async function correrImportTienda(){
   const btn = document.getElementById('itBtn'); btn.disabled = true;

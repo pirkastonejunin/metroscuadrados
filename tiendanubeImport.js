@@ -337,4 +337,32 @@ router.delete('/producto/:id/imagen/:imagenId', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---- espacio de la base (Atlas gratis = 512 MB) y limpieza de fotos importadas
+router.get('/almacenamiento', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const cols = await db.listCollections({}, { nameOnly: true }).toArray();
+    const filas = [];
+    for (const c of cols) {
+      try {
+        const st = await db.command({ collStats: c.name });
+        filas.push({ coleccion: c.name, mb: Math.round(((st.storageSize || 0) + (st.totalIndexSize || 0)) / 1048576 * 10) / 10, docs: st.count || 0 });
+      } catch (e) { /* vista o sin permisos */ }
+    }
+    filas.sort((a, b) => b.mb - a.mb);
+    const total = Math.round(filas.reduce((t, f) => t + f.mb, 0) * 10) / 10;
+    const img = await db.collection('tienda_imagenes').aggregate([{ $group: { _id: null, n: { $sum: 1 }, bytes: { $sum: '$bytes' } } }]).toArray();
+    res.json({ totalMb: total, limiteMb: 512, top: filas.slice(0, 8), fotos: img[0] ? img[0].n : 0, fotosMb: img[0] ? Math.round(img[0].bytes / 1048576 * 10) / 10 : 0 });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/imagenes', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const db = await getDb();
+    const r = await db.collection('tienda_imagenes').deleteMany({ orgId: req.orgId });
+    await db.collection('productos_tienda').updateMany({ orgId: req.orgId }, { $set: { imagenes: [] } }).catch(() => {});
+    res.json({ ok: true, borradas: r.deletedCount });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;

@@ -348,9 +348,14 @@ function filtroOrg(req) {
 const backfillHecho = {};
 async function backfillOrgId(db, coleccion) {
   if (backfillHecho[coleccion]) return;
-  const orgId = await asegurarOrgPorDefecto(db);
-  await db.collection(coleccion).updateMany({ orgId: { $exists: false } }, { $set: { orgId } });
-  backfillHecho[coleccion] = true;
+  try {
+    const orgId = await asegurarOrgPorDefecto(db);
+    await db.collection(coleccion).updateMany({ orgId: { $exists: false } }, { $set: { orgId } });
+    backfillHecho[coleccion] = true;
+  } catch (e) {
+    // Con la base sin espacio las escrituras fallan: que las lecturas sigan andando (se reintenta en la próxima).
+    console.error('backfillOrgId ' + coleccion + ':', e.message);
+  }
 }
 
 // Valida un array de ids de organización contra la colección real, y que
