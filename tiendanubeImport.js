@@ -6,7 +6,7 @@
 //
 // Idea: las fotos de Tiendanube viven en SU servidor; cuando se deje de usar
 // esa tienda, esos links dejan de andar. Por eso se DESCARGAN y se guardan
-// acá (reducidas a webp, máx. 1400 px), para que la tienda nueva no dependa
+// acá (sin recomprimir, en su calidad original), para que la tienda nueva no dependa
 // de Tiendanube.
 //
 // El producto de Tiendanube se vincula con el del sistema por SKU (el SKU de
@@ -37,7 +37,6 @@ const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 const auth = [authUsuario, resolverOrg, requiereModulo('productos')];
 const TN_API = () => (process.env.TN_API_URL || 'https://api.tiendanube.com/v1').replace(/\/$/, '');
-const MAX_LADO = 1400;
 const MAX_IMAGENES_POR_PRODUCTO = 20;
 
 let client, conectando;
@@ -132,21 +131,38 @@ router.get('/vista-previa', auth, async (req, res) => {
 // ---- imágenes
 let sharp = null;
 try { sharp = require('sharp'); } catch (e) { sharp = null; }
-async function prepararImagen(buf) {
-  if (!sharp) return { data: buf, contentType: 'image/jpeg', ancho: null, alto: null };
-  const img = sharp(buf, { failOn: 'none' }).rotate().resize({ width: MAX_LADO, height: MAX_LADO, fit: 'inside', withoutEnlargement: true });
-  const data = await img.webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
-  return { data: data.data, contentType: 'image/webp', ancho: data.info.width, alto: data.info.height };
+// Sin recomprimir ni achicar: la foto se guarda tal cual vino (misma calidad).
+// Solo se lee el tamaño para informarlo.
+async function prepararImagen(buf, contentType) {
+  let ancho = null, alto = null, ct = contentType;
+  if (sharp) {
+    try { const m = await sharp(buf, { failOn: 'none' }).metadata(); ancho = m.width || null; alto = m.height || null; if (!ct && m.format) ct = 'image/' + (m.format === 'jpg' ? 'jpeg' : m.format); }
+    catch (e) { throw new Error('No es una imagen válida.'); }
+  }
+  return { data: buf, contentType: ct || 'image/jpeg', ancho, alto };
 }
+// Tiendanube sirve las fotos con un sufijo de tamaño (ej. nombre-1024-1024.jpg).
+// Primero se intenta la versión sin sufijo (la original); si no existe, la de la lista.
 async function descargar(src) {
-  const url = String(src).startsWith('//') ? 'https:' + src : src;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return Buffer.from(await r.arrayBuffer());
+  const url = String(src).startsWith('//') ? 'https:' + src : String(src);
+  const candidatas = [];
+  const sinSufijo = url.replace(/-\d{2,4}-\d{2,4}(\.[a-z0-9]+)(\?.*)?$/i, '$1$2');
+  if (sinSufijo !== url) candidatas.push(sinSufijo);
+  candidatas.push(url);
+  let ultimo = 'sin respuesta';
+  for (const u of candidatas) {
+    try {
+      const r = await fetch(u);
+      if (!r.ok) { ultimo = 'HTTP ' + r.status; continue; }
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length) return { buf, contentType: (r.headers.get('content-type') || '').split(';')[0] };
+    } catch (e) { ultimo = e.message; }
+  }
+  throw new Error(ultimo);
 }
-async function guardarImagen(db, orgId, extra, buf) {
-  const im = await prepararImagen(buf);
-  if (im.data.length > 4 * 1024 * 1024) throw new Error('La imagen pesa demasiado.');
+async function guardarImagen(db, orgId, extra, buf, contentType) {
+  const im = await prepararImagen(buf, contentType);
+  if (im.data.length > 12 * 1024 * 1024) throw new Error('La imagen pesa más de 12 MB.');
   const r = await db.collection('tienda_imagenes').insertOne(Object.assign({
     orgId, contentType: im.contentType, ancho: im.ancho, alto: im.alto, bytes: im.data.length, data: new Binary(im.data), creadoEn: new Date()
   }, extra));
@@ -199,7 +215,7 @@ async function procesarImport(db, store, orgId, jobId, sobrescribir) {
         for (const im of imgsTn) {
           let id = mapaImg.get(String(im.id));
           if (!id) {
-            try { id = await guardarImagen(db, orgId, { tnProductId: p.id, tnImageId: im.id, origen: im.src }, await descargar(im.src)); stats.imagenes++; }
+            try { const d = await descargar(im.src); id = await guardarImagen(db, orgId, { tnProductId: p.id, tnImageId: im.id, origen: im.src }, d.buf, d.contentType); stats.imagenes++; }
             catch (e) { errores.push(`${nombre}: foto no descargada (${e.message})`); continue; }
           }
           orden.push(id);
@@ -276,7 +292,7 @@ router.post('/producto/:id/imagenes', auth, async (req, res) => {
     const t = await db.collection('productos_tienda').findOne({ orgId: p.orgId, productoId: p._id });
     if (((t && t.imagenes) || []).length >= MAX_IMAGENES_POR_PRODUCTO) throw err(400, `Máximo ${MAX_IMAGENES_POR_PRODUCTO} fotos por producto.`);
     let id;
-    try { id = await guardarImagen(db, p.orgId, { origen: 'subida' }, Buffer.from(m[1], 'base64')); } catch (e) { throw err(400, 'No se pudo leer la imagen: ' + e.message); }
+    try { id = await guardarImagen(db, p.orgId, { origen: 'subida' }, Buffer.from(m[1], 'base64'), (/^data:(image\/[a-z+.-]+);/i.exec(String(req.body.dataUrl)) || [])[1]); } catch (e) { throw err(400, 'No se pudo leer la imagen: ' + e.message); }
     await db.collection('productos_tienda').updateOne({ orgId: p.orgId, productoId: p._id },
       { $push: { imagenes: { imagenId: id } }, $set: { updatedAt: new Date() }, $setOnInsert: { orgId: p.orgId, productoId: p._id, descripcionHtml: '' } }, { upsert: true });
     res.json({ ok: true, imagenId: String(id) });
