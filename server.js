@@ -51,16 +51,6 @@ app.use('/api/notificaciones', notificacionesRouter);
 const productosRouter = require('./productos');
 app.use('/api/productos', productosRouter);
 
-// Tienda online pública (catálogo, carrito, pedidos y pago con Mercado Pago).
-const tiendaOnline = require('./tiendaOnline');
-app.get('/tienda', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tienda.html')));
-app.use('/api/tienda', tiendaOnline.publico);
-app.use('/api/tienda-admin', tiendaOnline.admin);
-
-// Importar fotos y descripciones desde Tiendanube (para armar la tienda propia).
-const tiendanubeImportRouter = require('./tiendanubeImport');
-app.use('/api/tienda-import', tiendanubeImportRouter);
-
 const clientesRouter = require('./clientes');
 app.use('/api/clientes', clientesRouter);
 
@@ -870,3 +860,17 @@ app.get('/public/bulto/:productId', async (req, res) => {
 
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => console.log('Corriendo en puerto ' + PORT));
+
+// Limpieza única (8/10/2026, pedido de Mato): se sacó la tienda online y la importación de fotos
+// de Tiendanube; se borran de la base las fotos importadas y las fichas de tienda para liberar
+// espacio (la base gratis de Atlas tiene 512 MB). Borrar funciona aunque la base esté llena.
+// Si no existen las colecciones, no hace nada.
+(async () => {
+  try {
+    const db = await getDb();
+    for (const nombre of ['tienda_imagenes', 'productos_tienda']) {
+      const hay = await db.listCollections({ name: nombre }, { nameOnly: true }).toArray();
+      if (hay.length) { await db.collection(nombre).drop(); console.log('Limpieza: colección ' + nombre + ' borrada.'); }
+    }
+  } catch (e) { console.error('Limpieza de tienda:', e.message); }
+})();

@@ -149,7 +149,6 @@
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
           <button class="btn secondary" onclick="abrirDuplicadosSku()">Revisar SKUs duplicados</button>
           <button class="btn secondary" title="Completa el precio de los productos que lo tienen vacío, trayéndolo desde tu tienda real de Tiendanube" onclick="abrirRecuperarPreciosTiendanube()">🛟 Recuperar precios</button>
-          <button class="btn secondary" title="Trae de Tiendanube las fotos y descripciones de cada producto y las guarda acá, para armar la tienda propia" onclick="abrirImportarTienda()">📷 Fotos de Tiendanube</button>
           <button class="btn secondary" onclick="abrirListasPrecio()">Listas de precio</button>
           <button class="btn" onclick="abrirNuevoProducto()">+ Nuevo producto</button>
         </div>
@@ -771,7 +770,6 @@ function formularioProducto(p){
   return `
     ${p._id ? '<div id="costeoProduccionInfo"></div>' : ''}
     ${p._id ? '<div id="tiendanubeInfo"></div>' : ''}
-    ${p._id ? '<div id="fichaTiendaInfo"></div>' : ''}
     ${p._id ? '<div id="preciosPorListaInfo"></div>' : ''}
     <div class="section-title">Datos básicos</div>
     <div class="grid3">
@@ -924,7 +922,6 @@ function abrirEditarProducto(id){
   });
   cargarCosteoProduccion(p);
   cargarInfoTiendanube(p);
-  cargarFichaTienda(p._id);
   cargarPreciosPorLista(p);
 }
 
@@ -1972,131 +1969,6 @@ async function guardarPrecioLista(productoId, listaId){
 async function quitarPrecioLista(productoId, listaId){
   document.getElementById('ppl_' + listaId).value = '';
   await guardarPrecioLista(productoId, listaId);
-}
-
-// ---------------------------------------------------------------------------
-// Fotos y descripción de la tienda (8/10/2026, pedido de Mato: traer de
-// Tiendanube las imágenes y descripciones para poder armar la tienda propia).
-// Las fotos se descargan y se guardan en el sistema (no dependen de
-// Tiendanube). Rutas: /api/tienda-import (ver tiendanubeImport.js).
-// ---------------------------------------------------------------------------
-const TI = '/api/tienda-import';
-async function abrirImportarTienda(){
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
-      <div class="modal">
-        <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Fotos y descripciones desde Tiendanube</h2>
-        <p class="muted">Vincula cada producto de la tienda con el del sistema por SKU, descarga sus fotos (las guarda acá en su calidad original) y trae la descripción, el SEO y las categorías. No toca tus precios ni tu descripción interna.</p>
-        <div id="itCont"><p class="muted">Revisando la tienda...</p></div>
-      </div>
-    </div>`;
-  try{
-    const r = await fetch(TI + '/vista-previa', {headers: headersAuthJson()});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error');
-    const ej = (d.ejemplosSinCoincidencia || []).map(x => `<li>${escapeHtml(x.nombre)}${x.skus.length ? ' <span class="muted">(' + escapeHtml(x.skus.join(', ')) + ')</span>' : ' <span class="muted">(sin SKU)</span>'}</li>`).join('');
-    let espacio = '';
-    try{
-      const ra = await fetch(TI + '/almacenamiento', {headers: headersAuthJson()}); const a = await ra.json();
-      if (ra.ok) espacio = `<div style="background:#f6f6f6;border-radius:8px;padding:10px;margin-bottom:10px;font-size:13px"><b>Espacio de la base: ${a.totalMb} MB de ${a.limiteMb} MB.</b> Fotos importadas: ${a.fotos} (${a.fotosMb} MB).<br><span class="muted">Más pesadas: ${a.top.slice(0,5).map(t => escapeHtml(t.coleccion) + ' ' + t.mb + ' MB').join(' · ')}</span>${a.fotos ? `<br><a href="#" onclick="borrarFotosImportadas();return false" style="color:#c0392b">Borrar todas las fotos importadas</a>` : ''}</div>`;
-    }catch(e){}
-    document.getElementById('itCont').innerHTML = espacio + `
-      <p>En la tienda hay <b>${d.total}</b> productos (${d.fotos} fotos). <b>${d.coinciden}</b> coinciden por SKU con productos del sistema${d.yaImportados ? ` y <b>${d.yaImportados}</b> ya tienen fotos importadas` : ''}.</p>
-      ${d.sinCoincidencia ? `<details style="margin:6px 0"><summary class="muted">${d.sinCoincidencia} no se pueden vincular (sin SKU o con SKU que no existe acá)</summary><ul style="margin:6px 0 0 18px;font-size:13px">${ej}</ul>${d.sinCoincidencia > 40 ? '<div class="muted">…y más.</div>' : ''}</details>` : ''}
-      <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="itSobre" style="width:auto"> Volver a traer también lo que ya importé (pisa fotos y descripciones editadas a mano)</label>
-      <div class="err" id="itErr"></div><div id="itProg" class="muted" style="margin-top:8px"></div>
-      <button class="btn" id="itBtn" style="margin-top:10px" onclick="correrImportTienda()" ${d.coinciden ? '' : 'disabled'}>Importar ahora</button>`;
-  }catch(e){ document.getElementById('itCont').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
-}
-async function borrarFotosImportadas(){
-  if (!confirm('Se borran todas las fotos importadas de Tiendanube de esta organización (las descripciones quedan). ¿Seguro?')) return;
-  const r = await fetch(TI + '/imagenes', {method:'DELETE', headers: headersAuthJson()}); const d = await r.json();
-  if (!r.ok) { alert(d.error || 'Error'); return; }
-  abrirImportarTienda();
-}
-async function correrImportTienda(){
-  const btn = document.getElementById('itBtn'); btn.disabled = true;
-  document.getElementById('itErr').textContent = '';
-  try{
-    const r = await fetch(TI + '/importar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({sobrescribir: document.getElementById('itSobre').checked})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error');
-    let job;
-    for (;;) {
-      await new Promise(x => setTimeout(x, 2000));
-      const rj = await fetch(BASE + '/import/estado/' + d.jobId, {headers: headersAuthJson()});
-      job = await rj.json();
-      if (!rj.ok) throw new Error(job.error || 'Error');
-      document.getElementById('itProg').textContent = `Procesando… ${job.procesados || 0} productos de la tienda · ${job.imagenes || 0} fotos descargadas`;
-      if (job.estado !== 'procesando') break;
-    }
-    if (job.estado === 'error') throw new Error(job.errorGeneral || 'Falló la importación');
-    const errs = (job.errores || []);
-    document.getElementById('itProg').innerHTML = `<p class="ok-msg">Listo: ${job.productos} productos del sistema actualizados · ${job.imagenes} fotos nuevas${job.sinCoincidencia ? ` · ${job.sinCoincidencia} de la tienda sin vincular` : ''}.</p>` +
-      (errs.length ? `<details><summary class="muted">${errs.length} aviso(s)</summary><ul style="margin:6px 0 0 18px;font-size:12px">${errs.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul></details>` : '');
-    btn.textContent = 'Importar de nuevo';
-  }catch(e){ document.getElementById('itErr').textContent = e.message; }
-  finally{ btn.disabled = false; }
-}
-
-async function cargarFichaTienda(productoId){
-  const cont = document.getElementById('fichaTiendaInfo');
-  if (!cont) return;
-  try{
-    const r = await fetch(TI + '/producto/' + productoId, {headers: headersAuthJson()});
-    const d = await r.json();
-    if (!r.ok) { cont.innerHTML = ''; return; }
-    const fotos = d.imagenes.map((id, i) => `
-      <div style="position:relative;width:96px">
-        <img src="${TI}/imagen/${id}" loading="lazy" style="width:96px;height:96px;object-fit:cover;border-radius:8px;border:${i === 0 ? '2px solid var(--accent)' : '1px solid var(--border)'}">
-        <div style="display:flex;gap:4px;margin-top:3px">
-          ${i === 0 ? '<span class="muted" style="font-size:11px">Principal</span>' : `<button type="button" class="btn small secondary" style="padding:1px 6px" title="Hacer principal" onclick="fichaTiendaPrincipal('${productoId}','${id}')">★</button>`}
-          <button type="button" class="btn small secondary" style="padding:1px 6px" title="Quitar foto" onclick="fichaTiendaQuitar('${productoId}','${id}')">✕</button>
-        </div>
-      </div>`).join('');
-    cont.innerHTML = `
-      <div class="card" style="margin-bottom:12px">
-        <strong>Fotos y descripción para la tienda</strong>
-        <label style="display:flex;gap:8px;align-items:center;margin:6px 0 0;font-size:13px;color:var(--text)"><input type="checkbox" style="width:auto" ${d.publicado ? 'checked' : ''} onchange="fichaTiendaPublicar('${productoId}', this)"> Publicado en la tienda online <span class="muted">(se ve si está activo y tiene precio de venta)</span></label>
-        ${d.tienda && d.tienda.url ? ` <a href="${escapeHtml(d.tienda.url)}" target="_blank" rel="noopener" class="muted">(ver en Tiendanube ↗)</a>` : ''}
-        <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">${fotos || '<span class="muted">Sin fotos todavía.</span>'}</div>
-        <div style="margin-top:8px"><label class="btn small secondary" style="cursor:pointer">+ Subir foto<input type="file" accept="image/*" multiple style="display:none" onchange="fichaTiendaSubir('${productoId}', this)"></label></div>
-        <div style="margin-top:10px"><label>Descripción de la tienda (HTML simple)</label>
-          <textarea id="fichaTiendaDesc" rows="5">${escapeHtml(d.descripcionHtml || '')}</textarea>
-          <div class="row" style="margin-top:6px;gap:8px;align-items:center"><button type="button" class="btn small secondary" onclick="fichaTiendaGuardarDesc('${productoId}')">Guardar descripción</button><span class="muted" id="fichaTiendaMsg"></span></div>
-          ${d.descripcionHtml ? `<details style="margin-top:6px"><summary class="muted">Vista previa</summary><div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:4px;font-size:13px" id="fichaTiendaPrev"></div></details>` : ''}
-        </div>
-      </div>`;
-    const prev = document.getElementById('fichaTiendaPrev');
-    if (prev) prev.innerHTML = d.descripcionHtml;
-  }catch(e){ cont.innerHTML = ''; }
-}
-async function fichaTiendaPublicar(id, chk){
-  const r = await fetch('/api/tienda-admin/producto/' + id + '/publicar', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({publicado: chk.checked})});
-  if (!r.ok) { chk.checked = !chk.checked; alert('No se pudo cambiar la publicación'); }
-}
-async function fichaTiendaGuardarDesc(id){
-  const msg = document.getElementById('fichaTiendaMsg');
-  const r = await fetch(TI + '/producto/' + id + '/descripcion', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({descripcionHtml: document.getElementById('fichaTiendaDesc').value})});
-  msg.textContent = r.ok ? 'Guardado ✔' : 'No se pudo guardar';
-}
-async function fichaTiendaQuitar(id, imagenId){
-  if (!confirm('¿Quitar esta foto del producto?')) return;
-  await fetch(TI + '/producto/' + id + '/imagen/' + imagenId, {method:'DELETE', headers: headersAuthJson()});
-  cargarFichaTienda(id);
-}
-async function fichaTiendaPrincipal(id, imagenId){
-  await fetch(TI + '/producto/' + id + '/imagen/' + imagenId + '/principal', {method:'POST', headers: headersAuthJson()});
-  cargarFichaTienda(id);
-}
-async function fichaTiendaSubir(id, input){
-  for (const f of Array.from(input.files || [])) {
-    const dataUrl = await new Promise((ok, ko) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = ko; fr.readAsDataURL(f); });
-    const r = await fetch(TI + '/producto/' + id + '/imagenes', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({dataUrl})});
-    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'No se pudo subir la foto'); break; }
-  }
-  cargarFichaTienda(id);
 }
 </script>
 </body>

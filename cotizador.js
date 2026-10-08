@@ -393,7 +393,7 @@ async function buscarProductoTiendanubePorSku(sku) {
       if (!coincide) continue;
       return {
         nombre: nombreLocalizado(p.name),
-        url: (store.domain && p.handle) ? `https://${store.domain}/productos/${typeof p.handle === 'string' ? p.handle : nombreLocalizado(p.handle)}` : null, // el handle viene como {es: ...} en la API
+        url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null,
         imagenes: (p.images || []).map(img => img.src).filter(Boolean)
       };
     }
@@ -2015,4 +2015,3 @@ module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
 module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js
 module.exports.sincronizarPreciosTiendanube = sincronizarPreciosTiendanube; // exportado para productos.js
 module.exports.obtenerPreciosTiendanubePorSku = obtenerPreciosTiendanubePorSku; // exportado para productos.js
-module.exports.getStoreById = getStoreById; // exportado para tiendanubeImport.js
