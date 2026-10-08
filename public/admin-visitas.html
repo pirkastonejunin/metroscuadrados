@@ -939,8 +939,15 @@ function mostrarDetalleDiaAgenda(){
   cont.innerHTML = eventos.map(v => `<div class="agenda-item ${v.estado}">${fmtFecha(v.fechaHora)} — ${escapeHtml(v.cliente.nombre)} <span class="muted">${escapeHtml(v.cliente.direccion||'')}</span></div>`).join('');
 }
 
-function abrirNuevaVisita(){
-  const opcionesVend = VENDEDORES.filter(v=>v.activo!==false).map(v=>`<option value="${v._id}">${v.nombre}</option>`).join('');
+async function abrirNuevaVisita(){
+  // Se vuelve a pedir la lista al abrir: si se cargó un vendedor o se cambió de organización, no queda vieja.
+  let errVend = '';
+  try { VENDEDORES = await api('/vendedores'); } catch(e){ errVend = e.message; }
+  const activos = VENDEDORES.filter(v=>v.activo!==false);
+  const opcionesVend = activos.map(v=>`<option value="${v._id}">${escapeHtml(v.nombre)}</option>`).join('');
+  const avisoVend = errVend
+    ? `<div class="err" style="margin-top:4px">No se pudieron traer los vendedores: ${escapeHtml(errVend)}</div>`
+    : (!activos.length ? `<div class="muted" style="margin-top:4px">No hay vendedores activos en esta organización. Cargalos en Usuarios → Vendedores, o revisá que estés en la organización correcta.</div>` : '');
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Nueva visita</h2>
@@ -949,7 +956,7 @@ function abrirNuevaVisita(){
       <div><label>Teléfono</label><input id="nVisTelefono"></div>
       <div style="grid-column:1/-1"><label>Domicilio</label><input id="nVisDireccion"></div>
       <div><label>Localidad</label><input id="nVisLocalidad"></div>
-      <div><label>Vendedor</label><select id="nVisVendedor" onchange="verAgendaVendedor(this.value,'nVisAgenda')"><option value="">Elegir…</option>${opcionesVend}</select></div>
+      <div><label>Vendedor</label><select id="nVisVendedor" onchange="verAgendaVendedor(this.value,'nVisAgenda')"><option value="">Elegir…</option>${opcionesVend}</select>${avisoVend}</div>
       <div style="grid-column:1/-1"><label>Fecha y hora de la visita</label><input type="datetime-local" id="nVisFecha"></div>
     </div>
     <div id="nVisAgenda" style="margin-top:10px"></div>
