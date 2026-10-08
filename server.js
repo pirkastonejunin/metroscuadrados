@@ -51,6 +51,10 @@ app.use('/api/notificaciones', notificacionesRouter);
 const productosRouter = require('./productos');
 app.use('/api/productos', productosRouter);
 
+// Importar fotos y descripciones desde Tiendanube (para armar la tienda propia).
+const tiendanubeImportRouter = require('./tiendanubeImport');
+app.use('/api/tienda-import', tiendanubeImportRouter);
+
 const clientesRouter = require('./clientes');
 app.use('/api/clientes', clientesRouter);
 
