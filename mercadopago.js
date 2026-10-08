@@ -424,6 +424,20 @@ router.post('/cobros/:id/cancelar', auth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Webhook (público: sin sesión; el token secreto va en la URL)
 // ---------------------------------------------------------------------------
+async function buscarCobroEntreOrgs(db, cfg, tipo, recurso) {
+  let ref = null;
+  if (tipo.includes('order') || recurso.startsWith('ORD')) {
+    const o = await mp(cfg, 'GET', '/v1/orders/' + encodeURIComponent(recurso)).catch(() => null);
+    ref = o && o.external_reference;
+    if (!ref) { const c = await db.collection('mp_cobros').findOne({ ordenId: recurso }); return c || null; }
+  } else {
+    const p = await mp(cfg, 'GET', '/v1/payments/' + encodeURIComponent(recurso)).catch(() => null);
+    ref = p && p.external_reference;
+  }
+  if (!ref || !/^pn-[0-9a-f]{24}$/.test(ref)) return null;
+  return db.collection('mp_cobros').findOne({ externalReference: ref });
+}
+
 router.post('/webhook/:token', async (req, res) => {
   const token = txt(req.params.token);
   let db;
@@ -449,7 +463,14 @@ router.post('/webhook/:token', async (req, res) => {
       const p = await mp(cfg, 'GET', '/v1/payments/' + encodeURIComponent(recurso)).catch(() => null);
       if (p && p.external_reference) cobro = await db.collection('mp_cobros').findOne({ orgId: cfg.orgId, externalReference: p.external_reference });
     }
-    if (cobro) await conciliarCobro(db, cfg, cobro);
+    // Si la misma cuenta de Mercado Pago la usan varias organizaciones, el aviso llega a una sola dirección:
+    // el cobro se busca por su referencia propia (única) y se concilia con la configuración de SU organización.
+    if (cobro && String(cobro.orgId) !== String(cfg.orgId)) cobro = null;
+    if (!cobro) cobro = await buscarCobroEntreOrgs(db, cfg, tipo, recurso);
+    if (cobro) {
+      const cfgCobro = String(cobro.orgId) === String(cfg.orgId) ? cfg : await cargarConfig(db, cobro.orgId);
+      if (cfgCobro) await conciliarCobro(db, cfgCobro, cobro);
+    }
   } catch (e) {
     console.error('Webhook Mercado Pago:', e.message);
     if (!res.headersSent) res.sendStatus(500);
