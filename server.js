@@ -74,6 +74,10 @@ app.use('/api/gastos', gastosRouter);
 const tesoreriaRouter = require('./tesoreria');
 app.use('/api/tesoreria', tesoreriaRouter);
 
+// Mercado Pago (link de pago + Point), independiente de Tiendanube.
+const mercadopagoRouter = require('./mercadopago');
+app.use('/api/mercadopago', mercadopagoRouter);
+
 // Tablero comercial (7/10/2026): embudo CRM -> visitas -> presupuestos -> ventas.
 const tableroRouter = require('./tablero');
 app.use('/api/tablero', tableroRouter);

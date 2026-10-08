@@ -1445,12 +1445,15 @@ function verDetalle(id){
         <div class="row" style="margin-top:10px">
           ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
+          ${v.estado !== 'anulada' && v.saldoPendiente > 0 && v.moneda === 'ARS' ? `<button class="btn secondary" onclick="abrirMP('${v._id}','link')">Link de pago</button><button class="btn secondary" onclick="abrirMP('${v._id}','point')">Cobrar con Point</button>` : ''}
         </div>
+        <div id="dvMP"></div>
         ${v.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${v.anuladaPor ? ' por ' + escapeHtml(v.anuladaPor) : ''}${v.anuladaEn ? ' — ' + fechaHora(v.anuladaEn) : ''}${v.anuladaMotivo ? ': ' + escapeHtml(v.anuladaMotivo) : ''}</p>` : ''}
       </div>
     </div>
   `;
   cargarRemitosDetalle(v._id);
+  cargarCobrosMP(v._id);
 }
 
 // Lista todos los remitos de la venta (3/10/2026, pedido de Mato: "una
@@ -1878,6 +1881,109 @@ async function descargarBlob(url, nombreArchivo){
   a.download = nombreArchivo;
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(a.href);
+}
+
+// ---------------------------------------------------------------------------
+// Mercado Pago (8/10/2026): link de pago y cobro con Point sobre la venta.
+// El cobro se registra solo cuando Mercado Pago confirma (webhook) o al
+// consultar el estado desde acá.
+// ---------------------------------------------------------------------------
+const MPB = '/api/mercadopago';
+const MP_EST = {pendiente:'Esperando pago', registrando:'Registrando…', acreditado:'Cobrado ✔', error:'Error al registrar', rechazado:'Rechazado', cancelado:'Cancelado'};
+let mpTimer = null;
+function mpParar(){ if (mpTimer) { clearInterval(mpTimer); mpTimer = null; } }
+async function cargarCobrosMP(ventaId){
+  const box = document.getElementById('dvMP'); if (!box) return;
+  try{
+    const r = await fetch(MPB + '/ventas/' + ventaId + '/cobros', {headers: headersAuth()});
+    if (!r.ok) { box.innerHTML = ''; return; }
+    const l = await r.json();
+    if (!l.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="section-title" style="margin-top:14px">Mercado Pago</div>` + l.map(c => `
+      <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0">
+        <span>${c.tipo === 'point' ? 'Point' : 'Link'} · ${money(c.monto)} · <b>${MP_EST[c.estado] || c.estado}</b>${c.error ? ' — ' + escapeHtml(c.error) : ''}</span>
+        ${c.estado === 'pendiente' && c.linkUrl ? `<button class="btn small secondary" onclick="mpMostrarLink('${c.linkUrl}', ${c.monto})">Ver link</button>` : ''}
+        ${c.estado === 'pendiente' || c.estado === 'error' ? `<button class="btn small secondary" onclick="mpVerificar('${c._id}','${ventaId}')">Verificar pago</button>` : ''}
+        ${c.estado === 'pendiente' ? `<button class="btn small danger" onclick="mpCancelar('${c._id}','${ventaId}')">Cancelar</button>` : ''}
+      </div>`).join('');
+  }catch(e){ box.innerHTML = ''; }
+}
+async function mpVerificar(cobroId, ventaId){
+  const r = await fetch(MPB + '/cobros/' + cobroId + '/verificar', {method:'POST', headers: headersAuthJson()});
+  const d = await r.json().catch(() => ({}));
+  if (d.estado === 'acreditado') { mpParar(); cerrarModal(); await cargarVentas(); verDetalle(ventaId); return d; }
+  cargarCobrosMP(ventaId);
+  return d;
+}
+async function mpCancelar(cobroId, ventaId){
+  if (!confirm('¿Cancelar este cobro de Mercado Pago?')) return;
+  mpParar();
+  const r = await fetch(MPB + '/cobros/' + cobroId + '/cancelar', {method:'POST', headers: headersAuthJson()});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) alert(d.error || 'No se pudo cancelar');
+  cerrarModal(); cargarCobrosMP(ventaId);
+}
+function mpMostrarLink(url, monto){
+  const v = ventaMPActual;
+  const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}`;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal">
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>Link de pago — ${money(monto)}</h2>
+      <input id="mpLinkTxt" readonly value="${escapeHtml(url)}" onclick="this.select()">
+      <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="mpCopiar()">Copiar link</button>
+        <a class="btn secondary" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(texto)}">Enviar por WhatsApp</a>
+      </div>
+      <p class="muted" style="margin-top:10px">Cuando el cliente pague, el cobro se registra solo en la venta y en Tesorería. El link vence en 7 días.</p>
+    </div></div>`;
+}
+function mpCopiar(){ const el = document.getElementById('mpLinkTxt'); el.select(); try{ navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand('copy'); } }
+let ventaMPActual = null;
+async function abrirMP(id, tipo){
+  const v = ventasCache.find(x => x._id === id); if (!v) return;
+  ventaMPActual = v; mpParar();
+  let terminales = [];
+  if (tipo === 'point') {
+    const r = await fetch(MPB + '/terminales', {headers: headersAuth()});
+    terminales = r.ok ? await r.json() : [];
+  }
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this && !mpTimer) cerrarModal()"><div class="modal">
+      <span class="close-x" onclick="mpParar();cerrarModal()">✕</span>
+      <h2>${tipo === 'point' ? 'Cobrar con Point' : 'Link de pago'} — venta #${v.numero}</h2>
+      <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
+      <label>Monto a cobrar</label><input id="mpMonto" type="number" step="0.01" min="0.01" value="${v.saldoPendiente}">
+      ${tipo === 'point' ? `<label style="margin-top:8px">Terminal</label><select id="mpTerm"><option value="">Usar la terminal por defecto</option>${terminales.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.nombre || t.id)}${t.pdv ? '' : ' (no está en modo PDV)'}</option>`).join('')}</select>` : ''}
+      <div class="err" id="mpErrV"></div>
+      <div id="mpEstadoV" class="muted" style="margin-top:8px"></div>
+      <button class="btn" id="mpGo" style="margin-top:10px" onclick="mpIniciar('${id}','${tipo}')">${tipo === 'point' ? 'Enviar a la terminal' : 'Generar link'}</button>
+    </div></div>`;
+}
+async function mpIniciar(id, tipo){
+  const monto = Number(document.getElementById('mpMonto').value);
+  const err = document.getElementById('mpErrV'); err.textContent = '';
+  if (!(monto > 0)) { err.textContent = 'El monto tiene que ser mayor a 0'; return; }
+  const body = {monto};
+  if (tipo === 'point') { const t = document.getElementById('mpTerm').value; if (t) body.terminalId = t; }
+  document.getElementById('mpGo').disabled = true;
+  try{
+    const r = await fetch(MPB + '/ventas/' + id + '/' + tipo, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    if (tipo === 'link') { mpMostrarLink(d.linkUrl, d.monto); cargarCobrosMP(id); return; }
+    document.getElementById('mpEstadoV').innerHTML = `Cobro enviado a la terminal. Pedile al cliente que pase o acerque la tarjeta.<br><b>Esperando el pago…</b> <button class="btn small danger" onclick="mpCancelar('${d._id}','${id}')">Cancelar cobro</button>`;
+    document.getElementById('mpGo').style.display = 'none';
+    mpTimer = setInterval(async () => {
+      const x = await mpVerificar(d._id, id).catch(() => null);
+      if (x && x.estado && x.estado !== 'pendiente') {
+        mpParar();
+        if (x.estado !== 'acreditado') { document.getElementById('mpEstadoV').innerHTML = '<b>' + (MP_EST[x.estado] || x.estado) + '</b>' + (x.error ? ' — ' + escapeHtml(x.error) : ''); }
+      }
+    }, 4000);
+  }catch(e){
+    err.textContent = e.message; document.getElementById('mpGo').disabled = false;
+  }
 }
 </script>
 </body>

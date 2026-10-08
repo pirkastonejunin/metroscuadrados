@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mercado Pago - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<!-- Mercado Pago (8/10/2026): configuración del cobro con link de pago y Point. Independiente de Tiendanube. -->
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .hidden{display:none !important;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  .muted{color:var(--muted);font-size:12px;}
+  .campo-combo-cliente{position:relative;}
+  .producto-buscar-opciones{position:absolute;top:100%;left:0;right:0;z-index:40;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:2px;max-height:220px;overflow:auto;box-shadow:var(--shadow);}
+  .producto-buscar-opciones .opcion{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .producto-buscar-opciones .opcion:hover,.producto-buscar-opciones .opcion.activa{background:var(--accent-soft);}
+  .producto-buscar-opciones .sin-resultados{padding:8px 10px;font-size:13px;color:var(--muted);}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328;
+      --danger:#ff8080; --danger-soft:#3a1f1f;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328;
+    --danger:#ff8080; --danger-soft:#3a1f1f;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+<div id="loginScreen" class="hidden"><div class="card">
+  <h2 style="margin-top:0;margin-bottom:14px">Mercado Pago</h2>
+  <label>Usuario</label><input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+  <label style="margin-top:8px">Contraseña</label><input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+  <div class="err" id="loginErr"></div>
+  <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+</div></div>
+<div id="sinAccesoScreen" class="hidden"><div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+  <h2 style="margin-top:0">Sin acceso</h2><p class="muted">Tu usuario no tiene habilitado el módulo de Tesorería.</p>
+  <button class="btn secondary" onclick="logout()">Cerrar sesión</button></div></div>
+<div id="app" class="hidden">
+  <header><div class="brand"><h1>Mercado Pago</h1></div>
+    <div style="display:flex;gap:8px;align-items:center"><span class="muted" id="topbarUser" style="font-size:12px;font-weight:600"></span><button onclick="logout()">Salir</button></div></header>
+  <main>
+    <div class="card">
+      <h3 style="margin-top:0">Conexión</h3>
+      <p class="muted">Cobrá las ventas con link de pago o con la terminal Point. El cobro se registra solo en la venta, en Tesorería y en la cuenta corriente del cliente.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px">
+        <div><label>Access token de producción <span id="tokInfo" class="muted"></span></label><input id="mpToken" type="password" autocomplete="off" placeholder="APP_USR-… (dejá vacío para no cambiarlo)"></div>
+        <div><label>¿A qué banco de Tesorería entra la plata? *</label><select id="mpBanco"></select></div>
+        <div><label>Terminal Point por defecto</label><select id="mpTerminal"><option value="">— elegir al cobrar —</option></select></div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="guardarConfig()">Guardar</button>
+        <button class="btn secondary" onclick="probar()">Probar conexión</button>
+        <button class="btn secondary" onclick="cargarTerminales()">Buscar terminales</button>
+      </div>
+      <div class="err" id="mpErr" style="color:var(--danger);margin-top:8px"></div>
+      <div id="mpOk" style="color:var(--ok);margin-top:8px"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Aviso automático (webhook)</h3>
+      <p class="muted">Copiá esta dirección en el panel de Mercado Pago Developers → tu aplicación → Webhooks → Modo producción, y marcá los eventos “Pagos” y “Order (Mercado Pago Point)”. Así el sistema se entera apenas se acredita un pago.</p>
+      <div style="display:flex;gap:8px"><input id="mpWebhook" readonly><button class="btn secondary" onclick="copiar('mpWebhook')">Copiar</button></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Últimos cobros con Mercado Pago</h3>
+      <table><thead><tr><th>Fecha</th><th>Venta</th><th>Tipo</th><th>Monto</th><th>Estado</th><th></th></tr></thead><tbody id="mpCobrosBody"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody></table>
+    </div>
+  </main>
+</div>
+<script>
+const BASE = '/api/mercadopago';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function money(n){ n=Number(n||0); return '$ '+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+async function login(){
+  document.getElementById('loginErr').textContent='';
+  try{
+    const r = await fetch('/api/usuarios/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:document.getElementById('loginUser').value,password:document.getElementById('loginPass').value})});
+    const d = await r.json(); if(!r.ok) throw new Error(d.error||'Error');
+    TOKEN=d.token; localStorage.setItem('obras_admin_token',TOKEN); await iniciarApp();
+  }catch(e){ document.getElementById('loginErr').textContent=e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+function resolverOrgActiva(me){
+  const orgs=me.organizaciones||[];
+  if (orgs.some(o=>o._id===ORG) || (me.puedeVerTodas && ORG==='todas')) return;
+  const def=orgs.find(o=>o.nombre==='Piedra Negra');
+  ORG = orgs.length===1 ? orgs[0]._id : (def?def._id:(orgs[0]?orgs[0]._id:(me.puedeVerTodas?'todas':'')));
+  if (ORG) localStorage.setItem('obras_org_activo',ORG); else localStorage.removeItem('obras_org_activo');
+}
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me',{headers:headersAuth()});
+    if(!r.ok){ localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    if(!(me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('tesoreria')))){
+      document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ document.getElementById('loginErr').textContent='No se pudo validar la sesión.'; return; }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me,'mercadopago',{ocultarOrg:true});
+  document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent=(me.usuario&&me.usuario.nombre)||'';
+  await cargarConfig(); cargarCobros();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+let CFG=null;
+function msg(ok,t){ document.getElementById('mpErr').textContent=ok?'':t; document.getElementById('mpOk').textContent=ok?t:''; }
+async function cargarConfig(){
+  const [rc,rb]=await Promise.all([fetch(BASE+'/config',{headers:headersAuth()}),fetch('/api/tesoreria/bancos',{headers:headersAuth()})]);
+  CFG = rc.ok ? await rc.json() : {};
+  const bancos = rb.ok ? await rb.json() : [];
+  const sel=document.getElementById('mpBanco');
+  sel.innerHTML='<option value="">— elegir —</option>'+bancos.filter(b=>b.activa!==false).map(b=>`<option value="${b._id}" ${String(CFG.bancoId||'')===String(b._id)?'selected':''}>${escapeHtml(b.nombre)}</option>`).join('');
+  document.getElementById('tokInfo').textContent = CFG.tokenCargado ? '(cargado '+CFG.tokenParcial+(CFG.modoPrueba?' — modo prueba':'')+')' : '(sin cargar)';
+  document.getElementById('mpWebhook').value = CFG.webhookUrl||'';
+  if (CFG.terminalId) document.getElementById('mpTerminal').innerHTML=`<option value="${escapeHtml(CFG.terminalId)}">${escapeHtml(CFG.terminalId)}</option>`;
+  if (CFG.tokenCargado) cargarTerminales(true);
+}
+async function guardarConfig(){
+  const body={bancoId:document.getElementById('mpBanco').value||null,terminalId:document.getElementById('mpTerminal').value};
+  const t=document.getElementById('mpToken').value.trim(); if(t) body.accessToken=t;
+  const r=await fetch(BASE+'/config',{method:'PUT',headers:headersAuthJson(),body:JSON.stringify(body)}); const d=await r.json();
+  if(!r.ok) return msg(false,d.error||'No se pudo guardar');
+  document.getElementById('mpToken').value=''; msg(true,'Guardado.'); await cargarConfig();
+}
+async function probar(){
+  const r=await fetch(BASE+'/config/probar',{method:'POST',headers:headersAuthJson()}); const d=await r.json();
+  if(!r.ok) return msg(false,d.error||'No conectó');
+  msg(true,'Conectado como '+(d.usuario||'cuenta de Mercado Pago')+'.');
+}
+async function cargarTerminales(silencioso){
+  const r=await fetch(BASE+'/terminales',{headers:headersAuth()}); const d=await r.json();
+  if(!r.ok){ if(!silencioso) msg(false,d.error||'No se pudieron traer las terminales'); return; }
+  const sel=document.getElementById('mpTerminal'); const actual=CFG&&CFG.terminalId||'';
+  sel.innerHTML='<option value="">— elegir al cobrar —</option>'+d.map(t=>`<option value="${escapeHtml(t.id)}" ${t.id===actual?'selected':''}>${escapeHtml(t.nombre||t.id)}${t.pdv?'':' (no está en modo PDV)'}</option>`).join('');
+  if(!silencioso) msg(true,d.length?d.length+' terminal(es) encontradas.':'No hay terminales vinculadas a esta cuenta.');
+}
+function copiar(id){ const el=document.getElementById(id); el.select(); try{ navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand('copy'); } }
+const EST={pendiente:'Esperando pago',registrando:'Registrando',acreditado:'Cobrado',error:'Error al registrar',rechazado:'Rechazado',cancelado:'Cancelado'};
+async function cargarCobros(){
+  const r=await fetch(BASE+'/cobros',{headers:headersAuth()}); const d=r.ok?await r.json():[];
+  const b=document.getElementById('mpCobrosBody');
+  if(!d.length){ b.innerHTML='<tr><td colspan="6" class="muted">Todavía no hay cobros con Mercado Pago.</td></tr>'; return; }
+  b.innerHTML=d.map(c=>`<tr><td>${new Date(c.createdAt).toLocaleString('es-AR')}</td><td>${escapeHtml((c.venta||"")+(c.cliente?" · "+c.cliente:"")||'')}</td><td>${c.tipo==='point'?'Point':'Link'}</td><td>${money(c.monto)}</td><td>${EST[c.estado]||c.estado}${c.error?'<div class="muted">'+escapeHtml(c.error)+'</div>':''}</td><td>${(c.estado==='pendiente'||c.estado==='error')?`<button class="btn secondary" onclick="verificar('${c._id}')">Verificar</button>`:''}</td></tr>`).join('');
+}
+async function verificar(id){ await fetch(BASE+'/cobros/'+id+'/verificar',{method:'POST',headers:headersAuthJson()}); cargarCobros(); }
+</script>
+</body>
+</html>

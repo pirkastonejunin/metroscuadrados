@@ -115,7 +115,8 @@
       { key: 'sueldos', href: '/admin-sueldos.html', modulo: 'sueldos', label: 'Sueldos', icon: ICONOS.usuarios }
     ]},
     { nombre: 'Tesorería', items: [
-      { key: 'tesoreria', href: '/admin-tesoreria.html', modulo: 'tesoreria', label: 'Tesorería', icon: ICONOS.tesoreria }
+      { key: 'tesoreria', href: '/admin-tesoreria.html', modulo: 'tesoreria', label: 'Tesorería', icon: ICONOS.tesoreria },
+      { key: 'mercadopago', href: '/admin-mercadopago.html', modulo: 'tesoreria', label: 'Mercado Pago', icon: ICONOS.tesoreria }
     ]},
     // Fiscal (5/10/2026): conexión con ARCA, facturación electrónica y libros.
     { nombre: 'Fiscal', items: [
