@@ -51,6 +51,12 @@ app.use('/api/notificaciones', notificacionesRouter);
 const productosRouter = require('./productos');
 app.use('/api/productos', productosRouter);
 
+// Tienda online pública (catálogo, carrito, pedidos y pago con Mercado Pago).
+const tiendaOnline = require('./tiendaOnline');
+app.get('/tienda', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tienda.html')));
+app.use('/api/tienda', tiendaOnline.publico);
+app.use('/api/tienda-admin', tiendaOnline.admin);
+
 // Importar fotos y descripciones desde Tiendanube (para armar la tienda propia).
 const tiendanubeImportRouter = require('./tiendanubeImport');
 app.use('/api/tienda-import', tiendanubeImportRouter);

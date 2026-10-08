@@ -2047,6 +2047,7 @@ async function cargarFichaTienda(productoId){
     cont.innerHTML = `
       <div class="card" style="margin-bottom:12px">
         <strong>Fotos y descripción para la tienda</strong>
+        <label style="display:flex;gap:8px;align-items:center;margin:6px 0 0;font-size:13px;color:var(--text)"><input type="checkbox" style="width:auto" ${d.publicado ? 'checked' : ''} onchange="fichaTiendaPublicar('${productoId}', this)"> Publicado en la tienda online <span class="muted">(se ve si está activo y tiene precio de venta)</span></label>
         ${d.tienda && d.tienda.url ? ` <a href="${escapeHtml(d.tienda.url)}" target="_blank" rel="noopener" class="muted">(ver en Tiendanube ↗)</a>` : ''}
         <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">${fotos || '<span class="muted">Sin fotos todavía.</span>'}</div>
         <div style="margin-top:8px"><label class="btn small secondary" style="cursor:pointer">+ Subir foto<input type="file" accept="image/*" multiple style="display:none" onchange="fichaTiendaSubir('${productoId}', this)"></label></div>
@@ -2059,6 +2060,10 @@ async function cargarFichaTienda(productoId){
     const prev = document.getElementById('fichaTiendaPrev');
     if (prev) prev.innerHTML = d.descripcionHtml;
   }catch(e){ cont.innerHTML = ''; }
+}
+async function fichaTiendaPublicar(id, chk){
+  const r = await fetch('/api/tienda-admin/producto/' + id + '/publicar', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({publicado: chk.checked})});
+  if (!r.ok) { chk.checked = !chk.checked; alert('No se pudo cambiar la publicación'); }
 }
 async function fichaTiendaGuardarDesc(id){
   const msg = document.getElementById('fichaTiendaMsg');

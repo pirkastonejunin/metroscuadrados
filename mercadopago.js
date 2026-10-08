@@ -461,6 +461,11 @@ router.post('/webhook/:token', async (req, res) => {
       }
     } else if (tipo === 'payment' || /^\d+$/.test(recurso)) {
       const p = await mp(cfg, 'GET', '/v1/payments/' + encodeURIComponent(recurso)).catch(() => null);
+      if (p && /^tw-[0-9a-f]{24}$/.test(String(p.external_reference || ''))) {
+        // Pago de un pedido de la tienda online: lo concilia tiendaOnline.js
+        try { await require('./tiendaOnline').conciliarPedidoPorReferencia(db, p.external_reference); } catch (e) { console.error('Tienda online (webhook):', e.message); }
+        return;
+      }
       if (p && p.external_reference) cobro = await db.collection('mp_cobros').findOne({ orgId: cfg.orgId, externalReference: p.external_reference });
     }
     // Si la misma cuenta de Mercado Pago la usan varias organizaciones, el aviso llega a una sola dirección:
@@ -478,4 +483,12 @@ router.post('/webhook/:token', async (req, res) => {
 });
 
 router.conciliarCobro = conciliarCobro; // para pruebas
+// Para la tienda online (tiendaOnline.js)
+router.registrarCobroEnVenta = registrarCobroEnVenta;
+router.completarDescuentos = completarDescuentos;
+router.cargarConfig = cargarConfig;
+router.mpLlamar = mp;
+router.baseUrl = baseUrl;
+router.urlWebhook = urlWebhook;
+router.interpretarPago = interpretar;
 module.exports = router;

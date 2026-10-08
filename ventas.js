@@ -1178,7 +1178,7 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-router.post('/', authAdmin, async (req, res) => {
+const postVenta = async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar una venta.');
     const body = req.body || {};
@@ -1421,6 +1421,14 @@ router.post('/', authAdmin, async (req, res) => {
     });
     res.json(await autorizarAlGuardar(req, resultado));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+};
+router.post('/', authAdmin, postVenta);
+
+// Crea una venta sin pasar por HTTP (la tienda online, 8/10/2026): reutiliza EXACTO el mismo
+// circuito que POST / (numeración, cuenta corriente, stock comprometido). `req` lleva orgId y usuario.
+router.crearVentaInterna = (req) => new Promise((resolve, reject) => {
+  const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(d) { if (this.statusCode >= 400) { const e = new Error((d && d.error) || 'No se pudo crear la venta'); e.status = this.statusCode; reject(e); } else resolve(d); } };
+  postVenta(req, res).catch(reject);
 });
 
 // Autorización automática en ARCA al guardar una venta fiscal (5/10/2026,

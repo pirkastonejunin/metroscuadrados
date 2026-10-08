@@ -269,7 +269,7 @@ router.get('/producto/:id', auth, async (req, res) => {
     const db = await getDb();
     const p = await productoDeOrg(db, req);
     const t = await db.collection('productos_tienda').findOne({ orgId: p.orgId, productoId: p._id });
-    res.json({ imagenes: ((t && t.imagenes) || []).map(i => String(i.imagenId)), descripcionHtml: (t && t.descripcionHtml) || '', tienda: (t && t.tienda) || null });
+    res.json({ imagenes: ((t && t.imagenes) || []).map(i => String(i.imagenId)), descripcionHtml: (t && t.descripcionHtml) || '', tienda: (t && t.tienda) || null, publicado: !!(t && t.publicado) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

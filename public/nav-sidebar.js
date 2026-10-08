@@ -98,6 +98,7 @@
       // que no comprometa stock ni cuenta", con estados y seguimiento, y
       // la posibilidad de importar cotizaciones ya armadas en el
       // cotizador. Reusa el módulo 'ventas' (no es un módulo nuevo).
+      { key: 'tienda', href: '/admin-tienda.html', modulo: 'productos', label: 'Tienda online', icon: ICONOS.cotizador || ICONOS.tesoreria },
       { key: 'presupuestos', href: '/admin-presupuestos.html', modulo: 'ventas', label: 'Presupuestos', icon: ICONOS.presupuestos }
     ]},
     { nombre: 'Inventario', items: [

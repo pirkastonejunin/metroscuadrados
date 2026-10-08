@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piedra Negra — Tienda</title>
+<meta name="description" content="Materiales de construcción, revestimientos y pisos. Comprá online y retirá en sucursal.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --piedra:#17181a; --grafito:#2b2d30; --humo:#6f7479; --ceniza:#e4e6e5; --arena:#f1f2f0; --blanco:#ffffff;
+    --brasa:#ff5a36; --brasa-osc:#d9431f; --ok:#1f7a54; --ok-fondo:#e0f2e9; --aviso:#9a6a00; --aviso-fondo:#fbf0d3; --error:#b3261e; --error-fondo:#fbe4e1;
+    --radio:6px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{font-family:"Archivo",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-stretch:100%;background:var(--arena);color:var(--piedra);line-height:1.45;-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  button{font-family:inherit;cursor:pointer}
+  img{display:block;max-width:100%}
+  :focus-visible{outline:3px solid var(--brasa);outline-offset:2px}
+  .oculto{display:none!important}
+  .contenedor{max-width:1240px;margin:0 auto;padding:0 16px}
+
+  /* encabezado */
+  header.cab{background:var(--piedra);color:#fff;position:sticky;top:0;z-index:30}
+  .cab-fila{display:flex;align-items:center;gap:16px;padding-top:12px;padding-bottom:12px}
+  .marca{font-stretch:125%;font-weight:800;letter-spacing:.06em;font-size:18px;text-decoration:none;white-space:nowrap}
+  .marca b{color:var(--brasa)}
+  .buscador{flex:1;position:relative;min-width:0}
+  .buscador input{width:100%;padding:11px 14px;border:0;border-radius:var(--radio);font:inherit;font-size:15px;background:#fff;color:var(--piedra)}
+  .carrito-btn{background:transparent;border:1px solid #55585c;color:#fff;border-radius:var(--radio);padding:9px 14px;font-weight:600;font-size:14px;white-space:nowrap}
+  .carrito-btn:hover{border-color:#fff}
+  .carrito-btn .n{display:inline-block;min-width:22px;padding:0 6px;margin-left:6px;border-radius:11px;background:var(--brasa);color:#fff;font-size:12px;line-height:22px;text-align:center}
+
+  /* rubros */
+  .rubros{background:var(--blanco);border-bottom:1px solid var(--ceniza)}
+  .rubros-fila{display:flex;gap:6px;overflow-x:auto;padding:10px 0;scrollbar-width:thin}
+  .chip{flex:none;border:1px solid var(--ceniza);background:var(--blanco);color:var(--grafito);padding:7px 14px;border-radius:999px;font-size:14px;font-weight:500;white-space:nowrap}
+  .chip:hover{border-color:var(--grafito)}
+  .chip.on{background:var(--piedra);border-color:var(--piedra);color:#fff}
+  .chip small{opacity:.6;margin-left:4px}
+  .subrubros{background:var(--arena)}
+  .subrubros .rubros-fila{padding:8px 0}
+  .subrubros .chip{font-size:13px;padding:5px 12px}
+
+  main{padding:20px 0 60px;min-height:70vh}
+  .barra{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .barra h1{font-size:22px;font-weight:700;font-stretch:90%;letter-spacing:-.01em}
+  .barra select{padding:8px 10px;border:1px solid var(--ceniza);border-radius:var(--radio);background:#fff;font:inherit;font-size:14px}
+  .muted{color:var(--humo);font-size:14px}
+
+  /* grilla */
+  .grilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+  .tarj{background:var(--blanco);border:1px solid var(--ceniza);border-radius:var(--radio);display:flex;flex-direction:column;overflow:hidden;transition:border-color .15s}
+  .tarj:hover{border-color:var(--grafito)}
+  .tarj a.foto{text-decoration:none;display:block;aspect-ratio:1/1;background:var(--arena);position:relative}
+  .tarj a.foto img{width:100%;height:100%;object-fit:cover}
+  .sinfoto{text-decoration:none;display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:var(--humo);font-size:13px}
+  .tarj .agotado{position:absolute;left:8px;top:8px;background:var(--piedra);color:#fff;font-size:12px;font-weight:600;padding:3px 9px;border-radius:3px}
+  .tarj .cuerpo{padding:12px;display:flex;flex-direction:column;gap:6px;flex:1}
+  .tarj .nombre{font-size:15px;font-weight:600;line-height:1.3;text-decoration:none;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tarj .marca-p{font-size:12px;color:var(--humo)}
+  .precio{font-size:21px;font-weight:800;font-stretch:90%;letter-spacing:-.01em}
+  .precio small{font-size:12px;font-weight:500;color:var(--humo);letter-spacing:0}
+  .tarj .pie{margin-top:auto;padding-top:8px}
+  .btn{display:inline-block;border:0;border-radius:var(--radio);background:var(--brasa);color:#fff;font-weight:700;font-size:15px;padding:11px 18px;text-decoration:none;text-align:center}
+  .btn:hover{background:var(--brasa-osc)}
+  .btn:disabled{background:var(--ceniza);color:var(--humo);cursor:not-allowed}
+  .btn.sec{background:#fff;color:var(--piedra);border:1px solid var(--grafito)}
+  .btn.sec:hover{background:var(--arena)}
+  .btn.full{width:100%}
+  .mas{display:block;margin:24px auto 0}
+
+  /* producto */
+  .prod{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:32px;align-items:start}
+  .galeria .grande{aspect-ratio:1/1;background:#fff;border:1px solid var(--ceniza);border-radius:var(--radio);overflow:hidden}
+  .galeria .grande img{width:100%;height:100%;object-fit:contain}
+  .miniaturas{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .miniaturas button{width:68px;height:68px;border:2px solid var(--ceniza);border-radius:var(--radio);padding:0;overflow:hidden;background:#fff}
+  .miniaturas button.on{border-color:var(--piedra)}
+  .miniaturas img{width:100%;height:100%;object-fit:cover}
+  .prod h1{font-size:28px;font-weight:700;font-stretch:90%;line-height:1.15;letter-spacing:-.015em;margin-bottom:6px}
+  .prod .precio{font-size:34px;margin:14px 0 4px}
+  .estado{display:inline-block;font-size:13px;font-weight:600;padding:3px 10px;border-radius:999px}
+  .estado.ok{background:var(--ok-fondo);color:var(--ok)}
+  .estado.poco{background:var(--aviso-fondo);color:var(--aviso)}
+  .estado.no{background:var(--error-fondo);color:var(--error)}
+  .compra{display:flex;gap:10px;margin:18px 0;flex-wrap:wrap}
+  .cant{display:inline-flex;border:1px solid var(--grafito);border-radius:var(--radio);overflow:hidden;background:#fff}
+  .cant button{width:40px;border:0;background:#fff;font-size:20px}
+  .cant button:hover{background:var(--arena)}
+  .cant input{width:56px;border:0;border-left:1px solid var(--ceniza);border-right:1px solid var(--ceniza);text-align:center;font:inherit;font-size:16px}
+  .desc{margin-top:26px;padding-top:18px;border-top:1px solid var(--ceniza);max-width:68ch;font-size:15px;line-height:1.6}
+  .desc p{margin-bottom:10px}.desc ul,.desc ol{margin:0 0 10px 20px}.desc img{max-width:100%;height:auto}
+  .nota{background:#fff;border:1px solid var(--ceniza);border-radius:var(--radio);padding:12px 14px;font-size:14px;margin-top:14px}
+
+  /* carrito y pedido */
+  .doble{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:24px;align-items:start}
+  .panel{background:#fff;border:1px solid var(--ceniza);border-radius:var(--radio);padding:16px}
+  .linea{display:grid;grid-template-columns:64px 1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid var(--ceniza);align-items:center}
+  .linea:last-child{border-bottom:0}
+  .linea .mini{width:64px;height:64px;background:var(--arena);border-radius:4px;overflow:hidden}
+  .linea .mini img{width:100%;height:100%;object-fit:cover}
+  .linea .n{font-weight:600;font-size:15px;text-decoration:none}
+  .linea .sub{font-weight:700;text-align:right}
+  .linea .quitar{background:none;border:0;color:var(--humo);font-size:13px;text-decoration:underline;padding:4px 0}
+  .total{display:flex;justify-content:space-between;font-size:20px;font-weight:800;font-stretch:90%;padding:12px 0}
+  label.campo{display:block;font-size:13px;font-weight:600;margin:10px 0 4px}
+  .panel input[type=text],.panel input[type=email],.panel input[type=tel]{width:100%;padding:10px 12px;border:1px solid #c9cdcc;border-radius:var(--radio);font:inherit;font-size:15px}
+  .error{background:var(--error-fondo);color:var(--error);padding:10px 12px;border-radius:var(--radio);font-size:14px;margin-top:10px}
+  .resultado{max-width:640px;margin:20px auto}
+  .resultado h1{font-size:26px;font-stretch:90%;margin-bottom:8px}
+  .vacio{text-align:center;padding:60px 16px}
+  .vacio h2{font-size:20px;margin-bottom:8px}
+
+  footer{background:var(--piedra);color:#b9bdc0;padding:22px 0;font-size:14px}
+  footer a{color:#fff}
+
+  @media(max-width:820px){
+    .prod,.doble{grid-template-columns:1fr}
+    .cab-fila{flex-wrap:wrap;gap:10px 12px}.marca{flex:1;font-size:16px;letter-spacing:.04em;font-stretch:110%}.buscador{order:3;flex-basis:100%}
+    .grilla{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .tarj .cuerpo{padding:10px}.precio{font-size:18px}
+    .prod h1{font-size:23px}
+  }
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="cab">
+  <div class="contenedor cab-fila">
+    <a class="marca" href="#/" id="marca">PIEDRA <b>NEGRA</b></a>
+    <form class="buscador" id="formBusca" role="search" onsubmit="return buscar(event)">
+      <input id="q" type="search" placeholder="Buscá por producto, marca o código" aria-label="Buscar productos" autocomplete="off">
+    </form>
+    <button class="carrito-btn" onclick="location.hash='#/carrito'" aria-label="Ver carrito">Carrito<span class="n" id="nCarrito">0</span></button>
+  </div>
+</header>
+<nav class="rubros" aria-label="Rubros"><div class="contenedor"><div class="rubros-fila" id="rubros"></div></div></nav>
+<nav class="subrubros oculto" id="subWrap" aria-label="Subrubros"><div class="contenedor"><div class="rubros-fila" id="subrubros"></div></div></nav>
+<main><div class="contenedor" id="vista"></div></main>
+<footer><div class="contenedor" id="pie"></div></footer>
+
+<script>
+const API = '/api/tienda';
+const IMG = '/api/tienda-import/imagen/';
+let CFG = {nombre:'Piedra Negra'}, RUBROS = [];
+let CARRITO = [];           // [{id, nombre, precio, cantidad (en unidades base), upb, bultoNombre, imagen, max}]
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => '$ ' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:2});
+const num = n => Number(n).toLocaleString('es-AR',{maximumFractionDigits:2});
+
+// El HTML de las descripciones ya se limpia en el servidor; acá se vuelve a sacar lo ejecutable por las dudas.
+function htmlSeguro(h){
+  const t = document.createElement('template'); t.innerHTML = String(h||'');
+  t.content.querySelectorAll('script,style,iframe,object,embed,form,link,meta').forEach(n => n.remove());
+  t.content.querySelectorAll('*').forEach(n => { [...n.attributes].forEach(a => { if (/^on/i.test(a.name) || /^\s*javascript:/i.test(a.value)) n.removeAttribute(a.name); }); });
+  return t.innerHTML;
+}
+
+// ---- carrito (se recuerda en el navegador; si no se puede, vive en memoria)
+function cargarCarrito(){ try{ CARRITO = JSON.parse(localStorage.getItem('pn_carrito')||'[]'); }catch(e){ CARRITO = []; } if(!Array.isArray(CARRITO)) CARRITO = []; pintarContador(); }
+function guardarCarrito(){ try{ localStorage.setItem('pn_carrito', JSON.stringify(CARRITO)); }catch(e){} pintarContador(); }
+function pintarContador(){ $('nCarrito').textContent = CARRITO.length; }
+const unidadesPorPaso = it => it.upb > 0 ? it.upb : 1;
+function agregar(p, cantidad){
+  const upb = p.bulto ? p.bulto.unidades : 0;
+  const ex = CARRITO.find(x => x.id === p.id);
+  const paso = upb || 1;
+  const max = p.disponible;
+  let nueva = Math.min(max, (ex ? ex.cantidad : 0) + cantidad * paso);
+  if (upb) nueva = Math.floor(nueva / paso + 1e-9) * paso; // solo bultos enteros
+  if (nueva <= 0) return false;
+  const datos = {id:p.id, nombre:p.nombre, precio:p.precio, cantidad:nueva, upb, bultoNombre:p.bulto?p.bulto.nombre:'', imagen:p.imagen, max};
+  if (ex) Object.assign(ex, datos); else CARRITO.push(datos);
+  guardarCarrito();
+  return true;
+}
+
+async function api(ruta, opciones){
+  const r = await fetch(API + ruta, opciones);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(d.error || 'Algo salió mal. Probá de nuevo.'); e.datos = d; e.status = r.status; throw e; }
+  return d;
+}
+
+// ---- ruteo
+window.addEventListener('hashchange', ruta);
+async function iniciar(){
+  cargarCarrito();
+  try { CFG = await api('/config'); } catch(e){ CFG = {activa:false}; }
+  if (!CFG.activa) { $('vista').innerHTML = '<div class="vacio"><h2>La tienda no está disponible por ahora</h2><p class="muted">Volvé a intentar más tarde.</p></div>'; return; }
+  document.title = (CFG.nombre || 'Tienda') + ' — Tienda';
+  $('pie').innerHTML = `<strong style="color:#fff">${esc(CFG.nombre||'')}</strong> · Retiro en sucursal${CFG.direccionRetiro?': '+esc(CFG.direccionRetiro):''}${CFG.whatsapp?` · <a href="https://wa.me/${encodeURIComponent(CFG.whatsapp.replace('+',''))}" target="_blank" rel="noopener">Escribinos por WhatsApp</a>`:''}`;
+  try { RUBROS = await api('/rubros'); } catch(e){ RUBROS = []; }
+  ruta();
+}
+function ruta(){
+  const h = location.hash.replace(/^#\/?/, '');
+  const [seg, a, b] = h.split('?')[0].split('/');
+  window.scrollTo(0, 0);
+  if (seg === 'producto' && a) return vistaProducto(a);
+  if (seg === 'carrito') return vistaCarrito();
+  if (seg === 'pedido' && a && b) return vistaPedido(a, b);
+  return vistaCatalogo(new URLSearchParams(h.split('?')[1]||''));
+}
+function irCatalogo(params){ const u = new URLSearchParams(params); location.hash = '#/?' + u.toString(); }
+function buscar(e){ e.preventDefault(); irCatalogo({q:$('q').value.trim()}); return false; }
+
+// ---- catálogo
+let cat = {q:'',rubro:'',subrubro:'',orden:'nombre',pagina:1,productos:[],total:0};
+function pintarRubros(){
+  document.querySelector('nav.rubros').classList.remove('oculto');
+  $('rubros').innerHTML = `<button class="chip ${!cat.rubro?'on':''}" onclick="irCatalogo({q:cat.q})">Todo</button>` +
+    RUBROS.map(r => `<button class="chip ${cat.rubro===r.nombre?'on':''}" data-r="${esc(r.nombre)}">${esc(r.nombre)}<small>${r.cantidad}</small></button>`).join('');
+  $('rubros').querySelectorAll('[data-r]').forEach(b => b.onclick = () => irCatalogo({rubro:b.dataset.r}));
+  const r = RUBROS.find(x => x.nombre === cat.rubro);
+  $('subWrap').classList.toggle('oculto', !(r && r.subrubros.length));
+  $('subrubros').innerHTML = r ? r.subrubros.map(s => `<button class="chip ${cat.subrubro===s.nombre?'on':''}" data-s="${esc(s.nombre)}">${esc(s.nombre)}<small>${s.cantidad}</small></button>`).join('') : '';
+  $('subrubros').querySelectorAll('[data-s]').forEach(b => b.onclick = () => irCatalogo({rubro:cat.rubro, subrubro: cat.subrubro===b.dataset.s ? '' : b.dataset.s}));
+}
+function precioTarjeta(p){
+  return p.bulto ? `<div class="precio">${money(p.bulto.precio)} <small>por ${esc(p.bulto.nombre)} (${num(p.bulto.unidades)} ${esc(p.unidad)})</small></div><div class="muted">${money(p.precio)} por ${esc(p.unidad)}</div>`
+                 : `<div class="precio">${money(p.precio)} <small>por ${esc(p.unidad)}</small></div>`;
+}
+function tarjeta(p){
+  const sin = !(p.disponible > 0);
+  return `<article class="tarj">
+    <a class="foto" href="#/producto/${p.id}" aria-label="${esc(p.nombre)}">${p.imagen ? `<img loading="lazy" src="${IMG}${p.imagen}" alt="${esc(p.nombre)}">` : '<span class="sinfoto">Sin foto</span>'}${sin?'<span class="agotado">Sin stock</span>':''}</a>
+    <div class="cuerpo">
+      ${p.marca?`<div class="marca-p">${esc(p.marca)}</div>`:''}
+      <a class="nombre" href="#/producto/${p.id}">${esc(p.nombre)}</a>
+      ${precioTarjeta(p)}
+      <div class="pie"><button class="btn full" ${sin?'disabled':''} onclick="agregarDesdeTarjeta('${p.id}')">${sin?'Sin stock':'Agregar'}</button></div>
+    </div></article>`;
+}
+function agregarDesdeTarjeta(id){
+  const p = cat.productos.find(x => x.id === id); if (!p) return;
+  if (agregar(p, 1)) { const b = event.target; const t = b.textContent; b.textContent = 'Agregado ✔'; setTimeout(() => b.textContent = t, 1200); }
+}
+async function vistaCatalogo(params){
+  cat = {q:params.get('q')||'', rubro:params.get('rubro')||'', subrubro:params.get('subrubro')||'', orden:params.get('orden')||'nombre', pagina:1, productos:[], total:0};
+  $('q').value = cat.q;
+  pintarRubros();
+  $('vista').innerHTML = '<p class="muted">Cargando productos…</p>';
+  await cargarPagina(true);
+}
+async function cargarPagina(primera){
+  const u = new URLSearchParams({q:cat.q, rubro:cat.rubro, subrubro:cat.subrubro, orden:cat.orden, pagina:cat.pagina, porPagina:24});
+  try{
+    const d = await api('/catalogo?' + u);
+    cat.total = d.total; cat.productos = primera ? d.productos : cat.productos.concat(d.productos);
+    const titulo = cat.q ? `Resultados para “${esc(cat.q)}”` : (cat.subrubro || cat.rubro || 'Todos los productos');
+    $('vista').innerHTML = `<div class="barra"><h1>${titulo} <span class="muted" style="font-weight:400">(${d.total})</span></h1>
+      <select id="orden" aria-label="Ordenar"><option value="nombre">Ordenar por nombre</option><option value="precio_asc">Menor precio</option><option value="precio_desc">Mayor precio</option></select></div>
+      ${cat.productos.length ? `<div class="grilla">${cat.productos.map(tarjeta).join('')}</div>` : `<div class="vacio"><h2>No encontramos productos</h2><p class="muted">Probá con otra palabra o mirá todos los rubros.</p></div>`}
+      ${cat.productos.length < d.total ? '<button class="btn sec mas" id="mas">Ver más productos</button>' : ''}`;
+    $('orden').value = cat.orden;
+    $('orden').onchange = e => irCatalogo({q:cat.q, rubro:cat.rubro, subrubro:cat.subrubro, orden:e.target.value});
+    const mas = $('mas'); if (mas) mas.onclick = () => { cat.pagina++; mas.disabled = true; mas.textContent = 'Cargando…'; cargarPagina(false); };
+  }catch(e){ $('vista').innerHTML = `<div class="vacio"><h2>No pudimos cargar los productos</h2><p class="muted">${esc(e.message)}</p></div>`; }
+}
+
+// ---- producto
+let prodActual = null;
+async function vistaProducto(id){
+  pintarRubros();
+  $('vista').innerHTML = '<p class="muted">Cargando…</p>';
+  try{
+    const p = prodActual = await api('/producto/' + id);
+    document.title = p.nombre + ' — ' + (CFG.nombre||'Tienda');
+    const sin = !(p.disponible > 0);
+    const maxCajas = p.bulto ? Math.floor(p.disponible / p.bulto.unidades) : p.disponible;
+    const estado = sin ? '<span class="estado no">Sin stock</span>' : (p.disponible <= 5 ? `<span class="estado poco">Últimas ${num(p.disponible)} ${esc(p.unidad)}</span>` : '<span class="estado ok">Disponible</span>');
+    $('vista').innerHTML = `<p style="margin-bottom:12px"><a href="#/${p.rubro?'?rubro='+encodeURIComponent(p.rubro):''}" class="muted">← ${esc(p.rubro||'Volver al catálogo')}</a></p>
+    <div class="prod">
+      <div class="galeria"><div class="grande" id="grande">${p.imagenes.length ? `<img src="${IMG}${p.imagenes[0]}" alt="${esc(p.nombre)}">` : '<span class="sinfoto" style="min-height:300px">Sin foto</span>'}</div>
+        ${p.imagenes.length>1?`<div class="miniaturas">${p.imagenes.map((im,i)=>`<button class="${i?'':'on'}" aria-label="Foto ${i+1}" data-i="${im}"><img src="${IMG}${im}" alt=""></button>`).join('')}</div>`:''}</div>
+      <div>
+        <div class="muted">${[p.marca, p.sku && 'Código ' + p.sku].filter(Boolean).map(esc).join(' · ')}</div>
+        <h1>${esc(p.nombre)}</h1>
+        ${estado}
+        ${precioTarjeta(p).replace('class="precio"','class="precio"')}
+        ${sin ? '' : `<div class="compra"><div class="cant"><button type="button" aria-label="Menos" onclick="cambiarCant(-1)">−</button><input id="cantP" type="number" min="1" max="${maxCajas}" value="1" inputmode="numeric" aria-label="Cantidad${p.bulto?' de '+esc(p.bulto.nombre)+'s':''}"><button type="button" aria-label="Más" onclick="cambiarCant(1)">+</button></div>
+          <button class="btn" id="btnAgregar" onclick="agregarProducto()">Agregar al carrito</button></div>
+          ${p.bulto?`<p class="muted">Se vende por ${esc(p.bulto.nombre)} cerrada de ${num(p.bulto.unidades)} ${esc(p.unidad)}. Cantidad: <b id="totU">${num(p.bulto.unidades)}</b> ${esc(p.unidad)}.</p>`:''}`}
+        <div class="nota">Retiro en sucursal${CFG.direccionRetiro?': <b>'+esc(CFG.direccionRetiro)+'</b>':''}. Pagás online con Mercado Pago y te avisamos cuando está listo.</div>
+      </div></div>
+      ${p.descripcionHtml?`<div class="desc" id="desc"></div>`:''}`;
+    if (p.descripcionHtml) $('desc').innerHTML = htmlSeguro(p.descripcionHtml);
+    document.querySelectorAll('.miniaturas button').forEach(b => b.onclick = () => {
+      $('grande').innerHTML = `<img src="${IMG}${b.dataset.i}" alt="${esc(p.nombre)}">`;
+      document.querySelectorAll('.miniaturas button').forEach(x => x.classList.toggle('on', x === b));
+    });
+    const c = $('cantP'); if (c && p.bulto) c.oninput = () => { $('totU').textContent = num((parseInt(c.value,10)||1) * p.bulto.unidades); };
+  }catch(e){ $('vista').innerHTML = `<div class="vacio"><h2>Este producto no está disponible</h2><p class="muted">${esc(e.message)}</p><p style="margin-top:12px"><a class="btn sec" href="#/">Ver el catálogo</a></p></div>`; }
+}
+function cambiarCant(d){
+  const c = $('cantP'); const max = parseInt(c.max,10) || 1;
+  c.value = Math.min(max, Math.max(1, (parseInt(c.value,10)||1) + d)); c.dispatchEvent(new Event('input'));
+}
+function agregarProducto(){
+  const p = prodActual; const cant = Math.max(1, parseInt($('cantP').value,10)||1);
+  const ok = agregar(p, p.bulto ? cant : cant);
+  const b = $('btnAgregar'); b.textContent = ok ? 'Agregado ✔' : 'No hay más stock'; setTimeout(() => b.textContent = 'Agregar al carrito', 1400);
+  if (ok) pintarContador();
+}
+
+// ---- carrito y pago
+function textoCantidad(it){
+  return it.upb > 0 ? `${num(it.cantidad / it.upb)} ${esc(it.bultoNombre)}${it.cantidad/it.upb===1?'':'s'} (${num(it.cantidad)} u.)` : `${num(it.cantidad)} u.`;
+}
+function subtotal(it){ return Math.round(it.cantidad * it.precio * 100) / 100; }
+function totalCarrito(){ return CARRITO.reduce((a, it) => a + subtotal(it), 0); }
+function vistaCarrito(){
+  pintarRubros();
+  document.title = 'Carrito — ' + (CFG.nombre||'Tienda');
+  if (!CARRITO.length) { $('vista').innerHTML = '<div class="vacio"><h2>Tu carrito está vacío</h2><p class="muted" style="margin-bottom:14px">Agregá productos para armar tu pedido.</p><a class="btn" href="#/">Ver productos</a></div>'; return; }
+  $('vista').innerHTML = `<div class="barra"><h1>Tu pedido</h1></div>
+  <div class="doble">
+    <div class="panel">${CARRITO.map((it, i) => `<div class="linea">
+      <a class="mini" href="#/producto/${it.id}">${it.imagen?`<img src="${IMG}${it.imagen}" alt="">`:''}</a>
+      <div><a class="n" href="#/producto/${it.id}">${esc(it.nombre)}</a><div class="muted">${money(it.upb>0?it.precio*it.upb:it.precio)} ${it.upb>0?'por '+esc(it.bultoNombre):'c/u'}</div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:6px"><div class="cant"><button type="button" aria-label="Menos" onclick="mover(${i},-1)">−</button><input value="${num(it.upb>0?it.cantidad/it.upb:it.cantidad)}" readonly aria-label="Cantidad"><button type="button" aria-label="Más" onclick="mover(${i},1)">+</button></div>
+        <button class="quitar" onclick="quitar(${i})">Quitar</button></div>
+        ${it.upb>0?`<div class="muted" style="margin-top:4px">${textoCantidad(it)}</div>`:''}</div>
+      <div class="sub">${money(subtotal(it))}</div></div>`).join('')}</div>
+    <div class="panel">
+      <div class="total"><span>Total</span><span>${money(totalCarrito())}</span></div>
+      <p class="muted">Retiro en sucursal${CFG.direccionRetiro?': '+esc(CFG.direccionRetiro):''}. Sin costo de envío.</p>
+      <form id="formPedido" onsubmit="return confirmarPedido(event)" novalidate>
+        <label class="campo" for="fNombre">Nombre y apellido</label><input id="fNombre" type="text" autocomplete="name" required>
+        <label class="campo" for="fEmail">Email</label><input id="fEmail" type="email" autocomplete="email" required>
+        <label class="campo" for="fTel">Teléfono</label><input id="fTel" type="tel" autocomplete="tel" required>
+        <label class="campo" for="fDni">DNI o CUIT (opcional)</label><input id="fDni" type="text" inputmode="numeric">
+        <div class="error oculto" id="errPedido" role="alert"></div>
+        <button class="btn full" id="btnPagar" style="margin-top:14px;padding:14px">Pagar con Mercado Pago</button>
+        <p class="muted" style="margin-top:8px">Vas a pasar a Mercado Pago para pagar de forma segura. Cuando vuelvas, vas a ver el estado de tu pedido.</p>
+      </form>
+    </div></div>`;
+  try { const g = JSON.parse(sessionStorage.getItem('pn_datos')||'{}'); ['Nombre','Email','Tel','Dni'].forEach(k => { if (g[k]) $('f'+k).value = g[k]; }); } catch(e){}
+}
+function mover(i, d){
+  const it = CARRITO[i]; const paso = it.upb > 0 ? it.upb : 1;
+  const nueva = it.cantidad + d * paso;
+  if (nueva < paso) return;
+  if (nueva > it.max + 1e-9) { alert('No hay más stock de este producto.'); return; }
+  it.cantidad = Math.round(nueva * 100) / 100; guardarCarrito(); vistaCarrito();
+}
+function quitar(i){ CARRITO.splice(i, 1); guardarCarrito(); vistaCarrito(); }
+async function confirmarPedido(e){
+  e.preventDefault();
+  const err = $('errPedido'); err.classList.add('oculto');
+  const cliente = {nombre:$('fNombre').value.trim(), email:$('fEmail').value.trim(), telefono:$('fTel').value.trim(), dni:$('fDni').value.trim()};
+  try{ sessionStorage.setItem('pn_datos', JSON.stringify({Nombre:cliente.nombre, Email:cliente.email, Tel:cliente.telefono, Dni:cliente.dni})); }catch(x){}
+  const b = $('btnPagar'); b.disabled = true; b.textContent = 'Preparando el pago…';
+  try{
+    const d = await api('/pedidos', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cliente, items:CARRITO.map(it => ({productoId:it.id, cantidad:it.cantidad}))})});
+    CARRITO = []; guardarCarrito();
+    location.href = d.linkPago;
+  }catch(x){
+    err.textContent = x.message; err.classList.remove('oculto');
+    if (x.datos && x.datos.faltan) { x.datos.faltan.forEach(f => { const it = CARRITO.find(c => c.id === f.productoId); if (it) it.max = f.disponible; }); guardarCarrito(); }
+    b.disabled = false; b.textContent = 'Pagar con Mercado Pago';
+  }
+  return false;
+}
+
+// ---- estado del pedido
+let timer = null;
+async function vistaPedido(id, token){
+  if (timer) { clearInterval(timer); timer = null; }
+  document.querySelector('nav.rubros').classList.add('oculto'); $('subWrap').classList.add('oculto');
+  const pintar = p => {
+    const lista = `<div class="panel" style="margin-top:16px">${p.items.map(i => `<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0"><span>${esc(i.nombre)} <span class="muted">× ${num(i.cantidad)}</span></span><b>${money(i.subtotal)}</b></div>`).join('')}<div class="total" style="border-top:1px solid var(--ceniza);margin-top:6px"><span>Total</span><span>${money(p.total)}</span></div></div>`;
+    const retiro = p.retiro ? `<div class="nota"><b>Retiro en sucursal</b>${p.retiro.direccion?'<br>'+esc(p.retiro.direccion):''}${p.retiro.mensaje?'<br>'+esc(p.retiro.mensaje):''}${p.retiro.whatsapp?`<br><a href="https://wa.me/${encodeURIComponent(p.retiro.whatsapp.replace('+',''))}" target="_blank" rel="noopener">Escribinos por WhatsApp</a>`:''}</div>` : '';
+    let cab;
+    if (p.estado === 'pagado') cab = `<span class="estado ok">Pago confirmado</span><h1>¡Gracias, ${esc(p.cliente.nombre.split(' ')[0])}! Recibimos tu pedido</h1><p>Pedido <b>#${p.numero}</b>. Te vamos a avisar cuando esté listo para retirar. Guardá esta página: es el seguimiento de tu pedido.</p>`;
+    else if (p.estado === 'pendiente_pago') cab = `<span class="estado poco">Esperando el pago</span><h1>Todavía no vemos tu pago</h1><p>Pedido <b>#${p.numero}</b>. Si ya pagaste, esperá unos segundos: esta página se actualiza sola. Si no llegaste a pagar, podés hacerlo ahora.</p>${p.linkPago?`<p style="margin-top:12px"><a class="btn" href="${esc(p.linkPago)}">Pagar con Mercado Pago</a></p>`:''}`;
+    else if (p.estado === 'procesando') cab = `<span class="estado poco">Procesando</span><h1>Estamos registrando tu pedido</h1><p>Pedido <b>#${p.numero}</b>. Un momento…</p>`;
+    else cab = `<span class="estado poco">En revisión</span><h1>Tu pago está acreditado, estamos revisando el pedido</h1><p>Pedido <b>#${p.numero}</b>. Nos vamos a comunicar con vos para confirmar los detalles.</p>`;
+    $('vista').innerHTML = `<div class="resultado">${cab}${lista}${retiro}<p style="margin-top:16px"><a href="#/" class="muted">Seguir mirando productos</a></p></div>`;
+  };
+  const consultar = async () => {
+    try{ const p = await api(`/pedidos/${id}?t=${encodeURIComponent(token)}`); pintar(p); if (!['pendiente_pago','procesando'].includes(p.estado) && timer) { clearInterval(timer); timer = null; } }
+    catch(e){ $('vista').innerHTML = `<div class="vacio"><h2>No encontramos ese pedido</h2><p class="muted">${esc(e.message)}</p></div>`; if (timer) { clearInterval(timer); timer = null; } }
+  };
+  await consultar();
+  timer = setInterval(() => { if (!location.hash.startsWith('#/pedido/')) { clearInterval(timer); timer = null; return; } consultar(); }, 5000);
+}
+iniciar();
+</script>
+</body>
+</html>
