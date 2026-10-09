@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/prov-import.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -453,6 +454,7 @@ function abrirEditarProveedor(id){
           <button data-tab="cuenta-corriente" onclick="mostrarTabProveedor('cuenta-corriente', '${id}')">Cuenta corriente</button>
           <button data-tab="productos" onclick="mostrarTabProveedor('productos', '${id}')">Productos comprados</button>
           <button data-tab="ordenes" onclick="mostrarTabProveedor('ordenes', '${id}')">Órdenes de compra</button>
+          <button data-tab="importar" onclick="mostrarTabProveedor('importar', '${id}')">Listas de precios</button>
         </div>
         <div id="tabProveedorDatos">
           ${formularioProveedor(p)}
@@ -464,6 +466,7 @@ function abrirEditarProveedor(id){
         </div>
         <div id="tabProveedorProductos" class="hidden"><div id="pprodContenido" class="muted">Cargando...</div></div>
         <div id="tabProveedorOrdenes" class="hidden"><div id="pordContenido" class="muted">Cargando...</div></div>
+        <div id="tabProveedorImportar" class="hidden"><div id="pimpContenido" class="muted">Cargando...</div></div>
       </div>
     </div>
   `;
@@ -475,9 +478,11 @@ function mostrarTabProveedor(tab, proveedorId){
   document.getElementById('tabProveedorCuentaCorriente').classList.toggle('hidden', tab !== 'cuenta-corriente');
   document.getElementById('tabProveedorProductos').classList.toggle('hidden', tab !== 'productos');
   document.getElementById('tabProveedorOrdenes').classList.toggle('hidden', tab !== 'ordenes');
+  document.getElementById('tabProveedorImportar').classList.toggle('hidden', tab !== 'importar');
   if (tab === 'cuenta-corriente') cargarCuentaCorrienteProveedorTab(proveedorId);
   if (tab === 'productos') cargarProductosProveedorTab(proveedorId);
   if (tab === 'ordenes') cargarOrdenesProveedorTab(proveedorId);
+  if (tab === 'importar') cargarImportarListaTab(proveedorId);
 }
 
 function moneyMonProv(n, mon){ return (mon && mon !== 'ARS' ? mon + ' ' : '') + money(n); }

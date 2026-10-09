@@ -56,6 +56,8 @@ app.use('/api/clientes', clientesRouter);
 
 const proveedoresRouter = require('./proveedores');
 app.use('/api/proveedores', proveedoresRouter);
+// Importar listas de precios de proveedores (regla por proveedor: descuentos, márgenes, moneda, stock).
+app.use('/api/proveedores-import', require('./proveedoresImport'));
 
 const stockRouter = require('./stock');
 app.use('/api/stock', stockRouter);
