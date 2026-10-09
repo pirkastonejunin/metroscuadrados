@@ -1512,6 +1512,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta ya está anulada.');
+      if (venta.importado) throw err(400, 'Es una venta histórica importada de Dux: no se puede anular desde acá.');
       // Un comprobante con CAE existe para ARCA: no se borra, se compensa (5/10/2026).
       if (venta.cae) throw err(400, `Este comprobante ya fue autorizado por ARCA (CAE ${venta.cae}) y no se puede anular: hacé una Nota de Crédito.`);
       if (venta.fiscalEstado === 'autorizando') throw err(409, 'Se está autorizando en ARCA en este momento. Esperá unos segundos.');
@@ -1631,6 +1632,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada, no se le pueden registrar cobros.');
+      if (venta.importado) throw err(400, 'Es una venta histórica importada de Dux: no admite cobros nuevos.');
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;

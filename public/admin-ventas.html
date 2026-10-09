@@ -175,6 +175,7 @@
         </div>
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'ventas.xlsx')">Exportar</button>
+          <button class="btn secondary" onclick="abrirImportarDux()">Importar historial Dux</button>
           <button class="btn" onclick="abrirNuevaVenta()">+ Nueva venta</button>
         </div>
       </div>
@@ -487,7 +488,7 @@ async function cargarVentas(){
   if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
   body.innerHTML = ventasCache.map(v => `
     <tr>
-      <td><strong>${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')}</strong>${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>
+      <td><strong>${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')}</strong>${v.importado ? ' <span class="muted" style="font-size:11px" title="Venta histórica importada de Dux">Dux</span>' : ''}${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>
       <td class="muted">${fechaCorta(v.fecha)}</td>
       <td>${escapeHtml(v.clienteNombre)}</td>
       <td>${money(v.total)}</td>
@@ -1408,7 +1409,7 @@ function verDetalle(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Venta ${v.letra || prefijoComprobante(v.tipoComprobante)}-${String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
+        <h2>Venta ${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''} — ${TIPO_COMPROBANTE_LABEL[v.tipoComprobante] || 'Comprobante X'}
         </p>
@@ -1984,6 +1985,70 @@ async function mpIniciar(id, tipo){
   }catch(e){
     err.textContent = e.message; document.getElementById('mpGo').disabled = false;
   }
+}
+
+// ---------------------------------------------------------------------
+// Importar historial de ventas de Dux (9/10/2026): Excel "consulta_ventas". Primero una vista previa, después se aplica.
+// ---------------------------------------------------------------------
+let impDuxBase64 = null;
+function abrirImportarDux(){
+  impDuxBase64 = null;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar historial de Dux</h2>
+        <p class="muted">Subí el listado de ventas que exporta Dux (consulta_ventas, .xls o .xlsx). Se cargan como historial: sin detalle de artículos, sin mover stock y sin tocar la cuenta corriente. Si lo subís dos veces, no duplica.</p>
+        <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()">
+        <div class="err" id="impDuxErr"></div>
+        <div id="impDuxResumen"></div>
+        <button class="btn" id="impDuxBtn" style="margin-top:10px;display:none" onclick="aplicarImportDux()">Importar</button>
+      </div>
+    </div>`;
+}
+function leerArchivoBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+async function previewImportDux(){
+  const file = document.getElementById('impDuxArchivo').files[0];
+  const errEl = document.getElementById('impDuxErr'); errEl.textContent = '';
+  document.getElementById('impDuxResumen').innerHTML = ''; document.getElementById('impDuxBtn').style.display = 'none';
+  if (!file) return;
+  document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    impDuxBase64 = await leerArchivoBase64(file);
+    const r = await fetch('/api/ventas-import-dux/preview', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxBase64})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+    document.getElementById('impDuxResumen').innerHTML = `
+      <ul style="line-height:1.7;padding-left:18px">
+        <li><b>${d.aImportar}</b> ventas para importar de ${d.filasLeidas} leídas (${d.yaImportadas} ya estaban cargadas)</li>
+        <li>Período: ${f(d.desde)} a ${f(d.hasta)} — Total: <b>$${Number(d.totalImporte).toLocaleString('es-AR')}</b></li>
+        <li>Clientes: ${d.clientesExistentes} ya existen, <b>${d.clientesNuevos}</b> se van a crear${d.clientesAmbiguos ? `, ${d.clientesAmbiguos} coinciden con más de uno (quedan sin vincular)` : ''}</li>
+        ${d.sinNumeroCompleto ? `<li>${d.sinNumeroCompleto} comprobantes vienen sin número completo desde Dux</li>` : ''}
+      </ul>
+      ${d.errores.length ? `<p class="err">${d.errores.length} fila(s) con error (se saltean):</p><ul class="muted">${d.errores.slice(0,10).map(e => `<li>Fila ${e.fila}: ${escapeHtml(e.motivo)}</li>`).join('')}</ul>` : ''}`;
+    if (d.aImportar > 0) document.getElementById('impDuxBtn').style.display = '';
+  }catch(e){ errEl.textContent = e.message; document.getElementById('impDuxResumen').innerHTML = ''; }
+}
+async function aplicarImportDux(){
+  const btn = document.getElementById('impDuxBtn'); const errEl = document.getElementById('impDuxErr');
+  if (btn.disabled || !impDuxBase64) return;
+  btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/ventas-import-dux/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxBase64})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} ventas importadas${d.clientesCreados ? ` y ${d.clientesCreados} clientes creados` : ''}.</p>`;
+    btn.style.display = 'none';
+    if (typeof cargarVentas === 'function') cargarVentas();
+  }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
 }
 </script>
 </body>
