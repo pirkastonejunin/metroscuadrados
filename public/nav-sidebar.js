@@ -301,6 +301,27 @@
     });
   }
 
+  // Aviso de espacio de la base: solo Administrador, solo si pasó el 80 %, y se puede cerrar (vuelve a aparecer al día siguiente).
+  function avisarEspacioDb(me) {
+    try {
+      if (!(me && me.rol && me.rol.protegido)) return;
+      const hoy = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem('pn_aviso_espacio') === hoy) return;
+      const token = localStorage.getItem('obras_admin_token') || '';
+      if (!token) return;
+      fetch('/api/espacio-db', { headers: { 'x-admin-token': token } }).then(r => r.ok ? r.json() : null).then(function (d) {
+        if (!d || d.nivel === 'ok') return;
+        const critico = d.nivel === 'critico';
+        const el = document.createElement('div');
+        el.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:9999;max-width:340px;padding:12px 14px;border-radius:10px;font:600 13px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2);color:#fff;background:' + (critico ? '#b42318' : '#b45309');
+        el.innerHTML = (critico ? '⚠️ Base de datos casi llena: ' : 'Base de datos al ' + d.porcentaje + ' %: ') + d.usadoMB + ' de ' + d.limiteMB + ' MB (' + d.porcentaje + ' %). ' +
+          (critico ? 'Si se llena, el sistema deja de guardar ventas y cobros. ' : '') + 'Liberá espacio o pasá a un plan pago. <span style="text-decoration:underline;cursor:pointer;margin-left:6px">Cerrar</span>';
+        el.querySelector('span').onclick = function () { localStorage.setItem('pn_aviso_espacio', hoy); el.remove(); };
+        document.body.appendChild(el);
+      }).catch(function () {});
+    } catch (e) { /* aviso accesorio: nunca debe romper el menú */ }
+  }
+
   function render(me, paginaActual, opts) {
     opts = opts || {};
     inyectarEstilos();
@@ -399,6 +420,7 @@
     const btnSidebarLogout = document.getElementById('pnSidebarLogout');
     if (btnSidebarLogout) btnSidebarLogout.addEventListener('click', cerrarSesionPN);
     montarMenuUsuario(me, paginaActual, nombreUsuario);
+    avisarEspacioDb(me);
 
     function cerrarSidebarMovil() {
       document.body.classList.remove('pn-sidebar-abierta');

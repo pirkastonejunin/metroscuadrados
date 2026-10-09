@@ -65,6 +65,7 @@ app.use('/api/stock', stockRouter);
 const ventasRouter = require('./ventas');
 app.use('/api/ventas-import-dux', require('./ventasImportDux'));
 app.use('/api/reinicio-datos', require('./reinicioDatos'));
+app.use('/api/espacio-db', require('./espacioDb'));
 app.use('/api/ventas', ventasRouter);
 const presupuestosRouter = require('./presupuestos');
 app.use('/api/presupuestos', presupuestosRouter);
