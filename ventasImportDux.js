@@ -111,92 +111,129 @@ function claveImport(v) {
   return 'dux:s/n:' + v.prefijo + ':' + v.fecha.toISOString().slice(0, 10) + ':' + norm(v.cliente) + ':' + v.total.toFixed(2) + ':' + v.fila;
 }
 
+
+// --- Sucursales = organizaciones del sistema (cada una con sus propios clientes, ventas y stock) ---
+const ESTADO_POR_REMITO = { 'CON REMITO': 'entregada', 'PENDIENTE': 'pendiente', 'REMITO PARCIAL': 'parcialmente_entregada' };
+function estadoDeRemito(txt) { return ESTADO_POR_REMITO[String(txt || '').trim().toUpperCase()] || 'entregada'; }
+
+async function orgsAccesibles(db, req) {
+  const { ObjectId } = require('mongodb');
+  if (req.usuario && req.usuario.rol && req.usuario.rol.protegido) return (await db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray());
+  const ids = ((req.usuario && req.usuario.orgIds) || [req.orgId]).map(x => { try { return new ObjectId(String(x)); } catch (e) { return null; } }).filter(Boolean);
+  return db.collection('organizaciones').find({ _id: { $in: ids } }).project({ nombre: 1 }).toArray();
+}
+function sugerirOrg(nombreSucursal, orgs) {
+  const n = norm(nombreSucursal); if (!n) return null;
+  const ex = orgs.find(o => norm(o.nombre) === n) || orgs.find(o => norm(o.nombre).includes(n) || n.includes(norm(o.nombre)));
+  return ex ? String(ex._id) : null;
+}
+
+// Resuelve clientes por organización (cada sucursal tiene los suyos). Reutiliza el que coincide por nombre (único);
+// si no existe, lo crea marcado 'Importado Dux'.
+function crearResolverClientes(db, ahora) {
+  const { ObjectId } = require('mongodb');
+  const porOrg = new Map();
+  async function cargar(orgId) {
+    const k = String(orgId);
+    if (porOrg.has(k)) return porOrg.get(k);
+    const clientes = await db.collection('clientes').find({ orgId, activo: { $ne: false } }).project({ apellidoRazonSocial: 1, nombre: 1, nombreFantasia: 1 }).toArray();
+    const mapa = new Map();
+    const agregar = (kk, id) => { if (!kk) return; if (!mapa.has(kk)) mapa.set(kk, new Set()); mapa.get(kk).add(String(id)); };
+    clientes.forEach(cl => [cl.apellidoRazonSocial, cl.nombreFantasia, [cl.nombre, cl.apellidoRazonSocial].filter(Boolean).join(' '), [cl.apellidoRazonSocial, cl.nombre].filter(Boolean).join(' ')].forEach(n => clavesNombre(n).forEach(c => agregar(c, cl._id))));
+    const o = { mapa, memo: new Map(), nuevos: new Set(), ambiguos: 0, existentes: 0 };
+    porOrg.set(k, o); return o;
+  }
+  return {
+    // Devuelve 'NUEVO' | null (ambiguo) | id. Solo clasifica; no crea.
+    async clasificar(orgId, nombre) {
+      const o = await cargar(orgId);
+      if (o.memo.has(nombre)) return o.memo.get(nombre);
+      const cand = new Set(); clavesNombre(nombre).forEach(c => (o.mapa.get(c) || new Set()).forEach(id => cand.add(id)));
+      let r; if (cand.size === 1) { r = [...cand][0]; o.existentes++; } else if (cand.size > 1) { r = null; o.ambiguos++; } else { r = 'NUEVO'; o.nuevos.add(nombre); }
+      o.memo.set(nombre, r); return r;
+    },
+    async crearNuevos() {
+      let creados = 0;
+      for (const [k, o] of porOrg) {
+        if (!o.nuevos.size) continue;
+        const nombres = [...o.nuevos];
+        const docs = nombres.map(n => ({ apellidoRazonSocial: n, categoriaFiscal: 'consumidor_final', origenCliente: 'Importado Dux', activo: true, orgId: new ObjectId(k), createdAt: ahora, updatedAt: ahora }));
+        const r = await db.collection('clientes').insertMany(docs, { ordered: false });
+        nombres.forEach((n, i) => o.memo.set(n, String(r.insertedIds[i])));
+        creados += docs.length;
+      }
+      return creados;
+    },
+    id(orgId, nombre) { const o = porOrg.get(String(orgId)); const v = o && o.memo.get(nombre); return v && v !== 'NUEVO' ? new ObjectId(v) : null; },
+    totales() { let n = 0, e = 0, a = 0; porOrg.forEach(o => { n += o.nuevos.size; e += o.existentes; a += o.ambiguos; }); return { nuevos: n, existentes: e, ambiguos: a }; }
+  };
+}
+
 async function procesar(req, aplicar) {
-  if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
+  if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
   const { ventas, errores } = leerArchivo(req.body && req.body.archivoBase64);
   if (!ventas.length) throw err(400, 'El archivo no tiene ventas para importar.');
   return conReintento(async () => {
-    const db = await getDb();
-    const orgId = req.orgId;
+    const db = await getDb(); const orgId = req.orgId; const { ObjectId } = require('mongodb');
+    const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    if (!orgIds.some(x => String(x) === String(orgId))) orgIds.push(orgId);
+    const ahora = new Date();
 
-    // Ya importadas
+    // Ya cargadas (en cualquier sucursal): solo se actualiza su estado de entrega y lo cobrado.
     const claves = ventas.map(claveImport);
-    const existentes = new Set((await db.collection('ventas').find({ orgId, claveImport: { $in: claves } }).project({ claveImport: 1 }).toArray()).map(x => x.claveImport));
-
-    // Clientes
-    const clientes = await db.collection('clientes').find({ orgId, activo: { $ne: false } })
-      .project({ apellidoRazonSocial: 1, nombre: 1, nombreFantasia: 1 }).toArray();
-    const mapa = new Map(); // clave -> Set(_id)
-    const agregar = (k, id) => { if (!k) return; if (!mapa.has(k)) mapa.set(k, new Set()); mapa.get(k).add(String(id)); };
-    clientes.forEach(cl => {
-      [cl.apellidoRazonSocial, cl.nombreFantasia, [cl.nombre, cl.apellidoRazonSocial].filter(Boolean).join(' '), [cl.apellidoRazonSocial, cl.nombre].filter(Boolean).join(' ')]
-        .forEach(n => clavesNombre(n).forEach(k => agregar(k, cl._id)));
-    });
-    const idPorNombre = new Map(); // nombre Dux -> _id | null (ambiguo) | 'NUEVO'
-    const nombresNuevos = new Set(); let ambiguos = 0, coinciden = 0;
-    [...new Set(ventas.map(v => v.cliente))].forEach(nombre => {
-      const cand = new Set();
-      clavesNombre(nombre).forEach(k => (mapa.get(k) || new Set()).forEach(id => cand.add(id)));
-      if (cand.size === 1) { idPorNombre.set(nombre, [...cand][0]); coinciden++; }
-      else if (cand.size > 1) { idPorNombre.set(nombre, null); ambiguos++; }
-      else { idPorNombre.set(nombre, 'NUEVO'); nombresNuevos.add(nombre); }
-    });
-
+    const existentes = new Map((await db.collection('ventas').find({ orgId: { $in: orgIds }, claveImport: { $in: claves } }).project({ claveImport: 1, orgId: 1 }).toArray()).map(x => [x.claveImport, x]));
     const nuevas = ventas.filter(v => !existentes.has(claveImport(v)));
+
+    const resolver = crearResolverClientes(db, ahora);
+    for (const v of nuevas) await resolver.clasificar(orgId, v.cliente);
+    const t = resolver.totales();
+    const porEstado = {}; ventas.forEach(v => { const e = estadoDeRemito(v.estadoRemitoDux); porEstado[e] = (porEstado[e] || 0) + 1; });
     const resumen = {
       filasLeidas: ventas.length, aImportar: nuevas.length, yaImportadas: ventas.length - nuevas.length,
       desde: ventas.reduce((a, v) => (!a || v.fecha < a ? v.fecha : a), null), hasta: ventas.reduce((a, v) => (!a || v.fecha > a ? v.fecha : a), null),
       totalImporte: round2(nuevas.reduce((s, v) => s + v.total, 0)),
       sinNumeroCompleto: nuevas.filter(v => !v.completo).length,
-      clientesExistentes: coinciden, clientesNuevos: nombresNuevos.size, clientesAmbiguos: ambiguos,
-      errores
+      clientesExistentes: t.existentes, clientesNuevos: t.nuevos, clientesAmbiguos: t.ambiguos,
+      estados: porEstado, sucursalDestino: (orgs.find(o => String(o._id) === String(orgId)) || {}).nombre || '', errores
     };
     if (!aplicar) return resumen;
 
-    const ahora = new Date();
     const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
-    // Crear clientes nuevos
-    let clientesCreados = 0;
-    if (nombresNuevos.size) {
-      const docs = [...nombresNuevos].map(n => ({ apellidoRazonSocial: n, categoriaFiscal: 'consumidor_final', origenCliente: 'Importado Dux', activo: true, orgId, createdAt: ahora, updatedAt: ahora }));
-      const r = await db.collection('clientes').insertMany(docs, { ordered: false });
-      [...nombresNuevos].forEach((n, i) => idPorNombre.set(n, String(r.insertedIds[i])));
-      clientesCreados = docs.length;
-    }
-    const { ObjectId } = require('mongodb');
+    const clientesCreados = await resolver.crearNuevos();
     const docs = nuevas.map(v => {
-      const cid = idPorNombre.get(v.cliente);
-      const esCX = v.prefijo === 'CX';
+      const esCX = v.prefijo === 'CX'; const estado = estadoDeRemito(v.estadoRemitoDux);
       return {
-        numero: v.nro || 0,
-        numeroOriginal: v.completo ? v.comprobante : (v.comprobante || v.prefijo) + ' (s/n)',
+        numero: v.nro || 0, numeroOriginal: v.completo ? v.comprobante : (v.comprobante || v.prefijo) + ' (s/n)',
         importado: true, origen: 'dux', claveImport: claveImport(v),
-        tipoComprobante: esCX ? 'comprobante_x' : 'fiscal',
-        letra: esCX ? null : v.prefijo.slice(1),
-        esFiscal: false, // ya se autorizó en Dux: no entra a ARCA ni a los libros fiscales de acá
-        clienteId: cid ? new ObjectId(cid) : null,
-        clienteNombre: v.cliente,
-        vendedor: v.vendedor,
-        fecha: v.fecha, moneda: 'ARS', listaPrecioId: null, cotizacionDolar: null,
-        tipoEntrega: null, depositoId: null, stockComprometido: false,
-        estado: 'entregada', estadoRemitoDux: v.estadoRemitoDux,
-        items: [{ productoId: null, sku: null, nombre: 'Venta histórica Dux (sin detalle)', cantidad: 1, precioUnitario: v.total, subtotal: v.total, cantidadEntregada: 1 }],
-        descuentoPorcentaje: 0, descuentoMonto: 0, subtotal: v.total, total: v.total,
-        fiscal: null, fiscalEstado: null, fiscalMensaje: null,
+        tipoComprobante: esCX ? 'comprobante_x' : 'fiscal', letra: esCX ? null : v.prefijo.slice(1), esFiscal: false,
+        clienteId: resolver.id(orgId, v.cliente), clienteNombre: v.cliente, vendedor: v.vendedor,
+        fecha: v.fecha, moneda: 'ARS', listaPrecioId: null, cotizacionDolar: null, tipoEntrega: null, depositoId: null, stockComprometido: false,
+        estado, estadoRemitoDux: v.estadoRemitoDux,
+        items: [{ productoId: null, sku: null, nombre: 'Venta histórica Dux (sin detalle)', cantidad: 1, precioUnitario: v.total, subtotal: v.total, cantidadEntregada: estado === 'entregada' ? 1 : 0 }],
+        descuentoPorcentaje: 0, descuentoMonto: 0, subtotal: v.total, total: v.total, fiscal: null, fiscalEstado: null, fiscalMensaje: null,
         pagos: [], totalCobrado: Math.min(v.cobrado, v.total), saldoPendiente: 0, duxCobrado: v.cobrado, duxSaldo: round2(Math.max(v.total - v.cobrado, 0)),
-        observaciones: v.observaciones, stockDescontado: false, stockDescontadoEn: null,
-        remitoId: null, remitoNumero: null, remitosIds: [], entregadaEn: v.fecha,
-        anuladaEn: null, anuladaPor: null, anuladaMotivo: null,
+        observaciones: v.observaciones, stockDescontado: false, stockDescontadoEn: null, remitoId: null, remitoNumero: null, remitosIds: [],
+        entregadaEn: estado === 'entregada' ? v.fecha : null, anuladaEn: null, anuladaPor: null, anuladaMotivo: null,
         usuarioNombre, orgId, createdAt: ahora, updatedAt: ahora
       };
     });
     let insertadas = 0;
-    for (let i = 0; i < docs.length; i += 500) {
-      const lote = docs.slice(i, i + 500);
-      await db.collection('ventas').insertMany(lote, { ordered: false });
-      insertadas += lote.length;
-    }
-    return Object.assign(resumen, { insertadas, clientesCreados });
+    for (let i = 0; i < docs.length; i += 500) { const lote = docs.slice(i, i + 500); await db.collection('ventas').insertMany(lote, { ordered: false }); insertadas += lote.length; }
+
+    // Las que ya estaban: se alinea el estado de entrega con Dux (sin tocar la sucursal ni los artículos).
+    let actualizadas = 0;
+    const ops = [];
+    ventas.forEach(v => {
+      const ex = existentes.get(claveImport(v)); if (!ex) return;
+      const estado = estadoDeRemito(v.estadoRemitoDux);
+      ops.push({ updateOne: { filter: { _id: ex._id }, update: [{ $set: {
+        estado, estadoRemitoDux: v.estadoRemitoDux, entregadaEn: estado === 'entregada' ? v.fecha : null,
+        totalCobrado: Math.min(v.cobrado, v.total), duxCobrado: v.cobrado, duxSaldo: round2(Math.max(v.total - v.cobrado, 0)), updatedAt: ahora,
+        items: { $map: { input: '$items', as: 'it', in: { $mergeObjects: ['$$it', { cantidadEntregada: estado === 'entregada' ? '$$it.cantidad' : 0 }] } } }
+      } }] } });
+    });
+    for (let i = 0; i < ops.length; i += 500) { const r = await db.collection('ventas').bulkWrite(ops.slice(i, i + 500), { ordered: false }); actualizadas += r.modifiedCount; }
+    return Object.assign(resumen, { insertadas, clientesCreados, actualizadas });
   });
 }
 
@@ -273,92 +310,108 @@ function tipoDeComprobante(comp) {
   return { pref, base, letra: letra === 'X' ? null : letra, nro: m ? Number(m[3]) : 0, completo: !!m };
 }
 
+
 async function procesarDetalle(req, aplicar) {
-  if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de importar.');
+  if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
   const { grupos, errores } = leerDetalle(req.body && req.body.archivoBase64);
   if (!grupos.length) throw err(400, 'El archivo no tiene ventas.');
   return conReintento(async () => {
-    const db = await getDb(); const orgId = req.orgId; const { ObjectId } = require('mongodb');
+    const db = await getDb(); const activa = req.orgId; const { ObjectId } = require('mongodb');
+    const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    if (!orgIds.some(x => String(x) === String(activa))) orgIds.push(activa);
+    const ahora = new Date();
 
-    // Catálogo para vincular artículos (por SKU / código externo)
+    // Sucursal de Dux → organización del sistema. Viene del front (mapaSucursales); lo que no se mapea cae en la activa.
+    const mapaIn = (req.body && req.body.mapaSucursales) || {};
+    const sucursales = [...new Set(grupos.map(g => g.sucursal))];
+    const destinoDe = (suc) => {
+      const elegido = mapaIn[suc];
+      if (elegido && orgIds.some(x => String(x) === String(elegido))) return new ObjectId(String(elegido));
+      return activa;
+    };
+    const nombreOrg = (id) => (orgs.find(o => String(o._id) === String(id)) || {}).nombre || String(id);
+
+    // Catálogo por organización destino
     const codigos = [...new Set(grupos.flatMap(g => g.items.map(i => i.codigo)).filter(Boolean))];
-    const prods = codigos.length ? await db.collection('productos_catalogo').find({ orgId, $or: [{ sku: { $in: codigos } }, { codigoExterno: { $in: codigos } }] }).project({ sku: 1, codigoExterno: 1, nombre: 1 }).toArray() : [];
-    const porCodigo = new Map();
-    prods.forEach(p => { [p.sku, p.codigoExterno].filter(Boolean).forEach(cd => { if (!porCodigo.has(cd)) porCodigo.set(cd, p); }); });
+    const catalogoPorOrg = new Map();
+    for (const oid of new Set(sucursales.map(s => String(destinoDe(s))))) {
+      const prods = codigos.length ? await db.collection('productos_catalogo').find({ orgId: new ObjectId(oid), $or: [{ sku: { $in: codigos } }, { codigoExterno: { $in: codigos } }] }).project({ sku: 1, codigoExterno: 1, nombre: 1 }).toArray() : [];
+      const m = new Map(); prods.forEach(p => [p.sku, p.codigoExterno].filter(Boolean).forEach(cd => { if (!m.has(cd)) m.set(cd, p); }));
+      catalogoPorOrg.set(oid, m);
+    }
+    const existentes = new Map((await db.collection('ventas').find({ orgId: { $in: orgIds }, claveImport: { $in: grupos.map(g => 'dux:' + g.comprobante) } }).project({ claveImport: 1, total: 1, orgId: 1 }).toArray()).map(v => [v.claveImport, v]));
 
-    // Ventas ya importadas
-    const claves = grupos.map(g => 'dux:' + g.comprobante);
-    const existentes = new Map((await db.collection('ventas').find({ orgId, claveImport: { $in: claves } }).project({ claveImport: 1, total: 1 }).toArray()).map(v => [v.claveImport, v]));
-
-    // Clientes para las que hay que crear
-    const clientes = await db.collection('clientes').find({ orgId, activo: { $ne: false } }).project({ apellidoRazonSocial: 1, nombre: 1, nombreFantasia: 1 }).toArray();
-    const mapa = new Map();
-    const agregar = (k, id) => { if (!k) return; if (!mapa.has(k)) mapa.set(k, new Set()); mapa.get(k).add(String(id)); };
-    clientes.forEach(cl => [cl.apellidoRazonSocial, cl.nombreFantasia, [cl.nombre, cl.apellidoRazonSocial].filter(Boolean).join(' '), [cl.apellidoRazonSocial, cl.nombre].filter(Boolean).join(' ')].forEach(n => clavesNombre(n).forEach(k => agregar(k, cl._id))));
+    const resolver = crearResolverClientes(db, ahora);
+    let aMover = 0;
+    for (const g of grupos) {
+      const dest = destinoDe(g.sucursal); const ex = existentes.get('dux:' + g.comprobante);
+      if (ex && String(ex.orgId) !== String(dest)) aMover++;
+      if (!ex || String(ex.orgId) !== String(dest)) await resolver.clasificar(dest, g.cliente);
+    }
+    let itemsVinculados = 0, itemsTotal = 0; const sinMatch = new Set();
+    grupos.forEach(g => { const cat = catalogoPorOrg.get(String(destinoDe(g.sucursal))); g.items.forEach(i => { itemsTotal++; if (cat.has(i.codigo)) itemsVinculados++; else sinMatch.add(i.codigo); }); });
+    const diferencias = grupos.filter(g => { const e = existentes.get('dux:' + g.comprobante); return e && Math.abs(e.total - Math.abs(g.total)) > 1; });
     const nuevasVentas = grupos.filter(g => !existentes.has('dux:' + g.comprobante));
-    const idPorNombre = new Map(); const nombresNuevos = new Set();
-    [...new Set(nuevasVentas.map(g => g.cliente))].forEach(n => {
-      const cand = new Set(); clavesNombre(n).forEach(k => (mapa.get(k) || new Set()).forEach(id => cand.add(id)));
-      if (cand.size === 1) idPorNombre.set(n, [...cand][0]); else if (cand.size > 1) idPorNombre.set(n, null); else { idPorNombre.set(n, 'NUEVO'); nombresNuevos.add(n); }
-    });
-
-    const sinMatch = new Set();
-    let itemsVinculados = 0, itemsTotal = 0;
-    grupos.forEach(g => g.items.forEach(i => { itemsTotal++; if (porCodigo.has(i.codigo)) itemsVinculados++; else sinMatch.add(i.codigo); }));
-    const diferencias = grupos.filter(g => existentes.has('dux:' + g.comprobante) && Math.abs(existentes.get('dux:' + g.comprobante).total - Math.abs(g.total)) > 1)
-      .map(g => ({ comprobante: g.comprobante, listado: existentes.get('dux:' + g.comprobante).total, detalle: Math.abs(g.total) }));
+    const porSucursal = sucursales.map(s => ({ sucursal: s, comprobantes: grupos.filter(g => g.sucursal === s).length, sugerida: sugerirOrg(s, orgs), destino: String(destinoDe(s)), destinoNombre: nombreOrg(destinoDe(s)) }));
+    const t = resolver.totales();
     const resumen = {
-      comprobantes: grupos.length, renglones: itemsTotal, conVentaExistente: grupos.length - nuevasVentas.length, aCrear: nuevasVentas.length,
+      comprobantes: grupos.length, renglones: itemsTotal, conVentaExistente: grupos.length - nuevasVentas.length, aCrear: nuevasVentas.length, aMover,
       notas: grupos.filter(g => /^N[CD]/.test(g.comprobante)).length,
       desde: grupos.reduce((a, g) => (!a || g.fecha < a ? g.fecha : a), null), hasta: grupos.reduce((a, g) => (!a || g.fecha > a ? g.fecha : a), null),
       articulosVinculados: itemsVinculados, articulosSinCatalogo: sinMatch.size, ejemplosSinCatalogo: [...sinMatch].slice(0, 8),
-      clientesNuevos: nombresNuevos.size, diferencias: diferencias.length, ejemplosDiferencias: diferencias.slice(0, 5), errores
+      clientesNuevos: t.nuevos, diferencias: diferencias.length, ejemplosDiferencias: diferencias.slice(0, 5).map(g => ({ comprobante: g.comprobante })),
+      sucursales: porSucursal, organizaciones: orgs.map(o => ({ _id: String(o._id), nombre: o.nombre })), errores
     };
     if (!aplicar) return resumen;
 
-    const ahora = new Date(); const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
-    if (nombresNuevos.size) {
-      const docs = [...nombresNuevos].map(n => ({ apellidoRazonSocial: n, categoriaFiscal: 'consumidor_final', origenCliente: 'Importado Dux', activo: true, orgId, createdAt: ahora, updatedAt: ahora }));
-      const r = await db.collection('clientes').insertMany(docs, { ordered: false });
-      [...nombresNuevos].forEach((n, i) => idPorNombre.set(n, String(r.insertedIds[i])));
-    }
-    const armarItems = (g) => g.items.map(i => {
-      const p = porCodigo.get(i.codigo);
-      return { productoId: p ? p._id : null, sku: i.codigo || null, nombre: p ? p.nombre : i.nombre, nombreDux: i.nombre, rubro: i.rubro || null, marca: i.marca || null, proveedor: i.proveedor || null,
-        cantidad: i.cantidad, cantidadEntregada: i.cantidad, precioUnitario: i.precioUnitario, descuentoPorcentaje: i.descuentoPorcentaje, subtotal: i.subtotal,
-        porcentajeIva: i.porcentajeIva, iva: i.iva, totalConIva: i.totalConIva, costoUnitario: i.costoUnitario, costoTotal: i.costoTotal };
-    });
-    let actualizadas = 0, creadas = 0, convertidasSN = 0;
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    const clientesCreados = await resolver.crearNuevos();
+    let actualizadas = 0, creadas = 0, convertidasSN = 0, movidas = 0;
     for (const g of grupos) {
-      const clave = 'dux:' + g.comprobante; const items = armarItems(g);
-      const base = { items, sucursalDux: g.sucursal, formaPagoDux: g.formaPago, duxCobros: { efectivo: round2(g.cobros.efectivo), tarjeta: round2(g.cobros.tarjeta), cheque: round2(g.cobros.cheque), cuenta: round2(g.cobros.cuenta) }, updatedAt: ahora };
-      if (existentes.has(clave)) {
-        await db.collection('ventas').updateOne({ orgId, claveImport: clave }, { $set: Object.assign(base, { detalleDux: true }) });
+      const dest = destinoDe(g.sucursal); const cat = catalogoPorOrg.get(String(dest));
+      const clave = 'dux:' + g.comprobante;
+      const items = g.items.map(i => {
+        const p = cat.get(i.codigo);
+        return { productoId: p ? p._id : null, sku: i.codigo || null, nombre: p ? p.nombre : i.nombre, nombreDux: i.nombre, rubro: i.rubro || null, marca: i.marca || null, proveedor: i.proveedor || null,
+          cantidad: i.cantidad, precioUnitario: i.precioUnitario, descuentoPorcentaje: i.descuentoPorcentaje, subtotal: i.subtotal,
+          porcentajeIva: i.porcentajeIva, iva: i.iva, totalConIva: i.totalConIva, costoUnitario: i.costoUnitario, costoTotal: i.costoTotal };
+      });
+      const base = { sucursalDux: g.sucursal, formaPagoDux: g.formaPago, duxCobros: { efectivo: round2(g.cobros.efectivo), tarjeta: round2(g.cobros.tarjeta), cheque: round2(g.cobros.cheque), cuenta: round2(g.cobros.cuenta) }, detalleDux: true, updatedAt: ahora };
+      // cantidadEntregada de cada renglón según el estado de la venta (si ya se conoce el del listado)
+      const aplicarEntrega = (estado) => items.map(it => Object.assign({}, it, { cantidadEntregada: estado === 'entregada' ? it.cantidad : 0 }));
+      const ex = existentes.get(clave);
+      if (ex) {
+        const actual = await db.collection('ventas').findOne({ _id: ex._id }, { projection: { estado: 1 } });
+        const set = Object.assign({}, base, { items: aplicarEntrega((actual && actual.estado) || 'entregada') });
+        if (String(ex.orgId) !== String(dest)) {
+          set.orgId = dest; set.clienteId = resolver.id(dest, g.cliente); set.clienteNombre = g.cliente; movidas++;
+        }
+        await db.collection('ventas').updateOne({ _id: ex._id }, { $set: set });
         actualizadas++; continue;
       }
-      const t = tipoDeComprobante(g.comprobante); const total = Math.abs(g.total);
-      // ¿Es una venta del listado que Dux exportó sin número completo? Se completa en vez de duplicar.
+      const t2 = tipoDeComprobante(g.comprobante); const total = Math.abs(g.total);
       const dia0 = new Date(g.fecha.getTime() - 12 * 3600e3), dia1 = new Date(g.fecha.getTime() + 12 * 3600e3);
-      const sn = await db.collection('ventas').findOne({ orgId, importado: true, numeroOriginal: /\(s\/n\)$/, clienteNombre: g.cliente, fecha: { $gte: dia0, $lte: dia1 }, total: { $gte: total - 1, $lte: total + 1 } });
+      const sn = await db.collection('ventas').findOne({ orgId: { $in: orgIds }, importado: true, numeroOriginal: /\(s\/n\)$/, clienteNombre: g.cliente, fecha: { $gte: dia0, $lte: dia1 }, total: { $gte: total - 1, $lte: total + 1 } });
       if (sn) {
-        await db.collection('ventas').updateOne({ _id: sn._id }, { $set: Object.assign(base, { detalleDux: true, numeroOriginal: g.comprobante, claveImport: clave, numero: t.nro }) });
+        const set = Object.assign({}, base, { items: aplicarEntrega(sn.estado || 'entregada'), numeroOriginal: g.comprobante, claveImport: clave, numero: t2.nro });
+        if (String(sn.orgId) !== String(dest)) { set.orgId = dest; set.clienteId = resolver.id(dest, g.cliente); }
+        await db.collection('ventas').updateOne({ _id: sn._id }, { $set: set });
         convertidasSN++; continue;
       }
-      const cid = idPorNombre.get(g.cliente);
       await db.collection('ventas').insertOne(Object.assign({
-        numero: t.nro, numeroOriginal: t.completo ? g.comprobante : 'S/N (s/n)', importado: true, origen: 'dux', claveImport: clave, detalleDux: true,
-        tipoComprobante: t.base, letra: t.letra, esFiscal: false,
-        clienteId: cid ? new ObjectId(cid) : null, clienteNombre: g.cliente, vendedor: g.vendedor, fecha: g.fecha, moneda: 'ARS',
+        numero: t2.nro, numeroOriginal: t2.completo ? g.comprobante : 'S/N (s/n)', importado: true, origen: 'dux', claveImport: clave,
+        tipoComprobante: t2.base, letra: t2.letra, esFiscal: false,
+        clienteId: resolver.id(dest, g.cliente), clienteNombre: g.cliente, vendedor: g.vendedor, fecha: g.fecha, moneda: 'ARS',
         listaPrecioId: null, cotizacionDolar: null, tipoEntrega: null, depositoId: null, stockComprometido: false,
         estado: 'entregada', estadoRemitoDux: '', descuentoPorcentaje: 0, descuentoMonto: 0,
         subtotal: round2(items.reduce((a, i) => a + i.subtotal, 0)), total, fiscal: null, fiscalEstado: null, fiscalMensaje: null,
         pagos: [], totalCobrado: total, saldoPendiente: 0, duxCobrado: total, duxSaldo: 0, observaciones: g.observaciones,
         stockDescontado: false, stockDescontadoEn: null, remitoId: null, remitoNumero: null, remitosIds: [], entregadaEn: g.fecha,
-        anuladaEn: null, anuladaPor: null, anuladaMotivo: null, usuarioNombre, orgId, createdAt: ahora
-      }, base));
+        anuladaEn: null, anuladaPor: null, anuladaMotivo: null, usuarioNombre, orgId: dest, createdAt: ahora
+      }, base, { items: aplicarEntrega('entregada') }));
       creadas++;
     }
-    return Object.assign(resumen, { actualizadas, creadas, convertidasSN, clientesCreados: nombresNuevos.size });
+    return Object.assign(resumen, { actualizadas, creadas, convertidasSN, movidas, clientesCreados });
   });
 }
 router.post('/detalle/preview', authAdmin, async (req, res) => {

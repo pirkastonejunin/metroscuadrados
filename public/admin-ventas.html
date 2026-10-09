@@ -2036,8 +2036,10 @@ async function previewImportDux(){
     const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
     document.getElementById('impDuxResumen').innerHTML = `
       <ul style="line-height:1.7;padding-left:18px">
-        <li><b>${d.aImportar}</b> ventas para importar de ${d.filasLeidas} leídas (${d.yaImportadas} ya estaban cargadas)</li>
+        <li><b>${d.aImportar}</b> ventas para importar de ${d.filasLeidas} leídas (${d.yaImportadas} ya estaban cargadas y se actualizan)</li>
         <li>Período: ${f(d.desde)} a ${f(d.hasta)} — Total: <b>$${Number(d.totalImporte).toLocaleString('es-AR')}</b></li>
+        <li>Entrega según Dux: ${d.estados.entregada||0} entregadas, ${d.estados.pendiente||0} pendientes, ${d.estados.parcialmente_entregada||0} con remito parcial</li>
+        <li>Las ventas nuevas se cargan en la sucursal activa: <b>${escapeHtml(d.sucursalDestino || '-')}</b>. Las que ya estaban cargadas se actualizan (estado de entrega y cobrado) sin cambiar de sucursal. Si el listado mezcla sucursales, cargá primero el detalle (paso 2), que sí trae la sucursal de cada venta.</li>
         <li>Clientes: ${d.clientesExistentes} ya existen, <b>${d.clientesNuevos}</b> se van a crear${d.clientesAmbiguos ? `, ${d.clientesAmbiguos} coinciden con más de uno (quedan sin vincular)` : ''}</li>
         ${d.sinNumeroCompleto ? `<li>${d.sinNumeroCompleto} comprobantes vienen sin número completo desde Dux</li>` : ''}
       </ul>
@@ -2059,12 +2061,12 @@ async function aplicarImportDux(){
   }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
 }
 
-let impDetArchivos = [];
+let impDetArchivos = [], impDetOrgs = [], impDetSucursales = {};
 async function previewDetalleDux(){
   const files = [...document.getElementById('impDetArchivos').files];
   const errEl = document.getElementById('impDetErr'); errEl.textContent = '';
   const out = document.getElementById('impDetResumen'); out.innerHTML = ''; document.getElementById('impDetBtn').style.display = 'none';
-  impDetArchivos = [];
+  impDetArchivos = []; impDetSucursales = {};
   if (!files.length) return;
   out.innerHTML = '<p class="muted">Analizando…</p>';
   const filas = []; let hayAlgo = false;
@@ -2076,11 +2078,19 @@ async function previewDetalleDux(){
       if (!r.ok) throw new Error(d.error || 'Error');
       impDetArchivos.push({nombre: f.name, b64});
       hayAlgo = true;
+      impDetOrgs = d.organizaciones || impDetOrgs;
+      (d.sucursales || []).forEach(x => { if (!impDetSucursales[x.sucursal]) impDetSucursales[x.sucursal] = {comprobantes: 0, destino: x.sugerida || x.destino}; impDetSucursales[x.sucursal].comprobantes += x.comprobantes; });
       const fd = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
       filas.push(`<li><b>${escapeHtml(f.name)}</b>: ${d.comprobantes} comprobantes (${fd(d.desde)} a ${fd(d.hasta)}), ${d.renglones} renglones. ${d.aCrear} ventas nuevas (${d.notas} notas), ${d.articulosVinculados} artículos vinculados al catálogo y ${d.articulosSinCatalogo} códigos sin catálogo.${d.diferencias ? ` <span class="err">${d.diferencias} comprobantes con total distinto al listado.</span>` : ''}</li>`);
     }catch(e){ filas.push(`<li class="err"><b>${escapeHtml(f.name)}</b>: ${escapeHtml(e.message)}</li>`); }
   }
-  out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">${filas.join('')}</ul>`;
+  const orgs = impDetOrgs;
+  const filasSuc = Object.keys(impDetSucursales).map(nombre => {
+    const suc = impDetSucursales[nombre];
+    return `<tr><td>${escapeHtml(nombre)} <span class="muted">(${suc.comprobantes})</span></td><td><select class="impDetSuc" data-suc="${escapeHtml(nombre)}">${orgs.map(o => `<option value="${o._id}"${o._id === suc.destino ? ' selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></td></tr>`;
+  }).join('');
+  out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">${filas.join('')}</ul>` +
+    (filasSuc ? `<p class="muted" style="margin-bottom:4px"><b>Sucursal de Dux → sucursal del sistema</b> (cada venta se carga en la sucursal que elijas):</p><table style="width:100%;font-size:13px">${filasSuc}</table>` : '');
   if (hayAlgo) document.getElementById('impDetBtn').style.display = '';
 }
 async function aplicarDetalleDux(){
@@ -2088,10 +2098,11 @@ async function aplicarDetalleDux(){
   if (btn.disabled || !impDetArchivos.length) return;
   btn.disabled = true; errEl.textContent = '';
   const filas = []; let act = 0, cre = 0;
+  const mapaSuc = {}; document.querySelectorAll('.impDetSuc').forEach(sel => { mapaSuc[sel.dataset.suc] = sel.value; });
   for (const a of impDetArchivos){
     btn.textContent = 'Importando ' + a.nombre + '…';
     try{
-      const r = await fetch('/api/ventas-import-dux/detalle/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: a.b64})});
+      const r = await fetch('/api/ventas-import-dux/detalle/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: a.b64, mapaSucursales: mapaSuc})});
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Error');
       act += d.actualizadas + d.convertidasSN; cre += d.creadas;
