@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Reinicio de datos de PRUEBA (9/10/2026, pedido de Mato): antes de importar el historial de Dux se dejan en
-// blanco ventas, remitos, cobranzas, stock, cuenta corriente y movimientos de tesorería, y se conserva todo lo
-// demás (visitas, obras, presupuestos, clientes, productos, proveedores, listas, usuarios, configuración, compras).
+// blanco ventas, remitos, cobranzas, stock, cuenta corriente, tesorería y compras, y se conserva todo lo
+// demás (visitas, obras, presupuestos, clientes, productos, proveedores, listas, usuarios y configuración).
 // Solo el rol Administrador (protegido), solo la organización con la que está trabajando, y exige escribir
 // BORRAR. GET /preview cuenta lo que se borraría, GET /respaldo baja un JSON con todo eso antes de borrar.
 // ---------------------------------------------------------------------------
@@ -29,7 +29,9 @@ const POR_ORG = [
   ['ventas', 'Ventas'], ['remitos', 'Remitos'], ['ventas_contadores', 'Numeración de ventas'], ['remitos_contadores', 'Numeración de remitos'],
   ['stock_movimientos', 'Movimientos de stock'], ['stock_actual', 'Stock actual (y comprometido)'],
   ['cuenta_corriente_movimientos', 'Movimientos de cuenta corriente'],
-  ['tesoreria_movimientos', 'Movimientos de tesorería (cobros, caja, bancos)'], ['cheques', 'Cheques'], ['retenciones_sufridas', 'Retenciones sufridas']
+  ['tesoreria_movimientos', 'Movimientos de tesorería (cobros, caja, bancos)'], ['cheques', 'Cheques'], ['retenciones_sufridas', 'Retenciones sufridas'],
+  ['compras', 'Compras'], ['compras_pagos', 'Pagos a proveedores'], ['compras_contadores', 'Numeración de compras'],
+  ['ordenes_compra', 'Órdenes de compra'], ['ordenes_compra_contadores', 'Numeración de órdenes de compra']
 ];
 
 async function cuentasConMovimientos(db, orgId) {
@@ -48,7 +50,7 @@ router.get('/preview', auth, async (req, res) => {
     filas.push({ coleccion: 'cuenta_corriente_saldos', etiqueta: 'Saldos de cuenta corriente de clientes', cantidad: await db.collection('cuenta_corriente_saldos').countDocuments({ clienteId: { $in: cids } }) });
     filas.push({ coleccion: 'tesoreria_saldos', etiqueta: 'Saldos de cajas/bancos (se ponen en 0)', cantidad: (await cuentasConMovimientos(db, orgId)).length });
     const org = await db.collection('organizaciones').findOne({ _id: orgId });
-    res.json({ organizacion: (org && org.nombre) || String(orgId), filas, conservado: ['Visitas', 'Obras', 'Presupuestos', 'Clientes', 'Productos', 'Proveedores', 'Listas de precios', 'Compras', 'Usuarios y configuración'] });
+    res.json({ organizacion: (org && org.nombre) || String(orgId), filas, conservado: ['Visitas', 'Obras', 'Presupuestos', 'Clientes', 'Productos', 'Proveedores', 'Listas de precios', 'Usuarios y configuración'] });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
