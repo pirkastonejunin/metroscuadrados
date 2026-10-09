@@ -53,6 +53,11 @@ function clavesNombre(nombre) {
   return [...claves];
 }
 
+// El tablero y los informes cuentan las ventas por createdAt: en las importadas tiene que ser la fecha original.
+async function alinearCreatedAt(db) {
+  await db.collection('ventas').updateMany({ importado: true, $expr: { $ne: ['$createdAt', '$fecha'] } }, [{ $set: { createdAt: '$fecha' } }]);
+}
+
 function parsearFecha(v) {
   if (v instanceof Date && !isNaN(v)) return new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate(), 15));
   if (typeof v === 'number') { const d = XLSX.SSF.parse_date_code(v); return d ? new Date(Date.UTC(d.y, d.m - 1, d.d, 15)) : null; }
@@ -214,7 +219,7 @@ async function procesar(req, aplicar) {
         pagos: [], totalCobrado: Math.min(v.cobrado, v.total), saldoPendiente: 0, duxCobrado: v.cobrado, duxSaldo: round2(Math.max(v.total - v.cobrado, 0)),
         observaciones: v.observaciones, stockDescontado: false, stockDescontadoEn: null, remitoId: null, remitoNumero: null, remitosIds: [],
         entregadaEn: estado === 'entregada' ? v.fecha : null, anuladaEn: null, anuladaPor: null, anuladaMotivo: null,
-        usuarioNombre, orgId, createdAt: ahora, updatedAt: ahora
+        usuarioNombre, orgId, createdAt: v.fecha, updatedAt: ahora
       };
     });
     let insertadas = 0;
@@ -233,6 +238,7 @@ async function procesar(req, aplicar) {
       } }] } });
     });
     for (let i = 0; i < ops.length; i += 500) { const r = await db.collection('ventas').bulkWrite(ops.slice(i, i + 500), { ordered: false }); actualizadas += r.modifiedCount; }
+    await alinearCreatedAt(db);
     return Object.assign(resumen, { insertadas, clientesCreados, actualizadas });
   });
 }
@@ -407,10 +413,11 @@ async function procesarDetalle(req, aplicar) {
         subtotal: round2(items.reduce((a, i) => a + i.subtotal, 0)), total, fiscal: null, fiscalEstado: null, fiscalMensaje: null,
         pagos: [], totalCobrado: total, saldoPendiente: 0, duxCobrado: total, duxSaldo: 0, observaciones: g.observaciones,
         stockDescontado: false, stockDescontadoEn: null, remitoId: null, remitoNumero: null, remitosIds: [], entregadaEn: g.fecha,
-        anuladaEn: null, anuladaPor: null, anuladaMotivo: null, usuarioNombre, orgId: dest, createdAt: ahora
+        anuladaEn: null, anuladaPor: null, anuladaMotivo: null, usuarioNombre, orgId: dest, createdAt: g.fecha
       }, base, { items: aplicarEntrega('entregada') }));
       creadas++;
     }
+    await alinearCreatedAt(db);
     return Object.assign(resumen, { actualizadas, creadas, convertidasSN, movidas, clientesCreados });
   });
 }
@@ -421,4 +428,8 @@ router.post('/detalle/aplicar', authAdmin, async (req, res) => {
   try { res.json(await procesarDetalle(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Al arrancar corrige las ventas ya importadas (fecha de creación = fecha original).
+setTimeout(() => { getDb().then(alinearCreatedAt).catch(() => {}); }, 20000).unref();
+
 module.exports = router;
+module.exports.alinearCreatedAt = alinearCreatedAt;
