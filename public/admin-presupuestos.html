@@ -254,6 +254,33 @@ async function iniciarApp(){
   document.getElementById('fHasta').value = hoy.toISOString().slice(0,10);
   document.getElementById('fDesde').value = hace30.toISOString().slice(0,10);
   await cargarPresupuestos();
+  await abrirDesdeVisita();
+}
+// Venimos del botón "Cargar presupuesto a mano" de una visita (vendedor.html?...): se abre directo el presupuesto
+// comercial de esa visita (el que ya tiene, o uno nuevo con el cliente y los datos de la visita ya cargados).
+let VISITA_PENDIENTE = null;
+async function abrirDesdeVisita(){
+  const vid = new URLSearchParams(location.search).get('visita');
+  if (!vid) return;
+  try{
+    const r = await fetch(BASE + '/desde-visita/' + encodeURIComponent(vid), {headers: headersAuth()});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo abrir la visita');
+    VISITA_PENDIENTE = { visitaId: d.visitaId, numero: d.numero };
+    if (d.presupuestoId){
+      const r2 = await fetch(BASE + '/' + d.presupuestoId, {headers: headersAuth()});
+      const p = await r2.json();
+      if (!r2.ok) throw new Error(p.error || 'No se pudo abrir el presupuesto');
+      if (!presupuestosCache.some(x => x._id === p._id)) presupuestosCache.unshift(p);
+      abrirEditarPresupuesto(p._id);
+    } else {
+      abrirNuevoPresupuesto(d.prefill);
+    }
+    const hdr = document.querySelector('#modalRoot .modal h2');
+    if (hdr) hdr.insertAdjacentHTML('afterend', `<p class="muted" style="margin-top:-8px">Visita #${d.numero}${d.direccion ? ' — ' + escapeHtml(d.direccion) : ''}. Al guardar volvés a la visita. <a href="/vendedor.html">Volver sin guardar</a></p>`);
+  }catch(e){
+    alert(e.message);
+  }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -644,6 +671,7 @@ async function guardarNuevoPresupuesto(){
     observaciones: document.getElementById('pObservaciones').value.trim()
   };
   if (origenCotizadorPendiente) body.origenCotizador = origenCotizadorPendiente;
+  if (VISITA_PENDIENTE) body.origenVisita = { visitaId: VISITA_PENDIENTE.visitaId };
   const btn = document.getElementById('pGuardarBtn');
   if (btn.disabled) return;
   btn.disabled = true;
@@ -653,6 +681,7 @@ async function guardarNuevoPresupuesto(){
     const r = await fetch(BASE, {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    if (VISITA_PENDIENTE){ location.href = '/vendedor.html'; return; }
     cerrarModal();
     origenCotizadorPendiente = null;
     await cargarPresupuestos();
@@ -818,6 +847,7 @@ async function guardarEdicionPresupuesto(id){
     const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    if (VISITA_PENDIENTE){ location.href = '/vendedor.html'; return; }
     cerrarModal();
     await cargarPresupuestos();
   }catch(e){ errEl.textContent = e.message; }

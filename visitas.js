@@ -1497,6 +1497,16 @@ async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSelecc
         .map(c => ({ cotizacionId: c.cotizacionId, tipoObraNombre: c.tipoObraNombre, baseTotal: c.baseTotal }));
     } else {
       tareasBase = tareasDesdeManual(visita.presupuesto);
+      if (visita.presupuesto.comercial) {
+        // Presupuesto comercial: sus ítems pueden ser productos del catálogo. Solo los que coinciden con un
+        // tipo de trabajo (Piso, Piedra, Placa...) pasan a tareas de la obra; si ninguno coincide, van todos.
+        const tipos = await db.collection('obras_tipos_trabajo').find({}).toArray();
+        const porNombre = new Map(tipos.map(t => [String(t.nombre || '').trim().toLowerCase(), t.nombre]));
+        const coinciden = tareasBase
+          .filter(t => porNombre.has(String(t.tipoTrabajo || '').trim().toLowerCase()))
+          .map(t => Object.assign({}, t, { tipoTrabajo: porNombre.get(String(t.tipoTrabajo).trim().toLowerCase()) }));
+        if (coinciden.length) tareasBase = coinciden;
+      }
       precioVentaCliente = visita.presupuesto.total || 0;
     }
 
@@ -1569,6 +1579,20 @@ async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSelecc
     if (cotizacionesDeclinadas) setVisita['presupuesto.cotizacionesDeclinadas'] = cotizacionesDeclinadas;
 
     await db.collection('visitas').updateOne({ _id: visita._id }, { $set: setVisita });
+
+    // Presupuesto comercial enlazado: si seguía abierto, pasa a aprobado.
+    try {
+      if (visita.presupuestoComercialId) {
+        const pc = await db.collection('presupuestos').findOne({ _id: visita.presupuestoComercialId });
+        if (pc && ['presupuestado', 'en_seguimiento'].includes(pc.estado) && !pc.convertidoEnVentaId) {
+          await db.collection('presupuestos').updateOne({ _id: pc._id }, {
+            $set: { estado: 'aprobado', updatedAt: new Date() },
+            $push: { seguimiento: { fecha: new Date(), estado: 'aprobado', nota: 'Visita #' + visita.numero + ' confirmada (obra Nº ' + numero + ')', usuarioNombre: confirmadaPor || '' } }
+          });
+          await db.collection('visitas').updateOne({ _id: visita._id }, { $set: { presupuestoComercialEstado: 'aprobado' } });
+        }
+      }
+    } catch (e) { console.error('Aprobar presupuesto comercial:', e.message); }
 
     return { visita: await db.collection('visitas').findOne({ _id: visita._id }), obra: obraDoc };
   });

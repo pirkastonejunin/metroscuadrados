@@ -310,7 +310,7 @@ async function mostrarDetalleVisita(id){
       resumen = `<b>Presupuesto (a mano)</b><br>` +
         v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
         `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` + formasPagoHtml +
-        (v.presupuestoComercialNumero ? `<div class="muted" style="margin-top:6px">Es el presupuesto comercial Nº ${String(v.presupuestoComercialNumero).padStart(5,'0')}${v.presupuestoComercialCongelado ? ' — ya está aprobado/cerrado en el panel comercial, los cambios nuevos no lo modifican' : ' — se actualiza solo si lo modificás'}.</div>` : '') +
+        (v.presupuestoComercialNumero ? `<div class="muted" style="margin-top:6px">Es el presupuesto comercial Nº ${String(v.presupuestoComercialNumero).padStart(5,'0')}${v.presupuestoComercialCongelado ? ' — ya está aprobado/cerrado en el panel comercial, los cambios nuevos no lo modifican' : ' — editándolo se actualiza esta visita'}.</div>` : '') +
         (v.presupuestoComercialError ? `<div class="err" style="margin-top:6px">No se pudo vincular con el panel comercial: ${v.presupuestoComercialError}</div>` : '') +
         `<div class="botonera-pdf">
           <button class="btn small secondary" type="button" onclick="abrirPdfConAuth('/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf')">Ver PDF llave en mano</button>
@@ -420,8 +420,7 @@ function formularioElegirPresupuesto(visitaId){
     <div style="margin-top:8px"><button class="btn secondary" onclick="mostrarVincularCotizacion('${visitaId}')">Ya guardé la cotización, vincularla</button></div>
     <div id="vincularCotizacion"></div>
     <div class="divider">
-      <button class="btn secondary" onclick="mostrarFormManual('${visitaId}')">Cargar presupuesto a mano</button>
-      <div id="formManual"></div>
+      <button class="btn secondary" onclick="abrirPresupuestoComercial('${visitaId}')">Cargar presupuesto a mano</button>
     </div>`;
 }
 
@@ -440,8 +439,7 @@ async function mostrarElegirPresupuesto(visitaId){
   catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; return; }
 
   if (v.presupuesto && v.presupuesto.tipo === 'manual'){
-    cont.innerHTML = '<div id="formManual"></div>';
-    mostrarFormManual(visitaId, v.presupuesto);
+    abrirPresupuestoComercial(visitaId);
   } else if (v.presupuesto && v.presupuesto.tipo === 'cotizador'){
     const cotizaciones = cotizacionesDeVisita(v);
     BASE_TOTAL_COTIZADOR = cotizaciones.reduce((s,c)=> s + (Number(c.baseTotal)||0), 0);
@@ -604,46 +602,10 @@ function actualizarTotalGeneralManual(){
   }, 0);
   el.textContent = 'Total del presupuesto: $' + total.toLocaleString('es-AR');
 }
-function agregarFilaItemManual(){
-  document.getElementById('itemsManual').insertAdjacentHTML('beforeend', filaItemManual());
-  actualizarTotalGeneralManual();
-}
-async function mostrarFormManual(visitaId, presupuestoExistente){
-  const cont = document.getElementById('formManual');
-  const itemsHtml = (presupuestoExistente && presupuestoExistente.items && presupuestoExistente.items.length)
-    ? presupuestoExistente.items.map(it => filaItemManual(it)).join('')
-    : filaItemManual();
-  cont.innerHTML = `
-    ${presupuestoExistente ? '<p class="muted">Editando el presupuesto ya cargado — modificá lo que necesites y guardá de nuevo.</p>' : ''}
-    <div id="itemsManual">${itemsHtml}</div>
-    <button class="btn small secondary" type="button" onclick="agregarFilaItemManual()">+ Agregar producto</button>
-    <div class="muted" id="totalGeneralManual" style="margin-top:8px;font-weight:700"></div>
-    <div id="formasPagoManual" class="muted" style="margin-top:10px">Cargando formas de pago…</div>
-    <div style="margin-top:10px"><label>Observaciones</label><textarea id="observacionesManual" placeholder="Aclaraciones para el cliente sobre este presupuesto">${escAttr(presupuestoExistente ? presupuestoExistente.notas || '' : '')}</textarea></div>
-    <div class="err" id="manualErr"></div>
-    <button class="btn" style="margin-top:8px" onclick="guardarPresupuestoManual('${visitaId}')">Guardar presupuesto</button>
-  `;
-  cargarFormasPagoManual(presupuestoExistente && presupuestoExistente.formasPago);
-  actualizarTotalGeneralManual();
-}
-// Mismo catálogo de formas de pago que ya carga Mato para el cotizador
-// (/api/cotizador/formas-pago) — así no hay que cargarlas dos veces.
-async function cargarFormasPagoManual(formasPagoExistentes){
-  const cont = document.getElementById('formasPagoManual');
-  if (!STORE_ID){ cont.innerHTML = ''; return; }
-  const seleccionadasNombres = new Set((formasPagoExistentes||[]).map(fp => fp.nombre));
-  try{
-    const res = await fetch('/api/cotizador/formas-pago?store_id=' + encodeURIComponent(STORE_ID), {headers:{'x-admin-token':TOKEN}});
-    const formas = await res.json();
-    if (!res.ok) throw new Error(formas.error || 'No se pudieron cargar las formas de pago');
-    if (!formas.length){ cont.innerHTML = ''; return; }
-    cont.innerHTML = '<b class="muted">Formas de pago a mostrar en el presupuesto</b>' +
-      formas.map(fp => `
-        <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-weight:normal">
-          <input type="checkbox" class="fpCheck" value='${JSON.stringify(fp).replace(/'/g,'&#39;')}'${seleccionadasNombres.has(fp.nombre) ? ' checked' : ''}>
-          ${fp.nombre}${fp.porcentaje ? ` (${fp.tipo==='recargo'?'+':'-'}${fp.porcentaje}%)` : ''}
-        </label>`).join('');
-  }catch(e){ cont.innerHTML = `<p class="err">${e.message}</p>`; }
+// "Cargar presupuesto a mano" ya no tiene formulario propio: abre directo el presupuesto comercial de la visita
+// (el existente, o uno nuevo con el cliente de la visita), y al guardar se vuelve acá.
+function abrirPresupuestoComercial(visitaId){
+  location.href = '/admin-presupuestos.html?visita=' + encodeURIComponent(visitaId);
 }
 // ---------------- ÍTEMS AGREGADOS A MANO SOBRE UN PRESUPUESTO DEL COTIZADOR ----------------
 
@@ -674,22 +636,6 @@ async function guardarItemsExtra(visitaId){
     await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-cotizador/items-extra`, {method:'POST', body:{items}});
     mostrarDetalleVisita(visitaId);
   }catch(e){ document.getElementById('itemsExtraErr').textContent = e.message; }
-}
-
-async function guardarPresupuestoManual(visitaId){
-  const items = [...document.querySelectorAll('#itemsManual .item-row')].map(row => ({
-    tipoTrabajo: row.querySelector('.itTipo').value,
-    descripcion: row.querySelector('.itDescripcion').value.trim(),
-    cantidad: Number(row.querySelector('.itCantidad').value) || 0,
-    valor: Number(row.querySelector('.itValor').value) || 0
-  }));
-  const formasPagoSeleccionadas = [...document.querySelectorAll('.fpCheck:checked')].map(chk => JSON.parse(chk.value));
-  const notasEl = document.getElementById('observacionesManual');
-  const notas = notasEl ? notasEl.value.trim() : '';
-  try{
-    await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/presupuesto-manual`, {method:'POST', body:{items, formasPagoSeleccionadas, notas}});
-    mostrarDetalleVisita(visitaId);
-  }catch(e){ document.getElementById('manualErr').textContent = e.message; }
 }
 
 // ---------------- COMPARTIR PDF POR WHATSAPP ----------------

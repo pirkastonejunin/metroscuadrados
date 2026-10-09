@@ -281,6 +281,62 @@ router.get('/', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+
+// ---------------------------------------------------------------------------
+// Visita <-> presupuesto comercial (9/10/2026): el botón "Cargar presupuesto a mano" de la visita abre
+// directamente el formulario del presupuesto comercial. El presupuesto queda enlazado a la visita
+// (origenVisita) y se "espeja" en visita.presupuesto con la forma de un presupuesto manual
+// ({tipo:'manual', comercial:true, items:[{tipoTrabajo,descripcion,cantidad,valor,total}], total}), así el
+// PDF, el resumen y la confirmación de la visita siguen funcionando sin cambios.
+// ---------------------------------------------------------------------------
+async function espejarEnVisita(db, presupuesto) {
+  if (!presupuesto || !presupuesto.origenVisita || !presupuesto.origenVisita.visitaId) return;
+  const visita = await db.collection('visitas').findOne({ _id: presupuesto.origenVisita.visitaId, orgId: presupuesto.orgId });
+  if (!visita) return;
+  const items = (presupuesto.items || []).map(it => ({
+    tipoTrabajo: it.nombre, descripcion: '', cantidad: it.cantidad, valor: it.precioUnitario, total: it.subtotal
+  }));
+  const set = {
+    presupuesto: {
+      tipo: 'manual', comercial: true, presupuestoId: presupuesto._id, numero: presupuesto.numero,
+      items, total: presupuesto.total, formasPago: [], notas: presupuesto.observaciones || '', fecha: new Date()
+    },
+    presupuestoComercialId: presupuesto._id,
+    presupuestoComercialNumero: presupuesto.numero,
+    presupuestoComercialEstado: presupuesto.estado,
+    presupuestoComercialCongelado: false,
+    updatedAt: new Date()
+  };
+  if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
+  await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set, $unset: { presupuestoComercialError: '' } });
+}
+
+// Qué abrir para una visita: el presupuesto ya enlazado, o un prefill para uno nuevo (cliente = el de la visita).
+router.get('/desde-visita/:visitaId', authAdmin, async (req, res) => {
+  try {
+    const vid = toObjectId(req.params.visitaId);
+    if (!vid) throw err(400, 'id inválido');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const visita = await db.collection('visitas').findOne(Object.assign({ _id: vid }, filtroOrg(req)));
+      if (!visita) throw err(404, 'Visita no encontrada');
+      const info = { visitaId: String(visita._id), numero: visita.numero, direccion: (visita.cliente && visita.cliente.direccion) || '', clienteVisita: (visita.cliente && visita.cliente.nombre) || '' };
+      if (visita.presupuestoComercialId) {
+        const ex = await db.collection('presupuestos').findOne({ _id: visita.presupuestoComercialId });
+        if (ex) return Object.assign(info, { presupuestoId: String(ex._id) });
+      }
+      const { clienteParaVisita } = require('./clienteVinculo');
+      const cli = await clienteParaVisita(db, visita.orgId, visita.cliente || {});
+      const items = (visita.presupuesto && visita.presupuesto.tipo === 'manual' && !visita.presupuesto.comercial)
+        ? (visita.presupuesto.items || []).map(it => ({ nombre: [it.tipoTrabajo, it.descripcion].filter(Boolean).join(' — '), cantidad: it.cantidad, precioUnitario: it.valor }))
+        : [];
+      const obs = 'Visita #' + visita.numero + (info.direccion ? ' — ' + info.direccion : '');
+      return Object.assign(info, { prefill: { clienteId: String(cli.clienteId), items, observaciones: obs } });
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -328,6 +384,17 @@ router.post('/', authAdmin, async (req, res) => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
+      let origenVisita = null;
+      if (body.origenVisita && body.origenVisita.visitaId) {
+        const vid = toObjectId(body.origenVisita.visitaId);
+        const visita = vid ? await db.collection('visitas').findOne(Object.assign({ _id: vid }, filtroOrg(req))) : null;
+        if (!visita) throw err(400, 'La visita no existe (o no pertenece a esta organización)');
+        if (visita.presupuestoComercialId) {
+          const ya = await db.collection('presupuestos').findOne({ _id: visita.presupuestoComercialId });
+          if (ya) throw err(400, 'Esta visita ya tiene el presupuesto comercial Nº ' + ya.numero + ' — editalo en vez de crear otro.');
+        }
+        origenVisita = { visitaId: visita._id, numero: visita.numero, direccion: (visita.cliente && visita.cliente.direccion) || '' };
+      }
       const { items, subtotal } = await normalizarItemsPresupuesto(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const numero = await proximoNumeroPresupuesto(db, req.orgId);
@@ -354,6 +421,7 @@ router.post('/', authAdmin, async (req, res) => {
         googleEventId: null,
         googleCalendarId: null,
         origenCotizador,
+        origenVisita,
         convertidoEnVentaId: null,
         convertidoEnVentaNumero: null,
         usuarioId: req.usuario && req.usuario._id ? req.usuario._id : null,
@@ -364,6 +432,7 @@ router.post('/', authAdmin, async (req, res) => {
       };
       const r = await db.collection('presupuestos').insertOne(presupuesto);
       presupuesto._id = r.insertedId;
+      if (origenVisita) await espejarEnVisita(db, presupuesto);
       return presupuesto;
     });
     res.json(resultado);
@@ -422,7 +491,9 @@ router.put('/:id', authAdmin, async (req, res) => {
       }
 
       await db.collection('presupuestos').updateOne({ _id: id }, { $set: set });
-      return db.collection('presupuestos').findOne({ _id: id });
+      const nuevo = await db.collection('presupuestos').findOne({ _id: id });
+      if (nuevo.origenVisita) await espejarEnVisita(db, nuevo);
+      return nuevo;
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -482,6 +553,9 @@ router.post('/:id/estado', authAdmin, async (req, res) => {
         { _id: id },
         { $set: set, $push: { seguimiento: seguimientoEntry } }
       );
+      if (actual.origenVisita && actual.origenVisita.visitaId) {
+        await db.collection('visitas').updateOne({ _id: actual.origenVisita.visitaId }, { $set: { presupuestoComercialEstado: estado } });
+      }
       return db.collection('presupuestos').findOne({ _id: id });
     });
     res.json(resultado);
