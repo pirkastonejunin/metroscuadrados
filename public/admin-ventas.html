@@ -1998,11 +1998,19 @@ function abrirImportarDux(){
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar historial de Dux</h2>
+        <h3 style="margin:0 0 6px;font-size:15px">1. Listado de ventas</h3>
         <p class="muted">Subí el listado de ventas que exporta Dux (consulta_ventas, .xls o .xlsx). Se cargan como historial: sin detalle de artículos, sin mover stock y sin tocar la cuenta corriente. Si lo subís dos veces, no duplica.</p>
         <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()">
         <div class="err" id="impDuxErr"></div>
         <div id="impDuxResumen"></div>
         <button class="btn" id="impDuxBtn" style="margin-top:10px;display:none" onclick="aplicarImportDux()">Importar</button>
+        <hr style="margin:18px 0;border:0;border-top:1px solid var(--border)">
+        <h3 style="margin:0 0 6px;font-size:15px">2. Detalle por artículo</h3>
+        <p class="muted">Subí los archivos "consulta_de_ventas_detallada" de Dux (podés elegir varios juntos, uno por cada período de 60 días). Completan los artículos de las ventas ya cargadas y agregan las que falten (notas de crédito y débito). Se puede repetir sin duplicar.</p>
+        <input type="file" id="impDetArchivos" accept=".xls,.xlsx" multiple onchange="previewDetalleDux()">
+        <div class="err" id="impDetErr"></div>
+        <div id="impDetResumen"></div>
+        <button class="btn" id="impDetBtn" style="margin-top:10px;display:none" onclick="aplicarDetalleDux()">Importar detalle</button>
       </div>
     </div>`;
 }
@@ -2049,6 +2057,50 @@ async function aplicarImportDux(){
     btn.style.display = 'none';
     if (typeof cargarVentas === 'function') cargarVentas();
   }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
+}
+
+let impDetArchivos = [];
+async function previewDetalleDux(){
+  const files = [...document.getElementById('impDetArchivos').files];
+  const errEl = document.getElementById('impDetErr'); errEl.textContent = '';
+  const out = document.getElementById('impDetResumen'); out.innerHTML = ''; document.getElementById('impDetBtn').style.display = 'none';
+  impDetArchivos = [];
+  if (!files.length) return;
+  out.innerHTML = '<p class="muted">Analizando…</p>';
+  const filas = []; let hayAlgo = false;
+  for (const f of files){
+    try{
+      const b64 = await leerArchivoBase64(f);
+      const r = await fetch('/api/ventas-import-dux/detalle/preview', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: b64})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      impDetArchivos.push({nombre: f.name, b64});
+      hayAlgo = true;
+      const fd = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+      filas.push(`<li><b>${escapeHtml(f.name)}</b>: ${d.comprobantes} comprobantes (${fd(d.desde)} a ${fd(d.hasta)}), ${d.renglones} renglones. ${d.aCrear} ventas nuevas (${d.notas} notas), ${d.articulosVinculados} artículos vinculados al catálogo y ${d.articulosSinCatalogo} códigos sin catálogo.${d.diferencias ? ` <span class="err">${d.diferencias} comprobantes con total distinto al listado.</span>` : ''}</li>`);
+    }catch(e){ filas.push(`<li class="err"><b>${escapeHtml(f.name)}</b>: ${escapeHtml(e.message)}</li>`); }
+  }
+  out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">${filas.join('')}</ul>`;
+  if (hayAlgo) document.getElementById('impDetBtn').style.display = '';
+}
+async function aplicarDetalleDux(){
+  const btn = document.getElementById('impDetBtn'); const errEl = document.getElementById('impDetErr');
+  if (btn.disabled || !impDetArchivos.length) return;
+  btn.disabled = true; errEl.textContent = '';
+  const filas = []; let act = 0, cre = 0;
+  for (const a of impDetArchivos){
+    btn.textContent = 'Importando ' + a.nombre + '…';
+    try{
+      const r = await fetch('/api/ventas-import-dux/detalle/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: a.b64})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      act += d.actualizadas + d.convertidasSN; cre += d.creadas;
+      filas.push(`<li>${escapeHtml(a.nombre)}: ${d.actualizadas + d.convertidasSN} ventas completadas, ${d.creadas} creadas.</li>`);
+    }catch(e){ filas.push(`<li class="err">${escapeHtml(a.nombre)}: ${escapeHtml(e.message)}</li>`); }
+  }
+  document.getElementById('impDetResumen').innerHTML = `<p class="ok-msg">Listo: ${act} ventas con detalle, ${cre} ventas nuevas.</p><ul class="muted">${filas.join('')}</ul>`;
+  btn.style.display = 'none'; btn.disabled = false; btn.textContent = 'Importar detalle';
+  if (typeof cargarVentas === 'function') cargarVentas();
 }
 </script>
 </body>

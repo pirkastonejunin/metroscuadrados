@@ -145,7 +145,7 @@ async function armarInformeVentas(req) {
       const sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
       items.forEach(it => {
         const p = it.productoId ? pm.get(String(it.productoId)) : null;
-        const rub = (p && p.rubro) || 'Sin rubro';
+        const rub = (p && p.rubro) || it.rubro || 'Sin rubro';
         if (productoId && String(it.productoId) !== String(productoId)) return;
         if (rubro && rub !== rubro) return;
         const parte = sub > 0 ? Number(it.subtotal || 0) / sub : (items.length ? 1 / items.length : 0);
