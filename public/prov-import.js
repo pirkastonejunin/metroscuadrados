@@ -177,10 +177,23 @@
         var v = m.variacionPct == null ? '' : '<span style="color:' + (m.variacionPct > 0 ? 'var(--danger)' : 'var(--ok, #1a7f4b)') + ';font-weight:700">' + (m.variacionPct > 0 ? '+' : '') + num(m.variacionPct, 1) + '%</span>';
         return '<tr' + (m.alerta ? ' style="background:rgba(214,69,65,.08)"' : '') + '><td>' + E(m.sku) + '</td><td>' + E(m.nombre) + (m.alerta ? ' <b style="color:var(--danger)">revisar</b>' : '') + '</td><td style="text-align:right">' + mon(m.costoAnterior, m.monedaAnterior) + ' → <b>' + mon(m.costoNuevo, m.moneda) + '</b> ' + v + '</td><td>' + precios + '</td><td style="text-align:right">' + st + '</td></tr>';
       }).join('');
-      var sinMatch = d.sinMatch.length ? '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">' + s.sinMatch + ' códigos de la lista no están en el sistema (no se tocan)</summary><div style="font-size:12px;margin-top:4px;max-height:160px;overflow:auto">' + d.sinMatch.map(function (x) { return E(x.codigo) + (x.nombre ? ' – ' + E(x.nombre) : ''); }).join('<br>') + '</div></details>' : '';
+      estado.nuevos = d.sinMatch;
+      var sinMatch = d.sinMatch.length ? '<div style="margin-top:14px"><div style="font-weight:700">' + s.sinMatch + ' productos de la lista no están en tu sistema</div>' +
+        '<div class="muted" style="font-size:12px;margin:2px 0 6px">Marcá los que querés agregar. Se crean con este proveedor, el costo y los precios de la regla' + (s.deposito ? ' y el stock en ' + E(s.deposito) : '') + '. El rubro, la marca y el resto los completás después en la ficha.</div>' +
+        '<label style="display:flex;gap:6px;align-items:center;font-weight:600;margin-bottom:4px"><input type="checkbox" style="width:auto" onchange="pimpMarcarNuevos(this.checked)"> Marcar todos los que tienen precio</label>' +
+        '<div style="overflow:auto;max-height:340px"><table><thead><tr><th></th><th>Código de la lista</th><th>Nombre</th><th>SKU a usar</th><th style="text-align:right">Costo</th><th>Precios</th><th style="text-align:right">Stock</th></tr></thead><tbody>' +
+        d.sinMatch.map(function (n, i) {
+          var ok = n.costoNuevo != null;
+          return '<tr><td><input type="checkbox" class="pn-chk" data-i="' + i + '" style="width:auto"' + (ok ? '' : ' disabled') + '></td><td>' + E(n.codigo) + '</td>' +
+            '<td><input class="pn-nombre" data-i="' + i + '" value="' + E(n.nombre || n.codigo) + '" style="min-width:180px"></td>' +
+            '<td><input class="pn-sku" data-i="' + i + '" value="' + E(n.codigo) + '" style="width:120px">' + (n.skuOcupado ? '<div style="font-size:11px;color:var(--danger)">Ese SKU ya existe: cambialo</div>' : '') + '</td>' +
+            '<td style="text-align:right">' + (ok ? mon(n.costoNuevo, n.moneda) : '<span class="muted">sin precio</span>') + '</td>' +
+            '<td>' + (n.precios || []).map(function (p) { return '<div style="font-size:12px"><span class="muted">' + E(p.lista) + ':</span> <b>' + num(p.nuevo) + '</b></div>'; }).join('') + '</td>' +
+            '<td style="text-align:right">' + (n.stock != null ? n.stock : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' + (s.sinMatch > 500 ? '<div class="muted" style="font-size:12px">Se muestran los primeros 500.</div>' : '') + '</div>' : '';
       var dup = d.duplicados.length ? '<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">' + s.duplicados + ' códigos ambiguos o repetidos (no se tocan)</summary><div style="font-size:12px;margin-top:4px">' + d.duplicados.map(function (x) { return E(x.codigo) + ': ' + x.productos.map(E).join('; '); }).join('<br>') + '</div></details>' : '';
       var cero = d.aCero.length ? '<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">' + s.stockACero + ' productos del proveedor ya no figuran: su stock pasa a 0</summary><div style="font-size:12px;margin-top:4px;max-height:140px;overflow:auto">' + d.aCero.map(function (x) { return E(x.sku) + ' – ' + E(x.nombre) + ' (' + x.anterior + ' → 0)'; }).join('<br>') + '</div></details>' : '';
-      var hayAlgo = s.costosCambian || s.preciosCambian || s.stockCambia;
+      var hayAlgo = s.costosCambian || s.preciosCambian || s.stockCambia || d.sinMatch.some(function (n) { return n.costoNuevo != null; });
       box.innerHTML = '<div class="row" style="gap:8px">' + tarjeta(s.vinculados, 'productos encontrados de ' + s.filasArchivo + ' filas') + tarjeta(s.costosCambian, 'costos cambian') + tarjeta(s.preciosCambian, 'precios cambian') +
         (s.deposito ? tarjeta(s.stockCambia, 'stock cambia en ' + E(s.deposito)) : '') + (s.alertas ? tarjeta(s.alertas, 'para revisar (variación grande)', 'var(--danger)') : '') + '</div>' +
         (s.moneda === 'USD' ? '<div class="muted" style="font-size:12px;margin-top:6px">Lista en dólares, dólar usado: $ ' + num(s.cotizacionDolar, 2) + '</div>' : '') +
@@ -191,15 +204,20 @@
     btn.disabled = false;
   };
 
+  window.pimpMarcarNuevos = function (on) { document.querySelectorAll('.pn-chk:not(:disabled)').forEach(function (c) { c.checked = on; }); };
   window.pimpAplicar = async function () {
     var err = document.getElementById('pimpErr'), box = document.getElementById('pimpPreview'), btn = document.getElementById('pimpBtnAplicar');
     var omitir = document.getElementById('pimpOmitir') ? document.getElementById('pimpOmitir').checked : false;
-    if (!confirm('Se actualizan costos, precios y stock con esta lista. ¿Seguimos?')) return;
+    var crear = Array.prototype.filter.call(document.querySelectorAll('.pn-chk'), function (c) { return c.checked; }).map(function (c) {
+      var i = c.dataset.i;
+      return { codigo: estado.nuevos[i].codigo, nombre: document.querySelector('.pn-nombre[data-i="' + i + '"]').value, sku: document.querySelector('.pn-sku[data-i="' + i + '"]').value };
+    });
+    if (!confirm('Se actualizan costos, precios y stock con esta lista' + (crear.length ? ' y se crean ' + crear.length + ' productos nuevos' : '') + '. ¿Seguimos?')) return;
     err.textContent = ''; btn.disabled = true; btn.textContent = 'Actualizando…';
     try {
-      var d = await pedir('/' + estado.id + '/aplicar', { method: 'POST', body: JSON.stringify({ archivoBase64: estado.archivo, nombreArchivo: estado.nombreArchivo, omitirAlertas: omitir }) });
+      var d = await pedir('/' + estado.id + '/aplicar', { method: 'POST', body: JSON.stringify({ archivoBase64: estado.archivo, nombreArchivo: estado.nombreArchivo, omitirAlertas: omitir, crear: crear }) });
       var s = d.resumen;
-      box.innerHTML = '<p class="ok-msg">Listo: ' + s.costosActualizados + ' costos, ' + s.preciosActualizados + ' precios y ' + s.stocksActualizados + ' stocks actualizados' + (s.omitidosPorAlerta ? ' (' + s.omitidosPorAlerta + ' marcados “revisar” quedaron sin tocar)' : '') + '.</p>';
+      box.innerHTML = '<p class="ok-msg">Listo: ' + s.costosActualizados + ' costos, ' + s.preciosActualizados + ' precios y ' + s.stocksActualizados + ' stocks actualizados' + (s.productosCreados ? ', ' + s.productosCreados + ' productos nuevos creados' : '') + (s.omitidosPorAlerta ? ' (' + s.omitidosPorAlerta + ' marcados “revisar” quedaron sin tocar)' : '') + '.</p>' + ((s.noCreados || []).length ? '<p class="err">No se pudieron crear: ' + s.noCreados.map(function (x) { return E(x.codigo) + ' (' + E(x.motivo) + ')'; }).join('; ') + '</p>' : '');
       document.getElementById('pimpArchivo').value = ''; estado.archivo = null; document.getElementById('pimpBtnPrev').disabled = true;
       cargarHistorial();
     } catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Hacer la actualización'; }

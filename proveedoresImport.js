@@ -301,12 +301,40 @@ async function calcular(db, req, prov, regla, filas) {
 
   const cambios = [], sinMatch = [], duplicados = [], sinPrecio = [];
   const vistos = new Set();
+  // códigos de la lista que ya existen como SKU de OTRO producto (al crear uno nuevo con ese SKU chocaría)
+  const skuOcupados = new Set();
+  if (campo === 'codigoExterno') {
+    for (let i = 0; i < claves.length; i += 1000) {
+      const lote = claves.slice(i, i + 1000).map(codigoClave);
+      (await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, sku: { $in: lote } }, filtroOrg(req))).project({ sku: 1 }).toArray()).forEach(x => skuOcupados.add(codigoClave(x.sku)));
+    }
+  }
   const factorDesc = regla.descuentos.reduce((a, d) => a * (1 - d / 100), 1);
   const decimales = regla.moneda === 'USD' ? 4 : 2;
   for (const f of filas) {
     const k = codigoClave(f.codigo);
     const cands = porCodigo.get(k) || [];
-    if (!cands.length) { sinMatch.push({ fila: f.fila, codigo: f.codigo, nombre: f.nombre }); continue; }
+    if (!cands.length) {
+      if (vistos.has(k)) continue;
+      vistos.add(k);
+      const n = { fila: f.fila, codigo: f.codigo, nombre: f.nombre, precioLista: f.precio, moneda: regla.moneda, precios: [] };
+      if (f.precio != null && f.precio > 0) {
+        let costo = f.precio * factorDesc * (1 + regla.recargoPct / 100);
+        if (regla.ivaIncluido) costo = costo / 1.21;
+        costo = redondear(costo, decimales);
+        const costoPesos = regla.moneda === 'USD' ? costo * cotizacion : costo;
+        n.costoNuevo = costo;
+        for (const m of regla.margenes) {
+          const l = listas.get(String(m.listaId));
+          if (l.alcance === 'seleccion') continue; // un producto nuevo no está en ninguna selección
+          n.precios.push({ listaId: String(l._id), lista: l.nombre, predeterminada: !!l.predeterminada, nuevo: aplicarMargen(costoPesos, m, 21, 21) });
+        }
+      }
+      if (deposito && f.stock != null) n.stock = Math.max(0, redondear(f.stock, 3));
+      n.skuOcupado = skuOcupados.has(k);
+      sinMatch.push(n);
+      continue;
+    }
     if (cands.length > 1) { duplicados.push({ fila: f.fila, codigo: f.codigo, productos: cands.map(c => c.sku + ' – ' + c.nombre).slice(0, 4) }); continue; }
     if (vistos.has(k)) { duplicados.push({ fila: f.fila, codigo: f.codigo, productos: ['Código repetido en el archivo (se usó la primera fila)'] }); continue; }
     vistos.add(k);
@@ -393,7 +421,7 @@ router.post('/:id/preview', authAdmin, async (req, res) => {
       resumen: calc.resumen,
       muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock })),
       hayMas: ordenadas.length > 300,
-      sinMatch: calc.sinMatch.slice(0, 200), duplicados: calc.duplicados.slice(0, 50), sinPrecio: calc.sinPrecio.slice(0, 50),
+      sinMatch: calc.sinMatch.slice(0, 500), duplicados: calc.duplicados.slice(0, 50), sinPrecio: calc.sinPrecio.slice(0, 50),
       aCero: calc.aCero.slice(0, 100).map(a => ({ sku: a.sku, nombre: a.nombre, anterior: a.anterior }))
     });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -438,6 +466,40 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
         if (opsProd.length) await db.collection('productos_catalogo').bulkWrite(opsProd, { ordered: true });
         if (opsStock.length) { await db.collection('stock_actual').bulkWrite(opsStock, { ordered: false }); await db.collection('stock_movimientos').insertMany(movs, { ordered: false }); }
       }
+      // productos nuevos que Mato eligió agregar
+      const creados = [], noCreados = [];
+      const pedidos = Array.isArray((req.body || {}).crear) ? req.body.crear : [];
+      if (pedidos.length) {
+        const porCod = new Map(calc.sinMatch.map(n => [codigoClave(n.codigo), n]));
+        const margenPre = regla.margenes.length ? regla.margenes : [];
+        for (const pd of pedidos) {
+          const n = porCod.get(codigoClave(pd.codigo));
+          const sku = String(pd.sku || pd.codigo || '').trim().toUpperCase();
+          const nombre = String(pd.nombre || n && n.nombre || pd.codigo || '').trim();
+          if (!n) { noCreados.push({ codigo: pd.codigo, motivo: 'No está en el archivo.' }); continue; }
+          if (n.costoNuevo == null) { noCreados.push({ codigo: pd.codigo, motivo: 'No tiene precio en la lista.' }); continue; }
+          if (!sku || !nombre) { noCreados.push({ codigo: pd.codigo, motivo: 'Falta el SKU o el nombre.' }); continue; }
+          if (await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)))) { noCreados.push({ codigo: pd.codigo, motivo: `Ya hay un producto con el SKU ${sku}.` }); continue; }
+          const doc = {
+            sku, nombre, unidad: 'unidad', tipoUnidad: 'unidad', disponiblePara: 'todos', tipoProducto: 'simple',
+            rubro: '', subrubro: '', marca: '', codigoBarra: '', embalaje: '', descripcion: '', notas: '',
+            codigoExterno: regla.matchPor === 'codigoExterno' ? String(n.codigo).trim() : '', proveedor: prov.razonSocial || '', proveedorId: prov._id,
+            costo: n.costoNuevo, moneda: n.moneda, porcentajeIva: 21, impuestoInterno: null, unidadesPorBulto: null, fechaVencimiento: null,
+            stockeable: true, aceptaStockNegativo: false, trazable: false, utilizaVariantes: false, indicaCtdBultos: false,
+            costoProductoId: null, cantidadMinima: null, stockIdeal: null,
+            precio: null, preciosPorLista: n.precios.map(pr => ({ listaId: new ObjectId(pr.listaId), precio: pr.nuevo })),
+            costoActualizadoEn: ahora, costoProveedorId: prov._id, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
+          };
+          const cf = n.precios.find(pr => pr.predeterminada);
+          if (cf) doc.precio = cf.nuevo;
+          const ins = await db.collection('productos_catalogo').insertOne(doc);
+          creados.push({ codigo: n.codigo, sku, nombre });
+          if (calc.deposito && n.stock != null && n.stock > 0) {
+            await db.collection('stock_actual').updateOne(Object.assign({ productoId: ins.insertedId, depositoId: calc.deposito._id }, filtroOrg(req)), { $set: { cantidad: n.stock, actualizadoEn: ahora }, $setOnInsert: Object.assign({ productoId: ins.insertedId, depositoId: calc.deposito._id }, filtroOrg(req)) }, { upsert: true });
+            await db.collection('stock_movimientos').insertOne({ productoId: ins.insertedId, depositoId: calc.deposito._id, tipo: 'ingreso', cantidad: n.stock, motivo: `Alta desde lista de ${prov.razonSocial} (0 → ${n.stock})`, sucursal: '', codigoExterno: '', observaciones: '', usuarioNombre, fecha: ahora, orgId: req.orgId, createdAt: ahora });
+          }
+        }
+      }
       // productos que el proveedor dejó de mandar → stock 0
       if (calc.aCero.length) {
         const opsStock = [], movs = [];
@@ -451,7 +513,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           await db.collection('stock_movimientos').insertMany(movs.slice(i, i + TANDA), { ordered: false });
         }
       }
-      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos });
+      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados });
       await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
       return resumen;
     });
