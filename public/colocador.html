@@ -124,8 +124,11 @@ let ADMIN_TOKEN = localStorage.getItem('obras_admin_token') || '';
 // Si NO hay PIN pero sí una sesión de Oficina (rol protegido, ya logueado
 // en inicio.html), se entra directo en "modo admin": sin pedir PIN, viendo
 // TODAS las obras de todos los colocadores en vez de las de uno solo.
-const ADMIN_MODE = !COLOCADOR_TOKEN && !!ADMIN_TOKEN;
+// (se confirma más abajo con /api/usuarios/me: si el administrador tiene además un PIN de colocador viejo
+// guardado en este navegador, gana la sesión de administrador y ve TODAS las obras)
+let ADMIN_MODE = !COLOCADOR_TOKEN && !!ADMIN_TOKEN;
 let TOKEN = COLOCADOR_TOKEN || ADMIN_TOKEN;
+let FILTRO_COLOCADOR = '';
 let NOMBRE = localStorage.getItem('colocador_nombre') || '';
 
 // La obra se maneja como una sola, aunque tenga varios productos adentro
@@ -175,7 +178,17 @@ function iniciar(){
   document.getElementById('saludo').textContent = ADMIN_MODE ? 'Todas las obras' : ('Hola, ' + NOMBRE);
   cargarMisObras();
 }
-if (TOKEN) iniciar(); else document.getElementById('loginScreen').classList.remove('hidden');
+async function arrancar(){
+  if (ADMIN_TOKEN && COLOCADOR_TOKEN) {
+    try{
+      const r = await fetch('/api/usuarios/me', {headers:{'x-admin-token':ADMIN_TOKEN}});
+      const me = r.ok ? await r.json() : null;
+      if (me && me.rol && me.rol.protegido) { ADMIN_MODE = true; TOKEN = ADMIN_TOKEN; }
+    }catch(e){ /* sin red: se sigue como colocador */ }
+  }
+  if (TOKEN) iniciar(); else document.getElementById('loginScreen').classList.remove('hidden');
+}
+arrancar();
 
 function cambiarTabObras(historial){
   VIENDO_HISTORIAL = historial;
@@ -201,7 +214,18 @@ async function cargarMisObras(){
       : '<p class="muted">No tenés obras asignadas por ahora.</p>';
     return;
   }
-  document.getElementById('listaObras').innerHTML = obras.map(o => {
+  let filtroHtml = '';
+  if (ADMIN_MODE){
+    const nombres = [...new Set(obras.flatMap(o => o.tareas.map(t => t.colocadorNombre || '(sin asignar)')))].sort((a,b) => a.localeCompare(b, 'es'));
+    if (FILTRO_COLOCADOR && !nombres.includes(FILTRO_COLOCADOR)) FILTRO_COLOCADOR = '';
+    const total = obras.length;
+    if (FILTRO_COLOCADOR) obras = obras.filter(o => o.tareas.some(t => (t.colocadorNombre || '(sin asignar)') === FILTRO_COLOCADOR));
+    filtroHtml = `<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);font-weight:600">Colocador</label>
+      <select onchange="FILTRO_COLOCADOR=this.value;cargarMisObras()" style="width:100%;padding:8px;border-radius:8px">
+        <option value="">Todos (${total} obras)</option>${nombres.map(n => `<option value="${n}" ${n===FILTRO_COLOCADOR?'selected':''}>${n}</option>`).join('')}
+      </select></div>`;
+  }
+  document.getElementById('listaObras').innerHTML = filtroHtml + obras.map(o => {
     const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
     const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
     return `

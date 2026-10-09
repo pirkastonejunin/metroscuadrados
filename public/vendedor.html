@@ -119,6 +119,8 @@ const BASE = '/api/visitas'; // coincide con app.use('/api/visitas', visitasRout
 let TOKEN = localStorage.getItem('obras_admin_token') || ''; // misma clave que admin-visitas.html/admin-obras.html: un solo login para toda la app
 let VENDEDOR_ID = '';
 let VENDEDOR_NOMBRE = '';
+let MI_VENDEDOR_ID = '';
+let FILTRO_VENDEDOR = '';
 let ADMIN_MODE = false; // rol protegido sin vendedorId propio: ve TODAS las visitas de todos los vendedores, no solo las suyas
 let STORE_ID = null;
 let TIPOS_TRABAJO = [];
@@ -211,7 +213,10 @@ async function iniciarApp(){
     document.getElementById('sinVendedorScreen').classList.remove('hidden');
     return;
   }
-  ADMIN_MODE = !me.usuario.vendedorId;
+  // Administrador (rol protegido): siempre ve las visitas de TODOS los vendedores, tenga o no vendedor propio
+  // (con un filtro para quedarse con uno solo). Un vendedor común sigue viendo solo las suyas.
+  ADMIN_MODE = !!(me.rol && me.rol.protegido) || !me.usuario.vendedorId;
+  MI_VENDEDOR_ID = me.usuario.vendedorId || '';
   VENDEDOR_ID = me.usuario.vendedorId || '';
   VENDEDOR_NOMBRE = me.usuario.nombre;
   document.getElementById('vendedorScreen').classList.add('hidden');
@@ -247,7 +252,21 @@ async function mostrarListaVisitas(){
     pant.innerHTML = '<p class="muted">No tenés visitas agendadas por ahora.</p>';
     return;
   }
-  pant.innerHTML = VISITAS.map(v => `
+  let filtroHtml = '';
+  let lista = VISITAS;
+  if (ADMIN_MODE){
+    const vendedores = [];
+    VISITAS.forEach(v => { if (!vendedores.some(x => x.id === (v.vendedorId||''))) vendedores.push({id: v.vendedorId||'', nombre: v.vendedorNombre||'(sin asignar)'}); });
+    vendedores.sort((a,b) => a.nombre.localeCompare(b.nombre, 'es'));
+    if (FILTRO_VENDEDOR && !vendedores.some(x => x.id === FILTRO_VENDEDOR)) FILTRO_VENDEDOR = '';
+    if (FILTRO_VENDEDOR) lista = VISITAS.filter(v => (v.vendedorId||'') === FILTRO_VENDEDOR);
+    filtroHtml = `<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);font-weight:600">Vendedor</label>
+      <select onchange="FILTRO_VENDEDOR=this.value;mostrarListaVisitas()" style="width:100%;padding:8px;border-radius:8px">
+        <option value="">Todos (${VISITAS.length})</option>
+        ${vendedores.map(x => `<option value="${x.id}" ${x.id===FILTRO_VENDEDOR?'selected':''}>${x.nombre}${x.id && x.id===MI_VENDEDOR_ID ? ' (yo)' : ''} (${VISITAS.filter(v => (v.vendedorId||'')===x.id).length})</option>`).join('')}
+      </select></div>`;
+  }
+  pant.innerHTML = filtroHtml + lista.map(v => `
     <div class="card" onclick="${ADMIN_MODE ? `VENDEDOR_ID='${v.vendedorId||''}';` : ''}mostrarDetalleVisita('${v._id}')" style="cursor:pointer">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div class="visita-titulo">${v.cliente.nombre}</div>
