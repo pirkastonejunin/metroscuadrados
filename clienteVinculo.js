@@ -43,4 +43,30 @@ async function buscarClienteUnico(db, orgId, datos) {
   catch (e) { return null; } // el vínculo es accesorio: nunca debe romper la creación de la obra
 }
 
-module.exports = { elegirClienteUnico, clientesActivos, buscarClienteUnico, norm, digitos };
+// Cliente de una VISITA para armar su presupuesto comercial (9/10/2026, pedido de Mato: "debería tomar el
+// mismo cliente del nombre de la visita"). Busca por nombre (prefiere el que también coincide en teléfono);
+// si no existe ninguno, crea el cliente con los datos de la visita. A diferencia de las obras, acá SÍ se crea.
+async function clienteParaVisita(db, orgId, datos) {
+  datos = datos || {};
+  const n = norm(datos.nombre), t = digitos(datos.telefono);
+  if (!n) { const e = new Error('La visita no tiene nombre de cliente.'); e.status = 400; throw e; }
+  const todos = await clientesActivos(db, orgId);
+  const porNombre = todos.filter(c => nombresDe(c).includes(n));
+  if (porNombre.length) {
+    const conTel = t.length >= 6 ? porNombre.find(c => telefonosDe(c).includes(t)) : null;
+    return { clienteId: (conTel || porNombre[0])._id, creado: false, ambiguo: porNombre.length > 1 && !conTel };
+  }
+  if (t.length >= 6) {
+    const porTel = todos.filter(c => telefonosDe(c).includes(t));
+    if (porTel.length === 1) return { clienteId: porTel[0]._id, creado: false, ambiguo: false };
+  }
+  const ahora = new Date();
+  const r = await db.collection('clientes').insertOne({
+    apellidoRazonSocial: String(datos.nombre).trim(), categoriaFiscal: 'consumidor_final', telefono: String(datos.telefono || '').trim(),
+    domicilio: String(datos.direccion || '').trim(), localidad: String(datos.localidad || '').trim(),
+    origenCliente: 'Visita', activo: true, orgId, createdAt: ahora, updatedAt: ahora
+  });
+  return { clienteId: r.insertedId, creado: true, ambiguo: false };
+}
+
+module.exports = { elegirClienteUnico, clientesActivos, buscarClienteUnico, clienteParaVisita, norm, digitos };

@@ -883,6 +883,21 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', authVendedor
       const visita = await visitaDelVendedor(db, req.params.id, req.params.vendedorId);
       const set = { presupuesto, updatedAt: new Date() };
       if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
+      // Un solo presupuesto: se crea/actualiza el del panel comercial enlazado a esta visita.
+      // Si falla, el presupuesto de la visita igual queda guardado (el vínculo se reintenta al guardar de nuevo).
+      try {
+        const { clienteParaVisita } = require('./clienteVinculo');
+        const cli = await clienteParaVisita(db, visita.orgId, visita.cliente);
+        const cl = await db.collection('clientes').findOne({ _id: cli.clienteId }, { projection: { apellidoRazonSocial: 1, nombre: 1 } });
+        const pc = await require('./presupuestos').sincronizarDesdeVisita(db, {
+          visita, clienteId: cli.clienteId, clienteNombre: (cl && (cl.apellidoRazonSocial || cl.nombre)) || String(visita.cliente.nombre || ''),
+          items: itemsFinales, formasPago, notas: notas || '', usuarioNombre: visita.vendedorNombre || ''
+        });
+        set.presupuestoComercialId = pc.presupuestoId;
+        set.presupuestoComercialNumero = pc.numero;
+        set.presupuestoComercialEstado = pc.estado;
+        set.presupuestoComercialCongelado = !!pc.congelado;
+      } catch (e) { set.presupuestoComercialError = e.message; console.error('Presupuesto comercial de la visita:', e.message); }
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
       return db.collection('visitas').findOne({ _id: visita._id });
     });

@@ -326,7 +326,7 @@ function renderPresupuestos(){
   body.innerHTML = lista.map(p => `
     <tr>
       <td>${fechaCorta(p.fecha)}</td>
-      <td><strong>${String(p.numero).padStart(5,'0')}</strong></td>
+      <td><strong>${String(p.numero).padStart(5,'0')}</strong>${p.origenVisita ? `<div class="muted" style="font-size:11px">Visita #${p.origenVisita.numero}</div>` : ''}</td>
       <td>${escapeHtml(p.clienteNombre || '—')}</td>
       <td class="muted">${escapeHtml(p.vendedor || '—')}</td>
       <td>${money(p.total)}</td>
@@ -893,6 +893,7 @@ function verPresupuesto(id){
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Presupuesto Nº ${String(p.numero).padStart(5,'0')} <span class="pill ${p.estado}" style="margin-left:8px">${ESTADO_LABEL[p.estado]||p.estado}</span></h2>
+        ${p.origenVisita ? `<p class="muted" style="margin:-6px 0 8px">Viene de la visita #${p.origenVisita.numero}${p.origenVisita.direccion ? ' — ' + escapeHtml(p.origenVisita.direccion) : ''}. Mientras esté presupuestado o en seguimiento, los cambios que haga el vendedor en la visita actualizan este presupuesto.</p>` : ''}
         <p class="muted" style="margin-top:-8px">${escapeHtml(p.clienteNombre)} · ${fechaCorta(p.fecha)} · Vendedor: ${escapeHtml(p.vendedor||'—')}</p>
         ${p.convertidoEnVentaId ? `<p class="muted">Convertido en Venta Nº ${String(p.convertidoEnVentaNumero).padStart(5,'0')}.</p>` : ''}
         <table>

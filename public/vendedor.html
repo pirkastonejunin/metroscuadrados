@@ -310,6 +310,8 @@ async function mostrarDetalleVisita(id){
       resumen = `<b>Presupuesto (a mano)</b><br>` +
         v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
         `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` + formasPagoHtml +
+        (v.presupuestoComercialNumero ? `<div class="muted" style="margin-top:6px">Es el presupuesto comercial Nº ${String(v.presupuestoComercialNumero).padStart(5,'0')}${v.presupuestoComercialCongelado ? ' — ya está aprobado/cerrado en el panel comercial, los cambios nuevos no lo modifican' : ' — se actualiza solo si lo modificás'}.</div>` : '') +
+        (v.presupuestoComercialError ? `<div class="err" style="margin-top:6px">No se pudo vincular con el panel comercial: ${v.presupuestoComercialError}</div>` : '') +
         `<div class="botonera-pdf">
           <button class="btn small secondary" type="button" onclick="abrirPdfConAuth('/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf')">Ver PDF llave en mano</button>
           <button class="btn small secondary" type="button" onclick="abrirPdfConAuth('/api/visitas/vendedor/${VENDEDOR_ID}/visitas/${v._id}/presupuesto-pdf?vista=detalle')">Ver PDF completo</button>

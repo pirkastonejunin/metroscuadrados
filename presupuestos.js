@@ -658,4 +658,45 @@ router.get('/:id/imprimir', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Presupuesto de una VISITA (9/10/2026, pedido de Mato): cuando el vendedor arma el presupuesto a mano en la
+// visita (sin cotizador), se crea acá UN solo presupuesto comercial enlazado a la visita, para no tener dos
+// presupuestos distintos. Mientras esté "presupuestado" o "en seguimiento" y no se haya convertido en venta,
+// cada cambio de la visita actualiza ESE mismo presupuesto; una vez aprobado/rechazado/convertido queda
+// congelado y la visita solo muestra el vínculo.
+// ---------------------------------------------------------------------------
+async function sincronizarDesdeVisita(db, { visita, clienteId, clienteNombre, items, formasPago, notas, usuarioNombre }) {
+  const orgId = visita.orgId;
+  const itemsPres = items.map(it => {
+    const nombre = [it.tipoTrabajo, it.descripcion].filter(Boolean).join(' — ');
+    return { productoId: null, sku: null, nombre, cantidad: it.cantidad, precioUnitario: it.valor, subtotal: round2(it.cantidad * it.valor) };
+  });
+  const subtotal = round2(itemsPres.reduce((s, i) => s + i.subtotal, 0));
+  const obs = [
+    'Visita #' + visita.numero + (visita.cliente && visita.cliente.direccion ? ' — ' + visita.cliente.direccion : ''),
+    notas ? 'Notas: ' + notas : '',
+    (formasPago || []).length ? 'Formas de pago: ' + formasPago.map(f => `${f.nombre} (${f.tipo === 'recargo' ? '+' : '-'}${f.porcentaje}%) $${f.total}`).join(' · ') : ''
+  ].filter(Boolean).join('\n');
+  const ahora = new Date();
+  const existente = visita.presupuestoComercialId ? await db.collection('presupuestos').findOne({ _id: visita.presupuestoComercialId }) : null;
+  if (existente) {
+    const abierto = ['presupuestado', 'en_seguimiento'].includes(existente.estado) && !existente.convertidoEnVentaId;
+    if (!abierto) return { presupuestoId: existente._id, numero: existente.numero, estado: existente.estado, congelado: true };
+    await db.collection('presupuestos').updateOne({ _id: existente._id }, { $set: { clienteId, clienteNombre, items: itemsPres, subtotal, total: calcularTotal(subtotal, existente.descuentoPorcentaje || 0, existente.descuentoMonto || 0), observaciones: obs, updatedAt: ahora } });
+    return { presupuestoId: existente._id, numero: existente.numero, estado: existente.estado, actualizado: true };
+  }
+  const numero = await proximoNumeroPresupuesto(db, orgId);
+  const doc = {
+    numero, clienteId, clienteNombre, vendedor: visita.vendedorNombre || usuarioNombre || '', fecha: ahora, moneda: 'ARS', cotizacionDolar: null,
+    items: itemsPres, descuentoPorcentaje: 0, descuentoMonto: 0, subtotal, total: subtotal, observaciones: obs,
+    estado: 'presupuestado', seguimiento: [{ fecha: ahora, estado: 'presupuestado', nota: 'Creado desde la visita #' + visita.numero, usuarioNombre: usuarioNombre || '' }],
+    proximoContactoFecha: null, googleEventId: null, googleCalendarId: null, origenCotizador: null,
+    origenVisita: { visitaId: visita._id, numero: visita.numero, direccion: (visita.cliente && visita.cliente.direccion) || '' },
+    convertidoEnVentaId: null, convertidoEnVentaNumero: null, usuarioId: null, usuarioNombre: usuarioNombre || '', orgId, createdAt: ahora, updatedAt: ahora
+  };
+  const r = await db.collection('presupuestos').insertOne(doc);
+  return { presupuestoId: r.insertedId, numero, estado: 'presupuestado', creado: true };
+}
+router.sincronizarDesdeVisita = sincronizarDesdeVisita;
+
 module.exports = router;
