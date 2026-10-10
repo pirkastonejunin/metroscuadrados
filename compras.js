@@ -1236,6 +1236,7 @@ router.post('/:id/recibir', authAdmin, async (req, res) => {
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra está anulada.');
+      if (compra.importado) throw err(400, 'Es una compra histórica importada de Dux (sin artículos): no se puede recibir.');
       if (compra.estado === 'recibida') throw err(400, 'Esta compra ya fue recibida.');
 
       await ingresarStockDeCompra(db, req, compra, depositoId);
@@ -1264,6 +1265,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra ya está anulada.');
+      if (compra.importado) throw err(400, 'Es una compra histórica importada de Dux: no se puede anular desde acá.');
 
       if (compra.stockIngresado) await egresarStockDeCompra(db, req, compra);
 

@@ -175,6 +175,7 @@
           </div>
           <div class="row" style="gap:8px">
             <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'compras.xlsx')">Exportar</button>
+            <button class="btn secondary" onclick="abrirImportarDux()">Importar de Dux</button>
             <button class="btn" onclick="abrirNuevaCompra()">+ Nueva compra</button>
           </div>
         </div>
@@ -612,7 +613,7 @@ async function cargarCompras(){
   if (!comprasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay compras cargadas todavía.</td></tr>'; return; }
   body.innerHTML = comprasCache.map(c => `
     <tr>
-      <td><strong>#${c.numero}</strong></td>
+      <td><strong>${nroImportado(c)}</strong></td>
       <td class="muted">${fechaCorta(c.fecha)}</td>
       <td>${escapeHtml(c.proveedorNombre)}</td>
       <td>${money(c.total)}</td>
@@ -1077,7 +1078,7 @@ function verDetalle(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Compra #${c.numero} <span class="pill ${c.estado}">${ESTADO_LABEL[c.estado]||c.estado}</span></h2>
+        <h2>Compra ${nroImportado(c)} <span class="pill ${c.estado}">${ESTADO_LABEL[c.estado]||c.estado}</span></h2>
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(c.proveedorNombre)} — ${fechaCorta(c.fecha)}${c.condicionPago ? ' — Condición: ' + escapeHtml(c.condicionPago) : ''}
         </p>
@@ -2107,6 +2108,67 @@ async function confirmarConvertirOrden(id){
   }
 }
 
+</script>
+
+<script>
+// Importar historial de compras de Dux (9/10/2026)
+let impDuxB64 = null;
+function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
+function abrirImportarDux(){
+  impDuxB64 = null;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar historial de compras de Dux</h2>
+        <p class="muted">Subí el archivo "Consulta De Gestion Compra" de Dux (.xls o .xlsx). Se carga como historial: sin movimientos de stock ni de caja/banco. Lo pagado y el saldo se toman de Dux. Si lo subís dos veces, no duplica.</p>
+        <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()">
+        <div class="err" id="impDuxErr"></div>
+        <div id="impDuxResumen"></div>
+        <button class="btn" id="impDuxBtn" style="margin-top:10px;display:none" onclick="aplicarImportDux()">Importar</button>
+      </div>
+    </div>`;
+}
+function leerB64(file){ return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); }); }
+async function previewImportDux(){
+  const file = document.getElementById('impDuxArchivo').files[0];
+  const errEl = document.getElementById('impDuxErr'); errEl.textContent = '';
+  document.getElementById('impDuxResumen').innerHTML = ''; document.getElementById('impDuxBtn').style.display = 'none';
+  if (!file) return;
+  document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    impDuxB64 = await leerB64(file);
+    const r = await fetch('/api/compras-import-dux/preview', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxB64})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+    const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
+    document.getElementById('impDuxResumen').innerHTML = `
+      <ul style="line-height:1.7;padding-left:18px">
+        <li><b>${d.aImportar}</b> compras para importar de ${d.filasLeidas} leídos (${d.yaImportadas} ya estaban cargados)</li>
+        <li>Período: ${f(d.desde)} a ${f(d.hasta)} — Total: <b>${m(d.totalImporte)}</b></li>
+        <li>Con saldo pendiente: ${d.conSaldo} por <b>${m(d.totalSaldo)}</b>${d.anuladas ? ' — ' + d.anuladas + ' anuladas en Dux' : ''}</li>
+        <li>Se cargan en la sucursal activa: <b>${escapeHtml(d.sucursalDestino || '-')}</b></li>
+        <li>Proveedores: ${d.proveedoresExistentes} ya existen, <b>${d.proveedoresNuevos}</b> se van a crear${d.proveedoresAmbiguos ? ', ' + d.proveedoresAmbiguos + ' coinciden con más de uno (quedan sin vincular)' : ''}</li>
+        ${d.conceptosNuevos ? '<li>Conceptos de gasto nuevos a crear: <b>' + d.conceptosNuevos + '</b></li>' : ''}
+      </ul>
+      ${d.errores.length ? '<p class="err">' + d.errores.length + ' fila(s) con error (se saltean):</p><ul class="muted">' + d.errores.slice(0,10).map(e => '<li>Fila ' + e.fila + ': ' + escapeHtml(e.motivo) + '</li>').join('') + '</ul>' : ''}`;
+    if (d.aImportar > 0) document.getElementById('impDuxBtn').style.display = '';
+  }catch(e){ errEl.textContent = e.message; document.getElementById('impDuxResumen').innerHTML = ''; }
+}
+async function aplicarImportDux(){
+  const btn = document.getElementById('impDuxBtn'); const errEl = document.getElementById('impDuxErr');
+  if (btn.disabled || !impDuxB64) return;
+  btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/compras-import-dux/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxB64})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} compras importados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
+    btn.style.display = 'none';
+    if (typeof cargarCompras === 'function') cargarCompras();
+  }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
+}
 </script>
 </body>
 </html>
