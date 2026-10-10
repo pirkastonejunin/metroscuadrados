@@ -385,7 +385,7 @@ async function procesarDetalle(req, aplicar) {
           cantidad: i.cantidad, precioUnitario: i.precioUnitario, descuentoPorcentaje: i.descuentoPorcentaje, subtotal: i.subtotal,
           porcentajeIva: i.porcentajeIva, iva: i.iva, totalConIva: i.totalConIva, costoUnitario: i.costoUnitario, costoTotal: i.costoTotal };
       });
-      const base = { sucursalDux: g.sucursal, formaPagoDux: g.formaPago, duxCobros: { efectivo: round2(g.cobros.efectivo), tarjeta: round2(g.cobros.tarjeta), cheque: round2(g.cobros.cheque), cuenta: round2(g.cobros.cuenta) }, detalleDux: true, updatedAt: ahora };
+      const base = { sucursalDux: g.sucursal, formaPagoDux: g.formaPago, duxCobros: { efectivo: round2(g.cobros.efectivo), tarjeta: round2(g.cobros.tarjeta), cheque: round2(g.cobros.cheque), cuenta: round2(g.cobros.cuenta) }, detalleDux: true, detalleEstimado: false, updatedAt: ahora };
       // cantidadEntregada de cada renglón según el estado de la venta (si ya se conoce el del listado)
       const aplicarEntrega = (estado) => items.map(it => Object.assign({}, it, { cantidadEntregada: estado === 'entregada' ? it.cantidad : 0 }));
       const ex = existentes.get(clave);
@@ -662,6 +662,36 @@ router.post('/notas/aplicar', authAdmin, async (req, res) => {
   try { res.json(await procesarNotas(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Completar el detalle de las notas sin artículos a partir de la venta que corrigen (comprobante relacionado), si esa venta
+// ya tiene su detalle. Se copian los renglones proporcionalmente al total de la nota (nota/venta). Queda marcado como
+// `detalleEstimado`; cuando se cargue el detalle real de la nota, lo reemplaza. Body: { aplicar }
+router.post('/notas/completar-desde-ventas', authAdmin, async (req, res) => {
+  try {
+    const aplicar = !!(req.body && req.body.aplicar);
+    const r = await conReintento(async () => {
+      const db = await getDb(); const orgs = await orgsAccesibles(db, req);
+      const ids = orgs.map(o => o._id); if (req.orgId) ids.push(req.orgId);
+      const notas = await db.collection('ventas').find({ importado: true, orgId: { $in: ids }, tipoComprobante: { $in: ['nota_credito', 'nota_debito'] }, detalleDux: { $ne: true }, detalleEstimado: { $ne: true }, ventaRelacionadaId: { $ne: null } }).project({ total: 1, ventaRelacionadaId: 1 }).toArray();
+      const rels = await db.collection('ventas').find({ _id: { $in: [...new Set(notas.map(n => String(n.ventaRelacionadaId)))].map(x => new (require('mongodb').ObjectId)(x)) }, detalleDux: true }).project({ items: 1, total: 1, tipoComprobante: 1 }).toArray();
+      const mapa = new Map(rels.map(v => [String(v._id), v]));
+      let completadas = 0, sinVentaConDetalle = 0, totalNotas = 0; const ops = [];
+      for (const n of notas) {
+        const v = mapa.get(String(n.ventaRelacionadaId));
+        if (!v || !v.total || !(v.items || []).length) { sinVentaConDetalle++; continue; }
+        const ratio = Math.min(1, Math.abs(n.total) / Math.abs(v.total)); // una nota no devuelve más de lo vendido
+        const f = (x) => round2((x || 0) * ratio);
+        const items = v.items.map(it => Object.assign({}, it, { cantidad: Math.round((it.cantidad || 0) * ratio * 1000) / 1000, subtotal: f(it.subtotal), iva: f(it.iva), totalConIva: f(it.totalConIva), costoTotal: f(it.costoTotal) }));
+        items.forEach(it => { it.cantidadEntregada = it.cantidad; });
+        completadas++; totalNotas += n.total;
+        ops.push({ updateOne: { filter: { _id: n._id }, update: { $set: { items, detalleEstimado: true, detalleDesdeVentaId: v._id, updatedAt: new Date() } } } });
+      }
+      if (aplicar) for (let i = 0; i < ops.length; i += 500) await db.collection('ventas').bulkWrite(ops.slice(i, i + 500), { ordered: false });
+      return { notasSinDetalleConRelacionada: notas.length, completadas, sinVentaConDetalle, montoCompletado: round2(totalNotas), aplicado: aplicar };
+    });
+    res.json(r);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Cobertura del detalle por artículo: por año/mes, cuántas ventas y notas importadas ya tienen sus artículos.
 router.get('/detalle/cobertura', authAdmin, async (req, res) => {
   try {
@@ -673,12 +703,12 @@ router.get('/detalle/cobertura', authAdmin, async (req, res) => {
       { $match: { orgId: { $in: orgIds }, importado: true, estado: { $ne: 'anulada' } } },
       { $group: { _id: { y: { $year: { date: '$fecha', timezone: tz } }, m: { $month: { date: '$fecha', timezone: tz } } },
         total: { $sum: 1 }, conDetalle: { $sum: { $cond: [{ $eq: ['$detalleDux', true] }, 1, 0] } },
-        notas: { $sum: { $cond: [esNota, 1, 0] } }, notasConDetalle: { $sum: { $cond: [{ $and: [esNota, { $eq: ['$detalleDux', true] }] }, 1, 0] } },
+        notas: { $sum: { $cond: [esNota, 1, 0] } }, notasConDetalle: { $sum: { $cond: [{ $and: [esNota, { $eq: ['$detalleDux', true] }] }, 1, 0] } }, notasEstimadas: { $sum: { $cond: [{ $and: [esNota, { $ne: ['$detalleDux', true] }, { $eq: ['$detalleEstimado', true] }] }, 1, 0] } },
         montoSinDetalle: { $sum: { $cond: [{ $eq: ['$detalleDux', true] }, 0, '$total'] } },
         conRemito: { $sum: { $cond: [{ $eq: ['$entregaDux', true] }, 1, 0] } } } },
       { $sort: { '_id.y': 1, '_id.m': 1 } }
     ]).toArray();
-    res.json({ meses: filas.map(f => ({ anio: f._id.y, mes: f._id.m, total: f.total, conDetalle: f.conDetalle, sinDetalle: f.total - f.conDetalle, notas: f.notas, notasSinDetalle: f.notas - f.notasConDetalle, montoSinDetalle: round2(f.montoSinDetalle) })) });
+    res.json({ meses: filas.map(f => ({ anio: f._id.y, mes: f._id.m, total: f.total, conDetalle: f.conDetalle, sinDetalle: f.total - f.conDetalle, notas: f.notas, notasSinDetalle: f.notas - f.notasConDetalle - f.notasEstimadas, notasEstimadas: f.notasEstimadas, montoSinDetalle: round2(f.montoSinDetalle) })) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

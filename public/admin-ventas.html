@@ -2042,6 +2042,11 @@ async function abrirImportarDux(){
         <div class="err" id="impNotErr"></div>
         <div id="impNotResumen"></div>
         <button class="btn" id="impNotBtn" title="Importar notas" style="margin-top:10px;display:none" onclick="aplicarNotasDux()">Importar notas</button>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+          <p class="muted" style="margin:0 0 6px">Las notas sin artículos pueden tomarlos de la venta que corrigen (si esa venta ya tiene su detalle), en proporción al monto de la nota. Quedan marcadas como estimadas y el detalle real las reemplaza.</p>
+          <button class="btn" id="impNotCompBtn" title="Completar detalle de notas" onclick="completarNotasDesdeVentas(false)">Ver cuántas se pueden completar</button>
+          <div id="impNotCompOut" style="margin-top:8px"></div>
+        </div>
       </div>
     </div>`;
   cargarOrgsImportDux();
@@ -2195,6 +2200,16 @@ async function aplicarRemitosDux(){
   btn.disabled = false;
 }
 // Notas de crédito y débito de Dux (paso 4 del import de ventas)
+async function completarNotasDesdeVentas(aplicar){
+  const out = document.getElementById('impNotCompOut'); const btn = document.getElementById('impNotCompBtn'); btn.disabled = true; out.textContent = 'Calculando…';
+  try {
+    const r = await fetch('/api/ventas-import-dux/notas/completar-desde-ventas', {method:'POST', headers: hImpVentas(), body: JSON.stringify({aplicar})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    if (aplicar) { out.innerHTML = `<p class="ok-msg">Listo: ${d.completadas} notas completadas con artículos de su venta.</p>`; cargarCoberturaDetalleVentas && cargarCoberturaDetalleVentas(); }
+    else out.innerHTML = `<p>${d.notasSinDetalleConRelacionada} notas sin artículos tienen venta relacionada: <b>${d.completadas}</b> se pueden completar (${d.sinVentaConDetalle} no, porque su venta aún no tiene detalle).</p>` + (d.completadas ? `<button class="btn" title="Completar" onclick="completarNotasDesdeVentas(true)">Completar ${d.completadas} notas</button>` : '');
+  } catch(e) { out.innerHTML = '<span class="err">' + e.message + '</span>'; }
+  btn.disabled = false;
+}
 let impNotB64 = null, impNotFile = null;
 async function previewNotasDux(){
   const file = document.getElementById('impNotArchivo').files[0]; const errEl = document.getElementById('impNotErr'); errEl.textContent = '';
