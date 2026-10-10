@@ -2033,6 +2033,13 @@ async function abrirImportarDux(){
         <div class="err" id="impRemErr"></div>
         <div id="impRemResumen"></div>
         <button class="btn" id="impRemBtn" title="Importar remitos" style="margin-top:10px;display:none" onclick="aplicarRemitosDux()">Importar remitos</button>
+        <hr style="margin:18px 0;border:0;border-top:1px solid var(--border)">
+        <h3 style="margin:0 0 6px;font-size:15px">4. Notas de crédito y débito</h3>
+        <p class="muted">Subí el archivo "Listado de Nota Crédito Débito de Venta" de Dux. Se cargan como historial (sin stock, caja ni saldo) con su venta relacionada. Las que ya cargó el detalle por artículo solo se completan; las que faltan se crean en la sucursal elegida arriba y el detalle después las acomoda. Se puede repetir sin duplicar.</p>
+        <input type="file" id="impNotArchivo" accept=".xls,.xlsx" onchange="previewNotasDux()">
+        <div class="err" id="impNotErr"></div>
+        <div id="impNotResumen"></div>
+        <button class="btn" id="impNotBtn" title="Importar notas" style="margin-top:10px;display:none" onclick="aplicarNotasDux()">Importar notas</button>
       </div>
     </div>`;
   cargarOrgsImportDux();
@@ -2179,6 +2186,37 @@ async function aplicarRemitosDux(){
     const r = await fetch('/api/ventas-import-dux/remitos/aplicar', {method:'POST', headers: h, body: JSON.stringify({archivoBase64: impRemB64, orgId: base, mapaSucursales: impRemMapa()})});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
     document.getElementById('impRemResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertados} remitos importados (${d.vinculadosAVenta} vinculados), ${d.ventasActualizadas} ventas con la entrega actualizada${d.clientesCreados ? ' y ' + d.clientesCreados + ' clientes creados' : ''}.</p>`;
+    btn.style.display = 'none'; if (typeof cargarVentas === 'function') cargarVentas();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
+}
+// Notas de crédito y débito de Dux (paso 4 del import de ventas)
+let impNotB64 = null, impNotFile = null;
+async function previewNotasDux(){
+  const file = document.getElementById('impNotArchivo').files[0]; const errEl = document.getElementById('impNotErr'); errEl.textContent = '';
+  const out = document.getElementById('impNotResumen'); document.getElementById('impNotBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impNotB64 || file !== impNotFile) { impNotB64 = await leerArchivoBase64(file); impNotFile = file; }
+    const r = await fetch('/api/ventas-import-dux/notas/preview', {method:'POST', headers: hImpVentas(), body: JSON.stringify({archivoBase64: impNotB64, orgId: orgImpVentas()})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const fd = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+    const $ = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits: 0});
+    out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">
+      <li><b>${d.filas}</b> notas (${fd(d.desde)} a ${fd(d.hasta)}): ${d.creditos} de crédito (${$(d.totalCreditos)}) y ${d.debitos} de débito (${$(d.totalDebitos)}).</li>
+      <li>${d.aImportar} nuevas, ${d.yaCargadas} ya estaban cargadas por el detalle (se completan). ${d.conVentaRelacionada} se vinculan a su venta${d.sinVentaRelacionada ? `; ${d.sinVentaRelacionada} no tienen comprobante relacionado` : ''}.</li>
+      <li>Clientes: ${d.clientesExistentes} ya existen, <b>${d.clientesNuevos}</b> se van a crear${d.clientesAmbiguos ? `, ${d.clientesAmbiguos} coinciden con más de uno` : ''}.</li>
+      <li>Las nuevas se cargan en: <b>${escapeHtml(d.sucursalDestino || '-')}</b>.</li></ul>`;
+    if (d.aImportar > 0 || d.yaCargadas > 0) document.getElementById('impNotBtn').style.display = '';
+  }catch(e){ errEl.textContent = e.message; out.innerHTML = ''; }
+}
+async function aplicarNotasDux(){
+  const btn = document.getElementById('impNotBtn'), errEl = document.getElementById('impNotErr');
+  if (btn.disabled || !impNotB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/ventas-import-dux/notas/aplicar', {method:'POST', headers: hImpVentas(), body: JSON.stringify({archivoBase64: impNotB64, orgId: orgImpVentas()})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impNotResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} notas importadas, ${d.actualizadas} completadas${d.clientesCreados ? ' y ' + d.clientesCreados + ' clientes creados' : ''}.</p>`;
     btn.style.display = 'none'; if (typeof cargarVentas === 'function') cargarVentas();
   }catch(e){ errEl.textContent = e.message; }
   btn.disabled = false;

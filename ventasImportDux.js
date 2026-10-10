@@ -565,6 +565,103 @@ router.post('/remitos/aplicar', authAdmin, async (req, res) => {
   try { res.json(await procesarRemitosDux(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// NOTAS DE CRÉDITO Y DÉBITO (Dux: "Listado de Nota Crédito Débito de Venta"). Una línea por nota, con total, lo aplicado y el
+// comprobante relacionado (la venta que corrigen). Se guardan en `ventas` (tipoComprobante nota_credito / nota_debito) como
+// historial: sin stock ni caja ni cuenta corriente. Si el detalle por artículo ya las cargó (NCX-/NDX-/NCA-…), solo se
+// completan (aplicado, venta relacionada, observaciones); las que faltan se crean sin artículos en la sucursal elegida
+// (el detalle por artículo después las completa y las pasa a su sucursal). Repetible sin duplicar.
+// Rutas: POST /notas/preview y /notas/aplicar   body: { archivoBase64, orgId }
+// ---------------------------------------------------------------------------
+function leerNotas(base64) {
+  if (!base64) throw err(400, 'Falta el archivo');
+  const buf = Buffer.from(String(base64).replace(/^data:[^,]*,/, ''), 'base64');
+  let wb;
+  try { wb = XLSX.read(buf, { type: 'buffer', cellDates: true }); } catch (e) { throw err(400, 'No se pudo leer el archivo: ¿es el Excel de Dux (.xls / .xlsx)?'); }
+  const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+  const h = filas.findIndex(f => f && f.some(c => norm(c) === 'tipo de comprobante') && f.some(c => norm(c) === 'comprobante'));
+  if (h < 0) throw err(400, 'No encontré las columnas Tipo de Comprobante y Comprobante. Tiene que ser "Listado de Nota Crédito Débito de Venta" de Dux.');
+  const enc = filas[h].map(norm); const c = (n) => enc.indexOf(n);
+  const idx = { tipo: c('tipo de comprobante'), comp: c('comprobante'), fecha: c('fecha'), cli: c('cliente'), total: c('total'), pesos: c('total pesos'), aplic: c('aplicado / cobrado'), vend: c('vendedor'), rel: c('comprobantes relacionados'), obs: c('observaciones'), anula: c('fecha anula') };
+  if (idx.cli < 0 || idx.tipo < 0) throw err(400, 'Faltan columnas (Tipo de Comprobante o Cliente).');
+  const txt = (f, k) => (idx[k] >= 0 && f[idx[k]] != null) ? String(f[idx[k]]).trim() : '';
+  const notas = [], errores = [];
+  for (let i = h + 1; i < filas.length; i++) {
+    const f = filas[i];
+    if (!f || f.every(x => x == null || x === '')) continue;
+    const esNC = /CREDITO/i.test(txt(f, 'tipo')); const fecha = parsearFecha(f[idx.fecha]); const cliente = txt(f, 'cli');
+    if (!fecha || !cliente) { errores.push({ fila: i + 1, motivo: 'Falta fecha o cliente' }); continue; }
+    const comp = txt(f, 'comp'); const m = comp.match(/^([A-Z])-(\d{1,5})-(\d{1,8})$/);
+    const pref = (esNC ? 'NC' : 'ND') + (m ? m[1] : (comp.match(/^([A-Z])/) || ['X'])[1]);
+    const total = round2(Math.abs(numero(f[idx.pesos >= 0 ? idx.pesos : idx.total]) || numero(f[idx.total])));
+    const rm = txt(f, 'rel').match(/^([A-Z])-(\d{1,5})-(\d{1,8})$/);
+    notas.push({ fila: i + 1, esNC, pref, comprobante: m ? pref + '-' + m[2] + '-' + m[3] : (comp || pref) + ' (s/n)', completo: !!m, nro: m ? Number(m[3]) : 0, letra: m && m[1] !== 'X' ? m[1] : null,
+      fecha, cliente, total, aplicado: round2(Math.abs(numero(f[idx.aplic]))), vendedor: txt(f, 'vend'), observaciones: txt(f, 'obs'),
+      relacionada: rm ? (rm[1] === 'X' ? 'CX' : 'F' + rm[1]) + '-' + rm[2] + '-' + rm[3] : '', relacionadaOriginal: txt(f, 'rel'), anulada: !!txt(f, 'anula') });
+  }
+  return { notas, errores };
+}
+const claveNota = (n) => n.completo ? 'dux:' + n.comprobante : 'dux:nota-sn:' + n.pref + ':' + n.fecha.toISOString().slice(0, 10) + ':' + norm(n.cliente) + ':' + n.total.toFixed(2) + ':' + n.fila;
+async function procesarNotas(req, aplicar) {
+  if (!req.orgId) { const v = req.body && req.body.orgId; if (v && /^[0-9a-f]{24}$/i.test(String(v))) req.orgId = new (require('mongodb').ObjectId)(String(v)); }
+  if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
+  const { notas, errores } = leerNotas(req.body && req.body.archivoBase64);
+  if (!notas.length) throw err(400, 'El archivo no tiene notas.');
+  return conReintento(async () => {
+    const db = await getDb(); const orgId = req.orgId; const ahora = new Date();
+    const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    if (!orgIds.some(x => String(x) === String(orgId))) orgIds.push(orgId);
+    const claves = notas.map(claveNota);
+    const existentes = new Map((await db.collection('ventas').find({ orgId: { $in: orgIds }, claveImport: { $in: claves } }).project({ claveImport: 1 }).toArray()).map(x => [x.claveImport, x]));
+    const nuevas = notas.filter(n => !existentes.has(claveNota(n)));
+    const rels = [...new Set(notas.map(n => n.relacionada).filter(Boolean).map(r => 'dux:' + r))];
+    const ventasRel = new Map((rels.length ? await db.collection('ventas').find({ orgId: { $in: orgIds }, claveImport: { $in: rels } }).project({ claveImport: 1 }).toArray() : []).map(x => [x.claveImport, x._id]));
+    const resolver = crearResolverClientes(db, ahora);
+    for (const n of nuevas) await resolver.clasificar(orgId, n.cliente);
+    const t = resolver.totales();
+    const suma = (arr) => round2(arr.reduce((a, n) => a + n.total, 0)); const porAnio = {};
+    notas.forEach(n => { const y = n.fecha.getUTCFullYear(); porAnio[y] = porAnio[y] || { nc: 0, nd: 0 }; porAnio[y][n.esNC ? 'nc' : 'nd']++; });
+    const resumen = {
+      filas: notas.length, creditos: notas.filter(n => n.esNC).length, debitos: notas.filter(n => !n.esNC).length,
+      totalCreditos: suma(notas.filter(n => n.esNC)), totalDebitos: suma(notas.filter(n => !n.esNC)), porAnio,
+      desde: notas.reduce((a, n) => (!a || n.fecha < a ? n.fecha : a), null), hasta: notas.reduce((a, n) => (!a || n.fecha > a ? n.fecha : a), null),
+      aImportar: nuevas.length, yaCargadas: notas.length - nuevas.length, conVentaRelacionada: notas.filter(n => n.relacionada && ventasRel.has('dux:' + n.relacionada)).length, sinVentaRelacionada: notas.filter(n => !n.relacionada).length,
+      sinNumeroCompleto: notas.filter(n => !n.completo).length, anuladas: notas.filter(n => n.anulada).length,
+      clientesExistentes: t.existentes, clientesNuevos: t.nuevos, clientesAmbiguos: t.ambiguos,
+      sucursalDestino: (orgs.find(o => String(o._id) === String(orgId)) || {}).nombre || '', errores
+    };
+    if (!aplicar) return resumen;
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    const clientesCreados = await resolver.crearNuevos();
+    const docs = nuevas.map(n => ({
+      numero: n.nro, numeroOriginal: n.completo ? n.comprobante : n.comprobante, importado: true, origen: 'dux', claveImport: claveNota(n),
+      tipoComprobante: n.esNC ? 'nota_credito' : 'nota_debito', letra: n.letra, esFiscal: false,
+      clienteId: resolver.id(orgId, n.cliente), clienteNombre: n.cliente, vendedor: n.vendedor, fecha: n.fecha, moneda: 'ARS',
+      listaPrecioId: null, cotizacionDolar: null, tipoEntrega: null, depositoId: null, stockComprometido: false, estado: n.anulada ? 'anulada' : 'entregada', estadoRemitoDux: '',
+      items: [{ productoId: null, sku: null, nombre: (n.esNC ? 'Nota de crédito' : 'Nota de débito') + ' histórica Dux (sin detalle)', cantidad: 1, precioUnitario: n.total, subtotal: n.total, cantidadEntregada: 1 }],
+      descuentoPorcentaje: 0, descuentoMonto: 0, subtotal: n.total, total: n.total, fiscal: null, fiscalEstado: null, fiscalMensaje: null,
+      pagos: [], totalCobrado: n.total, saldoPendiente: 0, duxCobrado: n.aplicado, duxSaldo: 0, observaciones: n.observaciones,
+      ventaRelacionadaId: n.relacionada ? (ventasRel.get('dux:' + n.relacionada) || null) : null, comprobanteRelacionado: n.relacionadaOriginal || '',
+      stockDescontado: false, stockDescontadoEn: null, remitoId: null, remitoNumero: null, remitosIds: [], entregadaEn: n.fecha,
+      anuladaEn: n.anulada ? n.fecha : null, anuladaPor: null, anuladaMotivo: null, usuarioNombre, orgId, createdAt: n.fecha, updatedAt: ahora
+    }));
+    let insertadas = 0;
+    for (let i = 0; i < docs.length; i += 500) { await db.collection('ventas').insertMany(docs.slice(i, i + 500), { ordered: false }); insertadas += Math.min(500, docs.length - i); }
+    const ops = [];
+    notas.forEach(n => { const ex = existentes.get(claveNota(n)); if (!ex) return;
+      ops.push({ updateOne: { filter: { _id: ex._id }, update: { $set: { duxCobrado: n.aplicado, ventaRelacionadaId: n.relacionada ? (ventasRel.get('dux:' + n.relacionada) || null) : null, comprobanteRelacionado: n.relacionadaOriginal || '', updatedAt: ahora } } } }); });
+    let actualizadas = 0;
+    for (let i = 0; i < ops.length; i += 500) { const r = await db.collection('ventas').bulkWrite(ops.slice(i, i + 500), { ordered: false }); actualizadas += r.modifiedCount; }
+    return Object.assign(resumen, { insertadas, actualizadas, clientesCreados });
+  });
+}
+router.post('/notas/preview', authAdmin, async (req, res) => {
+  try { res.json(await procesarNotas(req, false)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/notas/aplicar', authAdmin, async (req, res) => {
+  try { res.json(await procesarNotas(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Al arrancar corrige las ventas ya importadas (fecha de creación = fecha original).
 setTimeout(() => { getDb().then(alinearCreatedAt).catch(() => {}); }, 20000).unref();
 
