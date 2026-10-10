@@ -519,4 +519,25 @@ router.post('/detalle/aplicar', authAdmin, async (req, res) => {
   try { res.json(await procesarDetalleCompras(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Cobertura: por año/mes, cuántas compras y gastos importados ya tienen el detalle por artículo.
+router.get('/detalle/cobertura', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb(); const orgs = await orgsAccesibles(db, req);
+    const orgIds = orgs.map(o => o._id);
+    if (req.orgId && !orgIds.some(x => String(x) === String(req.orgId))) orgIds.push(req.orgId);
+    const out = {};
+    for (const col of ['compras', 'gastos']) {
+      const filas = await db.collection(col).aggregate([
+        { $match: { orgId: { $in: orgIds }, importado: true, estado: { $ne: 'anulada' } } },
+        { $group: { _id: { y: { $year: { date: '$fecha', timezone: 'America/Argentina/Buenos_Aires' } }, m: { $month: { date: '$fecha', timezone: 'America/Argentina/Buenos_Aires' } } },
+          total: { $sum: 1 }, conDetalle: { $sum: { $cond: [{ $eq: ['$detalleDux', true] }, 1, 0] } }, monto: { $sum: '$total' },
+          montoSin: { $sum: { $cond: [{ $eq: ['$detalleDux', true] }, 0, '$total'] } } } },
+        { $sort: { '_id.y': 1, '_id.m': 1 } }
+      ]).toArray();
+      out[col] = filas.map(f => ({ anio: f._id.y, mes: f._id.m, total: f.total, conDetalle: f.conDetalle, sinDetalle: f.total - f.conDetalle, monto: round2(f.monto), montoSinDetalle: round2(f.montoSin) }));
+    }
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;
