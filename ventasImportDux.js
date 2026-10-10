@@ -671,11 +671,22 @@ router.post('/notas/completar-desde-ventas', authAdmin, async (req, res) => {
     const r = await conReintento(async () => {
       const db = await getDb(); const orgs = await orgsAccesibles(db, req);
       const ids = orgs.map(o => o._id); if (req.orgId) ids.push(req.orgId);
-      const notas = await db.collection('ventas').find({ importado: true, orgId: { $in: ids }, tipoComprobante: { $in: ['nota_credito', 'nota_debito'] }, detalleDux: { $ne: true }, detalleEstimado: { $ne: true }, ventaRelacionadaId: { $ne: null } }).project({ total: 1, ventaRelacionadaId: 1 }).toArray();
-      const rels = await db.collection('ventas').find({ _id: { $in: [...new Set(notas.map(n => String(n.ventaRelacionadaId)))].map(x => new (require('mongodb').ObjectId)(x)) }, detalleDux: true }).project({ items: 1, total: 1, tipoComprobante: 1 }).toArray();
+      const { ObjectId } = require('mongodb');
+      const base = { importado: true, orgId: { $in: ids }, tipoComprobante: { $in: ['nota_credito', 'nota_debito'] } };
+      const totalNotas0 = await db.collection('ventas').countDocuments(base);
+      const conDetalleReal = await db.collection('ventas').countDocuments(Object.assign({}, base, { detalleDux: true }));
+      const notas = await db.collection('ventas').find(Object.assign({}, base, { detalleDux: { $ne: true }, detalleEstimado: { $ne: true } })).project({ total: 1, ventaRelacionadaId: 1, comprobanteRelacionado: 1, orgId: 1 }).toArray();
+      // si la nota quedó sin vínculo (la venta se cargó después), se reconstruye con el comprobante relacionado ("A-00001-00001234" → dux:FA-…)
+      const claveRel = (txtRel) => { const m = String(txtRel || '').match(/^([A-Z])-(\d{1,5})-(\d{1,8})$/); return m ? 'dux:' + (m[1] === 'X' ? 'CX' : 'F' + m[1]) + '-' + m[2] + '-' + m[3] : null; };
+      const sinVinculo = notas.filter(n => !n.ventaRelacionadaId && claveRel(n.comprobanteRelacionado));
+      const porClave = new Map();
+      if (sinVinculo.length) (await db.collection('ventas').find({ orgId: { $in: ids }, claveImport: { $in: [...new Set(sinVinculo.map(n => claveRel(n.comprobanteRelacionado)))] } }).project({ claveImport: 1 }).toArray()).forEach(v => porClave.set(v.claveImport, v._id));
+      notas.forEach(n => { if (!n.ventaRelacionadaId) { const id = porClave.get(claveRel(n.comprobanteRelacionado)); if (id) n.ventaRelacionadaId = id; } });
+      const conVinculo = notas.filter(n => n.ventaRelacionadaId);
+      const rels = conVinculo.length ? await db.collection('ventas').find({ _id: { $in: [...new Set(conVinculo.map(n => String(n.ventaRelacionadaId)))].map(x => new ObjectId(x)) }, detalleDux: true }).project({ items: 1, total: 1 }).toArray() : [];
       const mapa = new Map(rels.map(v => [String(v._id), v]));
       let completadas = 0, sinVentaConDetalle = 0, totalNotas = 0; const ops = [];
-      for (const n of notas) {
+      for (const n of conVinculo) {
         const v = mapa.get(String(n.ventaRelacionadaId));
         if (!v || !v.total || !(v.items || []).length) { sinVentaConDetalle++; continue; }
         const ratio = Math.min(1, Math.abs(n.total) / Math.abs(v.total)); // una nota no devuelve más de lo vendido
@@ -683,10 +694,10 @@ router.post('/notas/completar-desde-ventas', authAdmin, async (req, res) => {
         const items = v.items.map(it => Object.assign({}, it, { cantidad: Math.round((it.cantidad || 0) * ratio * 1000) / 1000, subtotal: f(it.subtotal), iva: f(it.iva), totalConIva: f(it.totalConIva), costoTotal: f(it.costoTotal) }));
         items.forEach(it => { it.cantidadEntregada = it.cantidad; });
         completadas++; totalNotas += n.total;
-        ops.push({ updateOne: { filter: { _id: n._id }, update: { $set: { items, detalleEstimado: true, detalleDesdeVentaId: v._id, updatedAt: new Date() } } } });
+        ops.push({ updateOne: { filter: { _id: n._id }, update: { $set: { items, detalleEstimado: true, detalleDesdeVentaId: v._id, ventaRelacionadaId: n.ventaRelacionadaId, updatedAt: new Date() } } } });
       }
       if (aplicar) for (let i = 0; i < ops.length; i += 500) await db.collection('ventas').bulkWrite(ops.slice(i, i + 500), { ordered: false });
-      return { notasSinDetalleConRelacionada: notas.length, completadas, sinVentaConDetalle, montoCompletado: round2(totalNotas), aplicado: aplicar };
+      return { notasTotales: totalNotas0, notasConDetalleReal: conDetalleReal, notasSinDetalle: notas.length, sinComprobanteRelacionado: notas.length - conVinculo.length, notasSinDetalleConRelacionada: conVinculo.length, completadas, sinVentaConDetalle, montoCompletado: round2(totalNotas), aplicado: aplicar };
     });
     res.json(r);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
