@@ -2004,7 +2004,7 @@ async function mpIniciar(id, tipo){
 // Importar historial de ventas de Dux (9/10/2026): Excel "consulta_ventas". Primero una vista previa, después se aplica.
 // ---------------------------------------------------------------------
 let impDuxBase64 = null;
-function abrirImportarDux(){
+async function abrirImportarDux(){
   impDuxBase64 = null;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
@@ -2013,7 +2013,9 @@ function abrirImportarDux(){
         <h2>Importar historial de Dux</h2>
         <h3 style="margin:0 0 6px;font-size:15px">1. Listado de ventas</h3>
         <p class="muted">Subí el listado de ventas que exporta Dux (consulta_ventas, .xls o .xlsx). Se cargan como historial: sin detalle de artículos, sin mover stock y sin tocar la cuenta corriente. Si lo subís dos veces, no duplica.</p>
-        <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()">
+        <label>Sucursal donde se cargan las ventas nuevas</label>
+        <select id="impDuxOrg" onchange="previewImportDux()"><option value="">Cargando…</option></select>
+                <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()">
         <div class="err" id="impDuxErr"></div>
         <div id="impDuxResumen"></div>
         <button class="btn" id="impDuxBtn" style="margin-top:10px;display:none" onclick="aplicarImportDux()">Importar</button>
@@ -2033,7 +2035,16 @@ function abrirImportarDux(){
         <button class="btn" id="impRemBtn" title="Importar remitos" style="margin-top:10px;display:none" onclick="aplicarRemitosDux()">Importar remitos</button>
       </div>
     </div>`;
+  cargarOrgsImportDux();
 }
+let impDuxOrgs = [];
+async function cargarOrgsImportDux(){
+  if (!impDuxOrgs.length) { try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){} }
+  const sel = document.getElementById('impDuxOrg'); if (!sel) return;
+  sel.innerHTML = impDuxOrgs.map(o => `<option value="${o._id}"${o._id === ORG ? ' selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('');
+}
+function hImpVentas(){ const h = headersAuthJson(); const sel = document.getElementById('impDuxOrg'); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }
+function orgImpVentas(){ const sel = document.getElementById('impDuxOrg'); return (sel && sel.value) || undefined; }
 function leerArchivoBase64(file){
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -2050,7 +2061,7 @@ async function previewImportDux(){
   document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
   try{
     impDuxBase64 = await leerArchivoBase64(file);
-    const r = await fetch('/api/ventas-import-dux/preview', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxBase64})});
+    const r = await fetch('/api/ventas-import-dux/preview', {method:'POST', headers: hImpVentas(), body: JSON.stringify({archivoBase64: impDuxBase64, orgId: orgImpVentas()})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al analizar');
     const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
@@ -2072,7 +2083,7 @@ async function aplicarImportDux(){
   if (btn.disabled || !impDuxBase64) return;
   btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
   try{
-    const r = await fetch('/api/ventas-import-dux/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxBase64})});
+    const r = await fetch('/api/ventas-import-dux/aplicar', {method:'POST', headers: hImpVentas(), body: JSON.stringify({archivoBase64: impDuxBase64, orgId: orgImpVentas()})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al importar');
     document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} ventas importadas${d.clientesCreados ? ` y ${d.clientesCreados} clientes creados` : ''}.</p>`;

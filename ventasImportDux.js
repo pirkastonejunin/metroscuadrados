@@ -175,6 +175,7 @@ function crearResolverClientes(db, ahora) {
 }
 
 async function procesar(req, aplicar) {
+  if (!req.orgId) { const v = req.body && req.body.orgId; if (v && /^[0-9a-f]{24}$/i.test(String(v))) req.orgId = new (require('mongodb').ObjectId)(String(v)); }
   if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
   const { ventas, errores } = leerArchivo(req.body && req.body.archivoBase64);
   if (!ventas.length) throw err(400, 'El archivo no tiene ventas para importar.');
@@ -318,12 +319,14 @@ function tipoDeComprobante(comp) {
 
 
 async function procesarDetalle(req, aplicar) {
-  if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
+  if (!req.orgId) { const v = req.body && req.body.orgId; if (v && /^[0-9a-f]{24}$/i.test(String(v))) req.orgId = new (require('mongodb').ObjectId)(String(v)); }
   const { grupos, errores } = leerDetalle(req.body && req.body.archivoBase64);
   if (!grupos.length) throw err(400, 'El archivo no tiene ventas.');
   return conReintento(async () => {
-    const db = await getDb(); const activa = req.orgId; const { ObjectId } = require('mongodb');
+    const db = await getDb(); const { ObjectId } = require('mongodb');
     const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    // con "Todas" activo no hay sucursal de trabajo: cada venta va a la sucursal que se mapea abajo; la primera accesible es solo el valor por defecto
+    const activa = req.orgId || (orgs[0] && orgs[0]._id); if (!activa) throw err(400, 'No tenés ninguna sucursal habilitada para importar.');
     if (!orgIds.some(x => String(x) === String(activa))) orgIds.push(activa);
     const ahora = new Date();
 
