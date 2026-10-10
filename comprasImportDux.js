@@ -347,4 +347,176 @@ router.post('/pagos/aplicar', authAdmin, async (req, res) => {
   try { res.json(await procesarPagos(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// DETALLE POR ARTÍCULO (Dux: "Consulta de Compras Detallada", máx. 60 días por archivo). Trae compras Y gastos
+// (columna Tipo), con Sucursal Empresa, artículo/concepto por renglón, IVA, percepciones, recepción y pagos por forma.
+// Completa las compras/gastos ya cargadas con el listado (por proveedor + comprobante + fecha), las pasa a la sucursal
+// que corresponda y crea las que falten. Sigue siendo SOLO historial (sin stock ni caja). Repetible sin duplicar.
+// Rutas: POST /detalle/preview y /detalle/aplicar   body: { archivoBase64, mapaSucursales: { 'PIRKA JUNIN': orgId } }
+// ---------------------------------------------------------------------------
+async function orgsAccesibles(db, req) {
+  const { ObjectId } = require('mongodb');
+  if (req.usuario && req.usuario.rol && req.usuario.rol.protegido) return db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray();
+  const ids = ((req.usuario && req.usuario.orgIds) || [req.orgId]).map(x => { try { return new ObjectId(String(x)); } catch (e) { return null; } }).filter(Boolean);
+  return db.collection('organizaciones').find({ _id: { $in: ids } }).project({ nombre: 1 }).toArray();
+}
+function sugerirOrg(nombre, orgs) {
+  const n = norm(nombre); if (!n) return null;
+  const ex = orgs.find(o => norm(o.nombre) === n) || orgs.find(o => norm(o.nombre).includes(n) || n.includes(norm(o.nombre)));
+  return ex ? String(ex._id) : null;
+}
+function leerDetalleCompras(base64) {
+  if (!base64) throw err(400, 'Falta el archivo');
+  const buf = Buffer.from(String(base64).replace(/^data:[^,]*,/, ''), 'base64');
+  let wb;
+  try { wb = XLSX.read(buf, { type: 'buffer', cellDates: true }); } catch (e) { throw err(400, 'No se pudo leer el archivo: ¿es el Excel de Dux (.xls / .xlsx)?'); }
+  const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+  const hIdx = filas.findIndex(f => f && f.some(c => norm(c) === 'producto/gasto') && f.some(c => norm(c) === 'comprobante'));
+  if (hIdx < 0) throw err(400, 'No encontré las columnas Comprobante y Producto/Gasto. Tiene que ser "Consulta de Compras Detallada" de Dux.');
+  const enc = filas[hIdx].map(norm); const c = (n) => enc.indexOf(n);
+  const idx = { suc: c('sucursal empresa'), tipo: c('tipo'), prov: c('proveedor'), comp: c('comprobante'), fecha: c('fecha'), codigo: c('codigo producto'), prod: c('producto/gasto'),
+    cant: c('cantidad'), rec: c('ctd recepcionada'), precio: c('precio uni'), desc: c('descuento'), sinIva: c('total sin iva'), pIva: c('porc. iva'), iva: c('iva'),
+    conIva: c('total con iva'), perc: c('total percepcion'), total: c('total'), efvo: c('pago efectivo'), chq: c('pago cheque'), cta: c('pago cuenta'),
+    rubro: c('rubro'), marca: c('marca'), personal: c('personal registra'), obs: c('observaciones comprobante'), venc: c('fecha vencimiento') };
+  if (idx.prov < 0 || idx.total < 0 || idx.fecha < 0) throw err(400, 'Faltan columnas (Proveedor, Fecha o Total).');
+  const txt = (f, k) => (idx[k] >= 0 && f[idx[k]] != null) ? String(f[idx[k]]).trim() : '';
+  const num = (f, k) => idx[k] >= 0 ? numero(f[idx[k]]) : 0;
+  const grupos = new Map(), errores = [];
+  for (let i = hIdx + 1; i < filas.length; i++) {
+    const f = filas[i];
+    if (!f || f.every(x => x == null || x === '')) continue;
+    const proveedor = txt(f, 'prov'); const fecha = parsearFecha(f[idx.fecha]); const comp = txt(f, 'comp');
+    const gasto = /GASTO/i.test(txt(f, 'tipo'));
+    if (!proveedor || !fecha) { errores.push({ fila: i + 1, motivo: 'Falta proveedor o fecha' }); continue; }
+    const key = (gasto ? 'G' : 'C') + '|' + norm(proveedor) + '|' + (comp || 'sn') + '|' + fecha.toISOString().slice(0, 10) + (comp ? '' : '|' + i);
+    if (!grupos.has(key)) grupos.set(key, { key, gasto, proveedor, comprobante: comp, fecha, sucursal: txt(f, 'suc'), personal: txt(f, 'personal'), observaciones: txt(f, 'obs'),
+      vencimiento: idx.venc >= 0 ? parsearFecha(f[idx.venc]) : null, items: [], total: 0, percepciones: 0, pagos: { efectivo: 0, cheque: 0, cuenta: 0 } });
+    const g = grupos.get(key);
+    g.items.push({ codigo: txt(f, 'codigo'), nombre: txt(f, 'prod'), cantidad: num(f, 'cant') || 1, recibida: num(f, 'rec'), precio: num(f, 'precio'), descuento: num(f, 'desc'),
+      subtotal: round2(num(f, 'sinIva')), porcIva: num(f, 'pIva'), iva: round2(num(f, 'iva')), conIva: round2(num(f, 'conIva')), rubro: txt(f, 'rubro'), marca: txt(f, 'marca') });
+    g.total = round2(g.total + num(f, 'total')); g.percepciones = round2(g.percepciones + num(f, 'perc'));
+    g.pagos.efectivo += num(f, 'efvo'); g.pagos.cheque += num(f, 'chq'); g.pagos.cuenta += num(f, 'cta');
+  }
+  return { grupos: [...grupos.values()], errores };
+}
+async function procesarDetalleCompras(req, aplicar) {
+  if (!req.orgId) req.orgId = orgDeCuerpo(req);
+  if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
+  const { grupos, errores } = leerDetalleCompras(req.body && req.body.archivoBase64);
+  if (!grupos.length) throw err(400, 'El archivo no tiene compras ni gastos.');
+  return conReintento(async () => {
+    const db = await getDb(); const activa = req.orgId; const { ObjectId } = require('mongodb'); const ahora = new Date();
+    const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    if (!orgIds.some(x => String(x) === String(activa))) orgIds.push(activa);
+    const mapaIn = (req.body && req.body.mapaSucursales) || {};
+    const sucursales = [...new Set(grupos.map(g => g.sucursal))];
+    const destinoDe = (suc) => { const e = mapaIn[suc]; return (e && orgIds.some(x => String(x) === String(e))) ? new ObjectId(String(e)) : activa; };
+    const nombreOrg = (id) => (orgs.find(o => String(o._id) === String(id)) || {}).nombre || String(id);
+    const claveDe = (g) => (g.gasto ? 'duxg:' : 'duxc:') + norm(g.proveedor) + ':' + (g.comprobante || 's/n') + ':' + g.fecha.toISOString().slice(0, 10);
+
+    // existentes (en cualquier sucursal accesible)
+    const claves = grupos.filter(g => g.comprobante).map(claveDe);
+    const colDe = (g) => g.gasto ? 'gastos' : 'compras';
+    const exC = new Map((await db.collection('compras').find({ orgId: { $in: orgIds }, claveImport: { $in: claves } }).project({ claveImport: 1, total: 1, orgId: 1, estado: 1 }).toArray()).map(x => [x.claveImport, x]));
+    const exG = new Map((await db.collection('gastos').find({ orgId: { $in: orgIds }, claveImport: { $in: claves } }).project({ claveImport: 1, total: 1, orgId: 1, estado: 1 }).toArray()).map(x => [x.claveImport, x]));
+    const existente = (g) => g.comprobante ? (g.gasto ? exG : exC).get(claveDe(g)) : null;
+
+    // catálogo por sucursal destino (solo compras)
+    const codigos = [...new Set(grupos.filter(g => !g.gasto).flatMap(g => g.items.map(i => i.codigo)).filter(Boolean))];
+    const catalogoPorOrg = new Map();
+    for (const oid of new Set(sucursales.map(s => String(destinoDe(s))))) {
+      const prods = codigos.length ? await db.collection('productos_catalogo').find({ orgId: new ObjectId(oid), $or: [{ sku: { $in: codigos } }, { codigoExterno: { $in: codigos } }] }).project({ sku: 1, codigoExterno: 1, nombre: 1 }).toArray() : [];
+      const m = new Map(); prods.forEach(p => [p.sku, p.codigoExterno].filter(Boolean).forEach(cd => { if (!m.has(cd)) m.set(cd, p); }));
+      catalogoPorOrg.set(oid, m);
+    }
+    // proveedores y conceptos por sucursal destino
+    const resolvers = new Map();
+    const provDe = (oid) => { const k = String(oid); if (!resolvers.has(k)) resolvers.set(k, crearResolverProveedores(db, new ObjectId(k), ahora)); return resolvers.get(k); };
+    const conceptos = new Map(); // orgId -> { map, nuevos:Set }
+    const conceptosDe = async (oid) => { const k = String(oid); if (!conceptos.has(k)) { const ya = await db.collection('gastos_conceptos').find({ orgId: new ObjectId(k) }).project({ nombre: 1 }).toArray(); conceptos.set(k, { map: new Map(ya.map(x => [norm(x.nombre), x._id])), nuevos: new Set() }); } return conceptos.get(k); };
+
+    let aMover = 0, itemsVinc = 0, itemsTot = 0; const sinMatch = new Set(); const diferencias = [];
+    for (const g of grupos) {
+      const dest = destinoDe(g.sucursal); const ex = existente(g);
+      if (ex && String(ex.orgId) !== String(dest)) aMover++;
+      if (!ex || String(ex.orgId) !== String(dest)) await provDe(dest).clasificar(g.proveedor);
+      if (g.gasto) { const cs = await conceptosDe(dest); g.items.forEach(i => { const nm = conceptoDeGasto(i.nombre); if (!cs.map.has(norm(nm))) cs.nuevos.add(nm); }); }
+      else { const cat = catalogoPorOrg.get(String(dest)); g.items.forEach(i => { itemsTot++; if (cat.has(i.codigo)) itemsVinc++; else sinMatch.add(i.codigo); }); }
+      if (ex && Math.abs(ex.total - g.total) > 1) diferencias.push(g.comprobante);
+    }
+    const nuevos = grupos.filter(g => !existente(g));
+    const porSucursal = sucursales.map(sn => ({ sucursal: sn, comprobantes: grupos.filter(g => g.sucursal === sn).length, sugerida: sugerirOrg(sn, orgs), destino: String(destinoDe(sn)), destinoNombre: nombreOrg(destinoDe(sn)) }));
+    let provNuevos = 0, provAmb = 0; resolvers.forEach(r => { const t = r.totales(); provNuevos += t.nuevos; provAmb += t.ambiguos; });
+    const resumen = {
+      comprobantes: grupos.length, compras: grupos.filter(g => !g.gasto).length, gastos: grupos.filter(g => g.gasto).length,
+      renglones: grupos.reduce((a, g) => a + g.items.length, 0), conExistente: grupos.length - nuevos.length, aCrear: nuevos.length, aMover,
+      desde: grupos.reduce((a, g) => (!a || g.fecha < a ? g.fecha : a), null), hasta: grupos.reduce((a, g) => (!a || g.fecha > a ? g.fecha : a), null),
+      articulosVinculados: itemsVinc, articulosSinCatalogo: sinMatch.size, ejemplosSinCatalogo: [...sinMatch].slice(0, 8),
+      proveedoresNuevos: provNuevos, proveedoresAmbiguos: provAmb, diferencias: diferencias.length, ejemplosDiferencias: diferencias.slice(0, 5),
+      sucursales: porSucursal, organizaciones: orgs.map(o => ({ _id: String(o._id), nombre: o.nombre })), errores
+    };
+    if (!aplicar) return resumen;
+
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    let proveedoresCreados = 0; for (const r of resolvers.values()) proveedoresCreados += await r.crearNuevos();
+    for (const [k, cs] of conceptos) {
+      if (!cs.nuevos.size) continue;
+      const nombres = [...cs.nuevos];
+      const r = await db.collection('gastos_conceptos').insertMany(nombres.map(n => ({ nombre: n, activo: true, orgId: new ObjectId(k), createdAt: ahora, updatedAt: ahora })), { ordered: false });
+      nombres.forEach((n, i) => cs.map.set(norm(n), r.insertedIds[i]));
+    }
+    let actualizados = 0, creados = 0, movidos = 0;
+    for (const g of grupos) {
+      const dest = destinoDe(g.sucursal); const ex = existente(g); const col = colDe(g);
+      const pagado = round2(g.pagos.efectivo + g.pagos.cheque + g.pagos.cuenta);
+      const base = { sucursalDux: g.sucursal, duxPagos: { efectivo: round2(g.pagos.efectivo), cheque: round2(g.pagos.cheque), cuenta: round2(g.pagos.cuenta) }, totalPercepciones: g.percepciones, detalleDux: true, updatedAt: ahora };
+      let items;
+      if (g.gasto) {
+        const cs = conceptos.get(String(dest));
+        items = g.items.map(i => { const nm = conceptoDeGasto(i.nombre); return { conceptoId: cs.map.get(norm(nm)) || null, conceptoNombre: nm, cantidad: i.cantidad, precioUnitario: i.precio, descuentoPorcentaje: i.descuento, subtotal: i.subtotal,
+          observaciones: nm !== i.nombre ? 'Concepto en Dux: ' + i.nombre : '', alicuotaIva: i.porcIva, importeIva: i.iva, codigoDux: i.codigo }; });
+      } else {
+        const cat = catalogoPorOrg.get(String(dest));
+        items = g.items.map(i => { const p = cat.get(i.codigo); return { productoId: p ? p._id : null, sku: i.codigo || null, nombre: p ? p.nombre : i.nombre, nombreDux: i.nombre, cantidad: i.cantidad, cantidadRecibida: i.recibida,
+          precioUnitario: i.precio, descuentoPorcentaje: i.descuento, subtotal: i.subtotal, alicuotaIva: i.porcIva, importeIva: i.iva, totalConIva: i.conIva, rubro: i.rubro || null, marca: i.marca || null }; });
+      }
+      if (ex) {
+        const set = Object.assign({}, base, { items });
+        if (String(ex.orgId) !== String(dest)) { set.orgId = dest; set.proveedorId = provDe(dest).id(g.proveedor); movidos++; }
+        await db.collection(col).updateOne({ _id: ex._id }, { $set: set });
+        actualizados++; continue;
+      }
+      // comprobante sin número: intenta enlazar con el "(s/n)" cargado por el listado (mismo proveedor, fecha y total)
+      if (!g.comprobante) {
+        const dia0 = new Date(g.fecha.getTime() - 12 * 3600e3), dia1 = new Date(g.fecha.getTime() + 12 * 3600e3);
+        const sn = await db.collection(col).findOne({ orgId: { $in: orgIds }, importado: true, comprobanteNumero: '', proveedorNombre: g.proveedor, fecha: { $gte: dia0, $lte: dia1 }, total: { $gte: g.total - 1, $lte: g.total + 1 }, detalleDux: { $ne: true } });
+        if (sn) { await db.collection(col).updateOne({ _id: sn._id }, { $set: Object.assign({}, base, { items }) }); actualizados++; continue; }
+      }
+      const todoRecibido = !g.gasto && g.items.every(i => i.recibida >= i.cantidad - 0.0001);
+      const doc = {
+        numero: 0, numeroOriginal: g.comprobante || 'S/N', importado: true, origen: 'dux', claveImport: g.comprobante ? claveDe(g) : claveDe(g) + ':' + g.key,
+        tipoComprobante: 'otro', puntoVenta: '', comprobanteNumero: g.comprobante, esFiscal: false,
+        importeNeto: 0, importeIva: 0, importeExento: 0, importeTotalComprobante: g.total,
+        percepciones: [], retenciones: [], impuestoCredito: 0, impuestoDebito: 0, otrosImpuestos: 0, totalPercepciones: g.percepciones, totalRetenciones: 0,
+        proveedorId: provDe(dest).id(g.proveedor), proveedorNombre: g.proveedor, fecha: g.fecha, moneda: 'ARS', cotizacionDolar: null, condicionPago: '',
+        estado: g.gasto ? 'activo' : (todoRecibido ? 'recibida' : 'pendiente'),
+        items, descuentoPorcentaje: 0, descuentoMonto: 0, subtotal: round2(items.reduce((a, i) => a + i.subtotal, 0)), total: g.total,
+        pagos: [], totalPagado: Math.min(pagado, g.total), saldoPendiente: Math.max(round2(g.total - pagado), 0) < 1 ? 0 : round2(g.total - pagado), duxPagado: pagado,
+        fechaVencimiento: g.vencimiento || null, personalDux: g.personal, observaciones: g.observaciones,
+        anuladaEn: null, anuladaPor: null, anuladaMotivo: null, usuarioNombre, orgId: dest, createdAt: g.fecha
+      };
+      if (!g.gasto) Object.assign(doc, { tipoRecepcion: 'inmediata', depositoId: null, stockIngresado: false, stockIngresadoEn: null, recibidaEn: null });
+      await db.collection(col).insertOne(Object.assign(doc, base));
+      creados++;
+    }
+    return Object.assign(resumen, { actualizados, creados, movidos, proveedoresCreados });
+  });
+}
+router.post('/detalle/preview', authAdmin, async (req, res) => {
+  try { res.json(await procesarDetalleCompras(req, false)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/detalle/aplicar', authAdmin, async (req, res) => {
+  try { res.json(await procesarDetalleCompras(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;

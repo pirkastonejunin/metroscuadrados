@@ -176,6 +176,7 @@
           <div class="row" style="gap:8px">
             <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'compras.xlsx')">Exportar</button>
             <button class="btn secondary" onclick="abrirImportarDux()">Importar de Dux</button>
+            <button class="btn secondary" onclick="abrirImportarDetalleDux()" title="Detalle por artículo de compras y gastos (Consulta de Compras Detallada)">Detalle Dux</button>
             <button class="btn" onclick="abrirNuevaCompra()">+ Nueva compra</button>
           </div>
         </div>
@@ -2195,6 +2196,75 @@ async function aplicarImportDux(){
     btn.style.display = 'none';
     if (typeof cargarCompras === 'function') cargarCompras(); if (IMP.pagos && typeof cargarSaldosProveedores === 'function') { cargarSaldosProveedores(); cargarPagos(); }
   }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
+}
+// Detalle por artículo (Consulta de Compras Detallada): compras y gastos, varios archivos, con mapeo de sucursales
+let impDetArchivos = [], impDetOrgs = [], impDetSucursales = {};
+function impDetOrgBase(){ const ids = impDuxOrgs.map(o => o._id); return ids.includes(ORG) ? ORG : (ids[0] || ORG); }
+function hDet(){ const h = headersAuthJson(); h['x-org-id'] = impDetOrgBase(); return h; }
+async function abrirImportarDetalleDux(){
+  impDetArchivos = []; impDetSucursales = {};
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar detalle de compras y gastos de Dux</h2>
+        <p class="muted">Subí los archivos "Consulta de Compras Detallada" de Dux (podés elegir varios juntos, uno por cada período de 60 días). Completan los artículos y conceptos de las compras y gastos ya cargados con el listado, los pasan a la sucursal que elijas y agregan los que falten. Sin movimientos de stock ni de caja. Se puede repetir sin duplicar.</p>
+        <input type="file" id="impDetArchivos" accept=".xls,.xlsx" multiple onchange="previewDetalleDux()">
+        <div class="err" id="impDetErr"></div>
+        <div id="impDetResumen"></div>
+        <button class="btn" id="impDetBtn" style="margin-top:10px;display:none" onclick="aplicarDetalleDux()">Importar detalle</button>
+      </div>
+    </div>`;
+}
+async function previewDetalleDux(){
+  const files = [...document.getElementById('impDetArchivos').files];
+  const errEl = document.getElementById('impDetErr'); errEl.textContent = '';
+  const out = document.getElementById('impDetResumen'); out.innerHTML = ''; document.getElementById('impDetBtn').style.display = 'none';
+  impDetArchivos = []; impDetSucursales = {};
+  if (!files.length) return;
+  out.innerHTML = '<p class="muted">Analizando…</p>';
+  const filas = []; let hayAlgo = false;
+  for (const f of files){
+    try{
+      const b64 = await leerB64(f);
+      const r = await fetch('/api/compras-import-dux/detalle/preview', {method:'POST', headers: hDet(), body: JSON.stringify({archivoBase64: b64, orgId: impDetOrgBase()})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      impDetArchivos.push({nombre: f.name, b64}); hayAlgo = true;
+      impDetOrgs = d.organizaciones || impDetOrgs;
+      (d.sucursales || []).forEach(x => { if (!impDetSucursales[x.sucursal]) impDetSucursales[x.sucursal] = {comprobantes: 0, destino: x.sugerida || x.destino}; impDetSucursales[x.sucursal].comprobantes += x.comprobantes; });
+      const fd = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+      filas.push(`<li><b>${escapeHtml(f.name)}</b>: ${d.comprobantes} comprobantes (${d.compras} compras, ${d.gastos} gastos; ${fd(d.desde)} a ${fd(d.hasta)}), ${d.renglones} renglones. ${d.conExistente} ya estaban cargados, ${d.aCrear} nuevos.${d.proveedoresNuevos ? ` ${d.proveedoresNuevos} proveedores nuevos.` : ''} ${d.articulosVinculados} artículos vinculados al catálogo y ${d.articulosSinCatalogo} códigos sin catálogo.${d.diferencias ? ` <span class="err">${d.diferencias} comprobantes con total distinto al listado.</span>` : ''}</li>`);
+    }catch(e){ filas.push(`<li class="err"><b>${escapeHtml(f.name)}</b>: ${escapeHtml(e.message)}</li>`); }
+  }
+  const filasSuc = Object.keys(impDetSucursales).map(nombre => {
+    const suc = impDetSucursales[nombre];
+    return `<tr><td>${escapeHtml(nombre)} <span class="muted">(${suc.comprobantes})</span></td><td><select class="impDetSuc" data-suc="${escapeHtml(nombre)}">${impDetOrgs.map(o => `<option value="${o._id}"${o._id === suc.destino ? ' selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></td></tr>`;
+  }).join('');
+  out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">${filas.join('')}</ul>` +
+    (filasSuc ? `<p class="muted" style="margin-bottom:4px"><b>Sucursal de Dux → sucursal del sistema</b> (cada compra o gasto se carga en la que elijas):</p><table style="width:100%;font-size:13px">${filasSuc}</table>` : '');
+  if (hayAlgo) document.getElementById('impDetBtn').style.display = '';
+}
+async function aplicarDetalleDux(){
+  const btn = document.getElementById('impDetBtn'); const errEl = document.getElementById('impDetErr');
+  if (btn.disabled || !impDetArchivos.length) return;
+  btn.disabled = true; errEl.textContent = '';
+  const filas = []; let act = 0, cre = 0, mov = 0;
+  const mapaSuc = {}; document.querySelectorAll('.impDetSuc').forEach(sel => { mapaSuc[sel.dataset.suc] = sel.value; });
+  for (const a of impDetArchivos){
+    btn.textContent = 'Importando ' + a.nombre + '…';
+    try{
+      const r = await fetch('/api/compras-import-dux/detalle/aplicar', {method:'POST', headers: hDet(), body: JSON.stringify({archivoBase64: a.b64, mapaSucursales: mapaSuc, orgId: impDetOrgBase()})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      act += d.actualizados; cre += d.creados; mov += d.movidos;
+      filas.push(`<li>${escapeHtml(a.nombre)}: ${d.actualizados} completados (${d.movidos} pasados de sucursal), ${d.creados} creados.</li>`);
+    }catch(e){ filas.push(`<li class="err">${escapeHtml(a.nombre)}: ${escapeHtml(e.message)}</li>`); }
+  }
+  document.getElementById('impDetResumen').innerHTML = `<p class="ok-msg">Listo: ${act} compras/gastos con detalle (${mov} pasados de sucursal), ${cre} nuevos.</p><ul class="muted">${filas.join('')}</ul>`;
+  btn.style.display = 'none'; btn.disabled = false; btn.textContent = 'Importar detalle';
+  if (typeof cargarCompras === 'function') cargarCompras();
 }
 </script>
 </body>
