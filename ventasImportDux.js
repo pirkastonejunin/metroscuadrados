@@ -662,6 +662,26 @@ router.post('/notas/aplicar', authAdmin, async (req, res) => {
   try { res.json(await procesarNotas(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Cobertura del detalle por artículo: por año/mes, cuántas ventas y notas importadas ya tienen sus artículos.
+router.get('/detalle/cobertura', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb(); const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    if (req.orgId && !orgIds.some(x => String(x) === String(req.orgId))) orgIds.push(req.orgId);
+    const esNota = { $in: ['$tipoComprobante', ['nota_credito', 'nota_debito']] };
+    const tz = 'America/Argentina/Buenos_Aires';
+    const filas = await db.collection('ventas').aggregate([
+      { $match: { orgId: { $in: orgIds }, importado: true, estado: { $ne: 'anulada' } } },
+      { $group: { _id: { y: { $year: { date: '$fecha', timezone: tz } }, m: { $month: { date: '$fecha', timezone: tz } } },
+        total: { $sum: 1 }, conDetalle: { $sum: { $cond: [{ $eq: ['$detalleDux', true] }, 1, 0] } },
+        notas: { $sum: { $cond: [esNota, 1, 0] } }, notasConDetalle: { $sum: { $cond: [{ $and: [esNota, { $eq: ['$detalleDux', true] }] }, 1, 0] } },
+        montoSinDetalle: { $sum: { $cond: [{ $eq: ['$detalleDux', true] }, 0, '$total'] } },
+        conRemito: { $sum: { $cond: [{ $eq: ['$entregaDux', true] }, 1, 0] } } } },
+      { $sort: { '_id.y': 1, '_id.m': 1 } }
+    ]).toArray();
+    res.json({ meses: filas.map(f => ({ anio: f._id.y, mes: f._id.m, total: f.total, conDetalle: f.conDetalle, sinDetalle: f.total - f.conDetalle, notas: f.notas, notasSinDetalle: f.notas - f.notasConDetalle, montoSinDetalle: round2(f.montoSinDetalle) })) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Al arrancar corrige las ventas ya importadas (fecha de creación = fecha original).
 setTimeout(() => { getDb().then(alinearCreatedAt).catch(() => {}); }, 20000).unref();
 

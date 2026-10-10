@@ -2026,6 +2026,8 @@ async function abrirImportarDux(){
         <div class="err" id="impDetErr"></div>
         <div id="impDetResumen"></div>
         <button class="btn" id="impDetBtn" style="margin-top:10px;display:none" onclick="aplicarDetalleDux()">Importar detalle</button>
+        <h4 style="margin:14px 0 4px;font-size:13px">Cobertura del detalle</h4>
+        <div id="impDetCobertura" class="muted">Calculando…</div>
         <hr style="margin:18px 0;border:0;border-top:1px solid var(--border)">
         <h3 style="margin:0 0 6px;font-size:15px">3. Remitos</h3>
         <p class="muted">Subí el archivo "Remitos Por Producto" de Dux. Se cargan los remitos como historial (sin mover stock), se vinculan a su venta por cliente y artículos, y se actualiza lo entregado de cada venta. Conviene cargar antes el detalle (paso 2). Se puede repetir sin duplicar.</p>
@@ -2043,6 +2045,7 @@ async function abrirImportarDux(){
       </div>
     </div>`;
   cargarOrgsImportDux();
+  cargarCoberturaDetalleVentas();
 }
 let impDuxOrgs = [];
 async function cargarOrgsImportDux(){
@@ -2150,6 +2153,7 @@ async function aplicarDetalleDux(){
   document.getElementById('impDetResumen').innerHTML = `<p class="ok-msg">Listo: ${act} ventas con detalle, ${cre} ventas nuevas.</p><ul class="muted">${filas.join('')}</ul>`;
   btn.style.display = 'none'; btn.disabled = false; btn.textContent = 'Importar detalle';
   if (typeof cargarVentas === 'function') cargarVentas();
+  cargarCoberturaDetalleVentas();
 }
 // Remitos de Dux (paso 3 del import de ventas)
 let impRemB64 = null, impRemFile = null, impRemOrgs = [];
@@ -2220,6 +2224,24 @@ async function aplicarNotasDux(){
     btn.style.display = 'none'; if (typeof cargarVentas === 'function') cargarVentas();
   }catch(e){ errEl.textContent = e.message; }
   btn.disabled = false;
+}
+async function cargarCoberturaDetalleVentas(){
+  const el = document.getElementById('impDetCobertura'); if (!el) return;
+  try{
+    const r = await fetch('/api/ventas-import-dux/detalle/cobertura', {headers: hImpVentas()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    if (!d.meses.length) { el.textContent = 'Todavía no hay ventas importadas.'; return; }
+    const MES = ['','ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const $ = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits: 0});
+    const porAnio = {}; d.meses.forEach(m => { (porAnio[m.anio] = porAnio[m.anio] || []).push(m); });
+    const filas = Object.keys(porAnio).map(a => {
+      const ms = porAnio[a]; const tot = ms.reduce((x, m) => x + m.total, 0), con = ms.reduce((x, m) => x + m.conDetalle, 0), monto = ms.reduce((x, m) => x + m.montoSinDetalle, 0), nsd = ms.reduce((x, m) => x + m.notasSinDetalle, 0);
+      const faltan = ms.filter(m => m.sinDetalle > 0).map(m => MES[m.mes] + ' (' + m.sinDetalle + ')');
+      const ok = con === tot;
+      return `<tr><td><b>${a}</b></td><td>${con}/${tot}</td><td>${ok ? '<span class="ok-msg">completo</span>' : `<span class="err">faltan ${tot - con}</span> · ${$(monto)}${nsd ? ` · ${nsd} notas sin detalle` : ''}`}</td><td class="muted" style="font-size:12px">${ok ? '' : faltan.join(', ')}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<table style="width:100%;font-size:13px"><tr class="muted"><td>Año</td><td>Con detalle</td><td>Estado</td><td>Meses con faltantes (cant.)</td></tr>${filas}</table>`;
+  }catch(e){ el.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
 }
 </script>
 </body>
