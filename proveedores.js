@@ -378,8 +378,8 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       const movimientos = [];
       for (const c of compras) {
         movimientos.push({
-          tipo: 'debito', monto: c.total, fecha: c.fecha,
-          concepto: c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`, origen: 'compra',
+          tipo: /^nota_credito/.test(c.tipoComprobante || '') ? 'credito' : 'debito', monto: c.total, fecha: c.fecha,
+          concepto: /^nota_(credito|debito)/.test(c.tipoComprobante || '') ? `${/^nota_credito/.test(c.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${c.numeroOriginal || ''} (Dux)` : c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`, origen: 'compra',
           docId: c._id, docNumero: c.numero, docEstado: c.estado,
           tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
           items: c.items, observaciones: c.observaciones, moneda: c.moneda,
@@ -395,8 +395,8 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       }
       for (const g of gastos) {
         movimientos.push({
-          tipo: 'debito', monto: g.total, fecha: g.fecha,
-          concepto: g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`, origen: 'gasto',
+          tipo: /^nota_credito/.test(g.tipoComprobante || '') ? 'credito' : 'debito', monto: g.total, fecha: g.fecha,
+          concepto: /^nota_(credito|debito)/.test(g.tipoComprobante || '') ? `${/^nota_credito/.test(g.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${g.numeroOriginal || ''} (Dux)` : g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`, origen: 'gasto',
           docId: g._id, docNumero: g.numero, docEstado: g.estado,
           tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
