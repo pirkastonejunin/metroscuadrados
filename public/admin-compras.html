@@ -192,8 +192,8 @@
       <div class="card">
         <div class="section-title" style="margin-top:0">Saldo por proveedor</div>
         <table>
-          <thead><tr><th>Proveedor</th><th>Compras pendientes</th><th>Saldo total</th></tr></thead>
-          <tbody id="saldosProveedoresBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+          <thead><tr><th>Proveedor</th><th>Comprobantes pendientes</th><th>Saldo (compras y gastos)</th><th title="Pagos a cuenta del historial de Dux que no se imputaron a una factura">A cuenta sin aplicar</th><th>Saldo neto</th></tr></thead>
+          <tbody id="saldosProveedoresBody"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
       <div class="card">
@@ -212,6 +212,7 @@
               <input id="fpHasta" type="date" onchange="cargarPagos()">
             </div>
           </div>
+          <button class="btn secondary" onclick="abrirImportarDux(true)">Importar pagos de Dux</button>
           <button class="btn" onclick="abrirPagoCuenta()">+ Pago a cuenta</button>
         </div>
       </div>
@@ -1328,16 +1329,18 @@ async function cargarSaldosProveedores(){
     const r = await fetch(BASE + '/saldos-proveedores', {headers: headersAuth()});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
-    if (!data.length) { body.innerHTML = '<tr><td colspan="3" class="muted">No hay saldos pendientes con proveedores.</td></tr>'; return; }
+    if (!data.length) { body.innerHTML = '<tr><td colspan="5" class="muted">No hay saldos pendientes con proveedores.</td></tr>'; return; }
     body.innerHTML = data.map(s => `
       <tr>
         <td>${escapeHtml(s.proveedorNombre)}</td>
         <td class="muted">${s.cantidadCompras}</td>
-        <td><strong>${money(s.saldoPendiente)}</strong></td>
+        <td>${money(s.saldoPendiente)}</td>
+        <td class="muted">${s.aCuenta > 0 ? money(s.aCuenta) : '—'}</td>
+        <td><strong>${money(s.neto)}</strong></td>
       </tr>
     `).join('');
   }catch(e){
-    body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="5" class="err">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -1356,9 +1359,9 @@ async function cargarPagos(){
     <tr>
       <td class="muted">${fechaCorta(p.fecha)}</td>
       <td>${escapeHtml(p.proveedorNombre)}</td>
-      <td>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor}</td>
+      <td>${p.importado ? '<span class="muted" title="Historial de Dux (sin forma de pago)">Dux</span>' : (TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor)}</td>
       <td>${money(p.monto)}</td>
-      <td class="muted">${(p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}</td>
+      <td class="muted">${p.importado ? (p.montoSinAplicar > 0 ? 'A cuenta: ' + money(p.montoSinAplicar) + ' sin aplicar' : 'Aplicado') : (p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}</td>
       <td class="muted">${escapeHtml(p.nota||'')}</td>
     </tr>
   `).join('');
@@ -2115,16 +2118,18 @@ async function confirmarConvertirOrden(id){
 let impDuxB64 = null;
 function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
 let impDuxOrgs = [];
+let IMP = {pagos:false};
 function hImp(){ const sel = document.getElementById('impDuxOrg'); const h = headersAuthJson(); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }
-async function abrirImportarDux(){
+async function abrirImportarDux(pagos){
+  IMP = {pagos: pagos === true};
   impDuxB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Importar historial de compras de Dux</h2>
-        <p class="muted">Subí el archivo "Consulta De Gestion Compra" de Dux (.xls o .xlsx). Se carga como historial: sin movimientos de stock ni de caja/banco. Lo pagado y el saldo se toman de Dux. Si lo subís dos veces, no duplica.</p>
+        <h2>Importar historial de ${IMP.pagos ? 'pagos a proveedores' : 'compras'} de Dux</h2>
+        <p class="muted">Subí el archivo "${IMP.pagos ? 'Consulta De Gestion Pago' : 'Consulta De Gestion Compra'}" de Dux (.xls o .xlsx). Se carga como historial: sin movimientos de stock ni de caja/banco. Lo pagado y el saldo se toman de Dux. Si lo subís dos veces, no duplica.</p>
         <label>Sucursal donde se cargan</label>
         <select id="impDuxOrg" onchange="previewImportDux()">${impDuxOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
         <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()" style="margin-top:8px">
@@ -2143,11 +2148,23 @@ async function previewImportDux(){
   document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
   try{
     impDuxB64 = await leerB64(file);
-    const r = await fetch('/api/compras-import-dux/preview', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
+    const r = await fetch('/api/compras-import-dux' + (IMP.pagos ? '/pagos' : '') + '/preview', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al analizar');
     const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
     const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
+    if (IMP.pagos) {
+      document.getElementById('impDuxResumen').innerHTML = `
+      <ul style="line-height:1.7;padding-left:18px">
+        <li><b>${d.aImportar}</b> pagos para importar de ${d.filasLeidas} leídos (${d.yaImportados} ya estaban cargados${d.anuladasOmitidas ? ', ' + d.anuladasOmitidas + ' anulados omitidos' : ''})</li>
+        <li>Período: ${f(d.desde)} a ${f(d.hasta)} — Total pagado: <b>${m(d.totalImporte)}</b></li>
+        <li>Imputado a facturas: ${m(d.totalAplicado)} — <b>A cuenta sin aplicar: ${m(d.totalSinAplicar)}</b> (${d.conSinAplicar} pagos). Ese monto se descuenta del saldo de cada proveedor.</li>
+        <li>Se cargan en la sucursal: <b>${escapeHtml(d.sucursalDestino || '-')}</b></li>
+        <li>Proveedores: ${d.proveedoresExistentes} ya existen, <b>${d.proveedoresNuevos}</b> se van a crear</li>
+      </ul>${d.errores.length ? '<p class="err">' + d.errores.length + ' fila(s) con error:</p><ul class="muted">' + d.errores.slice(0,10).map(e => '<li>Fila ' + e.fila + ': ' + escapeHtml(e.motivo) + '</li>').join('') + '</ul>' : ''}`;
+      if (d.aImportar > 0) document.getElementById('impDuxBtn').style.display = '';
+      return;
+    }
     document.getElementById('impDuxResumen').innerHTML = `
       <ul style="line-height:1.7;padding-left:18px">
         <li><b>${d.aImportar}</b> compras para importar de ${d.filasLeidas} leídos (${d.yaImportadas} ya estaban cargados)</li>
@@ -2166,12 +2183,12 @@ async function aplicarImportDux(){
   if (btn.disabled || !impDuxB64) return;
   btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
   try{
-    const r = await fetch('/api/compras-import-dux/aplicar', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
+    const r = await fetch('/api/compras-import-dux' + (IMP.pagos ? '/pagos' : '') + '/aplicar', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al importar');
-    document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} compras importados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
+    document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${IMP.pagos ? d.insertados + ' pagos' : d.insertadas + ' compras'} importados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
     btn.style.display = 'none';
-    if (typeof cargarCompras === 'function') cargarCompras();
+    if (typeof cargarCompras === 'function') cargarCompras(); if (IMP.pagos && typeof cargarSaldosProveedores === 'function') { cargarSaldosProveedores(); cargarPagos(); }
   }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
 }
 </script>

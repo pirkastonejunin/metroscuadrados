@@ -264,4 +264,87 @@ router.post('/gastos/aplicar', authGastos, async (req, res) => {
   try { res.json(await procesar(req, true, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// PAGOS A PROVEEDORES (Dux: "Consulta De Gestion Pago"). Columnas: Numero Pago, Fecha, Tipo Comprobante, Comprobante,
+// Concepto, Proveedor, Gasto, Personal, Total, Retenciones, Monto Aplicado, Total Pendiente Aplicar, Personal Anula, Fecha Anula.
+// Se guardan como historial en `compras_pagos` (pestaña Pagos de Compras): no mueven caja/banco ni tocan los pagos de las
+// compras. Dux no informa la forma de pago. "Total Pendiente Aplicar" = pagos a cuenta que todavía no se imputaron a una
+// factura: se guarda como `montoSinAplicar` y se descuenta del saldo con cada proveedor (saldos-proveedores).
+// ---------------------------------------------------------------------------
+function monto(v) {
+  if (typeof v === 'number') return v;
+  const s = String(v == null ? '' : v).replace(/[^0-9,.\-]/g, '');
+  if (!s) return 0;
+  const n = s.includes(',') ? Number(s.replace(/\./g, '').replace(',', '.')) : Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+function leerPagos(base64) {
+  if (!base64) throw err(400, 'Falta el archivo');
+  const buf = Buffer.from(String(base64).replace(/^data:[^,]*,/, ''), 'base64');
+  let wb;
+  try { wb = XLSX.read(buf, { type: 'buffer', cellDates: true }); } catch (e) { throw err(400, 'No se pudo leer el archivo: ¿es el Excel de Dux (.xls / .xlsx)?'); }
+  const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+  const hIdx = filas.findIndex(f => f && f.some(c => norm(c) === 'numero pago') && f.some(c => norm(c) === 'proveedor'));
+  if (hIdx < 0) throw err(400, 'No encontré las columnas Numero Pago y Proveedor. Tiene que ser "Consulta De Gestion Pago" de Dux.');
+  const enc = filas[hIdx].map(norm); const col = (n) => enc.indexOf(n);
+  const c = { nro: col('numero pago'), fecha: col('fecha'), comp: col('comprobante'), concepto: col('concepto'), prov: col('proveedor'), personal: col('personal'),
+    total: col('total'), ret: col('retenciones'), aplicado: col('monto aplicado'), pend: col('total pendiente aplicar'), anula: col('personal anula') };
+  const txt = (f, k) => (c[k] >= 0 && f[c[k]] != null) ? String(f[c[k]]).trim() : '';
+  const pagos = [], errores = []; let anuladas = 0;
+  for (let i = hIdx + 1; i < filas.length; i++) {
+    const f = filas[i];
+    if (!f || f.every(x => x == null || x === '')) continue;
+    const proveedor = txt(f, 'prov'); const fecha = parsearFecha(f[c.fecha]); const nro = txt(f, 'nro');
+    if (!proveedor) { errores.push({ fila: i + 1, motivo: 'Sin proveedor' }); continue; }
+    if (!fecha) { errores.push({ fila: i + 1, motivo: 'Fecha inválida: ' + f[c.fecha] }); continue; }
+    if (!nro) { errores.push({ fila: i + 1, motivo: 'Sin número de pago' }); continue; }
+    if (txt(f, 'anula')) { anuladas++; continue; }
+    pagos.push({ fila: i + 1, nro, fecha, proveedor, comprobante: txt(f, 'comp'), concepto: txt(f, 'concepto'), personal: txt(f, 'personal'),
+      total: round2(monto(f[c.total])), retenciones: round2(monto(f[c.ret])), aplicado: round2(monto(f[c.aplicado])), sinAplicar: round2(monto(f[c.pend])) });
+  }
+  return { pagos, errores, anuladas };
+}
+async function procesarPagos(req, aplicar) {
+  if (!req.orgId) req.orgId = orgDeCuerpo(req);
+  if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
+  const { pagos, errores, anuladas } = leerPagos(req.body && req.body.archivoBase64);
+  if (!pagos.length) throw err(400, 'El archivo no tiene pagos para importar.');
+  const clave = (p) => 'duxp:' + p.nro;
+  return conReintento(async () => {
+    const db = await getDb(); const orgId = req.orgId; const ahora = new Date();
+    const existentes = new Set((await db.collection('compras_pagos').find({ orgId, claveImport: { $in: pagos.map(clave) } }).project({ claveImport: 1 }).toArray()).map(x => x.claveImport));
+    const nuevos = pagos.filter(p => !existentes.has(clave(p)));
+    const resolver = crearResolverProveedores(db, orgId, ahora);
+    for (const p of nuevos) await resolver.clasificar(p.proveedor);
+    const t = resolver.totales();
+    const resumen = {
+      filasLeidas: pagos.length, aImportar: nuevos.length, yaImportados: pagos.length - nuevos.length, anuladasOmitidas: anuladas,
+      desde: pagos.reduce((a, p) => (!a || p.fecha < a ? p.fecha : a), null), hasta: pagos.reduce((a, p) => (!a || p.fecha > a ? p.fecha : a), null),
+      totalImporte: round2(nuevos.reduce((s, p) => s + p.total, 0)), totalAplicado: round2(nuevos.reduce((s, p) => s + p.aplicado, 0)),
+      totalSinAplicar: round2(nuevos.reduce((s, p) => s + p.sinAplicar, 0)), conSinAplicar: nuevos.filter(p => p.sinAplicar >= 1).length,
+      proveedoresExistentes: t.existentes, proveedoresNuevos: t.nuevos, proveedoresAmbiguos: t.ambiguos,
+      sucursalDestino: ((await db.collection('organizaciones').findOne({ _id: orgId }, { projection: { nombre: 1 } })) || {}).nombre || '', errores
+    };
+    if (!aplicar) return resumen;
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    const proveedoresCreados = await resolver.crearNuevos();
+    const docs = nuevos.map(p => ({
+      proveedorId: resolver.id(p.proveedor), proveedorNombre: p.proveedor, fecha: p.fecha, tipoValor: 'historial_dux', monto: p.total,
+      nota: p.concepto, usuarioNombre: p.personal || usuarioNombre, aplicaciones: [],
+      importado: true, origen: 'dux', claveImport: clave(p), numeroOriginal: p.nro, comprobanteDux: p.comprobante,
+      montoAplicado: p.aplicado, montoSinAplicar: p.sinAplicar >= 1 ? p.sinAplicar : 0, retenciones: p.retenciones,
+      orgId, createdAt: p.fecha, updatedAt: ahora
+    }));
+    let insertados = 0;
+    for (let i = 0; i < docs.length; i += 500) { const lote = docs.slice(i, i + 500); await db.collection('compras_pagos').insertMany(lote, { ordered: false }); insertados += lote.length; }
+    return Object.assign(resumen, { insertados, proveedoresCreados });
+  });
+}
+router.post('/pagos/preview', authAdmin, async (req, res) => {
+  try { res.json(await procesarPagos(req, false)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/pagos/aplicar', authAdmin, async (req, res) => {
+  try { res.json(await procesarPagos(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;

@@ -649,20 +649,45 @@ router.get('/pagos', authAdmin, async (req, res) => {
 });
 
 // Saldo total adeudado por proveedor (4/10/2026, pedido de Mato) — suma
-// el saldoPendiente de todas las compras activas (no anuladas) de cada
+// el saldoPendiente de todas las compras y gastos activos (9/10/2026: los gastos también, y se descuentan los pagos a cuenta del historial de Dux) (no anuladas) de cada
 // proveedor, para la pestaña "Pagos".
 router.get('/saldos-proveedores', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
-    const lista = await conReintento(async () => {
+    const { lista, aCuenta } = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('compras').aggregate([
+      const lista = await db.collection('compras').aggregate([
         { $match: match },
         { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, saldoPendiente: { $sum: '$saldoPendiente' }, cantidadCompras: { $sum: 1 } } },
         { $sort: { saldoPendiente: -1 } }
       ]).toArray();
+      // Gastos con saldo (Dux los pagaba contra el mismo proveedor): se suman al saldo con el proveedor.
+      const gastos = await db.collection('gastos').aggregate([
+        { $match: match },
+        { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, saldoPendiente: { $sum: '$saldoPendiente' }, cantidadCompras: { $sum: 1 } } }
+      ]).toArray();
+      gastos.forEach(g => lista.push(g));
+      // Pagos a cuenta del historial de Dux que todavía no se imputaron a una factura (se descuentan del saldo).
+      const aCuenta = await db.collection('compras_pagos').aggregate([
+        { $match: Object.assign({ importado: true, montoSinAplicar: { $gt: 0 } }, filtroOrg(req)) },
+        { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, aCuenta: { $sum: '$montoSinAplicar' } } }
+      ]).toArray();
+      return { lista, aCuenta };
     });
-    res.json(lista.map(x => ({ proveedorId: x._id, proveedorNombre: x.proveedorNombre, saldoPendiente: Math.round(x.saldoPendiente * 100) / 100, cantidadCompras: x.cantidadCompras })));
+    const mapa = new Map();
+    lista.forEach(x => {
+      const k = String(x._id), e = mapa.get(k);
+      if (e) { e.saldoPendiente += x.saldoPendiente; e.cantidadCompras += x.cantidadCompras; }
+      else mapa.set(k, { proveedorId: x._id, proveedorNombre: x.proveedorNombre, saldoPendiente: x.saldoPendiente, cantidadCompras: x.cantidadCompras, aCuenta: 0 });
+    });
+    aCuenta.forEach(a => {
+      const k = String(a._id);
+      if (mapa.has(k)) mapa.get(k).aCuenta = a.aCuenta;
+      else mapa.set(k, { proveedorId: a._id, proveedorNombre: a.proveedorNombre, saldoPendiente: 0, cantidadCompras: 0, aCuenta: a.aCuenta });
+    });
+    const r2 = (n) => Math.round(n * 100) / 100;
+    res.json([...mapa.values()].map(x => Object.assign(x, { saldoPendiente: r2(x.saldoPendiente), aCuenta: r2(x.aCuenta), neto: r2(x.saldoPendiente - x.aCuenta) }))
+      .filter(x => x.saldoPendiente > 0 || x.aCuenta > 0.99).sort((a, b) => b.neto - a.neto));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
