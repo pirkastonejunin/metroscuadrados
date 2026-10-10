@@ -285,6 +285,19 @@ async function iniciarApp(){
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   await cargarVentas();
   abrirVentaDesdePresupuestoSiCorresponde();
+  abrirVentaPorParametro();
+}
+// Enlace desde el tablero de inicio: /admin-ventas.html?abrir=<id de la venta>
+async function abrirVentaPorParametro(){
+  const id = new URLSearchParams(location.search).get('abrir'); if (!id) return;
+  history.replaceState(null, '', location.pathname);
+  try{
+    if (!ventasCache.some(x => x._id === id)) {
+      const r = await fetch(BASE + '/' + encodeURIComponent(id), {headers: headersAuth()}); if (!r.ok) return;
+      ventasCache.unshift(await r.json());
+    }
+    verDetalle(id);
+  }catch(e){}
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 

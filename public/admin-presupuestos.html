@@ -263,9 +263,22 @@ async function iniciarApp(){
   document.getElementById('fDesde').value = hace30.toISOString().slice(0,10);
   await cargarPresupuestos();
   await abrirDesdeVisita();
+  await abrirPresupuestoPorParametro();
 }
 // Venimos del botón "Cargar presupuesto a mano" de una visita (vendedor.html?...): se abre directo el presupuesto
 // comercial de esa visita (el que ya tiene, o uno nuevo con el cliente y los datos de la visita ya cargados).
+// Enlace desde el tablero de inicio: /admin-presupuestos.html?abrir=<id del presupuesto>
+async function abrirPresupuestoPorParametro(){
+  const id = new URLSearchParams(location.search).get('abrir'); if (!id) return;
+  history.replaceState(null, '', location.pathname);
+  try{
+    if (!presupuestosCache.some(x => x._id === id)) {
+      const r = await fetch(BASE + '/' + encodeURIComponent(id), {headers: headersAuth()}); if (!r.ok) return;
+      presupuestosCache.unshift(await r.json());
+    }
+    verPresupuesto(id);
+  }catch(e){}
+}
 let VISITA_PENDIENTE = null;
 async function abrirDesdeVisita(){
   const vid = new URLSearchParams(location.search).get('visita');

@@ -323,6 +323,21 @@
   #tabFactBox{margin-bottom:14px;}
   @media (max-width:1000px){.fc-tres{grid-template-columns:1fr;} .fc-hero{grid-template-columns:1fr;}}
   .tab-cal{width:100%;border:0;min-height:640px;border-radius:14px;background:var(--card);}
+
+  .tb-click { cursor: pointer; }
+  .tb-etapa.tb-click:hover, .tb-rub-fila.tb-click:hover, .tb-top-fila.tb-click:hover, .tb-chip.tb-click:hover { background: var(--accent-soft, rgba(0,0,0,.04)); border-radius: 8px; }
+  #tabHeroValor.tb-click:hover { text-decoration: underline dotted; }
+  svg g.tb-click:hover .b { opacity: .75; }
+  .tb-det-ov { display: none; position: fixed; inset: 0; background: rgba(17,20,24,.45); z-index: 500; align-items: flex-start; justify-content: center; padding: 6vh 12px; overflow-y: auto; }
+  .tb-det-ov.abierto { display: flex; }
+  .tb-det { background: var(--card, #fff); color: var(--text, inherit); border-radius: 14px; width: min(980px, 100%); padding: 16px 18px 18px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .tb-det-cab { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+  .tb-det-cab b { font-size: 16px; }
+  .tb-det-tabla { max-height: 60vh; overflow: auto; border: 1px solid var(--border, #e3e5e8); border-radius: 10px; }
+  .tb-det table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tb-det th { position: sticky; top: 0; background: var(--bg, #f4f5f7); text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .tb-det td { padding: 8px 10px; border-top: 1px solid var(--border, #e3e5e8); }
+  .tb-det tbody tr.tb-click:hover { background: var(--accent-soft, rgba(0,0,0,.04)); }
 </style>
 </head>
 <body>
@@ -870,7 +885,7 @@ function tabPintarSerie(d){
   let svg = '<svg viewBox="0 0 ' + W + ' 112" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ventas por día"><line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '"/>';
   dias.forEach((x, i) => {
     const hh = x.total ? Math.max(4, x.total / max * alto) : 0, cx = i * paso + paso / 2, f = x.dia.split('-');
-    svg += '<g><title>' + f[2] + '/' + f[1] + ' — ' + tabPesos(x.total) + ' (' + x.ventas + (x.ventas === 1 ? ' venta' : ' ventas') + ')</title>' +
+    svg += '<g class="tb-click"' + (x.ventas ? ' onclick="tabDetalle(\'ventas\',{dia:\'' + x.dia + '\'})"' : '') + '><title>' + f[2] + '/' + f[1] + ' — ' + tabPesos(x.total) + ' (' + x.ventas + (x.ventas === 1 ? ' venta' : ' ventas') + ')' + (x.ventas ? ' · clic para ver el detalle' : '') + '</title>' +
       '<rect x="' + (i * paso) + '" y="0" width="' + paso + '" height="' + base + '" fill="transparent"/>' +
       (hh ? '<rect class="b" x="' + (cx - ancho / 2) + '" y="' + (base - hh) + '" width="' + ancho + '" height="' + hh + '" rx="' + Math.min(5, ancho / 2) + '"/>' : '') + '</g>';
     if (i % pasoEtq === 0) svg += '<text x="' + cx + '" y="108" text-anchor="middle">' + f[2] + '/' + f[1] + '</text>';
@@ -884,7 +899,7 @@ function tabPintarEmbudo(data){
   const nombres = {crm:'CRM', visitas:'Visitas', presupuestos:'Presupuestos', ventas:'Ventas'};
   const filas = data.etapas.map((e, i) => {
     const tip = e.titulo + (i === 0 ? '' : ': ' + tabFmtPct(e.pctAnterior) + ' de ' + data.etapas[i-1].titulo.toLowerCase());
-    return '<div class="tb-etapa tab-etapa" title="' + notifEscapeHtml(tip) + '"><div class="nom">' + tabIcono(e.clave) + notifEscapeHtml(nombres[e.clave] || e.titulo) + '</div>' +
+    return '<div class="tb-etapa tab-etapa tb-click" onclick="tabDetalle(\'' + e.clave + '\')" title="' + notifEscapeHtml(tip + ' · clic para ver el detalle') + '"><div class="nom">' + tabIcono(e.clave) + notifEscapeHtml(nombres[e.clave] || e.titulo) + '</div>' +
       '<div class="tb-pista"><div style="width:' + (e.cantidad / max * 100) + '%;background:' + colores[i] + '"></div></div>' +
       '<div class="num">' + e.cantidad.toLocaleString('es-AR') + '</div><div class="pct">' + (i === 0 ? '' : '↳ ' + tabFmtPct(e.pctAnterior)) + '</div></div>';
   }).join('');
@@ -900,13 +915,14 @@ function tabPintarEmbudo(data){
     aro(data.efectividadTotal, 'Ventas / presupuestos', 'ventas sobre presupuestos', 'Efectividad de ventas: ventas realizadas sobre presupuestos cargados') + '</div>';
 }
 function tabPintarHero(p){
-  document.getElementById('tabHeroValor').textContent = tabPesos(p.totalVendido);
+  const hv = document.getElementById('tabHeroValor'); hv.textContent = tabPesos(p.totalVendido);
+  hv.classList.add('tb-click'); hv.title = 'Clic para ver las ventas del período'; hv.onclick = function(){ tabDetalle('ventas'); };
   const fm = n => n === null ? '—' : n.toLocaleString('es-AR', {maximumFractionDigits:2});
-  const chip = (ico, valor, et, tip) => '<div class="tb-chip" title="' + notifEscapeHtml(tip) + '">' + tabIcono(ico) + '<div><b>' + valor + '</b><span>' + et + '</span></div></div>';
+  const chip = (ico, valor, et, tip, det) => '<div class="tb-chip tb-click" onclick="tabDetalle(\'' + det + '\')" title="' + notifEscapeHtml(tip + ' · clic para ver el detalle') + '">' + tabIcono(ico) + '<div><b>' + valor + '</b><span>' + et + '</span></div></div>';
   document.getElementById('tabChips').innerHTML =
-    chip('ventas', p.ventas.toLocaleString('es-AR'), p.ventas === 1 ? 'venta' : 'ventas', 'Ventas del período (sin anuladas)') +
-    chip('ticket', p.ticketPromedio === null ? '—' : tabPesos(p.ticketPromedio), 'ticket promedio', 'Total vendido (con IVA) dividido la cantidad de ventas') +
-    chip('m2', p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', 'por venta', 'm2 vendidos sobre las ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas que tienen m2');
+    chip('ventas', p.ventas.toLocaleString('es-AR'), p.ventas === 1 ? 'venta' : 'ventas', 'Ventas del período (sin anuladas)', 'ventas') +
+    chip('ticket', p.ticketPromedio === null ? '—' : tabPesos(p.ticketPromedio), 'ticket promedio', 'Total vendido (con IVA) dividido la cantidad de ventas', 'ventas') +
+    chip('m2', p.m2Promedio === null ? '—' : fm(p.m2Promedio) + ' m2', 'por venta', 'm2 vendidos sobre las ' + p.ventasConM2.toLocaleString('es-AR') + ' ventas que tienen m2', 'ventas_m2');
 }
 async function cargarRubrosTablero(qs){
   const cont = document.getElementById('tabRubros');
@@ -918,7 +934,7 @@ async function cargarRubrosTablero(qs){
       return;
     }
     const max = Math.max(1, ...data.rubros.map(x => x.unidades));
-    cont.innerHTML = '<div class="tb-rub">' + data.rubros.map(x => '<div class="tb-rub-fila" title="' + notifEscapeHtml(x.rubro + ': ' + x.unidades.toLocaleString('es-AR') + ' unidades vendidas') + '"><div class="arriba"><span>' + notifEscapeHtml(x.rubro) + '</span><b>' + x.unidades.toLocaleString('es-AR', {maximumFractionDigits:1}) + '</b></div><div class="pista"><div style="width:' + (x.unidades / max * 100) + '%"></div></div></div>').join('') + '</div>';
+    cont.innerHTML = '<div class="tb-rub">' + data.rubros.map(x => '<div class="tb-rub-fila tb-click" onclick="tabDetalle(\'rubro\',{rubro:\'' + encodeURIComponent(x.rubro) + '\'})" title="' + notifEscapeHtml(x.rubro + ': ' + x.unidades.toLocaleString('es-AR') + ' unidades vendidas · clic para ver el detalle') + '"><div class="arriba"><span>' + notifEscapeHtml(x.rubro) + '</span><b>' + x.unidades.toLocaleString('es-AR', {maximumFractionDigits:1}) + '</b></div><div class="pista"><div style="width:' + (x.unidades / max * 100) + '%"></div></div></div>').join('') + '</div>';
   }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudieron cargar los rubros: ' + notifEscapeHtml(e.message) + '</div>'; }
 }
 async function tabRubrosPanel(){
@@ -952,14 +968,14 @@ async function cargarProduccionTablero(qs){
     let svg = '<svg viewBox="0 0 ' + W + ' 78" role="img" aria-label="m2 producidos por día"><line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '"/>';
     p.dias.forEach((x, i) => {
       const hh = x.m2 ? Math.max(3, x.m2 / max * alto) : 0, cx = i * paso + paso / 2, f = x.dia.split('-');
-      svg += '<g><title>' + f[2] + '/' + f[1] + ' — ' + fm(x.m2) + ' m2</title><rect x="' + (i * paso) + '" y="0" width="' + paso + '" height="' + base + '" fill="transparent"/>' +
+      svg += '<g class="tb-click"' + (x.m2 ? ' onclick="tabDetalle(\'produccion\',{dia:\'' + x.dia + '\'})"' : '') + '><title>' + f[2] + '/' + f[1] + ' — ' + fm(x.m2) + ' m2</title><rect x="' + (i * paso) + '" y="0" width="' + paso + '" height="' + base + '" fill="transparent"/>' +
         (hh ? '<rect class="b" x="' + (cx - ancho / 2) + '" y="' + (base - hh) + '" width="' + ancho + '" height="' + hh + '" rx="' + Math.min(4, ancho / 2) + '"/>' : '') + '</g>';
       if (i % pe === 0) svg += '<text x="' + cx + '" y="75" text-anchor="middle">' + f[2] + '/' + f[1] + '</text>';
     });
     svg += '</svg>';
     const maxP = Math.max(1, ...p.top.map(x => x.cantidad));
     const un = { m2: 'm2', unidad: 'un', paquete: 'paq' };
-    const top = p.top.map(x => '<div class="tb-top-fila" title="' + notifEscapeHtml(x.nombre + ': ' + fm(x.cantidad) + ' m2 (' + fm(x.paquetes) + ' paquetes)') + '"><span class="nom">' + notifEscapeHtml(x.nombre) + '</span><div class="pista"><div style="width:' + (x.cantidad / maxP * 100) + '%"></div></div><span class="val">' + fm(x.cantidad) + ' ' + (un[x.unidad] || x.unidad) + '</span></div>').join('');
+    const top = p.top.map(x => '<div class="tb-top-fila tb-click" onclick="tabDetalle(\'produccion\',{producto:\'' + encodeURIComponent(x.nombre) + '\'})" title="' + notifEscapeHtml(x.nombre + ': ' + fm(x.cantidad) + ' m2 (' + fm(x.paquetes) + ' paquetes) · clic para ver el detalle') + '"><span class="nom">' + notifEscapeHtml(x.nombre) + '</span><div class="pista"><div style="width:' + (x.cantidad / maxP * 100) + '%"></div></div><span class="val">' + fm(x.cantidad) + ' ' + (un[x.unidad] || x.unidad) + '</span></div>').join('');
     cont.innerHTML = '<div class="tb-prod-graf">' + svg + '</div><div class="tb-prod-sub">Más producidos, por m2</div><div class="tb-top">' + top + '</div>';
   }catch(e){ cont.innerHTML = '<div class="tab-aviso">No se pudo cargar la producción: ' + notifEscapeHtml(e.message) + '</div>'; }
 }
@@ -1026,6 +1042,38 @@ async function cargarFacturacionTablero(qs){
   el('fcSdTag').innerHTML = fcTag(T.saldoNeto >= 0 ? 'te deben más' : 'debés más', T.saldoNeto >= 0 ? 'ok' : 'mal');
   el('fcSdLista').innerHTML = S.map(s => fcFila(s.nombre, s.porCobrar, s.porPagar, s.saldoNeto, fcCls(s.saldoNeto), 'Por cobrar ' + fcPesos(s.porCobrar) + ' · Por pagar ' + fcPesos(s.porPagar))).join('');
 }
+// ---- Detalle de un dato del tablero (clic en barras, chips, etapas del embudo, rubros y producción) ----
+async function tabDetalle(tipo, extra){
+  extra = extra || {};
+  const qs = new URLSearchParams();
+  const d = document.getElementById('tabDesde').value, h = document.getElementById('tabHasta').value;
+  if (d) qs.set('desde', d); if (h) qs.set('hasta', h);
+  const vend = document.getElementById('tabVendedor').value; if (vend) qs.set('vendedorId', vend);
+  qs.set('tipo', tipo);
+  Object.keys(extra).forEach(k => qs.set(k, decodeURIComponent(extra[k])));
+  let ov = document.getElementById('tabDetalleOv');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'tabDetalleOv'; ov.className = 'tb-det-ov'; ov.onclick = function(e){ if (e.target === ov) tabDetalleCerrar(); }; document.body.appendChild(ov); }
+  ov.innerHTML = '<div class="tb-det"><div class="tb-det-cab"><b>Cargando…</b><button type="button" data-iconizado="1" onclick="tabDetalleCerrar()" aria-label="Cerrar">✕</button></div></div>';
+  ov.classList.add('abierto');
+  try{
+    const r = await tabGet('detalle', qs);
+    const fd = x => x ? x.split('-').reverse().join('/') : '';
+    const periodo = r.desde === r.hasta ? fd(r.desde) : fd(r.desde) + ' al ' + fd(r.hasta);
+    const num = new Set(r.numericas || []);
+    const fmt = (v, i) => /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? fd(v) : num.has(i) && typeof v === 'number' ? v.toLocaleString('es-AR', {maximumFractionDigits: 2}) : notifEscapeHtml(v == null ? '' : String(v));
+    const montoCol = r.monto ? r.columnas.length - 1 : -1;
+    const filas = r.filas.map(f => '<tr' + (f.href ? ' class="tb-click" onclick="location.href=\'' + f.href + '\'" title="Abrir"' : '') + '>' +
+      f.celdas.map((v, i) => '<td' + (num.has(i) ? ' style="text-align:right"' : '') + '>' + (i === montoCol ? tabPesos(v) : fmt(v, i)) + '</td>').join('') + '</tr>').join('');
+    ov.querySelector('.tb-det').innerHTML =
+      '<div class="tb-det-cab"><div><b>' + notifEscapeHtml(r.titulo) + '</b><div class="muted">' + periodo + ' · ' + r.filas.length + (r.filas.length === 1 ? ' registro' : ' registros') + (r.total !== null ? ' · Total ' + tabPesos(r.total) : '') + '</div></div>' +
+      '<button type="button" data-iconizado="1" onclick="tabDetalleCerrar()" aria-label="Cerrar">✕</button></div>' +
+      (r.truncado ? '<div class="tab-aviso">Se muestran los primeros ' + r.limite + ' registros. Acotá el período para ver el resto.</div>' : '') +
+      (r.filas.length ? '<div class="tb-det-tabla"><table><thead><tr>' + r.columnas.map((c, i) => '<th' + (num.has(i) ? ' style="text-align:right"' : '') + '>' + notifEscapeHtml(c) + '</th>').join('') + '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+        (r.filas.some(f => f.href) ? '<div class="muted" style="margin-top:8px">Tocá una fila para abrirla.</div>' : '') : '<div class="muted" style="padding:14px 0">No hay registros para este dato.</div>');
+  }catch(e){ ov.querySelector('.tb-det').innerHTML = '<div class="tb-det-cab"><b>Detalle</b><button type="button" data-iconizado="1" onclick="tabDetalleCerrar()">✕</button></div><div class="tab-aviso">' + notifEscapeHtml(e.message) + '</div>'; }
+}
+function tabDetalleCerrar(){ const ov = document.getElementById('tabDetalleOv'); if (ov) ov.classList.remove('abierto'); }
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape') tabDetalleCerrar(); });
 async function cargarTablero(){
   const qs = new URLSearchParams();
   const d = document.getElementById('tabDesde').value, h = document.getElementById('tabHasta').value;
