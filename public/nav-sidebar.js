@@ -20,6 +20,7 @@
 (function () {
   const TOKEN_KEY = 'obras_admin_token';
   const ORG_KEY = 'obras_org_activo';
+  let OCULTAR_ORG = false;
 
   const ICONOS = {
     inicio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v10h14V10"/></svg>',
@@ -215,6 +216,12 @@
       .pn-sidebar-footer button { display: flex; align-items: center; gap: 7px; width: 100%; background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; font-family: inherit; font-weight: 600; }
       .pn-sidebar-footer button:hover { border-color: var(--danger, #c53030); color: var(--danger, #c53030); }
       .pn-sidebar-footer button svg { width: 15px; height: 15px; }
+      .pn-orgbar { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; vertical-align: middle; }
+      .pn-orgbar .pn-orgbar-lbl { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+      .pn-orgbar select, .pn-orgbar .pn-orgbar-fija { padding: 7px 10px; border: 1px solid var(--accent, #555); border-radius: 8px; font-size: 13px; font-weight: 700; background: var(--accent-soft, var(--bg)); color: var(--accent, var(--pn-ink)); font-family: inherit; max-width: 220px; cursor: pointer; }
+      .pn-orgbar .pn-orgbar-fija { cursor: default; }
+      .pn-orgbar.pn-orgbar-todas select { border-color: #b7791f; background: #fffaf0; color: #b7791f; }
+      @media (max-width: 600px) { .pn-orgbar .pn-orgbar-lbl { display: none; } .pn-orgbar select { max-width: 140px; } }
       .pn-usermenu { position: relative; display: inline-block; }
       .pn-usermenu > button.pn-usermenu-btn {
         display: inline-flex; align-items: center; gap: 7px; background: transparent; border: 1px solid var(--border);
@@ -266,6 +273,31 @@
   // Reemplaza el "nombre + Cerrar sesión" de la barra de arriba de cada
   // pantalla por un desplegable: nombre ▾ → Configuración, Bases y catálogos
   // y Cerrar sesión. Se engancha al #topbarUser que ya tienen las pantallas.
+  // Selector de sucursal SIEMPRE visible arriba, al lado del usuario: dice en qué
+  // sucursal se está trabajando y permite cambiarla desde cualquier pantalla.
+  function montarSelectorOrg(me, wrap) {
+    if (document.querySelector('.pn-orgbar') || OCULTAR_ORG) return;
+    const orgs = me.organizaciones || [];
+    if (!orgs.length && !me.puedeVerTodas) return;
+    const orgActiva = localStorage.getItem(ORG_KEY) || '';
+    const puedeElegir = orgs.length > 1 || me.puedeVerTodas;
+    const box = document.createElement('div');
+    box.className = 'pn-orgbar' + (orgActiva === 'todas' ? ' pn-orgbar-todas' : '');
+    if (!puedeElegir) {
+      box.innerHTML = `<span class="pn-orgbar-lbl">Sucursal</span><span class="pn-orgbar-fija">${escapeHtml(orgs[0].nombre)}</span>`;
+    } else {
+      box.innerHTML = `<span class="pn-orgbar-lbl">Sucursal</span><select id="pnTopOrg" aria-label="Sucursal de trabajo" title="Sucursal con la que estás trabajando (cambiala acá en cualquier momento)">
+        ${orgs.map(o => `<option value="${o._id}" ${o._id === orgActiva ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
+        ${me.puedeVerTodas ? `<option value="todas" ${orgActiva === 'todas' ? 'selected' : ''}>Todas las sucursales</option>` : ''}
+      </select>`;
+    }
+    wrap.parentElement.insertBefore(box, wrap);
+    const sel = box.querySelector('select');
+    if (sel) sel.addEventListener('change', function () {
+      if (this.value) localStorage.setItem(ORG_KEY, this.value); else localStorage.removeItem(ORG_KEY);
+      location.reload();
+    });
+  }
   function montarMenuUsuario(me, paginaActual, nombreUsuario) {
     const spanUser = document.getElementById('topbarUser') || document.getElementById('oficinaNombre');
     if (!spanUser || document.querySelector('.pn-usermenu')) return;
@@ -288,6 +320,7 @@
     spanUser.style.display = 'none';
     if (btnLogoutOriginal) btnLogoutOriginal.style.display = 'none';
     if (btnLogoutOriginal) contenedor.insertBefore(wrap, btnLogoutOriginal); else contenedor.appendChild(wrap);
+    montarSelectorOrg(me, wrap);
     const btn = wrap.querySelector('.pn-usermenu-btn');
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -332,7 +365,9 @@
     // admin-costos.html ya trae su propio selector de organización en el
     // header (con el aviso de "todas" y la lógica de deshabilitar creación),
     // así que ahí se pide no repetirlo acá para no mostrar dos selectores.
-    const mostrarOrgSelect = !opts.ocultarOrg && (orgs.length > 1 || me.puedeVerTodas);
+    OCULTAR_ORG = paginaActual === 'costos'; // costos trae su propio selector
+    const hayTopbar = !!(document.getElementById('topbarUser') || document.getElementById('oficinaNombre'));
+    const mostrarOrgSelect = !opts.ocultarOrg && !hayTopbar && (orgs.length > 1 || me.puedeVerTodas);
 
     // Cada grupo se abre/cierra en acordeón (uno debajo del otro, no en
     // columnas) y recuerda cómo lo dejó el usuario. Por defecto arranca
