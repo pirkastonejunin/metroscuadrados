@@ -131,6 +131,7 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirSaldosDux()" title="Saldos de cuenta corriente de Dux (Consulta de Clientes con Saldo)">Saldos Dux</button>
           <button class="btn" onclick="abrirNuevoCliente()">+ Nuevo cliente</button>
         </div>
       </div>
@@ -655,7 +656,7 @@ async function desactivarCliente(id, nombre){
 // GET /:id/cuenta-corriente y registrarMovimientoCuentaCorriente en
 // clientes.js (backend).
 // -------------------------------------------------------------------
-const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual', devolucion: 'Devolución' };
+const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual', devolucion: 'Devolución', saldo_inicial_dux: 'Saldo inicial Dux' };
 // Ver/Imprimir/Compartir/Anular para comprobantes de venta referenciados
 // desde la cuenta corriente (3/10/2026, pedido de Mato: "en todas las
 // cuentas corrientes o detalles q haya algun comprobante asociado
@@ -1013,6 +1014,62 @@ async function buscarCuitEnArca(pref, idNombre, conCategoria){
     err.textContent = '';
     if (d.estadoClave && String(d.estadoClave).toUpperCase() !== 'ACTIVO') err.textContent = 'Ojo: ARCA informa la clave como ' + d.estadoClave + '.';
   }catch(e){ err.textContent = e.message; }
+}
+
+// ---- Saldos de clientes de Dux ----
+let impSdB64 = null, impSdOrgs = [];
+async function abrirSaldosDux(){
+  impSdB64 = null;
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impSdOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  const hoy = new Date(Date.now() - 3*3600e3).toISOString().slice(0,10);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar saldos de clientes de Dux</h2>
+        <p class="muted">Subí el archivo "Consulta de Clientes con Saldo" de Dux. Cada saldo se carga como un movimiento "Saldo inicial Dux" en la cuenta corriente del cliente (positivo = debe, negativo = a favor). Cada cliente se busca por nombre en todas tus sucursales. Si lo subís de nuevo, reemplaza el saldo inicial anterior, no lo duplica.</p>
+        <label>Fecha del saldo</label>
+        <input type="date" id="impSdFecha" value="${hoy}" onchange="previewSaldosDux()">
+        <label style="margin-top:8px;display:block">Sucursal para los clientes que no existan</label>
+        <select id="impSdOrg" onchange="previewSaldosDux()">${impSdOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <label style="display:block;margin-top:8px"><input type="checkbox" id="impSdCero" onchange="previewSaldosDux()"> Poner en 0 a los clientes con saldo inicial anterior que ya no figuran en el archivo</label>
+        <input type="file" id="impSdArchivo" accept=".xls,.xlsx" onchange="previewSaldosDux()" style="margin-top:8px">
+        <div class="err" id="impSdErr"></div>
+        <div id="impSdResumen"></div>
+        <button class="btn" id="impSdBtn" style="margin-top:10px;display:none" onclick="aplicarSaldosDux()">Cargar saldos</button>
+      </div>
+    </div>`;
+}
+function bodySaldosDux(){ return JSON.stringify({archivoBase64: impSdB64.b64, orgId: document.getElementById('impSdOrg').value, fechaCorte: document.getElementById('impSdFecha').value, ponerEnCero: document.getElementById('impSdCero').checked}); }
+function hSd(){ const h = headersAuthJson(); const s = document.getElementById('impSdOrg'); if (s && s.value) h['x-org-id'] = s.value; return h; }
+async function previewSaldosDux(){
+  const file = document.getElementById('impSdArchivo').files[0]; const errEl = document.getElementById('impSdErr'); errEl.textContent = '';
+  const out = document.getElementById('impSdResumen'); out.innerHTML = ''; document.getElementById('impSdBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impSdB64 || impSdB64.file !== file) impSdB64 = {file, b64: await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); })};
+    const r = await fetch('/api/saldos-import-dux/clientes/preview', {method:'POST', headers: hSd(), body: bodySaldosDux()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
+    out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
+      <li><b>${d.clientes}</b> clientes con saldo. Deben <b>${m(d.totalDeudores)}</b> (${d.cantDeudores}) · a favor <b>${m(d.totalAFavor)}</b> (${d.cantAFavor}) · neto <b>${m(d.saldoNeto)}</b></li>
+      <li>${d.existentes} ya existen${d.enVariasSucursales ? ' (' + d.enVariasSucursales + ' están en más de una sucursal: van a la que tiene más ventas)' : ''}, <b>${d.nuevos}</b> se van a crear</li>
+      <li>A cargar ahora: <b>${d.aCargar}</b> (${d.sinCambios} ya tienen ese mismo saldo)${d.ponerEnCero ? ' · ' + d.ponerEnCero + ' se ponen en 0' : ''}</li></ul>`
+      + (d.ambiguos ? `<p class="err"><b>${d.ambiguos} clientes no se cargan</b> (${m(d.montoAmbiguos)}) porque el nombre coincide con más de un cliente del sistema: ${d.detalleAmbiguos.map(x => escapeHtml(x.nombre) + ' (' + m(x.saldo) + ')').join(', ')}. Unificá los duplicados y volvé a subir el archivo.</p>` : '')
+      + (d.errores.length ? '<p class="muted">' + d.errores.length + ' aviso(s): ' + d.errores.slice(0,5).map(e => escapeHtml(e.motivo)).join('; ') + '</p>' : '');
+    if (d.aCargar > 0 || d.ponerEnCero > 0) document.getElementById('impSdBtn').style.display = '';
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
+}
+async function aplicarSaldosDux(){
+  const btn = document.getElementById('impSdBtn'), errEl = document.getElementById('impSdErr');
+  if (btn.disabled || !impSdB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/saldos-import-dux/clientes/aplicar', {method:'POST', headers: hSd(), body: bodySaldosDux()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al cargar');
+    document.getElementById('impSdResumen').innerHTML = `<p class="ok-msg">Listo: ${d.cargados} saldos cargados${d.clientesCreados ? ' y ' + d.clientesCreados + ' clientes creados' : ''}.</p>`;
+    btn.style.display = 'none'; if (typeof cargarClientes === 'function') cargarClientes();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
 }
 </script>
 </body>
