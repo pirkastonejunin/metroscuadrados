@@ -239,16 +239,16 @@ function renderRemitos(){
   });
   if (!lista.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay remitos para este filtro.</td></tr>'; return; }
   body.innerHTML = lista.map(rem => {
-    const resumenItems = (rem.items || []).map(it => `${escapeHtml(it.nombre)} (${it.cantidad})`).join(', ');
+    const resumenItems = (rem.items || []).map(it => `${escapeHtml(it.nombre)} (${it.cantidad}${it.cantidadPendiente > 0 ? ', pendiente ' + it.cantidadPendiente : ''})`).join(', ');
     return `
     <tr>
       <td>${fechaCorta(rem.fecha)}</td>
-      <td><strong>${String(rem.numero).padStart(5,'0')}</strong></td>
+      <td><strong>${rem.importado ? escapeHtml(rem.numeroOriginal || String(rem.numero)) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : String(rem.numero).padStart(5,'0')}</strong></td>
       <td class="muted">${rem.ventaNumero ? String(rem.ventaNumero).padStart(5,'0') : '—'}</td>
       <td>${escapeHtml(rem.clienteNombre || '—')}</td>
       <td class="muted">${escapeHtml(rem.depositoNombre || '—')}</td>
       <td class="muted" style="max-width:320px">${resumenItems || '—'}</td>
-      <td style="white-space:nowrap">${botonesImprimible(BASE + '/remitos/' + rem._id + '/imprimir')}</td>
+      <td style="white-space:nowrap">${rem.importado ? '' : botonesImprimible(BASE + '/remitos/' + rem._id + '/imprimir')}</td>
     </tr>
   `; }).join('');
 }

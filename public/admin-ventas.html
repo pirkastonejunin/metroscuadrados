@@ -2024,6 +2024,13 @@ function abrirImportarDux(){
         <div class="err" id="impDetErr"></div>
         <div id="impDetResumen"></div>
         <button class="btn" id="impDetBtn" style="margin-top:10px;display:none" onclick="aplicarDetalleDux()">Importar detalle</button>
+        <hr style="margin:18px 0;border:0;border-top:1px solid var(--border)">
+        <h3 style="margin:0 0 6px;font-size:15px">3. Remitos</h3>
+        <p class="muted">Subí el archivo "Remitos Por Producto" de Dux. Se cargan los remitos como historial (sin mover stock), se vinculan a su venta por cliente y artículos, y se actualiza lo entregado de cada venta. Conviene cargar antes el detalle (paso 2). Se puede repetir sin duplicar.</p>
+        <input type="file" id="impRemArchivo" accept=".xls,.xlsx" onchange="previewRemitosDux()">
+        <div class="err" id="impRemErr"></div>
+        <div id="impRemResumen"></div>
+        <button class="btn" id="impRemBtn" title="Importar remitos" style="margin-top:10px;display:none" onclick="aplicarRemitosDux()">Importar remitos</button>
       </div>
     </div>`;
 }
@@ -2125,6 +2132,45 @@ async function aplicarDetalleDux(){
   document.getElementById('impDetResumen').innerHTML = `<p class="ok-msg">Listo: ${act} ventas con detalle, ${cre} ventas nuevas.</p><ul class="muted">${filas.join('')}</ul>`;
   btn.style.display = 'none'; btn.disabled = false; btn.textContent = 'Importar detalle';
   if (typeof cargarVentas === 'function') cargarVentas();
+}
+// Remitos de Dux (paso 3 del import de ventas)
+let impRemB64 = null, impRemFile = null, impRemOrgs = [];
+async function impRemBase(){
+  if (!impRemOrgs.length) { try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impRemOrgs = (await r.json()).organizaciones || []; }catch(e){} }
+  const ids = impRemOrgs.map(o => o._id); return ids.includes(ORG) ? ORG : (ids[0] || ORG);
+}
+function impRemMapa(){ const m = {}; document.querySelectorAll('.impRemSuc').forEach(sel => { m[sel.dataset.suc] = sel.value; }); return m; }
+async function previewRemitosDux(){
+  const file = document.getElementById('impRemArchivo').files[0]; const errEl = document.getElementById('impRemErr'); errEl.textContent = '';
+  const out = document.getElementById('impRemResumen'); document.getElementById('impRemBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impRemB64 || file !== impRemFile) { impRemB64 = await leerArchivoBase64(file); impRemFile = file; }
+    const base = await impRemBase(); const h = headersAuthJson(); h['x-org-id'] = base;
+    const prev = impRemMapa();
+    const r = await fetch('/api/ventas-import-dux/remitos/preview', {method:'POST', headers: h, body: JSON.stringify({archivoBase64: impRemB64, orgId: base, mapaSucursales: prev})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const fd = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+    const filasSuc = d.sucursales.map(x => { const sel = prev[x.sucursal] || x.sugerida || x.destino; return `<tr><td>${escapeHtml(x.sucursal)} <span class="muted">(${x.remitos})</span></td><td><select class="impRemSuc" data-suc="${escapeHtml(x.sucursal)}" onchange="previewRemitosDux()">${d.organizaciones.map(o => `<option value="${o._id}"${o._id === sel ? ' selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></td></tr>`; }).join('');
+    out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">
+      <li><b>${d.remitosEnArchivo}</b> remitos (${d.lineas} renglones, ${fd(d.desde)} a ${fd(d.hasta)}): ${d.aImportar} nuevos, ${d.yaImportados} ya importados.</li>
+      <li>${d.vinculadosAVenta} se vinculan a su venta; ${d.sinVenta} quedan sin venta (se cargan igual). ${d.ventasConEntregaActualizada} ventas con la entrega actualizada. ${d.conPendiente} remitos tienen cantidades pendientes de entregar.</li>
+      <li>Clientes: ${d.clientesExistentes} ya existen, <b>${d.clientesNuevos}</b> se van a crear${d.clientesAmbiguos ? `, ${d.clientesAmbiguos} coinciden con más de uno` : ''}.</li></ul>
+      <p class="muted" style="margin-bottom:4px"><b>Sucursal de Dux → sucursal del sistema</b>:</p><table style="width:100%;font-size:13px">${filasSuc}</table>`;
+    if (d.aImportar > 0) document.getElementById('impRemBtn').style.display = '';
+  }catch(e){ errEl.textContent = e.message; out.innerHTML = ''; }
+}
+async function aplicarRemitosDux(){
+  const btn = document.getElementById('impRemBtn'), errEl = document.getElementById('impRemErr');
+  if (btn.disabled || !impRemB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const base = await impRemBase(); const h = headersAuthJson(); h['x-org-id'] = base;
+    const r = await fetch('/api/ventas-import-dux/remitos/aplicar', {method:'POST', headers: h, body: JSON.stringify({archivoBase64: impRemB64, orgId: base, mapaSucursales: impRemMapa()})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impRemResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertados} remitos importados (${d.vinculadosAVenta} vinculados), ${d.ventasActualizadas} ventas con la entrega actualizada${d.clientesCreados ? ' y ' + d.clientesCreados + ' clientes creados' : ''}.</p>`;
+    btn.style.display = 'none'; if (typeof cargarVentas === 'function') cargarVentas();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
 }
 </script>
 </body>
