@@ -620,7 +620,7 @@ async function cargarCompras(){
     <tr>
       <td><strong>${nroImportado(c)}</strong></td>
       <td class="muted">${fechaCorta(c.fecha)}</td>
-      <td>${escapeHtml(c.proveedorNombre)}</td>
+      <td>${linkProveedor(c.proveedorId, c.proveedorNombre)}</td>
       <td>${money(c.total)}</td>
       <td class="muted">${money(c.totalPagado)}</td>
       <td>${c.saldoPendiente > 0 ? money(c.saldoPendiente) : '<span class="muted">—</span>'}</td>
@@ -1336,7 +1336,7 @@ async function cargarSaldosProveedores(){
     if (!data.length) { body.innerHTML = '<tr><td colspan="5" class="muted">No hay saldos pendientes con proveedores.</td></tr>'; return; }
     body.innerHTML = data.map(s => `
       <tr>
-        <td>${escapeHtml(s.proveedorNombre)}</td>
+        <td>${linkProveedor(s.proveedorId, s.proveedorNombre)}</td>
         <td class="muted">${s.cantidadCompras}</td>
         <td>${money(s.saldoPendiente)}</td>
         <td class="muted">${s.aCuenta > 0 ? money(s.aCuenta) : '—'}</td>
@@ -1362,7 +1362,7 @@ async function cargarPagos(){
   body.innerHTML = pagosCache.map(p => `
     <tr>
       <td class="muted">${fechaCorta(p.fecha)}</td>
-      <td>${escapeHtml(p.proveedorNombre)}</td>
+      <td>${linkProveedor(p.proveedorId, p.proveedorNombre)}</td>
       <td>${p.importado ? '<span class="muted" title="Historial de Dux (sin forma de pago)">Dux</span>' : (TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor)}</td>
       <td>${money(p.monto)}</td>
       <td class="muted">${p.importado ? (p.montoSinAplicar > 0 ? 'A cuenta: ' + money(p.montoSinAplicar) + ' sin aplicar' : 'Aplicado') : (p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}</td>
@@ -2121,6 +2121,7 @@ async function confirmarConvertirOrden(id){
 // Importar historial de compras de Dux (9/10/2026)
 let impDuxB64 = null;
 function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
+function linkProveedor(id, nombre){ return id ? `<a href="/admin-proveedores.html?id=${id}&tab=cuenta-corriente" title="Ver la cuenta del proveedor" style="color:inherit;text-decoration:underline dotted">${escapeHtml(nombre||'')}</a>` : escapeHtml(nombre||''); }
 let impDuxOrgs = [];
 let IMP = {pagos:false};
 function hImp(){ const sel = document.getElementById('impDuxOrg'); const h = headersAuthJson(); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }

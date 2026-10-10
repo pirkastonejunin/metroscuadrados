@@ -363,7 +363,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const limite = Math.min(Number(req.query.limite) || 300, 1000);
+    const limite = Math.min(Number(req.query.limite) || 1000, 2000);
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
@@ -379,7 +379,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       for (const c of compras) {
         movimientos.push({
           tipo: 'debito', monto: c.total, fecha: c.fecha,
-          concepto: `Compra #${c.numero}`, origen: 'compra',
+          concepto: c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`, origen: 'compra',
           docId: c._id, docNumero: c.numero, docEstado: c.estado,
           tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
           items: c.items, observaciones: c.observaciones, moneda: c.moneda,
@@ -389,14 +389,14 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       for (const p of pagosCompra) {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
-          concepto: `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => '#' + a.compraNumero).join(', ') : ''}`,
+          concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => '#' + a.compraNumero).join(', ') : ''}`,
           origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor
         });
       }
       for (const g of gastos) {
         movimientos.push({
           tipo: 'debito', monto: g.total, fecha: g.fecha,
-          concepto: `Gasto #${g.numero}`, origen: 'gasto',
+          concepto: g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`, origen: 'gasto',
           docId: g._id, docNumero: g.numero, docEstado: g.estado,
           tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,

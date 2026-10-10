@@ -229,6 +229,14 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarProveedores();
+  // Viene desde otra pantalla (Compras, Pagos, Gastos): abre la ficha del proveedor en la pestaña pedida.
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('id')) {
+    let p = proveedoresCache.find(x => x._id === qs.get('id'));
+    if (!p) { try { const r = await fetch(BASE + '?incluirInactivos=1', {headers: headersAuth()}); if (r.ok) { proveedoresCache = await r.json(); p = proveedoresCache.find(x => x._id === qs.get('id')); } } catch(e){} }
+    if (p) { abrirEditarProveedor(p._id); mostrarTabProveedor(qs.get('tab') || 'cuenta-corriente', p._id); }
+    history.replaceState(null, '', location.pathname);
+  }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 

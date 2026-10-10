@@ -317,7 +317,7 @@ async function cargarGastos(){
     <tr>
       <td><strong>${nroImportado(g)}</strong></td>
       <td class="muted">${fechaCorta(g.fecha)}</td>
-      <td>${escapeHtml(g.proveedorNombre)}</td>
+      <td>${g.proveedorId ? `<a href="/admin-proveedores.html?id=${g.proveedorId}&tab=cuenta-corriente" title="Ver la cuenta del proveedor" style="color:inherit;text-decoration:underline dotted">${escapeHtml(g.proveedorNombre||'')}</a>` : escapeHtml(g.proveedorNombre||'')}</td>
       <td class="muted">${escapeHtml(g.comprobanteNumero||'—')}</td>
       <td>${money(g.total)}</td>
       <td class="muted">${money(g.totalPagado)}</td>
