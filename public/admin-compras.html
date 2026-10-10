@@ -2114,15 +2114,20 @@ async function confirmarConvertirOrden(id){
 // Importar historial de compras de Dux (9/10/2026)
 let impDuxB64 = null;
 function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
-function abrirImportarDux(){
+let impDuxOrgs = [];
+function hImp(){ const sel = document.getElementById('impDuxOrg'); return headersAuthJson(sel && sel.value ? {'x-org-id': sel.value} : {}); }
+async function abrirImportarDux(){
   impDuxB64 = null;
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar historial de compras de Dux</h2>
         <p class="muted">Subí el archivo "Consulta De Gestion Compra" de Dux (.xls o .xlsx). Se carga como historial: sin movimientos de stock ni de caja/banco. Lo pagado y el saldo se toman de Dux. Si lo subís dos veces, no duplica.</p>
-        <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()">
+        <label>Sucursal donde se cargan</label>
+        <select id="impDuxOrg" onchange="previewImportDux()">${impDuxOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()" style="margin-top:8px">
         <div class="err" id="impDuxErr"></div>
         <div id="impDuxResumen"></div>
         <button class="btn" id="impDuxBtn" style="margin-top:10px;display:none" onclick="aplicarImportDux()">Importar</button>
@@ -2138,7 +2143,7 @@ async function previewImportDux(){
   document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
   try{
     impDuxB64 = await leerB64(file);
-    const r = await fetch('/api/compras-import-dux/preview', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxB64})});
+    const r = await fetch('/api/compras-import-dux/preview', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al analizar');
     const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
@@ -2161,7 +2166,7 @@ async function aplicarImportDux(){
   if (btn.disabled || !impDuxB64) return;
   btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
   try{
-    const r = await fetch('/api/compras-import-dux/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({archivoBase64: impDuxB64})});
+    const r = await fetch('/api/compras-import-dux/aplicar', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al importar');
     document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} compras importados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
