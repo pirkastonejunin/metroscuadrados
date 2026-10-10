@@ -655,7 +655,7 @@ async function desactivarCliente(id, nombre){
 // GET /:id/cuenta-corriente y registrarMovimientoCuentaCorriente en
 // clientes.js (backend).
 // -------------------------------------------------------------------
-const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual' };
+const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual', devolucion: 'Devolución' };
 // Ver/Imprimir/Compartir/Anular para comprobantes de venta referenciados
 // desde la cuenta corriente (3/10/2026, pedido de Mato: "en todas las
 // cuentas corrientes o detalles q haya algun comprobante asociado
@@ -724,12 +724,13 @@ async function cargarCuentaCorrienteTab(id){
     // es decir, deshaciendo los movimientos uno por uno yendo hacia atrás
     // en el tiempo.
     let saldoCorrido = data.saldo;
+    // Los movimientos importados de Dux (cobros históricos) no forman parte del saldo: no entran en el saldo corrido.
     const filas = data.movimientos.map((m, i) => {
       if (i > 0) {
         const anterior = data.movimientos[i - 1];
-        saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto;
+        if (!anterior.importado) saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto;
       }
-      return { m, saldo: saldoCorrido };
+      return { m, saldo: m.importado ? null : saldoCorrido };
     });
     // Botón "Cobrar" por fila (3/10/2026, pedido de Mato: "deberiamos
     // tener algun boton que nos permita generar un cobro de cada factura
@@ -762,10 +763,10 @@ async function cargarCuentaCorrienteTab(id){
               <td>${venta
                 ? `<a href="javascript:void(0)" onclick="imprimirDocumento('/api/ventas/${m.ventaId}/comprobante')" style="text-decoration:underline;cursor:pointer" title="Ver el comprobante">${conceptoHtml}</a>`
                 : conceptoHtml}</td>
-              <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}</td>
+              <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}${m.importado ? ' <span style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : ''}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
-              <td class="muted">${money(saldo)}</td>
+              <td class="muted">${saldo === null ? '<span title="Cobro histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
               <td style="white-space:nowrap">
                 ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}

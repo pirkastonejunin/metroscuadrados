@@ -125,7 +125,8 @@
           <div style="min-width:140px"><label>Desde</label><input id="lcDesde" type="date" onchange="cargarListaCobranzas()"></div>
           <div style="min-width:140px"><label>Hasta</label><input id="lcHasta" type="date" onchange="cargarListaCobranzas()"></div>
         </div>
-        <button class="btn" onclick="toggleNuevaCobranza(true)">+ Nueva cobranza</button>
+        <div style="display:flex;gap:8px"><button class="btn secondary" onclick="abrirImportarCobrosDux()" title="Importar el historial de cobranzas de Dux (Consulta de Cobros)">Importar de Dux</button>
+        <button class="btn" onclick="toggleNuevaCobranza(true)">+ Nueva cobranza</button></div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
@@ -566,6 +567,69 @@ function botonesImprimible(url){
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button>
   `;
+}
+</script>
+<style>
+  .imp-ov { position: fixed; inset: 0; background: rgba(17,20,24,.45); z-index: 500; display: flex; align-items: flex-start; justify-content: center; padding: 6vh 12px; overflow-y: auto; }
+  .imp-box { background: var(--card, #fff); border-radius: 14px; width: min(760px, 100%); padding: 18px 20px 20px; box-shadow: 0 12px 40px rgba(0,0,0,.25); position: relative; }
+  .imp-box .x { position: absolute; top: 10px; right: 14px; cursor: pointer; font-size: 18px; }
+</style>
+<script>
+// Importar cobranzas históricas de Dux (10/10/2026)
+let impCobB64 = null, impCobOrgs = [], impCobSuc = {};
+function impCobOrgBase(){ const ids = impCobOrgs.map(o => o._id); return ids.includes(ORG) ? ORG : (ids[0] || ORG); }
+function impCobH(){ const h = headersAuthJson(); h['x-org-id'] = impCobOrgBase(); return h; }
+async function abrirImportarCobrosDux(){
+  impCobB64 = null; impCobSuc = {};
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impCobOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  let ov = document.getElementById('impCobOv'); if (!ov) { ov = document.createElement('div'); ov.id = 'impCobOv'; ov.className = 'imp-ov'; document.body.appendChild(ov); }
+  ov.style.display = 'flex';
+  ov.innerHTML = `<div class="imp-box"><span class="x" onclick="cerrarImportarCobros()">✕</span>
+    <h2 style="margin-top:0">Importar cobranzas de Dux</h2>
+    <p class="muted">Subí el archivo "Consulta de Cobros" de Dux (.xls o .xlsx). Se carga como historial: quedan en la lista de Cobranza y en la cuenta corriente de cada cliente, vinculadas a la venta cuando el concepto nombra el comprobante. <b>No cambian el saldo del cliente ni mueven cajas/bancos</b> (el saldo ya viene de Dux con las ventas). Si lo subís dos veces, no duplica.</p>
+    <p class="muted"><b>Importante:</b> cargá antes las ventas y su detalle, para que cada venta esté en su sucursal.</p>
+    <input type="file" id="impCobArchivo" accept=".xls,.xlsx" onchange="previewImportarCobros()">
+    <div class="err" id="impCobErr"></div><div id="impCobResumen"></div>
+    <button class="btn" id="impCobBtn" title="Importar" style="margin-top:10px;display:none" onclick="aplicarImportarCobros()">Importar</button></div>`;
+}
+function cerrarImportarCobros(){ const ov = document.getElementById('impCobOv'); if (ov) ov.style.display = 'none'; }
+function impCobLeer(file){ return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); }); }
+function impCobMapa(){ const m = {}; document.querySelectorAll('.impCobSuc').forEach(sel => { m[sel.dataset.suc] = sel.value; }); return m; }
+async function previewImportarCobros(){
+  const file = document.getElementById('impCobArchivo').files[0]; const errEl = document.getElementById('impCobErr'); errEl.textContent = '';
+  const out = document.getElementById('impCobResumen'); document.getElementById('impCobBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impCobB64 || file !== impCobFile) { impCobB64 = await impCobLeer(file); impCobFile = file; }
+    const mapaPrev = impCobMapa();
+    const r = await fetch('/api/cobros-import-dux/preview', {method:'POST', headers: impCobH(), body: JSON.stringify({archivoBase64: impCobB64, orgId: impCobOrgBase(), mapaSucursales: mapaPrev})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const fd = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+    const $ = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits: 0});
+    const L = {efectivo:'Efectivo', tarjeta:'Tarjeta', cuenta:'Transferencia/banco', cheque:'Cheque'};
+    const filasSuc = d.sucursales.map(x => { const sel = mapaPrev[x.sucursal] || x.sugerida || x.destino; return `<tr><td>${escapeHtml(x.sucursal)} <span class="muted">(${x.lineas})</span></td><td><select class="impCobSuc" data-suc="${escapeHtml(x.sucursal)}" onchange="previewImportarCobros()">${d.organizaciones.map(o => `<option value="${o._id}"${o._id === sel ? ' selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></td></tr>`; }).join('');
+    out.innerHTML = `<ul style="line-height:1.6;padding-left:18px">
+      <li><b>${d.lineas}</b> cobros en ${d.recibos} recibos (${fd(d.desde)} a ${fd(d.hasta)}): ${d.aImportar} nuevos, ${d.yaImportadas} ya importados.</li>
+      <li>Total cobrado: <b>${$(d.montoTotal)}</b> — ${Object.keys(d.porTipo).map(k => (L[k] || k) + ' ' + $(d.porTipo[k])).join(' · ')}</li>
+      <li>Por año: ${Object.keys(d.porAnio).map(y => y + ': ' + $(d.porAnio[y])).join(' · ')}</li>
+      <li>${d.vinculadasAVenta} se vinculan a una venta; ${d.aCuenta} quedan como cobro a cuenta (señas, adelantos, sin comprobante)${d.devoluciones ? `; ${d.devoluciones} devoluciones` : ''}.</li>
+      <li>Clientes: ${d.clientesExistentes} ya existen, <b>${d.clientesNuevos}</b> se van a crear${d.clientesAmbiguos ? `, ${d.clientesAmbiguos} coinciden con más de uno (quedan sin vincular)` : ''}.</li></ul>
+      <p class="muted" style="margin-bottom:4px"><b>Sucursal de Dux → sucursal del sistema</b>:</p><table style="width:100%;font-size:13px">${filasSuc}</table>
+      ${d.errores.length ? `<p class="err">${d.errores.length} fila(s) con error (se saltean).</p>` : ''}`;
+    if (d.aImportar > 0) document.getElementById('impCobBtn').style.display = '';
+  }catch(e){ errEl.textContent = e.message; out.innerHTML = ''; }
+}
+let impCobFile = null;
+async function aplicarImportarCobros(){
+  const btn = document.getElementById('impCobBtn'), errEl = document.getElementById('impCobErr');
+  if (btn.disabled || !impCobB64) return; btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/cobros-import-dux/aplicar', {method:'POST', headers: impCobH(), body: JSON.stringify({archivoBase64: impCobB64, orgId: impCobOrgBase(), mapaSucursales: impCobMapa()})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impCobResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertados} cobros importados${d.clientesCreados ? ' y ' + d.clientesCreados + ' clientes creados' : ''}.</p>`;
+    btn.style.display = 'none'; if (typeof cargarListaCobranzas === 'function') cargarListaCobranzas();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false; btn.textContent = 'Importar';
 }
 </script>
 </body>

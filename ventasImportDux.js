@@ -433,3 +433,4 @@ setTimeout(() => { getDb().then(alinearCreatedAt).catch(() => {}); }, 20000).unr
 
 module.exports = router;
 module.exports.alinearCreatedAt = alinearCreatedAt;
+module.exports.crearResolverClientes = crearResolverClientes;
