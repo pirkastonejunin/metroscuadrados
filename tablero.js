@@ -68,6 +68,12 @@ function fechaAR(d) {
 }
 function validarFecha(s) { return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(inicioDia(s).getTime()); }
 
+// Notas de crédito/débito: la nota de crédito RESTA (total y m2), la de débito SUMA; ninguna de las dos cuenta como "venta"
+// en las cantidades (embudo, ticket promedio, cantidad de ventas).
+const ES_NOTA = { $in: ['nota_credito', 'nota_debito'] };
+const SIGNO_NC = { $cond: [{ $eq: ['$tipoComprobante', 'nota_credito'] }, -1, 1] };
+const SIN_NOTAS = { tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } };
+
 function pct(parte, total) {
   if (!total) return null;
   return Math.round((parte / total) * 1000) / 10; // un decimal
@@ -119,7 +125,7 @@ router.get('/embudo', authTablero, async (req, res) => {
         sinVinculo ? 0 : db.collection('oportunidades').countDocuments(Object.assign({}, org, filtroVend, { createdAt: rango })),
         sinVinculo ? 0 : db.collection('visitas').countDocuments(Object.assign({}, org, filtroVend, { estado: { $ne: 'cancelada' }, createdAt: rango })),
         db.collection('presupuestos').countDocuments(Object.assign({}, org, filtroUsr, { createdAt: rango })),
-        db.collection('ventas').countDocuments(Object.assign({}, org, filtroUsr, { estado: { $ne: 'anulada' }, createdAt: rango }))
+        db.collection('ventas').countDocuments(Object.assign({}, org, filtroUsr, SIN_NOTAS, { estado: { $ne: 'anulada' }, createdAt: rango }))
       ]);
       return { crm, visitas, presupuestos, ventas, alcance, vendedorId: vendedorId ? String(vendedorId) : null };
     });
@@ -172,7 +178,7 @@ router.get('/rubros', authTablero, async (req, res) => {
         { $lookup: { from: 'productos_catalogo', localField: 'items.productoId', foreignField: '_id', as: 'prod' } },
         { $addFields: { rubro: { $ifNull: [{ $arrayElemAt: ['$prod.rubro', 0] }, ''] } } },
         { $match: { rubro: { $in: elegidos } } },
-        { $group: { _id: '$rubro', unidades: { $sum: '$items.cantidad' } } }
+        { $group: { _id: '$rubro', unidades: { $sum: { $multiply: ['$items.cantidad', SIGNO_NC] } } } }
       ]).toArray();
       const mapa = {}; filas.forEach(f => { mapa[f._id] = Math.round(f.unidades * 100) / 100; });
       return elegidos.map(r => ({ rubro: r, unidades: mapa[r] || 0 }));
@@ -283,16 +289,16 @@ router.get('/promedios', authTablero, async (req, res) => {
       const [tk, m2] = await Promise.all([
         db.collection('ventas').aggregate([
           { $match: match },
-          { $group: { _id: null, ventas: { $sum: 1 },
-              total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] }] } } } }
+          { $group: { _id: null, ventas: { $sum: { $cond: [{ $in: ['$tipoComprobante', ['nota_credito', 'nota_debito']] }, 0, 1] } },
+              total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] }, SIGNO_NC] } } } }
         ]).toArray(),
         db.collection('ventas').aggregate([
           { $match: match },
           { $unwind: '$items' },
           { $lookup: { from: 'productos_catalogo', localField: 'items.productoId', foreignField: '_id', as: 'prod' } },
           { $match: { 'prod.0.unidad': 'm2' } },
-          { $group: { _id: '$_id', m2: { $sum: '$items.cantidad' } } },
-          { $group: { _id: null, ventas: { $sum: 1 }, m2: { $sum: '$m2' } } }
+          { $group: { _id: '$_id', nota: { $first: '$tipoComprobante' }, m2: { $sum: { $multiply: ['$items.cantidad', SIGNO_NC] } } } },
+          { $group: { _id: null, ventas: { $sum: { $cond: [{ $in: ['$nota', ['nota_credito', 'nota_debito']] }, 0, 1] } }, m2: { $sum: '$m2' } } }
         ]).toArray()
       ]);
       const t = tk[0] || { ventas: 0, total: 0 }, m = m2[0] || { ventas: 0, m2: 0 };
@@ -317,8 +323,8 @@ router.get('/serie', authTablero, async (req, res) => {
       const { filtroUsr } = await resolverAlcance(db, req);
       return db.collection('ventas').aggregate([
         { $match: Object.assign({}, filtroOrg(req), filtroUsr, { estado: { $ne: 'anulada' }, createdAt: rango }) },
-        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: '-03:00' } }, ventas: { $sum: 1 },
-            total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] }] } } } }
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: '-03:00' } }, ventas: { $sum: { $cond: [{ $in: ['$tipoComprobante', ['nota_credito', 'nota_debito']] }, 0, 1] } },
+            total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] }, SIGNO_NC] } } } }
       ]).toArray();
     });
     const mapa = {}; filas.forEach(f => { mapa[f._id] = { ventas: f.ventas, total: Math.round(f.total) }; });
@@ -390,7 +396,7 @@ router.get('/detalle', authTablero, async (req, res) => {
       const db = await getDb(); const org = filtroOrg(req);
       const { filtroVend, filtroUsr } = await resolverAlcance(db, req);
       const nombreCli = c => (c && (c.nombre || c.apellidoRazonSocial || c.razonSocial)) || (typeof c === 'string' ? c : '');
-      const ars = v => Math.round((v.total || 0) * (v.moneda === 'USD' ? (v.cotizacionDolar || 1) : 1));
+      const ars = v => Math.round((v.total || 0) * (v.moneda === 'USD' ? (v.cotizacionDolar || 1) : 1) * (v.tipoComprobante === 'nota_credito' ? -1 : 1)); // la nota de crédito resta
       if (tipo === 'crm') {
         const docs = await db.collection('oportunidades').find(Object.assign({}, org, filtroVend, { createdAt: rango })).sort({ createdAt: -1 }).limit(LIMITE_DETALLE + 1).toArray();
         return { titulo: 'Datos en el CRM', columnas: ['Fecha', 'N°', 'Cliente', 'Vendedor', 'Estado'], filas: docs.map(d => ({ id: String(d._id), href: '/admin-visitas.html?abrir=crm-' + d._id, celdas: [fechaAR(d.createdAt), '#' + d.numero, nombreCli(d.cliente), d.vendedorNombre || '', d.estado || ''] })) };
@@ -412,10 +418,10 @@ router.get('/detalle', authTablero, async (req, res) => {
             { $lookup: { from: 'productos_catalogo', localField: 'items.productoId', foreignField: '_id', as: 'prod' } },
             { $addFields: { rubro: { $ifNull: [{ $arrayElemAt: ['$prod.rubro', 0] }, ''] } } },
             { $match: { rubro } }, { $sort: { createdAt: -1 } }, { $limit: LIMITE_DETALLE + 1 },
-            { $project: { createdAt: 1, numero: 1, tipoComprobante: 1, clienteNombre: 1, 'items.nombre': 1, 'items.sku': 1, 'items.cantidad': 1, 'items.subtotal': 1 } }
+            { $addFields: { signo: SIGNO_NC } }, { $project: { signo: 1, createdAt: 1, numero: 1, tipoComprobante: 1, clienteNombre: 1, 'items.nombre': 1, 'items.sku': 1, 'items.cantidad': 1, 'items.subtotal': 1 } }
           ]).toArray();
           return { titulo: 'Unidades vendidas: ' + rubro, columnas: ['Fecha', 'Venta', 'Cliente', 'Producto', 'Cantidad', 'Subtotal'], numericas: [4, 5],
-            filas: filas.map(v => ({ id: String(v._id), href: '/admin-ventas.html?abrir=' + v._id, celdas: [fechaAR(v.createdAt), '#' + (v.numero || ''), v.clienteNombre || '', (v.items.sku ? v.items.sku + ' - ' : '') + (v.items.nombre || ''), v.items.cantidad, Math.round(v.items.subtotal || 0)] })) };
+            filas: filas.map(v => ({ id: String(v._id), href: '/admin-ventas.html?abrir=' + v._id, celdas: [fechaAR(v.createdAt), '#' + (v.numero || ''), v.clienteNombre || '', (v.items.sku ? v.items.sku + ' - ' : '') + (v.items.nombre || ''), v.items.cantidad * v.signo, Math.round((v.items.subtotal || 0) * v.signo)] })) };
         }
         let ids = null;
         if (tipo === 'ventas_m2') {
@@ -426,8 +432,8 @@ router.get('/detalle', authTablero, async (req, res) => {
         }
         const docs = await db.collection('ventas').find(match).sort({ createdAt: -1 }).limit(LIMITE_DETALLE + 1).toArray();
         const cols = ['Fecha', 'Comprobante', 'Cliente', 'Vendedor', 'Estado'].concat(ids ? ['m2'] : []).concat(['Total']);
-        return { titulo: tipo === 'ventas_m2' ? 'Ventas con m2' : 'Ventas del período', columnas: cols, numericas: ids ? [5, 6] : [5], monto: true,
-          filas: docs.map(v => ({ id: String(v._id), href: '/admin-ventas.html?abrir=' + v._id, celdas: [fechaAR(v.createdAt), (v.numeroOriginal || ('#' + (v.numero || ''))), v.clienteNombre || '', v.vendedorNombre || v.usuarioNombre || '', v.estado || ''].concat(ids ? [Math.round((ids.get(String(v._id)) || 0) * 100) / 100] : []).concat([ars(v)]) })) };
+        return { titulo: tipo === 'ventas_m2' ? 'Ventas con m2' : 'Ventas del período (las notas de crédito restan y las de débito suman)', columnas: cols, numericas: ids ? [5, 6] : [5], monto: true,
+          filas: docs.map(v => ({ id: String(v._id), href: '/admin-ventas.html?abrir=' + v._id, celdas: [fechaAR(v.createdAt), (v.numeroOriginal || (({ nota_credito: 'NC #', nota_debito: 'ND #' })[v.tipoComprobante] || '#') + (v.numero || '')), v.clienteNombre || '', v.vendedorNombre || v.usuarioNombre || '', v.estado || ''].concat(ids ? [Math.round((ids.get(String(v._id)) || 0) * 100) / 100] : []).concat([ars(v)]) })) };
       }
       if (tipo === 'produccion') {
         const match = Object.assign({}, org, { fecha: dia ? dia : { $gte: desdeS, $lte: hastaS } });
