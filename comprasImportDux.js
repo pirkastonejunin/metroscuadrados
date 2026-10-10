@@ -162,7 +162,16 @@ function crearResolverProveedores(db, orgId, ahora) {
   };
 }
 
+// La sucursal destino puede venir también en el cuerpo (orgId), por si el encabezado no llega.
+function orgDeCuerpo(req) {
+  const { ObjectId } = require('mongodb');
+  const raw = req.body && req.body.orgId; if (!raw || !ObjectId.isValid(String(raw))) return null;
+  const u = req.usuario || {};
+  if (u.rol && u.rol.protegido) return new ObjectId(String(raw));
+  return (u.orgIds || []).map(String).includes(String(raw)) ? new ObjectId(String(raw)) : null;
+}
 async function procesar(req, aplicar, gasto) {
+  if (!req.orgId) req.orgId = orgDeCuerpo(req);
   if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
   const { compras, errores } = leerArchivo(req.body && req.body.archivoBase64, gasto);
   if (!compras.length) throw err(400, 'El archivo no tiene ' + (gasto ? 'gastos' : 'compras') + ' para importar.');

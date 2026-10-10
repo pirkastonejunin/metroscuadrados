@@ -2143,7 +2143,7 @@ async function previewImportDux(){
   document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
   try{
     impDuxB64 = await leerB64(file);
-    const r = await fetch('/api/compras-import-dux/preview', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64})});
+    const r = await fetch('/api/compras-import-dux/preview', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al analizar');
     const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
@@ -2166,7 +2166,7 @@ async function aplicarImportDux(){
   if (btn.disabled || !impDuxB64) return;
   btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
   try{
-    const r = await fetch('/api/compras-import-dux/aplicar', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64})});
+    const r = await fetch('/api/compras-import-dux/aplicar', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error al importar');
     document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} compras importados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
