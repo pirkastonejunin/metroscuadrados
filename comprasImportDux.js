@@ -79,6 +79,19 @@ function numero(v) {
 function estadoDeRecepcion(txt) { return /PENDIENTE|PARCIAL/i.test(String(txt || '')) ? 'pendiente' : 'recibida'; }
 
 const enc0 = (fila) => fila.map(norm);
+// Sueldos y cargas: en Dux se cargaban como gastos de un proveedor. Acá cuentan como "Sueldos y cargas · <sector>" en el
+// Estado de resultados (el informe agrupa por ese prefijo), así los meses anteriores al módulo Sueldos quedan bien
+// clasificados. El concepto original de Dux queda en las observaciones del renglón.
+const PREF_SUELDOS = 'Sueldos y cargas · ';
+function conceptoDeGasto(detalle) {
+  const n = norm(detalle);
+  if (/^sueldos? obra$/.test(n)) return PREF_SUELDOS + 'Obra';
+  if (/^sueldos? fabrica$|^sueldos? produccion$/.test(n)) return PREF_SUELDOS + 'Producción';
+  if (/^sueldos? comercial$|^comision(es)? venta$/.test(n)) return PREF_SUELDOS + 'Ventas';
+  if (/^sueldos?$|^sueldos?, aportes/.test(n)) return PREF_SUELDOS + 'Otros';
+  if (/^aportes leyes sociales/.test(n)) return PREF_SUELDOS + 'Cargas sociales y aportes';
+  return detalle;
+}
 function leerArchivo(base64, gasto) {
   if (!base64) throw err(400, 'Falta el archivo');
   const buf = Buffer.from(String(base64).replace(/^data:[^,]*,/, ''), 'base64');
@@ -109,7 +122,7 @@ function leerArchivo(base64, gasto) {
       fila: i + 1, fecha, comprobante, proveedor, total, pagado,
       saldo: round2(c.saldo >= 0 ? numero(f[c.saldo]) : total - pagado),
       estadoRecepcionDux: txt(f, 'estado'), personal: txt(f, 'personal'), vencimiento: parsearFecha(f[c.venc]),
-      observaciones: txt(f, 'obs'), anulada: !!txt(f, 'anula'), concepto: txt(f, 'detalle')
+      observaciones: txt(f, 'obs'), anulada: !!txt(f, 'anula'), conceptoDux: txt(f, 'detalle'), concepto: gasto ? conceptoDeGasto(txt(f, 'detalle')) : ''
     });
   }
   return { compras, errores };
@@ -178,7 +191,7 @@ async function procesar(req, aplicar, gasto) {
       desde: compras.reduce((a, v) => (!a || v.fecha < a ? v.fecha : a), null), hasta: compras.reduce((a, v) => (!a || v.fecha > a ? v.fecha : a), null),
       totalImporte: round2(nuevas.reduce((s, v) => s + v.total, 0)), totalSaldo: round2(nuevas.reduce((s, v) => s + (v.anulada ? 0 : v.saldo), 0)),
       conSaldo: nuevas.filter(v => !v.anulada && v.saldo >= 1).length, anuladas: nuevas.filter(v => v.anulada).length,
-      proveedoresExistentes: t.existentes, proveedoresNuevos: t.nuevos, proveedoresAmbiguos: t.ambiguos, conceptosNuevos: conceptosNuevos.size,
+      proveedoresExistentes: t.existentes, proveedoresNuevos: t.nuevos, proveedoresAmbiguos: t.ambiguos, conceptosNuevos: conceptosNuevos.size, sueldosReclasificados: gasto ? compras.filter(v => v.concepto.startsWith(PREF_SUELDOS)).length : 0, sueldosImporte: gasto ? round2(nuevas.filter(v => v.concepto.startsWith(PREF_SUELDOS)).reduce((a, v) => a + v.total, 0)) : 0,
       estados: porEstado, sucursalDestino: ((await db.collection('organizaciones').findOne({ _id: orgId }, { projection: { nombre: 1 } })) || {}).nombre || '', errores
     };
     if (!aplicar) return resumen;
@@ -208,7 +221,7 @@ async function procesar(req, aplicar, gasto) {
       };
       if (gasto) {
         return Object.assign(base, { estadoFacturacionDux: v.estadoRecepcionDux,
-          items: [{ conceptoId: conceptos.get(norm(v.concepto)) || null, conceptoNombre: v.concepto, cantidad: 1, precioUnitario: v.total, subtotal: v.total, observaciones: '', alicuotaIva: 0, importeIva: 0 }] });
+          items: [{ conceptoId: conceptos.get(norm(v.concepto)) || null, conceptoNombre: v.concepto, cantidad: 1, precioUnitario: v.total, subtotal: v.total, observaciones: v.conceptoDux !== v.concepto ? 'Concepto en Dux: ' + v.conceptoDux : '', alicuotaIva: 0, importeIva: 0 }] });
       }
       return Object.assign(base, { tipoRecepcion: 'inmediata', depositoId: null, estadoRecepcionDux: v.estadoRecepcionDux,
         items: [{ productoId: null, sku: null, nombre: 'Compra histórica Dux (sin detalle)', cantidad: 1, precioUnitario: v.total, subtotal: v.total }],

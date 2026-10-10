@@ -969,6 +969,7 @@ async function previewImportDux(){
         <li>Se cargan en la sucursal activa: <b>${escapeHtml(d.sucursalDestino || '-')}</b></li>
         <li>Proveedores: ${d.proveedoresExistentes} ya existen, <b>${d.proveedoresNuevos}</b> se van a crear${d.proveedoresAmbiguos ? ', ' + d.proveedoresAmbiguos + ' coinciden con más de uno (quedan sin vincular)' : ''}</li>
         ${d.conceptosNuevos ? '<li>Conceptos de gasto nuevos a crear: <b>' + d.conceptosNuevos + '</b></li>' : ''}
+        ${d.sueldosReclasificados ? '<li>' + d.sueldosReclasificados + ' comprobantes de sueldos y cargas se clasifican como <b>Sueldos y cargas · sector</b> (Obra, Producción, Ventas, Otros, Cargas sociales) para que el Estado de resultados los tome como sueldos' + '</li>' : ''}
       </ul>
       ${d.errores.length ? '<p class="err">' + d.errores.length + ' fila(s) con error (se saltean):</p><ul class="muted">' + d.errores.slice(0,10).map(e => '<li>Fila ' + e.fila + ': ' + escapeHtml(e.motivo) + '</li>').join('') + '</ul>' : ''}`;
     if (d.aImportar > 0) document.getElementById('impDuxBtn').style.display = '';
