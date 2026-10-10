@@ -2115,7 +2115,7 @@ async function confirmarConvertirOrden(id){
 let impDuxB64 = null;
 function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
 let impDuxOrgs = [];
-function hImp(){ const sel = document.getElementById('impDuxOrg'); return headersAuthJson(sel && sel.value ? {'x-org-id': sel.value} : {}); }
+function hImp(){ const sel = document.getElementById('impDuxOrg'); const h = headersAuthJson(); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }
 async function abrirImportarDux(){
   impDuxB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
