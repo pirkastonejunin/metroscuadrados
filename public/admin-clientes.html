@@ -131,6 +131,7 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirUnificar()" title="Buscar clientes duplicados y unificarlos">Unificar duplicados</button>
           <button class="btn secondary" onclick="abrirFichasCliDux()" title="Ficha de clientes de Dux (Listado de Clientes)">Fichas Dux</button>
           <button class="btn secondary" onclick="abrirSaldosDux()" title="Saldos de cuenta corriente de Dux (Consulta de Clientes con Saldo)">Saldos Dux</button>
           <button class="btn" onclick="abrirNuevoCliente()">+ Nuevo cliente</button>
@@ -1017,6 +1018,63 @@ async function buscarCuitEnArca(pref, idNombre, conCategoria){
   }catch(e){ err.textContent = e.message; }
 }
 
+
+
+// ---- Unificar clientes duplicados ----
+let unifGrupos = [];
+async function abrirUnificar(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal" style="max-width:900px;width:96%">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Unificar clientes duplicados</h2>
+        <p class="muted">Clientes de esta sucursal que parecen ser la misma persona (mismo CUIT o mismo nombre). Elegí cuál se conserva (la ficha que queda) y tildá los duplicados que se juntan con ella: sus ventas, cobros, presupuestos, obras y saldo pasan al cliente que se conserva, y los duplicados quedan inactivos. Revisá bien los que tienen el mismo nombre pero CUIT distinto: pueden ser personas diferentes.</p>
+        <div class="err" id="unifErr"></div>
+        <div id="unifLista"><p class="muted">Buscando duplicados…</p></div>
+      </div>
+    </div>`;
+  await cargarUnificar();
+}
+async function cargarUnificar(){
+  const out = document.getElementById('unifLista'), errEl = document.getElementById('unifErr'); if (!out) return;
+  try{
+    const r = await fetch('/api/unificar-clientes/grupos', {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    unifGrupos = d.grupos;
+    if (!d.grupos.length){ out.innerHTML = '<p class="ok-msg">No se encontraron clientes duplicados.</p>'; return; }
+    out.innerHTML = `<p><b>${d.total}</b> grupo(s) de posibles duplicados${d.total > d.grupos.length ? ' (se muestran los primeros ' + d.grupos.length + ')' : ''}.</p>` + d.grupos.map((g, gi) => `
+      <div id="unifG${gi}" style="border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin:8px 0;${g.riesgo ? 'border-color:#d9a400;background:rgba(217,164,0,.08)' : ''}">
+        <div class="muted" style="margin-bottom:4px"><b>${escapeHtml(g.motivo)}</b></div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr class="muted"><td>Conservar</td><td>Juntar</td><td>Cliente</td><td>CUIT</td><td>Domicilio</td><td>Teléfono</td><td style="text-align:right">Ventas</td><td style="text-align:right">Saldo</td></tr>
+          ${g.miembros.map((m, mi) => `<tr>
+            <td><input type="radio" name="unifK${gi}" value="${m._id}" ${mi === 0 ? 'checked' : ''} onchange="unifMarcar(${gi})"></td>
+            <td><input type="checkbox" class="unifC${gi}" value="${m._id}" ${mi === 0 ? 'disabled' : 'checked'}></td>
+            <td>${escapeHtml(m.nombre)}</td><td>${escapeHtml(m.cuit)}</td><td>${escapeHtml(m.domicilio)}</td><td>${escapeHtml(m.telefono)}</td>
+            <td style="text-align:right">${m.ventas}</td><td style="text-align:right">${m.saldo ? m.saldo.toLocaleString('es-AR') : ''}</td></tr>`).join('')}
+        </table>
+        <button class="btn" style="margin-top:6px" onclick="unificarGrupo(${gi})">Unificar este grupo</button>
+        <span class="muted" id="unifR${gi}"></span>
+      </div>`).join('');
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
+}
+function unifMarcar(gi){
+  const k = document.querySelector('input[name="unifK' + gi + '"]:checked').value;
+  document.querySelectorAll('.unifC' + gi).forEach(c => { if (c.value === k){ c.checked = false; c.disabled = true; } else if (c.disabled){ c.disabled = false; c.checked = true; } });
+}
+async function unificarGrupo(gi){
+  const k = document.querySelector('input[name="unifK' + gi + '"]:checked').value;
+  const perd = [...document.querySelectorAll('.unifC' + gi)].filter(c => c.checked && c.value !== k).map(c => c.value);
+  if (!perd.length){ alert('Tildá al menos un duplicado para juntar.'); return; }
+  if (!confirm('¿Unificar ' + perd.length + ' cliente(s) duplicado(s) en el que conservás? No se puede deshacer fácilmente.')) return;
+  const res = document.getElementById('unifR' + gi); res.textContent = ' Unificando…';
+  try{
+    const r = await fetch('/api/unificar-clientes/unificar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ganadorId: k, perdedorIds: perd})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    document.getElementById('unifG' + gi).innerHTML = '<span class="ok-msg">Listo: ' + d.unificados + ' unificado(s) en ' + escapeHtml(d.conservado) + '.</span>';
+    if (typeof cargarClientes === 'function') cargarClientes();
+  }catch(e){ res.textContent = ' ' + e.message; }
+}
 
 // ---- Ficha de clientes de Dux ----
 let impFcB64 = null, impFcOrgs = [];

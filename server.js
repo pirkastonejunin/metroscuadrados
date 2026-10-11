@@ -70,6 +70,7 @@ app.use('/api/saldos-import-dux', require('./saldosImportDux'));
 app.use('/api/estado-migracion', require('./estadoMigracion'));
 app.use('/api/fichas-import-dux', require('./fichasImportDux'));
 app.use('/api/fichas-import-dux', require('./fichasClientesDux'));
+app.use('/api/unificar-clientes', require('./unificarClientes'));
 app.use('/api/mover-visitas', require('./moverVisitas'));
 app.use('/api/reinicio-datos', require('./reinicioDatos'));
 app.use('/api/espacio-db', require('./espacioDb'));
