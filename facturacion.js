@@ -28,6 +28,7 @@
 // No depende de la sucursal elegida arriba: compara todas.
 //
 // Integración (server.js):  app.use('/api/facturacion', require('./facturacion'));
+const SC = require('./saldosCuentas');
 // ---------------------------------------------------------------------------
 
 const express = require('express');
@@ -156,13 +157,17 @@ async function resumenSucursal(db, org, d0, d1, desdeS, hastaS) {
       return a + signo * Number((v.fiscal && v.fiscal.iva) || 0);
     }, 0);
   const ivaCompras = comprasFiscales.concat(gastosFiscales).reduce((a, d) => a + ivaDeCompra(d), 0);
-  const pagos = pagosCompras + pagosGastos, porPagar = porPagarCompras + porPagarGastos;
+  const pagos = pagosCompras + pagosGastos;
+  let porPagar = porPagarCompras + porPagarGastos, porCobrarFinal = porCobrar;
+  // Si ya se cargaron los saldos de Dux, lo que se debe sale del saldo de cada cuenta corriente (igual que los informes de deuda)
+  if (await SC.usaSaldosClientes(db, { orgId })) porCobrarFinal = (await SC.saldosClientes(db, { orgId })).reduce((a, s) => a + s.saldo, 0);
+  if (await SC.usaSaldosProveedores(db, { orgId })) porPagar = (await SC.saldosProveedores(db, { orgId })).reduce((a, s) => a + s.saldo, 0);
 
   return {
     orgId: String(orgId), nombre: org.nombre || '',
     facturado: r2(facturado), cobros: r2(cobros), pagos: r2(pagos), flujoNeto: r2(cobros - pagos),
     ivaVentas: r2(ivaVentas), ivaCompras: r2(ivaCompras), posicionFiscal: r2(ivaVentas - ivaCompras),
-    porCobrar: r2(porCobrar), porPagar: r2(porPagar), saldoNeto: r2(porCobrar - porPagar)
+    porCobrar: r2(porCobrarFinal), porPagar: r2(porPagar), saldoNeto: r2(porCobrarFinal - porPagar)
   };
 }
 

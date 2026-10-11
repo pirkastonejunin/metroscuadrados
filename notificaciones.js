@@ -283,7 +283,7 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
       if (activa('comprasPorPagar')) {
         const limite = new Date(Date.now() - 30 * MS_DIA);
         const compras = await db.collection('compras')
-          .find(Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 }, createdAt: { $lt: limite } }, filtroOrg(req)))
+          .find(Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 }, importado: { $ne: true }, createdAt: { $lt: limite } }, filtroOrg(req)))
           .sort({ createdAt: 1 }).limit(50).toArray();
         for (const c of compras) {
           items.push({
@@ -313,7 +313,7 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
       if (activa('cobrosPendientes')) {
         const limite = new Date(Date.now() - 30 * MS_DIA);
         const ventas = await db.collection('ventas')
-          .find(Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 }, createdAt: { $lt: limite } }, filtroOrg(req)))
+          .find(Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 }, importado: { $ne: true }, createdAt: { $lt: limite } }, filtroOrg(req)))
           .sort({ createdAt: 1 }).limit(50).toArray();
         for (const v of ventas) {
           items.push({

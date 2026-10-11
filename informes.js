@@ -27,6 +27,7 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, resolverOrg, filtroOrg } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
+const SC = require('./saldosCuentas');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -490,11 +491,11 @@ function diasDesde(fecha) {
   return Math.max(0, Math.round((a - b) / 86400e3));
 }
 function tramoDe(dias) { return TRAMOS.find(t => dias <= t.max).k; }
-function formaFechaCorta(s) { const [y, m, d] = s.split('-'); return d + '/' + m + '/' + y; }
+function formaFechaCorta(s) { if (!s) return ''; const [y, m, d] = s.split('-'); return d + '/' + m + '/' + y; }
 
 // Junta comprobantes ({cuenta, cuentaId, fecha, comprobante, tipo, saldo, ...}) en filas por cuenta o por comprobante.
 function armarSaldos(comps, agrupar, minDias) {
-  comps.forEach(c => { c.dias = diasDesde(c.fecha); c.tramo = tramoDe(c.dias); c.fechaS = fechaAR(c.fecha); });
+  comps.forEach(c => { c.dias = c.diasFijos != null ? c.diasFijos : diasDesde(c.fecha); c.tramo = tramoDe(c.dias); c.fechaS = c.diasFijos != null ? '' : fechaAR(c.fecha); });
   const lista = comps.filter(c => c.dias >= minDias && c.saldo > 0.005);
   const tot = { saldo: 0, comprobantes: lista.length, cuentas: new Set(), t0: 0, t1: 0, t2: 0, t3: 0 };
   lista.forEach(c => { tot.saldo += c.saldo; tot[c.tramo] += c.saldo; tot.cuentas.add(c.cuenta); });
@@ -543,6 +544,11 @@ router.get('/deudores/opciones', authInforme('informe_deudores'), async (req, re
   try {
     const out = await conReintento(async () => {
       const db = await getDb();
+      if (await SC.usaSaldosClientes(db, filtroOrg(req))) {
+        const sal = await SC.saldosClientes(db, filtroOrg(req));
+        const vend = await db.collection('ventas').distinct('vendedor', Object.assign({ vendedor: { $nin: [null, ''] } }, filtroOrg(req)));
+        return { vendedores: vend.sort((a, b) => a.localeCompare(b, 'es')), clientes: sal.map(c => ({ _id: String(c.clienteId), nombre: c.nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) };
+      }
       const base = Object.assign({ estado: { $ne: 'anulada' }, tipoComprobante: { $ne: 'nota_credito' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
       const [vendedores, clientes] = await Promise.all([
         db.collection('ventas').distinct('vendedor', Object.assign({ vendedor: { $nin: [null, ''] } }, base)),
@@ -561,6 +567,22 @@ async function armarDeudores(req) {
   const vendedor = String(req.query.vendedor || '').trim();
   return conReintento(async () => {
     const db = await getDb();
+    if (await SC.usaSaldosClientes(db, filtroOrg(req))) {
+      let sal = await SC.saldosClientes(db, filtroOrg(req));
+      if (clienteId) sal = sal.filter(s => String(s.clienteId) === String(clienteId));
+      const ids = sal.map(s => s.clienteId);
+      const vs = ids.length ? await db.collection('ventas').find({ clienteId: { $in: ids }, estado: { $ne: 'anulada' }, tipoComprobante: { $nin: ['nota_credito', 'presupuesto', 'remito'] } })
+        .project({ fecha: 1, numero: 1, tipoComprobante: 1, letra: 1, clienteId: 1, vendedor: 1, moneda: 1, cotizacionDolar: 1, total: 1 }).sort({ fecha: -1 }).limit(200000).toArray() : [];
+      const porC = new Map(); vs.forEach(v => { const k = String(v.clienteId); if (!porC.has(k)) porC.set(k, []); porC.get(k).push(v); });
+      let comps = [];
+      sal.forEach(s => {
+        const lista = (porC.get(String(s.clienteId)) || []).map(v => ({ fecha: v.fecha, comprobante: etiquetaComprobante(v), vendedor: v.vendedor || '', cap: Number(v.total || 0) * (v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1) }));
+        const ult = (porC.get(String(s.clienteId)) || [])[0];
+        comps = comps.concat(SC.repartir(s.saldo, lista, { cuenta: s.nombre, cuentaId: s.clienteId, vendedor: ult ? (ult.vendedor || '') : '' }).map(c => Object.assign(c, { cuenta: s.nombre, cuentaId: s.clienteId })));
+      });
+      if (vendedor) comps = comps.filter(c => c.vendedor === vendedor);
+      return Object.assign(armarSaldos(comps, agrupar, minDias), { hoy: fechaAR(new Date()), truncado: false, base: 'cuenta_corriente' });
+    }
     const match = Object.assign({ estado: { $ne: 'anulada' }, tipoComprobante: { $ne: 'nota_credito' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
     if (clienteId) match.clienteId = clienteId;
     if (vendedor) match.vendedor = vendedor;
@@ -586,6 +608,10 @@ router.get('/proveedores/opciones', authInforme('informe_proveedores'), async (r
   try {
     const out = await conReintento(async () => {
       const db = await getDb();
+      if (await SC.usaSaldosProveedores(db, filtroOrg(req))) {
+        const sal = await SC.saldosProveedores(db, filtroOrg(req));
+        return { proveedores: sal.map(p => ({ _id: String(p.proveedorId), nombre: p.nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')) };
+      }
       const base = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
       const grp = [{ $match: Object.assign({ proveedorId: { $ne: null } }, base) }, { $group: { _id: '$proveedorId', nombre: { $last: '$proveedorNombre' } } }];
       const [a, b] = await Promise.all([db.collection('compras').aggregate(grp).toArray(), db.collection('gastos').aggregate(grp).toArray()]);
@@ -603,6 +629,27 @@ async function armarProveedores(req) {
   const tipo = ['compras', 'gastos'].includes(req.query.tipo) ? req.query.tipo : 'todos';
   return conReintento(async () => {
     const db = await getDb();
+    if (await SC.usaSaldosProveedores(db, filtroOrg(req))) {
+      let sal = await SC.saldosProveedores(db, filtroOrg(req));
+      if (proveedorId) sal = sal.filter(s => String(s.proveedorId) === String(proveedorId));
+      const ids = sal.map(s => s.proveedorId);
+      const q = { proveedorId: { $in: ids }, estado: { $ne: 'anulada' }, tipoComprobante: { $not: /^nota_credito/ } };
+      const proj = { fecha: 1, numero: 1, comprobanteNumero: 1, proveedorId: 1, moneda: 1, cotizacionDolar: 1, total: 1 };
+      const [cs, gs] = ids.length ? await Promise.all([
+        db.collection('compras').find(q).project(proj).sort({ fecha: -1 }).limit(100000).toArray(),
+        db.collection('gastos').find(q).project(proj).sort({ fecha: -1 }).limit(100000).toArray()
+      ]) : [[], []];
+      const porP = new Map(); const add = (x, t) => { const k = String(x.proveedorId); if (!porP.has(k)) porP.set(k, []); porP.get(k).push({ fecha: x.fecha, tipo: t,
+        comprobante: (t === 'Compra' ? 'Compra #' : 'Gasto #') + (x.numero != null ? x.numero : '') + (x.comprobanteNumero ? ' · ' + x.comprobanteNumero : ''),
+        cap: Number(x.total || 0) * (x.moneda === 'USD' ? (Number(x.cotizacionDolar) || 1) : 1) }); };
+      cs.forEach(x => add(x, 'Compra')); gs.forEach(x => add(x, 'Gasto'));
+      let comps = [];
+      sal.forEach(s => {
+        const lista = (porP.get(String(s.proveedorId)) || []).filter(c => tipo === 'todos' || c.tipo === (tipo === 'compras' ? 'Compra' : 'Gasto')).sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+        comps = comps.concat(SC.repartir(s.saldo, lista, { tipo: 'Compra' }).map(c => Object.assign(c, { cuenta: s.nombre, cuentaId: s.proveedorId })));
+      });
+      return Object.assign(armarSaldos(comps, agrupar, minDias), { hoy: fechaAR(new Date()), tipo, truncado: false, base: 'cuenta_corriente' });
+    }
     const match = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
     if (proveedorId) match.proveedorId = proveedorId;
     const proj = { fecha: 1, numero: 1, comprobanteNumero: 1, proveedorId: 1, proveedorNombre: 1, moneda: 1, cotizacionDolar: 1, saldoPendiente: 1 };
