@@ -131,6 +131,7 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirFichasCliDux()" title="Ficha de clientes de Dux (Listado de Clientes)">Fichas Dux</button>
           <button class="btn secondary" onclick="abrirSaldosDux()" title="Saldos de cuenta corriente de Dux (Consulta de Clientes con Saldo)">Saldos Dux</button>
           <button class="btn" onclick="abrirNuevoCliente()">+ Nuevo cliente</button>
         </div>
@@ -1014,6 +1015,59 @@ async function buscarCuitEnArca(pref, idNombre, conCategoria){
     err.textContent = '';
     if (d.estadoClave && String(d.estadoClave).toUpperCase() !== 'ACTIVO') err.textContent = 'Ojo: ARCA informa la clave como ' + d.estadoClave + '.';
   }catch(e){ err.textContent = e.message; }
+}
+
+
+// ---- Ficha de clientes de Dux ----
+let impFcB64 = null, impFcOrgs = [];
+async function abrirFichasCliDux(){
+  impFcB64 = null;
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impFcOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar fichas de clientes de Dux</h2>
+        <p class="muted">Subí el archivo "Listado de Clientes" de Dux. A los clientes que ya existen (por las ventas, cobros y saldos importados) les completa los datos que tengan vacíos (CUIT/DNI, categoría fiscal, domicilio, teléfono, mail, vendedor…) sin pisar lo ya cargado. Los que no existen se crean en la sucursal que elijas. Se puede repetir sin duplicar.</p>
+        <label>Sucursal donde se crean los que no existan</label>
+        <select id="impFcOrg" onchange="previewFichasCliDux()">${impFcOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <input type="file" id="impFcArchivo" accept=".xls,.xlsx" onchange="previewFichasCliDux()" style="margin-top:8px">
+        <div class="err" id="impFcErr"></div>
+        <div id="impFcResumen"></div>
+        <button class="btn" id="impFcBtn" style="margin-top:10px;display:none" onclick="aplicarFichasCliDux()">Importar fichas</button>
+      </div>
+    </div>`;
+}
+function hFc(){ const h = headersAuthJson(); const s = document.getElementById('impFcOrg'); if (s && s.value) h['x-org-id'] = s.value; return h; }
+function bodyFc(){ return JSON.stringify({archivoBase64: impFcB64.b64, orgId: document.getElementById('impFcOrg').value}); }
+async function previewFichasCliDux(){
+  const file = document.getElementById('impFcArchivo').files[0]; const errEl = document.getElementById('impFcErr'); errEl.textContent = '';
+  const out = document.getElementById('impFcResumen'); out.innerHTML = ''; document.getElementById('impFcBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impFcB64 || impFcB64.file !== file) impFcB64 = {file, b64: await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); })};
+    const r = await fetch('/api/fichas-import-dux/clientes/preview', {method:'POST', headers: hFc(), body: bodyFc()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
+      <li><b>${d.clientes}</b> clientes en el archivo (${d.conCuit} con CUIT, ${d.resp_inscriptos} responsables inscriptos)</li>
+      <li>${d.existentes} ya existen: a <b>${d.aCompletar}</b> se les completan datos (${d.camposACompletar} campos vacíos)</li>
+      <li><b>${d.aCrear}</b> se van a crear en ${escapeHtml(d.sucursalNuevos)}</li></ul>`
+      + (d.cuitRepetidos ? `<p class="muted">${d.cuitRepetidos} CUIT no se cargan porque ya los tiene otro cliente de la sucursal.</p>` : '')
+      + (d.ambiguos ? `<p class="err">${d.ambiguos} no se cargan porque coinciden con más de un cliente: ${d.ejemplosAmbiguos.map(escapeHtml).join(', ')}.</p>` : '')
+      + (d.errores ? '<p class="muted">' + d.errores + ' fila(s) omitidas: ' + d.ejemplosErrores.map(escapeHtml).join('; ') + '</p>' : '');
+    if (d.aCrear > 0 || d.aCompletar > 0) document.getElementById('impFcBtn').style.display = '';
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
+}
+async function aplicarFichasCliDux(){
+  const btn = document.getElementById('impFcBtn'), errEl = document.getElementById('impFcErr');
+  if (btn.disabled || !impFcB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/fichas-import-dux/clientes/aplicar', {method:'POST', headers: hFc(), body: bodyFc()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impFcResumen').innerHTML = `<p class="ok-msg">Listo: ${d.creados} clientes creados y ${d.completados} completados.</p>`;
+    btn.style.display = 'none'; if (typeof cargarClientes === 'function') cargarClientes();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
 }
 
 // ---- Saldos de clientes de Dux ----
