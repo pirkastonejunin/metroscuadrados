@@ -243,7 +243,7 @@ function renderRemitos(){
     return `
     <tr>
       <td>${fechaCorta(rem.fecha)}</td>
-      <td><strong>${rem.importado ? escapeHtml(rem.numeroOriginal || String(rem.numero)) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : String(rem.numero).padStart(5,'0')}</strong></td>
+      <td><strong>${rem.importado ? escapeHtml(rem.numeroOriginal || String(rem.numero)) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' + (rem.anuladoDux ? ' <span style="font-size:11px;color:#b42318;font-weight:700" title="Anulado en Dux">ANULADO</span>' : '') : String(rem.numero).padStart(5,'0')}</strong></td>
       <td class="muted">${rem.ventaNumero ? String(rem.ventaNumero).padStart(5,'0') : '—'}</td>
       <td>${escapeHtml(rem.clienteNombre || '—')}</td>
       <td class="muted">${escapeHtml(rem.depositoNombre || '—')}</td>

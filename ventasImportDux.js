@@ -466,9 +466,87 @@ function leerRemitosPorProducto(base64) {
   }
   return { remitos: [...remitos.values()], lineas, errores };
 }
+// LISTADO DE REMITOS (Dux: "Listado de Remitos"): una línea por remito con su factura/comprobante de venta (Nro Factura), fecha de
+// entrega, depósito y si está anulado. Sirve para vincular cada remito con su venta de forma exacta. No trae artículos: esos
+// llegan con "Remitos Por Producto" (que completa los renglones de los remitos cargados acá). Mismo paso 3, el sistema detecta el archivo.
+function leerListadoRemitos(base64) {
+  const buf = Buffer.from(String(base64).replace(/^data:[^,]*,/, ''), 'base64');
+  let wb; try { wb = XLSX.read(buf, { type: 'buffer', cellDates: true }); } catch (e) { throw err(400, 'No se pudo leer el archivo: ¿es el Excel de Dux (.xls / .xlsx)?'); }
+  const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+  const h = filas.findIndex(f => f && f.some(c => norm(c) === 'nro factura') && f.some(c => norm(c) === 'comprobante'));
+  if (h < 0) throw err(400, 'No encontré las columnas Comprobante y Nro Factura. Tiene que ser "Listado de Remitos" de Dux.');
+  const enc = filas[h].map(norm); const c = (n) => enc.indexOf(n);
+  const idx = { suc: c('sucursal'), comp: c('comprobante'), fecha: c('fecha'), fent: c('fecha entrega'), cli: c('cliente'), anu: c('anulado'), ctd: c('ctd total entregada'), fac: c('nro factura'), ped: c('nro. pedido'), obs: c('observaciones'), pers: c('personal'), dep: c('deposito'), tel: c('telefono'), lug: c('lugar entrega') };
+  const txt = (f, k) => (idx[k] >= 0 && f[idx[k]] != null) ? String(f[idx[k]]).trim() : '';
+  const remitos = [], errores = [];
+  for (let i = h + 1; i < filas.length; i++) {
+    const f = filas[i]; if (!f || f.every(x => x == null || x === '')) continue;
+    const comp = txt(f, 'comp').replace(/^R\s+/i, ''); const cliente = txt(f, 'cli'); const fecha = parsearFecha(f[idx.fecha]); const suc = txt(f, 'suc');
+    if (!comp || !cliente || !fecha) { errores.push({ fila: i + 1, motivo: 'Falta comprobante, cliente o fecha' }); continue; }
+    const m = txt(f, 'fac').match(/([A-Z])-(\d{1,5})-(\d{1,8})/);
+    remitos.push({ clave: 'duxrem:' + suc + ':' + comp, sucursal: suc, comprobante: comp, cliente, fecha, fechaEntrega: idx.fent >= 0 ? parsearFecha(f[idx.fent]) : null, anulado: /^(true|verdadero|si|sí|1)$/i.test(txt(f, 'anu')),
+      cantidad: Math.abs(numero(f[idx.ctd])), ventaClave: m ? 'dux:' + (m[1] === 'X' ? 'CX' : 'F' + m[1]) + '-' + m[2] + '-' + m[3] : null, facturaTxt: txt(f, 'fac'), pedido: txt(f, 'ped'),
+      observaciones: txt(f, 'obs'), personal: txt(f, 'pers'), deposito: txt(f, 'dep'), lugar: txt(f, 'lug') });
+  }
+  return { remitos, errores };
+}
+async function procesarListadoRemitos(req, aplicar) {
+  const { remitos, errores } = leerListadoRemitos(req.body && req.body.archivoBase64);
+  if (!remitos.length) throw err(400, 'El archivo no tiene remitos.');
+  return conReintento(async () => {
+    const { ObjectId } = require('mongodb');
+    const db = await getDb(); const activa = req.orgId; const ahora = new Date();
+    const orgs = await orgsAccesibles(db, req); const orgIds = orgs.map(o => o._id);
+    if (!orgIds.some(x => String(x) === String(activa))) orgIds.push(activa);
+    const mapaIn = (req.body && req.body.mapaSucursales) || {};
+    const sucursales = [...new Set(remitos.map(r => r.sucursal))];
+    const destinoDe = (sn) => { const e = mapaIn[sn]; return (e && orgIds.some(x => String(x) === String(e))) ? new ObjectId(String(e)) : activa; };
+    const nombreOrg = (id) => (orgs.find(o => String(o._id) === String(id)) || {}).nombre || String(id);
+
+    const existentes = new Map((await db.collection('remitos').find({ claveImport: { $in: remitos.map(r => r.clave) } }).project({ claveImport: 1 }).toArray()).map(x => [x.claveImport, x._id]));
+    const claves = [...new Set(remitos.map(r => r.ventaClave).filter(Boolean))];
+    const ventas = new Map((claves.length ? await db.collection('ventas').find({ orgId: { $in: orgIds }, claveImport: { $in: claves } }).project({ claveImport: 1, numero: 1, clienteId: 1, clienteNombre: 1, orgId: 1 }).toArray() : []).map(v => [v.claveImport, v]));
+    const nuevos = remitos.filter(r => !existentes.has(r.clave));
+    const resolver = crearResolverClientes(db, ahora);
+    for (const r of nuevos) if (!ventas.get(r.ventaClave)) await resolver.clasificar(destinoDe(r.sucursal), r.cliente);
+    const t = resolver.totales();
+    const conVenta = remitos.filter(r => ventas.get(r.ventaClave)).length;
+    const resumen = {
+      formato: 'listado', lineas: remitos.length, remitosEnArchivo: remitos.length, aImportar: nuevos.length, yaImportados: remitos.length - nuevos.length, actualizados: remitos.length - nuevos.length,
+      desde: remitos.reduce((a, r) => (!a || r.fecha < a ? r.fecha : a), null), hasta: remitos.reduce((a, r) => (!a || r.fecha > a ? r.fecha : a), null),
+      vinculadosAVenta: conVenta, sinVenta: remitos.length - conVenta, sinFactura: remitos.filter(r => !r.ventaClave).length, anulados: remitos.filter(r => r.anulado).length,
+      ventasConEntregaActualizada: 0, conPendiente: 0, clientesExistentes: t.existentes, clientesNuevos: t.nuevos, clientesAmbiguos: t.ambiguos,
+      sucursales: sucursales.map(sn => ({ sucursal: sn, remitos: remitos.filter(r => r.sucursal === sn).length, sugerida: sugerirOrg(sn, orgs), destino: String(destinoDe(sn)), destinoNombre: nombreOrg(destinoDe(sn)) })),
+      organizaciones: orgs.map(o => ({ _id: String(o._id), nombre: o.nombre })), errores
+    };
+    if (!aplicar) return resumen;
+
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    const clientesCreados = await resolver.crearNuevos();
+    const comunes = (r, v) => ({ ventaId: v ? v._id : null, ventaNumero: v ? (v.numero || null) : null, anuladoDux: r.anulado, fechaEntrega: r.fechaEntrega || null, depositoNombre: r.deposito || '', facturaDux: r.facturaTxt, pedidoDux: r.pedido, cantidadEntregadaDux: r.cantidad, observaciones: r.observaciones, lugarEntrega: r.lugar });
+    const docs = nuevos.map(r => {
+      const v = ventas.get(r.ventaClave); const dest = v ? v.orgId : destinoDe(r.sucursal); const mm = r.comprobante.match(/-(\d{1,8})$/);
+      return Object.assign({ numero: mm ? Number(mm[1]) : 0, numeroOriginal: r.comprobante, importado: true, origen: 'dux', claveImport: r.clave, tipoComprobante: 'comprobante_x',
+        clienteId: v ? v.clienteId : resolver.id(dest, r.cliente), clienteNombre: v ? v.clienteNombre : r.cliente, depositoId: null,
+        items: [{ productoId: null, sku: null, nombre: 'Remito histórico Dux (sin detalle por producto)', cantidad: r.cantidad, cantidadPendiente: 0 }], sinDetalleProducto: true,
+        fecha: r.fecha, usuarioNombre: r.personal || usuarioNombre, orgId: dest, createdAt: r.fecha, sucursalDux: r.sucursal }, comunes(r, v));
+    });
+    let insertados = 0;
+    for (let i = 0; i < docs.length; i += 500) { const x = await db.collection('remitos').insertMany(docs.slice(i, i + 500), { ordered: false }); insertados += x.insertedCount; }
+    const ops = [];
+    remitos.forEach(r => { const id = existentes.get(r.clave); if (!id) return; const v = ventas.get(r.ventaClave);
+      const set = Object.assign({}, comunes(r, v), { updatedAt: ahora }); if (!v) { delete set.ventaId; delete set.ventaNumero; } // no pisa un vínculo que ya tenga
+      if (!r.observaciones) delete set.observaciones; ops.push({ updateOne: { filter: { _id: id }, update: { $set: set } } }); });
+    let actualizados = 0;
+    for (let i = 0; i < ops.length; i += 500) { const x = await db.collection('remitos').bulkWrite(ops.slice(i, i + 500), { ordered: false }); actualizados += x.modifiedCount; }
+    return Object.assign(resumen, { insertados, actualizados, clientesCreados, ventasActualizadas: 0 });
+  });
+}
+const esListadoRemitos = (b64) => { try { const wb = XLSX.read(Buffer.from(String(b64).replace(/^data:[^,]*,/, ''), 'base64'), { type: 'buffer', sheetRows: 12 }); const f = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null }); return f.some(r => r && r.some(c => norm(c) === 'nro factura')); } catch (e) { return false; } };
 async function procesarRemitosDux(req, aplicar) {
   if (!req.orgId) { const v = req.body && req.body.orgId; if (v && /^[0-9a-f]{24}$/i.test(String(v))) req.orgId = new (require('mongodb').ObjectId)(String(v)); }
   if (!req.orgId) throw err(400, 'Elegí con qué organización (sucursal) estás trabajando antes de importar.');
+  if (esListadoRemitos(req.body && req.body.archivoBase64)) return procesarListadoRemitos(req, aplicar);
   const { remitos, lineas, errores } = leerRemitosPorProducto(req.body && req.body.archivoBase64);
   if (!remitos.length) throw err(400, 'El archivo no tiene remitos.');
   return conReintento(async () => {
@@ -481,7 +559,8 @@ async function procesarRemitosDux(req, aplicar) {
     const destinoDe = (sn) => { const e = mapaIn[sn]; return (e && orgIds.some(x => String(x) === String(e))) ? new ObjectId(String(e)) : activa; };
     const nombreOrg = (id) => (orgs.find(o => String(o._id) === String(id)) || {}).nombre || String(id);
 
-    const ya = new Set((await db.collection('remitos').find({ claveImport: { $in: remitos.map(r => r.clave) } }).project({ claveImport: 1 }).toArray()).map(x => x.claveImport));
+    const yaDocs = await db.collection('remitos').find({ claveImport: { $in: remitos.map(r => r.clave) } }).project({ claveImport: 1, sinDetalleProducto: 1 }).toArray();
+    const ya = new Set(yaDocs.map(x => x.claveImport)); const sinDetalleYa = new Map(yaDocs.filter(x => x.sinDetalleProducto).map(x => [x.claveImport, x._id])); // cargados antes con el Listado de Remitos (sin renglones)
     const nuevos = remitos.filter(r => !ya.has(r.clave));
 
     const resolver = crearResolverClientes(db, ahora);
@@ -540,6 +619,10 @@ async function procesarRemitosDux(req, aplicar) {
     });
     let insertados = 0;
     for (let i = 0; i < docs.length; i += 500) { const x = await db.collection('remitos').insertMany(docs.slice(i, i + 500), { ordered: false }); insertados += x.insertedCount; }
+    // remitos que venían del Listado de Remitos (sin renglones): ahora se completan con los artículos
+    let remitosCompletados = 0;
+    for (const r of remitos) { const id = sinDetalleYa.get(r.clave); if (!id) continue;
+      await db.collection('remitos').updateOne({ _id: id }, { $set: { items: r.items.map(i => ({ productoId: null, sku: i.sku || null, nombre: i.nombre, cantidad: i.cantidad, cantidadPendiente: i.pendiente })), sinDetalleProducto: false, updatedAt: ahora } }); remitosCompletados++; }
     // lo entregado en cada renglón de la venta y su estado
     let ventasActualizadas = 0;
     for (const e of entregaPorVenta.values()) {
@@ -555,7 +638,7 @@ async function procesarRemitosDux(req, aplicar) {
       const estado = entregado <= 0 ? 'pendiente' : (entregado >= total - 1e-6 ? 'entregada' : 'parcialmente_entregada');
       await db.collection('ventas').updateOne({ _id: e.venta._id }, { $set: { items, estado, entregaDux: true, updatedAt: ahora } }); ventasActualizadas++;
     }
-    return Object.assign(resumen, { insertados, clientesCreados, ventasActualizadas });
+    return Object.assign(resumen, { insertados, clientesCreados, ventasActualizadas, remitosCompletados });
   });
 }
 router.post('/remitos/preview', authAdmin, async (req, res) => {
