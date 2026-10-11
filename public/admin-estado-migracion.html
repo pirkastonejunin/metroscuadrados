@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Estado de la migración</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--bd:#e3e6ea;--tx:#1b1f24;--mu:#667085;--ok:#067647;--okbg:#e7f6ee;--wa:#b54708;--wabg:#fff4e0;--er:#b42318;--erbg:#fdeceb}
+@media (prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1d2125;--bd:#2d3339;--tx:#eceff2;--mu:#98a2b3;--ok:#5fd39a;--okbg:#12301f;--wa:#f5b266;--wabg:#33260f;--er:#f4908a;--erbg:#3a1815}}
+body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);margin:0;padding:16px}
+.wrap{max-width:1100px;margin:0 auto} h1{font-size:21px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-top:14px}
+.muted{color:var(--mu);font-size:13px} table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--bd);text-align:right;vertical-align:top} th:first-child,td:first-child{text-align:left}
+th{color:var(--mu);font-weight:600} .c{border-radius:8px;display:inline-block;padding:2px 8px;min-width:46px;text-align:center;font-weight:600}
+.ok{background:var(--okbg);color:var(--ok)} .wa{background:var(--wabg);color:var(--wa)} .er{background:var(--erbg);color:var(--er)} .no{color:var(--mu)}
+.bar{height:14px;background:var(--bd);border-radius:7px;overflow:hidden;margin:8px 0} .bar i{display:block;height:100%}
+select{padding:7px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx)} .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+ul{margin:6px 0;padding-left:18px;line-height:1.7;font-size:14px} .sub{display:block;font-size:11px;color:var(--mu);font-weight:400}
+.scroll{overflow-x:auto}
+</style></head><body><div class="wrap">
+<h1>Estado de la migración de Dux</h1>
+<p class="muted">Lo que hay cargado hoy en la base, por año. Verde = completo · naranja = parcial · rojo = falta · gris = sin datos.</p>
+<div class="row"><label class="muted">Sucursal</label><select id="org" onchange="pintar()"></select><button onclick="cargar()" style="padding:7px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer">Actualizar</button><span class="muted" id="gen"></span></div>
+<div id="err" class="muted" style="color:var(--er);margin-top:8px"></div>
+<div class="card" id="espacio"></div>
+<div class="card"><h2>Historial por año</h2><div class="scroll" id="tabla">Cargando…</div></div>
+<div class="card"><h2>Saldos y base de datos</h2><div id="base"></div></div>
+<div class="card"><h2>Pendiente de cargar o de construir</h2><div id="pend"></div></div>
+</div>
+<script>
+const TOKEN = localStorage.getItem('obras_admin_token') || '';
+let D = null;
+const M = n => '$' + Number(n||0).toLocaleString('es-AR',{maximumFractionDigits:0}); const N = n => Number(n||0).toLocaleString('es-AR');
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function cargar(){
+  const err = document.getElementById('err'); err.textContent = '';
+  if (!TOKEN){ err.textContent = 'Entrá primero al sistema con tu usuario Administrador.'; return; }
+  try{
+    const r = await fetch('/api/estado-migracion', {headers:{'x-admin-token':TOKEN}}); const d = await r.json(); if(!r.ok) throw new Error(d.error||'Error');
+    D = d; const sel = document.getElementById('org'); const prev = sel.value;
+    sel.innerHTML = '<option value="">Todas las sucursales</option>' + d.organizaciones.map(o=>`<option value="${o._id}">${esc(o.nombre)}</option>`).join(''); sel.value = prev;
+    document.getElementById('gen').textContent = 'Actualizado ' + new Date(d.generado).toLocaleTimeString('es-AR'); pintar();
+  }catch(e){ err.textContent = e.message; }
+}
+function agg(lista, campos){ // suma por año según la sucursal elegida
+  const org = document.getElementById('org').value; const out = {};
+  (lista||[]).forEach(f => { if (org && String(f._id.o) !== org) return; const y = f._id.y; const o = out[y] = out[y] || {n:0};
+    o.n += f.n; campos.forEach(c => o[c] = (o[c]||0) + (f[c]||0)); });
+  return out;
+}
+function celda(txt, cls, sub){ return `<span class="c ${cls}">${txt}</span>${sub?`<span class="sub">${sub}</span>`:''}`; }
+function pintar(){
+  if (!D) return;
+  const V = agg(D.ventas,['notas','conDetalle','monto','sinDetalle','notasSinDetalle']), R = agg(D.remitos,['vinculados']), C = agg(D.cobros,['monto']);
+  const P = agg(D.compras,['notas','conDetalle','monto']), G = agg(D.gastos,['notas','conDetalle','monto']), PG = agg(D.pagos,['monto']);
+  const anios = [...new Set([V,R,C,P,G,PG].flatMap(o=>Object.keys(o).map(Number)))].filter(Boolean);
+  const min = anios.length ? Math.min(...anios) : new Date().getFullYear(), max = Math.max(new Date().getFullYear(), ...(anios.length?anios:[0]));
+  const filas = []; for (let y = min; y <= max; y++) filas.push(y);
+  const det = (o) => !o ? celda('—','er','falta') : (o.conDetalle >= o.n ? celda(N(o.n),'ok','detalle completo') : celda(N(o.n),'wa','detalle '+Math.round(100*o.conDetalle/o.n)+'%'));
+  const simple = (o, mon) => !o ? celda('—','er','falta') : celda(N(o.n),'ok', mon ? M(o.monto) : '');
+  document.getElementById('tabla').innerHTML = `<table><tr><th>Año</th><th>Ventas</th><th>Remitos</th><th>Cobranzas</th><th>Compras</th><th>Gastos</th><th>Pagos a proveedores</th></tr>` +
+    filas.map(y => {
+      const v = V[y], r = R[y], c = C[y], p = P[y], g = G[y], pg = PG[y];
+      const rem = !r ? celda('—','er','falta') : celda(N(r.n), r.vinculados >= r.n ? 'ok' : 'wa', Math.round(100*r.vinculados/r.n)+'% con venta');
+      return `<tr><td><b>${y}</b></td><td>${det(v)}${v&&v.notasSinDetalle?`<span class="sub">${v.notasSinDetalle} notas s/detalle</span>`:''}</td><td>${rem}</td><td>${simple(c,true)}</td><td>${det(p)}</td><td>${det(g)}</td><td>${simple(pg,true)}</td></tr>`;
+    }).join('') + '</table><p class="muted">Un año en rojo en el medio de la tabla es un hueco para cargar. El año en curso puede estar parcial hasta la carga final.</p>';
+
+  const e = D.espacio || {};
+  document.getElementById('espacio').innerHTML = e.error ? `<h2>Espacio en la base</h2><p class="muted">${esc(e.error)}</p>` : (() => {
+    const pct = Math.min(100, Math.round(100*e.usadoMB/e.limiteMB)); const col = pct>=90?'var(--er)':pct>=70?'var(--wa)':'var(--ok)';
+    return `<h2>Espacio en la base: ${e.usadoMB} MB de ${e.limiteMB} MB (${pct}%)</h2><div class="bar"><i style="width:${pct}%;background:${col}"></i></div>
+    <p class="muted">Lo más pesado: ${e.mayores.map(x=>`${esc(x.coleccion)} ${x.mb} MB`).join(' · ')}</p>${pct>=80?'<p style="color:var(--er)"><b>Atención:</b> queda poco espacio. Conviene resolverlo antes de seguir cargando historial.</p>':''}`; })();
+
+  const org = document.getElementById('org').value; const suma = (l,k='n') => (l||[]).filter(x=>!org||String(x._id)===org).reduce((a,x)=>a+(x[k]||0),0);
+  const sc = suma(D.saldosClientes), ssc = suma(D.saldosClientes,'saldo'), cl = suma(D.clientes), pv = suma(D.proveedores), pr = suma(D.productos);
+  document.getElementById('base').innerHTML = `<ul>
+    <li>Clientes: <b>${N(cl)}</b> · con saldo inicial de Dux cargado: <b>${N(sc)}</b> (neto ${M(ssc)})</li>
+    <li>Proveedores: <b>${N(pv)}</b> · saldos de proveedores cargados: <b>${N(D.otros.saldosProveedores)}</b></li>
+    <li>Productos en el catálogo: <b>${N(pr)}</b></li></ul>`;
+
+  const li = (ok, t, s) => `<li>${ok?'✅':'⬜'} ${t}${s?` <span class="muted">— ${s}</span>`:''}</li>`;
+  const sinHueco = (o) => { const ys = Object.keys(o).map(Number); if(!ys.length) return false; for(let y=Math.min(...ys);y<=Math.max(...ys);y++) if(!o[y]) return false; return true; };
+  const detOk = (o) => Object.values(o).every(x => x.conDetalle >= x.n);
+  document.getElementById('pend').innerHTML = `<ul>
+    ${li(sinHueco(V)&&Object.keys(V).length>0,'Ventas: todos los años','falta si hay años en rojo arriba')}
+    ${li(Object.keys(V).length>0&&detOk(V),'Detalle de ventas completo','completar los períodos de 60 días que falten')}
+    ${li(Object.keys(R).length>0,'Remitos','cargar después del detalle de ventas')}
+    ${li(Object.keys(C).length>0,'Cobranzas de clientes')}
+    ${li(Object.keys(P).length>0&&detOk(P),'Compras y su detalle')}
+    ${li(Object.keys(G).length>0&&detOk(G),'Gastos y su detalle')}
+    ${li(Object.keys(PG).length>0,'Pagos a proveedores')}
+    ${li(sc>0,'Saldos de clientes')}
+    ${li(D.otros.saldosProveedores>0,'Saldos de proveedores','falta construir el importador y exportar el listado de Dux')}
+    ${li(D.otros.stockFilas>0,'Stock al corte por depósito','falta construir el importador')}
+    ${li(D.otros.tesoreria>0||D.otros.cheques>0,'Tesorería al corte (cajas, bancos, cheques)','falta construir el importador')}
+    ${li(false,'Ficha completa de clientes y proveedores (CUIT, domicilio)','falta construir el importador')}
+    ${li(D.otros.presupuestos>0,'Presupuestos y pedidos abiertos')}
+    ${li(false,'Día de la migración: último número fiscal por punto de venta, certificados ARCA, usuarios y roles, carga final y conciliación')}
+  </ul>`;
+}
+cargar();
+</script></body></html>
