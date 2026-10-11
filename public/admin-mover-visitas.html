@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mover visitas de sucursal</title>
+<style>
+body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#f6f7f9;color:#1b1f24;margin:0;padding:20px}
+.card{max-width:640px;margin:0 auto;background:#fff;border:1px solid #e3e6ea;border-radius:14px;padding:22px}
+h1{font-size:20px;margin:0 0 6px} .muted{color:#667085;font-size:13px} select,input{padding:9px;border:1px solid #cfd4da;border-radius:8px;font-size:14px}
+table{width:100%;border-collapse:collapse;margin:12px 0} td{padding:7px 4px;border-bottom:1px solid #eee;font-size:14px} td.n{text-align:right;font-weight:700}
+button{border:0;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:700;cursor:pointer;background:#1b1f24;color:#fff} button.sec{background:#fff;color:#1b1f24;border:1px solid #cfd4da} button.peligro{background:#b42318}
+.err{color:#b42318;margin-top:8px} .ok{color:#067647;margin-top:8px} label{display:block;margin:10px 0 4px;font-size:13px;color:#667085}
+</style></head><body><div class="card">
+<h1>Mover visitas de una sucursal a otra</h1>
+<p class="muted">Pasa todas las visitas de la sucursal de origen a la de destino, junto con lo que cuelga de ellas: obras, presupuestos, oportunidades del CRM y (si querés) los vendedores. Los clientes y las ventas no se mueven.</p>
+<label>Sucursal donde están hoy</label><select id="origen" onchange="ver()"></select>
+<label>Sucursal a la que pasan</label><select id="destino" onchange="ver()"></select>
+<div id="cont" class="muted" style="margin-top:12px"></div>
+<div class="err" id="err"></div>
+</div>
+<script>
+const TOKEN = localStorage.getItem('obras_admin_token') || '';
+const H = (e) => Object.assign({'x-admin-token': TOKEN}, e||{});
+let ORGS = [];
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function init(){
+  if (!TOKEN){ document.getElementById('cont').textContent = 'Entrá primero al sistema con tu usuario Administrador.'; return; }
+  const r = await fetch('/api/mover-visitas/preview', {headers: H()}); const d = await r.json();
+  if (!r.ok){ document.getElementById('err').textContent = d.error; return; }
+  ORGS = d.organizaciones; const opt = ORGS.map(o => `<option value="${o._id}">${esc(o.nombre)}</option>`).join('');
+  const po = ORGS.find(o => /piedra\s*negra/i.test(o.nombre)) || ORGS[0], pd = ORGS.find(o => /pirka/i.test(o.nombre)) || ORGS[1] || ORGS[0];
+  document.getElementById('origen').innerHTML = opt; document.getElementById('destino').innerHTML = opt;
+  document.getElementById('origen').value = po._id; document.getElementById('destino').value = pd._id; ver();
+}
+async function ver(){
+  const o = document.getElementById('origen').value, d = document.getElementById('destino').value, cont = document.getElementById('cont'), err = document.getElementById('err'); err.textContent = '';
+  if (o === d){ cont.innerHTML = ''; err.textContent = 'El origen y el destino son la misma sucursal.'; return; }
+  cont.textContent = 'Calculando…';
+  const r = await fetch(`/api/mover-visitas/preview?origen=${o}&destino=${d}`, {headers: H()}); const x = await r.json();
+  if (!r.ok){ cont.textContent = ''; err.textContent = x.error; return; }
+  const est = Object.entries(x.porEstado).map(([k,v]) => `${esc(k)}: ${v}`).join(' · ');
+  cont.innerHTML = `<table>
+    <tr><td>Visitas que se mueven</td><td class="n">${x.visitas}</td></tr>
+    <tr><td class="muted" colspan="2">${est || ''}</td></tr>
+    <tr><td>Obras nacidas de esas visitas</td><td class="n">${x.obras}</td></tr>
+    <tr><td>Presupuestos vinculados</td><td class="n">${x.presupuestos}</td></tr>
+    <tr><td>Oportunidades del CRM convertidas en visita</td><td class="n">${x.oportunidadesCrm}</td></tr>
+    <tr><td>Vendedores con esas visitas</td><td class="n">${x.vendedores.length}</td></tr></table>
+    ${x.vendedores.length ? `<p class="muted">Vendedores: ${x.vendedores.map(esc).join(', ')}</p>` : ''}
+    ${x.presupuestosQueQuedan ? `<p class="muted">${x.presupuestosQueQuedan} presupuestos ya se convirtieron en venta: se quedan donde están.</p>` : ''}
+    ${x.visitasYaEnDestino ? `<p class="muted">La sucursal de destino ya tiene ${x.visitasYaEnDestino} visitas propias; se suman a esas.</p>` : ''}
+    ${x.visitas ? `<label style="display:flex;gap:8px;align-items:center;color:#1b1f24"><input type="checkbox" id="vend" checked style="width:auto"> Mover también a los vendedores que tienen esas visitas</label>
+    <p><button class="sec" onclick="respaldo()">1. Descargar respaldo</button></p>
+    <p>2. Para confirmar escribí <b>MOVER</b>: <input id="conf" autocomplete="off" size="8"> <button class="peligro" onclick="ejecutar()">Mover ahora</button></p>` : '<p>No hay visitas para mover en la sucursal de origen.</p>'}`;
+}
+async function respaldo(){
+  const o = document.getElementById('origen').value, d = document.getElementById('destino').value;
+  const r = await fetch(`/api/mover-visitas/respaldo?origen=${o}&destino=${d}`, {headers: H()}); if (!r.ok){ document.getElementById('err').textContent = (await r.json()).error; return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob()); a.download = 'respaldo-visitas-antes-de-mover.json'; a.click();
+}
+async function ejecutar(){
+  const err = document.getElementById('err'); err.textContent = '';
+  const r = await fetch('/api/mover-visitas/ejecutar', {method:'POST', headers: H({'Content-Type':'application/json'}), body: JSON.stringify({origen: document.getElementById('origen').value, destino: document.getElementById('destino').value, moverVendedores: document.getElementById('vend').checked, confirmar: document.getElementById('conf').value.trim()})});
+  const d = await r.json(); if (!r.ok){ err.textContent = d.error; return; }
+  const m = d.movido; document.getElementById('cont').innerHTML = `<p class="ok">Listo. Movidas ${m.visitas} visitas${m.obras ? ', ' + m.obras + ' obras' : ''}${m.presupuestos ? ', ' + m.presupuestos + ' presupuestos' : ''}${m.oportunidadesCrm ? ', ' + m.oportunidadesCrm + ' oportunidades' : ''}${m.vendedores ? ' y ' + m.vendedores + ' vendedores' : ''}.</p>`;
+}
+init();
+</script></body></html>
