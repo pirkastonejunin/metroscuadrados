@@ -47,7 +47,7 @@ router.get('/', authUsuario, solo, async (req, res) => {
       db.collection('productos_catalogo').aggregate([{ $group: { _id: '$orgId', n: { $sum: 1 } } }]).toArray(),
       cont('stock_actual', {}), cont('tesoreria_movimientos', {}), cont('cheques', {}), cont('presupuestos', {})
     ]);
-    const saldosProv = await cont('proveedores_saldos_dux', {});
+    const saldosProv = await cont('proveedores_saldos_iniciales', {});
 
     // espacio en Atlas
     let espacio = null;

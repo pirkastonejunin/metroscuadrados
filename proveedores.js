@@ -369,18 +369,25 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!proveedor) throw err(404, 'Proveedor no encontrado');
 
-      const [compras, gastos, pagosCompra] = await Promise.all([
+      const [compras, gastos, pagosCompra, saldosIni] = await Promise.all([
         db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
         db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
-        db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, filtroOrg(req))).toArray()
+        db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, filtroOrg(req))).toArray(),
+        db.collection('proveedores_saldos_iniciales').find({ proveedorId: id }).toArray()
       ]);
 
       const movimientos = [];
+      // Saldo inicial de Dux (importado aparte): es la base del saldo. Las compras, gastos y pagos importados de Dux
+      // se muestran como historial pero NO suman al saldo (ya están dentro del saldo inicial).
+      for (const si of saldosIni) {
+        if (!si.monto) continue;
+        movimientos.push({ tipo: si.monto > 0 ? 'debito' : 'credito', monto: Math.abs(si.monto), fecha: si.fecha, concepto: 'Saldo inicial Dux', origen: 'saldo_inicial_dux', docId: si._id, moneda: 'ARS' });
+      }
       for (const c of compras) {
         movimientos.push({
           tipo: /^nota_credito/.test(c.tipoComprobante || '') ? 'credito' : 'debito', monto: c.total, fecha: c.fecha,
           concepto: /^nota_(credito|debito)/.test(c.tipoComprobante || '') ? `${/^nota_credito/.test(c.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${c.numeroOriginal || ''} (Dux)` : c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`, origen: 'compra',
-          docId: c._id, docNumero: c.numero, docEstado: c.estado,
+          docId: c._id, docNumero: c.numero, docEstado: c.estado, importado: !!c.importado,
           tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
           items: c.items, observaciones: c.observaciones, moneda: c.moneda,
           totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
@@ -390,14 +397,14 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
           concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => '#' + a.compraNumero).join(', ') : ''}`,
-          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor
+          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado
         });
       }
       for (const g of gastos) {
         movimientos.push({
           tipo: /^nota_credito/.test(g.tipoComprobante || '') ? 'credito' : 'debito', monto: g.total, fecha: g.fecha,
           concepto: /^nota_(credito|debito)/.test(g.tipoComprobante || '') ? `${/^nota_credito/.test(g.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${g.numeroOriginal || ''} (Dux)` : g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`, origen: 'gasto',
-          docId: g._id, docNumero: g.numero, docEstado: g.estado,
+          docId: g._id, docNumero: g.numero, docEstado: g.estado, importado: !!g.importado,
           tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
           totalPagado: g.totalPagado, saldoPendiente: g.saldoPendiente
@@ -412,7 +419,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       }
 
       movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-      const saldo = Math.round(movimientos.reduce((acc, m) => acc + (m.tipo === 'debito' ? m.monto : -m.monto), 0) * 100) / 100;
+      const saldo = Math.round(movimientos.filter(m => !m.importado).reduce((acc, m) => acc + (m.tipo === 'debito' ? m.monto : -m.monto), 0) * 100) / 100;
 
       return { proveedor, saldo, movimientos: movimientos.slice(0, limite) };
     });

@@ -135,6 +135,7 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirSaldosProvDux()" title="Saldos de proveedores de Dux (Consulta de Proveedores con Saldo)">Saldos Dux</button>
           <button class="btn secondary" onclick="abrirFichasDux()" title="Ficha de proveedores de Dux (Listado de Proveedores)">Fichas Dux</button>
           <button class="btn" onclick="abrirNuevoProveedor()">+ Nuevo proveedor</button>
         </div>
@@ -170,7 +171,7 @@ const TIPO_COMPROBANTE_LABEL = {
   nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M',
   recibo: 'Recibo', ticket: 'Ticket', otro: 'Otro (no fiscal)'
 };
-const ORIGEN_CC_PROVEEDOR_LABEL = { compra: 'Compra', pago_compra: 'Pago (compra)', gasto: 'Gasto', pago_gasto: 'Pago (gasto)' };
+const ORIGEN_CC_PROVEEDOR_LABEL = { compra: 'Compra', pago_compra: 'Pago (compra)', gasto: 'Gasto', pago_gasto: 'Pago (gasto)', saldo_inicial_dux: 'Saldo inicial Dux' };
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -665,9 +666,9 @@ async function cargarCuentaCorrienteProveedorTab(id){
     const filas = data.movimientos.map((m, i) => {
       if (i > 0) {
         const anterior = data.movimientos[i - 1];
-        saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto;
+        if (!anterior.importado) saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto; // el historial importado de Dux no entra en el saldo
       }
-      return { m, saldo: saldoCorrido, index: i };
+      return { m, saldo: m.importado ? null : saldoCorrido, index: i };
     });
     cont.innerHTML = `
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -686,10 +687,10 @@ async function cargarCuentaCorrienteProveedorTab(id){
             <tr>
               <td>${fechaCorta(m.fecha)}</td>
               <td>${conceptoHtml}${m.nota ? `<div class="muted">${escapeHtml(m.nota)}</div>` : ''}</td>
-              <td class="muted">${ORIGEN_CC_PROVEEDOR_LABEL[m.origen] || escapeHtml(m.origen || '—')}</td>
+              <td class="muted">${ORIGEN_CC_PROVEEDOR_LABEL[m.origen] || escapeHtml(m.origen || '—')}${m.importado ? ' <span style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : ''}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
-              <td class="muted">${money(saldo)}</td>
+              <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
               <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : ''}</td>
             </tr>
           `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
@@ -820,7 +821,7 @@ async function previewFichasDux(){
     out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
       <li><b>${d.proveedores}</b> proveedores en el archivo (${d.conCuit} con CUIT)</li>
       <li>${d.existentes} ya existen: a <b>${d.aCompletar}</b> se les completan datos (${d.camposACompletar} campos vacíos)</li>
-      <li><b>${d.aCrear}</b> se van a crear${d.ambiguos ? '' : ''}</li></ul>`
+      <li><b>${d.aCrear}</b> se van a crear</li></ul>`
       + (d.ambiguos ? `<p class="err">${d.ambiguos} no se cargan porque coinciden con más de un proveedor: ${d.ejemplosAmbiguos.map(escapeHtml).join(', ')}.</p>` : '')
       + (d.errores.length ? '<p class="muted">' + d.errores.length + ' aviso(s): ' + d.errores.slice(0,5).map(e => escapeHtml(e.motivo)).join('; ') + '</p>' : '');
     if (d.aCrear > 0 || d.aCompletar > 0) document.getElementById('impFpBtn').style.display = '';
@@ -833,6 +834,61 @@ async function aplicarFichasDux(){
     const r = await fetch('/api/fichas-import-dux/proveedores/aplicar', {method:'POST', headers: hFp(), body: bodyFp()});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
     document.getElementById('impFpResumen').innerHTML = `<p class="ok-msg">Listo: ${d.creados} proveedores creados y ${d.completados} completados.</p>`;
+    btn.style.display = 'none'; if (typeof cargarProveedores === 'function') cargarProveedores();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
+}
+// ---- Saldos de proveedores de Dux ----
+let impSpB64 = null, impSpOrgs = [];
+async function abrirSaldosProvDux(){
+  impSpB64 = null;
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impSpOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  const hoy = new Date(Date.now() - 3*3600e3).toISOString().slice(0,10);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar saldos de proveedores de Dux</h2>
+        <p class="muted">Subí el archivo "Consulta de Proveedores con Saldo" de Dux. Cada saldo se carga como "Saldo inicial Dux" en la cuenta corriente del proveedor (positivo = le debemos, negativo = saldo a favor nuestro). Las compras, gastos y pagos importados quedan como historial y dejan de sumar al saldo. Cada proveedor se busca por CUIT y por nombre en todas tus sucursales. Si lo subís de nuevo, reemplaza el saldo anterior, no lo duplica.</p>
+        <label>Fecha del saldo</label>
+        <input type="date" id="impSpFecha" value="${hoy}" onchange="previewSaldosProvDux()">
+        <label style="margin-top:8px;display:block">Sucursal para los proveedores que no existan</label>
+        <select id="impSpOrg" onchange="previewSaldosProvDux()">${impSpOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <label style="display:block;margin-top:8px"><input type="checkbox" id="impSpCero" onchange="previewSaldosProvDux()"> Poner en 0 a los proveedores con saldo inicial anterior que ya no figuran en el archivo</label>
+        <input type="file" id="impSpArchivo" accept=".xls,.xlsx" onchange="previewSaldosProvDux()" style="margin-top:8px">
+        <div class="err" id="impSpErr"></div>
+        <div id="impSpResumen"></div>
+        <button class="btn" id="impSpBtn" style="margin-top:10px;display:none" onclick="aplicarSaldosProvDux()">Cargar saldos</button>
+      </div>
+    </div>`;
+}
+function bodySaldosProvDux(){ return JSON.stringify({archivoBase64: impSpB64.b64, orgId: document.getElementById('impSpOrg').value, fechaCorte: document.getElementById('impSpFecha').value, ponerEnCero: document.getElementById('impSpCero').checked}); }
+function hSp(){ const h = headersAuthJson(); const s = document.getElementById('impSpOrg'); if (s && s.value) h['x-org-id'] = s.value; return h; }
+async function previewSaldosProvDux(){
+  const file = document.getElementById('impSpArchivo').files[0]; const errEl = document.getElementById('impSpErr'); errEl.textContent = '';
+  const out = document.getElementById('impSpResumen'); out.innerHTML = ''; document.getElementById('impSpBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impSpB64 || impSpB64.file !== file) impSpB64 = {file, b64: await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); })};
+    const r = await fetch('/api/saldos-import-dux/proveedores/preview', {method:'POST', headers: hSp(), body: bodySaldosProvDux()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
+    out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
+      <li><b>${d.proveedores}</b> proveedores con saldo. Les debemos <b>${m(d.totalDeuda)}</b> (${d.cantDeuda}) · a favor nuestro <b>${m(d.totalAFavor)}</b> (${d.cantAFavor}) · neto <b>${m(d.saldoNeto)}</b></li>
+      <li>${d.existentes} ya existen${d.enVariasSucursales ? ' (' + d.enVariasSucursales + ' están en más de una sucursal: van a la que tiene más ventas)' : ''}, <b>${d.nuevos}</b> se van a crear</li>
+      ${d.unificados ? `<li>${d.unificados} proveedores de Dux ya están unificados en uno solo en el sistema: se suman sus saldos.</li>` : ''}<li>A cargar ahora: <b>${d.aCargar}</b> (${d.sinCambios} ya tienen ese mismo saldo)${d.ponerEnCero ? ' · ' + d.ponerEnCero + ' se ponen en 0' : ''}</li></ul>`
+      + (d.ambiguos ? `<p class="err"><b>${d.ambiguos} proveedores no se cargan</b> (${m(d.montoAmbiguos)}) porque el nombre coincide con más de un proveedor del sistema: ${d.detalleAmbiguos.map(x => escapeHtml(x.nombre) + ' (' + m(x.saldo) + ')').join(', ')}. Unificá los duplicados y volvé a subir el archivo.</p>` : '')
+      + (d.errores.length ? '<p class="muted">' + d.errores.length + ' aviso(s): ' + d.errores.slice(0,5).map(e => escapeHtml(e.motivo)).join('; ') + '</p>' : '');
+    if (d.aCargar > 0 || d.ponerEnCero > 0) document.getElementById('impSpBtn').style.display = '';
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
+}
+async function aplicarSaldosProvDux(){
+  const btn = document.getElementById('impSpBtn'), errEl = document.getElementById('impSpErr');
+  if (btn.disabled || !impSpB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/saldos-import-dux/proveedores/aplicar', {method:'POST', headers: hSp(), body: bodySaldosProvDux()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al cargar');
+    document.getElementById('impSpResumen').innerHTML = `<p class="ok-msg">Listo: ${d.cargados} saldos cargados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
     btn.style.display = 'none'; if (typeof cargarProveedores === 'function') cargarProveedores();
   }catch(e){ errEl.textContent = e.message; }
   btn.disabled = false;
