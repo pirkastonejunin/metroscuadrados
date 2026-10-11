@@ -619,4 +619,5 @@ router.get('/detalle/cobertura', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+router.crearResolverProveedores = crearResolverProveedores;
 module.exports = router;

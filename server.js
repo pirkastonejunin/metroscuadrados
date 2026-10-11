@@ -68,6 +68,7 @@ app.use('/api/compras-import-dux', require('./comprasImportDux'));
 app.use('/api/cobros-import-dux', require('./cobrosImportDux'));
 app.use('/api/saldos-import-dux', require('./saldosImportDux'));
 app.use('/api/estado-migracion', require('./estadoMigracion'));
+app.use('/api/fichas-import-dux', require('./fichasImportDux'));
 app.use('/api/reinicio-datos', require('./reinicioDatos'));
 app.use('/api/espacio-db', require('./espacioDb'));
 app.use('/api/ventas', ventasRouter);

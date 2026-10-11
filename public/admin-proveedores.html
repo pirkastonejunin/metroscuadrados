@@ -135,6 +135,7 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirFichasDux()" title="Ficha de proveedores de Dux (Listado de Proveedores)">Fichas Dux</button>
           <button class="btn" onclick="abrirNuevoProveedor()">+ Nuevo proveedor</button>
         </div>
       </div>
@@ -784,6 +785,57 @@ async function buscarCuitEnArca(pref, idNombre, conCategoria){
     err.textContent = '';
     if (d.estadoClave && String(d.estadoClave).toUpperCase() !== 'ACTIVO') err.textContent = 'Ojo: ARCA informa la clave como ' + d.estadoClave + '.';
   }catch(e){ err.textContent = e.message; }
+}
+
+// ---- Ficha de proveedores de Dux ----
+let impFpB64 = null, impFpOrgs = [];
+async function abrirFichasDux(){
+  impFpB64 = null;
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impFpOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar fichas de proveedores de Dux</h2>
+        <p class="muted">Subí el archivo "Listado de Proveedores" de Dux. A los proveedores que ya existen (por las compras, gastos y pagos importados) les completa los datos que tengan vacíos (CUIT, categoría fiscal, domicilio, contacto…) sin pisar lo ya cargado. Los que no existen se crean en la sucursal que elijas. Se puede repetir sin duplicar.</p>
+        <label>Sucursal donde se crean los que no existan</label>
+        <select id="impFpOrg" onchange="previewFichasDux()">${impFpOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <input type="file" id="impFpArchivo" accept=".xls,.xlsx" onchange="previewFichasDux()" style="margin-top:8px">
+        <div class="err" id="impFpErr"></div>
+        <div id="impFpResumen"></div>
+        <button class="btn" id="impFpBtn" style="margin-top:10px;display:none" onclick="aplicarFichasDux()">Importar fichas</button>
+      </div>
+    </div>`;
+}
+function hFp(){ const h = headersAuthJson(); const s = document.getElementById('impFpOrg'); if (s && s.value) h['x-org-id'] = s.value; return h; }
+function bodyFp(){ return JSON.stringify({archivoBase64: impFpB64.b64, orgId: document.getElementById('impFpOrg').value}); }
+async function previewFichasDux(){
+  const file = document.getElementById('impFpArchivo').files[0]; const errEl = document.getElementById('impFpErr'); errEl.textContent = '';
+  const out = document.getElementById('impFpResumen'); out.innerHTML = ''; document.getElementById('impFpBtn').style.display = 'none';
+  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impFpB64 || impFpB64.file !== file) impFpB64 = {file, b64: await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); })};
+    const r = await fetch('/api/fichas-import-dux/proveedores/preview', {method:'POST', headers: hFp(), body: bodyFp()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
+      <li><b>${d.proveedores}</b> proveedores en el archivo (${d.conCuit} con CUIT)</li>
+      <li>${d.existentes} ya existen: a <b>${d.aCompletar}</b> se les completan datos (${d.camposACompletar} campos vacíos)</li>
+      <li><b>${d.aCrear}</b> se van a crear${d.ambiguos ? '' : ''}</li></ul>`
+      + (d.ambiguos ? `<p class="err">${d.ambiguos} no se cargan porque coinciden con más de un proveedor: ${d.ejemplosAmbiguos.map(escapeHtml).join(', ')}.</p>` : '')
+      + (d.errores.length ? '<p class="muted">' + d.errores.length + ' aviso(s): ' + d.errores.slice(0,5).map(e => escapeHtml(e.motivo)).join('; ') + '</p>' : '');
+    if (d.aCrear > 0 || d.aCompletar > 0) document.getElementById('impFpBtn').style.display = '';
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
+}
+async function aplicarFichasDux(){
+  const btn = document.getElementById('impFpBtn'), errEl = document.getElementById('impFpErr');
+  if (btn.disabled || !impFpB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/fichas-import-dux/proveedores/aplicar', {method:'POST', headers: hFp(), body: bodyFp()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impFpResumen').innerHTML = `<p class="ok-msg">Listo: ${d.creados} proveedores creados y ${d.completados} completados.</p>`;
+    btn.style.display = 'none'; if (typeof cargarProveedores === 'function') cargarProveedores();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
 }
 </script>
 </body>
