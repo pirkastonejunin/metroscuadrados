@@ -251,7 +251,7 @@
               </select>
             </div>
           </div>
-          <button class="btn" onclick="abrirNuevoCheque()">+ Cargar cheque suelto</button>
+          <div class="row"><button class="btn secondary" title="Importar historial de cheques de Dux" onclick="abrirImportarChequesDux()">Importar historial de Dux</button><button class="btn" onclick="abrirNuevoCheque()">+ Cargar cheque suelto</button></div>
         </div>
       </div>
       <div class="card">
@@ -805,6 +805,69 @@ async function cargarCheques(){
 function opcionesBancoCheque(seleccionado){
   return bancosCache.map(b => `<option value="${b._id}" ${String(b._id)===seleccionado?'selected':''}>${escapeHtml(b.nombre)}</option>`).join('')
     || '<option value="">No tenés ningún banco habilitado</option>';
+}
+
+
+// ---- Importar historial de cheques de terceros de Dux ("Cartera de Cheques") ----
+let impChqB64 = null, impChqOrgs = [];
+function leerB64Chq(file){ return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); }); }
+async function abrirImportarChequesDux(){
+  impChqB64 = null;
+  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impChqOrgs = (await r.json()).organizaciones || []; }catch(e){}
+  const ids = impChqOrgs.map(o => String(o._id)); const op = localStorage.getItem('obras_org_operar');
+  const def = (ORG && ORG !== 'todas' && ids.includes(ORG)) ? ORG : (op && ids.includes(op) ? op : ids[0]);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Importar historial de cheques de Dux</h2>
+        <p class="muted">Subí la "Cartera de Cheques" de Dux (.xls o .xlsx). Se carga como historial: no mueve cajas ni bancos. Los <b>disponibles</b> quedan en cartera (se pueden depositar, endosar o usar para pagar a un proveedor); el resto queda como cobrado, depositado, endosado o anulado. Si lo subís de nuevo no duplica: solo actualiza el estado de los que cambiaron en Dux.</p>
+        <label>Sucursal donde se cargan</label>
+        <select id="impChqOrg" onchange="previewImportChequesDux()">${impChqOrgs.map(o => `<option value="${o._id}" ${String(o._id) === def ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
+        <input type="file" id="impChqArchivo" accept=".xls,.xlsx" onchange="previewImportChequesDux()" style="margin-top:8px">
+        <div class="err" id="impChqErr"></div>
+        <div id="impChqResumen"></div>
+        <button class="btn" id="impChqBtn" style="margin-top:10px;display:none" onclick="aplicarImportChequesDux()">Importar</button>
+      </div>
+    </div>`;
+}
+function hImpChq(){ const h = headersAuthJson(); const o = (document.getElementById('impChqOrg')||{}).value; if (o) h['x-org-id'] = o; return h; }
+async function previewImportChequesDux(){
+  const file = document.getElementById('impChqArchivo').files[0];
+  const errEl = document.getElementById('impChqErr'); errEl.textContent = '';
+  document.getElementById('impChqResumen').innerHTML = ''; document.getElementById('impChqBtn').style.display = 'none';
+  if (!file) return;
+  document.getElementById('impChqResumen').innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    impChqB64 = await leerB64Chq(file);
+    const r = await fetch('/api/cheques-import-dux/preview', {method:'POST', headers: hImpChq(), body: JSON.stringify({archivoBase64: impChqB64, orgId: document.getElementById('impChqOrg').value})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
+    const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
+    const ET = { en_cartera: 'En cartera (disponibles)', depositado: 'Depositados', cobrado: 'Cobrados', endosado: 'Endosados', anulado: 'Anulados', rechazado: 'Rechazados' };
+    document.getElementById('impChqResumen').innerHTML = `
+      <ul style="line-height:1.7;padding-left:18px">
+        <li><b>${d.aImportar}</b> cheques para importar de ${d.filasLeidas} leídos (${d.yaImportados} ya estaban importados${d.yaCargadosAMano ? ', ' + d.yaCargadosAMano + ' ya cargados a mano' : ''}${d.aActualizar ? ', ' + d.aActualizar + ' con estado a actualizar' : ''})</li>
+        <li>Período: ${f(d.desde)} a ${f(d.hasta)} — Total: <b>${m(d.totalImporte)}</b></li>
+        ${Object.keys(d.porEstado).map(e => `<li>${ET[e] || e}: <b>${d.porEstado[e].cantidad}</b> por ${m(d.porEstado[e].total)}</li>`).join('')}
+        <li>Se cargan en la sucursal: <b>${escapeHtml(d.sucursalDestino || '-')}</b></li>
+      </ul>
+      ${d.enCartera.length ? '<p><b>Quedan en cartera (revisá que sean los que tenés):</b></p><ul class="muted">' + d.enCartera.map(c => '<li>' + escapeHtml(c.numero) + ' · ' + escapeHtml(c.banco) + ' · ' + m(c.monto) + ' · vence ' + f(c.vencimiento) + ' · ' + escapeHtml(c.cliente) + '</li>').join('') + '</ul>' : ''}
+      ${d.errores.length ? '<p class="err">' + d.errores.length + ' fila(s) con error (se saltean):</p><ul class="muted">' + d.errores.slice(0,10).map(e => '<li>Fila ' + e.fila + ': ' + escapeHtml(e.motivo) + '</li>').join('') + '</ul>' : ''}`;
+    if (d.aImportar > 0 || d.aActualizar > 0) document.getElementById('impChqBtn').style.display = '';
+  }catch(e){ errEl.textContent = e.message; document.getElementById('impChqResumen').innerHTML = ''; }
+}
+async function aplicarImportChequesDux(){
+  const btn = document.getElementById('impChqBtn'); const errEl = document.getElementById('impChqErr');
+  if (btn.disabled || !impChqB64) return;
+  btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/cheques-import-dux/aplicar', {method:'POST', headers: hImpChq(), body: JSON.stringify({archivoBase64: impChqB64, orgId: document.getElementById('impChqOrg').value})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
+    document.getElementById('impChqResumen').innerHTML = `<p style="color:var(--ok,#1f8a5f);font-weight:700">Listo: ${d.insertados} cheques importados${d.actualizados ? ' y ' + d.actualizados + ' actualizados' : ''}.</p>`;
+    btn.style.display = 'none';
+    cargarCheques();
+  }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
 }
 
 function abrirNuevoCheque(){

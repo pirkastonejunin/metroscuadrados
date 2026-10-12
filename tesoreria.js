@@ -427,7 +427,7 @@ router.get('/resumen', authOperar, async (req, res) => {
       const grupos = { cartera: [], depositados: [], emitidos: [] };
       cheques.forEach(c => {
         if (c.tipo === 'tercero' && c.estado === 'en_cartera') grupos.cartera.push(c);
-        else if (c.tipo === 'tercero' && (c.estado === 'depositado' || c.estado === 'cobrado')) grupos.depositados.push(c);
+        else if (c.tipo === 'tercero' && !c.importado && (c.estado === 'depositado' || c.estado === 'cobrado')) grupos.depositados.push(c); // el historial importado de Dux ya está acreditado: no cuenta como pendiente
         else if (c.tipo === 'propio' && c.estado === 'emitido') grupos.emitidos.push(c);
       });
       const venc = (c) => c.fechaVencimiento ? new Date(c.fechaVencimiento) : null;
@@ -1074,7 +1074,7 @@ router.get('/cheques', authOperar, async (req, res) => {
       if (req.query.desde) match.fechaVencimiento.$gte = new Date(req.query.desde);
       if (req.query.hasta) match.fechaVencimiento.$lte = new Date(req.query.hasta + 'T23:59:59');
     }
-    const cheques = await conReintento(async () => (await getDb()).collection('cheques').find(match).sort({ fechaVencimiento: 1 }).limit(500).toArray());
+    const cheques = await conReintento(async () => (await getDb()).collection('cheques').find(match).sort({ fechaVencimiento: 1 }).limit(3000).toArray());
     res.json(cheques);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
