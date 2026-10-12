@@ -279,6 +279,9 @@ async function iniciarApp(){
   document.getElementById('cbClienteCombo').innerHTML = comboClienteHtmlCB();
   document.getElementById('cbFecha').value = new Date().toISOString().slice(0,10);
   cargarListaCobranzas();
+  { const pre = new URLSearchParams(location.search).get('cliente'); // enlace desde la cuenta corriente del cliente
+    if (pre) { history.replaceState(null, '', location.pathname); const cl = clientesCache.find(x => String(x._id) === pre);
+      document.getElementById('cbCliente').value = pre; document.getElementById('cbBuscar').value = cl ? textoClienteCB(cl) : ''; mostrarClienteSeleccionadoCB(pre); } }
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
 }

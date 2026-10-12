@@ -286,6 +286,8 @@ async function iniciarApp(){
   await cargarVentas();
   abrirVentaDesdePresupuestoSiCorresponde();
   abrirVentaPorParametro();
+  { const pre = new URLSearchParams(location.search).get('vender'); // enlace desde la cuenta corriente del cliente
+    if (pre) { history.replaceState(null, '', location.pathname); abrirNuevaVenta({ clienteId: pre }); } }
 }
 // Enlace desde el tablero de inicio: /admin-ventas.html?abrir=<id de la venta>
 async function abrirVentaPorParametro(){
