@@ -569,9 +569,20 @@ async function normalizarItemsOrden(db, req, itemsRaw) {
 // Compras — CRUD + acciones
 // -----------------------------------------------------------------------
 
+
+// Proveedores COMPARTIDOS con esta sucursal (unificados entre sucursales): sus compras, pagos y saldos se ven completos, de todas las
+// sucursales que lo usan, no solo las de la sucursal actual. Devuelve el filtro de organización: la sucursal propia + esos proveedores.
+async function filtroOrgConCompartidos(db, req) {
+  const base = filtroOrg(req);
+  if (!req.orgId) return base;
+  const ids = (await db.collection('proveedores').find({ orgIdsCompartidas: req.orgId }).project({ _id: 1 }).toArray()).map(p => p._id)
+    .concat((await db.collection('proveedores').find({ orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }).project({ _id: 1 }).toArray()).map(p => p._id));
+  return ids.length ? { $or: [base, { proveedorId: { $in: ids } }] } : base;
+}
+
 router.get('/', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({}, filtroOrg(req));
+    const match = {};
     if (req.query.proveedorId) {
       const pid = toObjectId(req.query.proveedorId);
       if (!pid) throw err(400, 'proveedorId inválido');
@@ -589,6 +600,7 @@ router.get('/', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 200, 500);
     const lista = await conReintento(async () => {
       const db = await getDb();
+      Object.assign(match, await filtroOrgConCompartidos(db, req));
       return db.collection('compras').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
     });
     res.json(lista);
@@ -599,7 +611,7 @@ router.get('/', authAdmin, async (req, res) => {
 // (una fila por compra, no por ítem — ver comentario de COLUMNAS_COMPRAS_EXPORT).
 router.get('/export', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({}, filtroOrg(req));
+    const match = {};
     if (req.query.proveedorId) {
       const pid = toObjectId(req.query.proveedorId);
       if (pid) match.proveedorId = pid;
@@ -612,6 +624,7 @@ router.get('/export', authAdmin, async (req, res) => {
     }
     const lista = await conReintento(async () => {
       const db = await getDb();
+      Object.assign(match, await filtroOrgConCompartidos(db, req));
       return db.collection('compras').find(match).sort({ fecha: -1, numero: -1 }).limit(2000).toArray();
     });
     const listaExport = lista.map(c => Object.assign({}, c, {
@@ -628,7 +641,7 @@ router.get('/export', authAdmin, async (req, res) => {
 // colección, ver aplicarPagoProveedor).
 router.get('/pagos', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({}, filtroOrg(req));
+    const match = {};
     if (req.query.proveedorId) {
       const pid = toObjectId(req.query.proveedorId);
       if (!pid) throw err(400, 'proveedorId inválido');
@@ -642,6 +655,7 @@ router.get('/pagos', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 200, 500);
     const lista = await conReintento(async () => {
       const db = await getDb();
+      Object.assign(match, await filtroOrgConCompartidos(db, req));
       return db.collection('compras_pagos').find(match).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray();
     });
     res.json(lista);
@@ -653,9 +667,11 @@ router.get('/pagos', authAdmin, async (req, res) => {
 // proveedor, para la pestaña "Pagos".
 router.get('/saldos-proveedores', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({ estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } }, filtroOrg(req));
+    const match = { estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0 } };
     const { lista, aCuenta } = await conReintento(async () => {
       const db = await getDb();
+      const fo = await filtroOrgConCompartidos(db, req);
+      Object.assign(match, fo);
       const lista = await db.collection('compras').aggregate([
         { $match: match },
         { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, saldoPendiente: { $sum: '$saldoPendiente' }, cantidadCompras: { $sum: 1 } } },
@@ -669,7 +685,7 @@ router.get('/saldos-proveedores', authAdmin, async (req, res) => {
       gastos.forEach(g => lista.push(g));
       // Pagos a cuenta del historial de Dux que todavía no se imputaron a una factura (se descuentan del saldo).
       const aCuenta = await db.collection('compras_pagos').aggregate([
-        { $match: Object.assign({ importado: true, montoSinAplicar: { $gt: 0 } }, filtroOrg(req)) },
+        { $match: Object.assign({ importado: true, montoSinAplicar: { $gt: 0 } }, fo) },
         { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, aCuenta: { $sum: '$montoSinAplicar' } } }
       ]).toArray();
       return { lista, aCuenta };
