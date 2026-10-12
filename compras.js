@@ -600,7 +600,8 @@ router.get('/', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 200, 500);
     const lista = await conReintento(async () => {
       const db = await getDb();
-      Object.assign(match, await filtroOrgConCompartidos(db, req));
+      // ?sucursal=1: solo las compras de la sucursal (sin las de otras sucursales de un proveedor compartido) — lo usa el pago, que se hace en UNA sucursal.
+      Object.assign(match, req.query.sucursal === '1' ? filtroOrg(req) : await filtroOrgConCompartidos(db, req));
       return db.collection('compras').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
     });
     res.json(lista);

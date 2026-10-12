@@ -499,6 +499,7 @@ function resolverOrgActiva(me){
 }
 
 let NOMBRE_USUARIO = '';
+let ORGS_ME = [];
 async function iniciarApp(){
   let me;
   try{
@@ -517,6 +518,7 @@ async function iniciarApp(){
     return;
   }
   resolverOrgActiva(me);
+  ORGS_ME = me.organizaciones || [];
   if (!EMBED) PiedraSidebar.render(me, 'compras', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
@@ -557,6 +559,7 @@ const EMBED = new URLSearchParams(location.search).get('embed') === '1';
 if (EMBED) document.addEventListener('DOMContentLoaded', () => document.body.classList.add('embed'));
 function cerrarModal(){
   document.getElementById('modalRoot').innerHTML = '';
+  if (typeof restaurarCuentasBase === 'function') restaurarCuentasBase();
   if (EMBED && window.parent !== window) window.parent.postMessage({ tipo: 'popup-compras-cerrado' }, location.origin);
 }
 
@@ -1205,7 +1208,7 @@ async function cargarChequesTercero(p){
   const w = document.getElementById(p + 'TerceroWrap'); if (!w) return;
   w.innerHTML = '<p class="muted">Cargando cheques en cartera…</p>';
   try {
-    const r = await fetch(BASE + '/cheques-tercero', {headers: headersAuth()});
+    const r = await fetch(BASE + '/cheques-tercero', {headers: p === 'pc' ? headersPc() : headersAuth()});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     chequesTerceroCache = data;
@@ -1438,6 +1441,45 @@ function opcionesProveedoresPagoCuenta(seleccionado){
   ).join('');
 }
 
+
+// Sucursal del pago a cuenta: se elige en el momento (por defecto, la que se está usando). Los pedidos del popup viajan con esa sucursal.
+function orgPagoDefecto(){
+  const ids = ORGS_ME.map(o => String(o._id));
+  if (ORG && ORG !== 'todas' && ids.includes(ORG)) return ORG;
+  const op = localStorage.getItem('obras_org_operar');
+  if (op && ids.includes(op)) return op;
+  return ids[0] || '';
+}
+function orgPagoActual(){ const el = document.getElementById('pcOrg'); return el ? el.value : ''; }
+function headersPc(json){
+  const o = orgPagoActual();
+  const h = json ? headersAuthJson() : headersAuth();
+  if (o) h['x-org-id'] = o; // headersAuth() pisa x-org-id con la sucursal de la pantalla: acá manda la del pago
+  return h;
+}
+let cuentasPagoModificadas = false;
+async function cambiarSucursalPagoCuenta(){
+  const [rcj, rbc] = await Promise.all([
+    fetch('/api/tesoreria/cajas', {headers: headersPc()}).catch(() => null),
+    fetch('/api/tesoreria/bancos', {headers: headersPc()}).catch(() => null)
+  ]);
+  cajasTesoreriaCache = rcj && rcj.ok ? await rcj.json() : [];
+  bancosTesoreriaCache = rbc && rbc.ok ? await rbc.json() : [];
+  cuentasPagoModificadas = true;
+  actualizarTipoValorPagoCuenta();
+  cargarComprasPendientesPagoCuenta();
+}
+async function restaurarCuentasBase(){
+  if (!cuentasPagoModificadas) return;
+  cuentasPagoModificadas = false;
+  const [rcj, rbc] = await Promise.all([
+    fetch('/api/tesoreria/cajas', {headers: headersAuth()}).catch(() => null),
+    fetch('/api/tesoreria/bancos', {headers: headersAuth()}).catch(() => null)
+  ]);
+  cajasTesoreriaCache = rcj && rcj.ok ? await rcj.json() : cajasTesoreriaCache;
+  bancosTesoreriaCache = rbc && rbc.ok ? await rbc.json() : bancosTesoreriaCache;
+}
+
 function abrirPagoCuenta(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
@@ -1449,6 +1491,10 @@ function abrirPagoCuenta(){
           <div><label>Monto *</label><input id="pcMonto" type="number" min="0.01" step="0.01" value="0" oninput="actualizarRepartidoPagoCuenta()"></div>
           <div><label>Fecha *</label><input id="pcFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
+        ${ORGS_ME.length > 1 ? `<div class="grid2" style="margin-top:10px">
+          <div><label>Sucursal a la que corresponde el pago *</label><select id="pcOrg" onchange="cambiarSucursalPagoCuenta()">${ORGS_ME.map(o => `<option value="${o._id}" ${o._id === orgPagoDefecto() ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></div>
+          <div class="muted" style="align-self:end;padding-bottom:8px">Define la caja o banco de donde sale, los cheques en cartera y las compras que se pueden pagar.</div>
+        </div>` : ''}
         <div class="grid2" style="margin-top:10px">
           <div><label>Tipo de valor *</label><select id="pcTipoValor" onchange="actualizarTipoValorPagoCuenta()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque propio</option><option value="cheque_tercero">Cheque de tercero (de cartera)</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
           <div id="pcCuentaWrap"><label id="pcCuentaLabel">¿De qué caja sale? *</label><select id="pcCuenta">${opcionesCuentaPago('efectivo')}</select></div>
@@ -1489,6 +1535,7 @@ function abrirPagoCuenta(){
       </div>
     </div>
   `;
+  if (ORGS_ME.length > 1 && orgPagoDefecto() !== ORG) cambiarSucursalPagoCuenta();
 }
 
 function actualizarTipoValorPagoCuenta(){
@@ -1513,7 +1560,7 @@ async function cargarComprasPendientesPagoCuenta(){
   const cont = document.getElementById('pcCompras');
   if (!proveedorId) { cont.innerHTML = '<p class="muted">Elegí un proveedor para ver sus compras pendientes.</p>'; return; }
   cont.innerHTML = '<p class="muted">Cargando...</p>';
-  const r = await fetch(BASE + '?proveedorId=' + proveedorId, {headers: headersAuth()});
+  const r = await fetch(BASE + '?sucursal=1&proveedorId=' + proveedorId, {headers: headersPc()});
   const todas = r.ok ? await r.json() : [];
   comprasPendientesPagoCuentaCache = todas.filter(c => c.estado !== 'anulada' && c.saldoPendiente > 0);
   if (!comprasPendientesPagoCuentaCache.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene compras con saldo pendiente.</p>'; return; }
@@ -1622,7 +1669,7 @@ async function confirmarPagoCuenta(){
     }
   }
   try{
-    const r = await fetch(BASE + '/pagos-cuenta', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const r = await fetch(BASE + '/pagos-cuenta', {method:'POST', headers: headersPc(true), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
