@@ -371,6 +371,14 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
 
       // Un proveedor compartido entre sucursales (unificado) muestra toda su cuenta, de todas las sucursales que lo usan.
       const fOrg = (proveedor.orgIdsCompartidas || []).length ? { orgId: { $in: [proveedor.orgId].concat(proveedor.orgIdsCompartidas) } } : filtroOrg(req);
+      // Reparación: pagos hechos en modo "todas las sucursales" quedaron sin sucursal y no aparecían; se la ponemos según la compra a la que se aplicaron.
+      const huerfanos = await db.collection('compras_pagos').find({ proveedorId: id, $or: [{ orgId: null }, { orgId: { $exists: false } }] }).toArray();
+      for (const hp of huerfanos) {
+        const cid = hp.aplicaciones && hp.aplicaciones[0] && hp.aplicaciones[0].compraId;
+        const cmp = cid ? await db.collection('compras').findOne({ _id: cid }, { projection: { orgId: 1 } }) : null;
+        const oid = (cmp && cmp.orgId) || proveedor.orgId;
+        if (oid) await db.collection('compras_pagos').updateOne({ _id: hp._id }, { $set: { orgId: oid } });
+      }
       const [compras, gastos, pagosCompra, saldosIni] = await Promise.all([
         db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
         db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),

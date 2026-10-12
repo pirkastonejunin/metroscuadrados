@@ -809,7 +809,7 @@ router.post('/ordenes', authAdmin, async (req, res) => {
     if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
     const condicionPago = normalizarTexto(body.condicionPago);
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaPago(body.fecha);
     let cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
 
     const resultado = await conReintento(async () => {
@@ -968,7 +968,7 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaPago(body.fecha);
     let cotizacionDolar = body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null;
     const comprobante = normalizarComprobante(body);
     const impuestosCbte = normalizarImpuestosComprobante(body);
@@ -1165,7 +1165,7 @@ router.post('/', authAdmin, async (req, res) => {
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaPago(body.fecha);
     // Comprobante fiscal (4/10/2026) — numeración real del proveedor +
     // IVA discriminado, para el Libro IVA Compras.
     const comprobante = normalizarComprobante(body);
@@ -1337,6 +1337,12 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
 // datos del cheque/tarjeta) — compartido entre el pago de una compra
 // puntual y el pago a cuenta (4/10/2026, pedido de Mato: "agreguemos
 // pagos... para poder hacer pago a un proveedor a cuenta").
+// Fecha del pago: un "2026-10-12" suelto se guarda a las 12:00 de Argentina (si no, queda a medianoche UTC y se ve como el día anterior).
+function fechaPago(v) {
+  if (!v) return new Date();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return new Date(v + 'T12:00:00-03:00');
+  return new Date(v);
+}
 function normalizarDatosPago(body, fecha) {
   const tipoValor = normalizarTexto(body.tipoValor).toLowerCase();
   if (!TIPOS_VALOR_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_VALIDOS.join(', ')})`);
@@ -1469,7 +1475,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   }
   const pagoCuenta = Object.assign({
     proveedorId, proveedorNombre, fecha, tipoValor, monto: montoTotal, nota, usuarioNombre,
-    aplicaciones: aplicacionesGuardadas, orgId: req.orgId, createdAt: ahora
+    aplicaciones: aplicacionesGuardadas, orgId: req.orgId || (compras[0] && compras[0].orgId) || null, createdAt: ahora
   }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {}, chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {}, tarjetaDatos || {});
   const r = await db.collection('compras_pagos').insertOne(pagoCuenta);
   pagoCuenta._id = r.insertedId;
@@ -1487,7 +1493,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     const nota = normalizarTexto(body.nota);
     // Fecha del pago editable (2/10/2026, mismo pedido de Mato que en
     // Ventas: por si se carga más tarde con la fecha real en que pasó).
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaPago(body.fecha);
     const datosPago = normalizarDatosPago(body, fecha);
 
     const resultado = await conReintento(async () => {
@@ -1520,7 +1526,7 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
     const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
     if (monto <= 0) throw err(400, 'El monto del pago tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaPago(body.fecha);
     const datosPago = normalizarDatosPago(body, fecha);
 
     const aplicacionesRaw = Array.isArray(body.aplicaciones) ? body.aplicaciones : [];
