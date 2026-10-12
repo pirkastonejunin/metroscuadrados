@@ -261,7 +261,7 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
 // Nombre del comprobante para la cuenta corriente: "Factura A 0001-00001234" (si tiene tipo y número); si no, el texto de siempre.
 const TIPO_COMP_LABEL = { factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M', nota_credito_a: 'Nota de Crédito A', nota_credito_b: 'Nota de Crédito B', nota_credito_c: 'Nota de Crédito C', nota_credito_m: 'Nota de Crédito M', nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M', recibo: 'Recibo', ticket: 'Ticket', otro: 'Comprobante' };
 function nombreComprobante(d) {
-  if (!d || !d.comprobanteNumero) return null;
+  if (!d || !d.comprobanteNumero || /^[A-Z]-\d/.test(String(d.comprobanteNumero))) return null; // los importados de Dux ya traen su número completo (A-00012-00027691)
   const tipo = TIPO_COMP_LABEL[d.tipoComprobante] || (d.tipoComprobante ? String(d.tipoComprobante).replace(/_/g, ' ') : 'Comprobante');
   return tipo + ' ' + (d.puntoVenta ? d.puntoVenta + '-' : '') + d.comprobanteNumero;
 }

@@ -162,7 +162,7 @@
     </div>
     <div class="card">
       <table>
-        <thead><tr><th>Nº</th><th>Fecha</th><th>Proveedor</th><th>Comprobante</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+        <thead><tr><th>Comprobante</th><th>Fecha</th><th>Proveedor</th><th>Nº interno</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
         <tbody id="gastosBody"><tr><td colspan="9" class="muted">Cargando...</td></tr></tbody>
       </table>
     </div>
@@ -316,10 +316,10 @@ async function cargarGastos(){
   if (!gastosCache.length) { body.innerHTML = '<tr><td colspan="9" class="muted">No hay gastos cargados todavía.</td></tr>'; return; }
   body.innerHTML = gastosCache.map(g => `
     <tr>
-      <td><strong>${nroImportado(g)}</strong></td>
+      <td><strong>${nombreComp(g)}</strong></td>
       <td class="muted">${fechaCorta(g.fecha)}</td>
       <td>${g.proveedorId ? `<a href="/admin-proveedores.html?id=${g.proveedorId}&tab=cuenta-corriente" title="Ver la cuenta del proveedor" style="color:inherit;text-decoration:underline dotted">${escapeHtml(g.proveedorNombre||'')}</a>` : escapeHtml(g.proveedorNombre||'')}</td>
-      <td class="muted">${escapeHtml(g.comprobanteNumero||'—')}</td>
+      <td class="muted">#${g.numero}</td>
       <td>${money(g.total)}</td>
       <td class="muted">${money(g.totalPagado)}</td>
       <td>${g.saldoPendiente > 0 ? money(g.saldoPendiente) : '<span class="muted">—</span>'}</td>
@@ -738,7 +738,7 @@ function verDetalle(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Gasto ${nroImportado(g)} <span class="pill ${g.estado}">${ESTADO_LABEL[g.estado]||g.estado}</span></h2>
+        <h2>${g.tipoComprobante && g.comprobanteNumero ? '' : 'Gasto '}${nombreComp(g)} <span class="pill ${g.estado}">${ESTADO_LABEL[g.estado]||g.estado}</span></h2>
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(g.proveedorNombre)} — ${fechaCorta(g.fecha)}${g.condicionPago ? ' — Condición: ' + escapeHtml(g.condicionPago) : ''}
         </p>
@@ -969,6 +969,12 @@ async function descargarBlob(url, nombreArchivo){
 <script>
 // Importar historial de gastos de Dux (9/10/2026)
 let impDuxB64 = null;
+function nombreComp(x){
+  if (x.tipoComprobante && x.comprobanteNumero && TIPO_COMPROBANTE_LABEL[x.tipoComprobante] && !/^[A-Z]-\d/.test(x.comprobanteNumero)) {
+    return escapeHtml(TIPO_COMPROBANTE_LABEL[x.tipoComprobante] + ' ' + (x.puntoVenta ? x.puntoVenta + '-' : '') + x.comprobanteNumero) + (x.numeroOriginal ? ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '');
+  }
+  return nroImportado(x);
+}
 function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
 let impDuxOrgs = [];
 function hImp(){ const sel = document.getElementById('impDuxOrg'); const h = headersAuthJson(); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }
