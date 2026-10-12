@@ -258,6 +258,14 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
 
 // Conciliación con Dux: por proveedor, el saldo que se trajo de Dux (saldo inicial) contra lo que da el historial importado
 // (compras + gastos − notas de crédito − pagos). Sirve para ver si el signo del saldo de Dux quedó invertido o si hay diferencias puntuales.
+// Nombre del comprobante para la cuenta corriente: "Factura A 0001-00001234" (si tiene tipo y número); si no, el texto de siempre.
+const TIPO_COMP_LABEL = { factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M', nota_credito_a: 'Nota de Crédito A', nota_credito_b: 'Nota de Crédito B', nota_credito_c: 'Nota de Crédito C', nota_credito_m: 'Nota de Crédito M', nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M', recibo: 'Recibo', ticket: 'Ticket', otro: 'Comprobante' };
+function nombreComprobante(d) {
+  if (!d || !d.comprobanteNumero) return null;
+  const tipo = TIPO_COMP_LABEL[d.tipoComprobante] || (d.tipoComprobante ? String(d.tipoComprobante).replace(/_/g, ' ') : 'Comprobante');
+  return tipo + ' ' + (d.puntoVenta ? d.puntoVenta + '-' : '') + d.comprobanteNumero;
+}
+
 // Los saldos iniciales cargados de Dux antes de la corrección tenían el signo al revés (Dux: negativo = le debemos). Se invierten una sola vez.
 router.post('/corregir-signo-dux', authAdmin, async (req, res) => {
   try {
@@ -532,24 +540,25 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       for (const c of compras) {
         movimientos.push({
           tipo: /^nota_credito/.test(c.tipoComprobante || '') ? 'credito' : 'debito', monto: c.total, fecha: c.fecha,
-          concepto: /^nota_(credito|debito)/.test(c.tipoComprobante || '') ? `${/^nota_credito/.test(c.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${c.numeroOriginal || ''} (Dux)` : c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`, origen: 'compra',
+          concepto: nombreComprobante(c) || (/^nota_(credito|debito)/.test(c.tipoComprobante || '') ? `${/^nota_credito/.test(c.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${c.numeroOriginal || ''} (Dux)` : c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`), origen: 'compra',
           docId: c._id, docNumero: c.numero, docEstado: c.estado, importado: !!c.importado,
           tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
           items: c.items, observaciones: c.observaciones, moneda: c.moneda,
           totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
         });
       }
+      const nombreCompraPorId = new Map(compras.map(c => [String(c._id), nombreComprobante(c)]).filter(x => x[1]));
       for (const p of pagosCompra) {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
-          concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => '#' + a.compraNumero).join(', ') : ''}`,
+          concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => nombreCompraPorId.get(String(a.compraId)) || '#' + a.compraNumero).join(', ') : ''}`,
           origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado
         });
       }
       for (const g of gastos) {
         movimientos.push({
           tipo: /^nota_credito/.test(g.tipoComprobante || '') ? 'credito' : 'debito', monto: g.total, fecha: g.fecha,
-          concepto: /^nota_(credito|debito)/.test(g.tipoComprobante || '') ? `${/^nota_credito/.test(g.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${g.numeroOriginal || ''} (Dux)` : g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`, origen: 'gasto',
+          concepto: nombreComprobante(g) || (/^nota_(credito|debito)/.test(g.tipoComprobante || '') ? `${/^nota_credito/.test(g.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${g.numeroOriginal || ''} (Dux)` : g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`), origen: 'gasto',
           docId: g._id, docNumero: g.numero, docEstado: g.estado, importado: !!g.importado,
           tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
@@ -558,7 +567,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
         for (const p of (g.pagos || [])) {
           movimientos.push({
             tipo: 'credito', monto: p.monto, fecha: p.fecha,
-            concepto: `Pago — Gasto #${g.numero}`, origen: 'pago_gasto',
+            concepto: `Pago — ${nombreComprobante(g) || 'Gasto #' + g.numero}`, origen: 'pago_gasto',
             docId: g._id, nota: p.nota, tipoValor: p.tipoValor
           });
         }
