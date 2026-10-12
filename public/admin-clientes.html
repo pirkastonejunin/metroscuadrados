@@ -863,13 +863,13 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
     <div class="modal-bg" onclick="if(event.target===this) cerrarModalCobroVentaCC()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModalCobroVentaCC()">✕</span>
-        <h2>Cobrar venta Nº ${String(numero).padStart(5,'0')}</h2>
-        <p class="muted" style="margin-top:0">Saldo pendiente: <strong>${money(saldoPendiente)} ${escapeHtml(moneda)}</strong></p>
+        <h2>${ventaId ? 'Cobrar venta Nº ' + String(numero).padStart(5,'0') : 'Cobrar a cuenta · ' + escapeHtml(numero || '')}</h2>
+        <p class="muted" style="margin-top:0">${ventaId ? 'Saldo pendiente' : 'Saldo de la cuenta corriente'}: <strong>${money(saldoPendiente)} ${escapeHtml(moneda)}</strong>${ventaId ? '' : ' · es un recibo a cuenta: reduce el saldo del cliente sin atarse a una venta puntual.'}</p>
         <input type="hidden" id="cvccVentaId" value="${ventaId}">
         <input type="hidden" id="cvccClienteId" value="${clienteId}">
         <div class="grid2">
           <div><label>Tipo de valor</label><select id="cvccTipoValor" onchange="actualizarTipoValorCobroVentaCC()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
-          <div><label>Monto * (podés poner menos para un cobro parcial)</label><input id="cvccMonto" type="number" min="0.01" step="0.01" value="${saldoPendiente}"></div>
+          <div><label>Monto * (podés poner menos para un cobro parcial)</label><input id="cvccMonto" type="number" min="0.01" step="0.01" value="${saldoPendiente > 0 ? saldoPendiente : ''}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Fecha</label><input id="cvccFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
@@ -895,12 +895,16 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
           <div><label>Código de autorización</label><input id="cvccTarjetaCodigoAutorizacion"></div>
         </div>
         <div class="err" id="cvccErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="confirmarCobroVentaCC()">Registrar cobro</button>
+        <button class="btn" style="margin-top:10px" onclick="confirmarCobroVentaCC()">${ventaId ? 'Registrar cobro' : 'Registrar recibo'}</button>
       </div>
     </div>
   `;
   await cargarCajasYBancosCC();
   actualizarTipoValorCobroVentaCC();
+}
+// Cobro a cuenta (recibo sin venta puntual) sin salir de la cuenta corriente del cliente
+function abrirCobroCuentaCC(clienteId, saldo, nombre){
+  return abrirCobroVentaDesdeCC('', nombre || '', Math.max(0, Number(saldo) || 0), 'ARS', clienteId);
 }
 function cerrarModalCobroVentaCC(){ document.getElementById('modalCobroVentaRoot').innerHTML = ''; }
 async function confirmarCobroVentaCC(){
@@ -943,9 +947,18 @@ async function confirmarCobroVentaCC(){
     }
   }
   try{
-    const r = await fetch('/api/ventas/' + ventaId + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    if (!ventaId) body.clienteId = clienteId;
+    const r = await fetch(ventaId ? '/api/ventas/' + ventaId + '/pagos' : '/api/tesoreria/cobros-cuenta-cliente', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al registrar el cobro');
+    if (!ventaId && data.reciboTipo && data.reciboId) {
+      const url = '/api/tesoreria/recibo-cuenta/' + data.reciboTipo + '/' + data.reciboId;
+      document.getElementById('modalCobroVentaRoot').innerHTML = `<div class="modal-bg"><div class="modal"><span class="close-x" onclick="cerrarModalCobroVentaCC()">✕</span><h2>Recibo registrado</h2>
+        <p class="ok-msg">El cobro de ${money(body.monto)} quedó registrado y el saldo del cliente se actualizó.</p>
+        <button class="btn" onclick="imprimirDocumento('${url}')">Imprimir recibo</button> <button class="btn secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button> <button class="btn secondary" onclick="cerrarModalCobroVentaCC()">Cerrar</button></div></div>`;
+      await cargarCuentaCorrienteTab(clienteId);
+      return;
+    }
     cerrarModalCobroVentaCC();
     await cargarCuentaCorrienteTab(clienteId);
   }catch(e){ errEl.textContent = e.message; }
@@ -1076,7 +1089,7 @@ function telefonoWhatsApp(c){
 function accionCC(que){
   const m = document.getElementById('ccAccionesMenu'); if (m) m.classList.add('hidden');
   const c = window._ccCtx; if (!c) return;
-  if (que === 'cobrar') { location.href = '/admin-cobranza.html?cliente=' + encodeURIComponent(c.id); return; }
+  if (que === 'cobrar') { abrirCobroCuentaCC(c.id, c.saldo, [c.cliente.apellidoRazonSocial, c.cliente.nombre].filter(Boolean).join(', ')); return; }
   if (que === 'vender') { location.href = '/admin-ventas.html?vender=' + encodeURIComponent(c.id); return; }
   if (que === 'whatsapp') {
     const tel = telefonoWhatsApp(c.cliente);
