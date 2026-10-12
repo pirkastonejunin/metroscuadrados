@@ -1029,11 +1029,40 @@ async function abrirUnificar(){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Unificar clientes duplicados</h2>
         <p class="muted">Clientes de cualquier sucursal que parecen ser la misma persona (mismo CUIT o mismo nombre). Elegí cuál se conserva (la ficha que queda) y tildá los duplicados que se juntan con ella: sus ventas, cobros, presupuestos, obras y saldo pasan al cliente que se conserva, y los duplicados quedan inactivos. Si el duplicado era de otra sucursal, el cliente queda compartido: una sola ficha y un solo saldo, visible en ambas sucursales. Revisá bien los que tienen el mismo nombre pero CUIT distinto: pueden ser personas diferentes.</p>
+        <div style="margin:6px 0"><input type="text" id="unifQ" placeholder="Buscar un cliente por nombre o CUIT (ej: gercafe)…" style="width:60%" onkeydown="if(event.key==='Enter') buscarUnificar()"> <button class="btn secondary" onclick="buscarUnificar()">Buscar</button></div>
+        <div id="unifBusca"></div>
         <div class="err" id="unifErr"></div>
         <div id="unifLista"><p class="muted">Buscando duplicados…</p></div>
       </div>
     </div>`;
   await cargarUnificar();
+}
+function unifGrupoHtml(g, gi){ return `
+      <div id="unifG${gi}" style="border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin:8px 0;${g.riesgo ? 'border-color:#d9a400;background:rgba(217,164,0,.08)' : ''}">
+        <div class="muted" style="margin-bottom:4px"><b>${escapeHtml(g.motivo)}</b></div>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <tr class="muted"><td>Conservar</td><td>Juntar</td><td>Cliente</td><td>Sucursal</td><td>CUIT</td><td>Domicilio</td><td>Teléfono</td><td style="text-align:right">Ventas</td><td style="text-align:right">Saldo</td></tr>
+          ${g.miembros.map((m, mi) => `<tr>
+            <td><input type="radio" name="unifK${gi}" value="${m._id}" ${mi === 0 ? 'checked' : ''} onchange="unifMarcar(${gi})"></td>
+            <td><input type="checkbox" class="unifC${gi}" value="${m._id}" ${mi === 0 ? 'disabled' : (gi >= 100000 ? '' : 'checked')}></td>
+            <td>${escapeHtml(m.nombre)}</td><td>${escapeHtml(m.sucursal)}</td><td>${escapeHtml(m.cuit)}</td><td>${escapeHtml(m.domicilio)}</td><td>${escapeHtml(m.telefono)}</td>
+            <td style="text-align:right">${m.ventas}</td><td style="text-align:right">${m.saldo ? m.saldo.toLocaleString('es-AR') : ''}</td></tr>`).join('')}
+        </table>
+        <button class="btn" style="margin-top:6px" onclick="unificarGrupo(${gi})">Unificar este grupo</button>
+        <span class="muted" id="unifR${gi}"></span>
+      </div>`; }
+let unifManual = 0;
+async function buscarUnificar(){
+  const q = document.getElementById('unifQ').value.trim(), out = document.getElementById('unifBusca'), errEl = document.getElementById('unifErr'); errEl.textContent = '';
+  if (q.length < 2){ out.innerHTML = ''; return; }
+  out.innerHTML = '<p class="muted">Buscando…</p>';
+  try{
+    const r = await fetch('/api/unificar-clientes/buscar?q=' + encodeURIComponent(q), {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    if (d.miembros.length < 2){ out.innerHTML = '<p class="muted">' + (d.miembros.length ? 'Solo hay un cliente con ese nombre.' : 'No se encontró ningún cliente.') + '</p>'; return; }
+    const gi = 100000 + (++unifManual);
+    out.innerHTML = '<p class="muted">Resultados de la búsqueda (hasta 60). Tildá los que son el mismo cliente y elegí cuál se conserva:</p>' + unifGrupoHtml({motivo: 'Búsqueda manual', riesgo: false, miembros: d.miembros}, gi);
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
 }
 async function cargarUnificar(){
   const out = document.getElementById('unifLista'), errEl = document.getElementById('unifErr'); if (!out) return;
@@ -1044,20 +1073,7 @@ async function cargarUnificar(){
     if (!d.grupos.length){ out.innerHTML = '<p class="ok-msg">No se encontraron clientes duplicados.</p>'; return; }
     out.innerHTML = `<p><b>${d.total}</b> grupo(s) de posibles duplicados${d.total > d.grupos.length ? ' (se muestran los primeros ' + d.grupos.length + ')' : ''}.
       <button class="btn unifTodosBtn" style="margin-left:8px" onclick="unificarTodos(true)">Unificar TODO junto (${d.total} grupos)</button>
-      ${d.sinRiesgo && d.sinRiesgo < d.total ? `<button class="btn secondary unifTodosBtn" style="margin-left:8px" onclick="unificarTodos(false)">Solo los ${d.sinRiesgo} sin riesgo</button>` : ''}</p><p class="muted" id="unifProg"></p>` + d.grupos.map((g, gi) => `
-      <div id="unifG${gi}" style="border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin:8px 0;${g.riesgo ? 'border-color:#d9a400;background:rgba(217,164,0,.08)' : ''}">
-        <div class="muted" style="margin-bottom:4px"><b>${escapeHtml(g.motivo)}</b></div>
-        <table style="width:100%;font-size:13px;border-collapse:collapse">
-          <tr class="muted"><td>Conservar</td><td>Juntar</td><td>Cliente</td><td>Sucursal</td><td>CUIT</td><td>Domicilio</td><td>Teléfono</td><td style="text-align:right">Ventas</td><td style="text-align:right">Saldo</td></tr>
-          ${g.miembros.map((m, mi) => `<tr>
-            <td><input type="radio" name="unifK${gi}" value="${m._id}" ${mi === 0 ? 'checked' : ''} onchange="unifMarcar(${gi})"></td>
-            <td><input type="checkbox" class="unifC${gi}" value="${m._id}" ${mi === 0 ? 'disabled' : 'checked'}></td>
-            <td>${escapeHtml(m.nombre)}</td><td>${escapeHtml(m.sucursal)}</td><td>${escapeHtml(m.cuit)}</td><td>${escapeHtml(m.domicilio)}</td><td>${escapeHtml(m.telefono)}</td>
-            <td style="text-align:right">${m.ventas}</td><td style="text-align:right">${m.saldo ? m.saldo.toLocaleString('es-AR') : ''}</td></tr>`).join('')}
-        </table>
-        <button class="btn" style="margin-top:6px" onclick="unificarGrupo(${gi})">Unificar este grupo</button>
-        <span class="muted" id="unifR${gi}"></span>
-      </div>`).join('');
+      ${d.sinRiesgo && d.sinRiesgo < d.total ? `<button class="btn secondary unifTodosBtn" style="margin-left:8px" onclick="unificarTodos(false)">Solo los ${d.sinRiesgo} sin riesgo</button>` : ''}</p><p class="muted" id="unifProg"></p>` + d.grupos.map((g, gi) => unifGrupoHtml(g, gi)).join('');
   }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
 }
 async function unificarTodos(incluirDudosos){
@@ -1077,7 +1093,7 @@ async function unificarTodos(incluirDudosos){
 }
 function unifMarcar(gi){
   const k = document.querySelector('input[name="unifK' + gi + '"]:checked').value;
-  document.querySelectorAll('.unifC' + gi).forEach(c => { if (c.value === k){ c.checked = false; c.disabled = true; } else if (c.disabled){ c.disabled = false; c.checked = true; } });
+  document.querySelectorAll('.unifC' + gi).forEach(c => { if (c.value === k){ c.checked = false; c.disabled = true; } else if (c.disabled){ c.disabled = false; c.checked = gi < 100000; } });
 }
 async function unificarGrupo(gi){
   const k = document.querySelector('input[name="unifK' + gi + '"]:checked').value;

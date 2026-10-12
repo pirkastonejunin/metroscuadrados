@@ -32,6 +32,11 @@ function claves(nombre) {
   const n = norm(nombre); if (!n) return [];
   const c = new Set([n.replace(/,/g, '').replace(/\s+/g, ' ').trim()]);
   if (n.includes(',')) { const [ap, ...r] = n.split(','); c.add((r.join(' ') + ' ' + ap).replace(/\s+/g, ' ').trim()); }
+  // Variantes de razón social: sin puntos ni signos, sin "S.A./SRL/SAS...", y sin importar el orden de las palabras
+  const SUF = new Set(['sa', 'srl', 'sas', 'sh', 'sca', 'scs', 'ltda', 'sacif', 'saic', 'sacyf', 'cia', 'y', 'e', 'de', 'la', 'el', 'los', 'las', 'del']);
+  const limp = n.replace(/\.\s*/g, '').replace(/[,;:&'"()\-\/]/g, ' ').replace(/\s+/g, ' ').trim();
+  const toks = limp.split(' ').filter(t => t && !SUF.has(t));
+  if (toks.join('').length >= 4) { c.add(toks.join(' ')); c.add('ord ' + [...toks].sort().join(' ')); }
   return [...c];
 }
 async function orgsAccesibles(db, req) {
@@ -82,6 +87,28 @@ router.get('/grupos', auth, async (req, res) => {
     const out = await conReintento(async () => {
       const db = await getDb(); const lista = await calcularGrupos(db, await orgsAccesibles(db, req));
       return { total: lista.length, sinRiesgo: lista.filter(g => !g.riesgo).length, grupos: lista.slice(0, 500) };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Búsqueda manual por nombre / CUIT para juntar clientes que el sistema no detecta como iguales
+router.get('/buscar', auth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim(); if (q.length < 2) throw err(400, 'Escribí al menos 2 letras.');
+    const out = await conReintento(async () => {
+      const db = await getDb(); const orgs = await orgsAccesibles(db, req); const nombreOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
+      const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '.*'), 'i');
+      const cl = await db.collection('clientes').find({ orgId: { $in: orgs.map(o => o._id) }, activo: { $ne: false }, $or: [{ apellidoRazonSocial: re }, { nombre: re }, { nombreFantasia: re }, { cuit: re }] }).limit(60).toArray();
+      const ids = cl.map(c => c._id);
+      const [ventas, saldos] = ids.length ? await Promise.all([
+        db.collection('ventas').aggregate([{ $match: { clienteId: { $in: ids } } }, { $group: { _id: '$clienteId', n: { $sum: 1 } } }]).toArray(),
+        db.collection('cuenta_corriente_saldos').find({ clienteId: { $in: ids } }).toArray()]) : [[], []];
+      const nv = new Map(ventas.map(v => [String(v._id), v.n])), sd = new Map(saldos.map(x => [String(x.clienteId), x.saldo]));
+      const miembros = cl.map(c => ({ _id: String(c._id), nombre: nombreCompleto(c), cuit: c.cuit || '', domicilio: [c.domicilio, c.localidad].filter(Boolean).join(', '), telefono: c.telefono || c.celular || '',
+        sucursal: nombreOrg.get(String(c.orgId)) || '', orgId: String(c.orgId), ventas: nv.get(String(c._id)) || 0, saldo: round2(sd.get(String(c._id)) || 0) }))
+        .sort((a, b) => b.ventas - a.ventas);
+      return { miembros };
     });
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
