@@ -698,6 +698,12 @@ router.get('/saldos-proveedores', authAdmin, async (req, res) => {
         { $match: Object.assign({ importado: true, montoSinAplicar: { $gt: 0 } }, fo) },
         { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, aCuenta: { $sum: '$montoSinAplicar' } } }
       ]).toArray();
+      // Ajustes manuales de saldo: el neto por proveedor suma a lo que debemos (si es +) o cuenta como pago a cuenta (si es −).
+      const ajustes = await db.collection('proveedores_ajustes').aggregate([
+        { $match: fo },
+        { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, neto: { $sum: { $cond: [{ $eq: ['$tipo', 'debito'] }, '$monto', { $multiply: ['$monto', -1] }] } } } }
+      ]).toArray();
+      ajustes.forEach(a => { if (a.neto > 0) lista.push({ _id: a._id, proveedorNombre: a.proveedorNombre, saldoPendiente: a.neto, cantidadCompras: 0 }); else if (a.neto < 0) aCuenta.push({ _id: a._id, proveedorNombre: a.proveedorNombre, aCuenta: -a.neto }); });
       return { lista, aCuenta };
     });
     const mapa = new Map();
@@ -708,7 +714,7 @@ router.get('/saldos-proveedores', authAdmin, async (req, res) => {
     });
     aCuenta.forEach(a => {
       const k = String(a._id);
-      if (mapa.has(k)) mapa.get(k).aCuenta = a.aCuenta;
+      if (mapa.has(k)) mapa.get(k).aCuenta = (mapa.get(k).aCuenta || 0) + a.aCuenta;
       else mapa.set(k, { proveedorId: a._id, proveedorNombre: a.proveedorNombre, saldoPendiente: 0, cantidadCompras: 0, aCuenta: a.aCuenta });
     });
     const r2 = (n) => Math.round(n * 100) / 100;

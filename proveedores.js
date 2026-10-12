@@ -339,6 +339,48 @@ router.delete('/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Ajuste manual de saldo del proveedor: un movimiento propio (colección proveedores_ajustes) que suma (débito: le debemos más) o resta
+// (crédito: le debemos menos) a su cuenta corriente, con motivo y sucursal. Se puede quitar si se cargó por error.
+router.post('/:id/ajuste-saldo', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const tipo = b.tipo === 'credito' ? 'credito' : (b.tipo === 'debito' ? 'debito' : '');
+    if (!tipo) throw err(400, 'Elegí si el ajuste aumenta o disminuye lo que le debemos.');
+    const monto = Math.round(Number(b.monto) * 100) / 100;
+    if (!(monto > 0)) throw err(400, 'El monto del ajuste tiene que ser mayor a 0.');
+    const motivo = normalizarTexto(b.motivo);
+    if (!motivo) throw err(400, 'Escribí el motivo del ajuste.');
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás para registrar el ajuste.');
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(b.fecha || '')) ? new Date(b.fecha + 'T12:00:00-03:00') : new Date();
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!prov) throw err(404, 'Proveedor no encontrado');
+      const doc = { proveedorId: id, proveedorNombre: prov.razonSocial || prov.nombreFantasia || '', orgId: req.orgId, tipo, monto, fecha, motivo,
+        usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date() };
+      const r = await db.collection('proveedores_ajustes').insertOne(doc);
+      return Object.assign({ _id: r.insertedId }, doc);
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/:id/ajuste-saldo/:ajusteId', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id), aid = toObjectId(req.params.ajusteId);
+    if (!id || !aid) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const prov = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!prov) throw err(404, 'Proveedor no encontrado');
+      const r = await db.collection('proveedores_ajustes').deleteOne({ _id: aid, proveedorId: id });
+      if (!r.deletedCount) throw err(404, 'Ajuste no encontrado');
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // -----------------------------------------------------------------------
 // Cuenta corriente del proveedor (4/10/2026, pedido de Mato: "cuando
 // entramos en proveedores en al lado de los datos debemos crear una
@@ -379,11 +421,12 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
         const oid = (cmp && cmp.orgId) || proveedor.orgId;
         if (oid) await db.collection('compras_pagos').updateOne({ _id: hp._id }, { $set: { orgId: oid } });
       }
-      const [compras, gastos, pagosCompra, saldosIni] = await Promise.all([
+      const [compras, gastos, pagosCompra, saldosIni, ajustes] = await Promise.all([
         db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
         db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
         db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, fOrg)).toArray(),
-        db.collection('proveedores_saldos_iniciales').find({ proveedorId: id }).toArray()
+        db.collection('proveedores_saldos_iniciales').find({ proveedorId: id }).toArray(),
+        db.collection('proveedores_ajustes').find(Object.assign({ proveedorId: id }, fOrg)).toArray()
       ]);
 
       const movimientos = [];
@@ -392,6 +435,9 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       for (const si of saldosIni) {
         if (!si.monto) continue;
         movimientos.push({ tipo: si.monto > 0 ? 'debito' : 'credito', monto: Math.abs(si.monto), fecha: si.fecha, concepto: 'Saldo inicial Dux', origen: 'saldo_inicial_dux', docId: si._id, moneda: 'ARS' });
+      }
+      for (const a of ajustes) {
+        movimientos.push({ tipo: a.tipo, monto: a.monto, fecha: a.fecha, concepto: 'Ajuste de saldo — ' + a.motivo, origen: 'ajuste', docId: a._id, nota: a.usuarioNombre ? 'Cargó ' + a.usuarioNombre : '', moneda: 'ARS' });
       }
       for (const c of compras) {
         movimientos.push({

@@ -172,7 +172,7 @@ const TIPO_COMPROBANTE_LABEL = {
   nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M',
   recibo: 'Recibo', ticket: 'Ticket', otro: 'Otro (no fiscal)'
 };
-const ORIGEN_CC_PROVEEDOR_LABEL = { compra: 'Compra', pago_compra: 'Pago (compra)', gasto: 'Gasto', pago_gasto: 'Pago (gasto)', saldo_inicial_dux: 'Saldo inicial Dux' };
+const ORIGEN_CC_PROVEEDOR_LABEL = { compra: 'Compra', pago_compra: 'Pago (compra)', gasto: 'Gasto', pago_gasto: 'Pago (gasto)', saldo_inicial_dux: 'Saldo inicial Dux', ajuste: 'Ajuste de saldo' };
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -698,6 +698,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('pagar')">💰 Registrar pago</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('compra')">🧾 Nueva compra</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('orden')">📋 Nueva orden de compra</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('ajuste')">⚖ Ajustar saldo</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('imprimir')">🖨 Ver / imprimir resumen</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('whatsapp')">💬 Enviar resumen por WhatsApp</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('mail')">✉ Enviar resumen por mail</a>
@@ -721,7 +722,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
               <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
-              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : ''}</td>
+              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : (m.origen === 'ajuste' ? `<button class="btn small secondary" title="Quitar este ajuste" onclick="quitarAjusteSaldoProveedor('${m.docId}')">Quitar</button>` : '')}</td>
             </tr>
           `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
@@ -761,6 +762,7 @@ function accionCCProv(que){
   const c = window._ccProvCtx; if (!c) return;
   if (que === 'pagar') { irARegistrarPagoProveedor(c.id); return; }
   if (que === 'compra') { location.href = 'admin-compras.html?nuevaCompra=' + encodeURIComponent(c.id); return; }
+  if (que === 'ajuste') { abrirAjusteSaldoProveedor(); return; }
   if (que === 'orden') { location.href = 'admin-compras.html?nuevaOrden=' + encodeURIComponent(c.id); return; }
   if (que === 'whatsapp') {
     const tel = telefonoWhatsAppProv(c.proveedor);
@@ -790,6 +792,70 @@ function accionCCProv(que){
     <table><thead><tr><th>Fecha</th><th>Concepto</th><th style="text-align:right">Débito</th><th style="text-align:right">Crédito</th><th style="text-align:right">Saldo</th></tr></thead><tbody>${tr}</tbody></table>
     <p><button onclick="window.print()">Imprimir</button></p>`);
   w.document.close();
+}
+
+
+// ---- Ajuste manual de saldo del proveedor ----
+let ORGS_PROV = [];
+async function abrirAjusteSaldoProveedor(){
+  const c = window._ccProvCtx; if (!c) return;
+  try { const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) ORGS_PROV = (await r.json()).organizaciones || []; } catch (e) {}
+  const idsOrg = ORGS_PROV.map(o => String(o._id));
+  const op = localStorage.getItem('obras_org_operar');
+  const defOrg = (ORG && ORG !== 'todas' && idsOrg.includes(ORG)) ? ORG : (op && idsOrg.includes(op) ? op : (idsOrg[0] || ''));
+  const nombre = nombreProvCC(c);
+  document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
+    <div class="modal-bg" id="ajBg" onclick="if(event.target===this) cerrarAjusteSaldoProveedor()" style="z-index:950">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarAjusteSaldoProveedor()">✕</span>
+        <h2>Ajustar saldo — ${escapeHtml(nombre)}</h2>
+        <p class="muted" style="margin-top:-6px">Saldo actual: <strong>${money(c.saldo)}</strong> ${c.saldo > 0.005 ? '(le debemos)' : (c.saldo < -0.005 ? '(a favor nuestro)' : '')}. Poné el saldo que tiene que quedar y el sistema calcula la diferencia.</p>
+        <div class="row">
+          <div style="flex:1;min-width:180px"><label>Saldo que tiene que quedar *</label><input id="ajNuevo" type="number" step="0.01" value="${c.saldo}" oninput="calcularAjusteSaldoProveedor()"></div>
+          <div style="flex:1;min-width:150px"><label>Fecha</label><input id="ajFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        </div>
+        <div id="ajDif" class="muted" style="margin:8px 0"></div>
+        ${ORGS_PROV.length > 1 ? `<div><label>Sucursal a la que corresponde *</label><select id="ajOrg">${ORGS_PROV.map(o => `<option value="${o._id}" ${String(o._id) === defOrg ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></div>` : ''}
+        <div style="margin-top:10px"><label>Motivo *</label><input id="ajMotivo" placeholder="Ej: diferencia de cambio, error de carga, acuerdo con el proveedor"></div>
+        <div class="err" id="ajErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="guardarAjusteSaldoProveedor()">Guardar ajuste</button>
+      </div>
+    </div>`);
+  calcularAjusteSaldoProveedor();
+}
+function cerrarAjusteSaldoProveedor(){ const e = document.getElementById('ajBg'); if (e) e.remove(); }
+function calcularAjusteSaldoProveedor(){
+  const c = window._ccProvCtx; if (!c) return;
+  const nuevo = Number(document.getElementById('ajNuevo').value);
+  const dif = Math.round((nuevo - c.saldo) * 100) / 100;
+  document.getElementById('ajDif').innerHTML = Math.abs(dif) < 0.005 ? 'No hay diferencia: el saldo ya es ese.'
+    : (dif > 0 ? `Se suman <strong>${money(dif)}</strong> a lo que le debemos (ajuste de débito).` : `Se restan <strong>${money(-dif)}</strong> de lo que le debemos (ajuste de crédito).`);
+}
+async function guardarAjusteSaldoProveedor(){
+  const c = window._ccProvCtx; if (!c) return;
+  const err = document.getElementById('ajErr'); err.textContent = '';
+  const nuevo = Number(document.getElementById('ajNuevo').value);
+  const dif = Math.round((nuevo - c.saldo) * 100) / 100;
+  const motivo = document.getElementById('ajMotivo').value.trim();
+  if (!isFinite(nuevo)) { err.textContent = 'Poné el saldo que tiene que quedar.'; return; }
+  if (Math.abs(dif) < 0.005) { err.textContent = 'No hay diferencia con el saldo actual.'; return; }
+  if (!motivo) { err.textContent = 'Escribí el motivo del ajuste.'; return; }
+  const h = headersAuthJson(); const so = document.getElementById('ajOrg'); if (so && so.value) h['x-org-id'] = so.value;
+  try {
+    const r = await fetch(BASE + '/' + c.id + '/ajuste-saldo', {method: 'POST', headers: h, body: JSON.stringify({ tipo: dif > 0 ? 'debito' : 'credito', monto: Math.abs(dif), fecha: document.getElementById('ajFecha').value, motivo })});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cerrarAjusteSaldoProveedor();
+    cargarCuentaCorrienteProveedorTab(c.id);
+  } catch (e) { err.textContent = e.message; }
+}
+async function quitarAjusteSaldoProveedor(ajusteId){
+  const c = window._ccProvCtx; if (!c) return;
+  if (!confirm('¿Quitar este ajuste de saldo? La cuenta corriente vuelve al saldo anterior.')) return;
+  try {
+    const r = await fetch(BASE + '/' + c.id + '/ajuste-saldo/' + ajusteId, {method: 'DELETE', headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cargarCuentaCorrienteProveedorTab(c.id);
+  } catch (e) { alert(e.message); }
 }
 
 // Detalle de un comprobante (compra o gasto) referenciado desde la
