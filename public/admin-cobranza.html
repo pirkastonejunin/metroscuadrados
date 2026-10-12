@@ -281,7 +281,12 @@ async function iniciarApp(){
   cargarListaCobranzas();
   { const pre = new URLSearchParams(location.search).get('cliente'); // enlace desde la cuenta corriente del cliente
     if (pre) { history.replaceState(null, '', location.pathname); const cl = clientesCache.find(x => String(x._id) === pre);
-      document.getElementById('cbCliente').value = pre; document.getElementById('cbBuscar').value = cl ? textoClienteCB(cl) : ''; mostrarClienteSeleccionadoCB(pre); } }
+      document.getElementById('cbCliente').value = pre; document.getElementById('cbBuscar').value = cl ? textoClienteCB(cl) : '';
+      toggleNuevaCobranza(true); // abre el recibo con el cliente cargado y, si debe, el monto sugerido = su saldo
+      mostrarClienteSeleccionadoCB(pre);
+      fetch('/api/clientes/' + encodeURIComponent(pre) + '/cuenta-corriente?limite=1', {headers: headersAuth()}).then(r => r.ok ? r.json() : null).then(d => {
+        if (d && d.saldo > 0.005 && !document.getElementById('cbMonto').value) { document.getElementById('cbMonto').value = Math.round(d.saldo * 100) / 100; document.getElementById('cbMonto').select(); }
+      }).catch(() => {}); } }
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
 }
