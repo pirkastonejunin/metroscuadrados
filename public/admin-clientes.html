@@ -131,9 +131,9 @@
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
-          <button class="btn secondary" onclick="abrirUnificar()" title="Buscar clientes duplicados y unificarlos">Unificar duplicados</button>
-          <button class="btn secondary" onclick="abrirFichasCliDux()" title="Ficha de clientes de Dux (Listado de Clientes)">Fichas Dux</button>
-          <button class="btn secondary" onclick="abrirSaldosDux()" title="Saldos de cuenta corriente de Dux (Consulta de Clientes con Saldo)">Saldos Dux</button>
+          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirUnificar()" title="Buscar clientes duplicados y unificarlos">Unificar duplicados</button>
+          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirFichasCliDux()" title="Ficha de clientes de Dux (Listado de Clientes)">Fichas Dux</button>
+          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirSaldosDux()" title="Saldos de cuenta corriente de Dux (Consulta de Clientes con Saldo)">Saldos Dux</button>
           <button class="btn" onclick="abrirNuevoCliente()">+ Nuevo cliente</button>
         </div>
       </div>

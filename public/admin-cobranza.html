@@ -125,7 +125,7 @@
           <div style="min-width:140px"><label>Desde</label><input id="lcDesde" type="date" onchange="cargarListaCobranzas()"></div>
           <div style="min-width:140px"><label>Hasta</label><input id="lcHasta" type="date" onchange="cargarListaCobranzas()"></div>
         </div>
-        <div style="display:flex;gap:8px"><button class="btn secondary" onclick="abrirImportarCobrosDux()" title="Importar el historial de cobranzas de Dux (Consulta de Cobros)">Importar de Dux</button>
+        <div style="display:flex;gap:8px"><button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirImportarCobrosDux()" title="Importar el historial de cobranzas de Dux (Consulta de Cobros)">Importar de Dux</button>
         <button class="btn" onclick="toggleNuevaCobranza(true)">+ Nueva cobranza</button></div>
       </div>
     </div>

@@ -154,8 +154,8 @@
         </div>
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'gastos.xlsx')">Exportar</button>
-          <button class="btn secondary" onclick="abrirImportarDux()">Importar de Dux</button>
-          <button class="btn secondary" onclick="abrirImportarNotasDux()" title="Notas de crédito y débito de gastos">Notas Dux</button>
+          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirImportarDux()">Importar de Dux</button>
+          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirImportarNotasDux()" title="Notas de crédito y débito de gastos">Notas Dux</button>
             <button class="btn" onclick="abrirNuevoGasto()">+ Nuevo gasto</button>
         </div>
       </div>
