@@ -212,16 +212,45 @@ router.get('/proveedores', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-router.get('/conceptos', authAdmin, async (req, res) => {
-  try {
+// Los conceptos de gasto son un único catálogo para todas las sucursales: se guarda una copia por organización (los gastos la referencian
+// por id y se validan por org), pero siempre se mantienen iguales: alta, baja, renombre y reactivación se aplican a todas juntas, y
+// al listar se completa lo que falte en alguna sucursal. En la vista "todas" se muestra cada concepto una sola vez.
+const claveConcepto = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+async function idsOrganizaciones(db, req) {
+  const ids = (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id);
+  if (req.orgId && !ids.some(x => String(x) === String(req.orgId))) ids.push(req.orgId);
+  return ids;
+}
+async function sincronizarConceptos(db, req) {
+  const col = db.collection('gastos_conceptos');
+  const [docs, orgs] = await Promise.all([col.find({}).toArray(), idsOrganizaciones(db, req)]);
+  const porClave = new Map();
+  for (const d of docs) { const k = claveConcepto(d.nombre); if (!k) continue; if (!porClave.has(k)) porClave.set(k, []); porClave.get(k).push(d); }
+  const nuevos = [], ahora = new Date();
+  for (const [, grupo] of porClave) {
+    const tiene = new Set(grupo.map(d => String(d.orgId)));
+    const activo = grupo.some(d => d.activo !== false);
+    // si alguna copia está activa y otra inactiva, queda todo activo; las faltantes se crean con el estado del grupo
+    const desactivadas = grupo.filter(d => d.activo === false && activo);
+    if (desactivadas.length) await col.updateMany({ _id: { $in: desactivadas.map(d => d._id) } }, { $set: { activo: true, updatedAt: ahora } });
+    for (const o of orgs) if (!tiene.has(String(o))) nuevos.push({ nombre: grupo[0].nombre, activo, orgId: o, createdAt: ahora, updatedAt: ahora });
+  }
+  if (nuevos.length) await col.insertMany(nuevos, { ordered: false });
+}
+async function listarConceptos(req) {
+  return conReintento(async () => {
+    const db = await getDb();
+    await sincronizarConceptos(db, req);
     const match = Object.assign({}, filtroOrg(req));
     if (!req.query.incluirInactivos) match.activo = { $ne: false };
-    const lista = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
-    });
-    res.json(lista);
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+    const lista = await db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
+    if (req.orgId) return lista;
+    const vistos = new Set();
+    return lista.filter(d => { const k = claveConcepto(d.nombre); if (vistos.has(k)) return false; vistos.add(k); return true; });
+  });
+}
+router.get('/conceptos', authAdmin, async (req, res) => {
+  try { res.json(await listarConceptos(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 // Alta de concepto — se expone también bajo /config/conceptos (mismo
@@ -231,21 +260,17 @@ router.get('/conceptos', authAdmin, async (req, res) => {
 async function crearConceptoInterno(db, req, nombreRaw) {
   const nombre = normalizarTexto(nombreRaw);
   if (!nombre) throw err(400, 'Falta el nombre del concepto');
-  const existente = await db.collection('gastos_conceptos').findOne(Object.assign({
-    nombre: { $regex: `^${nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' }
-  }, filtroOrg(req)));
-  if (existente) {
-    if (existente.activo === false) {
-      await db.collection('gastos_conceptos').updateOne({ _id: existente._id }, { $set: { activo: true, updatedAt: new Date() } });
-      return Object.assign({}, existente, { activo: true });
-    }
-    return existente;
-  }
+  const col = db.collection('gastos_conceptos');
+  const regex = { $regex: `^${nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' };
   const ahora = new Date();
-  const doc = { nombre, activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora };
-  const r = await db.collection('gastos_conceptos').insertOne(doc);
-  doc._id = r.insertedId;
-  return doc;
+  await col.updateMany({ nombre: regex, activo: false }, { $set: { activo: true, updatedAt: ahora } });
+  const orgs = await idsOrganizaciones(db, req);
+  const existentes = await col.find({ nombre: regex }).toArray();
+  const tiene = new Set(existentes.map(d => String(d.orgId)));
+  const nuevos = orgs.filter(o => !tiene.has(String(o))).map(o => ({ nombre, activo: true, orgId: o, createdAt: ahora, updatedAt: ahora }));
+  if (nuevos.length) await col.insertMany(nuevos, { ordered: false });
+  const propio = await col.findOne(Object.assign({ nombre: regex }, filtroOrg(req)));
+  return propio;
 }
 
 router.post('/conceptos', authAdmin, async (req, res) => {
@@ -259,15 +284,7 @@ router.post('/conceptos', authAdmin, async (req, res) => {
 });
 
 router.get('/config/conceptos', authAdmin, async (req, res) => {
-  try {
-    const match = Object.assign({}, filtroOrg(req));
-    if (!req.query.incluirInactivos) match.activo = { $ne: false };
-    const lista = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
-    });
-    res.json(lista);
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  try { res.json(await listarConceptos(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 router.post('/config/conceptos', authAdmin, async (req, res) => {
@@ -279,6 +296,12 @@ router.post('/config/conceptos', authAdmin, async (req, res) => {
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+
+// Copias del mismo concepto en todas las sucursales (por nombre).
+async function copiasDelConcepto(db, actual) {
+  const k = claveConcepto(actual.nombre);
+  return (await db.collection('gastos_conceptos').find({}).project({ nombre: 1 }).toArray()).filter(d => claveConcepto(d.nombre) === k).map(d => d._id);
+}
 
 router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
   try {
@@ -297,7 +320,8 @@ router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
       const db = await getDb();
       const actual = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Concepto no encontrado');
-      await db.collection('gastos_conceptos').updateOne({ _id: id }, { $set: set });
+      const copias = await copiasDelConcepto(db, actual);
+      await db.collection('gastos_conceptos').updateMany({ _id: { $in: copias.concat([id]) } }, { $set: set });
       // Si se renombró, el nombre guardado en los gastos ya cargados NO
       // se actualiza en cascada a propósito (igual que Compras no
       // actualiza nombres de producto en ítems ya facturados — es una
@@ -310,18 +334,17 @@ router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
 
 // Baja de concepto — SIEMPRE soft-delete (activo:false), nunca se borra
 // de verdad, así no se pierde el dato en los gastos que ya lo tengan
-// cargado (mismo criterio que Rubros en productos.js).
+// cargado (mismo criterio que Rubros en productos.js). Se da de baja en todas las sucursales.
 router.delete('/config/conceptos/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     await conReintento(async () => {
       const db = await getDb();
-      const r = await db.collection('gastos_conceptos').updateOne(
-        Object.assign({ _id: id }, filtroOrg(req)),
-        { $set: { activo: false, updatedAt: new Date() } }
-      );
-      if (!r.matchedCount) throw err(404, 'Concepto no encontrado');
+      const actual = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!actual) throw err(404, 'Concepto no encontrado');
+      const copias = await copiasDelConcepto(db, actual);
+      await db.collection('gastos_conceptos').updateMany({ _id: { $in: copias.concat([id]) } }, { $set: { activo: false, updatedAt: new Date() } });
     });
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
