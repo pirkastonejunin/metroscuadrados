@@ -119,7 +119,7 @@ function normalizarTexto(v) { return (v === undefined || v === null) ? '' : Stri
 const TIPOS_RECEPCION_VALIDOS = ['inmediata', 'pendiente'];
 const ESTADOS_VALIDOS = ['pendiente', 'recibida', 'anulada'];
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
-const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
+const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cheque_tercero', 'cuenta', 'tarjeta'];
 
 // Comprobante fiscal (4/10/2026, pedido de Mato: "hay que agregar
 // comprobantes con numeracion y fiscal o no para luego poder sacar
@@ -659,6 +659,15 @@ router.get('/pagos', authAdmin, async (req, res) => {
       return db.collection('compras_pagos').find(match).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray();
     });
     res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Cheques de terceros en cartera (para pagarle a un proveedor endosándolos) de esta sucursal.
+router.get('/cheques-tercero', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('cheques')
+      .find(Object.assign({ tipo: 'tercero', estado: 'en_cartera' }, filtroOrg(req))).sort({ fechaVencimiento: 1 }).limit(500).toArray());
+    res.json(lista.map(c => ({ _id: c._id, numero: c.numero, banco: c.banco, librador: c.librador, clienteNombre: c.clienteNombre, monto: c.monto, moneda: c.moneda || 'ARS', fechaVencimiento: c.fechaVencimiento })));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -1338,13 +1347,21 @@ function normalizarDatosPago(body, fecha) {
   // de Mato: efectivo SOLO puede salir de una caja; cuenta
   // (transferencia) y tarjeta solo pueden salir de un banco.
   let cuentaTipo = null, cuentaId = null;
-  if (tipoValor !== 'cheque') {
+  if (tipoValor !== 'cheque' && tipoValor !== 'cheque_tercero') {
     cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
     if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
     if (tipoValor === 'efectivo' && cuentaTipo !== 'caja') throw err(400, 'Un pago en efectivo solo puede salir de una caja.');
     if ((tipoValor === 'cuenta' || tipoValor === 'tarjeta') && cuentaTipo !== 'banco') throw err(400, 'Un pago por transferencia o tarjeta solo puede salir de un banco.');
     cuentaId = toObjectId(body.cuentaId);
     if (!cuentaId) throw err(400, 'Caja/banco inválido');
+  }
+
+  // Cheques de terceros en cartera que se endosan al proveedor para pagarle (no mueven caja ni banco).
+  let chequesTerceroIds = null;
+  if (tipoValor === 'cheque_tercero') {
+    chequesTerceroIds = (Array.isArray(body.chequesTerceroIds) ? body.chequesTerceroIds : []).map(toObjectId);
+    if (!chequesTerceroIds.length || chequesTerceroIds.some(x => !x)) throw err(400, 'Elegí al menos un cheque de tercero de la cartera.');
+    if (new Set(chequesTerceroIds.map(String)).size !== chequesTerceroIds.length) throw err(400, 'Hay un cheque repetido.');
   }
 
   let chequeDatos = null;
@@ -1376,7 +1393,7 @@ function normalizarDatosPago(body, fecha) {
       tarjetaCodigoAutorizacion: normalizarTexto(body.tarjetaCodigoAutorizacion)
     };
   }
-  return { tipoValor, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos };
+  return { tipoValor, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos, chequesTerceroIds };
 }
 
 // Registra UN pago real (una salida de caja/banco, o un cheque emitido)
@@ -1385,9 +1402,17 @@ function normalizarDatosPago(body, fecha) {
 // aplicarlo" — nada de reparto automático). Queda además un registro
 // único en `compras_pagos` para que se pueda ver el pago completo en la
 // pestaña "Pagos", más allá de cómo haya quedado repartido.
-async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, moneda, tipoValor, montoTotal, fecha, nota, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos, aplicaciones, motivoMovimiento }) {
+async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, moneda, tipoValor, montoTotal, fecha, nota, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos, chequesTerceroIds, aplicaciones, motivoMovimiento }) {
   const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
   let chequeId = null;
+  let chequesTercero = [];
+  if (tipoValor === 'cheque_tercero') {
+    chequesTercero = await db.collection('cheques').find(Object.assign({ _id: { $in: chequesTerceroIds }, tipo: 'tercero', estado: 'en_cartera' }, filtroOrg(req))).toArray();
+    if (chequesTercero.length !== chequesTerceroIds.length) throw err(400, 'Algún cheque ya no está en cartera (se usó, depositó o anuló). Refrescá la lista y elegí de nuevo.');
+    if (chequesTercero.some(c => (c.moneda || 'ARS') !== (moneda || 'ARS'))) throw err(400, 'Hay cheques en otra moneda que la del pago.');
+    const sumaCheques = Math.round(chequesTercero.reduce((a, c) => a + (c.monto || 0), 0) * 100) / 100;
+    if (Math.abs(sumaCheques - montoTotal) > 0.01) throw err(400, `Los cheques elegidos suman ${sumaCheques} y el pago es de ${montoTotal}. Tienen que coincidir.`);
+  }
 
   if (tipoValor === 'cheque') {
     const cheque = Object.assign({
@@ -1399,7 +1424,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
     }, chequeDatos);
     const { insertedId } = await db.collection('cheques').insertOne(cheque);
     chequeId = insertedId;
-  } else {
+  } else if (tipoValor !== 'cheque_tercero') {
     const observacionesMovimiento = tipoValor === 'tarjeta'
       ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
       : nota;
@@ -1422,6 +1447,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
       { tipoValor, monto: aplic.monto, fecha, nota, usuarioNombre },
       cuentaTipo ? { cuentaTipo, cuentaId } : {},
       chequeId ? { chequeId } : {},
+      chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {},
       tarjetaDatos || {}
     );
     const totalPagado = (compra.totalPagado || 0) + aplic.monto;
@@ -1435,11 +1461,16 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
     aplicacionesGuardadas.push({ compraId: aplic.compraId, compraNumero: compra.numero, monto: aplic.monto });
   }
 
+  // Recién acá (ya validadas las compras) los cheques de terceros salen de la cartera: quedan endosados al proveedor.
   const ahora = new Date();
+  if (chequesTercero.length) {
+    await db.collection('cheques').updateMany({ _id: { $in: chequesTercero.map(c => c._id) }, estado: 'en_cartera' },
+      { $set: { estado: 'endosado', endosadoA: proveedorNombre || 'Proveedor', endosadoProveedorId: proveedorId || null, endosadoFecha: fecha, updatedAt: ahora } });
+  }
   const pagoCuenta = Object.assign({
     proveedorId, proveedorNombre, fecha, tipoValor, monto: montoTotal, nota, usuarioNombre,
     aplicaciones: aplicacionesGuardadas, orgId: req.orgId, createdAt: ahora
-  }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {}, tarjetaDatos || {});
+  }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, chequeId ? { chequeId } : {}, chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {}, tarjetaDatos || {});
   const r = await db.collection('compras_pagos').insertOne(pagoCuenta);
   pagoCuenta._id = r.insertedId;
 

@@ -1147,7 +1147,7 @@ function verDetalle(id){
   `;
 }
 
-const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
+const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cheque_tercero: 'Cheque de tercero', cuenta: 'Cuenta', tarjeta: 'Tarjeta' };
 
 function abrirRecibir(id){
   const c = comprasCache.find(x => x._id === id);
@@ -1198,14 +1198,47 @@ function opcionesBancoPropioCheque(seleccionado){
   return bancosTesoreriaCache.map(b => `<option value="${b._id}" ${String(b._id)===seleccionado?'selected':''}>${escapeHtml(b.nombre)}</option>`).join('')
     || '<option value="">No tenés ningún banco propio habilitado</option>';
 }
+
+// Cheques de terceros en cartera, para pagar endosándolos al proveedor. El monto del pago pasa a ser la suma de los cheques tildados.
+let chequesTerceroCache = [];
+async function cargarChequesTercero(p){
+  const w = document.getElementById(p + 'TerceroWrap'); if (!w) return;
+  w.innerHTML = '<p class="muted">Cargando cheques en cartera…</p>';
+  try {
+    const r = await fetch(BASE + '/cheques-tercero', {headers: headersAuth()});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    chequesTerceroCache = data;
+    w.innerHTML = data.length
+      ? `<label>Cheques de terceros en cartera — tildá los que le entregás al proveedor</label>
+         <div style="max-height:190px;overflow:auto;border:1px solid var(--border);border-radius:8px">` + data.map(ch => `
+         <label style="display:flex;gap:8px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--border);margin:0;font-weight:500;color:var(--text);cursor:pointer">
+           <input type="checkbox" class="${p}-chq" value="${ch._id}" style="width:auto;flex:none;margin:0" onchange="actualizarMontoChequesTercero('${p}')">
+           <span style="flex:1;min-width:0">Cheque ${escapeHtml(ch.numero || 's/n')}${ch.banco ? ' · ' + escapeHtml(ch.banco) : ''}${ch.librador ? ' · ' + escapeHtml(ch.librador) : ''} <span class="muted">· vence ${ch.fechaVencimiento ? fechaCorta(ch.fechaVencimiento) : '—'}</span></span>
+           <strong>${money(ch.monto)}</strong>
+         </label>`).join('') + `</div><div class="muted" id="${p}TerceroTotal" style="margin-top:6px"></div>`
+      : '<p class="muted">No hay cheques de terceros en cartera.</p>';
+  } catch (e) { w.innerHTML = '<p class="err">' + escapeHtml(e.message) + '</p>'; }
+}
+function chequesTerceroElegidos(p){ return [...document.querySelectorAll('.' + p + '-chq:checked')].map(x => x.value); }
+function actualizarMontoChequesTercero(p){
+  const ids = chequesTerceroElegidos(p);
+  const total = Math.round(chequesTerceroCache.filter(c => ids.includes(String(c._id))).reduce((a, c) => a + (c.monto || 0), 0) * 100) / 100;
+  const inp = document.getElementById(p === 'pc' ? 'pcMonto' : 'npMonto');
+  if (inp) { inp.value = total; if (p === 'pc') actualizarRepartidoPagoCuenta(); }
+  const t = document.getElementById(p + 'TerceroTotal'); if (t) t.textContent = ids.length ? ids.length + ' cheque(s) — total ' + money(total) : '';
+}
 function actualizarTipoValorPago(){
   const tipoValor = document.getElementById('npTipoValor').value;
   const esCheque = tipoValor === 'cheque';
+  const esTercero = tipoValor === 'cheque_tercero';
   const esTarjeta = tipoValor === 'tarjeta';
-  document.getElementById('npCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('npTerceroWrap').classList.toggle('hidden', !esTercero);
+  if (esTercero) cargarChequesTercero('np');
+  document.getElementById('npCuentaWrap').classList.toggle('hidden', esCheque || esTercero);
   document.getElementById('npChequeWrap').classList.toggle('hidden', !esCheque);
   document.getElementById('npTarjetaWrap').classList.toggle('hidden', !esTarjeta);
-  if (!esCheque) {
+  if (!esCheque && !esTercero) {
     document.getElementById('npCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿De qué caja sale? *' : '¿De qué banco sale? *';
     document.getElementById('npCuenta').innerHTML = opcionesCuentaPago(tipoValor);
   }
@@ -1220,13 +1253,14 @@ function abrirPago(id){
         <h2>Registrar pago — compra #${c.numero}</h2>
         <p class="muted">Saldo pendiente: ${money(c.saldoPendiente)}</p>
         <div class="grid2">
-          <div><label>Tipo de valor *</label><select id="npTipoValor" onchange="actualizarTipoValorPago()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Tipo de valor *</label><select id="npTipoValor" onchange="actualizarTipoValorPago()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque propio</option><option value="cheque_tercero">Cheque de tercero (de cartera)</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
           <div><label>Monto *</label><input id="npMonto" type="number" min="0.01" step="0.01" value="${c.saldoPendiente}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="npCuentaWrap"><label id="npCuentaLabel">¿De qué caja sale? *</label><select id="npCuenta">${opcionesCuentaPago('efectivo')}</select></div>
           <div><label>Fecha *</label><input id="npFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
+        <div id="npTerceroWrap" class="hidden" style="margin-top:10px"></div>
         <div id="npChequeWrap" class="hidden" style="margin-top:10px">
           <div class="grid2">
             <div><label>Número de cheque *</label><input id="npChequeNumero"></div>
@@ -1268,7 +1302,10 @@ async function confirmarPago(id){
     nota: document.getElementById('npNota').value.trim()
   };
   if (!body.monto || body.monto <= 0) { document.getElementById('npErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
-  if (tipoValor === 'cheque') {
+  if (tipoValor === 'cheque_tercero') {
+    body.chequesTerceroIds = chequesTerceroElegidos('np');
+    if (!body.chequesTerceroIds.length) { document.getElementById('npErr').textContent = 'Elegí al menos un cheque de la cartera'; return; }
+  } else if (tipoValor === 'cheque') {
     body.chequeNumero = document.getElementById('npChequeNumero').value.trim();
     body.chequeCuentaId = document.getElementById('npChequeCuenta').value;
     body.chequeFechaEmision = document.getElementById('npChequeFechaEmision').value;
@@ -1413,9 +1450,10 @@ function abrirPagoCuenta(){
           <div><label>Fecha *</label><input id="pcFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
-          <div><label>Tipo de valor *</label><select id="pcTipoValor" onchange="actualizarTipoValorPagoCuenta()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
+          <div><label>Tipo de valor *</label><select id="pcTipoValor" onchange="actualizarTipoValorPagoCuenta()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque propio</option><option value="cheque_tercero">Cheque de tercero (de cartera)</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
           <div id="pcCuentaWrap"><label id="pcCuentaLabel">¿De qué caja sale? *</label><select id="pcCuenta">${opcionesCuentaPago('efectivo')}</select></div>
         </div>
+        <div id="pcTerceroWrap" class="hidden" style="margin-top:10px"></div>
         <div id="pcChequeWrap" class="hidden" style="margin-top:10px">
           <div class="grid2">
             <div><label>Número de cheque *</label><input id="pcChequeNumero"></div>
@@ -1456,11 +1494,14 @@ function abrirPagoCuenta(){
 function actualizarTipoValorPagoCuenta(){
   const tipoValor = document.getElementById('pcTipoValor').value;
   const esCheque = tipoValor === 'cheque';
+  const esTercero = tipoValor === 'cheque_tercero';
   const esTarjeta = tipoValor === 'tarjeta';
-  document.getElementById('pcCuentaWrap').classList.toggle('hidden', esCheque);
+  document.getElementById('pcTerceroWrap').classList.toggle('hidden', !esTercero);
+  if (esTercero) cargarChequesTercero('pc');
+  document.getElementById('pcCuentaWrap').classList.toggle('hidden', esCheque || esTercero);
   document.getElementById('pcChequeWrap').classList.toggle('hidden', !esCheque);
   document.getElementById('pcTarjetaWrap').classList.toggle('hidden', !esTarjeta);
-  if (!esCheque) {
+  if (!esCheque && !esTercero) {
     document.getElementById('pcCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿De qué caja sale? *' : '¿De qué banco sale? *';
     document.getElementById('pcCuenta').innerHTML = opcionesCuentaPago(tipoValor);
   }
@@ -1552,7 +1593,10 @@ async function confirmarPagoCuenta(){
     nota: document.getElementById('pcNota').value.trim(),
     tipoValor
   };
-  if (tipoValor === 'cheque') {
+  if (tipoValor === 'cheque_tercero') {
+    body.chequesTerceroIds = chequesTerceroElegidos('pc');
+    if (!body.chequesTerceroIds.length) { document.getElementById('pcErr').textContent = 'Elegí al menos un cheque de la cartera'; return; }
+  } else if (tipoValor === 'cheque') {
     body.chequeNumero = document.getElementById('pcChequeNumero').value.trim();
     body.chequeCuentaId = document.getElementById('pcChequeCuenta').value;
     body.chequeFechaEmision = document.getElementById('pcChequeFechaEmision').value;
