@@ -131,9 +131,11 @@
     <div class="card">
       <div class="row" style="justify-content:space-between">
         <div class="row" style="flex:1">
-          <div style="min-width:180px">
+          <div style="flex:2;min-width:340px">
             <label>Proveedor</label>
-            <select id="fcProveedor" onchange="cargarGastos()"><option value="">Todos</option></select>
+            <input type="text" id="fcProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor (vacío = todos)…" autocomplete="off" oninput="proveedorTipeado('fcProveedor')" style="font-size:17px;padding:12px 14px;width:100%">
+            <input type="hidden" id="fcProveedor">
+            <datalist id="dlProveedores"></datalist>
           </div>
           <div style="min-width:150px">
             <label>Estado</label>
@@ -293,8 +295,7 @@ async function cargarListasBase(){
   // no es una falla real, simplemente no va a poder elegir cuenta al pagar.
   cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
   bancosTesoreriaCache = rbc.ok ? await rbc.json() : [];
-  document.getElementById('fcProveedor').innerHTML = '<option value="">Todos</option>' +
-    proveedoresCache.map(p => `<option value="${p._id}">${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`).join('');
+  llenarDatalistProveedores();
 }
 
 // -------------------------------------------------------------------
@@ -332,6 +333,31 @@ async function cargarGastos(){
 // -------------------------------------------------------------------
 // Nuevo gasto
 // -------------------------------------------------------------------
+// Proveedor tipeado (en vez de lista desplegable): el input visible tiene el nombre, el oculto (con el id de siempre) guarda el proveedor elegido.
+const nombreProveedor = (p) => p.razonSocial || p.nombreFantasia || '(sin nombre)';
+function llenarDatalistProveedores(){
+  const dl = document.getElementById('dlProveedores'); if (!dl) return;
+  dl.innerHTML = proveedoresCache.map(p => `<option value="${escapeHtml(nombreProveedor(p))}"></option>`).join('');
+}
+function proveedorTipeado(idCampo){
+  const txt = document.getElementById(idCampo + 'Txt').value.trim().toLowerCase();
+  const oculto = document.getElementById(idCampo);
+  let elegido = null;
+  if (txt) {
+    elegido = proveedoresCache.find(p => nombreProveedor(p).toLowerCase() === txt);
+    if (!elegido) { const parecidos = proveedoresCache.filter(p => nombreProveedor(p).toLowerCase().includes(txt)); if (parecidos.length === 1) elegido = parecidos[0]; }
+  }
+  const nuevo = elegido ? String(elegido._id) : '';
+  if (oculto.value === nuevo) return;
+  oculto.value = nuevo;
+  if (idCampo === 'fcProveedor') cargarGastos(); else actualizarCondicionPago();
+}
+function elegirProveedor(idCampo, id){
+  const p = proveedoresCache.find(x => String(x._id) === String(id));
+  document.getElementById(idCampo).value = p ? String(p._id) : '';
+  document.getElementById(idCampo + 'Txt').value = p ? nombreProveedor(p) : '';
+  llenarDatalistProveedores();
+}
 function opcionesProveedoresSelect(seleccionado){
   return '<option value="">Elegí un proveedor…</option>' + proveedoresCache.map(p =>
     `<option value="${p._id}" ${p._id===seleccionado?'selected':''}>${escapeHtml(p.razonSocial || p.nombreFantasia || '(sin nombre)')}</option>`
@@ -379,7 +405,7 @@ function abrirNuevoGasto(){
         <h2>Nuevo gasto</h2>
         ${FacturaIAUI.cajaHtml('ng', 'Sacá una foto o subí un PDF u otro archivo de la factura (luz, gas, teléfono, honorarios, etc.): la IA lee los datos y completa el formulario. Revisá todo antes de guardar.')}
         <div class="grid3">
-          <div><label>Proveedor *</label><select id="ngProveedor" onchange="actualizarCondicionPago()">${opcionesProveedoresSelect()}</select></div>
+          <div><label>Proveedor *</label><input type="text" id="ngProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('ngProveedor')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="ngProveedor"></div>
           <div><label>Condición de pago</label><input id="ngCondicionPago" placeholder="Se autocompleta del proveedor"></div>
           <div><label>Fecha</label><input id="ngFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
         </div>
@@ -581,8 +607,7 @@ function iaRenderProveedor(d){
   const co = d.proveedorCoincidencia;
   if (co) {
     if (!proveedoresCache.some(p => String(p._id) === String(co._id))) proveedoresCache.push({ _id: co._id, razonSocial: co.razonSocial, condicionPago: co.condicionPago || '' });
-    sel.innerHTML = opcionesProveedoresSelect(String(co._id));
-    sel.value = String(co._id);
+    elegirProveedor('ngProveedor', String(co._id));
     actualizarCondicionPago();
     cont.innerHTML = `<div class="muted" style="margin-top:8px">Proveedor reconocido: <strong>${escapeHtml(co.razonSocial)}</strong> (${co.criterio === 'cuit' ? 'por CUIT' : 'por nombre'}).</div>`;
     return;
@@ -614,8 +639,7 @@ async function iaCrearProveedor(){
     if (!r.ok) throw new Error(data.error || 'No se pudo crear el proveedor');
     proveedoresCache.push(data);
     const sel = document.getElementById('ngProveedor');
-    sel.innerHTML = opcionesProveedoresSelect(String(data._id));
-    sel.value = String(data._id);
+    elegirProveedor('ngProveedor', String(data._id));
     actualizarCondicionPago();
     document.getElementById('ngIaProveedor').innerHTML = `<div class="muted" style="margin-top:8px">Proveedor creado y elegido: <strong>${escapeHtml(data.razonSocial)}</strong>.</div>`;
   }catch(e){ errEl.textContent = e.message; }
