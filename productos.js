@@ -1119,32 +1119,70 @@ router.delete('/listas-precio/:id', authAdmin, async (req, res) => {
 // moneda original — esto solo afecta el cálculo derivado de las listas.
 // Pantalla: Bases y catálogos.
 // -----------------------------------------------------------------------
+// Cotización automática: dólar oficial del Banco Nación (billete, punta vendedora) vía dolarapi.com. Si la org la tiene en automático
+// ("auto"), se refresca sola cada 30 minutos y al abrir la pantalla; si la fuente falla se deja el último valor.
+const FUENTE_BNA = 'https://dolarapi.com/v1/dolares/oficial';
+async function traerDolarBna() {
+  const r = await fetch(FUENTE_BNA, { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error('La fuente de cotización respondió ' + r.status);
+  const d = await r.json();
+  const venta = Number(d.venta);
+  if (!Number.isFinite(venta) || venta <= 0) throw new Error('La fuente de cotización no devolvió un valor válido');
+  return { valor: venta, compra: Number(d.compra) || null, fuenteFecha: d.fechaActualizacion ? new Date(d.fechaActualizacion) : null };
+}
+async function refrescarCotizacionAuto(db, doc) {
+  const c = await traerDolarBna();
+  const ahora = new Date();
+  await db.collection('config_general').updateOne({ _id: doc._id }, { $set: { valor: c.valor, compraBna: c.compra, fuente: 'Banco Nación', fuenteFecha: c.fuenteFecha, updatedAt: ahora } });
+  return Object.assign(doc, { valor: c.valor, compraBna: c.compra, fuenteFecha: c.fuenteFecha, updatedAt: ahora });
+}
+async function refrescarTodasAuto() {
+  try {
+    const db = await getDb();
+    if (!(await db.collection('config_general').countDocuments({ clave: 'cotizacionDolar', auto: true }))) return;
+    const c = await traerDolarBna();
+    await db.collection('config_general').updateMany({ clave: 'cotizacionDolar', auto: true }, { $set: { valor: c.valor, compraBna: c.compra, fuente: 'Banco Nación', fuenteFecha: c.fuenteFecha, updatedAt: new Date() } });
+  } catch (e) { console.log('Cotización automática del dólar: ' + e.message); }
+}
+if (process.env.MONGODB_URI) {
+  setTimeout(refrescarTodasAuto, 20 * 1000).unref();
+  setInterval(refrescarTodasAuto, 30 * 60 * 1000).unref();
+}
+
 router.get('/config/cotizacion-dolar', authListasPrecio, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const doc = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+      let d = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+      if (d && d.auto && (!d.updatedAt || Date.now() - new Date(d.updatedAt).getTime() > 15 * 60 * 1000)) { try { d = await refrescarCotizacionAuto(db, d); } catch (e) { /* queda el último valor */ } }
+      return d;
     });
-    res.json({ valor: doc ? doc.valor : null, actualizadoEn: doc ? doc.updatedAt : null });
+    res.json({ valor: doc ? doc.valor : null, actualizadoEn: doc ? doc.updatedAt : null, auto: !!(doc && doc.auto), compraBna: doc ? doc.compraBna || null : null, fuenteFecha: doc ? doc.fuenteFecha || null : null });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// body: { auto: true } -> pasa a automático y trae el valor del Banco Nación ahora; { valor } (con o sin auto:false) -> manual.
 router.put('/config/cotizacion-dolar', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
-    const valor = Number((req.body || {}).valor);
-    if (!Number.isFinite(valor) || valor <= 0) throw err(400, 'La cotización tiene que ser un número mayor a 0');
+    const body = req.body || {};
     const ahora = new Date();
-    await conReintento(async () => {
+    const out = await conReintento(async () => {
       const db = await getDb();
-      await db.collection('config_general').updateOne(
-        { orgId: req.orgId, clave: 'cotizacionDolar' },
-        { $set: { valor, updatedAt: ahora }, $setOnInsert: { orgId: req.orgId, clave: 'cotizacionDolar', createdAt: ahora } },
-        { upsert: true }
-      );
+      const filtro = { orgId: req.orgId, clave: 'cotizacionDolar' };
+      const base = { $setOnInsert: { orgId: req.orgId, clave: 'cotizacionDolar', createdAt: ahora } };
+      if (body.auto === true) {
+        let c; try { c = await traerDolarBna(); } catch (e) { throw err(502, 'No pude consultar la cotización del Banco Nación ahora (' + e.message + '). Probá de nuevo en unos minutos.'); }
+        await db.collection('config_general').updateOne(filtro, Object.assign({ $set: { valor: c.valor, auto: true, compraBna: c.compra, fuente: 'Banco Nación', fuenteFecha: c.fuenteFecha, updatedAt: ahora } }, base), { upsert: true });
+        return { valor: c.valor, auto: true, compraBna: c.compra, fuenteFecha: c.fuenteFecha };
+      }
+      const valor = Number(body.valor);
+      if (!Number.isFinite(valor) || valor <= 0) throw err(400, 'La cotización tiene que ser un número mayor a 0');
+      await db.collection('config_general').updateOne(filtro, Object.assign({ $set: { valor, auto: false, fuente: 'Manual', updatedAt: ahora } }, base), { upsert: true });
+      return { valor, auto: false };
     });
-    res.json({ valor, actualizadoEn: ahora });
+    res.json(Object.assign({ actualizadoEn: ahora }, out));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

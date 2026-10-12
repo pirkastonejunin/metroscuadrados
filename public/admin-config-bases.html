@@ -195,6 +195,7 @@
         <div class="row">
           <div style="width:180px"><label>1 USD = $ ARS</label><input id="cdValor" type="number" min="0.01" step="0.01" onkeydown="if(event.key==='Enter')guardarCotizacionDolar()"></div>
           <div><button class="btn" onclick="guardarCotizacionDolar()">Guardar</button></div>
+          <div style="padding-bottom:9px"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="cdAuto" onchange="cambiarCotizacionAuto(this.checked)"> Actualizar sola con el Banco Nación</label></div>
           <div class="muted" id="cdActualizado" style="padding-bottom:9px"></div>
         </div>
         <div class="err" id="cotizacionErr"></div>
@@ -486,12 +487,28 @@ async function cargarCotizacionDolar(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     document.getElementById('cdValor').value = data.valor != null ? data.valor : '';
+    document.getElementById('cdAuto').checked = !!data.auto;
+    document.getElementById('cdValor').readOnly = !!data.auto;
     document.getElementById('cdActualizado').textContent = data.actualizadoEn
-      ? 'Actualizada el ' + new Date(data.actualizadoEn).toLocaleString('es-AR')
+      ? (data.auto ? 'Dólar oficial Banco Nación (venta), actualizado el ' : 'Actualizada el ') + new Date(data.actualizadoEn).toLocaleString('es-AR')
       : 'Todavía no está cargada';
   }catch(e){
     document.getElementById('cotizacionErr').textContent = e.message;
   }
+}
+
+async function cambiarCotizacionAuto(on){
+  document.getElementById('cotizacionErr').textContent = '';
+  try{
+    const valor = Number(document.getElementById('cdValor').value);
+    const body = on ? {auto:true} : {auto:false, valor: Number.isFinite(valor) && valor > 0 ? valor : 1};
+    const r = await fetch(BASE + '/config/cotizacion-dolar', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+  }catch(e){
+    document.getElementById('cotizacionErr').textContent = e.message;
+  }
+  await cargarCotizacionDolar();
 }
 
 async function guardarCotizacionDolar(){
@@ -499,7 +516,7 @@ async function guardarCotizacionDolar(){
   document.getElementById('cotizacionErr').textContent = '';
   if (!Number.isFinite(valor) || valor <= 0) { document.getElementById('cotizacionErr').textContent = 'Poné un valor mayor a 0'; return; }
   try{
-    const r = await fetch(BASE + '/config/cotizacion-dolar', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({valor})});
+    const r = await fetch(BASE + '/config/cotizacion-dolar', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({valor, auto:false})});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarCotizacionDolar();
