@@ -644,7 +644,24 @@ async function confirmarImportar(){
 // las facturas pendientes), así que se abre esa pantalla con el
 // proveedor ya elegido en vez de duplicar ese flujo acá.
 function irARegistrarPagoProveedor(id){
-  window.location.href = 'admin-compras.html?pagoProveedor=' + encodeURIComponent(id);
+  // Popup encima de la cuenta corriente (igual que el cobro en Clientes): es la misma pantalla de "Pago a cuenta" de Compras, en un marco.
+  cerrarPopupPagoProveedor();
+  const d = document.createElement('div');
+  d.id = 'popupPagoProv';
+  d.style.cssText = 'position:fixed;inset:0;z-index:900;';
+  d.innerHTML = '<iframe src="admin-compras.html?embed=1&pagoProveedor=' + encodeURIComponent(id) + '" style="width:100%;height:100%;border:0;background:transparent" allowtransparency="true"></iframe>';
+  document.body.appendChild(d);
+  window.addEventListener('message', escucharPopupPagoProveedor);
+}
+function escucharPopupPagoProveedor(ev){
+  if (ev.origin !== location.origin || !ev.data || ev.data.tipo !== 'popup-compras-cerrado') return;
+  cerrarPopupPagoProveedor();
+  const c = window._ccProvCtx;
+  if (c && document.getElementById('pccContenido')) cargarCuentaCorrienteProveedorTab(c.id);
+}
+function cerrarPopupPagoProveedor(){
+  const d = document.getElementById('popupPagoProv'); if (d) d.remove();
+  window.removeEventListener('message', escucharPopupPagoProveedor);
 }
 
 let cuentaCorrienteProveedorCache = null;

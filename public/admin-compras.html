@@ -13,6 +13,9 @@
 <script src="/impuestos-ui.js"></script>
 <script src="/factura-ia-ui.js"></script>
 <style>
+  body.embed{background:transparent !important;}
+  body.embed header, body.embed main{display:none !important;}
+  body.embed .modal-bg{background:transparent !important;}
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
     --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
@@ -70,6 +73,7 @@
   .tab-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
   .tab-btn.activo{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
   .fila-pago-cuenta{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);}
+  .fila-pago-cuenta input[type="checkbox"]{width:auto;flex:none;margin:0 4px;}
   .fila-pago-cuenta .info{flex:1;min-width:0;}
   .fila-pago-cuenta input[type="number"]{width:120px;}
   .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;}
@@ -513,7 +517,7 @@ async function iniciarApp(){
     return;
   }
   resolverOrgActiva(me);
-  PiedraSidebar.render(me, 'compras', { ocultarOrg: true });
+  if (!EMBED) PiedraSidebar.render(me, 'compras', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -547,7 +551,14 @@ async function iniciarApp(){
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
-function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+// Modo popup (?embed=1): esta pantalla se abre dentro de un marco encima de otra (ej. el pago a un proveedor desde su cuenta corriente).
+// Sin barra lateral ni listados; al cerrar o confirmar el modal le avisa a la pantalla de arriba para que cierre el marco y se refresque.
+const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+if (EMBED) document.addEventListener('DOMContentLoaded', () => document.body.classList.add('embed'));
+function cerrarModal(){
+  document.getElementById('modalRoot').innerHTML = '';
+  if (EMBED && window.parent !== window) window.parent.postMessage({ tipo: 'popup-compras-cerrado' }, location.origin);
+}
 
 // -------------------------------------------------------------------
 // Proveedores, productos y depósitos — se cargan una sola vez al entrar
@@ -1468,7 +1479,7 @@ async function cargarComprasPendientesPagoCuenta(){
   cont.innerHTML = comprasPendientesPagoCuentaCache.map(c => `
     <div class="fila-pago-cuenta" data-compra-id="${c._id}" data-saldo="${c.saldoPendiente}">
       <input type="checkbox" onchange="actualizarFilaPagoCuenta(this)">
-      <div class="info">Compra #${c.numero} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
+      <div class="info">${c.numero ? 'Compra #' + c.numero : 'Compra'}${c.comprobanteNumero ? ' · ' + (c.puntoVenta ? c.puntoVenta + '-' : '') + c.comprobanteNumero : ''} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
       <input type="number" min="0" step="0.01" value="0" disabled oninput="actualizarRepartidoPagoCuenta()">
     </div>
   `).join('');
