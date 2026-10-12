@@ -415,7 +415,7 @@ router.get('/resultados/config', authInforme('informe_resultados'), async (req, 
     const out = await conReintento(async () => {
       const db = await getDb();
       const [catalogo, usados, excluidos, spg, cog] = await Promise.all([
-        db.collection('gastos_conceptos').find({ orgId: req.orgId }).project({ nombre: 1 }).toArray(),
+        db.collection('gastos_conceptos').find({ $or: [{ orgId: req.orgId }, { compartido: true }] }).project({ nombre: 1 }).toArray(),
         db.collection('gastos').distinct('items.conceptoNombre', { orgId: req.orgId }),
         conceptosEnCosto(db, req.orgId),
         sueldosProduccionGasto(db, req.orgId),

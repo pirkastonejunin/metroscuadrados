@@ -540,7 +540,7 @@ async function buscarProducto(db, filtro, item) {
 
 // Para Gastos: las líneas son conceptos de gasto, no productos.
 async function buscarConcepto(db, filtro, item) {
-  const lista = await db.collection('gastos_conceptos').find(Object.assign({ activo: { $ne: false } }, filtro)).project({ nombre: 1 }).limit(2000).toArray();
+  const lista = await db.collection('gastos_conceptos').find({ activo: { $ne: false }, compartido: true }).project({ nombre: 1 }).limit(2000).toArray();
   const ordenados = lista.map(c => ({ _id: c._id, nombre: c.nombre, score: similitud(item.descripcion, c.nombre) })).sort((a, b) => b.score - a.score);
   const mejor = ordenados[0];
   const segundo = ordenados[1];

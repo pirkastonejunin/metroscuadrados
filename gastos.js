@@ -212,41 +212,37 @@ router.get('/proveedores', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Los conceptos de gasto son un único catálogo para todas las sucursales: se guarda una copia por organización (los gastos la referencian
-// por id y se validan por org), pero siempre se mantienen iguales: alta, baja, renombre y reactivación se aplican a todas juntas, y
-// al listar se completa lo que falte en alguna sucursal. En la vista "todas" se muestra cada concepto una sola vez.
+// Los conceptos de gasto son UN solo catálogo para todas las sucursales (compartido:true, sin orgId). Los que quedaron duplicados por
+// sucursal (o con distinto uso de mayúsculas/espacios) se fusionan solos la primera vez: queda uno por nombre y los gastos ya cargados
+// se reapuntan a ese.
 const claveConcepto = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-async function idsOrganizaciones(db, req) {
-  const ids = (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id);
-  if (req.orgId && !ids.some(x => String(x) === String(req.orgId))) ids.push(req.orgId);
-  return ids;
-}
-async function sincronizarConceptos(db, req) {
+async function unificarCatalogoConceptos(db) {
   const col = db.collection('gastos_conceptos');
-  const [docs, orgs] = await Promise.all([col.find({}).toArray(), idsOrganizaciones(db, req)]);
-  const porClave = new Map();
-  for (const d of docs) { const k = claveConcepto(d.nombre); if (!k) continue; if (!porClave.has(k)) porClave.set(k, []); porClave.get(k).push(d); }
-  const nuevos = [], ahora = new Date();
-  for (const [, grupo] of porClave) {
-    const tiene = new Set(grupo.map(d => String(d.orgId)));
-    const activo = grupo.some(d => d.activo !== false);
-    // si alguna copia está activa y otra inactiva, queda todo activo; las faltantes se crean con el estado del grupo
-    const desactivadas = grupo.filter(d => d.activo === false && activo);
-    if (desactivadas.length) await col.updateMany({ _id: { $in: desactivadas.map(d => d._id) } }, { $set: { activo: true, updatedAt: ahora } });
-    for (const o of orgs) if (!tiene.has(String(o))) nuevos.push({ nombre: grupo[0].nombre, activo, orgId: o, createdAt: ahora, updatedAt: ahora });
+  const sueltos = await col.countDocuments({ compartido: { $ne: true } });
+  if (!sueltos) return;
+  const docs = await col.find({}).sort({ createdAt: 1, _id: 1 }).toArray();
+  const grupos = new Map();
+  for (const d of docs) { const k = claveConcepto(d.nombre); if (!k) continue; if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(d); }
+  const ahora = new Date();
+  for (const [, g] of grupos) {
+    const canon = g.find(d => d.compartido === true) || g[0];
+    const resto = g.filter(d => String(d._id) !== String(canon._id));
+    const activo = g.some(d => d.activo !== false);
+    if (resto.length) {
+      const ids = resto.map(d => d._id);
+      await db.collection('gastos').updateMany({ 'items.conceptoId': { $in: ids } }, { $set: { 'items.$[it].conceptoId': canon._id } }, { arrayFilters: [{ 'it.conceptoId': { $in: ids } }] });
+      await col.deleteMany({ _id: { $in: ids } });
+    }
+    await col.updateOne({ _id: canon._id }, { $set: { compartido: true, orgId: null, activo, updatedAt: ahora } });
   }
-  if (nuevos.length) await col.insertMany(nuevos, { ordered: false });
 }
 async function listarConceptos(req) {
   return conReintento(async () => {
     const db = await getDb();
-    await sincronizarConceptos(db, req);
-    const match = Object.assign({}, filtroOrg(req));
+    await unificarCatalogoConceptos(db);
+    const match = { compartido: true };
     if (!req.query.incluirInactivos) match.activo = { $ne: false };
-    const lista = await db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
-    if (req.orgId) return lista;
-    const vistos = new Set();
-    return lista.filter(d => { const k = claveConcepto(d.nombre); if (vistos.has(k)) return false; vistos.add(k); return true; });
+    return db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
   });
 }
 router.get('/conceptos', authAdmin, async (req, res) => {
@@ -260,17 +256,18 @@ router.get('/conceptos', authAdmin, async (req, res) => {
 async function crearConceptoInterno(db, req, nombreRaw) {
   const nombre = normalizarTexto(nombreRaw);
   if (!nombre) throw err(400, 'Falta el nombre del concepto');
+  await unificarCatalogoConceptos(db);
   const col = db.collection('gastos_conceptos');
-  const regex = { $regex: `^${nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' };
+  const k = claveConcepto(nombre);
+  const existente = (await col.find({ compartido: true }).toArray()).find(d => claveConcepto(d.nombre) === k);
   const ahora = new Date();
-  await col.updateMany({ nombre: regex, activo: false }, { $set: { activo: true, updatedAt: ahora } });
-  const orgs = await idsOrganizaciones(db, req);
-  const existentes = await col.find({ nombre: regex }).toArray();
-  const tiene = new Set(existentes.map(d => String(d.orgId)));
-  const nuevos = orgs.filter(o => !tiene.has(String(o))).map(o => ({ nombre, activo: true, orgId: o, createdAt: ahora, updatedAt: ahora }));
-  if (nuevos.length) await col.insertMany(nuevos, { ordered: false });
-  const propio = await col.findOne(Object.assign({ nombre: regex }, filtroOrg(req)));
-  return propio;
+  if (existente) {
+    if (existente.activo === false) { await col.updateOne({ _id: existente._id }, { $set: { activo: true, updatedAt: ahora } }); return Object.assign({}, existente, { activo: true }); }
+    return existente;
+  }
+  const doc = { nombre, activo: true, compartido: true, orgId: null, createdAt: ahora, updatedAt: ahora };
+  doc._id = (await col.insertOne(doc)).insertedId;
+  return doc;
 }
 
 router.post('/conceptos', authAdmin, async (req, res) => {
@@ -297,12 +294,6 @@ router.post('/config/conceptos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Copias del mismo concepto en todas las sucursales (por nombre).
-async function copiasDelConcepto(db, actual) {
-  const k = claveConcepto(actual.nombre);
-  return (await db.collection('gastos_conceptos').find({}).project({ nombre: 1 }).toArray()).filter(d => claveConcepto(d.nombre) === k).map(d => d._id);
-}
-
 router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -318,10 +309,9 @@ router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const actual = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const actual = await db.collection('gastos_conceptos').findOne({ _id: id });
       if (!actual) throw err(404, 'Concepto no encontrado');
-      const copias = await copiasDelConcepto(db, actual);
-      await db.collection('gastos_conceptos').updateMany({ _id: { $in: copias.concat([id]) } }, { $set: set });
+      await db.collection('gastos_conceptos').updateOne({ _id: id }, { $set: set });
       // Si se renombró, el nombre guardado en los gastos ya cargados NO
       // se actualiza en cascada a propósito (igual que Compras no
       // actualiza nombres de producto en ítems ya facturados — es una
@@ -341,10 +331,8 @@ router.delete('/config/conceptos/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     await conReintento(async () => {
       const db = await getDb();
-      const actual = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
-      if (!actual) throw err(404, 'Concepto no encontrado');
-      const copias = await copiasDelConcepto(db, actual);
-      await db.collection('gastos_conceptos').updateMany({ _id: { $in: copias.concat([id]) } }, { $set: { activo: false, updatedAt: new Date() } });
+      const r = await db.collection('gastos_conceptos').updateOne({ _id: id }, { $set: { activo: false, updatedAt: new Date() } });
+      if (!r.matchedCount) throw err(404, 'Concepto no encontrado');
     });
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -376,16 +364,8 @@ async function normalizarItems(db, req, itemsRaw) {
     let conceptoId = it.conceptoId ? toObjectId(it.conceptoId) : null;
     let conceptoNombre = normalizarTexto(it.conceptoNombre);
     if (conceptoId) {
-      let concepto = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: conceptoId }, filtroOrg(req)));
-      if (!concepto) {
-        // El catálogo es el mismo en todas las sucursales (cada una guarda su copia): si el id es de la copia de otra sucursal
-        // (p. ej. la lista se cargó mirando "todas"), se usa la copia equivalente de esta sucursal.
-        const otra = await db.collection('gastos_conceptos').findOne({ _id: conceptoId });
-        if (!otra) throw err(400, 'Uno de los conceptos del gasto no existe');
-        concepto = await crearConceptoInterno(db, req, otra.nombre);
-        if (!concepto) throw err(400, 'Uno de los conceptos del gasto no existe (o no pertenece a esta organización)');
-        conceptoId = concepto._id;
-      }
+      const concepto = await db.collection('gastos_conceptos').findOne({ _id: conceptoId });
+      if (!concepto) throw err(400, 'Uno de los conceptos del gasto no existe');
       conceptoNombre = concepto.nombre;
     } else if (conceptoNombre) {
       // Concepto nuevo cargado al vuelo desde la pantalla de Gastos —

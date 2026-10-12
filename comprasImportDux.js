@@ -189,7 +189,7 @@ async function procesar(req, aplicar, gasto) {
     // Conceptos de gasto (Detalles): se reutilizan por nombre, los que faltan se crean.
     let conceptos = null, conceptosNuevos = new Set();
     if (gasto) {
-      const ya = await db.collection('gastos_conceptos').find({ orgId }).project({ nombre: 1 }).toArray();
+      const ya = await db.collection('gastos_conceptos').find({ $or: [{ orgId }, { compartido: true }] }).project({ nombre: 1 }).toArray();
       conceptos = new Map(ya.map(c => [norm(c.nombre), c._id]));
       nuevas.forEach(v => { const k = norm(v.concepto); if (k && !conceptos.has(k)) conceptosNuevos.add(v.concepto); });
     }
@@ -433,7 +433,7 @@ async function procesarDetalleCompras(req, aplicar) {
     const resolvers = new Map();
     const provDe = (oid) => { const k = String(oid); if (!resolvers.has(k)) resolvers.set(k, crearResolverProveedores(db, new ObjectId(k), ahora)); return resolvers.get(k); };
     const conceptos = new Map(); // orgId -> { map, nuevos:Set }
-    const conceptosDe = async (oid) => { const k = String(oid); if (!conceptos.has(k)) { const ya = await db.collection('gastos_conceptos').find({ orgId: new ObjectId(k) }).project({ nombre: 1 }).toArray(); conceptos.set(k, { map: new Map(ya.map(x => [norm(x.nombre), x._id])), nuevos: new Set() }); } return conceptos.get(k); };
+    const conceptosDe = async (oid) => { const k = String(oid); if (!conceptos.has(k)) { const ya = await db.collection('gastos_conceptos').find({ $or: [{ orgId: new ObjectId(k) }, { compartido: true }] }).project({ nombre: 1 }).toArray(); conceptos.set(k, { map: new Map(ya.map(x => [norm(x.nombre), x._id])), nuevos: new Set() }); } return conceptos.get(k); };
 
     let aMover = 0, itemsVinc = 0, itemsTot = 0; const sinMatch = new Set(); const diferencias = [];
     for (const g of grupos) {
