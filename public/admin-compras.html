@@ -533,6 +533,17 @@ async function iniciarApp(){
     const sel = document.getElementById('pcProveedor');
     if (sel) { sel.value = pagoProveedorId; cargarComprasPendientesPagoCuenta(); }
   }
+  // Desde el menú ⚙ de la cuenta corriente del proveedor: nueva compra / nueva orden de compra con el proveedor ya elegido.
+  const nuevaCompraId = qp.get('nuevaCompra'), nuevaOrdenId = qp.get('nuevaOrden');
+  if (nuevaCompraId) {
+    abrirNuevaCompra();
+    const sel = document.getElementById('ncProveedor');
+    if (sel) { sel.value = nuevaCompraId; if (typeof actualizarCondicionPago === 'function') actualizarCondicionPago(); }
+  } else if (nuevaOrdenId) {
+    abrirNuevaOrden();
+    const sel = document.getElementById('noProveedor');
+    if (sel) { sel.value = nuevaOrdenId; if (typeof actualizarCondicionPagoOrden === 'function') actualizarCondicionPagoOrden(); }
+  }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 

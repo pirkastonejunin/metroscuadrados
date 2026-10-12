@@ -656,6 +656,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al cargar la cuenta corriente');
     cuentaCorrienteProveedorCache = data;
+    window._ccProvCtx = { id, saldo: data.saldo, movs: data.movimientos, proveedor: (proveedoresCache.find(x => String(x._id) === String(id))) || {} };
     const cont = document.getElementById('pccContenido');
     if (!cont) return; // se cerró el modal mientras cargaba
     const saldoTexto = money(data.saldo);
@@ -674,7 +675,18 @@ async function cargarCuentaCorrienteProveedorTab(id){
     cont.innerHTML = `
       <div class="row" style="justify-content:space-between;align-items:center">
         <p class="muted" style="margin-top:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong>${data.saldo > 0 ? ' (le debemos esto al proveedor)' : (data.saldo < 0 ? ' (a favor nuestro)' : '')}</p>
-        ${data.saldo > 0 ? `<button class="btn secondary small" onclick="irARegistrarPagoProveedor('${id}')">Registrar pago</button>` : ''}
+        <div style="position:relative">
+          <button class="btn secondary" id="ccAccionesBtn" onclick="toggleAccionesCCProv(event)" title="Acciones de la cuenta corriente" style="font-size:18px;line-height:1;padding:6px 12px">⚙</button>
+          <div id="ccAccionesMenu" class="hidden" style="position:absolute;right:0;top:110%;z-index:50;min-width:250px;background:var(--surface,#fff);border:1px solid var(--border,#ccc);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:4px">
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('pagar')">💰 Registrar pago</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('compra')">🧾 Nueva compra</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('orden')">📋 Nueva orden de compra</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('imprimir')">🖨 Ver / imprimir resumen</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('whatsapp')">💬 Enviar resumen por WhatsApp</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('mail')">✉ Enviar resumen por mail</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCCProv('excel')">⬇ Descargar resumen (Excel/CSV)</a>
+          </div>
+        </div>
       </div>
       <table>
         <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
@@ -702,6 +714,65 @@ async function cargarCuentaCorrienteProveedorTab(id){
     const cont = document.getElementById('pccContenido');
     if (cont) cont.innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;
   }
+}
+
+
+// ---- Acciones (⚙) de la cuenta corriente del proveedor ----
+(function(){ const st = document.createElement('style'); st.textContent = '.cc-acc-item{display:block;padding:9px 12px;border-radius:6px;color:var(--text,#222);text-decoration:none;font-size:14px;white-space:nowrap}.cc-acc-item:hover{background:rgba(127,127,127,.15)}'; document.head.appendChild(st); })();
+function toggleAccionesCCProv(ev){
+  ev.stopPropagation();
+  const m = document.getElementById('ccAccionesMenu'); if (!m) return;
+  m.classList.toggle('hidden');
+  if (!m.classList.contains('hidden')) setTimeout(() => document.addEventListener('click', function cerrar(){ m.classList.add('hidden'); document.removeEventListener('click', cerrar); }), 0);
+}
+function nombreProvCC(c){ const p = c.proveedor || {}; return p.razonSocial || p.nombre || (document.querySelector('#modalRoot h2') || {}).textContent || 'Proveedor'; }
+function resumenCCProvTexto(maxFilas){
+  const c = window._ccProvCtx; if (!c) return '';
+  const fil = c.movs.filter(m => !m.importado).slice(0, maxFilas || 10);
+  const estado = c.saldo > 0.005 ? 'Saldo a pagar al proveedor: ' + money(c.saldo) : (c.saldo < -0.005 ? 'Saldo a favor: ' + money(-c.saldo) : 'Cuenta al día (saldo $ 0)');
+  return 'Resumen de cuenta corriente — ' + nombreProvCC(c) + '\n' + estado + '\n\nÚltimos movimientos:\n' + fil.map(m => fechaCorta(m.fecha) + ' · ' + (m.concepto || m.origen || '') + ' · ' + (m.tipo === 'debito' ? '+' : '−') + money(m.monto)).join('\n');
+}
+function telefonoWhatsAppProv(p){
+  let d = String(p.celular || p.telefono || '').replace(/\D/g, '').replace(/^0+/, '');
+  if (!d) return '';
+  if (d.startsWith('54')) return d;
+  if (!d.startsWith('9')) d = '9' + d;
+  return '54' + d;
+}
+function accionCCProv(que){
+  const mn = document.getElementById('ccAccionesMenu'); if (mn) mn.classList.add('hidden');
+  const c = window._ccProvCtx; if (!c) return;
+  if (que === 'pagar') { irARegistrarPagoProveedor(c.id); return; }
+  if (que === 'compra') { location.href = 'admin-compras.html?nuevaCompra=' + encodeURIComponent(c.id); return; }
+  if (que === 'orden') { location.href = 'admin-compras.html?nuevaOrden=' + encodeURIComponent(c.id); return; }
+  if (que === 'whatsapp') {
+    const tel = telefonoWhatsAppProv(c.proveedor);
+    if (!tel && !confirm('El proveedor no tiene teléfono cargado. ¿Abrir WhatsApp igual para elegir el contacto a mano?')) return;
+    window.open('https://wa.me/' + tel + '?text=' + encodeURIComponent(resumenCCProvTexto(10)), '_blank'); return;
+  }
+  if (que === 'mail') {
+    location.href = 'mailto:' + (c.proveedor.email || '') + '?subject=' + encodeURIComponent('Resumen de cuenta corriente') + '&body=' + encodeURIComponent(resumenCCProvTexto(15));
+    return;
+  }
+  const nombre = nombreProvCC(c);
+  let corrido = c.saldo;
+  const filas = c.movs.map((m, i) => {
+    if (i > 0) { const a = c.movs[i - 1]; if (!a.importado) corrido -= a.tipo === 'debito' ? a.monto : -a.monto; }
+    return { m, saldo: m.importado ? null : corrido };
+  });
+  if (que === 'excel') {
+    const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const lineas = [['Fecha', 'Concepto', 'Origen', 'Débito', 'Crédito', 'Saldo'].map(q).join(';')].concat(filas.map(f => [fechaCorta(f.m.fecha), f.m.concepto || '', f.m.origen || '', f.m.tipo === 'debito' ? f.m.monto : '', f.m.tipo === 'credito' ? f.m.monto : '', f.saldo == null ? '' : f.saldo].map(q).join(';')));
+    const blob = new Blob(['\ufeff' + lineas.join('\n')], {type: 'text/csv;charset=utf-8'});
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'cuenta-corriente-proveedor-' + nombre.replace(/[^\w]+/g, '-') + '.csv'; a.click(); return;
+  }
+  const w = window.open('', '_blank'); if (!w) { alert('El navegador bloqueó la ventana. Permití ventanas emergentes.'); return; }
+  const tr = filas.map(f => `<tr><td>${fechaCorta(f.m.fecha)}</td><td>${escapeHtml(f.m.concepto || '')}</td><td style="text-align:right">${f.m.tipo === 'debito' ? money(f.m.monto) : ''}</td><td style="text-align:right">${f.m.tipo === 'credito' ? money(f.m.monto) : ''}</td><td style="text-align:right">${f.saldo == null ? '—' : money(f.saldo)}</td></tr>`).join('');
+  w.document.write(`<!doctype html><meta charset="utf-8"><title>Resumen de cuenta corriente</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#111}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #ddd;padding:5px 6px;text-align:left}th{background:#f2f2f2}</style>
+    <h2>Resumen de cuenta corriente — proveedor</h2><p><b>${escapeHtml(nombre)}</b><br>Emitido el ${new Date().toLocaleDateString('es-AR')} · <b>Saldo: ${money(c.saldo)}</b> ${c.saldo > 0.005 ? '(a pagar al proveedor)' : (c.saldo < -0.005 ? '(a favor nuestro)' : '')}</p>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th style="text-align:right">Débito</th><th style="text-align:right">Crédito</th><th style="text-align:right">Saldo</th></tr></thead><tbody>${tr}</tbody></table>
+    <p><button onclick="window.print()">Imprimir</button></p>`);
+  w.document.close();
 }
 
 // Detalle de un comprobante (compra o gasto) referenciado desde la
