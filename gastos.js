@@ -110,7 +110,7 @@ function normalizarTexto(v) { return (v === undefined || v === null) ? '' : Stri
 
 const ESTADOS_VALIDOS = ['activo', 'anulada'];
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
-const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
+const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta', 'cheque_tercero'];
 
 // Comprobante fiscal (4/10/2026, pedido de Mato: "hay que agregar
 // comprobantes con numeracion y fiscal o no para luego poder sacar
@@ -635,7 +635,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     // salir de una caja; cuenta (transferencia) y tarjeta solo pueden
     // salir de un banco.
     let cuentaTipo = null, cuentaId = null;
-    if (tipoValor !== 'cheque') {
+    if (tipoValor !== 'cheque' && tipoValor !== 'cheque_tercero') {
       cuentaTipo = normalizarTexto(body.cuentaTipo).toLowerCase();
       if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
       if (tipoValor === 'efectivo' && cuentaTipo !== 'caja') throw err(400, 'Un pago en efectivo solo puede salir de una caja.');
@@ -644,6 +644,8 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
       if (!cuentaId) throw err(400, 'Caja/banco inválido');
     }
 
+    const chequesTerceroIds = tipoValor === 'cheque_tercero' ? (Array.isArray(body.chequesTerceroIds) ? body.chequesTerceroIds : []).map(toObjectId).filter(Boolean) : [];
+    if (tipoValor === 'cheque_tercero' && !chequesTerceroIds.length) throw err(400, 'Elegí los cheques de terceros con los que se paga.');
     let chequeDatos = null;
     if (tipoValor === 'cheque') {
       chequeDatos = {
@@ -678,8 +680,18 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;
+      let chequesTercero = [];
+      if (tipoValor === 'cheque_tercero') {
+        chequesTercero = await db.collection('cheques').find(Object.assign({ _id: { $in: chequesTerceroIds }, tipo: 'tercero', estado: 'en_cartera' }, filtroOrg(req))).toArray();
+        if (chequesTercero.length !== chequesTerceroIds.length) throw err(400, 'Algún cheque ya no está en cartera (se usó, depositó o anuló). Refrescá la lista y elegí de nuevo.');
+        if (chequesTercero.some(c => (c.moneda || 'ARS') !== (gasto.moneda || 'ARS'))) throw err(400, 'Hay cheques en otra moneda que la del gasto.');
+        const suma = Math.round(chequesTercero.reduce((a, c) => a + (c.monto || 0), 0) * 100) / 100;
+        if (Math.abs(suma - monto) > 0.01) throw err(400, `Los cheques elegidos suman ${suma} y el pago es de ${monto}. Tienen que coincidir.`);
+      }
 
-      if (tipoValor === 'cheque') {
+      if (tipoValor === 'cheque_tercero') {
+        // no mueve cajas: los cheques salen de la cartera (se endosan al proveedor más abajo)
+      } else if (tipoValor === 'cheque') {
         const cheque = Object.assign({
           tipo: 'propio', moneda: gasto.moneda || 'ARS', monto, estado: 'emitido',
           proveedorId: gasto.proveedorId || null, proveedorNombre: gasto.proveedorNombre || '',
@@ -703,6 +715,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         { tipoValor, monto, fecha, nota, usuarioNombre },
         cuentaTipo ? { cuentaTipo, cuentaId } : {},
         chequeId ? { chequeId } : {},
+        chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {},
         tarjetaDatos || {}
       );
       const totalPagado = (gasto.totalPagado || 0) + monto;
@@ -711,6 +724,10 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         { _id: id },
         { $push: { pagos: pago }, $set: { totalPagado, saldoPendiente, updatedAt: new Date() } }
       );
+      if (chequesTercero.length) {
+        await db.collection('cheques').updateMany({ _id: { $in: chequesTercero.map(c => c._id) }, estado: 'en_cartera' },
+          { $set: { estado: 'endosado', endosadoA: gasto.proveedorNombre || 'Proveedor', endosadoProveedorId: gasto.proveedorId || null, endosadoFecha: fecha, updatedAt: new Date() } });
+      }
       return db.collection('gastos').findOne({ _id: id });
     });
     res.json(resultado);
