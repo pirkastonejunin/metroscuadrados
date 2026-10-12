@@ -33,7 +33,7 @@ function elegirClienteUnico(clientes, { nombre, telefono }) {
 
 async function clientesActivos(db, orgId) {
   const q = { activo: { $ne: false } };
-  if (orgId) q.orgId = orgId;
+  if (orgId) q.$or = [{ orgId }, { orgIdsCompartidas: orgId }];
   return db.collection('clientes').find(q)
     .project({ apellidoRazonSocial: 1, nombre: 1, nombreFantasia: 1, telefono: 1, celular: 1 }).toArray();
 }

@@ -89,7 +89,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
@@ -965,7 +965,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
       if (!cliente) throw err(404, 'Cliente no encontrado');
       const clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';

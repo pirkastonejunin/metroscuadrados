@@ -90,6 +90,7 @@ async function procesar(req, aplicar) {
     for (const c of clientes) {
       const cand = [];
       for (const oid of orgIds) { const r = await resolver.clasificar(oid, c.nombre); if (r && r !== 'NUEVO') cand.push({ orgId: oid, clienteId: new ObjectId(r) }); }
+      { const vistos = new Set(); for (let i = cand.length - 1; i >= 0; i--) { const k = String(cand[i].clienteId); if (vistos.has(k)) cand.splice(i, 1); else vistos.add(k); } } // un cliente compartido entre sucursales aparece una sola vez
       if (cand.length === 1) { asignados.push(Object.assign({}, c, cand[0])); continue; }
       if (cand.length > 1) {
         enVarias++;

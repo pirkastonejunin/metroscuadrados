@@ -41,7 +41,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 const { elegirClienteUnico, clientesActivos } = require('./clienteVinculo');
 
@@ -309,11 +309,11 @@ function validarCliente(body) {
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
-    const match = Object.assign({}, filtroOrg(req));
+    const match = Object.assign({}, filtroOrgClientes(req));
     if (soloActivos) match.activo = { $ne: false };
     if (req.query.q) {
       const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      match.$or = [{ apellidoRazonSocial: re }, { nombre: re }, { codigo: re }, { cuit: re }, { numeroDocumento: re }];
+      match.$and = [{ $or: [{ apellidoRazonSocial: re }, { nombre: re }, { codigo: re }, { cuit: re }, { numeroDocumento: re }] }];
     }
     const clientes = await conReintento(async () => {
       const db = await getDb();
@@ -329,7 +329,7 @@ router.get('/', authAdmin, async (req, res) => {
 
 router.get('/export', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req));
     const clientes = await conReintento(async () => {
       const db = await getDb();
       return db.collection('clientes').find(match).sort({ apellidoRazonSocial: 1 }).toArray();
@@ -455,7 +455,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 300, 1000);
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
       if (!cliente) throw err(404, 'Cliente no encontrado');
       const [movimientos, saldoDoc] = await Promise.all([
         db.collection('cuenta_corriente_movimientos').find({ clienteId: id }).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray(),
@@ -490,7 +490,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
 async function clienteDeLaOrg(db, req) {
   const id = toObjectId(req.params.id);
   if (!id) throw err(400, 'id inválido');
-  const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+  const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
   if (!cliente) throw err(404, 'Cliente no encontrado');
   return cliente;
 }

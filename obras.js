@@ -33,7 +33,7 @@ const crypto = require('crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 const googleCalendar = require('./google-calendar');
 const { buscarClienteUnico } = require('./clienteVinculo');
-const { authUsuario, requiereModulo, tieneModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
+const { authUsuario, requiereModulo, tieneModulo, resolverOrg, filtroOrg, filtroOrgClientes, backfillOrgId } = require('./usuarios');
 
 const router = express.Router();
 // El body-parser ya lo agrega server.js globalmente (express.json({limit:'15mb'})),
@@ -609,7 +609,7 @@ router.post('/', authAdmin, async (req, res) => {
       const db = await getDb();
       // Vínculo con el cliente (sin crear clientes nuevos): el elegido a mano, o el único que coincida.
       let cid = req.body.clienteId ? toObjectId(req.body.clienteId) : null;
-      if (cid && !(await db.collection('clientes').findOne(Object.assign({ _id: cid }, filtroOrg(req)), { projection: { _id: 1 } }))) cid = null;
+      if (cid && !(await db.collection('clientes').findOne(Object.assign({ _id: cid }, filtroOrgClientes(req)), { projection: { _id: 1 } }))) cid = null;
       if (!cid) cid = await buscarClienteUnico(db, req.orgId, doc.cliente);
       if (cid) doc.clienteId = cid;
       const r = await db.collection('obras').insertOne(doc);

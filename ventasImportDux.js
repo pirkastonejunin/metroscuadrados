@@ -141,7 +141,7 @@ function crearResolverClientes(db, ahora) {
   async function cargar(orgId) {
     const k = String(orgId);
     if (porOrg.has(k)) return porOrg.get(k);
-    const clientes = await db.collection('clientes').find({ orgId, activo: { $ne: false } }).project({ apellidoRazonSocial: 1, nombre: 1, nombreFantasia: 1 }).toArray();
+    const clientes = await db.collection('clientes').find({ $or: [{ orgId }, { orgIdsCompartidas: orgId }], activo: { $ne: false } }).project({ apellidoRazonSocial: 1, nombre: 1, nombreFantasia: 1 }).toArray();
     const mapa = new Map();
     const agregar = (kk, id) => { if (!kk) return; if (!mapa.has(kk)) mapa.set(kk, new Set()); mapa.get(kk).add(String(id)); };
     clientes.forEach(cl => [cl.apellidoRazonSocial, cl.nombreFantasia, [cl.nombre, cl.apellidoRazonSocial].filter(Boolean).join(' '), [cl.apellidoRazonSocial, cl.nombre].filter(Boolean).join(' ')].forEach(n => clavesNombre(n).forEach(c => agregar(c, cl._id))));

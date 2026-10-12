@@ -341,6 +341,11 @@ function resolverOrg(req, res, next) {
 function filtroOrg(req) {
   return req.orgId ? { orgId: req.orgId } : {};
 }
+// Clientes: además de los de la sucursal, los clientes COMPARTIDOS con ella (un mismo cliente que opera en varias sucursales, unificado
+// con "Unificar duplicados"): tienen su sucursal de origen en orgId y las demás en orgIdsCompartidas.
+function filtroOrgClientes(req) {
+  return req.orgId ? { $or: [{ orgId: req.orgId }, { orgIdsCompartidas: req.orgId }] } : {};
+}
 // Backfill perezoso, una sola vez por proceso: le pone la organización por
 // defecto a los documentos viejos de `coleccion` que no tienen orgId
 // todavía. Cada módulo de datos (visitas.js, obras.js, crm.js,
@@ -885,5 +890,6 @@ module.exports.tieneModulo = tieneModulo;
 module.exports.MODULOS = MODULOS;
 module.exports.resolverOrg = resolverOrg;
 module.exports.filtroOrg = filtroOrg;
+module.exports.filtroOrgClientes = filtroOrgClientes;
 module.exports.backfillOrgId = backfillOrgId;
 module.exports.asegurarOrgPorDefecto = asegurarOrgPorDefecto;

@@ -65,7 +65,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const googleCalendar = require('./google-calendar');
 const {
   paginaImprimible, encabezadoComprobante, recuadroClienteComprobante,
@@ -382,7 +382,7 @@ router.post('/', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       let origenVisita = null;
       if (body.origenVisita && body.origenVisita.visitaId) {
@@ -460,7 +460,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       if (body.clienteId !== undefined) {
         const clienteId = toObjectId(body.clienteId);
         if (!clienteId) throw err(400, 'Elegí un cliente');
-        const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
+        const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
         if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
         set.clienteId = clienteId;
         set.clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';

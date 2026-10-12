@@ -70,7 +70,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
 // Tesorería (2/10/2026): un cobro en efectivo/cuenta/tarjeta tiene que
 // acreditarse YA en una caja/banco real; un cobro en cheque crea un
@@ -260,7 +260,7 @@ router.get('/tipos-impuestos', authAdmin, tiposImpuestosHandler);
 
 router.get('/clientes', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req));
     const lista = await conReintento(async () => {
       const db = await getDb();
       // categoriaFiscal (3/10/2026) se agrega a la proyección para que el
@@ -1232,7 +1232,7 @@ router.post('/', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       let comprobanteOrigenLetra = null;
       if (comprobanteOrigenId) {
