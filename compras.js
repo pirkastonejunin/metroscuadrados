@@ -1444,7 +1444,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   const aplicacionesGuardadas = [];
   for (const aplic of aplicaciones) {
     const compra = await db.collection('compras').findOne(Object.assign({ _id: aplic.compraId }, filtroOrg(req)));
-    if (!compra) throw err(404, 'Una de las compras elegidas no existe (o no pertenece a esta organización)');
+    if (!compra) throw err(404, 'Una de las compras elegidas no existe o es de otra sucursal. Si es de otra sucursal, cambiá "Opero en" (barra de arriba) a esa sucursal para pagarla.');
     if (compra.estado === 'anulada') throw err(400, `La compra #${compra.numero} está anulada, no se le pueden registrar pagos.`);
     if (String(compra.proveedorId) !== String(proveedorId)) throw err(400, `La compra #${compra.numero} no es de este proveedor.`);
     if (aplic.monto > compra.saldoPendiente + 0.01) throw err(400, `El monto aplicado a la compra #${compra.numero} (${aplic.monto}) es mayor que su saldo pendiente (${compra.saldoPendiente}).`);

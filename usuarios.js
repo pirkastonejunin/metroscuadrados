@@ -322,7 +322,17 @@ function resolverOrg(req, res, next) {
   const header = req.headers['x-org-id'];
   const u = req.usuario;
   if (u.rol.protegido) {
-    if (!header || header === 'todas') { req.orgId = null; return next(); }
+    if (!header || header === 'todas') {
+      // "Vista: todas las sucursales" (solo lectura de datos de todas). Para GUARDAR algo hay que elegir con qué sucursal se opera
+      // (header x-org-operar, que manda la barra superior): las altas y cambios se hacen siempre en UNA sucursal.
+      req.orgId = null; req.vistaTodas = true;
+      if (header === 'todas' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        const opH = String(req.headers['x-org-operar'] || ''); const op = /^[0-9a-f]{24}$/i.test(opH) ? toObjectId(opH) : null;
+        if (!op) return res.status(400).json({ error: 'Estás viendo todas las sucursales: elegí en la barra de arriba con qué sucursal operás para poder guardar.' });
+        req.orgId = op; req.orgOperar = op;
+      }
+      return next();
+    }
     const oid = toObjectId(header);
     if (!oid) return res.status(400).json({ error: 'x-org-id inválido' });
     req.orgId = oid;

@@ -20,6 +20,29 @@
 (function () {
   const TOKEN_KEY = 'obras_admin_token';
   const ORG_KEY = 'obras_org_activo';
+  // "Sucursal con la que se opera" (donde se guardan las altas y cambios), separada de la "vista" (ORG_KEY: una sucursal o todas).
+  const OPERAR_KEY = 'obras_org_operar';
+  // Cuando la vista es "todas las sucursales", todos los pedidos al servidor llevan además la sucursal de operación,
+  // así lo que se guarda queda en UNA sucursal (el servidor lo exige). Las pantallas no necesitan cambiar nada.
+  (function () {
+    if (window.__pnFetchOrg) return; window.__pnFetchOrg = true;
+    const f0 = window.fetch;
+    window.fetch = function (input, init) {
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        const operar = localStorage.getItem(OPERAR_KEY);
+        if (operar && url.indexOf('/api/') !== -1 && init && init.headers) {
+          const h = init.headers;
+          const esTodas = h instanceof Headers ? h.get('x-org-id') === 'todas' : h['x-org-id'] === 'todas';
+          if (esTodas) {
+            if (h instanceof Headers) h.set('x-org-operar', operar);
+            else init = Object.assign({}, init, { headers: Object.assign({}, h, { 'x-org-operar': operar }) });
+          }
+        }
+      } catch (e) { /* nunca romper un pedido por esto */ }
+      return f0.call(this, input, init);
+    };
+  })();
   let OCULTAR_ORG = false;
 
   const ICONOS = {
@@ -217,7 +240,7 @@
       .pn-sidebar-footer button:hover { border-color: var(--danger, #c53030); color: var(--danger, #c53030); }
       .pn-sidebar-footer button svg { width: 15px; height: 15px; }
       .pn-orgbar { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; vertical-align: middle; }
-      .pn-orgbar .pn-orgbar-lbl { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+      .pn-orgbar .pn-orgbar-lbl { white-space: nowrap; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
       .pn-orgbar select, .pn-orgbar .pn-orgbar-fija { padding: 7px 10px; border: 1px solid var(--accent, #555); border-radius: 8px; font-size: 13px; font-weight: 700; background: var(--accent-soft, var(--bg)); color: var(--accent, var(--pn-ink)); font-family: inherit; max-width: 220px; cursor: pointer; }
       .pn-orgbar .pn-orgbar-fija { cursor: default; }
       .pn-orgbar.pn-orgbar-todas select { border-color: #b7791f; background: #fffaf0; color: #b7791f; }
@@ -275,26 +298,52 @@
   // y Cerrar sesión. Se engancha al #topbarUser que ya tienen las pantallas.
   // Selector de sucursal SIEMPRE visible arriba, al lado del usuario: dice en qué
   // sucursal se está trabajando y permite cambiarla desde cualquier pantalla.
+  // Sucursal de operación vigente: la guardada si sigue siendo válida; si la vista (ORG_KEY) es una sucursal puntual, esa; si no, Piedra Negra / la primera.
+  function sucursalOperar(me) {
+    const orgs = me.organizaciones || [];
+    const ids = orgs.map(o => String(o._id));
+    const vista = localStorage.getItem(ORG_KEY) || '';
+    let op = vista && vista !== 'todas' && ids.includes(vista) ? vista : localStorage.getItem(OPERAR_KEY);
+    if (!op || !ids.includes(op)) { const def = orgs.find(o => o.nombre === 'Piedra Negra') || orgs[0]; op = def ? String(def._id) : ''; }
+    if (op) localStorage.setItem(OPERAR_KEY, op);
+    return op;
+  }
   function montarSelectorOrg(me, wrap) {
     if (document.querySelector('.pn-orgbar') || OCULTAR_ORG) return;
     const orgs = me.organizaciones || [];
     if (!orgs.length && !me.puedeVerTodas) return;
     const orgActiva = localStorage.getItem(ORG_KEY) || '';
     const puedeElegir = orgs.length > 1 || me.puedeVerTodas;
+    const operar = sucursalOperar(me);
     const box = document.createElement('div');
     box.className = 'pn-orgbar' + (orgActiva === 'todas' ? ' pn-orgbar-todas' : '');
     if (!puedeElegir) {
       box.innerHTML = `<span class="pn-orgbar-lbl">Sucursal</span><span class="pn-orgbar-fija">${escapeHtml(orgs[0].nombre)}</span>`;
+    } else if (me.puedeVerTodas) {
+      // Operás en UNA sucursal (acá se guarda todo); la vista puede ser solo esa o todas.
+      box.innerHTML = `<span class="pn-orgbar-lbl">Opero en</span><select id="pnTopOrg" aria-label="Sucursal con la que operás" title="Sucursal en la que se guardan las ventas, compras, pagos, etc.">
+          ${orgs.map(o => `<option value="${o._id}" ${o._id === operar ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
+        </select>
+        <span class="pn-orgbar-lbl">Ver</span><select id="pnTopVista" aria-label="Qué sucursales ver" title="Ver solo la sucursal con la que operás, o los datos de todas">
+          <option value="una" ${orgActiva !== 'todas' ? 'selected' : ''}>Solo esta sucursal</option>
+          <option value="todas" ${orgActiva === 'todas' ? 'selected' : ''}>Todas las sucursales</option>
+        </select>`;
     } else {
       box.innerHTML = `<span class="pn-orgbar-lbl">Sucursal</span><select id="pnTopOrg" aria-label="Sucursal de trabajo" title="Sucursal con la que estás trabajando (cambiala acá en cualquier momento)">
         ${orgs.map(o => `<option value="${o._id}" ${o._id === orgActiva ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
-        ${me.puedeVerTodas ? `<option value="todas" ${orgActiva === 'todas' ? 'selected' : ''}>Todas las sucursales</option>` : ''}
       </select>`;
     }
     wrap.parentElement.insertBefore(box, wrap);
-    const sel = box.querySelector('select');
+    const sel = box.querySelector('#pnTopOrg'), selVista = box.querySelector('#pnTopVista');
     if (sel) sel.addEventListener('change', function () {
-      if (this.value) localStorage.setItem(ORG_KEY, this.value); else localStorage.removeItem(ORG_KEY);
+      if (me.puedeVerTodas) {
+        localStorage.setItem(OPERAR_KEY, this.value);
+        localStorage.setItem(ORG_KEY, (localStorage.getItem(ORG_KEY) === 'todas') ? 'todas' : this.value);
+      } else if (this.value) localStorage.setItem(ORG_KEY, this.value); else localStorage.removeItem(ORG_KEY);
+      location.reload();
+    });
+    if (selVista) selVista.addEventListener('change', function () {
+      localStorage.setItem(ORG_KEY, this.value === 'todas' ? 'todas' : sucursalOperar(me));
       location.reload();
     });
   }
@@ -361,6 +410,7 @@
     if (document.querySelector('.pn-sidebar')) return; // ya renderizado (evita duplicar si algo llama render 2 veces)
 
     const orgs = me.organizaciones || [];
+    if (me.puedeVerTodas) sucursalOperar(me);
     const orgActiva = localStorage.getItem(ORG_KEY) || '';
     // admin-costos.html ya trae su propio selector de organización en el
     // header (con el aviso de "todas" y la lógica de deshabilitar creación),
@@ -449,6 +499,7 @@
       orgSelect.addEventListener('change', function () {
         if (this.value) localStorage.setItem(ORG_KEY, this.value);
         else localStorage.removeItem(ORG_KEY);
+        if (this.value && this.value !== 'todas') localStorage.setItem(OPERAR_KEY, this.value);
         location.reload();
       });
     }
