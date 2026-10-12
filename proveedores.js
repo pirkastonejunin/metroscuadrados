@@ -220,6 +220,42 @@ router.get('/', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Saldo de cada proveedor (el MISMO que muestra su cuenta corriente: saldo inicial Dux + compras y gastos propios + ajustes − pagos),
+// para las tarjetas de totales y la columna Saldo de la lista. Positivo = le debemos; negativo = a favor nuestro.
+router.get('/resumen-saldos', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const compartidos = req.orgId ? (await db.collection('proveedores').find({ $or: [{ orgIdsCompartidas: req.orgId }, { orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }] }).project({ _id: 1 }).toArray()).map(x => x._id) : [];
+      const fo = req.orgId ? (compartidos.length ? { $or: [{ orgId: req.orgId }, { proveedorId: { $in: compartidos } }] } : { orgId: req.orgId }) : {};
+      const mapa = new Map();
+      const suma = (id, v) => { if (!id) return; const k = String(id); mapa.set(k, (mapa.get(k) || 0) + v); };
+      const esNC = { $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } };
+      const signo = { $cond: [esNC, -1, 1] };
+      const [iniciales, compras, gastos, pagosGasto, pagos, ajustes] = await Promise.all([
+        db.collection('proveedores_saldos_iniciales').aggregate([{ $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        db.collection('compras').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, fo) }, { $unwind: '$pagos' }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray(),
+        db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        db.collection('proveedores_ajustes').aggregate([{ $match: fo }, { $group: { _id: '$proveedorId', t: { $sum: { $cond: [{ $eq: ['$tipo', 'debito'] }, '$monto', { $multiply: ['$monto', -1] }] } } } }]).toArray()
+      ]);
+      iniciales.forEach(x => suma(x._id, x.t)); compras.forEach(x => suma(x._id, x.t)); gastos.forEach(x => suma(x._id, x.t));
+      pagosGasto.forEach(x => suma(x._id, -x.t)); pagos.forEach(x => suma(x._id, -x.t)); ajustes.forEach(x => suma(x._id, x.t));
+      const provs = await db.collection('proveedores').find(Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req))).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const saldos = {}; let deuda = 0, aFavor = 0, conDeuda = 0, mayor = null;
+      provs.forEach(pr => {
+        const s = r2(mapa.get(String(pr._id)) || 0); saldos[String(pr._id)] = s;
+        if (s > 0.5) { deuda += s; conDeuda++; if (!mayor || s > mayor.saldo) mayor = { proveedorId: String(pr._id), nombre: pr.razonSocial || pr.nombreFantasia || '', saldo: s }; }
+        else if (s < -0.5) aFavor += -s;
+      });
+      return { activos: provs.length, conDeuda, deuda: r2(deuda), aFavor: r2(aFavor), mayor, saldos };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // -----------------------------------------------------------------------
 // Import / export en Excel (.xlsx) — ver importExport.js.
 // -----------------------------------------------------------------------

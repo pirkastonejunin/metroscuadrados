@@ -28,6 +28,13 @@
   header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
   header button:hover{border-color:var(--danger);color:var(--danger);}
   main{padding:20px;max-width:1200px;margin:0 auto;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);}
+  .kpi .t{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .kpi .v{font-size:20px;font-weight:800;margin-top:6px;}
+  .kpi .s{font-size:12px;color:var(--muted);margin-top:4px;}
+  .kpi .v.neg{color:var(--danger);}
+  .kpi .v.pos{color:var(--ok);}
   .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
@@ -142,10 +149,11 @@
         </div>
       </div>
     </div>
+    <div class="kpis" id="kpisProveedores"></div>
     <div class="card">
       <table>
-        <thead><tr><th>Código</th><th>Proveedor</th><th>Rubro</th><th>CUIT / Doc.</th><th>Contacto</th><th>Estado</th><th></th></tr></thead>
-        <tbody id="proveedoresBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
+        <thead><tr><th>Código</th><th>Proveedor</th><th>Rubro</th><th>CUIT / Doc.</th><th>Contacto</th><th style="text-align:right">Saldo</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="proveedoresBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
       </table>
     </div>
   </main>
@@ -250,9 +258,39 @@ async function cargarProveedores(){
   if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
   const body = document.getElementById('proveedoresBody');
-  if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
   proveedoresCache = await r.json();
+  await cargarResumenSaldos();
   renderProveedores();
+}
+
+
+// Tarjetas de totales + columna Saldo (mismo saldo que la cuenta corriente de cada proveedor).
+let resumenSaldosProv = null;
+async function cargarResumenSaldos(){
+  try {
+    const r = await fetch(BASE + '/resumen-saldos', {headers: headersAuth()});
+    resumenSaldosProv = r.ok ? await r.json() : null;
+  } catch (e) { resumenSaldosProv = null; }
+  renderKpisProveedores();
+}
+function saldoCeldaProv(id){
+  if (!resumenSaldosProv) return '<span class="muted">—</span>';
+  const s = resumenSaldosProv.saldos[String(id)];
+  if (s === undefined) return '<span class="muted">—</span>';
+  if (Math.abs(s) < 0.5) return '<span class="muted">$ 0,00</span>';
+  return `<strong style="color:${s > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(s)}</strong>`;
+}
+function renderKpisProveedores(){
+  const el = document.getElementById('kpisProveedores'); if (!el) return;
+  const d = resumenSaldosProv;
+  if (!d) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="kpi"><div class="t">Proveedores activos</div><div class="v">${d.activos}</div><div class="s">${d.conDeuda} con saldo a pagar</div></div>
+    <div class="kpi"><div class="t">Les debemos</div><div class="v ${d.deuda > 0 ? 'neg' : ''}">${money(d.deuda)}</div><div class="s">suma de los saldos a pagar</div></div>
+    <div class="kpi"><div class="t">A favor nuestro</div><div class="v ${d.aFavor > 0 ? 'pos' : ''}">${money(d.aFavor)}</div><div class="s">pagos a cuenta y créditos sin aplicar</div></div>
+    <div class="kpi"><div class="t">Neto</div><div class="v ${d.deuda - d.aFavor > 0 ? 'neg' : 'pos'}">${money(d.deuda - d.aFavor)}</div><div class="s">lo que debemos menos lo que tenemos a favor</div></div>
+    <div class="kpi"><div class="t">Mayor deuda</div><div class="v" style="font-size:16px">${d.mayor ? escapeHtml(d.mayor.nombre) : '—'}</div><div class="s">${d.mayor ? money(d.mayor.saldo) : 'Sin deudas'}</div></div>`;
 }
 
 const CATEGORIA_FISCAL_LABEL = {
@@ -263,7 +301,7 @@ const TIPO_DOCUMENTO_LABEL = { cuil: 'CUIL', cuit: 'CUIT', dni: 'DNI', pasaporte
 
 function renderProveedores(){
   const body = document.getElementById('proveedoresBody');
-  if (!proveedoresCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay proveedores todavía.</td></tr>'; return; }
+  if (!proveedoresCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay proveedores todavía.</td></tr>'; return; }
   body.innerHTML = proveedoresCache.map(p => `
     <tr>
       <td><strong>${escapeHtml(p.codigo || '—')}</strong></td>
@@ -271,6 +309,7 @@ function renderProveedores(){
       <td class="muted">${escapeHtml(p.rubro || '—')}</td>
       <td class="muted">${p.cuit ? escapeHtml(p.cuit) : (p.numeroDocumento ? `${TIPO_DOCUMENTO_LABEL[p.tipoDocumento]||'Doc.'} ${escapeHtml(p.numeroDocumento)}` : '—')}</td>
       <td class="muted">${[p.telefono || p.celular, p.email].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
+      <td style="text-align:right;white-space:nowrap">${saldoCeldaProv(p._id)}</td>
       <td><span class="pill ${p.activo === false ? 'inactivo' : 'activo'}">${p.activo === false ? 'Inactivo' : 'Activo'}</span></td>
       <td>
         <button class="btn small secondary" onclick="abrirEditarProveedor('${p._id}')">Editar</button>
