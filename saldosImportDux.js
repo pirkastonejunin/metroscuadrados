@@ -154,7 +154,7 @@ router.post('/clientes/preview', authClientes, async (req, res) => { try { res.j
 router.post('/clientes/aplicar', authClientes, async (req, res) => { try { res.json(await procesar(req, true)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); } });
 
 // ---------------------------------------------------------------------------
-// SALDOS DE PROVEEDORES (Dux: "Consulta de Proveedores con Saldo"): positivo = le debemos al proveedor; negativo = tenemos saldo a favor.
+// SALDOS DE PROVEEDORES (Dux: "Consulta de Proveedores con Saldo"): en el Excel de Dux el signo viene al revés: NEGATIVO = le debemos al proveedor; positivo = tenemos saldo a favor. Acá se guarda invertido (positivo = le debemos).
 // Se guardan en `proveedores_saldos_iniciales` (uno por proveedor) y son la base del saldo de su cuenta corriente: las compras, gastos y
 // pagos importados de Dux quedan como historial y no suman al saldo. Repetible: volver a subir el archivo reemplaza el saldo anterior.
 // Cada proveedor se busca por CUIT y por nombre en todas las sucursales; si está en varias va a la que tiene más compras; si no existe se
@@ -175,7 +175,7 @@ function leerProv(base64) {
     if (norm(nombre) === 'proveedor') continue; // encabezado repetido
     if (vistos.has(norm(nombre))) { errores.push({ fila: i + 1, motivo: 'Proveedor repetido (' + nombre + '): se ignora la segunda línea' }); continue; } vistos.add(norm(nombre));
     const cuit = ci >= 0 && f[ci] != null ? String(f[ci]).replace(/\D/g, '') : '';
-    lista.push({ fila: i + 1, nombre, saldo: round2(numero(f[si])), cuit: cuit.length === 11 ? cuit : '' });
+    lista.push({ fila: i + 1, nombre, saldo: round2(-numero(f[si])) || 0, cuit: cuit.length === 11 ? cuit : '' });
   }
   return { lista, errores };
 }
@@ -220,6 +220,7 @@ async function procesarProv(req, aplicar) {
     for (let i = asignados.length - 1; i >= 0; i--) { const a = asignados[i]; if (!a.proveedorId) continue; const k = String(a.proveedorId);
       if (unif.has(k)) { const base = unif.get(k); base.saldo = round2(base.saldo + a.saldo); base.nombre += ' + ' + a.nombre; unificados++; asignados.splice(i, 1); } else unif.set(k, a); }
 
+    await db.collection('proveedores_saldos_iniciales').updateMany({ origen: 'dux', signoCorregido: { $ne: true } }, [{ $set: { monto: { $multiply: ['$monto', -1] }, signoCorregido: true } }]); // saldos cargados antes de corregir el signo
     const ids = asignados.filter(a => a.proveedorId).map(a => a.proveedorId);
     const previos = new Map((ids.length ? await db.collection('proveedores_saldos_iniciales').find({ proveedorId: { $in: ids } }).toArray() : []).map(d => [String(d.proveedorId), d]));
     const aCambiar = asignados.filter(a => !a.proveedorId || !previos.has(String(a.proveedorId)) || Math.abs(previos.get(String(a.proveedorId)).monto - a.saldo) >= 0.005);
@@ -245,7 +246,7 @@ async function procesarProv(req, aplicar) {
     let cargados = 0;
     const poner = async (a) => {
       await db.collection('proveedores_saldos_iniciales').updateOne({ proveedorId: a.proveedorId },
-        { $set: { proveedorNombre: a.nombre, monto: a.saldo, fecha: fechaCorte, orgId: a.orgId, origen: 'dux', usuarioNombre, updatedAt: ahora }, $setOnInsert: { proveedorId: a.proveedorId, createdAt: ahora } }, { upsert: true });
+        { $set: { proveedorNombre: a.nombre, monto: a.saldo, fecha: fechaCorte, orgId: a.orgId, origen: 'dux', signoCorregido: true, usuarioNombre, updatedAt: ahora }, $setOnInsert: { proveedorId: a.proveedorId, createdAt: ahora } }, { upsert: true });
       cargados++;
     };
     for (const a of aCambiar) if (a.proveedorId) await poner(a);

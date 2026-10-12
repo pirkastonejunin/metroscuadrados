@@ -1054,12 +1054,19 @@ async function abrirConciliacionDux(){
         <div class="card" style="padding:8px 12px"><span class="muted">Total Dux</span><br><b>${money(d.totalDux)}</b></div>
         <div class="card" style="padding:8px 12px"><span class="muted">Total calculado</span><br><b>${money(d.totalCalculado)}</b></div>
       </div>
+      ${d.signoOpuesto > d.mismoSigno ? `<div style="margin:8px 0;padding:8px 10px;border:1px solid #c62828;border-radius:8px"><b>Los saldos de Dux están cargados con el signo al revés.</b> <button class="btn" onclick="corregirSignoDux()">Invertir signo de los saldos de Dux</button> <span class="muted" id="concilFix"></span></div>` : ''}
       <button class="btn secondary" onclick="descargarConcilCsv()">Descargar CSV</button>
       <div style="max-height:55vh;overflow:auto;margin-top:8px"><table style="width:100%;font-size:13px;border-collapse:collapse">
         <tr class="muted"><td>Proveedor</td><td style="text-align:right">Saldo Dux</td><td style="text-align:right">Compras</td><td style="text-align:right">Gastos</td><td style="text-align:right">Pagos</td><td style="text-align:right">Calculado</td><td style="text-align:right">Diferencia</td><td>Estado</td></tr>
         ${concilFilas.map(f => `<tr><td>${escapeHtml(f.nombre)}</td><td style="text-align:right">${money(f.dux)}</td><td style="text-align:right">${money(f.compras)}</td><td style="text-align:right">${money(f.gastos)}</td><td style="text-align:right">${money(f.pagos)}</td><td style="text-align:right">${money(f.calculado)}</td><td style="text-align:right">${money(f.diferencia)}</td><td style="color:${col[f.estado]}"><b>${f.estado}</b></td></tr>`).join('')}
       </table></div>`;
   } catch (e) { document.getElementById('concilRes').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
+}
+async function corregirSignoDux(){
+  if (!confirm('Se invierte el signo de todos los saldos iniciales traídos de Dux (una sola vez). ¿Seguro?')) return;
+  const r = await fetch('/api/proveedores/corregir-signo-dux', { method: 'POST', headers: headersAuthJson() }); const d = await r.json();
+  if (!r.ok) { document.getElementById('concilFix').textContent = d.error || 'Error'; return; }
+  await abrirConciliacionDux(); if (typeof cargar === 'function') try { cargar(); } catch (e) {}
 }
 function descargarConcilCsv(){
   const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';

@@ -258,6 +258,17 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
 
 // Conciliación con Dux: por proveedor, el saldo que se trajo de Dux (saldo inicial) contra lo que da el historial importado
 // (compras + gastos − notas de crédito − pagos). Sirve para ver si el signo del saldo de Dux quedó invertido o si hay diferencias puntuales.
+// Los saldos iniciales cargados de Dux antes de la corrección tenían el signo al revés (Dux: negativo = le debemos). Se invierten una sola vez.
+router.post('/corregir-signo-dux', authAdmin, async (req, res) => {
+  try {
+    const n = await conReintento(async () => {
+      const db = await getDb();
+      const r = await db.collection('proveedores_saldos_iniciales').updateMany({ origen: 'dux', signoCorregido: { $ne: true } }, [{ $set: { monto: { $multiply: ['$monto', -1] }, signoCorregido: true } }]);
+      return r.modifiedCount;
+    });
+    res.json({ corregidos: n });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.get('/conciliacion-dux', authAdmin, async (req, res) => {
   try {
     const out = await conReintento(async () => {
