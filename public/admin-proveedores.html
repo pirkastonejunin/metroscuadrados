@@ -265,32 +265,71 @@ async function cargarProveedores(){
 }
 
 
-// Tarjetas de totales + columna Saldo (mismo saldo que la cuenta corriente de cada proveedor).
+// Tarjetas de totales + ranking + columna Saldo (mismo saldo que la cuenta corriente de cada proveedor).
+// Son dinámicas: se calculan sobre lo que muestra la lista (búsqueda, "Ver inactivos") y al tocar una tarjeta la lista se filtra.
 let resumenSaldosProv = null;
+let filtroSaldoProv = '';   // '' | 'deuda' | 'favor'
 async function cargarResumenSaldos(){
   try {
     const r = await fetch(BASE + '/resumen-saldos', {headers: headersAuth()});
     resumenSaldosProv = r.ok ? await r.json() : null;
   } catch (e) { resumenSaldosProv = null; }
-  renderKpisProveedores();
+}
+function saldoProv(id){
+  if (!resumenSaldosProv) return null;
+  const s = resumenSaldosProv.saldos[String(id)];
+  return s === undefined ? null : s;
+}
+function proveedoresVisibles(){
+  const ord = filtroSaldoProv === 'deuda' ? (a, b) => (saldoProv(b._id) || 0) - (saldoProv(a._id) || 0) : (filtroSaldoProv === 'favor' ? (a, b) => (saldoProv(a._id) || 0) - (saldoProv(b._id) || 0) : null);
+  const l = proveedoresCache.filter(p => {
+    const s = saldoProv(p._id) || 0;
+    if (filtroSaldoProv === 'deuda') return s > 0.5;
+    if (filtroSaldoProv === 'favor') return s < -0.5;
+    return true;
+  });
+  return ord ? l.sort(ord) : l;
 }
 function saldoCeldaProv(id){
-  if (!resumenSaldosProv) return '<span class="muted">—</span>';
-  const s = resumenSaldosProv.saldos[String(id)];
-  if (s === undefined) return '<span class="muted">—</span>';
+  const s = saldoProv(id);
+  if (s === null) return '<span class="muted">—</span>';
   if (Math.abs(s) < 0.5) return '<span class="muted">$ 0,00</span>';
   return `<strong style="color:${s > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(s)}</strong>`;
 }
+function toggleFiltroSaldoProv(f){
+  filtroSaldoProv = filtroSaldoProv === f ? '' : f;
+  renderProveedores();
+}
 function renderKpisProveedores(){
   const el = document.getElementById('kpisProveedores'); if (!el) return;
-  const d = resumenSaldosProv;
-  if (!d) { el.innerHTML = ''; return; }
+  if (!resumenSaldosProv) { el.innerHTML = ''; return; }
+  const lista = proveedoresCache.map(p => ({ p, s: saldoProv(p._id) || 0 }));
+  const deudores = lista.filter(x => x.s > 0.5).sort((a, b) => b.s - a.s);
+  const favor = lista.filter(x => x.s < -0.5);
+  const deuda = deudores.reduce((a, x) => a + x.s, 0), aFavor = favor.reduce((a, x) => a - x.s, 0), neto = deuda - aFavor;
+  const top = deudores.slice(0, 8), max = top.length ? top[0].s : 1;
+  const act = (f) => filtroSaldoProv === f ? 'outline:2px solid var(--accent);' : '';
   el.innerHTML = `
-    <div class="kpi"><div class="t">Proveedores activos</div><div class="v">${d.activos}</div><div class="s">${d.conDeuda} con saldo a pagar</div></div>
-    <div class="kpi"><div class="t">Les debemos</div><div class="v ${d.deuda > 0 ? 'neg' : ''}">${money(d.deuda)}</div><div class="s">suma de los saldos a pagar</div></div>
-    <div class="kpi"><div class="t">A favor nuestro</div><div class="v ${d.aFavor > 0 ? 'pos' : ''}">${money(d.aFavor)}</div><div class="s">pagos a cuenta y créditos sin aplicar</div></div>
-    <div class="kpi"><div class="t">Neto</div><div class="v ${d.deuda - d.aFavor > 0 ? 'neg' : 'pos'}">${money(d.deuda - d.aFavor)}</div><div class="s">lo que debemos menos lo que tenemos a favor</div></div>
-    <div class="kpi"><div class="t">Mayor deuda</div><div class="v" style="font-size:16px">${d.mayor ? escapeHtml(d.mayor.nombre) : '—'}</div><div class="s">${d.mayor ? money(d.mayor.saldo) : 'Sin deudas'}</div></div>`;
+    <div class="kpi" style="cursor:pointer;${act('deuda')}" onclick="toggleFiltroSaldoProv('deuda')" title="Tocá para ver solo los proveedores a los que les debemos">
+      <div class="t">Les debemos</div><div class="v ${deuda > 0 ? 'neg' : ''}">${money(deuda)}</div><div class="s">${deudores.length} proveedor${deudores.length === 1 ? '' : 'es'} con saldo a pagar</div></div>
+    <div class="kpi" style="cursor:pointer;${act('favor')}" onclick="toggleFiltroSaldoProv('favor')" title="Tocá para ver solo los proveedores con saldo a favor nuestro">
+      <div class="t">A favor nuestro</div><div class="v ${aFavor > 0 ? 'pos' : ''}">${money(aFavor)}</div><div class="s">${favor.length} proveedor${favor.length === 1 ? '' : 'es'} — pagos a cuenta y créditos</div></div>
+    <div class="kpi">
+      <div class="t">Neto</div><div class="v ${neto > 0 ? 'neg' : 'pos'}">${money(neto)}</div><div class="s">lo que debemos menos lo que tenemos a favor</div></div>
+    <div class="kpi" style="grid-column:span 2;min-width:300px">
+      <div class="t">Ranking de deuda</div>
+      ${top.length ? `<div style="margin-top:8px;display:grid;gap:6px">${top.map((x, i) => `
+        <div style="display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center;font-size:13px;cursor:pointer" onclick="abrirCuentaProveedorDesdeRanking('${x.p._id}')" title="Ver su cuenta corriente">
+          <span class="muted" style="font-weight:800">${i + 1}</span>
+          <div style="min-width:0"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${escapeHtml(x.p.razonSocial || x.p.nombreFantasia || '')}</div>
+            <div style="height:5px;border-radius:3px;background:var(--border);margin-top:3px"><div style="height:5px;border-radius:3px;background:var(--danger);width:${Math.max(3, Math.round(x.s / max * 100))}%"></div></div></div>
+          <strong>${money(x.s)}</strong>
+        </div>`).join('')}</div>${deudores.length > top.length ? `<div class="s">y ${deudores.length - top.length} más</div>` : ''}` : '<div class="s" style="margin-top:8px">Ningún proveedor con deuda.</div>'}
+    </div>`;
+}
+function abrirCuentaProveedorDesdeRanking(id){
+  abrirEditarProveedor(id);
+  mostrarTabProveedor('cuenta-corriente', id);
 }
 
 const CATEGORIA_FISCAL_LABEL = {
@@ -301,8 +340,11 @@ const TIPO_DOCUMENTO_LABEL = { cuil: 'CUIL', cuit: 'CUIT', dni: 'DNI', pasaporte
 
 function renderProveedores(){
   const body = document.getElementById('proveedoresBody');
+  renderKpisProveedores();
+  const visibles = proveedoresVisibles();
   if (!proveedoresCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay proveedores todavía.</td></tr>'; return; }
-  body.innerHTML = proveedoresCache.map(p => `
+  if (!visibles.length) { body.innerHTML = '<tr><td colspan="8" class="muted">Ningún proveedor coincide con el filtro. <a href="javascript:void(0)" onclick="toggleFiltroSaldoProv(filtroSaldoProv)">Quitar filtro</a></td></tr>'; return; }
+  body.innerHTML = visibles.map(p => `
     <tr>
       <td><strong>${escapeHtml(p.codigo || '—')}</strong></td>
       <td>${escapeHtml(p.razonSocial)}${p.nombreFantasia ? `<div class="muted">${escapeHtml(p.nombreFantasia)}</div>` : ''}</td>

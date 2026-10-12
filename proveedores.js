@@ -242,7 +242,7 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
       ]);
       iniciales.forEach(x => suma(x._id, x.t)); compras.forEach(x => suma(x._id, x.t)); gastos.forEach(x => suma(x._id, x.t));
       pagosGasto.forEach(x => suma(x._id, -x.t)); pagos.forEach(x => suma(x._id, -x.t)); ajustes.forEach(x => suma(x._id, x.t));
-      const provs = await db.collection('proveedores').find(Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req))).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+      const provs = await db.collection('proveedores').find(Object.assign({}, filtroOrgClientes(req))).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
       const r2 = (n) => Math.round(n * 100) / 100;
       const saldos = {}; let deuda = 0, aFavor = 0, conDeuda = 0, mayor = null;
       provs.forEach(pr => {
