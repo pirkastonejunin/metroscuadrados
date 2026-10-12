@@ -726,15 +726,30 @@ async function cargarCuentaCorrienteTab(id){
     // menos el efecto de la fila anterior (débito suma, crédito resta),
     // es decir, deshaciendo los movimientos uno por uno yendo hacia atrás
     // en el tiempo.
+    // Saldo corrido en dos tramos: (1) lo operado en el sistema (incluye el "Saldo inicial Dux"), del más nuevo al más viejo, deshaciendo
+    // movimiento por movimiento desde el saldo actual; (2) el historial importado de Dux (ventas, cobros, devoluciones), que ya está
+    // incluido en ese saldo inicial: su saldo corrido termina en el saldo inicial y, hacia atrás, resta cada movimiento. Lo que queda
+    // antes del primer movimiento cargado se muestra como "Saldo anterior al historial cargado", así la cuenta cierra.
     let saldoCorrido = data.saldo;
-    // Los movimientos importados de Dux (cobros históricos) no forman parte del saldo: no entran en el saldo corrido.
-    const filas = data.movimientos.map((m, i) => {
-      if (i > 0) {
-        const anterior = data.movimientos[i - 1];
-        if (!anterior.importado) saldoCorrido -= anterior.tipo === 'debito' ? anterior.monto : -anterior.monto;
-      }
-      return { m, saldo: m.importado ? null : saldoCorrido };
+    const nativos = data.movimientos.filter(m => !m.importado), hist = data.movimientos.filter(m => m.importado);
+    const saldoDe = new Map(); let anclaHist = null;
+    nativos.forEach((m, i) => {
+      if (i > 0) { const ant = nativos[i - 1]; saldoCorrido -= ant.tipo === 'debito' ? ant.monto : -ant.monto; }
+      saldoDe.set(m, saldoCorrido);
+      if (m.origen === 'saldo_inicial_dux') anclaHist = saldoCorrido;
     });
+    if (anclaHist === null) anclaHist = nativos.length ? saldoCorrido - (nativos[nativos.length - 1].tipo === 'debito' ? nativos[nativos.length - 1].monto : -nativos[nativos.length - 1].monto) : data.saldo;
+    let sh = anclaHist;
+    hist.forEach((m, i) => {
+      if (i > 0) { const ant = hist[i - 1]; sh -= ant.tipo === 'debito' ? ant.monto : -ant.monto; }
+      saldoDe.set(m, sh);
+    });
+    const filas = data.movimientos.map(m => ({ m, saldo: saldoDe.get(m) }));
+    let saldoAnterior = null;
+    if (data.completo && hist.length){
+      const ult = hist[hist.length - 1];
+      saldoAnterior = Math.round((sh - (ult.tipo === 'debito' ? ult.monto : -ult.monto)) * 100) / 100;
+    }
     // Botón "Cobrar" por fila (3/10/2026, pedido de Mato: "deberiamos
     // tener algun boton que nos permita generar un cobro de cada factura
     // o un cobro parcial") — solo tiene sentido en el movimiento de
@@ -769,14 +784,14 @@ async function cargarCuentaCorrienteTab(id){
               <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}${m.importado ? ' <span style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : ''}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
-              <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
+              <td class="muted">${money(saldo)}</td>
               <td style="white-space:nowrap">
                 ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
                 ${venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
             </tr>
-          `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
+          `; }).join('') + (saldoAnterior !== null && Math.abs(saldoAnterior) >= 0.01 ? `<tr><td></td><td colspan="2" class="muted"><i>Saldo anterior al historial cargado (lo que ya traía la cuenta antes de los movimientos importados de Dux)</i></td><td>${saldoAnterior > 0 ? money(saldoAnterior) : ''}</td><td>${saldoAnterior < 0 ? money(-saldoAnterior) : ''}</td><td class="muted">${money(saldoAnterior)}</td><td></td></tr>` : '') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
       </table>
     `;

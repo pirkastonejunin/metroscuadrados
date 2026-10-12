@@ -488,7 +488,16 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           .toArray();
         for (const v of ventas) ventasPorId[String(v._id)] = v;
       }
-      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos, ventasPorId };
+      // Totales de TODO el historial importado (aunque la lista se corte en `limite`): sirven para mostrar el "saldo anterior al historial cargado"
+      const usd = { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] };
+      const [vt, mt] = await Promise.all([
+        db.collection('ventas').aggregate([{ $match: { clienteId: id, importado: true, estado: { $ne: 'anulada' } } }, { $group: { _id: { $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } }, t: { $sum: { $multiply: [{ $abs: { $ifNull: ['$total', 0] } }, usd] } } } }]).toArray(),
+        db.collection('cuenta_corriente_movimientos').aggregate([{ $match: { clienteId: id, importado: true } }, { $group: { _id: '$tipo', t: { $sum: { $ifNull: ['$monto', 0] } } } }]).toArray()
+      ]);
+      const historial = { debito: 0, credito: 0 };
+      vt.forEach(x => { if (x._id) historial.credito += x.t; else historial.debito += x.t; }); mt.forEach(x => { if (x._id === 'credito') historial.credito += x.t; else historial.debito += x.t; });
+      historial.debito = Math.round(historial.debito * 100) / 100; historial.credito = Math.round(historial.credito * 100) / 100;
+      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos, ventasPorId, historial, completo: movimientos.length < limite };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
