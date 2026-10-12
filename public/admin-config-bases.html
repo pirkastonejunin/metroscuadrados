@@ -198,6 +198,8 @@
           <div style="padding-bottom:9px"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="cdAuto" onchange="cambiarCotizacionAuto(this.checked)"> Actualizar sola con el Banco Nación</label></div>
           <div class="muted" id="cdActualizado" style="padding-bottom:9px"></div>
         </div>
+        <div class="row" style="margin-top:6px"><div class="muted" id="cdBna"></div>
+        </div>
         <div class="err" id="cotizacionErr"></div>
       </div>
     </div>
@@ -487,6 +489,9 @@ async function cargarCotizacionDolar(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     document.getElementById('cdValor').value = data.valor != null ? data.valor : '';
+    document.getElementById('cdBna').innerHTML = data.bna
+      ? 'Banco Nación hoy: compra <b>$ ' + Number(data.bna.compra).toLocaleString('es-AR') + '</b> · venta <b>$ ' + Number(data.bna.venta).toLocaleString('es-AR') + '</b>' + (data.bna.fecha ? ' (' + new Date(data.bna.fecha).toLocaleString('es-AR') + ')' : '') + (data.auto ? '' : ' <a href="#" onclick="document.getElementById(\'cdValor\').value=' + data.bna.venta + ';return false">usar la de venta</a>')
+      : 'No pude consultar la cotización del Banco Nación ahora.';
     document.getElementById('cdAuto').checked = !!data.auto;
     document.getElementById('cdValor').readOnly = !!data.auto;
     document.getElementById('cdActualizado').textContent = data.actualizadoEn

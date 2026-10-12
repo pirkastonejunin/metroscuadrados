@@ -1149,38 +1149,51 @@ if (process.env.MONGODB_URI) {
   setInterval(refrescarTodasAuto, 30 * 60 * 1000).unref();
 }
 
+let cacheBna = null;
+async function dolarBnaCacheado() {
+  if (cacheBna && Date.now() - cacheBna.t < 5 * 60 * 1000) return cacheBna.v;
+  const v = await traerDolarBna(); cacheBna = { t: Date.now(), v }; return v;
+}
+// La cotización es una sola para todas las sucursales: se guarda una copia por organización (así la leen los demás módulos) y se escriben todas juntas.
 router.get('/config/cotizacion-dolar', authListasPrecio, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
-    const doc = await conReintento(async () => {
+    const out = await conReintento(async () => {
       const db = await getDb();
-      let d = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
-      if (d && d.auto && (!d.updatedAt || Date.now() - new Date(d.updatedAt).getTime() > 15 * 60 * 1000)) { try { d = await refrescarCotizacionAuto(db, d); } catch (e) { /* queda el último valor */ } }
-      return d;
+      const col = db.collection('config_general');
+      let d = await col.findOne(req.orgId ? { orgId: req.orgId, clave: 'cotizacionDolar' } : { clave: 'cotizacionDolar' }, { sort: { updatedAt: -1 } });
+      let bna = null; try { bna = await dolarBnaCacheado(); } catch (e) { /* sin dato del banco */ }
+      if (d && d.auto && bna && (!d.updatedAt || Date.now() - new Date(d.updatedAt).getTime() > 15 * 60 * 1000)) {
+        await col.updateMany({ clave: 'cotizacionDolar', auto: true }, { $set: { valor: bna.valor, compraBna: bna.compra, fuente: 'Banco Nación', fuenteFecha: bna.fuenteFecha, updatedAt: new Date() } });
+        d = await col.findOne({ _id: d._id });
+      }
+      return { valor: d ? d.valor : null, actualizadoEn: d ? d.updatedAt : null, auto: !!(d && d.auto), bna: bna ? { venta: bna.valor, compra: bna.compra, fecha: bna.fuenteFecha } : null };
     });
-    res.json({ valor: doc ? doc.valor : null, actualizadoEn: doc ? doc.updatedAt : null, auto: !!(doc && doc.auto), compraBna: doc ? doc.compraBna || null : null, fuenteFecha: doc ? doc.fuenteFecha || null : null });
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// body: { auto: true } -> pasa a automático y trae el valor del Banco Nación ahora; { valor } (con o sin auto:false) -> manual.
+// body: { auto: true } -> automático (Banco Nación, venta); { valor } -> manual. Se aplica a todas las sucursales.
 router.put('/config/cotizacion-dolar', authAdmin, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const body = req.body || {};
     const ahora = new Date();
     const out = await conReintento(async () => {
       const db = await getDb();
-      const filtro = { orgId: req.orgId, clave: 'cotizacionDolar' };
-      const base = { $setOnInsert: { orgId: req.orgId, clave: 'cotizacionDolar', createdAt: ahora } };
+      const orgs = await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray();
+      const ids = orgs.map(o => o._id); if (req.orgId && !ids.some(x => String(x) === String(req.orgId))) ids.push(req.orgId);
+      let set, res2;
       if (body.auto === true) {
         let c; try { c = await traerDolarBna(); } catch (e) { throw err(502, 'No pude consultar la cotización del Banco Nación ahora (' + e.message + '). Probá de nuevo en unos minutos.'); }
-        await db.collection('config_general').updateOne(filtro, Object.assign({ $set: { valor: c.valor, auto: true, compraBna: c.compra, fuente: 'Banco Nación', fuenteFecha: c.fuenteFecha, updatedAt: ahora } }, base), { upsert: true });
-        return { valor: c.valor, auto: true, compraBna: c.compra, fuenteFecha: c.fuenteFecha };
+        set = { valor: c.valor, auto: true, compraBna: c.compra, fuente: 'Banco Nación', fuenteFecha: c.fuenteFecha, updatedAt: ahora };
+        res2 = { valor: c.valor, auto: true };
+      } else {
+        const valor = Number(body.valor);
+        if (!Number.isFinite(valor) || valor <= 0) throw err(400, 'La cotización tiene que ser un número mayor a 0');
+        set = { valor, auto: false, fuente: 'Manual', updatedAt: ahora };
+        res2 = { valor, auto: false };
       }
-      const valor = Number(body.valor);
-      if (!Number.isFinite(valor) || valor <= 0) throw err(400, 'La cotización tiene que ser un número mayor a 0');
-      await db.collection('config_general').updateOne(filtro, Object.assign({ $set: { valor, auto: false, fuente: 'Manual', updatedAt: ahora } }, base), { upsert: true });
-      return { valor, auto: false };
+      await db.collection('config_general').bulkWrite(ids.map(id => ({ updateOne: { filter: { orgId: id, clave: 'cotizacionDolar' }, update: { $set: set, $setOnInsert: { orgId: id, clave: 'cotizacionDolar', createdAt: ahora } }, upsert: true } })));
+      return res2;
     });
     res.json(Object.assign({ actualizadoEn: ahora }, out));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
