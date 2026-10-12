@@ -758,7 +758,7 @@ async function cargarCuentaCorrienteTab(id){
             // "poder clikear en el comprobante para ver el detalle o
             // imprimirlo").
             const venta = m.ventaId ? ventasPorId[String(m.ventaId)] : null;
-            const cobrable = venta && m.tipo === 'debito' && venta.estado !== 'anulada' && venta.saldoPendiente > 0;
+            const cobrable = venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' && venta.saldoPendiente > 0;
             const conceptoHtml = `${escapeHtml(m.concepto || '—')}${m.observaciones ? `<div class="muted">${escapeHtml(m.observaciones)}</div>` : ''}`;
             return `
             <tr>
@@ -769,11 +769,11 @@ async function cargarCuentaCorrienteTab(id){
               <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}${m.importado ? ' <span style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : ''}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
-              <td class="muted">${saldo === null ? '<span title="Cobro histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
+              <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
               <td style="white-space:nowrap">
                 ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
-                ${venta && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
+                ${venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
             </tr>
           `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}

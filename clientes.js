@@ -457,10 +457,21 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
       if (!cliente) throw err(404, 'Cliente no encontrado');
-      const [movimientos, saldoDoc] = await Promise.all([
+      const [movs, saldoDoc, ventasImp] = await Promise.all([
         db.collection('cuenta_corriente_movimientos').find({ clienteId: id }).sort({ fecha: -1, createdAt: -1 }).limit(limite).toArray(),
-        db.collection('cuenta_corriente_saldos').findOne({ clienteId: id })
+        db.collection('cuenta_corriente_saldos').findOne({ clienteId: id }),
+        // Ventas históricas importadas de Dux: no generan movimiento (no suman al saldo), pero se muestran en el resumen como historial.
+        db.collection('ventas').find({ clienteId: id, importado: true, estado: { $ne: 'anulada' } })
+          .project({ fecha: 1, numero: 1, numeroOriginal: 1, tipoComprobante: 1, letra: 1, total: 1, moneda: 1, cotizacionDolar: 1, orgId: 1 }).sort({ fecha: -1 }).limit(limite).toArray()
       ]);
+      const conVenta = new Set(movs.filter(m => m.ventaId).map(m => String(m.ventaId)));
+      const virtuales = ventasImp.filter(v => !conVenta.has(String(v._id))).map(v => {
+        const nc = /^nota_credito/.test(v.tipoComprobante || '');
+        const factor = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
+        return { _id: 'v' + v._id, clienteId: id, tipo: nc ? 'credito' : 'debito', monto: Math.abs(Number(v.total) || 0) * factor, moneda: 'ARS', fecha: v.fecha, origen: 'venta', ventaId: v._id, importado: true,
+          concepto: (nc ? 'Nota de crédito ' : (v.tipoComprobante === 'nota_debito' ? 'Nota de débito ' : 'Venta ')) + (v.numeroOriginal || ('Nº ' + v.numero)), createdAt: v.fecha };
+      });
+      const movimientos = movs.concat(virtuales).sort((x, y) => new Date(y.fecha) - new Date(x.fecha) || new Date(y.createdAt || 0) - new Date(x.createdAt || 0)).slice(0, limite);
       // Saldo pendiente por venta (3/10/2026, pedido de Mato: poder
       // generar un cobro de cada factura, o uno parcial, directo desde
       // la cuenta corriente). Se resuelve acá, no en el frontend, porque
