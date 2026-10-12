@@ -1042,9 +1042,9 @@ async function cargarUnificar(){
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     unifGrupos = d.grupos;
     if (!d.grupos.length){ out.innerHTML = '<p class="ok-msg">No se encontraron clientes duplicados.</p>'; return; }
-    const seguros = d.grupos.filter(g => !g.riesgo).length;
     out.innerHTML = `<p><b>${d.total}</b> grupo(s) de posibles duplicados${d.total > d.grupos.length ? ' (se muestran los primeros ' + d.grupos.length + ')' : ''}.
-      ${seguros ? `<button class="btn" style="margin-left:8px" id="unifTodosBtn" onclick="unificarTodos()">Unificar los ${seguros} sin riesgo (conserva el de más ventas)</button>` : ''}</p><p class="muted" id="unifProg"></p>` + d.grupos.map((g, gi) => `
+      <button class="btn unifTodosBtn" style="margin-left:8px" onclick="unificarTodos(true)">Unificar TODO junto (${d.total} grupos)</button>
+      ${d.sinRiesgo && d.sinRiesgo < d.total ? `<button class="btn secondary unifTodosBtn" style="margin-left:8px" onclick="unificarTodos(false)">Solo los ${d.sinRiesgo} sin riesgo</button>` : ''}</p><p class="muted" id="unifProg"></p>` + d.grupos.map((g, gi) => `
       <div id="unifG${gi}" style="border:1px solid #ccc;border-radius:8px;padding:8px 10px;margin:8px 0;${g.riesgo ? 'border-color:#d9a400;background:rgba(217,164,0,.08)' : ''}">
         <div class="muted" style="margin-bottom:4px"><b>${escapeHtml(g.motivo)}</b></div>
         <table style="width:100%;font-size:13px;border-collapse:collapse">
@@ -1060,23 +1060,20 @@ async function cargarUnificar(){
       </div>`).join('');
   }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
 }
-async function unificarTodos(){
-  const idx = unifGrupos.map((g, i) => i).filter(i => !unifGrupos[i].riesgo);
-  if (!idx.length) return;
-  if (!confirm('Se van a unificar ' + idx.length + ' grupos de duplicados (los de nombre igual con CUIT distinto quedan para revisar). En cada grupo se conserva el cliente con más ventas. ¿Seguimos?')) return;
-  const btn = document.getElementById('unifTodosBtn'); if (btn) btn.disabled = true;
-  const prog = document.getElementById('unifProg'); let ok = 0, mal = 0, ult = '';
-  for (const gi of idx){
-    const g = unifGrupos[gi]; const k = g.miembros[0]._id; const perd = g.miembros.slice(1).map(m => m._id);
-    try{
-      const r = await fetch('/api/unificar-clientes/unificar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ganadorId: k, perdedorIds: perd})});
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); ok++;
-      const el = document.getElementById('unifG' + gi); if (el) el.innerHTML = '<span class="ok-msg">Listo: ' + d.unificados + ' unificado(s) en ' + escapeHtml(d.conservado) + '.</span>';
-    }catch(e){ mal++; ult = e.message; }
-    if (prog) prog.textContent = 'Unificando… ' + (ok + mal) + ' de ' + idx.length;
-  }
-  if (prog) prog.textContent = 'Terminado: ' + ok + ' grupos unificados' + (mal ? ', ' + mal + ' con error (' + ult + ')' : '') + '.';
-  if (typeof cargarClientes === 'function') cargarClientes();
+async function unificarTodos(incluirDudosos){
+  const prog = document.getElementById('unifProg');
+  const msg = incluirDudosos
+    ? 'Se van a unificar TODOS los grupos, incluidos los de mismo nombre con CUIT distinto (pueden ser personas distintas). En cada grupo se conserva el cliente con más ventas. No hay botón para deshacerlo. ¿Seguro?'
+    : 'Se van a unificar todos los grupos sin riesgo (mismo CUIT, o mismo nombre sin CUIT contradictorio). En cada grupo se conserva el cliente con más ventas. ¿Seguimos?';
+  if (!confirm(msg)) return;
+  document.querySelectorAll('.unifTodosBtn').forEach(b => b.disabled = true);
+  if (prog) prog.textContent = 'Unificando, puede tardar un par de minutos…';
+  try{
+    const r = await fetch('/api/unificar-clientes/unificar-todos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({incluirDudosos: !!incluirDudosos})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    document.getElementById('unifLista').innerHTML = '<p class="ok-msg">Listo: ' + d.grupos + ' grupos unificados (' + d.unificados + ' clientes duplicados juntados).</p>';
+    if (typeof cargarClientes === 'function') cargarClientes();
+  }catch(e){ if (prog) prog.textContent = ''; document.getElementById('unifErr').textContent = e.message; document.querySelectorAll('.unifTodosBtn').forEach(b => b.disabled = false); }
 }
 function unifMarcar(gi){
   const k = document.querySelector('input[name="unifK' + gi + '"]:checked').value;
