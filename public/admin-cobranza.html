@@ -279,6 +279,8 @@ async function iniciarApp(){
   document.getElementById('cbClienteCombo').innerHTML = comboClienteHtmlCB();
   document.getElementById('cbFecha').value = new Date().toISOString().slice(0,10);
   cargarListaCobranzas();
+  await ImpuestosUI.cargarTipos(BASE, headersAuth);
+  document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
   { const pre = new URLSearchParams(location.search).get('cliente'); // enlace desde la cuenta corriente del cliente
     if (pre) { history.replaceState(null, '', location.pathname); const cl = clientesCache.find(x => String(x._id) === pre);
       document.getElementById('cbCliente').value = pre; document.getElementById('cbBuscar').value = cl ? textoClienteCB(cl) : '';
@@ -287,8 +289,7 @@ async function iniciarApp(){
       fetch('/api/clientes/' + encodeURIComponent(pre) + '/cuenta-corriente?limite=1', {headers: headersAuth()}).then(r => r.ok ? r.json() : null).then(d => {
         if (d && d.saldo > 0.005 && !document.getElementById('cbMonto').value) { document.getElementById('cbMonto').value = Math.round(d.saldo * 100) / 100; document.getElementById('cbMonto').select(); }
       }).catch(() => {}); } }
-  await ImpuestosUI.cargarTipos(BASE, headersAuth);
-  document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
+  { const card = document.getElementById('nuevaCobranzaCard'); if (!card.classList.contains('hidden')) { const ir = () => card.scrollIntoView({behavior:'auto', block:'start'}); ir(); setTimeout(ir, 400); setTimeout(ir, 1200); } }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
