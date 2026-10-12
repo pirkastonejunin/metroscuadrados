@@ -256,6 +256,49 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Conciliación con Dux: por proveedor, el saldo que se trajo de Dux (saldo inicial) contra lo que da el historial importado
+// (compras + gastos − notas de crédito − pagos). Sirve para ver si el signo del saldo de Dux quedó invertido o si hay diferencias puntuales.
+router.get('/conciliacion-dux', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const compartidos = req.orgId ? (await db.collection('proveedores').find({ $or: [{ orgIdsCompartidas: req.orgId }, { orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }] }).project({ _id: 1 }).toArray()).map(x => x._id) : [];
+      const fo = req.orgId ? (compartidos.length ? { $or: [{ orgId: req.orgId }, { proveedorId: { $in: compartidos } }] } : { orgId: req.orgId }) : {};
+      const signo = { $cond: [{ $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } }, -1, 1] };
+      const agg = (col, extra, valor) => db.collection(col).aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, extra, fo) }, { $group: { _id: '$proveedorId', t: { $sum: valor }, n: { $sum: 1 } } }]).toArray();
+      const [ini, compras, gastos, pagos, pagosGasto] = await Promise.all([
+        db.collection('proveedores_saldos_iniciales').aggregate([{ $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        agg('compras', { importado: true }, { $multiply: ['$total', signo] }),
+        agg('gastos', { importado: true }, { $multiply: ['$total', signo] }),
+        db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: true }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' }, n: { $sum: 1 } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: true }, fo) }, { $unwind: '$pagos' }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray()
+      ]);
+      const m = new Map(); const get = (id) => { const k = String(id); if (!m.has(k)) m.set(k, { dux: 0, compras: 0, gastos: 0, pagos: 0 }); return m.get(k); };
+      ini.forEach(x => { if (x._id) get(x._id).dux += x.t; }); compras.forEach(x => { if (x._id) get(x._id).compras += x.t; }); gastos.forEach(x => { if (x._id) get(x._id).gastos += x.t; });
+      pagos.forEach(x => { if (x._id) get(x._id).pagos += x.t; }); pagosGasto.forEach(x => { if (x._id) get(x._id).pagos += x.t; });
+      const provs = await db.collection('proveedores').find(filtroOrgClientes(req)).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+      const nombre = new Map(provs.map(pr => [String(pr._id), pr.razonSocial || pr.nombreFantasia || '']));
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const filas = [];
+      for (const [k, v] of m) {
+        if (!nombre.has(k)) continue;
+        const calc = r2(v.compras + v.gastos - v.pagos), dux = r2(v.dux);
+        if (Math.abs(calc) < 0.5 && Math.abs(dux) < 0.5) continue;
+        const diff = r2(dux - calc);
+        const estado = Math.abs(diff) < 1 ? 'cuadra' : (Math.abs(dux + calc) < 1 ? 'invertido' : 'difiere');
+        filas.push({ proveedorId: k, nombre: nombre.get(k), dux, compras: r2(v.compras), gastos: r2(v.gastos), pagos: r2(v.pagos), calculado: calc, diferencia: diff, estado });
+      }
+      filas.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+      const cnt = { cuadra: 0, invertido: 0, difiere: 0 }; filas.forEach(f => cnt[f.estado]++);
+      const ambos = filas.filter(f => Math.abs(f.dux) >= 1 && Math.abs(f.calculado) >= 1);
+      const mismoSigno = ambos.filter(f => (f.dux > 0) === (f.calculado > 0)).length;
+      return { proveedores: filas.length, cuadran: cnt.cuadra, invertidos: cnt.invertido, difieren: cnt.difiere, conAmbos: ambos.length, mismoSigno, signoOpuesto: ambos.length - mismoSigno,
+        totalDux: r2(filas.reduce((a, f) => a + f.dux, 0)), totalCalculado: r2(filas.reduce((a, f) => a + f.calculado, 0)), filas };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // -----------------------------------------------------------------------
 // Import / export en Excel (.xlsx) — ver importExport.js.
 // -----------------------------------------------------------------------

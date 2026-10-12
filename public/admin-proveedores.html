@@ -144,6 +144,7 @@
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
           <button class="btn secondary" onclick="abrirSaldosProvDux()" title="Saldos de proveedores de Dux (Consulta de Proveedores con Saldo)">Saldos Dux</button>
           <button class="btn secondary" onclick="abrirUnificarP()" title="Buscar proveedores duplicados y unificarlos">Unificar duplicados</button>
+          <button class="btn secondary" onclick="abrirConciliacionDux()" title="Comparar el saldo traído de Dux con compras + gastos − pagos">Conciliar con Dux</button>
           <button class="btn secondary" onclick="abrirFichasDux()" title="Ficha de proveedores de Dux (Listado de Proveedores)">Fichas Dux</button>
           <button class="btn" onclick="abrirNuevoProveedor()">+ Nuevo proveedor</button>
         </div>
@@ -1022,6 +1023,51 @@ async function buscarCuitEnArca(pref, idNombre, conCategoria){
     err.textContent = '';
     if (d.estadoClave && String(d.estadoClave).toUpperCase() !== 'ACTIVO') err.textContent = 'Ojo: ARCA informa la clave como ' + d.estadoClave + '.';
   }catch(e){ err.textContent = e.message; }
+}
+
+
+// ---- Conciliación con el saldo de Dux ----
+let concilFilas = [];
+async function abrirConciliacionDux(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal" style="max-width:1000px;width:96%">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Conciliar saldos con Dux</h2>
+        <p class="muted">Compara, por proveedor, el saldo que se trajo de Dux contra lo calculado con el historial importado: compras + gastos (las notas de crédito restan) − pagos. "Invertido" quiere decir que el calculado es igual al de Dux pero con el signo contrario.</p>
+        <div id="concilRes"><p class="muted">Calculando…</p></div>
+      </div>
+    </div>`;
+  try {
+    const r = await fetch('/api/proveedores/conciliacion-dux', { headers: headersAuth() });
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    concilFilas = d.filas || [];
+    const orden = { difiere: 0, invertido: 1, cuadra: 2 };
+    concilFilas.sort((a, b) => (orden[a.estado] - orden[b.estado]) || Math.abs(b.diferencia) - Math.abs(a.diferencia));
+    const col = { cuadra: '#2e7d32', invertido: '#c62828', difiere: '#d9a400' };
+    document.getElementById('concilRes').innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0">
+        <div class="card" style="padding:8px 12px"><b>${d.cuadran}</b><br><span class="muted">cuadran</span></div>
+        <div class="card" style="padding:8px 12px"><b style="color:#c62828">${d.invertidos}</b><br><span class="muted">invertidos</span></div>
+        <div class="card" style="padding:8px 12px"><b style="color:#d9a400">${d.difieren}</b><br><span class="muted">difieren</span></div>
+        <div class="card" style="padding:8px 12px"><b>${d.mismoSigno}</b> / <b>${d.signoOpuesto}</b><br><span class="muted">mismo signo / signo opuesto (de ${d.conAmbos} con ambos)</span></div>
+        <div class="card" style="padding:8px 12px"><span class="muted">Total Dux</span><br><b>${money(d.totalDux)}</b></div>
+        <div class="card" style="padding:8px 12px"><span class="muted">Total calculado</span><br><b>${money(d.totalCalculado)}</b></div>
+      </div>
+      <button class="btn secondary" onclick="descargarConcilCsv()">Descargar CSV</button>
+      <div style="max-height:55vh;overflow:auto;margin-top:8px"><table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr class="muted"><td>Proveedor</td><td style="text-align:right">Saldo Dux</td><td style="text-align:right">Compras</td><td style="text-align:right">Gastos</td><td style="text-align:right">Pagos</td><td style="text-align:right">Calculado</td><td style="text-align:right">Diferencia</td><td>Estado</td></tr>
+        ${concilFilas.map(f => `<tr><td>${escapeHtml(f.nombre)}</td><td style="text-align:right">${money(f.dux)}</td><td style="text-align:right">${money(f.compras)}</td><td style="text-align:right">${money(f.gastos)}</td><td style="text-align:right">${money(f.pagos)}</td><td style="text-align:right">${money(f.calculado)}</td><td style="text-align:right">${money(f.diferencia)}</td><td style="color:${col[f.estado]}"><b>${f.estado}</b></td></tr>`).join('')}
+      </table></div>`;
+  } catch (e) { document.getElementById('concilRes').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
+}
+function descargarConcilCsv(){
+  const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [['Proveedor','Saldo Dux','Compras','Gastos','Pagos','Calculado','Diferencia','Estado'].join(';')]
+    .concat(concilFilas.map(f => [q(f.nombre), f.dux, f.compras, f.gastos, f.pagos, f.calculado, f.diferencia, f.estado].join(';')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'conciliacion-dux.csv'; a.click();
 }
 
 // ---- Unificar proveedores duplicados ----
