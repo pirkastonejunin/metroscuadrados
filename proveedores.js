@@ -44,7 +44,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 
 const router = express.Router();
@@ -206,11 +206,11 @@ function validarProveedor(body) {
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
-    const match = Object.assign({}, filtroOrg(req));
+    const match = Object.assign({}, filtroOrgClientes(req));
     if (soloActivos) match.activo = { $ne: false };
     if (req.query.q) {
       const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      match.$or = [{ razonSocial: re }, { nombreFantasia: re }, { codigo: re }, { cuit: re }, { numeroDocumento: re }];
+      match.$and = [{ $or: [{ razonSocial: re }, { nombreFantasia: re }, { codigo: re }, { cuit: re }, { numeroDocumento: re }] }];
     }
     const proveedores = await conReintento(async () => {
       const db = await getDb();
@@ -226,7 +226,7 @@ router.get('/', authAdmin, async (req, res) => {
 
 router.get('/export', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req));
     const proveedores = await conReintento(async () => {
       const db = await getDb();
       return db.collection('proveedores').find(match).sort({ razonSocial: 1 }).toArray();
@@ -366,13 +366,15 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 1000, 2000);
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
       if (!proveedor) throw err(404, 'Proveedor no encontrado');
 
+      // Un proveedor compartido entre sucursales (unificado) muestra toda su cuenta, de todas las sucursales que lo usan.
+      const fOrg = (proveedor.orgIdsCompartidas || []).length ? { orgId: { $in: [proveedor.orgId].concat(proveedor.orgIdsCompartidas) } } : filtroOrg(req);
       const [compras, gastos, pagosCompra, saldosIni] = await Promise.all([
-        db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
-        db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
-        db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, filtroOrg(req))).toArray(),
+        db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
+        db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
+        db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, fOrg)).toArray(),
         db.collection('proveedores_saldos_iniciales').find({ proveedorId: id }).toArray()
       ]);
 
@@ -432,7 +434,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
 async function proveedorDeLaOrg(db, req) {
   const id = toObjectId(req.params.id);
   if (!id) throw err(400, 'id inválido');
-  const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+  const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
   if (!proveedor) throw err(404, 'Proveedor no encontrado');
   return proveedor;
 }

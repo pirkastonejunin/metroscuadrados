@@ -32,7 +32,7 @@
 const express = require('express');
 const XLSX = require('xlsx');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -168,7 +168,7 @@ function reglaParaCliente(r) {
 async function proveedorDeOrg(db, req) {
   const id = oid(req.params.id);
   if (!id) throw err(400, 'id inválido');
-  const p = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+  const p = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
   if (!p) throw err(404, 'Proveedor no encontrado');
   return p;
 }

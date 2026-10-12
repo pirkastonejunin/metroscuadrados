@@ -88,7 +88,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg, tieneModulo } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes, tieneModulo } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64, leerEncabezadosXlsxBase64, sugerirMapeo } = require('./importExport');
 // Para mostrar en la ficha de producto el link y las fotos de Tiendanube
 // (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
@@ -798,7 +798,7 @@ router.post('/config/rubros/unificar-duplicados', authAdmin, async (req, res) =>
 // Proveedores (ver comentario de cabecera).
 router.get('/proveedores-lite', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req));
     const lista = await conReintento(async () => {
       const db = await getDb();
       return db.collection('proveedores')
@@ -1789,7 +1789,7 @@ router.post('/import', authAdmin, async (req, res) => {
 
 async function procesarImportProductos(db, req, jobId, filas) {
   const proveedoresActivos = await db.collection('proveedores')
-    .find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+    .find(Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req)))
     .project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
   const proveedorIdPorNombre = new Map();
   proveedoresActivos.forEach(p => {

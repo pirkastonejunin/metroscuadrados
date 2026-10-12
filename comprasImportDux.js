@@ -137,7 +137,7 @@ function crearResolverProveedores(db, orgId, ahora) {
   async function cargar() {
     if (mapa) return;
     mapa = new Map();
-    const provs = await db.collection('proveedores').find({ orgId, activo: { $ne: false } }).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+    const provs = await db.collection('proveedores').find({ $or: [{ orgId }, { orgIdsCompartidas: orgId }], activo: { $ne: false } }).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
     const agregar = (k, id) => { if (!k) return; if (!mapa.has(k)) mapa.set(k, new Set()); mapa.get(k).add(String(id)); };
     provs.forEach(p => [p.razonSocial, p.nombreFantasia, [p.razonSocial, p.nombreFantasia].filter(Boolean).join(', ')].forEach(n => clavesNombre(n).forEach(k => agregar(k, p._id))));
   }
