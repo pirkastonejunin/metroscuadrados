@@ -376,8 +376,16 @@ async function normalizarItems(db, req, itemsRaw) {
     let conceptoId = it.conceptoId ? toObjectId(it.conceptoId) : null;
     let conceptoNombre = normalizarTexto(it.conceptoNombre);
     if (conceptoId) {
-      const concepto = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: conceptoId }, filtroOrg(req)));
-      if (!concepto) throw err(400, 'Uno de los conceptos del gasto no existe (o no pertenece a esta organización)');
+      let concepto = await db.collection('gastos_conceptos').findOne(Object.assign({ _id: conceptoId }, filtroOrg(req)));
+      if (!concepto) {
+        // El catálogo es el mismo en todas las sucursales (cada una guarda su copia): si el id es de la copia de otra sucursal
+        // (p. ej. la lista se cargó mirando "todas"), se usa la copia equivalente de esta sucursal.
+        const otra = await db.collection('gastos_conceptos').findOne({ _id: conceptoId });
+        if (!otra) throw err(400, 'Uno de los conceptos del gasto no existe');
+        concepto = await crearConceptoInterno(db, req, otra.nombre);
+        if (!concepto) throw err(400, 'Uno de los conceptos del gasto no existe (o no pertenece a esta organización)');
+        conceptoId = concepto._id;
+      }
       conceptoNombre = concepto.nombre;
     } else if (conceptoNombre) {
       // Concepto nuevo cargado al vuelo desde la pantalla de Gastos —
