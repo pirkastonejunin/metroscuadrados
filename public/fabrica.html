@@ -214,7 +214,29 @@ function opcionesProductos(seleccionadoId){
   ).join('');
 }
 
+function textoProducto(p){ return p ? (p.sku ? p.sku + ' — ' : '') + p.nombre : ''; }
+function asegurarDatalistProductos(){
+  let dl = document.getElementById('dlProductos');
+  if (!dl) { dl = document.createElement('datalist'); dl.id = 'dlProductos'; document.body.appendChild(dl); }
+  dl.innerHTML = PRODUCTOS.map(p => `<option value="${escapeHtml(textoProducto(p))}"></option>`).join('');
+}
+// Busca por SKU o nombre mientras se escribe; si hay una sola coincidencia al salir del campo, la toma.
+function elegirProductoTexto(inp, alSalir){
+  const wrap = inp.closest('.fila-item-wrap');
+  const select = wrap.querySelector('select');
+  const q = inp.value.trim().toLowerCase();
+  let p = PRODUCTOS.find(x => textoProducto(x).toLowerCase() === q);
+  if (!p && alSalir && q) {
+    const c = PRODUCTOS.filter(x => textoProducto(x).toLowerCase().includes(q));
+    if (c.length === 1) { p = c[0]; inp.value = textoProducto(p); }
+  }
+  select.value = p ? String(p._id) : '';
+  inp.style.borderColor = (q && !p) ? 'var(--danger, #c0392b)' : '';
+  actualizarPreview(select);
+}
+
 function agregarFila(productoId, paquetes){
+  asegurarDatalistProductos();
   const cont = document.getElementById('filasItems');
   const fila = document.createElement('div');
   fila.className = 'fila-item-wrap';
@@ -222,7 +244,8 @@ function agregarFila(productoId, paquetes){
     <div class="fila-item">
       <div class="campo-producto">
         <label>Producto</label>
-        <select onchange="actualizarPreview(this)">${opcionesProductos(productoId)}</select>
+        <input type="text" class="prod-buscar" list="dlProductos" placeholder="Escribí para buscar un producto…" autocomplete="off" value="${escapeHtml(textoProducto(PRODUCTOS.find(p => String(p._id)===String(productoId))))}" oninput="elegirProductoTexto(this)" onchange="elegirProductoTexto(this,true)" style="width:100%">
+        <select style="display:none" onchange="actualizarPreview(this)">${opcionesProductos(productoId)}</select>
       </div>
       <div class="campo-paquetes">
         <label>Paquetes</label>
