@@ -160,20 +160,42 @@ const parser = new XMLParser({
   isArray: (name) => ['Err', 'Evt', 'Obs', 'FECAEDetResponse', 'PtoVenta', 'CondicionIvaReceptor', 'impuesto', 'Tributo', 'IvaTipo'].includes(name)
 });
 
+// Los servidores de ARCA a veces usan parámetros TLS viejos (clave DH chica) que el fetch de Node rechaza con "fetch failed": en ese caso se
+// reintenta con https y un nivel de seguridad de OpenSSL más permisivo (solo para hablar con ARCA).
+function postHttps(url, soapAction, xml, timeoutMs) {
+  const https = require('https');
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = https.request({ method: 'POST', hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, ciphers: 'DEFAULT:@SECLEVEL=0', minVersion: 'TLSv1',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: soapAction, 'Content-Length': Buffer.byteLength(xml) } }, (r) => {
+      const partes = []; r.on('data', c => partes.push(c)); r.on('end', () => resolve({ status: r.statusCode, texto: Buffer.concat(partes).toString('utf8') }));
+    });
+    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('timeout'), { name: 'AbortError' })));
+    req.on('error', reject); req.write(xml); req.end();
+  });
+}
 async function postSoap(url, soapAction, xml) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   let resp, texto;
   try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: soapAction },
-      body: xml, signal: ctl.signal
-    });
-    texto = await resp.text();
+    try {
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: soapAction },
+        body: xml, signal: ctl.signal
+      });
+      texto = await resp.text();
+    } catch (e1) {
+      if (e1.name === 'AbortError') throw e1;
+      // fallo de conexión/TLS: segundo intento con parámetros TLS permisivos
+      try { resp = await postHttps(url, soapAction, xml, TIMEOUT_MS); texto = resp.texto; }
+      catch (e2) { e2.causaPrimera = e1; throw e2; }
+    }
   } catch (e) {
     if (e.name === 'AbortError') throw err(504, 'ARCA tardó demasiado en responder. Probá de nuevo en unos minutos.', { incierto: true });
-    throw err(502, 'No se pudo conectar con ARCA: ' + e.message, { incierto: true });
+    const causa = (e.causaPrimera && e.causaPrimera.cause) || e.cause || e;
+    throw err(502, 'No se pudo conectar con ARCA: ' + e.message + (causa && (causa.code || causa.message) && causa !== e ? ' (' + [causa.code, causa.message].filter(Boolean).join(': ') + ')' : (e.code ? ' (' + e.code + ')' : '')), { incierto: true });
   } finally { clearTimeout(timer); }
   let doc;
   try { doc = parser.parse(texto); } catch (e) { throw err(502, 'ARCA devolvió una respuesta ilegible (estado ' + resp.status + ').', { incierto: true }); }
