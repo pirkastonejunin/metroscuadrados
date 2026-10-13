@@ -784,14 +784,17 @@ async function abrirPonerEnCero(){
         <button class="btn danger" style="margin-top:10px" onclick="ejecutarPonerEnCero()">Poner en cero los tildados</button>
       </div>
     </div>`;
+  const fila = (id, nombre, extra) => `<label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:6px 0;color:var(--text);font-size:14px"><input type="checkbox" class="pcDep" value="${id}" checked style="width:auto"> ${escapeHtml(nombre)} <span class="muted">${extra}</span></label>`;
+  const base = depositosCache.filter(d => d.activo !== false);
+  document.getElementById('pcLista').innerHTML = base.map(d => fila(d._id, d.nombre, '')).join('') || 'No se cargaron los depósitos.';
   try{
     const r = await fetch(BASE + '/poner-en-cero/preview', {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    document.getElementById('pcLista').innerHTML = d.depositos.map(x => `<label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:6px 0"><input type="checkbox" class="pcDep" value="${x.depositoId}" checked style="width:auto"> ${escapeHtml(x.nombre)} <span class="muted">— ${x.productos} productos con stock (${Math.round(x.unidades*100)/100} unidades)</span></label>`).join('') || 'No hay depósitos.';
-  }catch(e){ document.getElementById('pcLista').textContent = ''; document.getElementById('pcErr').textContent = e.message; }
+    if (d.depositos.length) document.getElementById('pcLista').innerHTML = d.depositos.map(x => fila(x.depositoId, x.nombre, `— ${x.productos} productos con stock (${Math.round(x.unidades*100)/100} unidades)`)).join('');
+  }catch(e){ document.getElementById('pcErr').textContent = e.message; }
 }
 async function ejecutarPonerEnCero(){
   const ids = [...document.querySelectorAll('.pcDep:checked')].map(c => c.value);
-  if (!ids.length) { document.getElementById('pcErr').textContent = 'Tildá al menos un depósito.'; return; }
+  if (!ids.length) { document.getElementById('pcErr').textContent = 'No hay ningún depósito tildado (si la lista está vacía, cerrá y volvé a abrir la pantalla).'; return; }
   try{
     const r = await fetch(BASE + '/poner-en-cero', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({depositoIds: ids, confirmar: document.getElementById('pcConf').value.trim()})});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
