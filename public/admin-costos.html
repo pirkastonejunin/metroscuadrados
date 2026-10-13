@@ -321,6 +321,15 @@ async function iniciarApp(){
   renderOrgSelector();
   await cargarInsumos();
   await cargarProductos();
+  // Viene de "Registrar producción" con un producto que no existe: abre el alta con el nombre ya puesto.
+  try {
+    const nuevo = new URLSearchParams(location.search).get('nuevoProducto');
+    if (nuevo !== null) {
+      showTab('productos');
+      abrirNuevoProducto();
+      document.getElementById('fpNombre').value = nuevo;
+    }
+  } catch(e) {}
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -622,7 +631,14 @@ function elegirProductoCatalogo(inp, alSalir){
     const m = CATALOGO_DISP.filter(x => textoCatalogo(x).toLowerCase().includes(q));
     if (m.length === 1) { c = m[0]; inp.value = textoCatalogo(c); }
   }
-  if (!c) return;
+  const msg = document.getElementById('fpCatalogoMsg');
+  if (!c) {
+    if (alSalir && q) {
+      if (!document.getElementById('fpNombre').value.trim()) document.getElementById('fpNombre').value = inp.value.trim();
+      msg.textContent = 'No está en Productos: se crea como producto nuevo con el nombre y SKU de abajo.';
+    }
+    return;
+  }
   document.getElementById('fpNombre').value = c.nombre;
   document.getElementById('fpSku').value = c.sku || '';
   const tipo = (c.unidad === 'm2') ? 'm2' : 'unidad';

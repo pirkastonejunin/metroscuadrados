@@ -232,7 +232,19 @@ function elegirProductoTexto(inp, alSalir){
   }
   select.value = p ? String(p._id) : '';
   inp.style.borderColor = (q && !p) ? 'var(--danger, #c0392b)' : '';
+  // Si no existe, se ofrece crearlo (en Costos de Producción, que es donde se arma la receta).
+  let aviso = wrap.querySelector('.prod-no-existe');
+  if (q && !p) {
+    if (!aviso) { aviso = document.createElement('div'); aviso.className = 'prod-no-existe muted'; aviso.style.cssText = 'font-size:12px;margin-top:4px'; inp.parentElement.appendChild(aviso); }
+    aviso.innerHTML = 'No está cargado. <a href="#" onclick="crearProductoNuevo(this);return false" style="color:var(--accent)">+ Crearlo ahora</a>';
+    aviso.dataset.texto = inp.value.trim();
+  } else if (aviso) aviso.remove();
   actualizarPreview(select);
+}
+
+function crearProductoNuevo(a){
+  const texto = a.parentElement.dataset.texto || '';
+  window.open('/admin-costos.html?nuevoProducto=' + encodeURIComponent(texto), '_blank');
 }
 
 function agregarFila(productoId, paquetes){
