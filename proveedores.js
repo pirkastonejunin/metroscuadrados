@@ -203,6 +203,13 @@ function validarProveedor(body) {
   };
 }
 
+// Las credenciales del portal (cifradas) nunca salen al navegador.
+function sinSecretos(p) {
+  if (!p || !p.portal) return p;
+  const portal = { tipo: p.portal.tipo, usuario: p.portal.usuario, tieneClave: !!p.portal.claveCifrada };
+  return Object.assign({}, p, { portal });
+}
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
@@ -216,7 +223,7 @@ router.get('/', authAdmin, async (req, res) => {
       const db = await getDb();
       return db.collection('proveedores').find(match).sort({ razonSocial: 1 }).toArray();
     });
-    res.json(proveedores);
+    res.json(proveedores.map(sinSecretos));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -419,7 +426,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       return r && r.value !== undefined ? r.value : r;
     });
     if (!doc) throw err(404, 'Proveedor no encontrado');
-    res.json(doc);
+    res.json(sinSecretos(doc));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

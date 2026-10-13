@@ -4,7 +4,7 @@
 (function () {
   var PI = '/api/proveedores-import';
   var E = function (s) { return escapeHtml(s); };
-  var estado = { id: null, listas: [], depositos: [], cotizacion: null, regla: null, archivo: null, nombreArchivo: '', headers: [] };
+  var estado = { portal: null, conectores: [], modoPortal: false, id: null, listas: [], depositos: [], cotizacion: null, regla: null, archivo: null, nombreArchivo: '', headers: [] };
 
   function leerArchivo(file) {
     return new Promise(function (ok, mal) {
@@ -29,6 +29,7 @@
     try {
       var d = await pedir('/' + id + '/regla');
       estado.listas = d.listas; estado.depositos = d.depositos; estado.cotizacion = d.cotizacionDolar; estado.regla = d.regla;
+      try { var pt = await pedir('/' + id + '/portal'); estado.portal = pt.portal; estado.conectores = pt.conectores; } catch (e2) { estado.portal = null; estado.conectores = []; }
       cont.innerHTML = htmlTab(d);
       pintarMargenes();
       cargarHistorial();
@@ -75,12 +76,42 @@
           '<div class="err" id="pimpReglaErr"></div><div class="ok-msg" id="pimpReglaOk"></div>' +
           '<button type="button" class="btn" style="margin-top:10px" onclick="pimpGrabarRegla()">Grabar regla</button>' +
         '</div></details>' +
+      htmlPortal() +
       '<div class="card" style="padding:12px"><div style="font-weight:700;margin-bottom:8px">2. Subir la lista que mandó el proveedor</div>' +
         '<div class="row"><div style="flex:1;min-width:240px"><input type="file" id="pimpArchivo" accept=".xlsx,.xls,.csv" onchange="pimpElegirArchivo()"></div>' +
-        '<button type="button" class="btn" id="pimpBtnPrev" onclick="pimpRevisar()" disabled>Revisar cambios</button></div>' +
+        '<button type="button" class="btn" id="pimpBtnPrev" onclick="pimpRevisarArchivo()" disabled>Revisar cambios</button>' +
+        (estado.portal ? '<button type="button" class="btn secondary" id="pimpBtnPortal" onclick="pimpRevisarPortal()" title="Entra al portal del proveedor y lee la lista actual">Actualizar desde el portal</button>' : '') + '</div>' +
         '<div class="err" id="pimpErr"></div><div id="pimpPreview" style="margin-top:10px"></div></div>' +
       '<div class="card" style="padding:12px"><div style="font-weight:700;margin-bottom:6px">Últimas actualizaciones</div><div id="pimpHist" class="muted">Cargando...</div></div>';
   }
+
+  function htmlPortal() {
+    if (!estado.conectores.length) return '';
+    var p = estado.portal;
+    var ops = estado.conectores.map(function (c) { return '<option value="' + c.tipo + '"' + (p && p.tipo === c.tipo ? ' selected' : '') + '>' + E(c.nombre) + '</option>'; }).join('');
+    return '<details class="card" ' + (p ? '' : '') + ' style="padding:12px"><summary style="cursor:pointer;font-weight:700">Portal del proveedor (actualizar sin subir archivos)' + (p ? ' <span class="pill activo">Conectado</span>' : '') + '</summary>' +
+      '<div style="margin-top:10px"><p class="muted" style="margin:0 0 8px">Guardá el usuario y la clave con los que entrás al catálogo online de este proveedor: el sistema entra solo, lee los precios y los pasa por la misma regla de arriba (descuentos, IVA, márgenes y stock). La clave se guarda cifrada y nunca se vuelve a mostrar.</p>' +
+      '<div class="row"><div style="flex:1;min-width:200px"><label>Portal</label><select id="pptTipo">' + ops + '</select></div>' +
+      '<div style="flex:1;min-width:200px"><label>Usuario (mail)</label><input id="pptUsuario" autocomplete="off" value="' + E(p ? p.usuario : '') + '"></div>' +
+      '<div style="flex:1;min-width:200px"><label>Clave</label><input id="pptClave" type="password" autocomplete="new-password" placeholder="' + (p && p.tieneClave ? '•••••••• (guardada — escribí una nueva para cambiarla)' : '') + '"></div></div>' +
+      '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">Si el portal pide código de verificación en dos pasos</summary>' +
+        '<div style="margin-top:6px"><label>Secreto del autenticador (la clave de texto que muestra al configurar la app)</label><input id="pptDosPasos" type="password" autocomplete="off" placeholder="' + (p && p.tieneDosPasos ? '•••• (guardado)' : 'Opcional') + '">' +
+        '<div class="muted" style="font-size:12px;margin-top:4px">Con esto el sistema genera el código solo. Si preferís no guardarlo, pedile al proveedor un usuario para el sistema sin dos pasos.</div></div></details>' +
+      '<div class="err" id="pptErr"></div><div class="ok-msg" id="pptOk"></div>' +
+      '<div class="row" style="margin-top:8px;gap:8px"><button type="button" class="btn" onclick="pimpGuardarPortal()">Guardar conexión</button>' + (p ? '<button type="button" class="btn secondary" onclick="pimpQuitarPortal()">Quitar</button>' : '') + '</div></div></details>';
+  }
+  window.pimpGuardarPortal = async function () {
+    var err = document.getElementById('pptErr'), ok = document.getElementById('pptOk'); err.textContent = ''; ok.textContent = '';
+    try {
+      await pedir('/' + estado.id + '/portal', { method: 'PUT', body: JSON.stringify({ tipo: document.getElementById('pptTipo').value, usuario: document.getElementById('pptUsuario').value, clave: document.getElementById('pptClave').value, secretoDosPasos: document.getElementById('pptDosPasos').value }) });
+      ok.textContent = 'Conexión guardada.';
+      await window.cargarImportarListaTab(estado.id);
+    } catch (e) { err.textContent = e.message; }
+  };
+  window.pimpQuitarPortal = async function () {
+    if (!confirm('¿Quitar el usuario y la clave guardados de este portal?')) return;
+    try { await pedir('/' + estado.id + '/portal', { method: 'DELETE' }); await window.cargarImportarListaTab(estado.id); } catch (e) { document.getElementById('pptErr').textContent = e.message; }
+  };
 
   function pintarMargenes() {
     var cont = document.getElementById('pimpMargenes'); if (!cont) return;
@@ -150,7 +181,7 @@
       stock: { activo: document.getElementById('pimpStockOn').checked, depositoId: document.getElementById('pimpDeposito') ? document.getElementById('pimpDeposito').value : '', ceroSiNoViene: document.getElementById('pimpCero') ? document.getElementById('pimpCero').checked : false },
       alertaPct: document.getElementById('pimpAlerta').value
     };
-    if (!body.columnas.codigo || !body.columnas.precio) { err.textContent = 'Indicá la columna del código y la del precio.'; return; }
+    if ((!body.columnas.codigo || !body.columnas.precio) && !estado.portal) { err.textContent = 'Indicá la columna del código y la del precio.'; return; }
     try { await pedir('/' + estado.id + '/regla', { method: 'PUT', body: JSON.stringify(body) }); ok.textContent = 'Regla grabada.'; estado.regla = body; }
     catch (e) { err.textContent = e.message; }
   };
@@ -158,16 +189,20 @@
   window.pimpElegirArchivo = async function () {
     var f = document.getElementById('pimpArchivo').files[0];
     document.getElementById('pimpPreview').innerHTML = ''; document.getElementById('pimpErr').textContent = '';
+    estado.modoPortal = false;
     if (!f) { estado.archivo = null; document.getElementById('pimpBtnPrev').disabled = true; return; }
     try { estado.archivo = await leerArchivo(f); estado.nombreArchivo = f.name; document.getElementById('pimpBtnPrev').disabled = false; }
     catch (e) { document.getElementById('pimpErr').textContent = e.message; }
   };
 
+  window.pimpRevisarArchivo = function () { estado.modoPortal = false; return window.pimpRevisar(); };
+  window.pimpRevisarPortal = function () { estado.modoPortal = true; return window.pimpRevisar(); };
   window.pimpRevisar = async function () {
     var err = document.getElementById('pimpErr'), box = document.getElementById('pimpPreview'), btn = document.getElementById('pimpBtnPrev');
-    err.textContent = ''; box.innerHTML = '<span class="muted">Calculando…</span>'; btn.disabled = true;
+    err.textContent = ''; box.innerHTML = '<span class="muted">' + (estado.modoPortal ? 'Entrando al portal y leyendo la lista… (puede tardar un minuto)' : 'Calculando…') + '</span>'; btn.disabled = true;
+    var btnP = document.getElementById('pimpBtnPortal'); if (btnP) btnP.disabled = true;
     try {
-      var d = await pedir('/' + estado.id + '/preview', { method: 'POST', body: JSON.stringify({ archivoBase64: estado.archivo }) });
+      var d = await pedir('/' + estado.id + '/preview', { method: 'POST', body: JSON.stringify(estado.modoPortal ? { desdePortal: true } : { archivoBase64: estado.archivo }) });
       var s = d.resumen;
       var tarjeta = function (n, t, c) { return '<div style="flex:1;min-width:120px;border:1px solid var(--border);border-radius:10px;padding:8px 10px"><div style="font-size:20px;font-weight:800;' + (c ? 'color:' + c : '') + '">' + n + '</div><div class="muted" style="font-size:12px">' + t + '</div></div>'; };
       var cols = d.muestra.length && d.muestra[0].precios ? d.muestra[0].precios : [];
@@ -201,7 +236,7 @@
         sinMatch + dup + cero +
         (hayAlgo ? '<div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" class="btn" id="pimpBtnAplicar" onclick="pimpAplicar()">Hacer la actualización</button>' + (s.alertas ? '<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:600"><input type="checkbox" id="pimpOmitir" style="width:auto"> No tocar los ' + s.alertas + ' marcados “revisar”</label>' : '') + '</div>' : '');
     } catch (e) { box.innerHTML = ''; err.textContent = e.message; }
-    btn.disabled = false;
+    btn.disabled = !estado.archivo && !estado.modoPortal ? true : false; var btnP2 = document.getElementById('pimpBtnPortal'); if (btnP2) btnP2.disabled = false;
   };
 
   window.pimpMarcarNuevos = function (on) { document.querySelectorAll('.pn-chk:not(:disabled)').forEach(function (c) { c.checked = on; }); };
@@ -215,10 +250,10 @@
     if (!confirm('Se actualizan costos, precios y stock con esta lista' + (crear.length ? ' y se crean ' + crear.length + ' productos nuevos' : '') + '. ¿Seguimos?')) return;
     err.textContent = ''; btn.disabled = true; btn.textContent = 'Actualizando…';
     try {
-      var d = await pedir('/' + estado.id + '/aplicar', { method: 'POST', body: JSON.stringify({ archivoBase64: estado.archivo, nombreArchivo: estado.nombreArchivo, omitirAlertas: omitir, crear: crear }) });
+      var d = await pedir('/' + estado.id + '/aplicar', { method: 'POST', body: JSON.stringify({ archivoBase64: estado.modoPortal ? undefined : estado.archivo, desdePortal: estado.modoPortal, nombreArchivo: estado.nombreArchivo, omitirAlertas: omitir, crear: crear }) });
       var s = d.resumen;
       box.innerHTML = '<p class="ok-msg">Listo: ' + s.costosActualizados + ' costos, ' + s.preciosActualizados + ' precios y ' + s.stocksActualizados + ' stocks actualizados' + (s.productosCreados ? ', ' + s.productosCreados + ' productos nuevos creados' : '') + (s.omitidosPorAlerta ? ' (' + s.omitidosPorAlerta + ' marcados “revisar” quedaron sin tocar)' : '') + '.</p>' + ((s.noCreados || []).length ? '<p class="err">No se pudieron crear: ' + s.noCreados.map(function (x) { return E(x.codigo) + ' (' + E(x.motivo) + ')'; }).join('; ') + '</p>' : '');
-      document.getElementById('pimpArchivo').value = ''; estado.archivo = null; document.getElementById('pimpBtnPrev').disabled = true;
+      document.getElementById('pimpArchivo').value = ''; estado.archivo = null; document.getElementById('pimpBtnPrev').disabled = true; estado.modoPortal = false;
       cargarHistorial();
     } catch (e) { err.textContent = e.message; btn.disabled = false; btn.textContent = 'Hacer la actualización'; }
   };

@@ -34,6 +34,8 @@ const XLSX = require('xlsx');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 
+const portales = require('./portalesProveedores');
+
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 const authAdmin = [authUsuario, resolverOrg, requiereModulo('proveedores')];
@@ -406,8 +408,9 @@ async function prepararCalculo(req) {
   const prov = await proveedorDeOrg(db, req);
   if (!prov.reglaImport) throw err(400, 'Primero guardá la regla de importación de este proveedor.');
   const regla = prov.reglaImport;
-  const filas = filasDeArchivo((req.body || {}).archivoBase64, regla);
-  if (!filas.length) throw err(400, 'No encontré filas con código en el archivo. Revisá la fila de encabezado y la columna de código.');
+  const desdePortal = !!(req.body || {}).desdePortal;
+  const filas = desdePortal ? await portales.filasDePortal(prov.portal, regla) : filasDeArchivo((req.body || {}).archivoBase64, regla);
+  if (!filas.length) throw err(400, desdePortal ? 'El portal no devolvió productos.' : 'No encontré filas con código en el archivo. Revisá la fila de encabezado y la columna de código.');
   const calc = await calcular(db, req, prov, regla, filas);
   return { db, prov, regla, calc };
 }
@@ -514,10 +517,54 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
         }
       }
       const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados });
-      await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
+      await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: (req.body || {}).desdePortal ? 'Portal ' + ((prov.portal && prov.portal.tipo) || '') : String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
       return resumen;
     });
     res.json({ ok: true, resumen: out });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---- Portal del proveedor (usuario y clave cifrados; la clave nunca vuelve al navegador)
+router.get('/:id/portal', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const prov = await proveedorDeOrg(await getDb(), req);
+      const p = prov.portal || null;
+      return { conectores: Object.entries(portales.CONECTORES).map(([tipo, c]) => ({ tipo, nombre: c.nombre, url: c.url })),
+        portal: p ? { tipo: p.tipo, usuario: p.usuario || '', tieneClave: !!p.claveCifrada, tieneDosPasos: !!p.totpCifrado, ultimaConexion: p.ultimaConexion || null } : null };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/:id/portal', authAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const tipo = String(b.tipo || '').trim();
+    if (!portales.CONECTORES[tipo]) throw err(400, 'Elegí un portal de la lista.');
+    const usuario = String(b.usuario || '').trim();
+    if (!usuario) throw err(400, 'Falta el usuario (mail) del portal.');
+    await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      const previo = prov.portal || {};
+      const portal = { tipo, usuario, claveCifrada: previo.claveCifrada || null, totpCifrado: previo.totpCifrado || null, ultimaConexion: previo.ultimaConexion || null };
+      if (b.clave) portal.claveCifrada = portales.cifrar(String(b.clave));
+      if (b.secretoDosPasos) portal.totpCifrado = portales.cifrar(String(b.secretoDosPasos).trim());
+      if (b.quitarDosPasos) portal.totpCifrado = null;
+      if (!portal.claveCifrada) throw err(400, 'Falta la clave del portal.');
+      await db.collection('proveedores').updateOne({ _id: prov._id }, { $set: { portal, updatedAt: new Date() } });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/:id/portal', authAdmin, async (req, res) => {
+  try {
+    await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      await db.collection('proveedores').updateOne({ _id: prov._id }, { $unset: { portal: '' }, $set: { updatedAt: new Date() } });
+    });
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
