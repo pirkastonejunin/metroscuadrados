@@ -1235,19 +1235,26 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
     });
     const { venta, pago, org } = resultado;
     const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', tarjeta: 'Tarjeta' };
+    // Varios medios cobrados juntos: un solo recibo con todos.
+    const grupo = pago.reciboGrupo ? (venta.pagos || []).filter(p => p.reciboGrupo === pago.reciboGrupo && !p.anulado) : [pago];
+    const totalMedios = grupo.reduce((a, p) => a + p.monto, 0);
+    const totalRet = grupo.reduce((a, p) => a + (p.totalRetenciones || 0), 0);
+    const retsTodas = grupo.reduce((a, p) => a.concat(p.retenciones || []), []);
+    const detalleMedio = p => (TIPO_VALOR_LABEL[p.tipoValor] || escHtml(p.tipoValor))
+      + (p.tipoValor === 'tarjeta' ? ` (Lote ${escHtml(p.tarjetaLote || '—')} / Cupón ${escHtml(p.tarjetaCupon || '—')})` : '');
     const bodyHtml = `
       <h1>Recibo — Venta Nº ${String(venta.numero).padStart(5, '0')}</h1>
       <div class="datos-doc">
         <div>
           <strong>Recibí de:</strong> ${escHtml(venta.clienteNombre)}<br>
-          <strong>La suma de:</strong> ${moneyImp(pago.monto, venta.moneda)}${(pago.retenciones && pago.retenciones.length) ? `<br><strong>Retenciones practicadas:</strong> ${pago.retenciones.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(pago.monto + (pago.totalRetenciones || 0), venta.moneda)}` : ''}
+          <strong>La suma de:</strong> ${moneyImp(totalMedios, venta.moneda)}${retsTodas.length ? `<br><strong>Retenciones practicadas:</strong> ${retsTodas.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(totalMedios + totalRet, venta.moneda)}` : ''}
         </div>
         <div>
           <strong>Fecha:</strong> ${fechaLarga(pago.fecha)}<br>
-          <strong>Forma de pago:</strong> ${TIPO_VALOR_LABEL[pago.tipoValor] || escHtml(pago.tipoValor)}
-          ${pago.tipoValor === 'tarjeta' ? `<br><span class="muted">Lote ${escHtml(pago.tarjetaLote || '—')} / Cupón ${escHtml(pago.tarjetaCupon || '—')}</span>` : ''}
+          ${grupo.length > 1 ? '<strong>Forma de pago:</strong> Varios medios' : `<strong>Forma de pago:</strong> ${detalleMedio(pago)}`}
         </div>
       </div>
+      ${grupo.length > 1 ? `<table style="width:100%;border-collapse:collapse;margin:10px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #999">Medio</th><th style="text-align:right;border-bottom:1px solid #999">Importe</th></tr></thead><tbody>${grupo.map(p => `<tr><td>${detalleMedio(p)}</td><td style="text-align:right">${moneyImp(p.monto, venta.moneda)}</td></tr>`).join('')}</tbody></table>` : ''}
       <p>En concepto de pago de la Venta Nº ${String(venta.numero).padStart(5, '0')}.${pago.nota ? ` ${escHtml(pago.nota)}` : ''}</p>
       <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>
     `;
@@ -1639,11 +1646,10 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
 // Registra un cobro contra la venta (parcial o total). Los pagos son un
 // detalle append-only (no se editan ni se borran — un error se corrige
 // con un pago en sentido contrario, mismo criterio que el libro de Stock).
-router.post('/:id/pagos', authAdmin, async (req, res) => {
-  try {
-    const id = toObjectId(req.params.id);
-    if (!id) throw err(400, 'id inválido');
-    const body = req.body || {};
+// Un cobro (un medio de pago) sobre la venta. `reciboGrupo` agrupa varios
+// medios cobrados juntos para que salgan en un mismo recibo.
+async function procesarPagoVenta(req, id, body, reciboGrupo) {
+  {
     const tipoValor = normalizarTexto(body.tipoValor).toLowerCase();
     if (!TIPOS_VALOR_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_VALIDOS.join(', ')})`);
     const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
@@ -1739,7 +1745,8 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         retenciones.length ? { retenciones, totalRetenciones } : {},
         cuentaTipo ? { cuentaTipo, cuentaId } : {},
         chequeId ? { chequeId } : {},
-        tarjetaDatos || {}
+        tarjetaDatos || {},
+        reciboGrupo ? { reciboGrupo } : {}
       );
       const totalCobrado = (venta.totalCobrado || 0) + monto + totalRetenciones; // las retenciones también cancelan deuda
       const saldoPendiente = Math.max(0, venta.total - totalCobrado);
@@ -1761,7 +1768,29 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
 
       return db.collection('ventas').findOne({ _id: id });
     });
-    res.json(resultado);
+    return resultado;
+  }
+}
+
+router.post('/:id/pagos', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    // Varios medios de pago en un mismo recibo (13/10/2026, pedido de Mato):
+    // cada medio queda como un cobro propio (cheque en cartera, ingreso en
+    // caja/banco), todos con el mismo reciboGrupo; las retenciones van en el primero.
+    if (Array.isArray(body.valores) && body.valores.length > 1) {
+      const grupo = new ObjectId().toString();
+      let venta = null;
+      for (let i = 0; i < body.valores.length; i++) {
+        const v = Object.assign({}, body.valores[i], { fecha: body.fecha, nota: body.nota, retenciones: i === 0 ? body.retenciones : [] });
+        try { venta = await procesarPagoVenta(req, id, v, grupo); }
+        catch (e) { if (i > 0) e.message = `Se registraron ${i} de ${body.valores.length} medios de pago y falló el siguiente: ${e.message}`; throw e; }
+      }
+      return res.json(venta);
+    }
+    res.json(await procesarPagoVenta(req, id, body.valores && body.valores.length === 1 ? Object.assign({}, body, body.valores[0]) : body, null));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

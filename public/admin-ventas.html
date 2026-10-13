@@ -1725,6 +1725,7 @@ function actualizarTipoValorCobro(){
 // realmente entra (caja/banco/cheque); las retenciones cancelan deuda sin
 // que entre plata, así que lo aplicado a la venta es cobrado + retenciones.
 let ventaCobroActual = null;
+let ncValores = [];
 let montoCobroTocado = false;
 function actualizarResumenCobro(){
   const v = ventaCobroActual;
@@ -1732,11 +1733,12 @@ function actualizarResumenCobro(){
   if (!v || !input) return;
   const ret = ImpuestosUI.totales('impCV').retenciones;
   // Mientras no se haya tocado el monto a mano, se sugiere el saldo menos las retenciones.
-  if (!montoCobroTocado) input.value = Math.max(0, Math.round((v.saldoPendiente - ret) * 100) / 100);
-  const monto = Number(input.value) || 0;
+  const yaCargado = ncValores.reduce((a, x) => a + x.monto, 0);
+  if (!montoCobroTocado) input.value = Math.max(0, Math.round((v.saldoPendiente - ret - yaCargado) * 100) / 100);
+  const monto = (Number(input.value) || 0) + yaCargado;
   const aplicado = monto + ret;
   const restante = Math.max(0, Math.round((v.saldoPendiente - aplicado) * 100) / 100);
-  document.getElementById('ncResumenCobro').innerHTML = ret > 0
+  document.getElementById('ncResumenCobro').innerHTML = (ret > 0 || ncValores.length)
     ? `Cobrado ${money(monto)} + retenciones ${money(ret)} = <strong>aplicado a la venta ${money(aplicado)}</strong> — saldo restante ${money(restante)}`
     : '';
 }
@@ -1745,6 +1747,7 @@ function abrirCobro(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
   ventaCobroActual = v;
+  ncValores = [];
   montoCobroTocado = false;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
@@ -1788,6 +1791,8 @@ function abrirCobro(id){
             <div><label>Código de autorización</label><input id="ncTarjetaCodigoAutorizacion" placeholder="Opcional"></div>
           </div>
         </div>
+        <div style="margin-top:10px"><button type="button" class="btn small secondary" onclick="agregarValorCobro()">+ Agregar otro medio de pago</button> <span class="muted">(todo sale en un solo recibo)</span></div>
+        <div id="ncValoresLista"></div>
         ${ImpuestosUI.bloqueHtml('impCV', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCobro' })}
         <div class="muted" id="ncResumenCobro" style="margin-top:6px"></div>
         <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
@@ -1799,42 +1804,72 @@ function abrirCobro(id){
   actualizarResumenCobro();
 }
 
-async function confirmarCobro(id){
+function leerValorCobro(){
   const tipoValor = document.getElementById('ncTipoValor').value;
-  const body = {
-    tipoValor,
-    monto: Number(document.getElementById('ncMonto').value),
+  const v = { tipoValor, monto: Number(document.getElementById('ncMonto').value) };
+  if (!v.monto || v.monto <= 0) return { error: 'El monto tiene que ser mayor a 0' };
+  if (tipoValor === 'cheque') {
+    v.chequeNumero = document.getElementById('ncChequeNumero').value.trim();
+    v.chequeBanco = document.getElementById('ncChequeBanco').value.trim();
+    v.chequeLibrador = document.getElementById('ncChequeLibrador').value.trim();
+    v.chequeCuitLibrador = document.getElementById('ncChequeCuit').value.trim();
+    v.chequeFechaEmision = document.getElementById('ncChequeFechaEmision').value;
+    v.chequeFechaVencimiento = document.getElementById('ncChequeVencimiento').value;
+    if (!v.chequeNumero) return { error: 'Falta el número de cheque' };
+    if (!v.chequeFechaVencimiento) return { error: 'Falta la fecha de vencimiento del cheque' };
+  } else {
+    const cuenta = document.getElementById('ncCuenta').value;
+    if (!cuenta) return { error: tipoValor === 'efectivo' ? 'Elegí a qué caja va el cobro' : 'Elegí a qué banco va el cobro' };
+    const [cuentaTipo, cuentaId] = cuenta.split(':');
+    v.cuentaTipo = cuentaTipo; v.cuentaId = cuentaId;
+    v.cuentaNombre = document.getElementById('ncCuenta').selectedOptions[0].textContent.replace(/\s*\(.*$/, '');
+    if (tipoValor === 'tarjeta') {
+      v.tarjetaEntidad = document.getElementById('ncTarjetaEntidad').value.trim();
+      v.tarjetaTipo = document.getElementById('ncTarjetaTipo').value;
+      v.tarjetaCuotas = Number(document.getElementById('ncTarjetaCuotas').value) || 1;
+      v.tarjetaLote = document.getElementById('ncTarjetaLote').value.trim();
+      v.tarjetaCupon = document.getElementById('ncTarjetaCupon').value.trim();
+      v.tarjetaCodigoAutorizacion = document.getElementById('ncTarjetaCodigoAutorizacion').value.trim();
+      if (!v.tarjetaLote) return { error: 'Falta el número de lote' };
+      if (!v.tarjetaCupon) return { error: 'Falta el número de cupón' };
+    }
+  }
+  return { valor: v };
+}
+const TIPO_LABEL_NC = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', tarjeta: 'Tarjeta' };
+function renderValoresCobro(){
+  const el = document.getElementById('ncValoresLista');
+  if (!el) return;
+  if (!ncValores.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="margin-top:10px"><strong>Medios cargados en este recibo</strong>' +
+    ncValores.map((v, i) => `<div style="display:flex;gap:8px;align-items:center;margin-top:4px"><span>${TIPO_LABEL_NC[v.tipoValor] || v.tipoValor}${v.tipoValor === 'cheque' ? ' N° ' + escapeHtml(v.chequeNumero) : (v.cuentaNombre ? ' — ' + escapeHtml(v.cuentaNombre) : '')}: <strong>${money(v.monto)}</strong></span><button type="button" class="btn small secondary" onclick="quitarValorCobro(${i})">Quitar</button></div>`).join('') + '</div>';
+}
+function quitarValorCobro(i){ ncValores.splice(i, 1); montoCobroTocado = false; renderValoresCobro(); actualizarResumenCobro(); }
+function agregarValorCobro(){
+  document.getElementById('ncErr').textContent = '';
+  const r = leerValorCobro();
+  if (r.error) { document.getElementById('ncErr').textContent = r.error; return; }
+  ncValores.push(r.valor);
+  ['ncChequeNumero','ncChequeBanco','ncChequeLibrador','ncChequeCuit','ncChequeVencimiento','ncTarjetaLote','ncTarjetaCupon','ncTarjetaCodigoAutorizacion','ncTarjetaEntidad'].forEach(x => { const e = document.getElementById(x); if (e) e.value = ''; });
+  montoCobroTocado = false;
+  renderValoresCobro();
+  actualizarResumenCobro();
+}
+
+async function confirmarCobro(id){
+  document.getElementById('ncErr').textContent = '';
+  const valores = ncValores.slice();
+  if (!valores.length || Number(document.getElementById('ncMonto').value) > 0) {
+    const r = leerValorCobro();
+    if (r.error) { document.getElementById('ncErr').textContent = r.error; return; }
+    valores.push(r.valor);
+  }
+  const comun = {
     fecha: document.getElementById('ncFecha').value,
     nota: document.getElementById('ncNota').value.trim(),
     retenciones: ImpuestosUI.leer('impCV').retenciones
   };
-  if (!body.monto || body.monto <= 0) { document.getElementById('ncErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
-  if (tipoValor === 'cheque') {
-    body.chequeNumero = document.getElementById('ncChequeNumero').value.trim();
-    body.chequeBanco = document.getElementById('ncChequeBanco').value.trim();
-    body.chequeLibrador = document.getElementById('ncChequeLibrador').value.trim();
-    body.chequeCuitLibrador = document.getElementById('ncChequeCuit').value.trim();
-    body.chequeFechaEmision = document.getElementById('ncChequeFechaEmision').value;
-    body.chequeFechaVencimiento = document.getElementById('ncChequeVencimiento').value;
-    if (!body.chequeNumero) { document.getElementById('ncErr').textContent = 'Falta el número de cheque'; return; }
-    if (!body.chequeFechaVencimiento) { document.getElementById('ncErr').textContent = 'Falta la fecha de vencimiento del cheque'; return; }
-  } else {
-    const cuenta = document.getElementById('ncCuenta').value;
-    if (!cuenta) { document.getElementById('ncErr').textContent = tipoValor === 'efectivo' ? 'Elegí a qué caja va el cobro' : 'Elegí a qué banco va el cobro'; return; }
-    const [cuentaTipo, cuentaId] = cuenta.split(':');
-    body.cuentaTipo = cuentaTipo;
-    body.cuentaId = cuentaId;
-    if (tipoValor === 'tarjeta') {
-      body.tarjetaEntidad = document.getElementById('ncTarjetaEntidad').value.trim();
-      body.tarjetaTipo = document.getElementById('ncTarjetaTipo').value;
-      body.tarjetaCuotas = Number(document.getElementById('ncTarjetaCuotas').value) || 1;
-      body.tarjetaLote = document.getElementById('ncTarjetaLote').value.trim();
-      body.tarjetaCupon = document.getElementById('ncTarjetaCupon').value.trim();
-      body.tarjetaCodigoAutorizacion = document.getElementById('ncTarjetaCodigoAutorizacion').value.trim();
-      if (!body.tarjetaLote) { document.getElementById('ncErr').textContent = 'Falta el número de lote'; return; }
-      if (!body.tarjetaCupon) { document.getElementById('ncErr').textContent = 'Falta el número de cupón'; return; }
-    }
-  }
+  const body = valores.length > 1 ? Object.assign({}, comun, { valores }) : Object.assign({}, comun, valores[0]);
   try{
     const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
