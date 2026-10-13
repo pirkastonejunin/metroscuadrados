@@ -214,7 +214,6 @@ async function sincronizarProductoEnCatalogo(db, req, costosProducto) {
 
 // Módulo con clave propia — decisión tomada con Mato (28/9/2026): datos
 // separados por organización, mismo mecanismo que visitas/obras/CRM.
-const authAdmin = [authUsuario, resolverOrg, requiereModulo('costos')];
 
 // La carga diaria de producción la puede hacer tanto el personal de fábrica
 // (módulo 'fabrica', y NADA MÁS del resto de este router) como alguien de
@@ -239,6 +238,8 @@ async function fijarOrgProduccion(req, res, next) {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 }
 const authProduccion = [authUsuario, resolverOrg, requiereModuloAlguno('fabrica', 'costos'), fijarOrgProduccion];
+// Costos de Producción (insumos, recetas, listas) también es único para todo el grupo (13/10/2026, pedido de Mato).
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('costos'), fijarOrgProduccion];
 // Depósito donde entra toda la producción: el depósito Junín de la planta.
 async function depositoProduccion(db, orgId) {
   return db.collection('depositos').findOne({ orgId, activo: { $ne: false }, nombre: /jun[ií]n/i });

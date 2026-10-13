@@ -274,7 +274,7 @@ let ORGANIZACIONES = [];
 let PUEDE_VER_TODAS = false;
 function renderOrgSelector(){
   const select = document.getElementById('orgSelector');
-  if (ORGANIZACIONES.length > 1 || PUEDE_VER_TODAS) {
+  if (false && (ORGANIZACIONES.length > 1 || PUEDE_VER_TODAS)) { // producción es única para el grupo
     select.innerHTML = ORGANIZACIONES.map(o => `<option value="${o._id}">${escapeHtml(o.nombre)}</option>`).join('')
       + (PUEDE_VER_TODAS ? '<option value="todas">Todas las organizaciones</option>' : '');
     select.value = ORG;
@@ -282,7 +282,7 @@ function renderOrgSelector(){
   } else {
     select.classList.add('hidden');
   }
-  const enTodas = (ORG === 'todas');
+  const enTodas = false; // producción es única: no depende de la sucursal
   document.getElementById('avisoTodasOrgs').classList.toggle('hidden', !enTodas);
   document.querySelectorAll('.btn-crear-org').forEach(b => b.disabled = enTodas);
 }
