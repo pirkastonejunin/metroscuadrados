@@ -744,12 +744,13 @@ router.post('/ajustar', authAdmin, async (req, res) => {
 // caché en 0. Lo comprometido por pedidos no se toca. GET /poner-en-cero/preview cuenta antes; POST exige escribir CERO.
 router.get('/poner-en-cero/preview', authAdmin, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const org = req.orgId || req.orgOperar; // en la vista "todas" se usa la sucursal de operación de la barra de arriba
+    if (!org) throw err(400, 'Elegí en la barra de arriba con qué sucursal operás.');
     const db = await getDb();
-    const deps = await db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray();
+    const deps = await db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, { orgId: org })).sort({ nombre: 1 }).toArray();
     const filas = [];
     for (const d of deps) {
-      const r = await db.collection('stock_actual').aggregate([{ $match: Object.assign({ depositoId: d._id, cantidad: { $ne: 0 } }, filtroOrg(req)) }, { $group: { _id: null, n: { $sum: 1 }, u: { $sum: '$cantidad' } } }]).toArray();
+      const r = await db.collection('stock_actual').aggregate([{ $match: Object.assign({ depositoId: d._id, cantidad: { $ne: 0 } }, { orgId: org }) }, { $group: { _id: null, n: { $sum: 1 }, u: { $sum: '$cantidad' } } }]).toArray();
       filas.push({ depositoId: String(d._id), nombre: d.nombre, productos: r[0] ? r[0].n : 0, unidades: r[0] ? r[0].u : 0 });
     }
     res.json({ depositos: filas });
