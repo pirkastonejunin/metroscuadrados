@@ -70,6 +70,7 @@ async function procesar(req, aplicar) {
   const body = req.body || {};
   let depositoId; try { depositoId = new ObjectId(String(body.depositoId)); } catch (e) { throw err(400, 'Elegí el depósito al que va este stock.'); }
   const crearFaltantes = body.crearFaltantes !== false;
+  const ponerEnCero = body.ponerEnCero !== false; // los productos de las marcas del archivo que no figuran quedan en 0
   const productos = leer(body.archivoBase64);
 
   return conReintento(async () => {
@@ -81,7 +82,7 @@ async function procesar(req, aplicar) {
     if (req.orgId && String(req.orgId) !== String(orgId)) throw err(400, 'Ese depósito es de otra sucursal: cambiá a esa sucursal (o a "Todas") para importar.');
     const u = req.usuario || {};
     if (!(u.rol && u.rol.protegido) && Array.isArray(u.orgIds) && u.orgIds.length && !u.orgIds.map(String).includes(String(orgId))) throw err(403, 'No tenés acceso a la sucursal de ese depósito.');
-    const catalogo = await db.collection('productos_catalogo').find({ orgId }, { projection: { sku: 1, nombre: 1, activo: 1 } }).toArray();
+    const catalogo = await db.collection('productos_catalogo').find({ orgId }, { projection: { sku: 1, nombre: 1, activo: 1, marca: 1 } }).toArray();
     const porSku = new Map(), porNombre = new Map();
     catalogo.forEach(c => { if (c.sku) porSku.set(String(c.sku).toUpperCase(), c); const n = norm(c.nombre); if (n && !c.sku && !porNombre.has(n)) porNombre.set(n, c); });
     const actual = new Map((await db.collection('stock_actual').find({ orgId, depositoId }).toArray()).map(s => [String(s.productoId), s.cantidad || 0]));
@@ -100,12 +101,26 @@ async function procesar(req, aplicar) {
         faltantes.push(Object.assign({}, p, { objetivo }));
       }
     }
-    // Productos con stock cargado antes en este depósito que ya no figuran con stock en el archivo → quedarían en 0 solo si el archivo los trae; no se tocan.
+    // Marcas que trae el archivo: los productos de esas marcas que tienen stock en este depósito y NO figuran en el archivo (o figuran en 0) se llevan a 0.
+    // Así, volver a cargar una marca corregida reemplaza lo anterior de esa marca y no toca las demás.
+    const aCero = [];
+    if (ponerEnCero) {
+      const marcas = new Set(productos.map(p => norm(p.marca)).filter(Boolean));
+      const enArchivo = new Set(items.map(i => String(i.productoId)));
+      const tocados = new Set();
+      for (const p of productos) { let prod = p.codigo ? porSku.get(p.codigo.toUpperCase()) : null; if (!prod) prod = porNombre.get(norm(p.nombre)); if (prod) tocados.add(String(prod._id)); }
+      for (const c of catalogo) {
+        if (!marcas.has(norm(c.marca)) || tocados.has(String(c._id)) || enArchivo.has(String(c._id))) continue;
+        const hoy = actual.get(String(c._id)) || 0;
+        if (Math.abs(hoy) >= 0.0005) aCero.push({ productoId: c._id, codigo: c.sku || '', nombre: c.nombre, hoy, objetivo: 0, dif: round3(-hoy), ausente: true });
+      }
+    }
     const resumen = {
       deposito: deposito.nombre, filasArchivo: productos.length, conStock: productos.filter(p => p.real > 0).length,
       totalUnidades: round3(productos.reduce((s, p) => s + (p.real > 0 ? p.real : 0), 0)),
       aAjustar: items.length, sinCambios: productos.filter(p => p.real !== 0).length - items.length - faltantes.length,
       noExisten: faltantes.length, ejemplosNoExisten: faltantes.slice(0, 15).map(f => `${f.codigo} — ${f.nombre} (${f.objetivo})`),
+      ponerEnCero, aPoner0: aCero.length, ejemplosPoner0: aCero.slice(0, 15).map(a => `${a.codigo} — ${a.nombre} (${a.hoy} → 0)`),
       crearFaltantes, negativos: negativos.length, ejemplosNegativos: negativos.slice(0, 15).map(n => `${n.codigo} — ${n.nombre} (${n.real})`)
     };
     if (!aplicar) return resumen;
@@ -129,12 +144,13 @@ async function procesar(req, aplicar) {
         creados++;
       }
     }
+    items.push(...aCero);
     let ajustados = 0;
     for (const it of items) {
       const tipo = it.dif > 0 ? 'ingreso' : 'egreso';
       const cantidad = Math.abs(it.dif);
       await db.collection('stock_movimientos').insertOne({
-        productoId: it.productoId, depositoId, tipo, cantidad, motivo: `Stock inicial Dux (${it.hoy} → ${it.objetivo})`,
+        productoId: it.productoId, depositoId, tipo, cantidad, motivo: `${it.ausente ? 'Stock Dux: no figura en el archivo' : 'Stock inicial Dux'} (${it.hoy} → ${it.objetivo})`,
         sucursal: '', codigoExterno: '', observaciones: 'Importado de la Consulta de Stock de Dux', usuarioNombre, fecha: ahora, orgId, createdAt: ahora
       });
       await db.collection('stock_actual').updateOne(
