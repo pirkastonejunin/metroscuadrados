@@ -129,6 +129,10 @@
           </div>
         </div>
         <div class="row" style="gap:8px">
+          <div style="position:relative">
+            <button class="btn secondary" onclick="toggleSelectorColumnas(event)" title="Elegí qué columnas ver en el listado">Columnas ▾</button>
+            <div id="selectorColumnas" class="hidden" style="position:absolute;right:0;top:100%;z-index:50;background:var(--card,#fff);border:1px solid var(--border,#ccc);border-radius:8px;padding:10px;min-width:220px;max-height:340px;overflow:auto;box-shadow:0 4px 14px rgba(0,0,0,.18)" onclick="event.stopPropagation()"></div>
+          </div>
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
           <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirUnificar()" title="Buscar clientes duplicados y unificarlos">Unificar duplicados</button>
@@ -140,7 +144,7 @@
     </div>
     <div class="card">
       <table>
-        <thead><tr><th>Código</th><th>Cliente</th><th>Categoría fiscal</th><th>CUIT / Doc.</th><th>Contacto</th><th>Estado</th><th></th></tr></thead>
+        <thead id="clientesHead"></thead>
         <tbody id="clientesBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
       </table>
     </div>
@@ -263,17 +267,67 @@ const CATEGORIA_FISCAL_LABEL = {
 };
 const TIPO_DOCUMENTO_LABEL = { cuil: 'CUIL', cuit: 'CUIT', dni: 'DNI', pasaporte: 'Pasaporte' };
 
+// Columnas configurables (13/10/2026, pedido de Mato): cada usuario elige qué
+// columnas ve en el listado; se guarda en este navegador, por usuario.
+const COLUMNAS_CLIENTES = [
+  { k: 'codigo', l: 'Código', def: true, th: 'Código', td: c => `<strong>${escapeHtml(c.codigo || '—')}</strong>` },
+  { k: 'cliente', l: 'Cliente', def: true, fija: true, th: 'Cliente', td: c => `${escapeHtml(c.apellidoRazonSocial)}${c.nombre ? ' ' + escapeHtml(c.nombre) : ''}${c.nombreFantasia ? `<div class="muted">${escapeHtml(c.nombreFantasia)}</div>` : ''}` },
+  { k: 'categoria', l: 'Categoría fiscal', def: true, th: 'Categoría fiscal', td: c => CATEGORIA_FISCAL_LABEL[c.categoriaFiscal] || '—' },
+  { k: 'cuit', l: 'CUIT / Doc.', def: true, th: 'CUIT / Doc.', td: c => c.cuit ? escapeHtml(c.cuit) : (c.numeroDocumento ? `${TIPO_DOCUMENTO_LABEL[c.tipoDocumento]||'Doc.'} ${escapeHtml(c.numeroDocumento)}` : '—') },
+  { k: 'contacto', l: 'Contacto (tel. + mail)', def: true, th: 'Contacto', td: c => [c.telefono || c.celular, c.email].filter(Boolean).map(escapeHtml).join(' · ') || '—' },
+  { k: 'telefono', l: 'Teléfono', th: 'Teléfono', td: c => escapeHtml(c.telefono || '—') },
+  { k: 'celular', l: 'Celular', th: 'Celular', td: c => escapeHtml(c.celular || '—') },
+  { k: 'email', l: 'Email', th: 'Email', td: c => escapeHtml(c.email || '—') },
+  { k: 'personaContacto', l: 'Persona de contacto', th: 'Persona de contacto', td: c => escapeHtml(c.personaContacto || '—') },
+  { k: 'domicilio', l: 'Domicilio', th: 'Domicilio', td: c => escapeHtml(c.domicilio || '—') },
+  { k: 'localidad', l: 'Localidad', th: 'Localidad', td: c => escapeHtml(c.localidad || '—') },
+  { k: 'provincia', l: 'Provincia', th: 'Provincia', td: c => escapeHtml(c.provincia || '—') },
+  { k: 'zona', l: 'Zona', th: 'Zona', td: c => escapeHtml(c.zona || '—') },
+  { k: 'vendedor', l: 'Vendedor', th: 'Vendedor', td: c => escapeHtml(c.vendedor || '—') },
+  { k: 'tipoCliente', l: 'Tipo de cliente', th: 'Tipo', td: c => escapeHtml(c.tipoCliente || '—') },
+  { k: 'origenCliente', l: 'Origen del cliente', th: 'Origen', td: c => escapeHtml(c.origenCliente || '—') },
+  { k: 'condicionPago', l: 'Condición de pago', th: 'Cond. de pago', td: c => escapeHtml(c.condicionPago || '—') },
+  { k: 'descuento', l: '% descuento', th: '% Desc.', td: c => c.porcentajeDescuento ? escapeHtml(String(c.porcentajeDescuento)) + '%' : '—' },
+  { k: 'limiteCtaCte', l: 'Límite cta. cte.', th: 'Límite cta. cte.', td: c => c.limiteCtaCteFacturacion ? money(c.limiteCtaCteFacturacion) : '—' },
+  { k: 'estado', l: 'Estado', def: true, th: 'Estado', td: c => `<span class="pill ${c.activo === false ? 'inactivo' : 'activo'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span>` }
+];
+function claveColumnasClientes(){ return 'clientes_columnas_' + (typeof NOMBRE_USUARIO !== 'undefined' ? NOMBRE_USUARIO : ''); }
+function columnasClientesVisibles(){
+  let sel = null;
+  try { sel = JSON.parse(localStorage.getItem(claveColumnasClientes()) || 'null'); } catch(e){}
+  if (!Array.isArray(sel)) sel = COLUMNAS_CLIENTES.filter(c => c.def).map(c => c.k);
+  return COLUMNAS_CLIENTES.filter(c => c.fija || sel.includes(c.k));
+}
+function toggleSelectorColumnas(ev){
+  if (ev) ev.stopPropagation();
+  const box = document.getElementById('selectorColumnas');
+  if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+  const vis = columnasClientesVisibles().map(c => c.k);
+  box.innerHTML = '<div class="muted" style="margin-bottom:6px">Columnas a mostrar</div>' +
+    COLUMNAS_CLIENTES.map(c => `<label style="display:flex;align-items:center;gap:6px;font-weight:500;margin:3px 0"><input type="checkbox" style="width:auto" ${vis.includes(c.k) ? 'checked' : ''} ${c.fija ? 'disabled' : ''} onchange="guardarColumnasClientes()" data-col="${c.k}"> ${c.l}</label>`).join('') +
+    '<button class="btn small secondary" style="margin-top:8px" onclick="restablecerColumnasClientes()">Restablecer</button>';
+  box.classList.remove('hidden');
+}
+function guardarColumnasClientes(){
+  const sel = Array.from(document.querySelectorAll('#selectorColumnas input[data-col]')).filter(i => i.checked).map(i => i.dataset.col);
+  try { localStorage.setItem(claveColumnasClientes(), JSON.stringify(sel)); } catch(e){}
+  renderClientes();
+}
+function restablecerColumnasClientes(){
+  try { localStorage.removeItem(claveColumnasClientes()); } catch(e){}
+  document.getElementById('selectorColumnas').classList.add('hidden');
+  renderClientes();
+}
+document.addEventListener('click', () => { const b = document.getElementById('selectorColumnas'); if (b) b.classList.add('hidden'); });
+
 function renderClientes(){
   const body = document.getElementById('clientesBody');
-  if (!clientesCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay clientes todavía.</td></tr>'; return; }
+  const cols = columnasClientesVisibles();
+  document.getElementById('clientesHead').innerHTML = '<tr>' + cols.map(c => `<th>${c.th}</th>`).join('') + '<th></th></tr>';
+  if (!clientesCache.length) { body.innerHTML = `<tr><td colspan="${cols.length + 1}" class="muted">No hay clientes todavía.</td></tr>`; return; }
   body.innerHTML = clientesCache.map(c => `
     <tr>
-      <td><strong>${escapeHtml(c.codigo || '—')}</strong></td>
-      <td>${escapeHtml(c.apellidoRazonSocial)}${c.nombre ? ' ' + escapeHtml(c.nombre) : ''}${c.nombreFantasia ? `<div class="muted">${escapeHtml(c.nombreFantasia)}</div>` : ''}</td>
-      <td class="muted">${CATEGORIA_FISCAL_LABEL[c.categoriaFiscal] || '—'}</td>
-      <td class="muted">${c.cuit ? escapeHtml(c.cuit) : (c.numeroDocumento ? `${TIPO_DOCUMENTO_LABEL[c.tipoDocumento]||'Doc.'} ${escapeHtml(c.numeroDocumento)}` : '—')}</td>
-      <td class="muted">${[c.telefono || c.celular, c.email].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</td>
-      <td><span class="pill ${c.activo === false ? 'inactivo' : 'activo'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span></td>
+      ${cols.map(col => `<td${col.k === 'codigo' || col.k === 'cliente' || col.k === 'estado' ? '' : ' class="muted"'}>${col.td(c)}</td>`).join('')}
       <td>
         <button class="btn small secondary" onclick="abrirEditarCliente('${c._id}')">Editar</button>
         ${c.activo === false ? '' : `<button class="btn small danger" onclick="desactivarCliente('${c._id}', '${escapeHtml(c.apellidoRazonSocial).replace(/'/g,"\\'")}')">Desactivar</button>`}
