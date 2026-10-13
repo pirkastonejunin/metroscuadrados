@@ -581,6 +581,11 @@ function abrirNuevoProducto(){
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Nuevo producto</h2>
+    <div class="campo-edit"><label>Elegir un producto ya cargado (opcional)</label>
+      <input id="fpCatalogo" list="dlCatalogoProd" placeholder="Escribí SKU o nombre para buscar en Productos…" autocomplete="off" oninput="elegirProductoCatalogo(this)" onchange="elegirProductoCatalogo(this,true)" style="width:100%">
+      <datalist id="dlCatalogoProd"></datalist>
+      <div class="muted" id="fpCatalogoMsg" style="font-size:12px;margin-top:4px">Si el producto ya está en Productos, se completan nombre, SKU y unidad; solo falta armar la receta.</div>
+    </div>
     <div class="grid2">
       <div class="campo-edit"><label>Nombre</label><input id="fpNombre" placeholder="Ej: Adoquín 40x40"></div>
       <div class="campo-edit"><label>Se costea por</label><select id="fpTipoCosteo" onchange="cambiarTipoCosteoTemp(this.value)"><option value="unidad">Unidad</option><option value="m2">m²</option></select></div>
@@ -594,6 +599,33 @@ function abrirNuevoProducto(){
     <button class="btn" style="margin-top:6px" onclick="guardarNuevoProducto()">Guardar</button>
   `, 'wide');
   renderRecetaTemp();
+  cargarCatalogoDisponible();
+}
+let CATALOGO_DISP = [];
+function textoCatalogo(c){ return (c.sku ? c.sku + ' — ' : '') + c.nombre; }
+async function cargarCatalogoDisponible(){
+  try{
+    const r = await fetch(BASE + '/productos/catalogo-disponibles', {headers: headersAuth()});
+    if (!r.ok) return;
+    CATALOGO_DISP = await r.json();
+    const dl = document.getElementById('dlCatalogoProd');
+    if (dl) dl.innerHTML = CATALOGO_DISP.map(c => `<option value="${escapeHtml(textoCatalogo(c))}"></option>`).join('');
+  }catch(e){}
+}
+function elegirProductoCatalogo(inp, alSalir){
+  const q = inp.value.trim().toLowerCase();
+  let c = CATALOGO_DISP.find(x => textoCatalogo(x).toLowerCase() === q);
+  if (!c && alSalir && q) {
+    const m = CATALOGO_DISP.filter(x => textoCatalogo(x).toLowerCase().includes(q));
+    if (m.length === 1) { c = m[0]; inp.value = textoCatalogo(c); }
+  }
+  if (!c) return;
+  document.getElementById('fpNombre').value = c.nombre;
+  document.getElementById('fpSku').value = c.sku || '';
+  const tipo = (c.unidad === 'm2') ? 'm2' : 'unidad';
+  const sel = document.getElementById('fpTipoCosteo');
+  if (sel.value !== tipo) { sel.value = tipo; cambiarTipoCosteoTemp(tipo); }
+  document.getElementById('fpCatalogoMsg').textContent = c.sku ? 'Se vincula por SKU con el producto de Productos.' : 'Este producto no tiene SKU en Productos: ponele uno para vincularlo.';
 }
 function leerRecetaTemp(){
   return RECETA_TEMP.filter(f=>f.insumoId).map(f => {

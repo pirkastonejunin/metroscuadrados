@@ -555,6 +555,22 @@ router.post('/productos/sincronizar-catalogo', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Productos ya cargados en el catálogo (módulo Productos) que todavía no tienen
+// receta de costos: sirven para elegir uno al crear un producto de producción.
+router.get('/productos/catalogo-disponibles', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const usados = await db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)), { projection: { sku: 1 } }).toArray();
+      const skusUsados = new Set(usados.map(p => String(p.sku || '').toUpperCase()).filter(Boolean));
+      const cat = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)), { projection: { sku: 1, nombre: 1, unidad: 1 } }).sort({ nombre: 1 }).toArray();
+      return cat.filter(c => !c.sku || !skusUsados.has(String(c.sku).toUpperCase()))
+        .map(c => ({ _id: c._id, sku: c.sku || '', nombre: c.nombre || '', unidad: c.unidad || '' }));
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/productos', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
