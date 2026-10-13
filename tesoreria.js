@@ -830,7 +830,7 @@ router.post('/movimientos', authOperar, async (req, res) => {
 // corriente por cobro (de una venta o a cuenta). La forma de pago y el
 // recibo se toman del propio movimiento (cobros nuevos) o, en los viejos,
 // se infieren del cobro de la venta / del movimiento de caja o banco.
-const FORMA_LABEL_COBRANZA = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', transferencia: 'Transferencia', tarjeta: 'Tarjeta' };
+const FORMA_LABEL_COBRANZA = { mixto: 'Varios medios', efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', transferencia: 'Transferencia', tarjeta: 'Tarjeta' };
 router.get('/cobranzas', authOperar, async (req, res) => {
   try {
     const match = Object.assign({ tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] } }, filtroOrg(req));
@@ -909,8 +909,107 @@ router.get('/cobranzas', authOperar, async (req, res) => {
 // cheque entra "en cartera" (no mueve plata todavía, igual que uno
 // recibido por una venta).
 // -----------------------------------------------------------------------
+// Valida y normaliza UN medio de pago de un recibo con varios (efectivo / cheque / transferencia / tarjeta).
+function normalizarValorRecibo(v, fechaDefecto) {
+  const tipoValor = normalizarTexto(v.tipoValor).toLowerCase();
+  if (!TIPOS_VALOR_COBRO_CUENTA_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_COBRO_CUENTA_VALIDOS.join(', ')})`);
+  const monto = normalizarMontoPositivo(v.monto, 'El monto de cada medio de pago');
+  const out = { tipoValor, monto, cuentaTipo: null, cuentaId: null, chequeDatos: null, tarjetaDatos: null };
+  if (tipoValor !== 'cheque') {
+    out.cuentaTipo = normalizarTexto(v.cuentaTipo).toLowerCase();
+    if (!['caja', 'banco'].includes(out.cuentaTipo)) throw err(400, 'Elegí a qué caja o banco va cada cobro.');
+    if (tipoValor === 'efectivo' && out.cuentaTipo !== 'caja') throw err(400, 'Un cobro en efectivo solo puede ir a una caja.');
+    if ((tipoValor === 'cuenta' || tipoValor === 'tarjeta') && out.cuentaTipo !== 'banco') throw err(400, 'Un cobro por transferencia o tarjeta solo puede ir a un banco.');
+    out.cuentaId = toObjectId(v.cuentaId);
+    if (!out.cuentaId) throw err(400, 'Caja/banco inválido');
+  } else {
+    out.chequeDatos = {
+      numero: normalizarTexto(v.chequeNumero), banco: normalizarTexto(v.chequeBanco), librador: normalizarTexto(v.chequeLibrador),
+      cuitLibrador: normalizarTexto(v.chequeCuitLibrador),
+      fechaEmision: v.chequeFechaEmision ? new Date(v.chequeFechaEmision) : fechaDefecto,
+      fechaVencimiento: v.chequeFechaVencimiento ? new Date(v.chequeFechaVencimiento) : null,
+      observaciones: normalizarTexto(v.chequeObservaciones)
+    };
+    if (!out.chequeDatos.numero) throw err(400, 'Falta el número de cheque.');
+    if (!out.chequeDatos.fechaVencimiento) throw err(400, 'Falta la fecha de vencimiento del cheque.');
+  }
+  if (tipoValor === 'tarjeta') {
+    out.tarjetaDatos = {
+      tarjetaEntidad: normalizarTexto(v.tarjetaEntidad), tarjetaTipo: normalizarTexto(v.tarjetaTipo).toLowerCase(),
+      tarjetaCuotas: v.tarjetaCuotas ? Number(v.tarjetaCuotas) : 1, tarjetaLote: normalizarTexto(v.tarjetaLote),
+      tarjetaCupon: normalizarTexto(v.tarjetaCupon), tarjetaCodigoAutorizacion: normalizarTexto(v.tarjetaCodigoAutorizacion)
+    };
+    if (!out.tarjetaDatos.tarjetaLote) throw err(400, 'Falta el número de lote.');
+    if (!out.tarjetaDatos.tarjetaCupon) throw err(400, 'Falta el número de cupón.');
+  }
+  return out;
+}
+
+// Recibo con VARIOS medios de pago (p. ej. parte en tarjeta, parte en cheques, parte en transferencia): un solo recibo y un solo
+// movimiento de cuenta corriente por el total; cada medio genera su cheque en cartera o su ingreso en caja/banco.
+async function cobroCuentaVariosMedios(req, res) {
+  const body = req.body || {};
+  const clienteId = toObjectId(body.clienteId);
+  if (!clienteId) throw err(400, 'Elegí un cliente');
+  const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
+  if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
+  const nota = normalizarTexto(body.nota);
+  const fecha = body.fecha ? new Date(body.fecha) : new Date();
+  const retenciones = normalizarLineasImpuesto(body.retenciones, TIPOS_RETENCION, 'Retenciones');
+  const totalRetenciones = sumarMontos(retenciones);
+  const valores = body.valores.map(v => normalizarValorRecibo(v || {}, fecha));
+  const totalCobrado = valores.reduce((t, v) => t + v.monto, 0);
+
+  return conReintento(async () => {
+    const db = await getDb();
+    const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
+    if (!cliente) throw err(404, 'Cliente no encontrado');
+    const clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
+    const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+    // Antes de escribir nada: que todas las cajas/bancos existan y estén habilitados (así no queda un recibo a medias).
+    for (const v of valores) {
+      if (!v.cuentaTipo) continue;
+      const cuenta = await db.collection(v.cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos').findOne({ _id: v.cuentaId });
+      if (!cuenta) throw err(404, `${v.cuentaTipo === 'caja' ? 'Caja' : 'Banco'} no encontrado`);
+      if (!cuentaHabilitada(cuenta, req)) throw err(403, `No tenés habilitada ${v.cuentaTipo === 'caja' ? 'la caja' : 'la cuenta bancaria'} "${cuenta.nombre}" en esta sucursal.`);
+    }
+    const detalle = [];
+    for (const v of valores) {
+      const d = { tipoValor: v.tipoValor, monto: v.monto };
+      if (v.tipoValor === 'cheque') {
+        const cheque = Object.assign({
+          tipo: 'tercero', moneda, monto: v.monto, estado: 'en_cartera', clienteId, clienteNombre,
+          ventaId: null, compraId: null, cuentaId: null, depositadoEnCuentaId: null, endosadoA: null,
+          usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date()
+        }, v.chequeDatos);
+        const { insertedId } = await db.collection('cheques').insertOne(cheque);
+        Object.assign(d, { chequeId: insertedId, chequeNumero: v.chequeDatos.numero, chequeBanco: v.chequeDatos.banco, chequeVencimiento: v.chequeDatos.fechaVencimiento });
+      } else {
+        const obs = v.tipoValor === 'tarjeta' ? [nota, `Lote ${v.tarjetaDatos.tarjetaLote} / Cupón ${v.tarjetaDatos.tarjetaCupon}`].filter(Boolean).join(' — ') : nota;
+        const m = await aplicarMovimientoCuenta(db, req, {
+          cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId, tipo: 'ingreso', monto: v.monto, moneda,
+          motivo: `Cobro a cuenta — ${clienteNombre}`, observaciones: obs, origen: 'cobro_cuenta', fecha
+        });
+        Object.assign(d, { tesoId: m._id, cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId }, v.tarjetaDatos || {});
+      }
+      detalle.push(d);
+    }
+    const mov = await registrarMovimientoCuentaCorriente(db, req, {
+      clienteId, clienteNombre, tipo: 'credito', monto: totalCobrado + totalRetenciones, moneda,
+      concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId: null,
+      observaciones: [nota, retenciones.length ? 'Incluye retenciones: ' + retenciones.map(r => `${r.tipoNombre} $${r.monto}`).join(', ') : ''].filter(Boolean).join(' — '),
+      fecha, extra: { tipoValor: 'mixto', reciboTipo: 'multi', valores: detalle, totalRetenciones }
+    });
+    await db.collection('cuenta_corriente_movimientos').updateOne({ _id: mov._id }, { $set: { reciboId: mov._id } });
+    await registrarRetencionesSufridas(db, req, { origen: 'cobro_cuenta', retenciones, fecha, moneda,
+      referencia: { clienteId, clienteNombre, reciboTipo: 'multi', reciboId: mov._id } });
+    return { ok: true, reciboTipo: 'multi', reciboId: mov._id };
+  });
+}
+
 router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
   try {
+    if (Array.isArray(req.body && req.body.valores) && req.body.valores.length > 1) return res.json(await cobroCuentaVariosMedios(req, res));
     const body = req.body || {};
     const clienteId = toObjectId(body.clienteId);
     if (!clienteId) throw err(400, 'Elegí un cliente');
@@ -1038,7 +1137,28 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
       // --- 1) El valor cobrado: cheque en cartera, o plata en caja/banco.
       let cuentaRev = null;   // { cuentaTipo, cuentaId, monto, moneda }
       let pagoIdx = -1, venta = null;
-      if (mov.origen === 'cobro_venta') {
+      if (Array.isArray(mov.valores)) {
+        // Recibo con varios medios: primero se comprueba que TODOS los cheques sigan en cartera, y recién después se revierte cada medio.
+        for (const v of mov.valores) {
+          if (!v.chequeId) continue;
+          const ch = await db.collection('cheques').findOne({ _id: v.chequeId });
+          if (!ch) throw err(404, 'No encuentro uno de los cheques de este recibo.');
+          if (ch.estado !== 'en_cartera') throw err(400, `El cheque Nº ${ch.numero} ya está "${ch.estado}": no se puede anular el recibo mientras no vuelva a cartera.`);
+        }
+        for (const v of mov.valores) {
+          if (v.chequeId) {
+            const ch = await db.collection('cheques').findOne({ _id: v.chequeId });
+            await db.collection('cheques').updateOne({ _id: v.chequeId }, { $set: { estado: 'anulado', observaciones: ((ch.observaciones ? ch.observaciones + ' — ' : '') + 'Cobranza anulada' + (motivo ? ': ' + motivo : '')), updatedAt: ahora } });
+          } else if (v.cuentaTipo && v.cuentaId) {
+            await aplicarMovimientoCuenta(db, reqOrg, {
+              cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId, tipo: 'egreso', monto: v.monto, moneda: mov.moneda || 'ARS',
+              motivo: `Anulación de cobranza — ${mov.clienteNombre || ''}`, observaciones: motivo, origen: 'anulacion_cobro', fecha: ahora, omitirPermiso: true
+            });
+            if (v.tesoId) await db.collection('tesoreria_movimientos').updateOne({ _id: v.tesoId }, { $set: { anulado: true } });
+          }
+        }
+        await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_cuenta', reciboId: mov._id });
+      } else if (mov.origen === 'cobro_venta') {
         venta = mov.ventaId ? await db.collection('ventas').findOne({ _id: mov.ventaId }) : null;
         if (!venta) throw err(404, 'No encuentro la venta de este cobro.');
         pagoIdx = (venta.pagos || []).findIndex(p => !p.anulado && new Date(p.fecha).getTime() === new Date(mov.fecha).getTime() && (!mov.chequeId || p.tipoValor === 'cheque'));
@@ -1097,9 +1217,41 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
 router.get('/recibo-cuenta/:tipo/:id', authOperar, async (req, res) => {
   try {
     const tipo = req.params.tipo;
-    if (!['movimiento', 'cheque'].includes(tipo)) throw err(400, 'tipo inválido');
+    if (!['movimiento', 'cheque', 'multi'].includes(tipo)) throw err(400, 'tipo inválido');
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
+    if (tipo === 'multi') {
+      const r = await conReintento(async () => {
+        const db = await getDb();
+        const m = await db.collection('cuenta_corriente_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+        if (!m || !Array.isArray(m.valores)) throw err(404, 'No se encontró ese recibo');
+        const org = await db.collection('organizaciones').findOne({ _id: m.orgId });
+        const retenciones = await db.collection('retenciones_sufridas').find({ origen: 'cobro_cuenta', reciboId: id }).toArray();
+        return { m, org, retenciones };
+      });
+      const { m, org, retenciones } = r;
+      const LBL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', tarjeta: 'Tarjeta' };
+      const total = m.valores.reduce((t, v) => t + (Number(v.monto) || 0), 0);
+      const totalRet = retenciones.reduce((a, x) => a + (Number(x.monto) || 0), 0);
+      const fila = (v) => {
+        let det = '';
+        if (v.tipoValor === 'cheque') det = `Nº ${escHtml(v.chequeNumero || '—')}${v.chequeBanco ? ' — ' + escHtml(v.chequeBanco) : ''}${v.chequeVencimiento ? ' — vence ' + fechaLarga(v.chequeVencimiento) : ''}`;
+        else if (v.tipoValor === 'tarjeta') det = `${escHtml(v.tarjetaEntidad || '')} ${escHtml(v.tarjetaTipo || '')} — Lote ${escHtml(v.tarjetaLote || '—')} / Cupón ${escHtml(v.tarjetaCupon || '—')}`;
+        return `<tr><td>${LBL[v.tipoValor] || escHtml(v.tipoValor)}</td><td>${det}</td><td style="text-align:right">${moneyImp(v.monto, m.moneda)}</td></tr>`;
+      };
+      const bodyHtml = `
+        <h1>Recibo — Cobro a cuenta</h1>
+        <div class="datos-doc">
+          <div><strong>Recibí de:</strong> ${escHtml(m.clienteNombre || '—')}<br>
+            <strong>La suma de:</strong> ${moneyImp(total, m.moneda)}${retenciones.length ? `<br><strong>Retenciones practicadas:</strong> ${retenciones.map(x => escHtml(x.tipoNombre) + ' ' + moneyImp(x.monto, m.moneda)).join(' — ')}<br><strong>Total aplicado a la cuenta:</strong> ${moneyImp(total + totalRet, m.moneda)}` : ''}</div>
+          <div><strong>Fecha:</strong> ${fechaLarga(m.fecha)}<br><strong>Forma de pago:</strong> varios medios</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left">Medio</th><th style="text-align:left">Detalle</th><th style="text-align:right">Importe</th></tr></thead><tbody>${m.valores.map(fila).join('')}</tbody></table>
+        <p>En concepto de cobro a cuenta corriente, sin venta puntual asociada.${m.observaciones ? ` ${escHtml(m.observaciones)}` : ''}</p>
+        <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>`;
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      return res.send(paginaImprimible({ titulo: 'Recibo — Cobro a cuenta', org: org || { nombre: 'Organización' }, bodyHtml }));
+    }
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const doc = tipo === 'cheque'
