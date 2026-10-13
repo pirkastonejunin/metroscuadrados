@@ -816,7 +816,9 @@ router.get('/proveedores-lite', authAdmin, async (req, res) => {
 // simplemente no muestra esa sección.
 router.get('/tiendanube/:sku', authAdmin, async (req, res) => {
   try {
-    const info = await buscarProductoTiendanubePorSku(req.params.sku);
+    let skuTn = req.params.sku;
+    try { const db = await conReintento(getDb); const prod = await db.collection('productos_catalogo').findOne(Object.assign({ sku: req.params.sku, activo: { $ne: false } }, filtroOrg(req)), { projection: { skuTiendanube: 1 } }); if (prod && prod.skuTiendanube) skuTn = prod.skuTiendanube; } catch (e) { /* sin vínculo: se busca por el SKU propio */ }
+    const info = await buscarProductoTiendanubePorSku(skuTn);
     if (!info) return res.json({ encontrado: false });
     res.json(Object.assign({ encontrado: true }, info));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -1928,12 +1930,13 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
 
     const productos = await db.collection('productos_catalogo')
       .find(matchProductosDeLista(req, lista))
-      .project({ sku: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1 }).toArray();
+      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1 }).toArray();
     const preciosPorSku = new Map();
     productos.forEach(p => {
-      if (!p.sku) return;
+      if (!p.sku && !p.skuTiendanube) return;
       const { precio } = precioResuelto(p, lista, null);
-      if (precio != null) preciosPorSku.set(String(p.sku), precio);
+      // si el producto está vinculado con Tiendanube bajo otro SKU, el precio va a ese SKU (tiendanubeVinculo.js)
+      if (precio != null) preciosPorSku.set(String(p.skuTiendanube || p.sku), precio);
     });
     if (!preciosPorSku.size) throw err(400, 'No hay productos con precio calculado para sincronizar en esta lista');
 

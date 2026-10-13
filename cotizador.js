@@ -2015,3 +2015,6 @@ module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
 module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js
 module.exports.sincronizarPreciosTiendanube = sincronizarPreciosTiendanube; // exportado para productos.js
 module.exports.obtenerPreciosTiendanubePorSku = obtenerPreciosTiendanubePorSku; // exportado para productos.js
+module.exports.fetchAllProducts = fetchAllProducts; // exportado para tiendanubeVinculo.js
+module.exports.getStoreById = getStoreById;
+module.exports.nombreLocalizado = nombreLocalizado;
