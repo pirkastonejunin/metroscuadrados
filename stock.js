@@ -739,6 +739,50 @@ router.post('/ajustar', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Poner el stock de uno o más depósitos en CERO (13/10/2026, pedido de Mato: error de importación). Respeta el libro: por cada
+// producto con stock distinto de 0 carga un movimiento de ajuste que lo lleva a 0 (queda el rastro de qué había) y deja el
+// caché en 0. Lo comprometido por pedidos no se toca. GET /poner-en-cero/preview cuenta antes; POST exige escribir CERO.
+router.get('/poner-en-cero/preview', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const db = await getDb();
+    const deps = await db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray();
+    const filas = [];
+    for (const d of deps) {
+      const r = await db.collection('stock_actual').aggregate([{ $match: Object.assign({ depositoId: d._id, cantidad: { $ne: 0 } }, filtroOrg(req)) }, { $group: { _id: null, n: { $sum: 1 }, u: { $sum: '$cantidad' } } }]).toArray();
+      filas.push({ depositoId: String(d._id), nombre: d.nombre, productos: r[0] ? r[0].n : 0, unidades: r[0] ? r[0].u : 0 });
+    }
+    res.json({ depositos: filas });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/poner-en-cero', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const body = req.body || {};
+    if (body.confirmar !== 'CERO') throw err(400, 'Escribí CERO para confirmar.');
+    const ids = (Array.isArray(body.depositoIds) ? body.depositoIds : []).map(toObjectId).filter(Boolean);
+    if (!ids.length) throw err(400, 'Elegí al menos un depósito.');
+    const db = await getDb(); const ahora = new Date();
+    const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+    const motivoBase = normalizarTexto(body.motivo) || 'Puesta en cero por error de importación';
+    const deps = await db.collection('depositos').find(Object.assign({ _id: { $in: ids } }, filtroOrg(req))).toArray();
+    const resumen = [];
+    for (const d of deps) {
+      const filas = await db.collection('stock_actual').find(Object.assign({ depositoId: d._id, cantidad: { $ne: 0 } }, filtroOrg(req))).toArray();
+      let hechos = 0;
+      for (let i = 0; i < filas.length; i += 500) {
+        const tanda = filas.slice(i, i + 500);
+        const movs = tanda.map(f => ({ productoId: f.productoId, depositoId: d._id, tipo: f.cantidad > 0 ? 'egreso' : 'ingreso', cantidad: Math.abs(f.cantidad), motivo: `${motivoBase} (${f.cantidad} → 0)`, sucursal: '', codigoExterno: '', observaciones: '', usuarioNombre, fecha: ahora, orgId: req.orgId, createdAt: ahora }));
+        await db.collection('stock_movimientos').insertMany(movs, { ordered: false });
+        await db.collection('stock_actual').bulkWrite(tanda.map(f => ({ updateOne: { filter: { _id: f._id }, update: { $set: { cantidad: 0, actualizadoEn: ahora } } } })), { ordered: false });
+        hechos += tanda.length;
+      }
+      resumen.push({ deposito: d.nombre, productos: hechos });
+    }
+    res.json({ ok: true, resumen });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Transferencia entre depósitos = un egreso del depósito origen + un
 // ingreso al depósito destino, ligados por transferenciaId. No pasa por
 // la validación de "no acepta stock negativo" de una forma distinta al

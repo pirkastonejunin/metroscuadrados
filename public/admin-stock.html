@@ -212,6 +212,7 @@
             <button class="btn secondary" onclick="abrirStockDux()" title="Cargar el stock de un depósito desde la Consulta de Stock de Dux">Stock de Dux</button>
             <button class="btn secondary" onclick="abrirNuevaTransferencia()">Transferencia</button>
             <button class="btn secondary" onclick="abrirAjusteStock()">Ajustar stock</button>
+            <button class="btn secondary" onclick="abrirPonerEnCero()">Poner depósitos en cero</button>
             <button class="btn" onclick="abrirNuevoMovimiento()">+ Nuevo movimiento</button>
           </div>
         </div>
@@ -768,6 +769,35 @@ function abrirAjusteStock(){
       </div>
     </div>
   `;
+}
+
+async function abrirPonerEnCero(){
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Poner depósitos en cero</h2>
+        <p class="muted">Para corregir una importación equivocada. Por cada producto con stock se carga un movimiento de ajuste que lo lleva a 0 (queda registrado cuánto había). Lo comprometido por pedidos no se toca.</p>
+        <div id="pcLista" class="muted">Contando…</div>
+        <div style="margin-top:10px"><label>Para confirmar, escribí CERO</label><input id="pcConf" autocomplete="off"></div>
+        <div class="err" id="pcErr"></div>
+        <button class="btn danger" style="margin-top:10px" onclick="ejecutarPonerEnCero()">Poner en cero los tildados</button>
+      </div>
+    </div>`;
+  try{
+    const r = await fetch(BASE + '/poner-en-cero/preview', {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    document.getElementById('pcLista').innerHTML = d.depositos.map(x => `<label style="display:flex;gap:8px;align-items:center;font-weight:600;margin:6px 0"><input type="checkbox" class="pcDep" value="${x.depositoId}" checked style="width:auto"> ${escapeHtml(x.nombre)} <span class="muted">— ${x.productos} productos con stock (${Math.round(x.unidades*100)/100} unidades)</span></label>`).join('') || 'No hay depósitos.';
+  }catch(e){ document.getElementById('pcLista').textContent = ''; document.getElementById('pcErr').textContent = e.message; }
+}
+async function ejecutarPonerEnCero(){
+  const ids = [...document.querySelectorAll('.pcDep:checked')].map(c => c.value);
+  if (!ids.length) { document.getElementById('pcErr').textContent = 'Tildá al menos un depósito.'; return; }
+  try{
+    const r = await fetch(BASE + '/poner-en-cero', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({depositoIds: ids, confirmar: document.getElementById('pcConf').value.trim()})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cerrarModal(); await cargarMovimientos(); if (tabActiva === 'actual') await cargarStockActual();
+    alert('Listo: ' + d.resumen.map(x => x.deposito + ' (' + x.productos + ' productos)').join(', ') + ' en cero.');
+  }catch(e){ document.getElementById('pcErr').textContent = e.message; }
 }
 
 async function actualizarCantidadActualAjuste(){
