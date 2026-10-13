@@ -656,7 +656,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       // El evento de Calendar de la obra depende de estado/fechaInicio/
       // notasColocador (título, fecha y descripción) — se resincroniza si
       // se tocó alguno de los tres.
-      if (estado !== undefined || fechaInicio !== undefined || notasColocador !== undefined) {
+      if (estado !== undefined || fechaInicio !== undefined || notasColocador !== undefined || cliente !== undefined) {
         const obraEfectiva = { ...obra, ...set };
         await sincronizarCalendarDeObra(db, obraEfectiva);
         set.googleEventId = obraEfectiva.googleEventId;
