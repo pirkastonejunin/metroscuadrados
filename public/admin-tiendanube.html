@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tiendanube - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);}
+  .kpi .t{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .kpi .v{font-size:20px;font-weight:800;margin-top:6px;}
+  .kpi .s{font-size:12px;color:var(--muted);margin-top:4px;}
+  .kpi .v.neg{color:var(--danger);}
+  .kpi .v.pos{color:var(--ok);}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  textarea{min-height:50px;font-family:inherit;}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;filter:none;}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.danger{background:var(--danger);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.activo{background:var(--ok-soft);color:var(--ok);}
+  .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto;z-index:500;}
+  .modal{background:var(--card);border-radius:16px;padding:20px;max-width:680px;width:100%;box-shadow:var(--shadow);}
+  .modal.wide{max-width:920px;}
+  .modal h2{margin-top:0;font-size:16px;}
+  .close-x{float:right;cursor:pointer;color:var(--muted);font-size:18px;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;}
+  .modal-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+  .modal-tabs button{background:none;border:none;padding:9px 12px;font-size:13px;font-family:inherit;font-weight:700;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  .modal-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
+  .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
+  .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px;}
+  .tab-btn{background:none;border:none;padding:10px 14px;font-size:14px;font-family:inherit;font-weight:700;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
+  .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .kpi.clic{cursor:pointer;transition:border-color .15s;} .kpi.clic:hover{border-color:var(--accent);} .kpi.clic.on{border-color:var(--accent);background:var(--accent-soft);}
+  .scroll{overflow:auto;max-height:620px;border:1px solid var(--border);border-radius:10px;}
+  .scroll th{position:sticky;top:0;background:var(--card);z-index:1;}
+  td.n,th.n{text-align:right;white-space:nowrap;}
+  .pill.sku{background:var(--ok-soft);color:var(--ok);} .pill.manual{background:var(--info-soft);color:var(--info);} .pill.sin{background:var(--danger-soft);color:var(--danger);}
+  .dif{color:var(--danger);font-weight:800;}
+  .linksub{font-size:12px;color:var(--muted);margin-top:2px;}
+  a{color:var(--info);}
+  .tn-sel{min-width:260px;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Tiendanube</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Tu usuario no tiene habilitado el módulo de Productos. Pedile a un administrador que te lo habilite desde Usuarios y roles.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><h1>Tiendanube</h1></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="tabs">
+      <button class="tab-btn" id="tabBtnVinculos" onclick="cambiarTab('vinculos')">Vínculos y precios</button>
+      <button class="tab-btn" id="tabBtnPendientes" onclick="cambiarTab('pendientes')">Vincular pendientes</button>
+    </div>
+
+    <div id="tabVinculos">
+      <div class="card">
+        <div class="row">
+          <div><button class="btn" id="btnVinc" onclick="cargarVinculos()">Actualizar desde Tiendanube</button></div>
+          <div style="min-width:220px"><label>Lista de precios del sistema</label><select id="lista" onchange="cargarVinculos()"></select></div>
+          <div style="flex:1;min-width:220px"><label>Buscar</label><input id="q" placeholder="SKU o nombre…" oninput="pintarVinculos()"></div>
+        </div>
+        <div class="muted" style="margin-top:8px">Cada producto de la tienda con el producto del sistema al que corresponde y los dos precios. No cambia nada: sirve para revisar.</div>
+        <div class="err" id="errV"></div>
+      </div>
+      <div id="resV" class="hidden">
+        <div class="kpis" id="kpisV"></div>
+        <div class="card" style="padding:0"><div class="scroll"><table>
+          <thead><tr><th>En Tiendanube</th><th>En el sistema</th><th>Vínculo</th><th class="n">Precio Tiendanube</th><th class="n">Precio sistema</th><th class="n">Diferencia</th><th></th></tr></thead>
+          <tbody id="tbV"></tbody></table></div></div>
+      </div>
+    </div>
+
+    <div id="tabPendientes" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div><button class="btn" id="btnAn" onclick="analizar()">Leer Tiendanube y proponer vínculos</button></div>
+          <label style="display:flex;gap:6px;align-items:center;margin:0 0 6px;font-weight:600"><input type="checkbox" id="viejos" style="width:auto"> Usar también los productos viejos desactivados como pista</label>
+        </div>
+        <div class="muted" style="margin-top:8px">Empareja los productos de Tiendanube que no tienen pareja en el sistema, comparando nombres. El vínculo siempre se guarda en el producto activo. Las fotos quedan en Tiendanube.</div>
+        <div class="err" id="errP"></div>
+      </div>
+      <div id="resP"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+const ORG_KEY = 'obras_org_activo';
+function orgEfectiva(){ if (ORG && ORG !== 'todas') return ORG; return localStorage.getItem('obras_org_operar') || ''; }
+function headersAuth(extra){
+  const h = Object.assign({'x-admin-token':TOKEN}, extra||{});
+  if (ORG) h['x-org-id'] = ORG;
+  return h;
+}
+function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
+// El catálogo es el mismo para todas las sucursales: si no hay una elegida, se usa la primera que tenga el usuario.
+let ORG_OP = '';
+function H(){ const h = headersAuthJson(); const o = orgEfectiva() || ORG_OP; if (o) { h['x-org-id'] = o; h['x-org-operar'] = o; } return h; }
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const N = n => Number(n||0).toLocaleString('es-AR');
+const M = n => (n==null||!isFinite(n)) ? '—' : '$ ' + Number(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+async function login(){
+  const usuario = document.getElementById('loginUser').value, pass = document.getElementById('loginPass').value;
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario, password: pass})});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN); await iniciarApp();
+  }catch(e){ document.getElementById('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  const ok = orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas');
+  if (!ok) { const def = orgs.find(o => o.nombre === 'Piedra Negra'); ORG = orgs.length === 1 ? orgs[0]._id : (def ? def._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : ''))); if (ORG) localStorage.setItem(ORG_KEY, ORG); }
+  if (orgs[0]) ORG_OP = orgs[0]._id;
+}
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    if (!(me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('productos')))) { document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'tiendanube', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
+  cambiarTab(location.hash === '#pendientes' ? 'pendientes' : 'vinculos');
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+let tab = '';
+function cambiarTab(t){
+  tab = t; location.hash = t === 'pendientes' ? 'pendientes' : '';
+  document.getElementById('tabVinculos').classList.toggle('hidden', t !== 'vinculos'); document.getElementById('tabPendientes').classList.toggle('hidden', t !== 'pendientes');
+  document.getElementById('tabBtnVinculos').classList.toggle('active', t === 'vinculos'); document.getElementById('tabBtnPendientes').classList.toggle('active', t === 'pendientes');
+  if (t === 'vinculos' && !DV) cargarVinculos();
+}
+
+// ---------------------------------------------------------------- Vínculos y precios
+let DV = null, FILTRO = 'todos';
+async function cargarVinculos(){
+  const err = document.getElementById('errV'), b = document.getElementById('btnVinc'); err.textContent = ''; b.disabled = true; b.textContent = 'Leyendo Tiendanube…';
+  try{
+    const l = document.getElementById('lista').value;
+    const r = await fetch('/api/tiendanube-vinculo/vinculos' + (l ? '?listaId=' + l : ''), {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    DV = d; document.getElementById('lista').innerHTML = d.listas.map(x => '<option value="' + x._id + '"' + (x._id === d.lista ? ' selected' : '') + '>' + esc(x.nombre) + '</option>').join('');
+    document.getElementById('resV').classList.remove('hidden'); pintarVinculos();
+  }catch(e){ err.textContent = e.message; }
+  b.disabled = false; b.textContent = 'Actualizar desde Tiendanube';
+}
+function difV(r){ if (!r.producto || r.precioSistema == null || !isFinite(r.tn.precio)) return null; return r.precioSistema - r.tn.precio; }
+function pintarVinculos(){
+  if (!DV) return; const s = DV.resumen, q = document.getElementById('q').value.trim().toLowerCase();
+  const K = [['todos', s.total, 'En Tiendanube'], ['sku', s.porSku, 'Por SKU igual'], ['manual', s.manuales, 'Vinculados a mano'], ['sin', s.sinVinculo, 'Sin vínculo'], ['dif', s.conDiferencia, 'Con diferencia de precio'], ['sinp', s.sinPrecioSistema, 'Sin precio en el sistema']];
+  document.getElementById('kpisV').innerHTML = K.map(k => '<div class="kpi clic' + (FILTRO === k[0] ? ' on' : '') + '" onclick="FILTRO=\'' + k[0] + '\';pintarVinculos()"><div class="t">' + k[2] + '</div><div class="v">' + N(k[1]) + '</div></div>').join('');
+  let f = DV.filas.filter(r => FILTRO === 'todos' || (FILTRO === 'sku' && r.tipo === 'sku') || (FILTRO === 'manual' && r.tipo === 'manual') || (FILTRO === 'sin' && r.tipo === 'sin') || (FILTRO === 'dif' && difV(r) != null && Math.abs(difV(r)) >= 0.5) || (FILTRO === 'sinp' && r.producto && r.precioSistema == null));
+  if (q) f = f.filter(r => (r.tn.sku + ' ' + r.tn.nombre + ' ' + (r.producto ? r.producto.sku + ' ' + r.producto.nombre : '')).toLowerCase().includes(q));
+  if (FILTRO === 'dif') f = f.slice().sort((a, b) => Math.abs(difV(b)) - Math.abs(difV(a)));
+  document.getElementById('tbV').innerHTML = f.slice(0, 1500).map(r => {
+    const d = difV(r); const pill = r.tipo === 'sku' ? '<span class="pill sku">SKU igual</span>' : r.tipo === 'manual' ? '<span class="pill manual">A mano</span>' : '<span class="pill sin">Sin vínculo</span>';
+    return '<tr><td><b>' + esc(r.tn.sku || '(sin SKU)') + '</b><div class="linksub">' + (r.tn.url ? '<a target="_blank" href="' + esc(r.tn.url) + '">' + esc(r.tn.nombre) + '</a>' : esc(r.tn.nombre)) + '</div></td>'
+      + '<td>' + (r.producto ? '<b>' + esc(r.producto.sku) + '</b><div class="linksub">' + esc(r.producto.nombre) + '</div>' : '<span class="muted">—</span>') + '</td><td>' + pill + '</td>'
+      + '<td class="n">' + M(r.tn.precio) + (r.tn.promo != null ? '<div class="linksub">oferta ' + M(r.tn.promo) + '</div>' : '') + '</td><td class="n">' + M(r.precioSistema) + '</td>'
+      + '<td class="n' + (d != null && Math.abs(d) >= 0.5 ? ' dif' : '') + '">' + (d == null ? '—' : (d > 0 ? '+' : '') + M(d)) + '</td>'
+      + '<td>' + (r.tipo === 'manual' ? '<button class="btn secondary small" onclick="desvincular(\'' + r.producto._id + '\')">Quitar vínculo</button>' : '') + '</td></tr>'; }).join('')
+    + (f.length > 1500 ? '<tr><td colspan="7" class="muted">Se muestran los primeros 1.500: usá el filtro o el buscador.</td></tr>' : '') + (!f.length ? '<tr><td colspan="7" class="muted">No hay nada para mostrar con este filtro.</td></tr>' : '');
+}
+async function desvincular(id){
+  if (!confirm('Se quita el vínculo hecho a mano de este producto.')) return;
+  try{ const r = await fetch('/api/tiendanube-vinculo/desvincular', {method:'POST', headers: H(), body: JSON.stringify({productoId: id})}); if (r.ok) cargarVinculos(); }catch(e){}
+}
+
+// ---------------------------------------------------------------- Vincular pendientes
+let P = [];
+async function analizar(){
+  const err = document.getElementById('errP'), out = document.getElementById('resP'), b = document.getElementById('btnAn'); err.textContent = ''; b.disabled = true;
+  out.innerHTML = '<div class="card muted">Leyendo la tienda y comparando… puede tardar un minuto.</div>';
+  try{
+    const r = await fetch('/api/tiendanube-vinculo/analizar?usarViejos=' + (document.getElementById('viejos').checked ? '1' : '0'), {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); P = d.propuestas;
+    let h = '<div class="kpis"><div class="kpi"><div class="t">Variantes en Tiendanube</div><div class="v">' + N(d.enTienda) + '</div></div><div class="kpi"><div class="t">Ya coinciden por SKU</div><div class="v pos">' + N(d.directos) + '</div></div><div class="kpi"><div class="t">Ya vinculados</div><div class="v">' + N(d.yaVinculados) + '</div></div><div class="kpi"><div class="t">Sin pareja todavía</div><div class="v ' + (d.pendientes ? 'neg' : 'pos') + '">' + N(d.pendientes) + '</div></div></div>';
+    if (!P.length) h += '<div class="card">Todo lo que está en Tiendanube ya está vinculado.</div>';
+    else h += '<div class="card"><div class="section-title">Para vincular</div><p class="muted" style="margin:8px 0">Las de parecido alto vienen tildadas. Elegí el producto correcto en cada fila, o buscalo por nombre o SKU.' + (d.hayMas ? ' Se muestran las primeras 1.500.' : '') + '</p>'
+      + '<div class="scroll"><table><thead><tr><th></th><th>En Tiendanube</th><th>Producto del sistema</th></tr></thead><tbody>'
+      + P.map((p, i) => { const ops = '<option value="">— ninguno —</option>' + p.candidatos.map((c, j) => '<option value="' + c.productoId + '"' + (j === 0 && p.seguro ? ' selected' : '') + '>' + esc((c.sku ? c.sku + ' · ' : '') + c.nombre) + ' (' + c.parecido + '%)</option>').join('');
+        return '<tr><td><input type="checkbox" class="chk" data-i="' + i + '" style="width:auto"' + (p.seguro ? ' checked' : '') + (p.sku ? '' : ' disabled') + '></td><td><b>' + esc(p.sku || '(sin SKU en Tiendanube)') + '</b><div class="linksub">' + esc(p.nombre) + (p.url ? ' · <a target="_blank" href="' + esc(p.url) + '">ver</a>' : '') + '</div>' + (p.productoViejo ? '<div class="linksub">Producto viejo: ' + esc(p.productoViejo) + '</div>' : '') + '</td>'
+          + '<td><select class="sel tn-sel" data-i="' + i + '" onchange="this.closest(\'tr\').querySelector(\'.chk\').checked=!!this.value">' + ops + '</select><div style="margin-top:4px"><input placeholder="Buscar otro por nombre o SKU…" data-i="' + i + '" oninput="buscar(this)" style="max-width:300px"></div></td></tr>'; }).join('')
+      + '</tbody></table></div><div style="margin-top:12px"><button class="btn" onclick="guardar()">Guardar los vínculos tildados</button> <span id="resG"></span></div></div>';
+    out.innerHTML = h;
+  }catch(e){ out.innerHTML = ''; err.textContent = e.message; }
+  b.disabled = false;
+}
+let TB = null;
+function buscar(inp){
+  clearTimeout(TB);
+  TB = setTimeout(async () => { const q = inp.value.trim(); if (q.length < 2) return;
+    try{ const r = await fetch('/api/tiendanube-vinculo/buscar?q=' + encodeURIComponent(q), {headers: H()}); const d = await r.json(); const s = document.querySelector('.sel[data-i="' + inp.dataset.i + '"]'); if (!r.ok || !s) return;
+      s.innerHTML = '<option value="">— ninguno —</option>' + d.map(c => '<option value="' + c.productoId + '">' + esc((c.sku ? c.sku + ' · ' : '') + c.nombre) + (c.vinculado ? ' (ya vinculado)' : '') + '</option>').join('');
+      if (d.length === 1) { s.value = d[0].productoId; s.onchange(); } }catch(e){} }, 350);
+}
+async function guardar(){
+  const pares = [];
+  document.querySelectorAll('.chk').forEach(c => { if (!c.checked) return; const i = +c.dataset.i, s = document.querySelector('.sel[data-i="' + i + '"]'); if (s && s.value) pares.push({productoId: s.value, sku: P[i].sku, productId: P[i].productId, variantId: P[i].variantId}); });
+  const out = document.getElementById('resG');
+  if (!pares.length) { out.textContent = 'No hay nada tildado.'; return; }
+  if (!confirm('Se vinculan ' + pares.length + ' productos con Tiendanube. ¿Seguimos?')) return;
+  try{
+    const r = await fetch('/api/tiendanube-vinculo/vincular', {method:'POST', headers: H(), body: JSON.stringify({pares})}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    out.innerHTML = '<span class="ok-msg">' + d.guardados + ' vinculados.</span>' + (d.rechazados.length ? ' <span class="err">No se guardaron ' + d.rechazados.length + ': ' + d.rechazados.slice(0, 8).map(x => esc(x.sku) + ' (' + esc(x.motivo) + ')').join('; ') + '</span>' : '');
+    DV = null;
+  }catch(e){ out.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+}
+</script>
+</body>
+</html>

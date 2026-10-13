@@ -126,7 +126,9 @@
     ]},
     { nombre: 'Inventario', items: [
       { key: 'productos', href: '/admin-productos.html', modulo: 'productos', label: 'Productos', icon: ICONOS.productos },
-      { key: 'stock', href: '/admin-stock.html', modulo: 'stock', label: 'Stock', icon: ICONOS.stock }
+      { key: 'stock', href: '/admin-stock.html', modulo: 'stock', label: 'Stock', icon: ICONOS.stock },
+      // Vínculo de productos con Tiendanube (13/10/2026): vínculos actuales, comparación de precios y emparejamiento de pendientes.
+      { key: 'tiendanube', href: '/admin-tiendanube.html', modulo: 'productos', label: 'Tiendanube', icon: ICONOS.bases || ICONOS.productos }
     ]},
     { nombre: 'Proveedores', items: [
       { key: 'proveedores', href: '/admin-proveedores.html', modulo: 'proveedores', label: 'Proveedores', icon: ICONOS.proveedores },
