@@ -398,6 +398,7 @@ async function calcular(db, req, prov, regla, filas) {
   const resumen = {
     filasArchivo: filas.length, vinculados: cambios.length, sinMatch: sinMatch.length, duplicados: duplicados.length, sinPrecio: sinPrecio.length,
     costosCambian: cambios.filter(c => c.cambiaCosto).length,
+    bultosCambian: cambios.filter(c => c.bultoNuevo || c.pasaAM2).length,
     preciosCambian: cambios.reduce((n, c) => n + (c.precios || []).filter(x => x.cambia).length, 0),
     stockCambia: cambios.filter(c => c.stock && c.stock.cambia).length + aCero.length,
     stockACero: aCero.length, alertas: cambios.filter(c => c.alerta).length,
@@ -425,7 +426,7 @@ router.post('/:id/preview', authAdmin, async (req, res) => {
     const ordenadas = calc.cambios.filter(c => c.hayCambio).sort((a, b) => (b.alerta ? 1 : 0) - (a.alerta ? 1 : 0) || Math.abs(b.variacionPct || 0) - Math.abs(a.variacionPct || 0));
     res.json({
       resumen: calc.resumen,
-      muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock })),
+      muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock, bultoNuevo: c.bultoNuevo || null })),
       hayMas: ordenadas.length > 300,
       sinMatch: calc.sinMatch.slice(0, 500), duplicados: calc.duplicados.slice(0, 50), sinPrecio: calc.sinPrecio.slice(0, 50),
       aCero: calc.aCero.slice(0, 100).map(a => ({ sku: a.sku, nombre: a.nombre, anterior: a.anterior }))
@@ -444,7 +445,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const aplicables = calc.cambios.filter(c => c.hayCambio && !(omitirAlertas && c.alerta));
       const omitidos = calc.cambios.filter(c => c.hayCambio && omitirAlertas && c.alerta).length;
-      let costos = 0, precios = 0, stocks = 0;
+      let costos = 0, precios = 0, stocks = 0, bultos = 0;
 
       for (let i = 0; i < aplicables.length; i += TANDA) {
         const lote = aplicables.slice(i, i + TANDA);
@@ -453,7 +454,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           const set = { updatedAt: ahora };
           if (c.costoNuevo != null) { set.costo = c.costoNuevo; set.moneda = c.moneda; set.costoActualizadoEn = ahora; set.costoProveedorId = prov._id; costos++; }
           for (const pr of (c.precios || [])) if (pr.predeterminada) set.precio = pr.nuevo;
-          if (c.bultoNuevo) set.unidadesPorBulto = c.bultoNuevo;
+          if (c.bultoNuevo) { set.unidadesPorBulto = c.bultoNuevo; bultos++; }
           if (c.pasaAM2) { set.unidad = 'm2'; set.tipoUnidad = 'superficie'; }
           opsProd.push({ updateOne: { filter: { _id: c.productoId }, update: { $set: set } } });
           if ((c.precios || []).length) opsProd.push({ updateOne: { filter: { _id: c.productoId, preciosPorLista: { $not: { $type: 'array' } } }, update: { $set: { preciosPorLista: [] } } } });
@@ -527,7 +528,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           await db.collection('stock_movimientos').insertMany(movs.slice(i, i + TANDA), { ordered: false });
         }
       }
-      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados, totalPorCrear });
+      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, bultosActualizados: bultos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados, totalPorCrear });
       await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: (req.body || {}).desdePortal ? 'Portal ' + ((prov.portal && prov.portal.tipo) || '') : String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
       return resumen;
     });
