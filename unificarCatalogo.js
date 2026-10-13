@@ -7,6 +7,7 @@
 const express = require('express');
 const { MongoClient } = require('mongodb');
 const { authUsuario } = require('./usuarios');
+const compartido = require('./compartido');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -49,6 +50,49 @@ router.get('/diagnostico', authUsuario, solo, async (req, res) => {
       else if (arr.length > 1) repetidosEnMismaOrg++;
     }
     res.json({ organizaciones: orgs.map(o => ({ _id: String(o._id), nombre: o.nombre })), cuentas, depositos, listas, cotizacionDolar: cot, skus: { total: porSku.size, enVariasSucursales: enVariasOrgs, repetidosEnMismaSucursal: repetidosEnMismaOrg, ejemplos } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/estado', authUsuario, solo, async (req, res) => {
+  res.json({ activo: compartido.estado.activo, matrizOrgId: compartido.estado.matriz ? String(compartido.estado.matriz) : null });
+});
+
+// Activa el catálogo compartido: deja TODO lo compartido bajo la sucursal matriz y prende el reemplazo de sucursal en cada consulta.
+// Listas de precio repetidas (mismo nombre) se unifican con la de la matriz; ventas y presupuestos que la usaban pasan a la de la matriz.
+router.post('/activar', authUsuario, solo, async (req, res) => {
+  try {
+    const { ObjectId } = require('mongodb');
+    const db = await getDb();
+    let matriz; try { matriz = new ObjectId(String((req.body || {}).matrizOrgId)); } catch (e) { return res.status(400).json({ error: 'Elegí la sucursal matriz.' }); }
+    if (String((req.body || {}).confirmar || '').toLowerCase() !== 'activar') return res.status(400).json({ error: 'Falta la confirmación.' });
+    if (!(await db.collection('organizaciones').findOne({ _id: matriz }))) return res.status(400).json({ error: 'La sucursal matriz no existe.' });
+    const resumen = { listasUnificadas: 0, listasMovidas: 0 };
+    const bloqueos = [];
+    for (const col of ['productos_catalogo', 'depositos', 'stock_actual', 'stock_movimientos', 'productos_rubros_base', 'productos_subrubros_base']) {
+      const n = await db.collection(col).countDocuments({ orgId: { $nin: [matriz, null] } });
+      if (n) bloqueos.push(col + ': ' + n);
+    }
+    if (bloqueos.length) return res.status(409).json({ error: 'Hay datos en otras sucursales que primero hay que unificar (' + bloqueos.join(', ') + '). Pasame el diagnóstico y lo resuelvo antes de activar.' });
+    const propias = await db.collection('productos_listas_precio').find({ orgId: { $nin: [matriz, null] } }).toArray();
+    const deMatriz = await db.collection('productos_listas_precio').find({ orgId: matriz }).toArray();
+    for (const l of propias) {
+      const igual = deMatriz.find(m => norm(m.nombre) === norm(l.nombre));
+      if (igual) {
+        for (const col of ['ventas', 'presupuestos']) await db.collection(col).updateMany({ listaPrecioId: l._id }, { $set: { listaPrecioId: igual._id } });
+        await db.collection('productos_listas_precio').deleteOne({ _id: l._id }); resumen.listasUnificadas++;
+      } else { await db.collection('productos_listas_precio').updateOne({ _id: l._id }, { $set: { orgId: matriz } }); resumen.listasMovidas++; }
+    }
+    await db.collection('config_general').updateOne({ clave: 'catalogoCompartido' }, { $set: { clave: 'catalogoCompartido', activo: true, matrizOrgId: matriz, activadoEn: new Date() } }, { upsert: true });
+    await compartido.recargar();
+    res.json({ ok: true, resumen });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/desactivar', authUsuario, solo, async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.collection('config_general').updateOne({ clave: 'catalogoCompartido' }, { $set: { activo: false } });
+    await compartido.recargar();
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 module.exports = router;

@@ -1,4 +1,5 @@
 require('dotenv').config();
+const compartido = require('./compartido'); // catálogo compartido entre sucursales: va PRIMERO (parchea el driver)
 const express = require('express');
 const path = require('path');
 const compression = require('compression');
@@ -16,6 +17,7 @@ const app = express();
 // diferencia entre notarse trabado o no. No tiene contras: el browser
 // descomprime solo, es estándar en cualquier API.
 app.use(compression());
+app.use((req, res, next) => { compartido.listo.then(() => next(), () => next()); });
 // Límite subido a 30mb (30/9/2026): el import de módulos (Productos,
 // Clientes, etc.) manda el Excel como base64 dentro del JSON, y el
 // export real de Dux (catálogo completo, ~20.000 productos) ya pesa
