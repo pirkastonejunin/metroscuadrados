@@ -39,7 +39,7 @@ async function productosTienda() {
     const nombreP = cotizador.nombreLocalizado(p.name);
     for (const v of (p.variants || [])) {
       const vals = (v.values || []).map(x => cotizador.nombreLocalizado(x)).filter(Boolean).join(' ');
-      filas.push({ sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null });
+      filas.push({ stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null });
     }
   }
   return filas;
@@ -123,6 +123,43 @@ router.get('/buscar', auth, async (req, res) => {
     const filtro = Object.assign({ activo: { $ne: false }, $and: palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }] })) }, filtroOrg(req));
     const lista = await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, skuTiendanube: 1 }).limit(15).toArray();
     res.json(lista.map(p => ({ productoId: String(p._id), sku: p.sku || '', nombre: p.nombre || '', vinculado: !!p.skuTiendanube })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Vínculos actuales: cada variante de Tiendanube con el producto del sistema al que corresponde, y los dos precios lado a lado.
+router.get('/vinculos', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const { precioResuelto } = require('./productos');
+    const listas = await db.collection('productos_listas_precio').find(Object.assign({ activa: { $ne: false } }, filtroOrg(req))).toArray();
+    let lista = null;
+    if (req.query.listaId) lista = listas.find(l => String(l._id) === String(req.query.listaId));
+    if (!lista) lista = listas.find(l => l.formula === 'cf_x_bulto') || listas.find(l => /tienda/i.test(l.nombre || '')) || listas.find(l => l.predeterminada) || listas[0] || null;
+    const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
+    const filas = await productosTienda();
+    const prods = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, skuTiendanube: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, porcentajeIva: 1 }).toArray();
+    const porSku = new Map(), porTn = new Map();
+    for (const p of prods) { if (p.sku) porSku.set(K(p.sku), p); if (p.skuTiendanube) porTn.set(K(p.skuTiendanube), p); }
+    const out = filas.map(f => {
+      const k = K(f.sku); let p = null, tipo = 'sin';
+      if (k && porTn.has(k)) { p = porTn.get(k); tipo = 'manual'; } else if (k && porSku.has(k)) { p = porSku.get(k); tipo = 'sku'; }
+      let precioSistema = null;
+      if (p && lista) { try { precioSistema = precioResuelto(p, lista, cot).precio; } catch (e) { precioSistema = null; } }
+      return { tn: { sku: f.sku, nombre: f.nombre, precio: f.precio, promo: f.promo, stock: f.stock, url: f.url, productId: f.productId, variantId: f.variantId },
+        producto: p ? { _id: String(p._id), sku: p.sku || '', nombre: p.nombre || '' } : null, tipo, precioSistema: precioSistema == null ? null : precioSistema };
+    });
+    const resumen = { total: out.length, porSku: out.filter(r => r.tipo === 'sku').length, manuales: out.filter(r => r.tipo === 'manual').length, sinVinculo: out.filter(r => r.tipo === 'sin').length,
+      conDiferencia: out.filter(r => r.producto && r.precioSistema != null && Number.isFinite(r.tn.precio) && Math.abs(r.precioSistema - r.tn.precio) >= 0.5).length,
+      sinPrecioSistema: out.filter(r => r.producto && r.precioSistema == null).length };
+    res.json({ lista: lista ? String(lista._id) : null, listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), resumen, filas: out });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/desvincular', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const pid = oid((req.body || {}).productoId);
+    if (!pid) throw err(400, 'Falta el producto.');
+    const r = await db.collection('productos_catalogo').updateOne(Object.assign({ _id: pid }, filtroOrg(req)), { $unset: { skuTiendanube: '', tiendanube: '' }, $set: { updatedAt: new Date() } });
+    res.json({ ok: true, modificados: r.modifiedCount });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
