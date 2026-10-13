@@ -67,6 +67,7 @@ app.use('/api/ventas-import-dux', require('./ventasImportDux'));
 app.use('/api/compras-import-dux', require('./comprasImportDux'));
 app.use('/api/cobros-import-dux', require('./cobrosImportDux'));
 app.use('/api/saldos-import-dux', require('./saldosImportDux'));
+app.use('/api/stock-import-dux', require('./stockImportDux'));
 app.use('/api/cheques-import-dux', require('./chequesImportDux'));
 app.use('/api/estado-migracion', require('./estadoMigracion'));
 app.use('/api/fichas-import-dux', require('./fichasImportDux'));

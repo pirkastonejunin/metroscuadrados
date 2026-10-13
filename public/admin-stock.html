@@ -209,6 +209,7 @@
           <div class="row">
             <button class="btn secondary" onclick="descargarBlob(BASE + '/movimientos/export', 'movimientos-stock.xlsx')">Exportar</button>
             <button class="btn secondary" onclick="abrirImportarMovimientos()">Carga inicial de stock</button>
+            <button class="btn secondary" onclick="abrirStockDux()" title="Cargar el stock de un depósito desde la Consulta de Stock de Dux">Stock de Dux</button>
             <button class="btn secondary" onclick="abrirNuevaTransferencia()">Transferencia</button>
             <button class="btn secondary" onclick="abrirAjusteStock()">Ajustar stock</button>
             <button class="btn" onclick="abrirNuevoMovimiento()">+ Nuevo movimiento</button>
@@ -1051,6 +1052,62 @@ function abrirImportarMovimientos(){
       </div>
     </div>
   `;
+}
+
+// ---- Importar stock de Dux (Consulta de Stock, un archivo por depósito) ----
+let impSkB64 = null;
+function abrirStockDux(){
+  impSkB64 = null;
+  const ops = depositosCache.filter(d => d.activo !== false).map(d => `<option value="${d._id}">${escapeHtml(d.nombre)}</option>`).join('');
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Cargar stock desde Dux</h2>
+        <p class="muted">Subí la "Consulta de Stock" de Dux de UN depósito y elegí a qué depósito va (Junín es el real; Colomé el del proveedor). El Stock Real de Dux pasa a ser el stock de ese depósito. Si lo subís de nuevo, solo ajusta la diferencia: no duplica. El stock reservado se ignora y el negativo se carga como 0.</p>
+        <label>Depósito</label>
+        <select id="impSkDep" onchange="previewStockDux()"><option value="">Elegí un depósito…</option>${ops}</select>
+        <label style="display:block;margin-top:8px"><input type="checkbox" id="impSkCrear" checked onchange="previewStockDux()"> Crear en Productos los que tienen stock y no existen</label>
+        <input type="file" id="impSkArchivo" accept=".xls,.xlsx" onchange="previewStockDux()" style="margin-top:8px">
+        <div class="err" id="impSkErr"></div>
+        <div id="impSkResumen"></div>
+        <button class="btn" id="impSkBtn" style="margin-top:10px;display:none" onclick="aplicarStockDux()">Cargar stock</button>
+      </div>
+    </div>`;
+}
+function bodyStockDux(){ return JSON.stringify({archivoBase64: impSkB64.b64, depositoId: document.getElementById('impSkDep').value, crearFaltantes: document.getElementById('impSkCrear').checked}); }
+async function previewStockDux(){
+  const file = document.getElementById('impSkArchivo').files[0], dep = document.getElementById('impSkDep').value;
+  const errEl = document.getElementById('impSkErr'); errEl.textContent = '';
+  const out = document.getElementById('impSkResumen'); out.innerHTML = ''; document.getElementById('impSkBtn').style.display = 'none';
+  if (!file || !dep) return; out.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    if (!impSkB64 || impSkB64.file !== file) impSkB64 = {file, b64: await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); })};
+    const r = await fetch('/api/stock-import-dux/preview', {method:'POST', headers: headersAuthJson(), body: bodyStockDux()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
+    const n = x => Number(x).toLocaleString('es-AR', {maximumFractionDigits:2});
+    out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
+      <li>Depósito: <b>${escapeHtml(d.deposito)}</b> · ${n(d.filasArchivo)} productos en el archivo, <b>${n(d.conStock)}</b> con stock (${n(d.totalUnidades)} unidades en total)</li>
+      <li>A ajustar ahora: <b>${n(d.aAjustar)}</b> · ya coinciden: ${n(d.sinCambios)}</li>
+      <li>Con stock y <b>no existen</b> en Productos: <b>${n(d.noExisten)}</b> ${d.crearFaltantes ? '(se van a crear)' : '(NO se cargan)'}</li>
+      <li>Stock negativo en Dux (se carga como 0): <b>${n(d.negativos)}</b></li></ul>`
+      + (d.ejemplosNoExisten.length ? `<p class="muted"><b>No existen:</b> ${d.ejemplosNoExisten.map(escapeHtml).join(' · ')}${d.noExisten > d.ejemplosNoExisten.length ? ' …' : ''}</p>` : '')
+      + (d.ejemplosNegativos.length ? `<p class="muted"><b>Negativos:</b> ${d.ejemplosNegativos.map(escapeHtml).join(' · ')}${d.negativos > d.ejemplosNegativos.length ? ' …' : ''}</p>` : '');
+    if (d.aAjustar > 0 || (d.crearFaltantes && d.noExisten > 0)) document.getElementById('impSkBtn').style.display = '';
+  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
+}
+async function aplicarStockDux(){
+  const btn = document.getElementById('impSkBtn'), errEl = document.getElementById('impSkErr');
+  if (btn.disabled || !impSkB64) return; btn.disabled = true; errEl.textContent = '';
+  try{
+    const r = await fetch('/api/stock-import-dux/aplicar', {method:'POST', headers: headersAuthJson(), body: bodyStockDux()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al cargar');
+    document.getElementById('impSkResumen').innerHTML = `<p class="ok-msg">Listo: ${d.ajustados} productos ajustados en ${escapeHtml(d.deposito)}${d.productosCreados ? ' (' + d.productosCreados + ' creados en Productos)' : ''}.</p>`;
+    btn.style.display = 'none';
+    if (typeof cargarMovimientos === 'function') cargarMovimientos();
+    if (typeof cargarStockActual === 'function') cargarStockActual();
+  }catch(e){ errEl.textContent = e.message; }
+  btn.disabled = false;
 }
 </script>
 </body>
