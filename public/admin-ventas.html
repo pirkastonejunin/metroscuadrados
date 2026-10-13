@@ -257,7 +257,16 @@ function resolverOrgActiva(me){
 
 let NOMBRE_USUARIO = '';
 let meCache = null;
+function aplicarRangoMesActual(){
+  // Por defecto el listado muestra el mes en curso, del 1 al último día.
+  const hoy = new Date(), y = hoy.getFullYear(), m = hoy.getMonth();
+  const f = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const d = document.getElementById('fvDesde'), h = document.getElementById('fvHasta');
+  if (d && !d.value) d.value = f(new Date(y, m, 1));
+  if (h && !h.value) h.value = f(new Date(y, m + 1, 0));
+}
 async function iniciarApp(){
+  aplicarRangoMesActual();
   let me;
   try{
     const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
