@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Catálogo compartido: diagnóstico</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--bd:#e3e6ea;--tx:#1b1f24;--mu:#667085;--er:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1d2125;--bd:#2d3339;--tx:#eceff2;--mu:#98a2b3;--er:#f4908a}}
+body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);margin:0;padding:16px}
+.wrap{max-width:1000px;margin:0 auto} h1{font-size:21px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-top:14px}
+.muted{color:var(--mu);font-size:13px} table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:right} th:first-child,td:first-child{text-align:left} th{color:var(--mu);font-weight:600}
+.l td,.l th{text-align:left}
+</style></head><body><div class="wrap">
+<h1>Catálogo compartido entre sucursales: diagnóstico</h1>
+<p class="muted">Solo lectura. Muestra qué tiene hoy cada sucursal para planear la unificación. No cambia nada.</p>
+<div id="err" style="color:var(--er)"></div><div id="out" class="muted">Cargando…</div>
+</div>
+<script>
+const TOKEN = localStorage.getItem('obras_admin_token') || '';
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const N = n => Number(n||0).toLocaleString('es-AR');
+(async()=>{
+  if(!TOKEN){document.getElementById('err').textContent='Entrá primero al sistema con tu usuario Administrador.';document.getElementById('out').textContent='';return;}
+  try{
+    const r=await fetch('/api/unificar-catalogo/diagnostico',{headers:{'x-admin-token':TOKEN}});const d=await r.json();if(!r.ok)throw new Error(d.error||'Error');
+    const O=d.organizaciones;const T={productosActivos:'Productos activos',productosInactivos:'Productos inactivos',listasPrecio:'Listas de precio',depositos:'Depósitos',stockFilas:'Filas de stock',stockMovimientos:'Movimientos de stock',rubros:'Rubros',subrubros:'Subrubros',ventas:'Ventas',compras:'Compras',presupuestos:'Presupuestos',obras:'Obras'};
+    let h='<div class="card"><h2>Cantidades por sucursal</h2><table><thead><tr><th></th>'+O.map(o=>'<th>'+esc(o.nombre)+'</th>').join('')+'</tr></thead><tbody>'+Object.keys(T).map(k=>'<tr><td>'+T[k]+'</td>'+O.map(o=>'<td>'+N((d.cuentas[k]||{})[o._id])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
+    h+='<div class="card"><h2>Depósitos</h2><table class="l"><thead><tr><th>Sucursal</th><th>Depósito</th><th>Activo</th><th>Filas de stock</th><th>Con stock</th></tr></thead><tbody>'+d.depositos.map(x=>'<tr><td>'+esc(x.org)+'</td><td>'+esc(x.nombre)+'</td><td>'+(x.activo?'sí':'no')+'</td><td>'+N(x.filasStock)+'</td><td>'+N(x.conStock)+'</td></tr>').join('')+'</tbody></table></div>';
+    h+='<div class="card"><h2>Listas de precio</h2><table class="l"><thead><tr><th>Sucursal</th><th>Lista</th><th>Predeterminada</th><th>Activa</th></tr></thead><tbody>'+d.listas.map(x=>'<tr><td>'+esc(x.org)+'</td><td>'+esc(x.nombre)+'</td><td>'+(x.predeterminada?'sí':'')+'</td><td>'+(x.activa?'sí':'no')+'</td></tr>').join('')+'</tbody></table></div>';
+    h+='<div class="card"><h2>Cotización del dólar</h2>'+(d.cotizacionDolar.length?d.cotizacionDolar.map(c=>esc(c.org)+': '+esc(c.valor)).join('<br>'):'<span class="muted">Ninguna cargada</span>')+'</div>';
+    h+='<div class="card"><h2>SKU</h2><p>Distintos: <b>'+N(d.skus.total)+'</b> · repetidos entre sucursales: <b>'+N(d.skus.enVariasSucursales)+'</b> · repetidos dentro de la misma sucursal: <b>'+N(d.skus.repetidosEnMismaSucursal)+'</b></p>'+(d.skus.ejemplos.length?'<table class="l"><thead><tr><th>SKU</th><th>Sucursales</th><th>Nombres</th></tr></thead><tbody>'+d.skus.ejemplos.map(e=>'<tr><td>'+esc(e.sku)+'</td><td>'+e.orgs.map(esc).join(', ')+'</td><td>'+e.nombres.map(esc).join(' | ')+'</td></tr>').join('')+'</tbody></table>':'')+'</div>';
+    document.getElementById('out').innerHTML=h;
+  }catch(e){document.getElementById('err').textContent=e.message;document.getElementById('out').textContent='';}
+})();
+</script></body></html>
