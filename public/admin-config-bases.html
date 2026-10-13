@@ -153,19 +153,21 @@
         <span>Tarjetas y planes de cobro</span><span class="chev">▾</span>
       </button>
       <div id="contTarjetas">
-        <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes son de la sucursal elegida arriba. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas).</p>
+        <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes son de la sucursal elegida arriba. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
         <div class="row" style="margin-bottom:12px;align-items:flex-end">
           <div style="flex:2;min-width:150px"><label>Tarjeta</label><input id="tpTarjeta" placeholder="Ej: Visa crédito"></div>
           <div style="flex:2;min-width:150px"><label>Plan</label><input id="tpNombre" placeholder="Ej: 3 cuotas"></div>
           <div style="width:80px"><label>Cuotas</label><input id="tpCuotas" type="number" min="1" step="1" value="1"></div>
           <div style="width:100px"><label>Costo %</label><input id="tpCosto" type="number" min="0" max="100" step="0.01" value="0"></div>
           <div style="width:100px"><label>Recargo %</label><input id="tpRecargo" type="number" min="0" max="100" step="0.01" value="0"></div>
+          <div style="flex:2;min-width:180px"><label>Leyenda (se muestra al cobrar)</label><input id="tpLeyenda" placeholder="Ej: Promo Ahora 12 — hasta agotar stock"></div>
+          <div style="width:150px"><label>Vigente hasta</label><input id="tpVigente" type="date"></div>
           <div><button class="btn" onclick="crearPlanTarjeta()">Agregar</button></div>
         </div>
         <div class="err" id="tarjetasErr"></div>
         <table>
-          <thead><tr><th>Tarjeta</th><th>Plan</th><th>Cuotas</th><th>Costo %</th><th>Recargo %</th><th>Listas de precio</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="tarjetasBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
+          <thead><tr><th>Tarjeta</th><th>Plan</th><th>Cuotas</th><th>Costo %</th><th>Recargo %</th><th>Leyenda</th><th>Vigente hasta</th><th>Listas de precio</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="tarjetasBody"><tr><td colspan="10" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -683,26 +685,29 @@ async function cargarPlanesTarjeta(){
       <td><input id="tp_q_${p._id}" type="number" min="1" step="1" value="${p.cuotas || 1}" style="width:70px"></td>
       <td><input id="tp_c_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.costoPorcentaje || 0}" style="width:90px"></td>
       <td><input id="tp_r_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.recargoPorcentaje || 0}" style="width:90px"></td>
+      <td><input id="tp_y_${p._id}" value="${escapeHtml(p.leyenda || '')}" style="min-width:160px"></td>
+      <td><input id="tp_h_${p._id}" type="date" value="${escapeHtml(p.vigenteHasta || '')}">${p.vigenteHasta && p.vigenteHasta < new Date().toISOString().slice(0,10) ? '<div class="err" style="margin:0">Vencido</div>' : ''}</td>
       <td>${listasPrecioPlanes.map(l => `<label style="display:flex;align-items:center;gap:4px;font-weight:500;white-space:nowrap"><input type="checkbox" style="width:auto" class="tp_l_${p._id}" value="${l._id}" ${(p.listasPrecioIds || []).map(String).includes(String(l._id)) ? 'checked' : ''}> ${escapeHtml(l.nombre)}</label>`).join('') || '<span class="muted">—</span>'}</td>
       <td>${p.activo !== false ? '<span class="pill activo">Activo</span>' : '<span class="pill inactivo">Inactivo</span>'}</td>
       <td style="white-space:nowrap"><button class="btn small" onclick="guardarPlanTarjeta('${p._id}', ${p.activo !== false})">Guardar</button>
         <button class="btn small secondary" onclick="guardarPlanTarjeta('${p._id}', ${p.activo === false})">${p.activo === false ? 'Reactivar' : 'Desactivar'}</button></td>
-    </tr>`).join('') || '<tr><td colspan="8" class="muted">Todavía no hay planes de tarjeta</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="10" class="muted">Todavía no hay planes de tarjeta</td></tr>';
 }
 async function crearPlanTarjeta(){
   document.getElementById('tarjetasErr').textContent = '';
   const body = { tarjeta: document.getElementById('tpTarjeta').value.trim(), nombre: document.getElementById('tpNombre').value.trim(), cuotas: Number(document.getElementById('tpCuotas').value) || 1,
-    costoPorcentaje: Number(document.getElementById('tpCosto').value) || 0, recargoPorcentaje: Number(document.getElementById('tpRecargo').value) || 0 };
+    costoPorcentaje: Number(document.getElementById('tpCosto').value) || 0, recargoPorcentaje: Number(document.getElementById('tpRecargo').value) || 0,
+    leyenda: document.getElementById('tpLeyenda').value.trim(), vigenteHasta: document.getElementById('tpVigente').value || '' };
   try{
     await apiTarjetas('/config/tarjetas-planes', {method:'POST', body});
-    ['tpNombre'].forEach(id => document.getElementById(id).value = '');
+    ['tpNombre', 'tpLeyenda', 'tpVigente'].forEach(id => document.getElementById(id).value = '');
     await cargarPlanesTarjeta();
   }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
 }
 async function guardarPlanTarjeta(id, activo){
   document.getElementById('tarjetasErr').textContent = '';
   const v = k => document.getElementById('tp_' + k + '_' + id).value;
-  const body = { tarjeta: v('t').trim(), nombre: v('n').trim(), cuotas: Number(v('q')) || 1, costoPorcentaje: Number(v('c')) || 0, recargoPorcentaje: Number(v('r')) || 0, activo, listasPrecioIds: Array.from(document.querySelectorAll('.tp_l_' + id)).filter(c => c.checked).map(c => c.value) };
+  const body = { tarjeta: v('t').trim(), nombre: v('n').trim(), cuotas: Number(v('q')) || 1, costoPorcentaje: Number(v('c')) || 0, recargoPorcentaje: Number(v('r')) || 0, activo, leyenda: v('y').trim(), vigenteHasta: v('h') || '', listasPrecioIds: Array.from(document.querySelectorAll('.tp_l_' + id)).filter(c => c.checked).map(c => c.value) };
   try{ await apiTarjetas('/config/tarjetas-planes/' + id, {method:'PUT', body}); await cargarPlanesTarjeta(); }
   catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
 }

@@ -448,12 +448,13 @@ function resumenPlanTarjeta(pre){
   if (!plan) { if (recW) recW.style.display = 'none'; out.textContent = ''; return; }
   const conRecargo = (plan.recargoPorcentaje || 0) > 0;
   recW.style.display = conRecargo ? 'flex' : 'none';
+  const ley = plan.leyenda ? `<div style="margin-bottom:2px"><b>${escapeHtml(plan.leyenda)}</b>${plan.vigenteHasta ? ' · vigente hasta ' + plan.vigenteHasta.split('-').reverse().join('/') : ''}</div>` : (plan.vigenteHasta ? `<div>Vigente hasta ${plan.vigenteHasta.split('-').reverse().join('/')}</div>` : '');
   const monto = Number(document.getElementById(pre + 'Monto').value) || 0;
   const aplica = conRecargo && document.getElementById(pre + 'AplicarRecargo').checked;
   const recargo = Math.round(monto * (aplica ? plan.recargoPorcentaje : 0)) / 100;
   const cargo = Math.round((monto + recargo) * 100) / 100;
   const costo = Math.round(cargo * (plan.costoPorcentaje || 0)) / 100;
-  out.innerHTML = monto > 0 ? `El cliente paga con tarjeta <b>${money(cargo)}</b>${recargo > 0 ? ` (incluye recargo ${money(recargo)})` : ''} · costo del plan ${money(costo)} · entra al banco <b>${money(cargo - costo)}</b>` : '';
+  out.innerHTML = ley + (monto > 0 ? `El cliente paga con tarjeta <b>${money(cargo)}</b>${recargo > 0 ? ` (incluye recargo ${money(recargo)})` : ''} · costo del plan ${money(costo)} · entra al banco <b>${money(cargo - costo)}</b>` : '');
 }
 
 function actualizarTipoValorCB(){

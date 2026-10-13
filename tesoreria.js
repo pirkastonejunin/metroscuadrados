@@ -247,6 +247,7 @@ async function calcularPlanTarjeta(db, req, { planId, monto, aplicarRecargo, lis
   if (!pid) return null;
   const plan = await db.collection('tarjetas_planes').findOne(Object.assign({ _id: pid }, req.orgId ? { orgId: req.orgId } : {}));
   if (!plan) throw err(400, 'El plan de tarjeta elegido no existe (o no es de esta sucursal).');
+  if (planVencido(plan)) throw err(400, `El plan "${plan.tarjeta} — ${plan.nombre}" venció el ${plan.vigenteHasta.split('-').reverse().join('/')}.`);
   // Planes habilitados solo para ciertas listas de precio (vacío = todas). Solo se controla cuando se conoce la lista (cobro de una venta).
   if (listaPrecioId !== undefined && Array.isArray(plan.listasPrecioIds) && plan.listasPrecioIds.length && !plan.listasPrecioIds.map(String).includes(String(listaPrecioId || ''))) {
     throw err(400, `El plan "${plan.tarjeta} — ${plan.nombre}" no está habilitado para la lista de precios de esta venta.`);
@@ -257,7 +258,7 @@ async function calcularPlanTarjeta(db, req, { planId, monto, aplicarRecargo, lis
   const costoPct = Number(plan.costoPorcentaje) || 0;
   const costo = redondear2(cargoTotal * costoPct / 100);
   return {
-    tarjetaPlanId: plan._id, tarjetaPlanNombre: `${plan.tarjeta} — ${plan.nombre}`, tarjetaCuotas: plan.cuotas || 1,
+    tarjetaPlanId: plan._id, tarjetaPlanNombre: `${plan.tarjeta} — ${plan.nombre}`, tarjetaPlanLeyenda: plan.leyenda || '', tarjetaCuotas: plan.cuotas || 1,
     tarjetaCostoPorcentaje: costoPct, tarjetaRecargoPorcentaje: recargoPct, tarjetaRecargo: recargo,
     tarjetaTotalCobrado: cargoTotal, tarjetaCostoFinanciero: costo, tarjetaIngresoNeto: redondear2(cargoTotal - costo)
   };
@@ -269,9 +270,21 @@ router.get('/tarjetas-planes', authUsuario, resolverOrg, async (req, res) => {
     const todos = req.query.todos === '1';
     const lista = await conReintento(async () => (await getDb()).collection('tarjetas_planes')
       .find(Object.assign({}, req.orgId ? { orgId: req.orgId } : {}, todos ? {} : { activo: { $ne: false } })).sort({ tarjeta: 1, cuotas: 1 }).toArray());
-    res.json(lista);
+    res.json(todos ? lista : lista.filter(p => !planVencido(p)));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+function validarFechaPlan(v) {
+  const t = normalizarTexto(v);
+  if (!t) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t) || isNaN(new Date(t + 'T12:00:00Z').getTime())) throw err(400, 'La fecha de fin del plan no es válida.');
+  return t;
+}
+// Un plan vence al final del día "vigenteHasta" (hora Argentina). Sin fecha = no vence.
+function planVencido(plan, ref) {
+  if (!plan.vigenteHasta) return false;
+  const hoyAR = new Date((ref || new Date()).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+  return hoyAR > plan.vigenteHasta;
+}
 function leerPlanTarjeta(b) {
   const tarjeta = normalizarTexto(b.tarjeta), nombre = normalizarTexto(b.nombre);
   if (!tarjeta) throw err(400, 'Falta el nombre de la tarjeta (ej: Visa crédito).');
@@ -279,6 +292,8 @@ function leerPlanTarjeta(b) {
   const num = (v, et) => { const n = Number(v === '' || v == null ? 0 : v); if (!Number.isFinite(n) || n < 0 || n > 100) throw err(400, `${et} tiene que estar entre 0 y 100.`); return n; };
   const cuotas = Math.max(1, Math.floor(Number(b.cuotas) || 1));
   return { tarjeta, nombre, cuotas, costoPorcentaje: num(b.costoPorcentaje, 'El costo %'), recargoPorcentaje: num(b.recargoPorcentaje, 'El recargo %'), activo: b.activo !== false,
+    leyenda: normalizarTexto(b.leyenda),
+    vigenteHasta: validarFechaPlan(b.vigenteHasta),
     listasPrecioIds: (Array.isArray(b.listasPrecioIds) ? b.listasPrecioIds : []).map(String).filter(x => /^[0-9a-f]{24}$/i.test(x)) };
 }
 router.post('/config/tarjetas-planes', authConfig, async (req, res) => {
