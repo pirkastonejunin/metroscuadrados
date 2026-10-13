@@ -238,6 +238,8 @@ async function iniciarApp(){
         if (rc.ok) clientesCache = await rc.json();
       }
       abrirEditarCliente(idQs);
+      const tabQs = new URLSearchParams(location.search).get('tab');
+      if (tabQs === 'cuenta-corriente') mostrarTabCliente('cuenta-corriente', idQs);
     }
   } catch(e) {}
 }

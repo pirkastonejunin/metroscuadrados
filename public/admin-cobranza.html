@@ -502,7 +502,12 @@ async function confirmarReciboCB(){
     await Promise.all([cargarCajasYBancosCB(), mostrarClienteSeleccionadoCB(clienteId)]);
     actualizarTipoValorCB();
     cargarListaCobranzas();
-    okEl.innerHTML = 'Recibo registrado.' + (reciboUrl ? ` <button class="btn small secondary" onclick="imprimirDocumento('${reciboUrl}')">Imprimir recibo</button>` : '');
+    let saldoTxt = '';
+    try{
+      const rs = await fetch('/api/clientes/' + encodeURIComponent(clienteId) + '/cuenta-corriente?limite=1', {headers: headersAuth()});
+      if (rs.ok) { const ds = await rs.json(); saldoTxt = ` Saldo actual de ${escapeHtml((ds.cliente && (ds.cliente.apellidoRazonSocial || ds.cliente.nombre)) || 'el cliente')}: <strong>${money(ds.saldo)}</strong>.`; }
+    }catch(e){}
+    okEl.innerHTML = 'Recibo registrado.' + saldoTxt + (reciboUrl ? ` <button class="btn small secondary" onclick="imprimirDocumento('${reciboUrl}')">Imprimir recibo</button>` : '');
   }catch(e){ errEl.textContent = e.message; }
 }
 
@@ -540,7 +545,7 @@ function renderListaCobranzas(){
   body.innerHTML = lista.map(c => `
     <tr>
       <td class="muted">${fechaCorta(c.fecha)}</td>
-      <td>${escapeHtml(c.clienteNombre || '—')}</td>
+      <td>${c.clienteId ? `<a href="/admin-clientes.html?id=${c.clienteId}&tab=cuenta-corriente" target="_blank" title="Abrir la cuenta corriente de este cliente" style="color:inherit;text-decoration:underline dotted">${escapeHtml(c.clienteNombre || '—')}</a>` : escapeHtml(c.clienteNombre || '—')}</td>
       <td>${escapeHtml(c.concepto || '—')}${c.observaciones ? `<div class="muted">${escapeHtml(c.observaciones)}</div>` : ''}</td>
       <td>${escapeHtml(c.formaLabel)}</td>
       <td>${(c.moneda && c.moneda !== 'ARS' ? c.moneda + ' ' : '') + money(c.monto)}</td>
