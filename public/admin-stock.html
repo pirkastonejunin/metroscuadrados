@@ -1101,7 +1101,6 @@ function abrirStockDux(){
         <label>Depósito</label>
         <select id="impSkDep" onchange="previewStockDux()"><option value="">Elegí un depósito…</option>${ops}</select>
         <label style="display:block;margin-top:8px"><input type="checkbox" id="impSkCrear" checked onchange="previewStockDux()"> Crear en Productos los que tienen stock y no existen</label>
-        <label style="display:block;margin-top:8px"><input type="checkbox" id="impSkCero" checked onchange="previewStockDux()"> Poner en 0 los productos de las marcas de este archivo que no figuran (reemplaza lo que ya estaba cargado de esa marca)</label>
         <input type="file" id="impSkArchivo" accept=".xls,.xlsx" onchange="previewStockDux()" style="margin-top:8px">
         <div class="err" id="impSkErr"></div>
         <div id="impSkResumen"></div>
@@ -1109,7 +1108,7 @@ function abrirStockDux(){
       </div>
     </div>`;
 }
-function bodyStockDux(){ return JSON.stringify({archivoBase64: impSkB64.b64, depositoId: document.getElementById('impSkDep').value, crearFaltantes: document.getElementById('impSkCrear').checked, ponerEnCero: document.getElementById('impSkCero').checked}); }
+function bodyStockDux(){ return JSON.stringify({archivoBase64: impSkB64.b64, depositoId: document.getElementById('impSkDep').value, crearFaltantes: document.getElementById('impSkCrear').checked}); }
 async function previewStockDux(){
   const file = document.getElementById('impSkArchivo').files[0], dep = document.getElementById('impSkDep').value;
   const errEl = document.getElementById('impSkErr'); errEl.textContent = '';
@@ -1124,12 +1123,10 @@ async function previewStockDux(){
       <li>Depósito: <b>${escapeHtml(d.deposito)}</b> · ${n(d.filasArchivo)} productos en el archivo, <b>${n(d.conStock)}</b> con stock (${n(d.totalUnidades)} unidades en total)</li>
       <li>A ajustar ahora: <b>${n(d.aAjustar)}</b> · ya coinciden: ${n(d.sinCambios)}</li>
       <li>Con stock y <b>no existen</b> en Productos: <b>${n(d.noExisten)}</b> ${d.crearFaltantes ? '(se van a crear)' : '(NO se cargan)'}</li>
-      <li>Stock negativo en Dux (se carga como 0): <b>${n(d.negativos)}</b></li>
-      ${d.ponerEnCero ? `<li>De las mismas marcas, con stock acá y <b>no figuran</b> en el archivo (se ponen en 0): <b>${n(d.aPoner0)}</b></li>` : ''}</ul>`
+      <li>Stock negativo en Dux (se carga como 0): <b>${n(d.negativos)}</b></li></ul>`
       + (d.ejemplosNoExisten.length ? `<p class="muted"><b>No existen:</b> ${d.ejemplosNoExisten.map(escapeHtml).join(' · ')}${d.noExisten > d.ejemplosNoExisten.length ? ' …' : ''}</p>` : '')
-      + (d.ejemplosPoner0 && d.ejemplosPoner0.length ? `<p class="muted"><b>Se ponen en 0:</b> ${d.ejemplosPoner0.map(escapeHtml).join(' · ')}${d.aPoner0 > d.ejemplosPoner0.length ? ' …' : ''}</p>` : '')
       + (d.ejemplosNegativos.length ? `<p class="muted"><b>Negativos:</b> ${d.ejemplosNegativos.map(escapeHtml).join(' · ')}${d.negativos > d.ejemplosNegativos.length ? ' …' : ''}</p>` : '');
-    if (d.aAjustar > 0 || d.aPoner0 > 0 || (d.crearFaltantes && d.noExisten > 0)) document.getElementById('impSkBtn').style.display = '';
+    if (d.aAjustar > 0 || (d.crearFaltantes && d.noExisten > 0)) document.getElementById('impSkBtn').style.display = '';
   }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
 }
 async function aplicarStockDux(){
