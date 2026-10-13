@@ -594,7 +594,7 @@ function juntarItemsPresupuesto(){
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
     if (cantidad > 0 && (productoId || nombreLibre)) {
       const item = { cantidad, precioUnitario };
-      if (productoId) item.productoId = productoId; else item.nombre = nombreLibre;
+      if (productoId) { item.productoId = productoId; item.nombreRespaldo = nombreLibre; } else item.nombre = nombreLibre;
       items.push(item);
     }
   });
@@ -680,7 +680,7 @@ async function guardarNuevoPresupuesto(){
   const errEl = document.getElementById('pErr');
   errEl.textContent = '';
   if (!clienteId) { errEl.textContent = 'Elegí un cliente'; return; }
-  if (!items.length) { errEl.textContent = 'Agregá al menos un ítem'; return; }
+  if (!items.length) { errEl.textContent = 'Agregá al menos un ítem: escribí o elegí el producto y poné una cantidad mayor a 0'; return; }
   const body = {
     clienteId,
     vendedor: document.getElementById('pVendedor').value.trim(),
@@ -841,7 +841,7 @@ function juntarItemsDe(contId){
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value) || 0;
     if (cantidad > 0 && (productoId || nombreLibre)) {
       const item = { cantidad, precioUnitario };
-      if (productoId) item.productoId = productoId; else item.nombre = nombreLibre;
+      if (productoId) { item.productoId = productoId; item.nombreRespaldo = nombreLibre; } else item.nombre = nombreLibre;
       items.push(item);
     }
   });

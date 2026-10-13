@@ -173,6 +173,7 @@ async function normalizarItemsPresupuesto(db, req, itemsRaw) {
         if (precioBase === undefined || precioBase === null || precioBase === '') precioBase = producto.precio;
       }
     }
+    if (!nombre) nombre = normalizarTexto(it.nombreRespaldo);
     if (!nombre) throw err(400, 'Falta el nombre de un ítem del presupuesto');
     const cantidad = normalizarCantidadPositiva(it.cantidad, `La cantidad de "${nombre}"`);
     const precioUnitario = normalizarMontoNoNegativo(precioBase, `El precio unitario de "${nombre}"`);
