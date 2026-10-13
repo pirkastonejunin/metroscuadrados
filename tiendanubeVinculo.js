@@ -63,7 +63,8 @@ router.get('/analizar', auth, async (req, res) => {
     // productos viejos (desactivados) con el SKU de Tiendanube: sirven de puente para encontrar el nuevo por nombre
     const skusPend = [...new Set(pendientes.map(f => K(f.sku)).filter(Boolean))];
     const viejos = new Map();
-    for (let i = 0; i < skusPend.length; i += 1000) {
+    const usarViejos = String(req.query.usarViejos || '') === '1';
+    for (let i = 0; usarViejos && i < skusPend.length; i += 1000) {
       const lote = skusPend.slice(i, i + 1000);
       (await db.collection('productos_catalogo').find(Object.assign({ activo: false, sku: { $in: lote.concat(lote.map(x => x.toLowerCase())) } }, filtroOrg(req))).project({ sku: 1, nombre: 1 }).toArray()).forEach(p => viejos.set(K(p.sku), p.nombre));
     }

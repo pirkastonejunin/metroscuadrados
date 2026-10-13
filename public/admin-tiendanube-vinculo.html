@@ -15,7 +15,7 @@ select{padding:6px;border:1px solid var(--bd);border-radius:8px;background:var(-
 </style></head><body><div class="wrap">
 <h1>Vincular productos con Tiendanube</h1>
 <p class="muted">Empareja los productos que ya están publicados en Tiendanube con los del sistema, para poder actualizar precios y stock. Las fotos quedan en Tiendanube: no se copian ni ocupan lugar en la base.</p>
-<div class="card"><button class="p" id="btn" onclick="analizar()">Leer Tiendanube y proponer vínculos</button> <span class="muted" id="est"></span><div id="err" style="color:var(--er);margin-top:8px"></div></div>
+<div class="card"><button class="p" id="btn" onclick="analizar()">Leer Tiendanube y proponer vínculos</button> <label class="muted" style="margin-left:10px"><input type="checkbox" id="viejos" style="width:auto"> usar también los productos viejos desactivados como pista</label> <span class="muted" id="est"></span><div id="err" style="color:var(--er);margin-top:8px"></div></div>
 <div id="out"></div></div>
 <script>
 const TOKEN = localStorage.getItem('obras_admin_token') || '';
@@ -30,7 +30,7 @@ async function analizar(){
   const err=document.getElementById('err'), out=document.getElementById('out'), b=document.getElementById('btn'); err.textContent=''; b.disabled=true; await asegurarOrg();
   out.innerHTML='<div class="card muted">Leyendo la tienda y comparando… puede tardar un minuto.</div>';
   try{
-    const r=await fetch('/api/tiendanube-vinculo/analizar',{headers:H()}); const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); P=d.propuestas;
+    const r=await fetch('/api/tiendanube-vinculo/analizar?usarViejos='+(document.getElementById('viejos').checked?'1':'0'),{headers:H()}); const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); P=d.propuestas;
     let h='<div class="card"><div class="t"><div><b>'+N(d.enTienda)+'</b>variantes en Tiendanube</div><div><b>'+N(d.directos)+'</b>ya coinciden por SKU</div><div><b>'+N(d.yaVinculados)+'</b>ya vinculados</div><div><b>'+N(d.pendientes)+'</b>sin pareja todavía</div></div></div>';
     if(!P.length){ h+='<div class="card">Todo lo que está en Tiendanube ya está vinculado.</div>'; }
     else{
