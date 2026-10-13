@@ -248,7 +248,7 @@ async function iniciarApp(){
     return;
   }
   resolverOrgActiva(me);
-  PiedraSidebar.render(me, 'productos', { ocultarOrg: true });
+  if (!EMBED) PiedraSidebar.render(me, 'productos', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
@@ -267,11 +267,23 @@ async function iniciarApp(){
     cargarSubrubrosBase(),
     cargarProveedoresLite()
   ]);
+  if (EMBED && EDITAR_ID) { await abrirEmbebido(); return; }
   await cargarProductos();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
 let proveedoresCache = [];
+// Modo embebido (13/10/2026): /admin-productos.html?editar=<id>&embed=1 abre SOLO la ficha del producto, sin menú, para usarla como ventana
+// emergente desde otras pantallas (Tiendanube). Avisa a la pantalla de arriba cuando se guarda o se cierra.
+const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+const EDITAR_ID = new URLSearchParams(location.search).get('editar');
+function avisarPadre(tipo){ try { window.parent.postMessage({ pn: 'producto', tipo: tipo, id: EDITAR_ID }, location.origin); } catch (e) {} }
+async function abrirEmbebido(){
+  const style = document.createElement('style'); style.textContent = '#app > header, #app > main > :not(#modalRoot), #sidebar, .pn-sidebar, nav.pn-nav{display:none !important} body{background:var(--card,#fff)} .modal-bg{position:static !important;background:none !important;padding:0 !important} .modal{box-shadow:none !important;max-width:none !important;border-radius:0 !important}   .close-x,.modal > h2{display:none !important} button[onclick^="guardarEdicionProducto"]{position:sticky;bottom:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:5}'; document.head.appendChild(style);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') avisarPadre('cerrar'); });
+  try { const r = await fetch(BASE + '/?incluirInactivos=1&ids=' + encodeURIComponent(EDITAR_ID), {headers: headersAuth()}); const l = await r.json(); const p = (Array.isArray(l) ? l : l.productos || [])[0]; if (!p) { document.body.innerHTML = '<p style="padding:20px">No se encontró el producto.</p>'; return; } productosCache = [p]; abrirEditarProducto(String(p._id)); }
+  catch (e) { document.body.innerHTML = '<p style="padding:20px">No se pudo abrir el producto.</p>'; }
+}
 async function cargarProveedoresLite(){
   const r = await fetch(BASE + '/proveedores-lite', {headers: headersAuth()});
   if (!r.ok) return;
@@ -979,6 +991,7 @@ async function guardarEdicionProducto(id){
     const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
+    if (EMBED) { avisarPadre('guardado'); const t = document.createElement('div'); t.textContent = 'Guardado ✓'; t.style.cssText = 'position:fixed;right:16px;bottom:16px;background:#15803d;color:#fff;padding:10px 16px;border-radius:10px;font-weight:700;z-index:9999'; document.body.appendChild(t); setTimeout(() => t.remove(), 2500); return; }
     cerrarModal();
     await cargarRubros();
     await cargarProductos();

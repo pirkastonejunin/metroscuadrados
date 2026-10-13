@@ -65,6 +65,12 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
   .section-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:6px;}
+  .pp-bg{position:fixed;inset:0;background:rgba(17,20,24,.55);z-index:900;display:flex;align-items:center;justify-content:center;padding:16px;}
+  .pp-box{background:var(--card);border-radius:16px;box-shadow:var(--shadow);width:min(980px,100%);height:min(88vh,900px);display:flex;flex-direction:column;overflow:hidden;}
+  .pp-head{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);font-weight:800;}
+  .pp-head button{background:none;border:none;font-size:20px;cursor:pointer;color:var(--muted);}
+  .pp-box iframe{flex:1;border:0;width:100%;background:var(--card);}
+  a.edit-prod{color:var(--text);text-decoration:none;} a.edit-prod:hover{color:var(--accent);text-decoration:underline;}
   .modal-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;}
   .modal-tabs button{background:none;border:none;padding:9px 12px;font-size:13px;font-family:inherit;font-weight:700;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;}
   .modal-tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
@@ -284,7 +290,7 @@ function pintarVinculos(){
   document.getElementById('tbV').innerHTML = f.slice(0, 1500).map(r => {
     const d = difV(r); const pill = r.tipo === 'sku' ? '<span class="pill sku">SKU igual</span>' : r.tipo === 'manual' ? '<span class="pill manual">A mano</span>' : '<span class="pill sin">Sin vínculo</span>';
     return '<tr><td><b>' + esc(r.tn.sku || '(sin SKU)') + '</b><div class="linksub">' + (r.tn.url ? '<a target="_blank" href="' + esc(r.tn.url) + '">' + esc(r.tn.nombre) + '</a>' : esc(r.tn.nombre)) + '</div></td>'
-      + '<td>' + (r.producto ? '<b>' + esc(r.producto.sku) + '</b><div class="linksub">' + esc(r.producto.nombre) + '</div>' : '<span class="muted">—</span>') + '</td><td>' + pill + '</td>'
+      + '<td>' + (r.producto ? '<a href="#" class="edit-prod" title="Editar el producto en una ventana" onclick="event.preventDefault();editarProducto(\'' + r.producto._id + '\')"><b>' + esc(r.producto.sku) + '</b> ✎</a><div class="linksub">' + esc(r.producto.nombre) + '</div>' : '<span class="muted">—</span>') + '</td><td>' + pill + '</td>'
       + '<td class="n">' + M(r.tn.precio) + (r.tn.promo != null ? '<div class="linksub">oferta ' + M(r.tn.promo) + '</div>' : '') + '</td><td class="n">' + M(r.precioSistema) + (r.producto ? '<div class="linksub">' + (r.producto.bulto ? 'bulto ×' + r.producto.bulto : (r.producto.porM2 ? '<b style="color:var(--danger)">m² sin bulto</b>' : 'sin bulto')) + '</div>' : '') + '</td>'
       + '<td class="n' + (d != null && Math.abs(d) >= 0.5 ? ' dif' : '') + '">' + (d == null ? '—' : (d > 0 ? '+' : '') + M(d)) + '</td>'
       + '<td>' + (r.tipo === 'manual' ? '<button class="btn secondary small" onclick="desvincular(\'' + r.producto._id + '\')">Quitar vínculo</button>' : '') + '</td></tr>'; }).join('')
@@ -301,6 +307,33 @@ async function desvincular(id){
   try{ const r = await fetch('/api/tiendanube-vinculo/desvincular', {method:'POST', headers: H(), body: JSON.stringify({productoId: id})}); if (r.ok) cargarVinculos(); }catch(e){}
 }
 
+
+// ---------------------------------------------------------------- Editar producto en ventana emergente
+function editarProducto(id){
+  cerrarProducto();
+  const d = document.createElement('div'); d.className = 'pp-bg'; d.id = 'ppBg';
+  d.innerHTML = '<div class="pp-box"><div class="pp-head"><span>Editar producto</span><button onclick="cerrarProducto()" title="Cerrar (Esc)">✕</button></div><iframe src="/admin-productos.html?editar=' + encodeURIComponent(id) + '&embed=1"></iframe></div>';
+  d.addEventListener('click', e => { if (e.target === d) cerrarProducto(); });
+  document.body.appendChild(d); window.__ppId = id;
+}
+function cerrarProducto(){ const d = document.getElementById('ppBg'); if (d) d.remove(); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarProducto(); });
+window.addEventListener('message', async e => {
+  if (e.origin !== location.origin || !e.data || e.data.pn !== 'producto') return;
+  if (e.data.tipo === 'cerrar') { cerrarProducto(); return; }
+  if (e.data.tipo !== 'guardado' || !DV) return;
+  const id = e.data.id; if (!id) return;
+  try{
+    const l = document.getElementById('lista').value;
+    const r = await fetch('/api/tiendanube-vinculo/vinculos/producto/' + id + (l ? '?listaId=' + l : ''), {headers: H()}); const d = await r.json(); if (!r.ok) return;
+    DV.filas.forEach(f => { if (f.producto && f.producto._id === id) { f.producto = Object.assign(f.producto, d.producto); f.precioSistema = d.precioSistema; } });
+    const F = DV.filas, s = DV.resumen;
+    s.conDiferencia = F.filter(x => x.producto && x.precioSistema != null && Number.isFinite(x.tn.precio) && Math.abs(x.precioSistema - x.tn.precio) >= 0.5).length;
+    s.sinPrecioSistema = F.filter(x => x.producto && x.precioSistema == null).length;
+    s.m2SinBulto = F.filter(x => x.producto && x.producto.porM2 && !x.producto.bulto).length;
+    pintarVinculos();
+  }catch(err){}
+});
 
 // ---------------------------------------------------------------- Publicar productos
 let DB = null, CAND = [];

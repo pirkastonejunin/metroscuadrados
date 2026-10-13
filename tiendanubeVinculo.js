@@ -156,6 +156,19 @@ router.get('/vinculos', auth, async (req, res) => {
     res.json({ lista: lista ? String(lista._id) : null, listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), resumen, filas: out });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// Datos actuales de UN producto del sistema (para refrescar la fila después de editarlo en la ventana emergente, sin volver a leer Tiendanube).
+router.get('/vinculos/producto/:id', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const { precioResuelto } = require('./productos'); const pid = oid(req.params.id);
+    if (!pid) throw err(400, 'id inválido');
+    const p = await db.collection('productos_catalogo').findOne(Object.assign({ _id: pid }, filtroOrg(req)));
+    if (!p) throw err(404, 'Producto no encontrado');
+    const { lista } = await listaDePrecios(db, req, req.query.listaId);
+    const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
+    let precioSistema = null; if (lista) { try { precioSistema = precioResuelto(p, lista, cot).precio; } catch (e) { precioSistema = null; } }
+    res.json({ producto: { _id: String(p._id), sku: p.sku || '', nombre: p.nombre || '', unidad: p.unidad || '', porM2: p.unidad === 'm2' || p.tipoUnidad === 'superficie' || /\(m²\)\s*$/.test(String(p.nombre || '')), bulto: p.unidadesPorBulto > 0 ? p.unidadesPorBulto : null, precioUnitario: p.precio == null ? null : p.precio }, precioSistema: precioSistema == null ? null : precioSistema });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 // Deja marcados como vinculados (skuTiendanube = sku) los productos que están en la tienda con el MISMO SKU, para que se vean con el tilde en Productos.
 router.post('/vinculos/confirmar-sku', auth, async (req, res) => {
   try {
