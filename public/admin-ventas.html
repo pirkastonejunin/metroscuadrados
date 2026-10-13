@@ -1708,6 +1708,34 @@ function opcionesCuentaCobro(tipoValor){
   return bancosTesoreriaCache.map(b => `<option value="banco:${b._id}">${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`).join('')
     || '<option value="">No tenés ningún banco habilitado — pedile a un administrador que te habilite uno desde Configuración</option>';
 }
+
+// Planes de tarjeta (13/10/2026): al cobrar con tarjeta se elige el plan; muestra recargo, costo y lo que entra al banco.
+let planesCobroCache = null;
+async function cargarPlanesCobro(pre){
+  if (planesCobroCache === null) {
+    try { const r = await fetch('/api/tesoreria/tarjetas-planes', {headers: headersAuth()}); planesCobroCache = r.ok ? await r.json() : []; }
+    catch(e){ planesCobroCache = []; }
+  }
+  const sel = document.getElementById(pre + 'TarjetaPlan');
+  if (!sel || sel.dataset.cargado === '1') return;
+  sel.innerHTML = '<option value="">Sin plan (sin costo ni recargo)</option>' + planesCobroCache.map(p => `<option value="${p._id}">${escapeHtml(p.tarjeta)} — ${escapeHtml(p.nombre)}${p.costoPorcentaje ? ' (costo ' + p.costoPorcentaje + '%)' : ''}${p.recargoPorcentaje ? ' · recargo ' + p.recargoPorcentaje + '%' : ''}</option>`).join('');
+  sel.dataset.cargado = '1';
+}
+function resumenPlanTarjeta(pre){
+  const sel = document.getElementById(pre + 'TarjetaPlan'); if (!sel) return;
+  const plan = (planesCobroCache || []).find(p => p._id === sel.value);
+  const recW = document.getElementById(pre + 'RecargoWrap'), out = document.getElementById(pre + 'PlanResumen');
+  if (!plan) { if (recW) recW.style.display = 'none'; out.textContent = ''; return; }
+  const conRecargo = (plan.recargoPorcentaje || 0) > 0;
+  recW.style.display = conRecargo ? 'flex' : 'none';
+  const monto = Number(document.getElementById(pre + 'Monto').value) || 0;
+  const aplica = conRecargo && document.getElementById(pre + 'AplicarRecargo').checked;
+  const recargo = Math.round(monto * (aplica ? plan.recargoPorcentaje : 0)) / 100;
+  const cargo = Math.round((monto + recargo) * 100) / 100;
+  const costo = Math.round(cargo * (plan.costoPorcentaje || 0)) / 100;
+  out.innerHTML = monto > 0 ? `El cliente paga con tarjeta <b>${money(cargo)}</b>${recargo > 0 ? ` (incluye recargo ${money(recargo)})` : ''} · costo del plan ${money(costo)} · entra al banco <b>${money(cargo - costo)}</b>` : '';
+}
+
 function actualizarTipoValorCobro(){
   const tipoValor = document.getElementById('ncTipoValor').value;
   const esCheque = tipoValor === 'cheque';
@@ -1715,6 +1743,7 @@ function actualizarTipoValorCobro(){
   document.getElementById('ncCuentaWrap').classList.toggle('hidden', esCheque);
   document.getElementById('ncChequeWrap').classList.toggle('hidden', !esCheque);
   document.getElementById('ncTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (esTarjeta) cargarPlanesCobro('nc').then(() => resumenPlanTarjeta('nc'));
   if (!esCheque) {
     document.getElementById('ncCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
     document.getElementById('ncCuenta').innerHTML = opcionesCuentaCobro(tipoValor);
@@ -1728,6 +1757,7 @@ let ventaCobroActual = null;
 let ncValores = [];
 let montoCobroTocado = false;
 function actualizarResumenCobro(){
+  resumenPlanTarjeta('nc');
   const v = ventaCobroActual;
   const input = document.getElementById('ncMonto');
   if (!v || !input) return;
@@ -1778,6 +1808,10 @@ function abrirCobro(id){
           </div>
         </div>
         <div id="ncTarjetaWrap" class="hidden" style="margin-top:10px">
+          <div style="margin-bottom:10px"><label>Plan de tarjeta</label>
+            <select id="ncTarjetaPlan" onchange="resumenPlanTarjeta('nc')"><option value="">Sin plan (sin costo ni recargo)</option></select>
+            <label style="display:none;align-items:center;gap:6px;font-weight:500;margin-top:6px" id="ncRecargoWrap"><input type="checkbox" id="ncAplicarRecargo" style="width:auto" checked onchange="resumenPlanTarjeta('nc')"> Cobrarle el recargo al cliente</label>
+            <div class="muted" id="ncPlanResumen" style="margin-top:4px"></div></div>
           <div class="grid2">
             <div><label>Entidad/tarjeta</label><input id="ncTarjetaEntidad" placeholder="Ej: Visa, Mastercard"></div>
             <div><label>Tipo</label><select id="ncTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
@@ -1832,6 +1866,8 @@ function leerValorCobro(){
       v.tarjetaCodigoAutorizacion = document.getElementById('ncTarjetaCodigoAutorizacion').value.trim();
       if (!v.tarjetaLote) return { error: 'Falta el número de lote' };
       if (!v.tarjetaCupon) return { error: 'Falta el número de cupón' };
+      v.tarjetaPlanId = document.getElementById('ncTarjetaPlan').value || undefined;
+      v.aplicarRecargo = document.getElementById('ncAplicarRecargo').checked;
     }
   }
   return { valor: v };

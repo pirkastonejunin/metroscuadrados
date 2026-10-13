@@ -355,6 +355,23 @@ async function resultadosOrg(db, orgId, d0, d1) {
     ]).toArray();
     obras.forEach(o => { const m = mes(mesDe(o.fin)); const c = 'Sueldos y cargas · Obra (colocadores)'; m.gastos[c] = (m.gastos[c] || 0) + Number(o.monto || 0); });
   }
+  // Costos financieros (13/10/2026): lo que descuentan las tarjetas al acreditar (según el plan elegido en el cobro) y las comisiones
+  // e impuestos de Mercado Pago. Los recargos que se le cobraron al cliente por financiar se muestran restando, como "Recargos financieros cobrados".
+  const finMes = (fecha, concepto, monto) => { if (!(monto > 0) && !(monto < 0)) return; const m = mes(mesDe(fecha)); m.gastos[concepto] = (m.gastos[concepto] || 0) + monto; };
+  const C_TARJ = 'Costo financiero · Tarjetas', C_REC = 'Recargos financieros cobrados', C_MP = 'Costo financiero · Mercado Pago (comisión)', C_MPI = 'Costo financiero · Mercado Pago (impuestos y retenciones)';
+  const enRango = f => { const t = new Date(f).getTime(); return t >= d0.getTime() && t <= d1.getTime(); };
+  const ventasTarj = await db.collection('ventas').find({ orgId, estado: { $ne: 'anulada' }, 'pagos.tarjetaPlanId': { $exists: true } }).project({ pagos: 1 }).limit(50000).toArray();
+  ventasTarj.forEach(v => (v.pagos || []).forEach(p => {
+    if (p.anulado || !p.tarjetaPlanId || !enRango(p.fecha)) return;
+    finMes(p.fecha, C_TARJ, Number(p.tarjetaCostoFinanciero) || 0); finMes(p.fecha, C_REC, -(Number(p.tarjetaRecargo) || 0));
+  }));
+  const ccTarj = await db.collection('cuenta_corriente_movimientos').find({ orgId, origen: 'cobro_cuenta', anulado: { $ne: true }, fecha: { $gte: d0, $lte: d1 }, $or: [{ tarjetaPlanId: { $exists: true } }, { 'valores.tarjetaPlanId': { $exists: true } }] }).limit(50000).toArray();
+  ccTarj.forEach(c => {
+    const lista = Array.isArray(c.valores) ? c.valores : [c];
+    lista.forEach(x => { if (!x.tarjetaPlanId) return; finMes(c.fecha, C_TARJ, Number(x.tarjetaCostoFinanciero) || 0); finMes(c.fecha, C_REC, -(Number(x.tarjetaRecargo) || 0)); });
+  });
+  const mpCobros = await db.collection('mp_cobros').find({ orgId, estado: 'acreditado', acreditadoEn: { $gte: d0, $lte: d1 } }).project({ comision: 1, impuestos: 1, acreditadoEn: 1 }).limit(50000).toArray();
+  mpCobros.forEach(c => { finMes(c.acreditadoEn, C_MP, Number(c.comision) || 0); finMes(c.acreditadoEn, C_MPI, Number(c.impuestos) || 0); });
   return meses;
 }
 

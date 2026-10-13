@@ -236,6 +236,74 @@ router.aplicarMovimientoCuenta = aplicarMovimientoCuenta;
 router.cuentaHabilitada = cuentaHabilitada;
 
 // -----------------------------------------------------------------------
+// Tarjetas y planes (13/10/2026, pedido de Mato): cada tarjeta tiene planes (contado, 3 cuotas, 6 cuotas…) con su costo (lo que
+// descuenta el procesador/banco al acreditar, IVA incluido) y, si se quiere, un recargo para el cliente. Al cobrar con tarjeta se
+// elige el plan: el cliente paga monto + recargo, al banco entra (monto + recargo) - costo, y el costo se informa como costo
+// financiero (y el recargo como ingreso financiero) en el Estado de resultados.
+// -----------------------------------------------------------------------
+function redondear2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+async function calcularPlanTarjeta(db, req, { planId, monto, aplicarRecargo }) {
+  const pid = planId ? toObjectId(planId) : null;
+  if (!pid) return null;
+  const plan = await db.collection('tarjetas_planes').findOne(Object.assign({ _id: pid }, req.orgId ? { orgId: req.orgId } : {}));
+  if (!plan) throw err(400, 'El plan de tarjeta elegido no existe (o no es de esta sucursal).');
+  const recargoPct = aplicarRecargo === false ? 0 : (Number(plan.recargoPorcentaje) || 0);
+  const recargo = redondear2(monto * recargoPct / 100);
+  const cargoTotal = redondear2(monto + recargo);
+  const costoPct = Number(plan.costoPorcentaje) || 0;
+  const costo = redondear2(cargoTotal * costoPct / 100);
+  return {
+    tarjetaPlanId: plan._id, tarjetaPlanNombre: `${plan.tarjeta} — ${plan.nombre}`, tarjetaCuotas: plan.cuotas || 1,
+    tarjetaCostoPorcentaje: costoPct, tarjetaRecargoPorcentaje: recargoPct, tarjetaRecargo: recargo,
+    tarjetaTotalCobrado: cargoTotal, tarjetaCostoFinanciero: costo, tarjetaIngresoNeto: redondear2(cargoTotal - costo)
+  };
+}
+router.calcularPlanTarjeta = calcularPlanTarjeta;
+
+router.get('/tarjetas-planes', authUsuario, resolverOrg, async (req, res) => {
+  try {
+    const todos = req.query.todos === '1';
+    const lista = await conReintento(async () => (await getDb()).collection('tarjetas_planes')
+      .find(Object.assign({}, req.orgId ? { orgId: req.orgId } : {}, todos ? {} : { activo: { $ne: false } })).sort({ tarjeta: 1, cuotas: 1 }).toArray());
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+function leerPlanTarjeta(b) {
+  const tarjeta = normalizarTexto(b.tarjeta), nombre = normalizarTexto(b.nombre);
+  if (!tarjeta) throw err(400, 'Falta el nombre de la tarjeta (ej: Visa crédito).');
+  if (!nombre) throw err(400, 'Falta el nombre del plan (ej: 3 cuotas).');
+  const num = (v, et) => { const n = Number(v === '' || v == null ? 0 : v); if (!Number.isFinite(n) || n < 0 || n > 100) throw err(400, `${et} tiene que estar entre 0 y 100.`); return n; };
+  const cuotas = Math.max(1, Math.floor(Number(b.cuotas) || 1));
+  return { tarjeta, nombre, cuotas, costoPorcentaje: num(b.costoPorcentaje, 'El costo %'), recargoPorcentaje: num(b.recargoPorcentaje, 'El recargo %'), activo: b.activo !== false };
+}
+router.post('/config/tarjetas-planes', authConfig, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás para cargar un plan.');
+    const doc = Object.assign(leerPlanTarjeta(req.body || {}), { orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
+    const r = await conReintento(async () => (await getDb()).collection('tarjetas_planes').insertOne(doc));
+    res.json(Object.assign(doc, { _id: r.insertedId }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/config/tarjetas-planes/:id', authConfig, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const set = Object.assign(leerPlanTarjeta(req.body || {}), { updatedAt: new Date() });
+    const r = await conReintento(async () => (await getDb()).collection('tarjetas_planes').updateOne(Object.assign({ _id: id }, req.orgId ? { orgId: req.orgId } : {}), { $set: set }));
+    if (!r.matchedCount) throw err(404, 'Plan no encontrado');
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/config/tarjetas-planes/:id', authConfig, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => (await getDb()).collection('tarjetas_planes').updateOne(Object.assign({ _id: id }, req.orgId ? { orgId: req.orgId } : {}), { $set: { activo: false, updatedAt: new Date() } }));
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
 // Configuración — alta y habilitación de cajas/bancos. Vive dentro de
 // Configuración (módulo 'usuarios'), no de Tesorería.
 // -----------------------------------------------------------------------
@@ -914,7 +982,7 @@ function normalizarValorRecibo(v, fechaDefecto) {
   const tipoValor = normalizarTexto(v.tipoValor).toLowerCase();
   if (!TIPOS_VALOR_COBRO_CUENTA_VALIDOS.includes(tipoValor)) throw err(400, `Tipo de valor inválido (opciones: ${TIPOS_VALOR_COBRO_CUENTA_VALIDOS.join(', ')})`);
   const monto = normalizarMontoPositivo(v.monto, 'El monto de cada medio de pago');
-  const out = { tipoValor, monto, cuentaTipo: null, cuentaId: null, chequeDatos: null, tarjetaDatos: null };
+  const out = { tipoValor, monto, cuentaTipo: null, cuentaId: null, chequeDatos: null, tarjetaDatos: null, tarjetaPlanId: v.tarjetaPlanId || null, aplicarRecargo: v.aplicarRecargo };
   if (tipoValor !== 'cheque') {
     out.cuentaTipo = normalizarTexto(v.cuentaTipo).toLowerCase();
     if (!['caja', 'banco'].includes(out.cuentaTipo)) throw err(400, 'Elegí a qué caja o banco va cada cobro.');
@@ -985,12 +1053,13 @@ async function cobroCuentaVariosMedios(req, res) {
         const { insertedId } = await db.collection('cheques').insertOne(cheque);
         Object.assign(d, { chequeId: insertedId, chequeNumero: v.chequeDatos.numero, chequeBanco: v.chequeDatos.banco, chequeVencimiento: v.chequeDatos.fechaVencimiento });
       } else {
-        const obs = v.tipoValor === 'tarjeta' ? [nota, `Lote ${v.tarjetaDatos.tarjetaLote} / Cupón ${v.tarjetaDatos.tarjetaCupon}`].filter(Boolean).join(' — ') : nota;
+        const plan = (v.tipoValor === 'tarjeta' && v.tarjetaPlanId) ? await calcularPlanTarjeta(db, req, { planId: v.tarjetaPlanId, monto: v.monto, aplicarRecargo: v.aplicarRecargo }) : null;
+        const obs = v.tipoValor === 'tarjeta' ? [nota, `Lote ${v.tarjetaDatos.tarjetaLote} / Cupón ${v.tarjetaDatos.tarjetaCupon}`, plan ? `${plan.tarjetaPlanNombre} (costo ${plan.tarjetaCostoFinanciero})` : ''].filter(Boolean).join(' — ') : nota;
         const m = await aplicarMovimientoCuenta(db, req, {
-          cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId, tipo: 'ingreso', monto: v.monto, moneda,
+          cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId, tipo: 'ingreso', monto: plan ? plan.tarjetaIngresoNeto : v.monto, moneda,
           motivo: `Cobro a cuenta — ${clienteNombre}`, observaciones: obs, origen: 'cobro_cuenta', fecha
         });
-        Object.assign(d, { tesoId: m._id, cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId }, v.tarjetaDatos || {});
+        Object.assign(d, { tesoId: m._id, cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId }, v.tarjetaDatos || {}, plan || {});
       }
       detalle.push(d);
     }
@@ -1070,6 +1139,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;
       let movimientoId = null; // 3/10/2026: para poder imprimir el recibo de este cobro recién hecho.
+      let planTarjeta = null;
 
       if (tipoValor === 'cheque') {
         const cheque = Object.assign({
@@ -1081,11 +1151,12 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
         const { insertedId } = await db.collection('cheques').insertOne(cheque);
         chequeId = insertedId;
       } else {
+        if (tipoValor === 'tarjeta' && body.tarjetaPlanId) planTarjeta = await calcularPlanTarjeta(db, req, { planId: body.tarjetaPlanId, monto, aplicarRecargo: body.aplicarRecargo });
         const observacionesMovimiento = tipoValor === 'tarjeta'
-          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
+          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`, planTarjeta ? `${planTarjeta.tarjetaPlanNombre} (costo ${planTarjeta.tarjetaCostoFinanciero})` : ''].filter(Boolean).join(' — ')
           : nota;
         const movimiento = await aplicarMovimientoCuenta(db, req, {
-          cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda,
+          cuentaTipo, cuentaId, tipo: 'ingreso', monto: planTarjeta ? planTarjeta.tarjetaIngresoNeto : monto, moneda,
           motivo: `Cobro a cuenta — ${clienteNombre}`, observaciones: observacionesMovimiento,
           origen: 'cobro_cuenta', fecha
         });
@@ -1096,7 +1167,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
         clienteId, clienteNombre, tipo: 'credito', monto: monto + totalRetenciones, moneda,
         concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId,
         observaciones: [nota, retenciones.length ? 'Incluye retenciones: ' + retenciones.map(r => `${r.tipoNombre} $${r.monto}`).join(', ') : ''].filter(Boolean).join(' — '),
-        fecha, extra: { tipoValor, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId }
+        fecha, extra: Object.assign({ tipoValor, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId }, planTarjeta || {})
       });
       // Las retenciones quedan indexadas con la referencia del recibo (para
       // poder mostrarlas al imprimirlo) — ver GET /recibo-cuenta/:tipo/:id.
@@ -1151,7 +1222,7 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
             await db.collection('cheques').updateOne({ _id: v.chequeId }, { $set: { estado: 'anulado', observaciones: ((ch.observaciones ? ch.observaciones + ' — ' : '') + 'Cobranza anulada' + (motivo ? ': ' + motivo : '')), updatedAt: ahora } });
           } else if (v.cuentaTipo && v.cuentaId) {
             await aplicarMovimientoCuenta(db, reqOrg, {
-              cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId, tipo: 'egreso', monto: v.monto, moneda: mov.moneda || 'ARS',
+              cuentaTipo: v.cuentaTipo, cuentaId: v.cuentaId, tipo: 'egreso', monto: v.tarjetaIngresoNeto != null ? v.tarjetaIngresoNeto : v.monto, moneda: mov.moneda || 'ARS',
               motivo: `Anulación de cobranza — ${mov.clienteNombre || ''}`, observaciones: motivo, origen: 'anulacion_cobro', fecha: ahora, omitirPermiso: true
             });
             if (v.tesoId) await db.collection('tesoreria_movimientos').updateOne({ _id: v.tesoId }, { $set: { anulado: true } });
@@ -1164,7 +1235,7 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
         pagoIdx = (venta.pagos || []).findIndex(p => !p.anulado && new Date(p.fecha).getTime() === new Date(mov.fecha).getTime() && (!mov.chequeId || p.tipoValor === 'cheque'));
         if (pagoIdx < 0) throw err(400, 'No pude identificar el cobro dentro de la venta, así que no lo anulo (para no dejar los saldos desparejos).');
         const pago = venta.pagos[pagoIdx];
-        if (pago.cuentaTipo && pago.cuentaId) cuentaRev = { cuentaTipo: pago.cuentaTipo, cuentaId: pago.cuentaId, monto: pago.monto, moneda: venta.moneda || 'ARS' };
+        if (pago.cuentaTipo && pago.cuentaId) cuentaRev = { cuentaTipo: pago.cuentaTipo, cuentaId: pago.cuentaId, monto: pago.tarjetaIngresoNeto != null ? pago.tarjetaIngresoNeto : pago.monto, moneda: venta.moneda || 'ARS' };
       } else if (!mov.chequeId) {
         let tm = null;
         if (mov.reciboTipo === 'movimiento' && mov.reciboId) tm = await db.collection('tesoreria_movimientos').findOne({ _id: mov.reciboId });

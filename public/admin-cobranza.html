@@ -176,6 +176,10 @@
           </div>
         </div>
         <div id="cbTarjetaWrap" class="hidden" style="margin-top:10px">
+          <div style="margin-bottom:10px"><label>Plan de tarjeta</label>
+            <select id="cbTarjetaPlan" onchange="resumenPlanTarjeta('cb')"><option value="">Sin plan (sin costo ni recargo)</option></select>
+            <label style="display:none;align-items:center;gap:6px;font-weight:500;margin-top:6px" id="cbRecargoWrap"><input type="checkbox" id="cbAplicarRecargo" style="width:auto" checked onchange="resumenPlanTarjeta('cb')"> Cobrarle el recargo al cliente</label>
+            <div class="muted" id="cbPlanResumen" style="margin-top:4px"></div></div>
           <div class="grid2">
             <div><label>Entidad/tarjeta</label><input id="cbTarjetaEntidad" placeholder="Ej: Visa, Mastercard"></div>
             <div><label>Tipo</label><select id="cbTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
@@ -422,6 +426,34 @@ function opcionesCuentaCB(tipoValor){
   return bancosCache.map(b => `<option value="banco:${b._id}">${escapeHtml(b.nombre)} (saldo ${money(b.saldo)})</option>`).join('')
     || '<option value="">No tenés ningún banco habilitado — pedile a un administrador que te habilite uno desde Configuración</option>';
 }
+
+// Planes de tarjeta (13/10/2026): al cobrar con tarjeta se elige el plan; muestra recargo, costo y lo que entra al banco.
+let planesCobroCache = null;
+async function cargarPlanesCobro(pre){
+  if (planesCobroCache === null) {
+    try { const r = await fetch('/api/tesoreria/tarjetas-planes', {headers: headersAuth()}); planesCobroCache = r.ok ? await r.json() : []; }
+    catch(e){ planesCobroCache = []; }
+  }
+  const sel = document.getElementById(pre + 'TarjetaPlan');
+  if (!sel || sel.dataset.cargado === '1') return;
+  sel.innerHTML = '<option value="">Sin plan (sin costo ni recargo)</option>' + planesCobroCache.map(p => `<option value="${p._id}">${escapeHtml(p.tarjeta)} — ${escapeHtml(p.nombre)}${p.costoPorcentaje ? ' (costo ' + p.costoPorcentaje + '%)' : ''}${p.recargoPorcentaje ? ' · recargo ' + p.recargoPorcentaje + '%' : ''}</option>`).join('');
+  sel.dataset.cargado = '1';
+}
+function resumenPlanTarjeta(pre){
+  const sel = document.getElementById(pre + 'TarjetaPlan'); if (!sel) return;
+  const plan = (planesCobroCache || []).find(p => p._id === sel.value);
+  const recW = document.getElementById(pre + 'RecargoWrap'), out = document.getElementById(pre + 'PlanResumen');
+  if (!plan) { if (recW) recW.style.display = 'none'; out.textContent = ''; return; }
+  const conRecargo = (plan.recargoPorcentaje || 0) > 0;
+  recW.style.display = conRecargo ? 'flex' : 'none';
+  const monto = Number(document.getElementById(pre + 'Monto').value) || 0;
+  const aplica = conRecargo && document.getElementById(pre + 'AplicarRecargo').checked;
+  const recargo = Math.round(monto * (aplica ? plan.recargoPorcentaje : 0)) / 100;
+  const cargo = Math.round((monto + recargo) * 100) / 100;
+  const costo = Math.round(cargo * (plan.costoPorcentaje || 0)) / 100;
+  out.innerHTML = monto > 0 ? `El cliente paga con tarjeta <b>${money(cargo)}</b>${recargo > 0 ? ` (incluye recargo ${money(recargo)})` : ''} · costo del plan ${money(costo)} · entra al banco <b>${money(cargo - costo)}</b>` : '';
+}
+
 function actualizarTipoValorCB(){
   const tipoValor = document.getElementById('cbTipoValor').value;
   const esCheque = tipoValor === 'cheque';
@@ -429,6 +461,7 @@ function actualizarTipoValorCB(){
   document.getElementById('cbCuentaWrap').classList.toggle('hidden', esCheque);
   document.getElementById('cbChequeWrap').classList.toggle('hidden', !esCheque);
   document.getElementById('cbTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (esTarjeta) cargarPlanesCobro('cb').then(() => resumenPlanTarjeta('cb'));
   if (!esCheque) {
     document.getElementById('cbCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
     document.getElementById('cbCuenta').innerHTML = opcionesCuentaCB(tipoValor);
@@ -441,6 +474,7 @@ function actualizarTipoValorCB(){
 // sin que entre plata, así que lo que se aplica a la cuenta del cliente es
 // cobrado + retenciones.
 function actualizarResumenCB(){
+  resumenPlanTarjeta('cb');
   const el = document.getElementById('cbResumenCobro');
   if (!el) return;
   const ret = ImpuestosUI.totales('impCB').retenciones;
@@ -479,6 +513,8 @@ function leerValorCB(){
       v.tarjetaCodigoAutorizacion = document.getElementById('cbTarjetaCodigoAutorizacion').value.trim();
       if (!v.tarjetaLote) return { error: 'Falta el número de lote' };
       if (!v.tarjetaCupon) return { error: 'Falta el número de cupón' };
+      v.tarjetaPlanId = document.getElementById('cbTarjetaPlan').value || undefined;
+      v.aplicarRecargo = document.getElementById('cbAplicarRecargo').checked;
     }
   }
   return { valor: v };

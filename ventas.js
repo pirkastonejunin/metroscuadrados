@@ -77,7 +77,7 @@ const { exportarXlsx } = require('./importExport');
 // cheque "de terceros" en cartera. Se reusan estas dos funciones de
 // tesoreria.js (en vez de reimplementarlas) porque son lógica de
 // negocio sensible al dinero — ver la nota en tesoreria.js.
-const { aplicarMovimientoCuenta, cuentaHabilitada } = require('./tesoreria');
+const { aplicarMovimientoCuenta, cuentaHabilitada, calcularPlanTarjeta } = require('./tesoreria');
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
 // comentario grande de registrarMovimientoCuentaCorriente en clientes.js.
 const { registrarMovimientoCuentaCorriente } = require('./clientes');
@@ -1239,6 +1239,7 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
     const grupo = pago.reciboGrupo ? (venta.pagos || []).filter(p => p.reciboGrupo === pago.reciboGrupo && !p.anulado) : [pago];
     const totalMedios = grupo.reduce((a, p) => a + p.monto, 0);
     const totalRet = grupo.reduce((a, p) => a + (p.totalRetenciones || 0), 0);
+    const recargoTotal = grupo.reduce((a, p) => a + (p.tarjetaRecargo || 0), 0);
     const retsTodas = grupo.reduce((a, p) => a.concat(p.retenciones || []), []);
     const detalleMedio = p => (TIPO_VALOR_LABEL[p.tipoValor] || escHtml(p.tipoValor))
       + (p.tipoValor === 'tarjeta' ? ` (Lote ${escHtml(p.tarjetaLote || '—')} / Cupón ${escHtml(p.tarjetaCupon || '—')})` : '');
@@ -1247,7 +1248,7 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
       <div class="datos-doc">
         <div>
           <strong>Recibí de:</strong> ${escHtml(venta.clienteNombre)}<br>
-          <strong>La suma de:</strong> ${moneyImp(totalMedios, venta.moneda)}${retsTodas.length ? `<br><strong>Retenciones practicadas:</strong> ${retsTodas.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(totalMedios + totalRet, venta.moneda)}` : ''}
+          <strong>La suma de:</strong> ${moneyImp(totalMedios, venta.moneda)}${retsTodas.length ? `<br><strong>Retenciones practicadas:</strong> ${retsTodas.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(totalMedios + totalRet, venta.moneda)}` : ''}${recargoTotal > 0 ? `<br><strong>Recargo por financiación (tarjeta):</strong> ${moneyImp(recargoTotal, venta.moneda)}<br><strong>Total cobrado con tarjeta:</strong> ${moneyImp(grupo.reduce((a, p) => a + (p.tarjetaTotalCobrado || 0), 0), venta.moneda)}` : ''}
         </div>
         <div>
           <strong>Fecha:</strong> ${fechaLarga(pago.fecha)}<br>
@@ -1720,6 +1721,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;
+      let planTarjeta = null;
 
       if (tipoValor === 'cheque') {
         const cheque = Object.assign({
@@ -1731,11 +1733,13 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
         const { insertedId } = await db.collection('cheques').insertOne(cheque);
         chequeId = insertedId;
       } else {
+        // Plan de tarjeta: al banco entra lo cobrado (más el recargo, si hay) menos el costo del plan.
+        if (tipoValor === 'tarjeta' && body.tarjetaPlanId) planTarjeta = await calcularPlanTarjeta(db, req, { planId: body.tarjetaPlanId, monto, aplicarRecargo: body.aplicarRecargo });
         const observacionesMovimiento = tipoValor === 'tarjeta'
-          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
+          ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`, planTarjeta ? `${planTarjeta.tarjetaPlanNombre} (costo ${planTarjeta.tarjetaCostoFinanciero})` : ''].filter(Boolean).join(' — ')
           : nota;
         await aplicarMovimientoCuenta(db, req, {
-          cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda: venta.moneda || 'ARS',
+          cuentaTipo, cuentaId, tipo: 'ingreso', monto: planTarjeta ? planTarjeta.tarjetaIngresoNeto : monto, moneda: venta.moneda || 'ARS',
           motivo: `Cobro venta Nº ${venta.numero}`, observaciones: observacionesMovimiento, origen: 'venta', ventaId: id, fecha
         });
       }
@@ -1746,6 +1750,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
         cuentaTipo ? { cuentaTipo, cuentaId } : {},
         chequeId ? { chequeId } : {},
         tarjetaDatos || {},
+        planTarjeta || {},
         reciboGrupo ? { reciboGrupo } : {}
       );
       const totalCobrado = (venta.totalCobrado || 0) + monto + totalRetenciones; // las retenciones también cancelan deuda
