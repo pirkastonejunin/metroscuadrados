@@ -543,14 +543,25 @@ function renderListaCobranzas(){
   const body = document.getElementById('cobranzasBody');
   if (!lista.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No hay cobranzas para estos filtros.</td></tr>'; return; }
   body.innerHTML = lista.map(c => `
-    <tr>
+    <tr${c.anulado ? ' style="opacity:.55;text-decoration:line-through"' : ''}>
       <td class="muted">${fechaCorta(c.fecha)}</td>
       <td>${c.clienteId ? `<a href="/admin-clientes.html?id=${c.clienteId}&tab=cuenta-corriente" target="_blank" title="Abrir la cuenta corriente de este cliente" style="color:inherit;text-decoration:underline dotted">${escapeHtml(c.clienteNombre || '—')}</a>` : escapeHtml(c.clienteNombre || '—')}</td>
       <td>${escapeHtml(c.concepto || '—')}${c.observaciones ? `<div class="muted">${escapeHtml(c.observaciones)}</div>` : ''}</td>
       <td>${escapeHtml(c.formaLabel)}</td>
       <td>${(c.moneda && c.moneda !== 'ARS' ? c.moneda + ' ' : '') + money(c.monto)}</td>
-      <td style="white-space:nowrap">${c.reciboUrl ? botonesImprimible(c.reciboUrl) : ''}</td>
+      <td style="white-space:nowrap">${c.anulado ? '<span class="muted" style="text-decoration:none;display:inline-block" title="' + escapeHtml(c.anuladoMotivo || '') + '">ANULADA</span>' : ((c.reciboUrl ? botonesImprimible(c.reciboUrl) : '') + ` <button class="btn small danger" data-anular-cobranza="${c._id}" onclick="anularCobranza('${c._id}')" title="Anular esta cobranza (por ejemplo si se cargó a otro cliente)">Anular</button>`)}</td>
     </tr>`).join('');
+}
+async function anularCobranza(id){
+  const c = cobranzasCache.find(x => String(x._id) === String(id));
+  const motivo = prompt(`¿Anular la cobranza de ${c ? (c.clienteNombre || '') : ''} por ${c ? money(c.monto) : ''}?\n\nSe revierte en la cuenta corriente del cliente y en caja/banco (o se anula el cheque). Motivo (opcional):`);
+  if (motivo === null) return;
+  try{
+    const r = await fetch(BASE + '/cobranzas/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    await cargarListaCobranzas();
+  }catch(e){ alert(e.message); }
 }
 function toggleNuevaCobranza(mostrar){
   document.getElementById('nuevaCobranzaCard').classList.toggle('hidden', !mostrar);

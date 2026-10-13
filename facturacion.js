@@ -119,7 +119,7 @@ async function resumenSucursal(db, org, d0, d1, desdeS, hastaS) {
       { $group: { _id: null, total: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, SIGNO_NC, FACTOR_USD] } } } }
     ]),
     sumar(db.collection('cuenta_corriente_movimientos'), [
-      { $match: { orgId, tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, fecha: enRango } },
+      { $match: { orgId, tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, anulado: { $ne: true }, fecha: enRango } },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$monto', 0] } } } }
     ]),
     sumar(db.collection('compras_pagos'), [

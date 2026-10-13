@@ -414,7 +414,7 @@ router.get('/resumen', authOperar, async (req, res) => {
           .sort({ fechaVencimiento: 1 }).limit(1000).toArray(),
         db.collection('ventas').find(Object.assign({ estado: { $ne: 'anulada' }, 'pagos.tipoValor': 'tarjeta' }, filtroOrg(req)))
           .project({ numero: 1, clienteNombre: 1, moneda: 1, pagos: 1 }).sort({ createdAt: -1 }).limit(500).toArray(),
-        db.collection('tesoreria_movimientos').find(Object.assign({ origen: 'cobro_cuenta', tipo: 'ingreso', observaciones: /Lote .* \/ Cup/ }, filtroOrg(req)))
+        db.collection('tesoreria_movimientos').find(Object.assign({ origen: 'cobro_cuenta', tipo: 'ingreso', anulado: { $ne: true }, observaciones: /Lote .* \/ Cup/ }, filtroOrg(req)))
           .sort({ fecha: -1 }).limit(200).toArray()
       ]);
       const nombreBanco = new Map(bancos.map(b => [String(b._id), b.nombre]));
@@ -444,7 +444,7 @@ router.get('/resumen', authOperar, async (req, res) => {
         .map(c => ({ _id: c._id, tipo: c.tipo, numero: c.numero, banco: c.banco || '', fechaVencimiento: c.fechaVencimiento, monto: c.monto, moneda: c.moneda || 'ARS', estado: c.estado, contraparte: c.tipo === 'tercero' ? (c.clienteNombre || c.librador || '') : (c.proveedorNombre || '') }));
       // Tarjeta
       const cobrosTarjeta = [];
-      ventasTarjeta.forEach(v => (v.pagos || []).filter(p => p.tipoValor === 'tarjeta').forEach(p => cobrosTarjeta.push({
+      ventasTarjeta.forEach(v => (v.pagos || []).filter(p => p.tipoValor === 'tarjeta' && !p.anulado).forEach(p => cobrosTarjeta.push({
         fecha: p.fecha, monto: p.monto, moneda: v.moneda || 'ARS',
         referencia: `Venta Nº ${v.numero}${v.clienteNombre ? ' — ' + v.clienteNombre : ''}`,
         entidad: p.tarjetaEntidad || '', tipoTarjeta: p.tarjetaTipo || '', cuotas: p.tarjetaCuotas || 1,
@@ -876,7 +876,7 @@ router.get('/cobranzas', authOperar, async (req, res) => {
         const v = m.ventaId ? ventaPorId[String(m.ventaId)] : null;
         return { _id: m._id, fecha: m.fecha, clienteId: m.clienteId, clienteNombre: m.clienteNombre, origen: m.origen,
           concepto: m.concepto, ventaId: m.ventaId || null, ventaNumero: v ? v.numero : null, monto: m.monto, moneda: m.moneda || 'ARS',
-          forma: f, formaLabel: f ? (FORMA_LABEL_COBRANZA[f] || f) : '—', observaciones: m.observaciones || '', usuarioNombre: m.usuarioNombre || '', reciboUrl: recibo };
+          forma: f, formaLabel: f ? (FORMA_LABEL_COBRANZA[f] || f) : '—', observaciones: m.observaciones || '', usuarioNombre: m.usuarioNombre || '', reciboUrl: recibo, anulado: !!m.anulado, anuladoMotivo: m.anuladoMotivo || '' };
       });
       const lista = forma ? items.filter(i => i.forma === forma || (forma === 'cuenta' && i.forma === 'transferencia')) : items;
 
@@ -885,7 +885,7 @@ router.get('/cobranzas', authOperar, async (req, res) => {
       const desdeDia = new Date(hoy + 'T00:00:00-03:00');
       const desdeMes = new Date(hoy.slice(0, 7) + '-01T00:00:00-03:00');
       const delMes = await db.collection('cuenta_corriente_movimientos')
-        .find(Object.assign({ tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, fecha: { $gte: desdeMes } }, filtroOrg(req)))
+        .find(Object.assign({ tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, anulado: { $ne: true }, fecha: { $gte: desdeMes } }, filtroOrg(req)))
         .project({ fecha: 1, monto: 1, moneda: 1 }).toArray();
       const resumen = { dia: { cantidad: 0, monto: {} }, mes: { cantidad: 0, monto: {} } };
       for (const m of delMes) {
@@ -1008,6 +1008,82 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
       // GET /recibo-cuenta/:tipo/:id más abajo) — el tipo le dice al
       // frontend cuál de las dos rutas de recibo usar.
       return { ok: true, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Anular una cobranza (cobro de una venta o cobro a cuenta) cargada por error, p. ej. a otro cliente. No se borra nada: queda
+// marcada como anulada y se registran los movimientos inversos (cuenta corriente del cliente, caja/banco o cheque, saldo de la venta).
+// Un cheque solo se puede anular mientras siga en cartera (si ya se depositó o endosó, primero hay que deshacer eso).
+router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const motivo = normalizarTexto(req.body && req.body.motivo);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const mov = await db.collection('cuenta_corriente_movimientos').findOne({ _id: id });
+      if (!mov || mov.tipo !== 'credito' || !['cobro_venta', 'cobro_cuenta'].includes(mov.origen)) throw err(404, 'Cobranza no encontrada');
+      if (req.orgId && mov.orgId && String(req.orgId) !== String(mov.orgId)) throw err(404, 'Cobranza no encontrada');
+      const u = req.usuario || {};
+      if (!(u.rol && u.rol.protegido) && Array.isArray(u.orgIds) && u.orgIds.length && mov.orgId && !u.orgIds.map(String).includes(String(mov.orgId))) throw err(403, 'No tenés acceso a la sucursal de esta cobranza.');
+      if (mov.anulado) throw err(400, 'Esta cobranza ya está anulada.');
+      if (mov.importado) throw err(400, 'Es una cobranza histórica importada de Dux: no se puede anular desde acá.');
+      const reqOrg = Object.assign({}, req, { orgId: mov.orgId || req.orgId });
+      const ahora = new Date();
+      const usuarioNombre = (u && u.nombre) || '';
+      const montoCC = mov.monto;
+
+      // --- 1) El valor cobrado: cheque en cartera, o plata en caja/banco.
+      let cuentaRev = null;   // { cuentaTipo, cuentaId, monto, moneda }
+      let pagoIdx = -1, venta = null;
+      if (mov.origen === 'cobro_venta') {
+        venta = mov.ventaId ? await db.collection('ventas').findOne({ _id: mov.ventaId }) : null;
+        if (!venta) throw err(404, 'No encuentro la venta de este cobro.');
+        pagoIdx = (venta.pagos || []).findIndex(p => !p.anulado && new Date(p.fecha).getTime() === new Date(mov.fecha).getTime() && (!mov.chequeId || p.tipoValor === 'cheque'));
+        if (pagoIdx < 0) throw err(400, 'No pude identificar el cobro dentro de la venta, así que no lo anulo (para no dejar los saldos desparejos).');
+        const pago = venta.pagos[pagoIdx];
+        if (pago.cuentaTipo && pago.cuentaId) cuentaRev = { cuentaTipo: pago.cuentaTipo, cuentaId: pago.cuentaId, monto: pago.monto, moneda: venta.moneda || 'ARS' };
+      } else if (!mov.chequeId) {
+        let tm = null;
+        if (mov.reciboTipo === 'movimiento' && mov.reciboId) tm = await db.collection('tesoreria_movimientos').findOne({ _id: mov.reciboId });
+        if (!tm) tm = await db.collection('tesoreria_movimientos').findOne({ origen: 'cobro_cuenta', tipo: 'ingreso', orgId: mov.orgId, fecha: mov.fecha, motivo: new RegExp((mov.clienteNombre || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$') });
+        if (!tm) throw err(400, 'No pude identificar el ingreso en caja/banco de este cobro, así que no lo anulo (para no dejar los saldos desparejos).');
+        cuentaRev = { cuentaTipo: tm.cuentaTipo, cuentaId: tm.cuentaId, monto: tm.monto, moneda: tm.moneda || mov.moneda || 'ARS', tesoId: tm._id };
+      }
+      if (mov.chequeId) {
+        const ch = await db.collection('cheques').findOne({ _id: mov.chequeId });
+        if (!ch) throw err(404, 'No encuentro el cheque de este cobro.');
+        if (ch.estado !== 'en_cartera') throw err(400, `El cheque Nº ${ch.numero} ya está "${ch.estado}": no se puede anular el cobro mientras no vuelva a cartera.`);
+        await db.collection('cheques').updateOne({ _id: ch._id }, { $set: { estado: 'anulado', observaciones: ((ch.observaciones ? ch.observaciones + ' — ' : '') + 'Cobranza anulada' + (motivo ? ': ' + motivo : '')), updatedAt: ahora } });
+      }
+      if (cuentaRev) {
+        await aplicarMovimientoCuenta(db, reqOrg, {
+          cuentaTipo: cuentaRev.cuentaTipo, cuentaId: cuentaRev.cuentaId, tipo: 'egreso', monto: cuentaRev.monto, moneda: cuentaRev.moneda,
+          motivo: `Anulación de cobranza — ${mov.clienteNombre || ''}`, observaciones: motivo, origen: 'anulacion_cobro', ventaId: mov.ventaId || null, fecha: ahora, omitirPermiso: true
+        });
+        if (cuentaRev.tesoId) await db.collection('tesoreria_movimientos').updateOne({ _id: cuentaRev.tesoId }, { $set: { anulado: true } });
+      }
+
+      // --- 2) La venta: el cobro queda marcado como anulado y se recalcula lo cobrado / el saldo.
+      if (venta) {
+        const pagos = venta.pagos.map((p, i) => i === pagoIdx ? Object.assign({}, p, { anulado: true, anuladoEn: ahora, anuladoMotivo: motivo }) : p);
+        const totalCobrado = pagos.filter(p => !p.anulado).reduce((t, p) => t + (p.monto || 0) + (p.totalRetenciones || 0), 0);
+        await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { pagos, totalCobrado, saldoPendiente: Math.max(0, venta.total - totalCobrado), updatedAt: ahora } });
+        await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_venta', ventaId: venta._id, fecha: mov.fecha });
+      } else if (mov.reciboId) {
+        await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_cuenta', reciboId: mov.reciboId });
+      }
+
+      // --- 3) Cuenta corriente: el cobro queda anulado y un débito lo compensa (el saldo vuelve a como estaba).
+      await db.collection('cuenta_corriente_movimientos').updateOne({ _id: id }, { $set: { anulado: true, anuladoEn: ahora, anuladoPor: usuarioNombre, anuladoMotivo: motivo } });
+      await registrarMovimientoCuentaCorriente(db, reqOrg, {
+        clienteId: mov.clienteId, clienteNombre: mov.clienteNombre, tipo: 'debito', monto: montoCC, moneda: mov.moneda || 'ARS',
+        concepto: `Anulación de cobranza (${mov.concepto || 'cobro'})`, origen: 'anulacion_cobro', ventaId: mov.ventaId || null, chequeId: mov.chequeId || null,
+        observaciones: motivo, fecha: ahora, extra: { anulaMovimientoId: id }
+      });
+      return { ok: true };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
