@@ -454,7 +454,9 @@ function mostrarPanel(dia) {
         <div class="tag visita">Visita</div>
         <div class="cont">
           <div class="titulo">${v.cliente.nombre}</div>
-          <div class="detalle">${v.vendedorNombre || 'Sin vendedor'} · ${v.cliente.direccion || ''}${cancelada ? ' · Cancelada' : ''}</div>
+          <div class="detalle">${v.vendedorNombre || 'Sin vendedor'} · ${v.cliente.direccion || ''}${v.cliente.localidad ? ', ' + v.cliente.localidad : ''}${cancelada ? ' · Cancelada' : ''}</div>
+          ${v.cliente.telefono ? `<div class="detalle">Tel: ${v.cliente.telefono}</div>` : ''}
+          ${v.notasEmpleada ? `<div class="detalle" style="white-space:pre-wrap"><strong>Anotaciones:</strong> ${v.notasEmpleada}</div>` : ''}
         </div>
         <div class="hora">${hora}</div>
       </div>`;

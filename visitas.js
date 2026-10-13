@@ -215,14 +215,24 @@ function parsearFechaHoraLocal(fechaHoraStr) {
 // Arma los campos del evento de Google Calendar a partir de una visita
 // (o de la fusión de la visita actual con los cambios que se le van a aplicar).
 function eventoDeVisita(v) {
+  const c = v.cliente || {};
+  const fecha = v.fechaHora ? new Date(v.fechaHora) : null;
+  const hora = fecha && !isNaN(fecha) ? fecha.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : null;
+  const ubic = [c.direccion, c.localidad].filter(Boolean).join(', ');
   return {
-    titulo: `Visita: ${v.cliente.nombre}`,
+    // El título lleva el teléfono: es lo primero que se ve en la vista previa del calendario.
+    titulo: `Visita: ${c.nombre}${c.telefono ? ' · ' + c.telefono : ''}`,
     descripcion: [
+      'DATOS PARA EL ASESOR',
+      `Cliente: ${c.nombre}`,
+      c.telefono ? `Teléfono: ${c.telefono}` : null,
+      ubic ? `Dirección: ${ubic}` : null,
+      hora ? `Cuándo: ${hora}` : null,
       `Vendedor: ${v.vendedorNombre || '-'}`,
-      v.cliente.telefono ? `Teléfono: ${v.cliente.telefono}` : null,
-      v.notasEmpleada ? `Notas: ${v.notasEmpleada}` : null
+      v.numero ? `Visita Nº ${v.numero}` : null,
+      v.notasEmpleada ? `\nANOTACIONES:\n${v.notasEmpleada}` : null
     ].filter(Boolean).join('\n'),
-    ubicacion: v.cliente.direccion || '',
+    ubicacion: ubic,
     inicio: v.fechaHora,
     fin: new Date(new Date(v.fechaHora).getTime() + DURACION_VISITA_MS)
   };
