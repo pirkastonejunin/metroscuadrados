@@ -902,5 +902,19 @@ module.exports.MODULOS = MODULOS;
 module.exports.resolverOrg = resolverOrg;
 module.exports.filtroOrg = filtroOrg;
 module.exports.filtroOrgClientes = filtroOrgClientes;
+// Cliente para operar en la sucursal actual: si es de la sucursal o ya está compartido con ella, se devuelve tal cual. Si es de OTRA sucursal
+// a la que el usuario tiene acceso, se comparte con la actual (un mismo cliente que opera en varias sucursales es UNA sola ficha y un solo saldo).
+module.exports.cargarClienteParaOperar = async function (db, req, clienteId) {
+  const col = db.collection('clientes');
+  let c = await col.findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
+  if (c || !req.orgId) return c;
+  const otro = await col.findOne({ _id: clienteId });
+  if (!otro) return null;
+  const u = req.usuario || {};
+  const acceso = (u.rol && u.rol.protegido) || [String(otro.orgId)].concat((otro.orgIdsCompartidas || []).map(String)).some(o => (u.orgIds || []).map(String).includes(o));
+  if (!acceso) return null;
+  await col.updateOne({ _id: clienteId }, { $addToSet: { orgIdsCompartidas: req.orgId } });
+  return Object.assign(otro, { orgIdsCompartidas: (otro.orgIdsCompartidas || []).concat([req.orgId]) });
+};
 module.exports.backfillOrgId = backfillOrgId;
 module.exports.asegurarOrgPorDefecto = asegurarOrgPorDefecto;

@@ -229,6 +229,17 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await Promise.all([cargarClientes(), cargarVendedoresYListasCliente()]);
+  // Abrir la ficha de un cliente puntual (?id=...), p. ej. desde la pantalla de ventas.
+  try {
+    const idQs = new URLSearchParams(location.search).get('id');
+    if (idQs) {
+      if (!clientesCache.find(x => x._id === idQs)) {
+        const rc = await fetch(BASE + '?incluirInactivos=1', {headers: headersAuth()});
+        if (rc.ok) clientesCache = await rc.json();
+      }
+      abrirEditarCliente(idQs);
+    }
+  } catch(e) {}
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 

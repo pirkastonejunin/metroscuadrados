@@ -70,7 +70,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes, cargarClienteParaOperar } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
 // Tesorería (2/10/2026): un cobro en efectivo/cuenta/tarjeta tiene que
 // acreditarse YA en una caja/banco real; un cobro en cheque crea un
@@ -723,6 +723,84 @@ function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
 // bajo los filtros del listado. Día/mes en horario de Argentina (-03:00).
 // No cuenta anuladas; las notas de crédito restan y las de débito suman al
 // monto, y ninguna de las dos cuenta como "venta" en la cantidad.
+// Próximo número de comprobante (sin consumirlo) para mostrarlo en la
+// pantalla de carga: ?tipo=comprobante_x|fiscal|nota_credito|nota_debito&letra=A|B|X
+router.get('/proximo-numero', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) return res.json({ numero: null });
+    const tipo = normalizarTexto(req.query.tipo).toLowerCase() || 'comprobante_x';
+    if (!TIPOS_COMPROBANTE_VALIDOS.includes(tipo)) throw err(400, 'Tipo de comprobante inválido');
+    let letra = normalizarTexto(req.query.letra).toUpperCase();
+    if (tipo === 'comprobante_x') letra = 'X';
+    else if (!['A', 'B', 'X'].includes(letra)) letra = 'B';
+    const clave = tipo === 'comprobante_x' ? 'comprobante_x' : `${tipo}_${letra}`;
+    const db = await getDb();
+    let doc = await db.collection('ventas_contadores').findOne({ orgId: req.orgId, tipoComprobante: clave });
+    let ultimo = doc ? doc.ultimo : 0;
+    if (!doc && clave === 'comprobante_x') {
+      const legacy = await db.collection('ventas_contadores').findOne({ orgId: req.orgId, tipoComprobante: { $exists: false } });
+      if (legacy) ultimo = legacy.ultimo;
+    }
+    let puntoVenta = null;
+    try {
+      const cfg = await emisionFiscal.getConfig(db, req.orgId);
+      puntoVenta = cfg && cfg.puntoVenta ? cfg.puntoVenta : null;
+    } catch (e) { /* sin config fiscal */ }
+    res.json({ numero: ultimo + 1, letra, tipo, puntoVenta });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Convierte una venta cargada como NO fiscal (Comprobante X) en una factura
+// fiscal (A/B según el cliente). Queda con número nuevo de la serie fiscal
+// (el X anterior se guarda en numeroXAnterior) y pendiente de autorizar en ARCA.
+router.post('/:id/convertir-fiscal', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.estado === 'anulada') throw err(400, 'La venta está anulada.');
+      if (venta.importado) throw err(400, 'Es una venta histórica importada: no se puede convertir.');
+      if (venta.tipoComprobante !== 'comprobante_x' || venta.esFiscal) throw err(400, 'Solo se puede convertir un Comprobante X (no fiscal).');
+      const orgVenta = venta.orgId;
+      const reqOrg = Object.assign({}, req, { orgId: orgVenta });
+      const cliente = await db.collection('clientes').findOne({ _id: venta.clienteId });
+      if (!cliente) throw err(400, 'El cliente de la venta ya no existe.');
+      const letra = letraFiscalParaCliente(cliente);
+      const cfgFiscal = await emisionFiscal.getConfig(db, orgVenta);
+      const incluyeIva = await emisionFiscal.preciosIncluyenIvaDe(db, cfgFiscal, venta.listaPrecioId || null);
+      let fiscal;
+      try {
+        fiscal = emisionFiscal.calcularFiscalVenta({ items: venta.items, descuentoPorcentaje: venta.descuentoPorcentaje || 0, descuentoMonto: venta.descuentoMonto || 0, preciosIncluyenIva: incluyeIva, letra, ivaDefecto: cfgFiscal.ivaDefecto });
+      } catch (eF) { throw err(400, eF.message); }
+      const totalNuevo = fiscal.total;
+      const diferencia = Math.round((totalNuevo - venta.total) * 100) / 100;
+      const numero = await proximoNumero(db, orgVenta, `fiscal_${letra}`);
+      const ahora = new Date();
+      const nuevoSaldo = Math.max(0, Math.round((totalNuevo - (venta.totalCobrado || 0)) * 100) / 100);
+      const upd = await db.collection('ventas').updateOne(
+        { _id: id, tipoComprobante: 'comprobante_x', estado: { $ne: 'anulada' } },
+        { $set: {
+          tipoComprobante: 'fiscal', letra, esFiscal: true, fiscal, numero,
+          numeroXAnterior: venta.numero, total: totalNuevo, saldoPendiente: nuevoSaldo,
+          fiscalEstado: 'pendiente', fiscalMensaje: null, convertidaAFiscalEn: ahora, updatedAt: ahora
+        } }
+      );
+      if (!upd.modifiedCount) throw err(409, 'La venta cambió mientras se convertía. Probá de nuevo.');
+      if (Math.abs(diferencia) >= 0.01) {
+        await registrarMovimientoCuentaCorriente(db, reqOrg, {
+          clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: diferencia > 0 ? 'debito' : 'credito', monto: Math.abs(diferencia), moneda: venta.moneda || 'ARS',
+          concepto: `Conversión a factura fiscal (venta X Nº ${venta.numero} → ${letra} Nº ${numero}): ajuste de IVA`, origen: 'venta', ventaId: id
+        });
+      }
+      return db.collection('ventas').findOne({ _id: id });
+    });
+    res.json(await autorizarAlGuardar(Object.assign({}, req, { orgId: resultado.orgId }), resultado));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/resumen', authAdmin, async (req, res) => {
   try {
     const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
@@ -1232,7 +1310,7 @@ router.post('/', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
+      const cliente = await cargarClienteParaOperar(db, req, clienteId);
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       let comprobanteOrigenLetra = null;
       if (comprobanteOrigenId) {
