@@ -291,6 +291,51 @@ router.post('/publicar', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Stock hacia Tiendanube (13/10/2026): stock de la tienda = suma de TODOS los depósitos (Junín + Colomé) menos lo comprometido.
+// Primero se compara (no cambia nada) y después se envía lo tildado. Las variantes con stock ilimitado en la tienda no se tocan salvo que se pida.
+// ---------------------------------------------------------------------------
+router.get('/stock/comparar', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const filas = await productosTienda();
+    const prods = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, skuTiendanube: 1 }).toArray();
+    const porSku = new Map(), porTn = new Map();
+    for (const p of prods) { if (p.sku) porSku.set(K(p.sku), p); if (p.skuTiendanube) porTn.set(K(p.skuTiendanube), p); }
+    const pares = [];
+    for (const f of filas) { const k = K(f.sku); const p = k && (porTn.get(k) || porSku.get(k)); if (p) pares.push({ f, p }); }
+    const stock = await stockDisponible(db, pares.map(x => x.p._id));
+    const out = pares.map(({ f, p }) => { const s = stock.get(String(p._id)) || 0; const ilimitado = f.stock == null;
+      return { productoId: String(p._id), sku: p.sku, nombre: p.nombre || f.nombre, productId: f.productId, variantId: f.variantId, tnStock: f.stock, ilimitado, sistema: s, diferencia: ilimitado ? null : s - f.stock }; });
+    const dif = out.filter(r => !r.ilimitado && Math.abs(r.diferencia) > 0.0001);
+    res.json({ resumen: { vinculados: out.length, iguales: out.filter(r => !r.ilimitado && Math.abs(r.diferencia) <= 0.0001).length, distintos: dif.length, ilimitados: out.filter(r => r.ilimitado).length, sinPareja: filas.length - out.length }, filas: out });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/stock/enviar', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig();
+    const items = (Array.isArray((req.body || {}).items) ? req.body.items : []).slice(0, 20);
+    const ids = items.map(i => oid(i.productoId)).filter(Boolean);
+    const prods = await db.collection('productos_catalogo').find(Object.assign({ _id: { $in: ids } }, filtroOrg(req))).project({ sku: 1 }).toArray();
+    const ok = new Set(prods.map(p => String(p._id)));
+    const stock = await stockDisponible(db, prods.map(p => p._id));
+    const resultados = [];
+    for (const it of items) {
+      const pid = String(it.productoId || ''); const sku = (prods.find(p => String(p._id) === pid) || {}).sku;
+      try {
+        if (!ok.has(pid) || !Number(it.productId) || !Number(it.variantId)) { resultados.push({ sku, ok: false, motivo: 'datos incompletos' }); continue; }
+        const cantidad = Math.floor(stock.get(pid) || 0);
+        const r = await tnFetch(store, '/products/' + Number(it.productId) + '/variants/' + Number(it.variantId), { method: 'PUT', body: JSON.stringify({ stock: cantidad, stock_management: true }) });
+        if (!r.ok) { resultados.push({ sku, ok: false, motivo: 'Tiendanube respondió ' + r.status }); await sleep(600); continue; }
+        resultados.push({ sku, ok: true, stock: cantidad });
+        await sleep(600);
+      } catch (e) { resultados.push({ sku, ok: false, motivo: e.message }); }
+    }
+    res.json({ resultados });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/estado', auth, async (req, res) => {
   try {
     const db = await getDb();

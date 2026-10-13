@@ -137,6 +137,7 @@
       <button class="tab-btn" id="tabBtnVinculos" onclick="cambiarTab('vinculos')">Vínculos y precios</button>
       <button class="tab-btn" id="tabBtnPendientes" onclick="cambiarTab('pendientes')">Vincular pendientes</button>
       <button class="tab-btn" id="tabBtnPublicar" onclick="cambiarTab('publicar')">Publicar productos</button>
+      <button class="tab-btn" id="tabBtnStock" onclick="cambiarTab('stock')">Stock</button>
     </div>
 
     <div id="tabVinculos">
@@ -167,6 +168,15 @@
         <div class="err" id="errP"></div>
       </div>
       <div id="resP"></div>
+    </div>
+
+    <div id="tabStock" class="hidden">
+      <div class="card">
+        <div class="row"><div><button class="btn" id="btnSt" onclick="cargarStock()">Comparar stock con Tiendanube</button></div></div>
+        <div class="muted" style="margin-top:8px">El stock que va a la tienda es la <b>suma de todos los depósitos</b> (Junín + Colomé) menos lo comprometido en pedidos. Primero se compara; no se cambia nada hasta que tildes y envíes. Los productos con stock ilimitado en Tiendanube no se tildan solos (al enviarlos pasan a stock controlado).</div>
+        <div class="err" id="errS"></div>
+      </div>
+      <div id="resS"></div>
     </div>
 
     <div id="tabPublicar" class="hidden">
@@ -237,14 +247,14 @@ async function iniciarApp(){
   PiedraSidebar.render(me, 'tiendanube', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
-  cambiarTab(location.hash === '#pendientes' ? 'pendientes' : (location.hash === '#publicar' ? 'publicar' : 'vinculos'));
+  cambiarTab(['pendientes','publicar','stock'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'vinculos');
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
 let tab = '';
 function cambiarTab(t){
-  tab = t; location.hash = (t === 'pendientes' || t === 'publicar') ? t : '';
-  document.getElementById('tabVinculos').classList.toggle('hidden', t !== 'vinculos'); document.getElementById('tabPendientes').classList.toggle('hidden', t !== 'pendientes'); document.getElementById('tabPublicar').classList.toggle('hidden', t !== 'publicar'); document.getElementById('tabBtnPublicar').classList.toggle('active', t === 'publicar');
+  tab = t; location.hash = (t === 'pendientes' || t === 'publicar' || t === 'stock') ? t : '';
+  document.getElementById('tabVinculos').classList.toggle('hidden', t !== 'vinculos'); document.getElementById('tabPendientes').classList.toggle('hidden', t !== 'pendientes'); document.getElementById('tabPublicar').classList.toggle('hidden', t !== 'publicar'); document.getElementById('tabBtnPublicar').classList.toggle('active', t === 'publicar'); document.getElementById('tabStock').classList.toggle('hidden', t !== 'stock'); document.getElementById('tabBtnStock').classList.toggle('active', t === 'stock');
   document.getElementById('tabBtnVinculos').classList.toggle('active', t === 'vinculos'); document.getElementById('tabBtnPendientes').classList.toggle('active', t === 'pendientes');
   if (t === 'vinculos' && !DV) cargarVinculos();
   if (t === 'publicar' && !DB) cargarPublicar();
@@ -330,6 +340,44 @@ async function publicar(){
   }
   prog.innerHTML = '<span class="ok-msg">' + ok + ' productos creados sin publicar (' + fotos + ' con fotos).</span>' + (fallos.length ? '<div class="err" style="font-size:12px">No se crearon ' + fallos.length + ': ' + fallos.slice(0, 10).map(x => esc(x.sku) + ' (' + esc(x.motivo) + ')').join('; ') + '</div>' : '') + '<div class="muted">Revisalos en Tiendanube y publicalos desde ahí. Ya quedaron vinculados con el sistema.</div>';
   btn.disabled = false; DV = null;
+}
+
+// ---------------------------------------------------------------- Stock
+let ST = [], STF = 'dif';
+async function cargarStock(){
+  const err = document.getElementById('errS'), b = document.getElementById('btnSt'); err.textContent = ''; b.disabled = true; b.textContent = 'Leyendo Tiendanube…';
+  try{
+    const r = await fetch('/api/tiendanube-vinculo/stock/comparar', {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    ST = d.filas; window.STR = d.resumen; pintarStock();
+  }catch(e){ err.textContent = e.message; }
+  b.disabled = false; b.textContent = 'Comparar stock con Tiendanube';
+}
+function pintarStock(){
+  const s = window.STR, out = document.getElementById('resS'); if (!s) return;
+  const K2 = [['dif', s.distintos, 'Con diferencia'], ['ilim', s.ilimitados, 'Ilimitados en la tienda'], ['ig', s.iguales, 'Iguales'], ['todos', s.vinculados, 'Todos los vinculados']];
+  let f = ST.filter(r => STF === 'todos' || (STF === 'dif' && !r.ilimitado && Math.abs(r.diferencia) > 0.0001) || (STF === 'ilim' && r.ilimitado) || (STF === 'ig' && !r.ilimitado && Math.abs(r.diferencia) <= 0.0001));
+  out.innerHTML = '<div class="kpis">' + K2.map(k => '<div class="kpi clic' + (STF === k[0] ? ' on' : '') + '" onclick="STF=\'' + k[0] + '\';pintarStock()"><div class="t">' + k[2] + '</div><div class="v">' + N(k[1]) + '</div></div>').join('') + '</div>'
+    + '<div class="card"><div class="row" style="align-items:center"><button class="btn secondary small" onclick="marcarStock(true)">Tildar todos</button><button class="btn secondary small" onclick="marcarStock(false)">Destildar</button><button class="btn" id="btnEnvSt" onclick="enviarStock()">Enviar stock a Tiendanube</button></div><div id="progSt" style="margin-top:8px"></div></div>'
+    + '<div class="card" style="padding:0"><div class="scroll"><table><thead><tr><th></th><th>Producto</th><th class="n">Stock Tiendanube</th><th class="n">Stock sistema (ambos depósitos)</th><th class="n">Diferencia</th></tr></thead><tbody>'
+    + f.slice(0, 1500).map(r => '<tr><td><input type="checkbox" class="sb" data-i="' + ST.indexOf(r) + '" style="width:auto"' + (!r.ilimitado && Math.abs(r.diferencia) > 0.0001 ? ' checked' : '') + '></td><td><b>' + esc(r.sku) + '</b><div class="linksub">' + esc(r.nombre) + '</div></td><td class="n">' + (r.ilimitado ? '<span class="pill sin">Ilimitado</span>' : N(r.tnStock)) + '</td><td class="n">' + N(r.sistema) + '</td><td class="n' + (r.diferencia ? ' dif' : '') + '">' + (r.diferencia == null ? '—' : (r.diferencia > 0 ? '+' : '') + N(r.diferencia)) + '</td></tr>').join('')
+    + (!f.length ? '<tr><td colspan="5" class="muted">No hay nada para mostrar con este filtro.</td></tr>' : '') + '</tbody></table></div></div>';
+}
+function marcarStock(on){ document.querySelectorAll('.sb').forEach(c => { c.checked = on; }); }
+async function enviarStock(){
+  const sel = []; document.querySelectorAll('.sb').forEach(c => { if (c.checked) sel.push(ST[+c.dataset.i]); });
+  const prog = document.getElementById('progSt'), btn = document.getElementById('btnEnvSt');
+  if (!sel.length) { prog.innerHTML = '<span class="err">No hay nada tildado.</span>'; return; }
+  if (!confirm('Se va a actualizar el stock de ' + sel.length + ' productos en Tiendanube. ¿Seguimos?')) return;
+  btn.disabled = true; let ok = 0; const fallos = [];
+  for (let i = 0; i < sel.length; i += 10) {
+    prog.innerHTML = '<span class="muted">Enviando… ' + ok + ' de ' + sel.length + '. No cierres esta pantalla.</span>';
+    try{
+      const r = await fetch('/api/tiendanube-vinculo/stock/enviar', {method:'POST', headers: H(), body: JSON.stringify({items: sel.slice(i, i + 10).map(x => ({productoId: x.productoId, productId: x.productId, variantId: x.variantId}))})}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+      d.resultados.forEach(x => { if (x.ok) ok++; else fallos.push(x); });
+    }catch(e){ fallos.push({sku: '(tanda)', motivo: e.message}); break; }
+  }
+  prog.innerHTML = '<span class="ok-msg">' + ok + ' productos actualizados.</span>' + (fallos.length ? '<div class="err" style="font-size:12px">No se actualizaron ' + fallos.length + ': ' + fallos.slice(0, 10).map(x => esc(x.sku) + ' (' + esc(x.motivo) + ')').join('; ') + '</div>' : '');
+  btn.disabled = false;
 }
 
 // ---------------------------------------------------------------- Vincular pendientes
