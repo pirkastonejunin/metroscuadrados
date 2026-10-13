@@ -29,6 +29,9 @@
   main{padding:20px;max-width:1200px;margin:0 auto;}
   .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  th.ord{cursor:pointer;user-select:none;white-space:nowrap;}
+  th.ord:hover{color:var(--text);}
+  th.ord .flecha{display:inline-block;width:12px;margin-left:3px;font-size:10px;}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
   input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
   input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
@@ -165,7 +168,7 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>SKU</th><th>Producto</th><th>Depósito</th><th>Cantidad</th><th>Comprometido</th><th>Disponible</th><th>Mínimo</th><th>Estado</th></tr></thead>
+          <thead><tr id="thActual"><th class="ord" data-k="sku" data-n="0" onclick="ordenarStock('sku',0)">SKU<span class="flecha"></span></th><th class="ord" data-k="nombre" data-n="0" onclick="ordenarStock('nombre',0)">Producto<span class="flecha"></span></th><th class="ord" data-k="deposito" data-n="0" onclick="ordenarStock('deposito',0)">Depósito<span class="flecha"></span></th><th class="ord" data-k="cantidad" data-n="1" onclick="ordenarStock('cantidad',1)">Cantidad<span class="flecha"></span></th><th class="ord" data-k="cantidadComprometida" data-n="1" onclick="ordenarStock('cantidadComprometida',1)">Comprometido<span class="flecha"></span></th><th class="ord" data-k="disponible" data-n="1" onclick="ordenarStock('disponible',1)">Disponible<span class="flecha"></span></th><th class="ord" data-k="cantidadMinima" data-n="1" onclick="ordenarStock('cantidadMinima',1)">Mínimo<span class="flecha"></span></th><th class="ord" data-k="bajoMinimo" data-n="1" onclick="ordenarStock('bajoMinimo',1)">Estado<span class="flecha"></span></th></tr></thead>
           <tbody id="actualBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
@@ -448,8 +451,19 @@ async function cargarStockActual(){
   // fabricar ese faltante para poder generar esos remitos.
   renderStockActual(200);
 }
+let ORD_STOCK = null; // { k, dir }  dir: 1 menor→mayor, -1 mayor→menor
+function ordenarStock(k, numerico){
+  if (ORD_STOCK && ORD_STOCK.k === k) ORD_STOCK.dir = -ORD_STOCK.dir; else ORD_STOCK = { k, dir: numerico ? -1 : 1 }; // numéricas: primer clic de mayor a menor
+  renderStockActual(200);
+}
 function renderStockActual(limite){
-  const filas = stockActualCache;
+  let filas = stockActualCache;
+  if (ORD_STOCK) {
+    const k = ORD_STOCK.k, d = ORD_STOCK.dir, num = (v) => (v == null || v === '') ? -Infinity : Number(v);
+    const esNum = ['cantidad','cantidadComprometida','disponible','cantidadMinima','bajoMinimo'].includes(k);
+    filas = filas.slice().sort((a, b) => esNum ? (num(a[k] === true ? 1 : a[k] === false ? 0 : a[k]) - num(b[k] === true ? 1 : b[k] === false ? 0 : b[k])) * d : String(a[k] || '').localeCompare(String(b[k] || ''), 'es', { numeric: true, sensitivity: 'base' }) * d);
+  }
+  document.querySelectorAll('#thActual th.ord').forEach(t => { t.querySelector('.flecha').textContent = ORD_STOCK && ORD_STOCK.k === t.dataset.k ? (ORD_STOCK.dir === 1 ? '▲' : '▼') : ''; });
   const body = document.getElementById('actualBody');
   const visibles = filas.slice(0, limite);
   body.innerHTML = visibles.map(f => `
