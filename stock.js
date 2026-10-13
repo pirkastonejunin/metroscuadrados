@@ -412,19 +412,33 @@ router.get('/resumen-depositos', authAdmin, async (req, res) => {
   try {
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const [existencias, depositos] = await Promise.all([
-        db.collection('stock_actual').find(Object.assign({ depositoId: { $ne: null } }, filtroOrg(req))).toArray(),
+      // Tarjetas dinámicas (13/10/2026): respetan la búsqueda, el rubro y la marca de la pantalla. Las tarjetas de depósito ignoran el
+      // depósito elegido (para poder cambiar de uno a otro); comprometido y faltante sí lo respetan.
+      const depSel = req.query.depositoId ? toObjectId(req.query.depositoId) : null;
+      let idsPermitidos = null;
+      if (req.query.q || req.query.rubro || req.query.marca) {
+        const mp = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+        if (req.query.rubro) mp.rubro = req.query.rubro;
+        if (req.query.marca) mp.marca = req.query.marca;
+        const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+        if (palabras.length) mp.$and = palabras.map(w => { const re = new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'); return { $or: [{ nombre: re }, { sku: re }] }; });
+        idsPermitidos = new Set((await db.collection('productos_catalogo').find(mp).project({ _id: 1 }).toArray()).map(p => String(p._id)));
+      }
+      const permitido = (e) => !idsPermitidos || idsPermitidos.has(String(e.productoId));
+      const [todasBrutas, depositos] = await Promise.all([
+        db.collection('stock_actual').find(filtroOrg(req)).toArray(),
         db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray()
       ]);
+      const todas = todasBrutas.filter(permitido);
+      const existencias = todas.filter(e => e.depositoId != null);
       const ids = Array.from(new Set(existencias.map(e => String(e.productoId)))).map(toObjectId).filter(Boolean);
       const prods = ids.length ? await db.collection('productos_catalogo').find({ _id: { $in: ids } }).project({ costo: 1, moneda: 1 }).toArray() : [];
       const porProd = new Map(prods.map(p => [String(p._id), p]));
       const mapa = new Map(depositos.map(d => [String(d._id), { depositoId: d._id, nombre: d.nombre, unidades: 0, productos: 0, comprometido: 0, valor: {}, sinCosto: 0 }]));
-      // Comprometido y faltante (acceso rápido): sobre TODAS las existencias, incluida la
-      // demanda sin depósito asignado. Faltante = lo comprometido que supera el stock físico.
-      const todas = await db.collection('stock_actual').find(filtroOrg(req)).toArray();
+      // Comprometido y faltante (acceso rápido): incluye la demanda sin depósito asignado. Faltante = lo comprometido que supera el stock físico.
       const comprometidoTotal = { unidades: 0, filas: 0 }, faltante = { unidades: 0, filas: 0 };
       for (const e of todas) {
+        if (depSel && String(e.depositoId) !== String(depSel)) continue;
         const comp = Number(e.cantidadComprometida) || 0;
         if (comp > 0) { comprometidoTotal.unidades += comp; comprometidoTotal.filas += 1; }
         const disp = (Number(e.cantidad) || 0) - comp;

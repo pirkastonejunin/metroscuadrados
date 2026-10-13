@@ -382,30 +382,33 @@ function montoDep(m){
   return mons.map(k => (k === 'ARS' ? '$ ' : k + ' ') + Math.round(m[k]).toLocaleString('es-AR')).join(' + ');
 }
 const fmtN = n => Math.round(n).toLocaleString('es-AR');
-let RESUMEN_DEP = null, RESUMEN_DEP_T = 0;
-async function cargarResumenDepositos(){
+let RESUMEN_DEP = null, RESUMEN_DEP_T = 0, RESUMEN_DEP_K = '', RESUMEN_TIMER = null;
+function cargarResumenDepositos(){ clearTimeout(RESUMEN_TIMER); RESUMEN_TIMER = setTimeout(pintarResumenDepositos, 250); }
+async function pintarResumenDepositos(){
   const cont = document.getElementById('resumenDepositos');
   try{
     // No se vuelve a pedir en cada tecla de la búsqueda: se reutiliza 30 segundos.
-    if (!RESUMEN_DEP || Date.now() - RESUMEN_DEP_T > 30000) {
-      const r = await fetch(BASE + '/resumen-depositos', {headers: headersAuth()});
+    const pr = new URLSearchParams();
+    ['faBusqueda:q','faRubro:rubro','faMarca:marca','faDeposito:depositoId'].forEach(x => { const [id, k] = x.split(':'); const v = document.getElementById(id).value.trim(); if (v) pr.set(k, v); });
+    const clave = pr.toString();
+    if (!RESUMEN_DEP || clave !== RESUMEN_DEP_K || Date.now() - RESUMEN_DEP_T > 10000) {
+      const r = await fetch(BASE + '/resumen-depositos?' + clave, {headers: headersAuth()});
       const dd = await r.json();
       if (!r.ok) throw new Error(dd.error || '');
-      RESUMEN_DEP = dd; RESUMEN_DEP_T = Date.now();
+      RESUMEN_DEP = dd; RESUMEN_DEP_T = Date.now(); RESUMEN_DEP_K = clave;
     }
     const d = RESUMEN_DEP;
     const sel = document.getElementById('faDeposito').value;
-    const junin = d.depositos.find(x => /jun[ií]n/i.test(x.nombre));
     const caja = (clave, titulo, color, activa, cuerpo) => `
       <div class="card" onclick="${clave}" style="margin:0;cursor:pointer;border-left:4px solid ${color};${activa ? 'outline:2px solid ' + color + ';' : ''}">
         <div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">${titulo}</div>${cuerpo}
       </div>`;
     let html = '';
-    if (junin) {
-      html += caja(`filtrarPorDepositoTarjeta('${junin.depositoId}')`, escapeHtml(junin.nombre), 'var(--accent)', sel === String(junin.depositoId) && !FILTRO_RAPIDO, `
-        <div style="font-size:22px;font-weight:800;margin-top:4px">${fmtN(junin.unidades)} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
-        <div style="font-weight:700;margin-top:2px">${montoDep(junin.valor)} <span class="muted" style="font-weight:600">valor a costo</span></div>
-        <div class="muted" style="margin-top:2px">${junin.productos} producto${junin.productos === 1 ? '' : 's'}${junin.sinCosto ? ' · ' + junin.sinCosto + ' sin costo' : ''}</div>`);
+    for (const dep of d.depositos) {
+      html += caja(`filtrarPorDepositoTarjeta('${dep.depositoId}')`, escapeHtml(dep.nombre), 'var(--accent)', sel === String(dep.depositoId), `
+        <div style="font-size:22px;font-weight:800;margin-top:4px">${fmtN(dep.unidades)} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
+        <div style="font-weight:700;margin-top:2px">${montoDep(dep.valor)} <span class="muted" style="font-weight:600">valor a costo</span></div>
+        <div class="muted" style="margin-top:2px">${dep.productos} producto${dep.productos === 1 ? '' : 's'}${dep.sinCosto ? ' · ' + dep.sinCosto + ' sin costo' : ''}</div>`);
     }
     html += caja(`filtrarRapido('comprometido')`, 'Stock comprometido', 'var(--warn, #b45309)', FILTRO_RAPIDO === 'comprometido', `
       <div style="font-size:22px;font-weight:800;margin-top:4px">${fmtN(d.comprometidoTotal.unidades)} <span class="muted" style="font-size:13px;font-weight:600">unidades</span></div>
@@ -418,13 +421,11 @@ async function cargarResumenDepositos(){
 }
 function filtrarPorDepositoTarjeta(id){
   const sel = document.getElementById('faDeposito');
-  FILTRO_RAPIDO = '';
-  sel.value = (sel.value === id) ? '' : id;
+  sel.value = (sel.value === id) ? '' : id; // se combina con los demás filtros
   cargarStockActual();
 }
 function filtrarRapido(cual){
-  FILTRO_RAPIDO = (FILTRO_RAPIDO === cual) ? '' : cual;
-  document.getElementById('faDeposito').value = '';
+  FILTRO_RAPIDO = (FILTRO_RAPIDO === cual) ? '' : cual; // se combina con depósito, búsqueda, rubro y marca
   cargarStockActual();
 }
 async function cargarStockActual(){
