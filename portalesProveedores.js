@@ -139,6 +139,7 @@ function imagenesDeProducto(p, base) {
   const urls = [];
   const agregar = (v) => {
     if (!v) return;
+    if (typeof v === 'string' && v.includes('|')) { v.split('|').forEach(agregar); return; } // Maxipiso: varias fotos separadas por " | "
     if (typeof v === 'string') { const s = v.trim(); if (/^https?:\/\//i.test(s)) urls.push(s); else if (/^\/[^\s]+\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(s)) urls.push((base || '') + s); return; }
     if (Array.isArray(v)) { v.forEach(agregar); return; }
     if (typeof v === 'object') { agregar(v.url || v.src || v.secure_url || v.path || v.imagen || v.image); }
@@ -152,6 +153,12 @@ function camposImagen(p) { return Object.keys(p || {}).filter(k => /(imagen|imag
 // reconocible devuelve null (nunca se inventa); GET /portal/muestra muestra los campos reales para ajustar.
 const RE_M2_CAJA = /(m2|m²|metros?|mts?).{0,12}(caja|bulto|pack|paquete|pallet)|(caja|bulto|pack|paquete).{0,12}(m2|m²|metros?|mts?)|cobertura|rendimiento/i;
 function bultoDeProducto(p) {
+  // Maxipiso: "base" = m² que cubre una caja (viene como "2.26 m2" con baseUm "m2"); además precioCaja = precioM2 × m² por caja, que sirve de control.
+  const base = parseFloat(String(p.base == null ? '' : p.base).replace(',', '.'));
+  const baseEsM2 = /m2|m²/i.test(String(p.baseUm || p.base || ''));
+  if (baseEsM2 && base > 0 && base < 1000) return { campo: 'base', valor: Math.round(base * 1000) / 1000 };
+  const pc = numero(p.precioCaja), pm = numero(p.precioM2);
+  if (pc && pm) { const r = Math.round(pc / pm * 1000) / 1000; if (r > 0 && r < 1000) return { campo: 'precioCaja / precioM2', valor: r }; }
   const cand = Object.keys(p || {}).filter(k => RE_M2_CAJA.test(k) && !/precio|costo|stock|total|pallet/i.test(k));
   for (const k of cand) { const n = numero(p[k]); if (n > 0 && n < 1000) return { campo: k, valor: n }; }
   return null;
@@ -162,7 +169,7 @@ function filaDeProductoMaxipiso(p, i) {
   const nombre = [p.tipoProducto || p._tablaLabel, p.nombre, p.codigo, p.marca].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   const stock = Number(p.stock);
   const b = bultoDeProducto(p);
-  return { fila: i + 1, porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
+  return { fila: i + 1, pesoCaja: numero(p.pesoCaja), porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
 }
 
 async function filasMaxipiso(cred, opciones) {

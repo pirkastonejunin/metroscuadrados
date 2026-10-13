@@ -264,7 +264,7 @@ async function fotosPorCodigo(db, provId, req) {
   const m = new Map();
   if (prov && prov.portal) {
     const filas = await portales.filasDePortal(prov.portal, prov.reglaImport || {});
-    for (const f of filas) if (f.imagenes && f.imagenes.length) m.set(K(f.codigo), f.imagenes);
+    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null });
   }
   cachePortal.set(k, { t: Date.now(), m }); return m;
 }
@@ -285,10 +285,10 @@ router.post('/publicar', auth, async (req, res) => {
         if (require('./productos').sinBultoPorM2(p)) { resultados.push({ sku: p.sku, ok: false, motivo: 'es por m² y no tiene los m² por caja cargados' }); continue; }
         const precio = lista ? precioResuelto(p, lista, cot).precio : null;
         if (!(precio > 0)) { resultados.push({ sku: p.sku, ok: false, motivo: 'no tiene precio en la lista elegida' }); continue; }
-        let imagenes = [];
-        if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); imagenes = m.get(K(p.codigoExterno)) || []; } catch (e) { /* sin fotos */ } }
+        let imagenes = [], pesoCaja = null;
+        if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); const d = m.get(K(p.codigoExterno)); if (d) { imagenes = d.imagenes; pesoCaja = d.pesoCaja; } } catch (e) { /* sin fotos */ } }
         const cat = mapa[p.rubro || ''];
-        const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: stock.get(String(p._id)) || 0, weight: '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
+        const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: stock.get(String(p._id)) || 0, weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
         if (p.descripcion) body.description = { es: String(p.descripcion) };
         if (p.marca) body.brand = p.marca;
         if (cat) body.categories = [cat];
