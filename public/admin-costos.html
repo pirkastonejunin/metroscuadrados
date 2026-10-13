@@ -581,11 +581,7 @@ function abrirNuevoProducto(){
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Nuevo producto</h2>
-    <div class="campo-edit"><label>Elegir un producto ya cargado (opcional)</label>
-      <input id="fpCatalogo" list="dlCatalogoProd" placeholder="Escribí SKU o nombre para buscar en Productos…" autocomplete="off" oninput="elegirProductoCatalogo(this)" onchange="elegirProductoCatalogo(this,true)" style="width:100%">
-      <datalist id="dlCatalogoProd"></datalist>
-      <div class="muted" id="fpCatalogoMsg" style="font-size:12px;margin-top:4px">Si el producto ya está en Productos, se completan nombre, SKU y unidad; solo falta armar la receta.</div>
-    </div>
+    ${pickerCatalogoHtml()}
     <div class="grid2">
       <div class="campo-edit"><label>Nombre</label><input id="fpNombre" placeholder="Ej: Adoquín 40x40"></div>
       <div class="campo-edit"><label>Se costea por</label><select id="fpTipoCosteo" onchange="cambiarTipoCosteoTemp(this.value)"><option value="unidad">Unidad</option><option value="m2">m²</option></select></div>
@@ -600,6 +596,13 @@ function abrirNuevoProducto(){
   `, 'wide');
   renderRecetaTemp();
   cargarCatalogoDisponible();
+}
+function pickerCatalogoHtml(){
+  return `<div class="campo-edit"><label>Elegir un producto ya cargado (opcional)</label>
+      <input id="fpCatalogo" list="dlCatalogoProd" placeholder="Escribí SKU o nombre para buscar en Productos…" autocomplete="off" oninput="elegirProductoCatalogo(this)" onchange="elegirProductoCatalogo(this,true)" style="width:100%">
+      <datalist id="dlCatalogoProd"></datalist>
+      <div class="muted" id="fpCatalogoMsg" style="font-size:12px;margin-top:4px">Si el producto ya está en Productos, se completan nombre, SKU y unidad; solo falta armar la receta.</div>
+    </div>`;
 }
 let CATALOGO_DISP = [];
 function textoCatalogo(c){ return (c.sku ? c.sku + ' — ' : '') + c.nombre; }
@@ -660,6 +663,7 @@ function duplicarProducto(id){
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Duplicar producto</h2>
     <p class="muted">Se copia la receta de "${escapeHtml(p.nombre)}" — cambiá el nombre y lo que necesites antes de guardar. Queda como un producto nuevo, el original no se toca.</p>
+    ${pickerCatalogoHtml()}
     <div class="grid2">
       <div class="campo-edit"><label>Nombre</label><input id="fpNombre" value="${escapeHtml(p.nombre + ' (copia)')}"></div>
       <div class="campo-edit"><label>Se costea por</label><select id="fpTipoCosteo" onchange="cambiarTipoCosteoTemp(this.value)">
@@ -676,6 +680,7 @@ function duplicarProducto(id){
     <button class="btn" style="margin-top:6px" onclick="guardarNuevoProducto()">Guardar como producto nuevo</button>
   `, 'wide');
   renderRecetaTemp();
+  cargarCatalogoDisponible();
 }
 function abrirEditarProducto(id){
   const p = PRODUCTOS.find(x=>x._id===id);
