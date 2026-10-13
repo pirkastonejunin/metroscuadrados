@@ -525,6 +525,95 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
 });
 
 // ---- Portal del proveedor (usuario y clave cifrados; la clave nunca vuelve al navegador)
+// ---- Equivalencias por descripción (una sola vez): si el proveedor cambió sus códigos, se busca para cada fila de su
+// lista el producto nuestro que más se le parece por nombre, y al confirmar se guarda el código nuevo como "código del proveedor".
+const PALABRAS_VACIAS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'e', 'en', 'con', 'para', 'por', 'x', 'm2', 'm²', 'unidad', 'cm', 'mm', 'mts', 'mt']);
+function tokensNombre(s) {
+  const t = norm(s).replace(/[()]/g, ' ').replace(/(\d)\s*[x×*]\s*(\d)/g, '$1x$2').replace(/(\d),(\d)/g, '$1.$2').split(/[^a-z0-9.x]+/).filter(Boolean);
+  return [...new Set(t.map(w => w.replace(/^\.+|\.+$/g, '')).filter(w => w && !PALABRAS_VACIAS.has(w) && (w.length > 1 || /\d/.test(w))))];
+}
+function parecido(a, b) {
+  if (!a.length || !b.length) return 0;
+  const sb = new Set(b);
+  let comunes = 0, peso = 0, pesoTotal = 0;
+  const pesoDe = w => (/\d/.test(w) ? 2 : 1);
+  for (const w of a) { pesoTotal += pesoDe(w); if (sb.has(w)) { comunes++; peso += pesoDe(w); } }
+  for (const w of b) if (!a.includes(w)) pesoTotal += pesoDe(w);
+  return comunes ? (2 * peso) / (pesoTotal + peso) : 0;
+}
+router.post('/:id/equivalencias', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      if (!prov.reglaImport) throw err(400, 'Primero guardá la regla de importación de este proveedor.');
+      const regla = prov.reglaImport;
+      const desdePortal = !!(req.body || {}).desdePortal;
+      const filas = desdePortal ? await portales.filasDePortal(prov.portal, regla) : filasDeArchivo((req.body || {}).archivoBase64, regla);
+      const productos = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1 }).toArray();
+      const campo = regla.matchPor === 'sku' ? 'sku' : 'codigoExterno';
+      const codigosLista = new Set(filas.map(f => codigoClave(f.codigo)));
+      // productos que ya están vinculados con alguna fila de la lista: no se tocan
+      const vinculados = new Set(productos.filter(p => codigosLista.has(codigoClave(p[campo]))).map(p => String(p._id)));
+      const delProv = p => (p.proveedorId && String(p.proveedorId) === String(prov._id)) || (prov.razonSocial && norm(p.proveedor) === norm(prov.razonSocial));
+      let candidatos = productos.filter(p => !vinculados.has(String(p._id)) && delProv(p));
+      const soloDelProveedor = candidatos.length > 0;
+      if (!soloDelProveedor) candidatos = productos.filter(p => !vinculados.has(String(p._id)));
+      const cand = candidatos.map(p => ({ p, t: tokensNombre(p.nombre) }));
+      const sinVincular = [], vistos = new Set();
+      for (const f of filas) {
+        const k = codigoClave(f.codigo);
+        if (!k || vistos.has(k) || vinculados.has('c:' + k)) continue;
+        vistos.add(k);
+        if (productos.some(p => codigoClave(p[campo]) === k)) continue; // esta fila ya tiene su producto
+        sinVincular.push(f);
+      }
+      const propuestas = sinVincular.map(f => {
+        const tf = tokensNombre(f.nombre);
+        const tops = cand.map(c => ({ c, s: parecido(tf, c.t) })).filter(x => x.s >= 0.3).sort((a, b) => b.s - a.s).slice(0, 3);
+        return { codigo: f.codigo, nombre: f.nombre, precio: f.precio, tops };
+      });
+      // un producto nuestro solo se propone para una fila: gana la de mayor parecido
+      const mejorPorProducto = new Map();
+      propuestas.forEach((pr, i) => { const t = pr.tops[0]; if (t) { const id = String(t.c.p._id); const prev = mejorPorProducto.get(id); if (!prev || t.s > prev.s) mejorPorProducto.set(id, { s: t.s, i }); } });
+      const filasOut = propuestas.map((pr, i) => {
+        const t = pr.tops[0];
+        const seguro = !!t && t.s >= 0.6 && (!pr.tops[1] || t.s - pr.tops[1].s >= 0.1) && mejorPorProducto.get(String(t.c.p._id)).i === i;
+        return { codigo: pr.codigo, nombre: pr.nombre, seguro, candidatos: pr.tops.map(x => ({ productoId: String(x.c.p._id), sku: x.c.p.sku || '', nombre: x.c.p.nombre || '', codigoActual: x.c.p.codigoExterno || '', parecido: Math.round(x.s * 100) })) };
+      });
+      const usados = new Set(filasOut.flatMap(f => f.candidatos.map(c => c.productoId)));
+      const sinFila = candidatos.filter(c => !usados.has(String(c._id))).length;
+      return { matchPor: regla.matchPor, soloDelProveedor, filasLista: filas.length, sinVincular: filasOut.length, propuestas: filasOut.slice(0, 600), hayMas: filasOut.length > 600, productosSinFila: sinFila };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/:id/equivalencias/aplicar', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      if (!prov.reglaImport || prov.reglaImport.matchPor === 'sku') throw err(400, 'Las equivalencias se guardan como "código del proveedor": cambiá en la regla "Vincular por" a "Código del proveedor".');
+      const pares = Array.isArray((req.body || {}).pares) ? req.body.pares : [];
+      let guardados = 0; const rechazados = [];
+      const usadosCodigos = new Set(), usadosProd = new Set();
+      for (const par of pares.slice(0, 2000)) {
+        const codigo = String(par.codigo == null ? '' : par.codigo).trim();
+        const pid = oid(par.productoId);
+        if (!codigo || !pid) continue;
+        if (usadosCodigos.has(codigoClave(codigo)) || usadosProd.has(String(pid))) { rechazados.push({ codigo, motivo: 'repetido en la selección' }); continue; }
+        const otro = await db.collection('productos_catalogo').findOne(Object.assign({ codigoExterno: codigo, _id: { $ne: pid }, activo: { $ne: false }, $or: [{ proveedorId: prov._id }, { proveedorId: { $exists: false } }, { proveedorId: null }] }, filtroOrg(req)));
+        if (otro) { rechazados.push({ codigo, motivo: 'ese código ya lo tiene "' + (otro.nombre || otro.sku) + '"' }); continue; }
+        const r = await db.collection('productos_catalogo').updateOne(Object.assign({ _id: pid }, filtroOrg(req)), { $set: { codigoExterno: codigo, proveedorId: prov._id, proveedor: prov.razonSocial || '', updatedAt: new Date() } });
+        if (r.matchedCount) { guardados++; usadosCodigos.add(codigoClave(codigo)); usadosProd.add(String(pid)); } else rechazados.push({ codigo, motivo: 'producto no encontrado' });
+      }
+      return { ok: true, guardados, rechazados };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/:id/portal', authAdmin, async (req, res) => {
   try {
     const out = await conReintento(async () => {

@@ -81,6 +81,7 @@
         '<div class="row"><div style="flex:1;min-width:240px"><input type="file" id="pimpArchivo" accept=".xlsx,.xls,.csv" onchange="pimpElegirArchivo()"></div>' +
         '<button type="button" class="btn" id="pimpBtnPrev" onclick="pimpRevisarArchivo()" disabled>Revisar cambios</button>' +
         (estado.portal ? '<button type="button" class="btn secondary" id="pimpBtnPortal" onclick="pimpRevisarPortal()" title="Entra al portal del proveedor y lee la lista actual">Actualizar desde el portal</button>' : '') + '</div>' +
+        '<div style="margin-top:8px"><button type="button" class="btn secondary" onclick="pimpEquivalencias()" title="Si el proveedor cambió sus códigos: empareja por descripción, una sola vez">Buscar equivalencias por descripción</button> <span class="muted" style="font-size:12px">Usá esto una vez si el proveedor cambió sus códigos' + (estado.portal ? ' (lee el portal)' : ' (usa el archivo elegido)') + '.</span></div><div id="pimpEquiv" style="margin-top:10px"></div>' +
         '<div class="err" id="pimpErr"></div><div id="pimpPreview" style="margin-top:10px"></div></div>' +
       '<div class="card" style="padding:12px"><div style="font-weight:700;margin-bottom:6px">Últimas actualizaciones</div><div id="pimpHist" class="muted">Cargando...</div></div>';
   }
@@ -237,6 +238,43 @@
         (hayAlgo ? '<div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" class="btn" id="pimpBtnAplicar" onclick="pimpAplicar()">Hacer la actualización</button>' + (s.alertas ? '<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:600"><input type="checkbox" id="pimpOmitir" style="width:auto"> No tocar los ' + s.alertas + ' marcados “revisar”</label>' : '') + '</div>' : '');
     } catch (e) { box.innerHTML = ''; err.textContent = e.message; }
     btn.disabled = !estado.archivo && !estado.modoPortal ? true : false; var btnP2 = document.getElementById('pimpBtnPortal'); if (btnP2) btnP2.disabled = false;
+  };
+
+  window.pimpEquivalencias = async function () {
+    var err = document.getElementById('pimpErr'), box = document.getElementById('pimpEquiv');
+    err.textContent = '';
+    if (!estado.portal && !estado.archivo) { err.textContent = 'Elegí primero el archivo de la lista (o conectá el portal).'; return; }
+    box.innerHTML = '<span class="muted">Leyendo la lista y comparando nombres…</span>';
+    try {
+      var d = await pedir('/' + estado.id + '/equivalencias', { method: 'POST', body: JSON.stringify(estado.portal ? { desdePortal: true } : { archivoBase64: estado.archivo }) });
+      estado.equiv = d.propuestas;
+      if (d.matchPor === 'sku') { box.innerHTML = '<p class="err">Para guardar equivalencias, en la regla poné “Vincular por: Código del proveedor”.</p>'; return; }
+      if (!d.propuestas.length) { box.innerHTML = '<p class="ok-msg">Todas las filas de la lista ya están vinculadas con un producto. No hay nada que emparejar.</p>'; return; }
+      box.innerHTML = '<div style="font-weight:700">' + d.sinVincular + ' filas de la lista sin producto vinculado</div>' +
+        '<div class="muted" style="font-size:12px;margin:2px 0 6px">Para cada una, elegí el producto tuyo que corresponde (las de parecido alto vienen tildadas). Al confirmar, el código del proveedor se guarda en la ficha y de ahí en más se actualiza solo. ' + (d.soloDelProveedor ? 'Se comparan solo productos de este proveedor.' : 'Ningún producto está asignado a este proveedor: se comparan todos.') + ' Las que no empareje quedan como “no están en tu sistema” al revisar cambios.</div>' +
+        '<div style="overflow:auto;max-height:420px"><table><thead><tr><th></th><th>En la lista del proveedor</th><th>Producto tuyo</th></tr></thead><tbody>' +
+        d.propuestas.map(function (p, i) {
+          var ops = '<option value="">— ninguno —</option>' + p.candidatos.map(function (c, j) { return '<option value="' + c.productoId + '"' + (j === 0 && p.seguro ? ' selected' : '') + '>' + E((c.sku ? c.sku + ' · ' : '') + c.nombre) + ' (' + c.parecido + '%)' + (c.codigoActual ? ' [código actual ' + E(c.codigoActual) + ']' : '') + '</option>'; }).join('');
+          return '<tr><td><input type="checkbox" class="eq-chk" data-i="' + i + '" style="width:auto"' + (p.seguro ? ' checked' : '') + (p.candidatos.length ? '' : ' disabled') + '></td><td><b>' + E(p.codigo) + '</b><div style="font-size:12px">' + E(p.nombre) + '</div></td><td>' + (p.candidatos.length ? '<select class="eq-sel" data-i="' + i + '" style="min-width:260px" onchange="this.closest(\'tr\').querySelector(\'.eq-chk\').checked=!!this.value">' + ops + '</select>' : '<span class="muted">sin parecidos</span>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>' + (d.hayMas ? '<div class="muted" style="font-size:12px">Se muestran las primeras 600; repetí después para el resto.</div>' : '') +
+        '<div style="margin-top:10px"><button type="button" class="btn" id="pimpBtnEq" onclick="pimpEquivalenciasGuardar()">Guardar equivalencias tildadas</button></div>';
+    } catch (e) { box.innerHTML = ''; err.textContent = e.message; }
+  };
+  window.pimpEquivalenciasGuardar = async function () {
+    var err = document.getElementById('pimpErr'), box = document.getElementById('pimpEquiv');
+    var pares = [];
+    document.querySelectorAll('.eq-chk').forEach(function (c) {
+      if (!c.checked) return;
+      var i = +c.getAttribute('data-i'), sel = document.querySelector('.eq-sel[data-i="' + i + '"]');
+      if (sel && sel.value) pares.push({ codigo: estado.equiv[i].codigo, productoId: sel.value });
+    });
+    if (!pares.length) { err.textContent = 'No hay ninguna equivalencia tildada.'; return; }
+    if (!confirm('Se guarda el código del proveedor en ' + pares.length + ' productos. ¿Seguimos?')) return;
+    err.textContent = '';
+    try {
+      var d = await pedir('/' + estado.id + '/equivalencias/aplicar', { method: 'POST', body: JSON.stringify({ pares: pares }) });
+      box.innerHTML = '<p class="ok-msg">Listo: ' + d.guardados + ' productos vinculados. Ahora apretá “Revisar cambios” / “Actualizar desde el portal”.</p>' + ((d.rechazados || []).length ? '<p class="err">No se guardaron: ' + d.rechazados.map(function (x) { return E(x.codigo) + ' (' + E(x.motivo) + ')'; }).join('; ') + '</p>' : '');
+    } catch (e) { err.textContent = e.message; }
   };
 
   window.pimpMarcarNuevos = function (on) { document.querySelectorAll('.pn-chk:not(:disabled)').forEach(function (c) { c.checked = on; }); };
