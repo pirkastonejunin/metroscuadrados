@@ -148,6 +148,7 @@
           <div style="flex:1;min-width:220px"><label>Buscar</label><input id="q" placeholder="SKU o nombre…" oninput="pintarVinculos()"></div>
         </div>
         <div class="muted" style="margin-top:8px">Cada producto de la tienda con el producto del sistema al que corresponde y los dos precios. No cambia nada: sirve para revisar.</div>
+        <div style="margin-top:8px"><button class="btn secondary small" id="btnConf" onclick="confirmarSku()">Marcar como vinculados los de SKU igual</button> <span class="muted">Así aparece el tilde de Tiendanube en el listado de Productos.</span> <span id="resConf"></span></div>
         <div class="err" id="errV"></div>
       </div>
       <div id="resV" class="hidden">
@@ -288,6 +289,12 @@ function pintarVinculos(){
       + '<td class="n' + (d != null && Math.abs(d) >= 0.5 ? ' dif' : '') + '">' + (d == null ? '—' : (d > 0 ? '+' : '') + M(d)) + '</td>'
       + '<td>' + (r.tipo === 'manual' ? '<button class="btn secondary small" onclick="desvincular(\'' + r.producto._id + '\')">Quitar vínculo</button>' : '') + '</td></tr>'; }).join('')
     + (f.length > 1500 ? '<tr><td colspan="7" class="muted">Se muestran los primeros 1.500: usá el filtro o el buscador.</td></tr>' : '') + (!f.length ? '<tr><td colspan="7" class="muted">No hay nada para mostrar con este filtro.</td></tr>' : '');
+}
+async function confirmarSku(){
+  const b = document.getElementById('btnConf'), o = document.getElementById('resConf'); b.disabled = true; o.textContent = '';
+  try{ const r = await fetch('/api/tiendanube-vinculo/vinculos/confirmar-sku', {method:'POST', headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); o.innerHTML = '<span class="ok-msg">' + d.marcados + ' productos marcados.</span>'; cargarVinculos(); }
+  catch(e){ o.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+  b.disabled = false;
 }
 async function desvincular(id){
   if (!confirm('Se quita el vínculo hecho a mano de este producto.')) return;

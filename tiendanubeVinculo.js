@@ -155,6 +155,18 @@ router.get('/vinculos', auth, async (req, res) => {
     res.json({ lista: lista ? String(lista._id) : null, listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), resumen, filas: out });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// Deja marcados como vinculados (skuTiendanube = sku) los productos que están en la tienda con el MISMO SKU, para que se vean con el tilde en Productos.
+router.post('/vinculos/confirmar-sku', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const filas = await productosTienda(); const tn = new Map();
+    for (const f of filas) { const k = K(f.sku); if (k && !tn.has(k)) tn.set(k, f); }
+    const prods = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, skuTiendanube: { $in: [null, ''] }, sku: { $nin: [null, ''] } }, filtroOrg(req))).project({ sku: 1 }).toArray();
+    const ops = []; const ahora = new Date();
+    for (const p of prods) { const f = tn.get(K(p.sku)); if (f) ops.push({ updateOne: { filter: { _id: p._id }, update: { $set: { skuTiendanube: p.sku, tiendanube: { productId: f.productId || null, variantId: f.variantId || null, vinculadoEn: ahora }, updatedAt: ahora } } } }); }
+    for (let i = 0; i < ops.length; i += 500) await db.collection('productos_catalogo').bulkWrite(ops.slice(i, i + 500), { ordered: false });
+    res.json({ ok: true, marcados: ops.length });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.post('/desvincular', auth, async (req, res) => {
   try {
     const db = await getDb(); const pid = oid((req.body || {}).productoId);

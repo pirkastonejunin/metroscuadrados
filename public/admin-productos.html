@@ -686,10 +686,12 @@ const COLUMNAS_PRODUCTOS_DISPONIBLES = [
     render: p => `<td class="muted">${TIPO_PRODUCTO_LABEL[p.tipoProducto] || 'Simple'}</td>` },
   { key: 'proveedor', titulo: 'Proveedor', defecto: false,
     render: p => { const prov = proveedoresCache.find(x => String(x._id) === String(p.proveedorId)); return `<td class="muted">${prov ? escapeHtml(prov.razonSocial || prov.nombreFantasia || '') : (escapeHtml(p.proveedor||'') || '—')}</td>`; } },
+  { key: 'tiendanube', titulo: 'Tiendanube', defecto: true,
+    render: p => `<td style="text-align:center">${p.skuTiendanube ? '<span title="Vinculado con Tiendanube" style="color:var(--ok,#15803d);font-weight:800;font-size:16px">✓</span>' : '<span class="muted">—</span>'}</td>` },
   { key: 'estado', titulo: 'Estado', defecto: true,
     render: p => `<td><span class="pill ${p.activo === false ? 'inactivo' : 'activo'}">${p.activo === false ? 'Inactivo' : 'Activo'}</span></td>` }
 ];
-const COLUMNAS_PRODUCTOS_KEY = 'pn_productos_columnas_v1';
+const COLUMNAS_PRODUCTOS_KEY = 'pn_productos_columnas_v2';
 function columnasProductosVisibles(){
   try{
     const guardado = JSON.parse(localStorage.getItem(COLUMNAS_PRODUCTOS_KEY) || 'null');
