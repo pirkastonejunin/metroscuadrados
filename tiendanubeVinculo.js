@@ -113,6 +113,18 @@ router.post('/vincular', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Buscador manual: productos activos por SKU o por palabras del nombre (para las filas que no tuvieron pareja clara)
+router.get('/buscar', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (!palabras.length || palabras.join('').length < 2) return res.json([]);
+    const filtro = Object.assign({ activo: { $ne: false }, $and: palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }] })) }, filtroOrg(req));
+    const lista = await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, skuTiendanube: 1 }).limit(15).toArray();
+    res.json(lista.map(p => ({ productoId: String(p._id), sku: p.sku || '', nombre: p.nombre || '', vinculado: !!p.skuTiendanube })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/estado', auth, async (req, res) => {
   try {
     const db = await getDb();

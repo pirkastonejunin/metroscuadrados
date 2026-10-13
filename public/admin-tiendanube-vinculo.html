@@ -37,13 +37,16 @@ async function analizar(){
       h+='<div class="card"><h2>Para vincular</h2><p class="muted">Las de parecido alto vienen tildadas. Elegí el producto correcto en cada fila o dejalo en “ninguno”. “Producto viejo” es el que tenías con ese SKU de Dux (ya desactivado), que ayuda a encontrar el nuevo.'+(d.hayMas?' Se muestran las primeras 1.500.':'')+'</p>'
         +'<div style="overflow:auto;max-height:560px"><table><thead><tr><th></th><th>En Tiendanube</th><th>Producto del sistema</th></tr></thead><tbody>'
         +P.map((p,i)=>{const ops='<option value="">— ninguno —</option>'+p.candidatos.map((c,j)=>'<option value="'+c.productoId+'"'+(j===0&&p.seguro?' selected':'')+'>'+esc((c.sku?c.sku+' · ':'')+c.nombre)+' ('+c.parecido+'%)</option>').join('');
-          return '<tr><td><input type="checkbox" class="chk" data-i="'+i+'"'+(p.seguro?' checked':'')+(p.candidatos.length&&p.sku?'':' disabled')+'></td><td><b>'+esc(p.sku||'(sin SKU)')+'</b><div>'+esc(p.nombre)+'</div>'+(p.productoViejo?'<div class="muted">Producto viejo: '+esc(p.productoViejo)+'</div>':'')+(p.url?'<a class="muted" target="_blank" href="'+esc(p.url)+'">ver en la tienda</a>':'')+'</td><td>'+(p.candidatos.length?'<select class="sel" data-i="'+i+'" onchange="this.closest(\'tr\').querySelector(\'.chk\').checked=!!this.value">'+ops+'</select>':'<span class="muted">sin parecidos</span>')+'</td></tr>';}).join('')
+          return '<tr><td><input type="checkbox" class="chk" data-i="'+i+'"'+(p.seguro?' checked':'')+(p.sku?'':' disabled')+'></td><td><b>'+esc(p.sku||'(sin SKU)')+'</b><div>'+esc(p.nombre)+'</div>'+(p.productoViejo?'<div class="muted">Producto viejo: '+esc(p.productoViejo)+'</div>':'')+(p.url?'<a class="muted" target="_blank" href="'+esc(p.url)+'">ver en la tienda</a>':'')+'</td><td>'+'<select class="sel" data-i="'+i+'" onchange="this.closest(\'tr\').querySelector(\'.chk\').checked=!!this.value">'+ops+'</select><div style="margin-top:4px"><input placeholder="Buscar otro por nombre o SKU…" data-i="'+i+'" oninput="buscar(this)" style="padding:5px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);width:260px"></div></td></tr>';}).join('')
         +'</tbody></table></div><div style="margin-top:12px"><button class="p" onclick="guardar()">Guardar los vínculos tildados</button> <span id="res"></span></div></div>';
     }
     out.innerHTML=h;
   }catch(e){ out.innerHTML=''; err.textContent=e.message; }
   b.disabled=false;
 }
+let TB=null;
+function buscar(inp){ clearTimeout(TB); TB=setTimeout(async()=>{ const q=inp.value.trim(); if(q.length<2) return; try{ const r=await fetch('/api/tiendanube-vinculo/buscar?q='+encodeURIComponent(q),{headers:H()}); const d=await r.json(); const s=document.querySelector('.sel[data-i="'+inp.dataset.i+'"]'); if(!r.ok||!s) return;
+  s.innerHTML='<option value="">— ninguno —</option>'+d.map(c=>'<option value="'+c.productoId+'">'+esc((c.sku?c.sku+' · ':'')+c.nombre)+(c.vinculado?' (ya vinculado)':'')+'</option>').join(''); if(d.length===1){ s.value=d[0].productoId; s.onchange(); } }catch(e){} },350); }
 async function guardar(){ await asegurarOrg();
   const pares=[]; document.querySelectorAll('.chk').forEach(c=>{ if(!c.checked) return; const i=+c.dataset.i, s=document.querySelector('.sel[data-i="'+i+'"]'); if(s&&s.value) pares.push({productoId:s.value,sku:P[i].sku,productId:P[i].productId,variantId:P[i].variantId}); });
   if(!pares.length){ document.getElementById('res').textContent='No hay nada tildado.'; return; }
