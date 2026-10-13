@@ -1734,7 +1734,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
         chequeId = insertedId;
       } else {
         // Plan de tarjeta: al banco entra lo cobrado (más el recargo, si hay) menos el costo del plan.
-        if (tipoValor === 'tarjeta' && body.tarjetaPlanId) planTarjeta = await calcularPlanTarjeta(db, req, { planId: body.tarjetaPlanId, monto, aplicarRecargo: body.aplicarRecargo });
+        if (tipoValor === 'tarjeta' && body.tarjetaPlanId) planTarjeta = await calcularPlanTarjeta(db, req, { planId: body.tarjetaPlanId, monto, aplicarRecargo: body.aplicarRecargo, listaPrecioId: venta.listaPrecioId || null });
         const observacionesMovimiento = tipoValor === 'tarjeta'
           ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`, planTarjeta ? `${planTarjeta.tarjetaPlanNombre} (costo ${planTarjeta.tarjetaCostoFinanciero})` : ''].filter(Boolean).join(' — ')
           : nota;

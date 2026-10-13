@@ -1711,15 +1711,17 @@ function opcionesCuentaCobro(tipoValor){
 
 // Planes de tarjeta (13/10/2026): al cobrar con tarjeta se elige el plan; muestra recargo, costo y lo que entra al banco.
 let planesCobroCache = null;
-async function cargarPlanesCobro(pre){
+async function cargarPlanesCobro(pre, listaId){
   if (planesCobroCache === null) {
     try { const r = await fetch('/api/tesoreria/tarjetas-planes', {headers: headersAuth()}); planesCobroCache = r.ok ? await r.json() : []; }
     catch(e){ planesCobroCache = []; }
   }
   const sel = document.getElementById(pre + 'TarjetaPlan');
-  if (!sel || sel.dataset.cargado === '1') return;
-  sel.innerHTML = '<option value="">Sin plan (sin costo ni recargo)</option>' + planesCobroCache.map(p => `<option value="${p._id}">${escapeHtml(p.tarjeta)} — ${escapeHtml(p.nombre)}${p.costoPorcentaje ? ' (costo ' + p.costoPorcentaje + '%)' : ''}${p.recargoPorcentaje ? ' · recargo ' + p.recargoPorcentaje + '%' : ''}</option>`).join('');
-  sel.dataset.cargado = '1';
+  if (!sel) return;
+  const previo = sel.value;
+  const visibles = planesCobroCache.filter(p => !listaId || !(p.listasPrecioIds || []).length || p.listasPrecioIds.map(String).includes(String(listaId)));
+  sel.innerHTML = '<option value="">Sin plan (sin costo ni recargo)</option>' + visibles.map(p => `<option value="${p._id}">${escapeHtml(p.tarjeta)} — ${escapeHtml(p.nombre)}${p.costoPorcentaje ? ' (costo ' + p.costoPorcentaje + '%)' : ''}${p.recargoPorcentaje ? ' · recargo ' + p.recargoPorcentaje + '%' : ''}</option>`).join('');
+  if (previo && visibles.some(p => p._id === previo)) sel.value = previo;
 }
 function resumenPlanTarjeta(pre){
   const sel = document.getElementById(pre + 'TarjetaPlan'); if (!sel) return;
@@ -1743,7 +1745,7 @@ function actualizarTipoValorCobro(){
   document.getElementById('ncCuentaWrap').classList.toggle('hidden', esCheque);
   document.getElementById('ncChequeWrap').classList.toggle('hidden', !esCheque);
   document.getElementById('ncTarjetaWrap').classList.toggle('hidden', !esTarjeta);
-  if (esTarjeta) cargarPlanesCobro('nc').then(() => resumenPlanTarjeta('nc'));
+  if (esTarjeta) cargarPlanesCobro('nc', ventaCobroActual && ventaCobroActual.listaPrecioId).then(() => resumenPlanTarjeta('nc'));
   if (!esCheque) {
     document.getElementById('ncCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
     document.getElementById('ncCuenta').innerHTML = opcionesCuentaCobro(tipoValor);

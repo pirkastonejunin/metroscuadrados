@@ -242,11 +242,15 @@ router.cuentaHabilitada = cuentaHabilitada;
 // financiero (y el recargo como ingreso financiero) en el Estado de resultados.
 // -----------------------------------------------------------------------
 function redondear2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
-async function calcularPlanTarjeta(db, req, { planId, monto, aplicarRecargo }) {
+async function calcularPlanTarjeta(db, req, { planId, monto, aplicarRecargo, listaPrecioId }) {
   const pid = planId ? toObjectId(planId) : null;
   if (!pid) return null;
   const plan = await db.collection('tarjetas_planes').findOne(Object.assign({ _id: pid }, req.orgId ? { orgId: req.orgId } : {}));
   if (!plan) throw err(400, 'El plan de tarjeta elegido no existe (o no es de esta sucursal).');
+  // Planes habilitados solo para ciertas listas de precio (vacío = todas). Solo se controla cuando se conoce la lista (cobro de una venta).
+  if (listaPrecioId !== undefined && Array.isArray(plan.listasPrecioIds) && plan.listasPrecioIds.length && !plan.listasPrecioIds.map(String).includes(String(listaPrecioId || ''))) {
+    throw err(400, `El plan "${plan.tarjeta} — ${plan.nombre}" no está habilitado para la lista de precios de esta venta.`);
+  }
   const recargoPct = aplicarRecargo === false ? 0 : (Number(plan.recargoPorcentaje) || 0);
   const recargo = redondear2(monto * recargoPct / 100);
   const cargoTotal = redondear2(monto + recargo);
@@ -274,7 +278,8 @@ function leerPlanTarjeta(b) {
   if (!nombre) throw err(400, 'Falta el nombre del plan (ej: 3 cuotas).');
   const num = (v, et) => { const n = Number(v === '' || v == null ? 0 : v); if (!Number.isFinite(n) || n < 0 || n > 100) throw err(400, `${et} tiene que estar entre 0 y 100.`); return n; };
   const cuotas = Math.max(1, Math.floor(Number(b.cuotas) || 1));
-  return { tarjeta, nombre, cuotas, costoPorcentaje: num(b.costoPorcentaje, 'El costo %'), recargoPorcentaje: num(b.recargoPorcentaje, 'El recargo %'), activo: b.activo !== false };
+  return { tarjeta, nombre, cuotas, costoPorcentaje: num(b.costoPorcentaje, 'El costo %'), recargoPorcentaje: num(b.recargoPorcentaje, 'El recargo %'), activo: b.activo !== false,
+    listasPrecioIds: (Array.isArray(b.listasPrecioIds) ? b.listasPrecioIds : []).map(String).filter(x => /^[0-9a-f]{24}$/i.test(x)) };
 }
 router.post('/config/tarjetas-planes', authConfig, async (req, res) => {
   try {
