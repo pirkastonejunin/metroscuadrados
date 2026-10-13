@@ -471,7 +471,13 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
       }
       // productos nuevos que Mato eligió agregar
       const creados = [], noCreados = [];
-      const pedidos = Array.isArray((req.body || {}).crear) ? req.body.crear : [];
+      let totalPorCrear = 0;
+      let pedidos = Array.isArray((req.body || {}).crear) ? req.body.crear : [];
+      if ((req.body || {}).crearTodos) {
+        const todos = calc.sinMatch.filter(n => n.costoNuevo != null && !n.skuOcupado);
+        totalPorCrear = todos.length;
+        pedidos = todos.slice(0, Math.max(1, Math.min(parseInt(req.body.lote, 10) || 300, 500))).map(n => ({ codigo: n.codigo, sku: n.codigo, nombre: n.nombre }));
+      }
       if (pedidos.length) {
         const porCod = new Map(calc.sinMatch.map(n => [codigoClave(n.codigo), n]));
         const margenPre = regla.margenes.length ? regla.margenes : [];
@@ -516,7 +522,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           await db.collection('stock_movimientos').insertMany(movs.slice(i, i + TANDA), { ordered: false });
         }
       }
-      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados });
+      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados, totalPorCrear });
       await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: (req.body || {}).desdePortal ? 'Portal ' + ((prov.portal && prov.portal.tipo) || '') : String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
       return resumen;
     });
@@ -541,6 +547,54 @@ function parecido(a, b) {
   for (const w of b) if (!a.includes(w)) pesoTotal += pesoDe(w);
   return comunes ? (2 * peso) / (pesoTotal + peso) : 0;
 }
+// Rehacer la base de un proveedor: desactiva (no borra) sus productos para volver a crearlos desde su lista.
+// Se conservan ventas, compras y stock históricos. Reversible: /reactivar-productos.
+function filtroProductosDeProveedor(prov, req) {
+  return Object.assign({ $or: [{ proveedorId: prov._id }, ...(prov.razonSocial ? [{ proveedor: prov.razonSocial }] : [])] }, filtroOrg(req));
+}
+router.get('/:id/productos-proveedor', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      const f = filtroProductosDeProveedor(prov, req);
+      return { activos: await db.collection('productos_catalogo').countDocuments(Object.assign({ activo: { $ne: false } }, f)), inactivos: await db.collection('productos_catalogo').countDocuments(Object.assign({ activo: false, desactivadoPorImport: prov._id }, f)) };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/:id/desactivar-productos', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      if (String((req.body || {}).confirmar || '').trim().toLowerCase() !== 'desactivar') throw err(400, 'Falta la confirmación.');
+      const r = await db.collection('productos_catalogo').updateMany(Object.assign({ activo: { $ne: false } }, filtroProductosDeProveedor(prov, req)), { $set: { activo: false, desactivadoPorImport: prov._id, desactivadoEn: new Date() } });
+      return { ok: true, desactivados: r.modifiedCount };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/:id/reactivar-productos', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      // solo los que no chocan con un SKU activo nuevo
+      const lista = await db.collection('productos_catalogo').find(Object.assign({ activo: false, desactivadoPorImport: prov._id }, filtroOrg(req))).project({ sku: 1 }).toArray();
+      let n = 0;
+      for (const p of lista) {
+        if (p.sku && await db.collection('productos_catalogo').findOne(Object.assign({ sku: p.sku, activo: { $ne: false } }, filtroOrg(req)))) continue;
+        await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: { activo: true }, $unset: { desactivadoPorImport: '', desactivadoEn: '' } }); n++;
+      }
+      return { ok: true, reactivados: n, omitidos: lista.length - n };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/:id/equivalencias', authAdmin, async (req, res) => {
   try {
     const out = await conReintento(async () => {

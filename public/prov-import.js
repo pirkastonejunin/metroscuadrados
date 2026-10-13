@@ -81,6 +81,7 @@
         '<div class="row"><div style="flex:1;min-width:240px"><input type="file" id="pimpArchivo" accept=".xlsx,.xls,.csv" onchange="pimpElegirArchivo()"></div>' +
         '<button type="button" class="btn" id="pimpBtnPrev" onclick="pimpRevisarArchivo()" disabled>Revisar cambios</button>' +
         (estado.portal ? '<button type="button" class="btn secondary" id="pimpBtnPortal" onclick="pimpRevisarPortal()" title="Entra al portal del proveedor y lee la lista actual">Actualizar desde el portal</button>' : '') + '</div>' +
+        '<details class="card" style="padding:10px;margin-top:10px"><summary style="cursor:pointer;font-weight:700">Rehacer la base de este proveedor desde su lista</summary><div style="margin-top:8px"><p class="muted" style="margin:0 0 8px">Desactiva los productos actuales de este proveedor (no se borran: se conservan ventas, compras y stock históricos) y después los crea todos de nuevo desde su lista, con sus códigos actuales.</p><div id="pimpRehacer" class="muted">Cargando…</div></div></details>' +
         '<div style="margin-top:8px"><button type="button" class="btn secondary" onclick="pimpEquivalencias()" title="Si el proveedor cambió sus códigos: empareja por descripción, una sola vez">Buscar equivalencias por descripción</button> <span class="muted" style="font-size:12px">Usá esto una vez si el proveedor cambió sus códigos' + (estado.portal ? ' (lee el portal)' : ' (usa el archivo elegido)') + '.</span></div><div id="pimpEquiv" style="margin-top:10px"></div>' +
         '<div class="err" id="pimpErr"></div><div id="pimpPreview" style="margin-top:10px"></div></div>' +
       '<div class="card" style="padding:12px"><div style="font-weight:700;margin-bottom:6px">Últimas actualizaciones</div><div id="pimpHist" class="muted">Cargando...</div></div>';
@@ -277,6 +278,44 @@
     } catch (e) { err.textContent = e.message; }
   };
 
+  async function cargarRehacer() {
+    var box = document.getElementById('pimpRehacer'); if (!box) return;
+    try {
+      var d = await pedir('/' + estado.id + '/productos-proveedor');
+      box.innerHTML = '<div>Productos activos de este proveedor: <b>' + d.activos + '</b>' + (d.inactivos ? ' · desactivados por esta herramienta: <b>' + d.inactivos + '</b>' : '') + '</div>' +
+        '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn secondary" onclick="pimpDesactivar()"' + (d.activos ? '' : ' disabled') + '>1. Desactivar los ' + d.activos + ' productos actuales</button>' +
+        '<button type="button" class="btn" onclick="pimpCrearTodos()">2. Crear todos los productos de la lista</button>' +
+        (d.inactivos ? '<button type="button" class="btn secondary" onclick="pimpReactivar()">Deshacer: reactivar los desactivados</button>' : '') + '</div><div id="pimpRehMsg" style="margin-top:8px"></div>';
+    } catch (e) { box.innerHTML = '<span class="err">' + E(e.message) + '</span>'; }
+  }
+  window.pimpDesactivar = async function () {
+    var t = prompt('Se van a DESACTIVAR todos los productos activos de este proveedor (quedan ocultos; se pueden reactivar). Escribí  desactivar  para confirmar:');
+    if (!t) return;
+    try { var d = await pedir('/' + estado.id + '/desactivar-productos', { method: 'POST', body: JSON.stringify({ confirmar: t }) }); document.getElementById('pimpRehMsg').innerHTML = '<span class="ok-msg">' + d.desactivados + ' productos desactivados.</span>'; cargarRehacer(); }
+    catch (e) { document.getElementById('pimpRehMsg').innerHTML = '<span class="err">' + E(e.message) + '</span>'; }
+  };
+  window.pimpReactivar = async function () {
+    if (!confirm('Se reactivan los productos que desactivó esta herramienta (salvo los que choquen con un SKU nuevo). ¿Seguimos?')) return;
+    try { var d = await pedir('/' + estado.id + '/reactivar-productos', { method: 'POST', body: '{}' }); document.getElementById('pimpRehMsg').innerHTML = '<span class="ok-msg">' + d.reactivados + ' reactivados' + (d.omitidos ? ', ' + d.omitidos + ' omitidos por SKU repetido' : '') + '.</span>'; cargarRehacer(); }
+    catch (e) { document.getElementById('pimpRehMsg').innerHTML = '<span class="err">' + E(e.message) + '</span>'; }
+  };
+  window.pimpCrearTodos = async function () {
+    if (!estado.portal && !estado.archivo) { document.getElementById('pimpRehMsg').innerHTML = '<span class="err">Elegí el archivo de la lista, o conectá el portal.</span>'; return; }
+    if (!confirm('Se crean TODOS los productos de la lista que no existan (con costo, precios por lista y stock según la regla). Si no desactivaste los viejos antes, se pueden duplicar. ¿Seguimos?')) return;
+    var m = document.getElementById('pimpRehMsg'); var creados = 0, fallos = [], vuelta = 0, prev = -1;
+    try {
+      while (true) {
+        m.innerHTML = '<span class="muted">Creando productos… ' + creados + ' hechos. No cierres esta pantalla.</span>';
+        var d = await pedir('/' + estado.id + '/aplicar', { method: 'POST', body: JSON.stringify(Object.assign({ crearTodos: true, lote: 300 }, estado.portal ? { desdePortal: true } : { archivoBase64: estado.archivo })) });
+        var s = d.resumen || {}; creados += s.productosCreados || 0; fallos = fallos.concat(s.noCreados || []);
+        var quedan = (s.totalPorCrear || 0) - (s.productosCreados || 0) - (s.noCreados || []).length;
+        if (!(s.productosCreados || 0) || quedan <= 0 || ++vuelta > 60) break;
+      }
+      m.innerHTML = '<span class="ok-msg">Listo: ' + creados + ' productos creados.</span>' + (fallos.length ? '<div class="err" style="font-size:12px">No se crearon ' + fallos.length + ': ' + fallos.slice(0, 15).map(function (x) { return E(x.codigo) + ' (' + E(x.motivo) + ')'; }).join('; ') + '</div>' : '');
+      cargarRehacer();
+    } catch (e) { m.innerHTML = '<span class="err">' + E(e.message) + (creados ? ' (ya se habían creado ' + creados + ': podés volver a apretar, sigue donde quedó)' : '') + '</span>'; }
+  };
+
   window.pimpMarcarNuevos = function (on) { document.querySelectorAll('.pn-chk:not(:disabled)').forEach(function (c) { c.checked = on; }); };
   window.pimpAplicar = async function () {
     var err = document.getElementById('pimpErr'), box = document.getElementById('pimpPreview'), btn = document.getElementById('pimpBtnAplicar');
@@ -297,6 +336,7 @@
   };
 
   async function cargarHistorial() {
+    cargarRehacer();
     var el = document.getElementById('pimpHist'); if (!el) return;
     try {
       var h = await pedir('/' + estado.id + '/historial');
