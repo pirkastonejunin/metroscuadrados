@@ -148,12 +148,21 @@ function imagenesDeProducto(p, base) {
 }
 function camposImagen(p) { return Object.keys(p || {}).filter(k => /(imagen|image|foto|img|thumb|galeria|gallery|picture)/i.test(k)); }
 
+// m² por caja (unidades por bulto): se busca un campo numérico cuyo nombre hable de m² y de caja/bulto/pack, o de cobertura. Si no hay uno
+// reconocible devuelve null (nunca se inventa); GET /portal/muestra muestra los campos reales para ajustar.
+const RE_M2_CAJA = /(m2|m²|metros?|mts?).{0,12}(caja|bulto|pack|paquete|pallet)|(caja|bulto|pack|paquete).{0,12}(m2|m²|metros?|mts?)|cobertura|rendimiento/i;
+function bultoDeProducto(p) {
+  const cand = Object.keys(p || {}).filter(k => RE_M2_CAJA.test(k) && !/precio|costo|stock|total|pallet/i.test(k));
+  for (const k of cand) { const n = numero(p[k]); if (n > 0 && n < 1000) return { campo: k, valor: n }; }
+  return null;
+}
 function filaDeProductoMaxipiso(p, i) {
   const precio = numero(p.precioM2) || numero(p.precio);
   const unidad = numero(p.precioM2) ? 'm²' : (p.unidadMedida || 'unidad');
   const nombre = [p.tipoProducto || p._tablaLabel, p.nombre, p.codigo, p.marca].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   const stock = Number(p.stock);
-  return { fila: i + 1, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
+  const b = bultoDeProducto(p);
+  return { fila: i + 1, porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
 }
 
 async function filasMaxipiso(cred, opciones) {
@@ -185,7 +194,8 @@ async function muestraMaxipiso(cred) {
   const r = await pedirJson(`${MAXIPISO_BASE}/api/catalogo/todos?take=3&skip=0&sortBy=relevancia`, {}, jarra, 45000);
   const j = await r.json().catch(() => null);
   const lista = j && j.data && Array.isArray(j.data.productos) ? j.data.productos : [];
-  return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), camposImagen: camposImagen(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE) }));
+  const corto = v => (v && typeof v === 'object') ? JSON.stringify(v).slice(0, 200) : (typeof v === 'string' ? v.slice(0, 200) : v);
+  return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), valores: Object.fromEntries(Object.keys(p).map(k => [k, corto(p[k])])), camposImagen: camposImagen(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE), m2PorCaja: bultoDeProducto(p) }));
 }
 
 const CONECTORES = {
@@ -205,4 +215,4 @@ async function muestraDePortal(portal) {
   if (!portal.usuario || !portal.claveCifrada) throw err(400, 'Faltan el usuario y la clave del portal en la ficha del proveedor.');
   return con.muestra({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' });
 }
-module.exports = { muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso };
+module.exports = { bultoDeProducto, muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso };

@@ -83,6 +83,7 @@
         (estado.portal ? '<button type="button" class="btn secondary" id="pimpBtnPortal" onclick="pimpRevisarPortal()" title="Entra al portal del proveedor y lee la lista actual">Actualizar desde el portal</button>' : '') + '</div>' +
         '<details class="card" style="padding:10px;margin-top:10px"><summary style="cursor:pointer;font-weight:700">Rehacer la base de este proveedor desde su lista</summary><div style="margin-top:8px"><p class="muted" style="margin:0 0 8px">Desactiva los productos actuales de este proveedor (no se borran: se conservan ventas, compras y stock históricos) y después los crea todos de nuevo desde su lista, con sus códigos actuales.</p><div id="pimpRehacer" class="muted">Cargando…</div></div></details>' +
         '<div style="margin-top:8px"><button type="button" class="btn secondary" onclick="pimpEquivalencias()" title="Si el proveedor cambió sus códigos: empareja por descripción, una sola vez">Buscar equivalencias por descripción</button> <span class="muted" style="font-size:12px">Usá esto una vez si el proveedor cambió sus códigos' + (estado.portal ? ' (lee el portal)' : ' (usa el archivo elegido)') + '.</span></div><div id="pimpEquiv" style="margin-top:10px"></div>' +
+        (estado.portal ? '<div style="margin-top:8px"><button type="button" class="btn secondary" onclick="pimpMuestraPortal()" title="Muestra los campos reales que trae el portal (fotos, m² por caja, etc.)">Ver qué datos trae el portal</button> <span class="muted" style="font-size:12px">Sirve para confirmar de dónde sale el dato de m² por caja y las fotos.</span></div><div id="pimpMuestra" style="margin-top:10px"></div>' : '') +
         '<div class="err" id="pimpErr"></div><div id="pimpPreview" style="margin-top:10px"></div></div>' +
       '<div class="card" style="padding:12px"><div style="font-weight:700;margin-bottom:6px">Últimas actualizaciones</div><div id="pimpHist" class="muted">Cargando...</div></div>';
   }
@@ -241,6 +242,16 @@
     btn.disabled = !estado.archivo && !estado.modoPortal ? true : false; var btnP2 = document.getElementById('pimpBtnPortal'); if (btnP2) btnP2.disabled = false;
   };
 
+  window.pimpMuestraPortal = async function () {
+    var box = document.getElementById('pimpMuestra'); box.innerHTML = '<span class="muted">Entrando al portal…</span>';
+    try {
+      var d = await pedir('/' + estado.id + '/portal/muestra');
+      var esc = function (x) { return String(x == null ? '' : x).replace(/[&<>]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]; }); };
+      var arr = Array.isArray(d) ? d : (d.muestra || d.productos || [d]);
+      box.innerHTML = arr.slice(0, 3).map(function (x) { return '<div class="card" style="padding:10px;margin-bottom:8px"><b>' + esc(x.sku) + ' — ' + esc(x.nombre) + '</b><div class="muted" style="margin:4px 0">m² por caja detectado: <b>' + (x.m2PorCaja ? esc(x.m2PorCaja.valor) + ' (campo ' + esc(x.m2PorCaja.campo) + ')' : 'ninguno') + '</b> · fotos detectadas: <b>' + ((x.imagenes || []).length) + '</b></div><pre style="white-space:pre-wrap;font-size:11px;margin:0;max-height:260px;overflow:auto">' + esc(JSON.stringify(x.valores || x.campos, null, 1)) + '</pre></div>'; }).join('');
+    } catch (e) { box.innerHTML = '<span class="err">' + esc2(e.message) + '</span>'; }
+    function esc2(t) { return String(t).replace(/[&<>]/g, ''); }
+  };
   window.pimpEquivalencias = async function () {
     var err = document.getElementById('pimpErr'), box = document.getElementById('pimpEquiv');
     err.textContent = '';

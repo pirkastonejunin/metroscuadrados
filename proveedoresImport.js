@@ -319,7 +319,7 @@ async function calcular(db, req, prov, regla, filas) {
     if (!cands.length) {
       if (vistos.has(k)) continue;
       vistos.add(k);
-      const n = { fila: f.fila, codigo: f.codigo, nombre: f.nombre, precioLista: f.precio, moneda: regla.moneda, precios: [] };
+      const n = { fila: f.fila, codigo: f.codigo, nombre: f.nombre, precioLista: f.precio, moneda: regla.moneda, precios: [], porM2: !!f.porM2, bulto: f.bulto > 0 ? f.bulto : null };
       if (f.precio != null && f.precio > 0) {
         let costo = f.precio * factorDesc * (1 + regla.recargoPct / 100);
         if (regla.ivaIncluido) costo = costo / 1.21;
@@ -342,6 +342,9 @@ async function calcular(db, req, prov, regla, filas) {
     vistos.add(k);
     const p = cands[0];
     const c = { productoId: p._id, sku: p.sku, nombre: p.nombre, fila: f.fila, codigo: f.codigo, moneda: regla.moneda };
+    // Dato de la caja que trae el portal: m² por caja (unidades por bulto) y si el precio es por m². Solo se completa; nunca se borra.
+    if (f.bulto > 0 && Number(p.unidadesPorBulto) !== f.bulto) c.bultoNuevo = f.bulto;
+    if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
 
     if (f.precio != null && f.precio > 0) {
       const iva = p.porcentajeIva != null ? p.porcentajeIva : 21;
@@ -375,7 +378,7 @@ async function calcular(db, req, prov, regla, filas) {
       const ant = stockPrev.has(String(p._id)) ? stockPrev.get(String(p._id)) : 0;
       c.stock = { anterior: ant, nuevo, cambia: Math.abs(ant - nuevo) > 0.0005 };
     }
-    c.hayCambio = !!(c.cambiaCosto || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
+    c.hayCambio = !!(c.cambiaCosto || c.bultoNuevo || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
     cambios.push(c);
   }
 
@@ -450,6 +453,8 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           const set = { updatedAt: ahora };
           if (c.costoNuevo != null) { set.costo = c.costoNuevo; set.moneda = c.moneda; set.costoActualizadoEn = ahora; set.costoProveedorId = prov._id; costos++; }
           for (const pr of (c.precios || [])) if (pr.predeterminada) set.precio = pr.nuevo;
+          if (c.bultoNuevo) set.unidadesPorBulto = c.bultoNuevo;
+          if (c.pasaAM2) { set.unidad = 'm2'; set.tipoUnidad = 'superficie'; }
           opsProd.push({ updateOne: { filter: { _id: c.productoId }, update: { $set: set } } });
           if ((c.precios || []).length) opsProd.push({ updateOne: { filter: { _id: c.productoId, preciosPorLista: { $not: { $type: 'array' } } }, update: { $set: { preciosPorLista: [] } } } });
           for (const pr of (c.precios || [])) {
@@ -490,10 +495,10 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           if (!sku || !nombre) { noCreados.push({ codigo: pd.codigo, motivo: 'Falta el SKU o el nombre.' }); continue; }
           if (await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)))) { noCreados.push({ codigo: pd.codigo, motivo: `Ya hay un producto con el SKU ${sku}.` }); continue; }
           const doc = {
-            sku, nombre, unidad: 'unidad', tipoUnidad: 'unidad', disponiblePara: 'todos', tipoProducto: 'simple',
+            sku, nombre, unidad: n.porM2 ? 'm2' : 'unidad', tipoUnidad: n.porM2 ? 'superficie' : 'unidad', disponiblePara: 'todos', tipoProducto: 'simple',
             rubro: '', subrubro: '', marca: '', codigoBarra: '', embalaje: '', descripcion: '', notas: '',
             codigoExterno: regla.matchPor === 'codigoExterno' ? String(n.codigo).trim() : '', proveedor: prov.razonSocial || '', proveedorId: prov._id,
-            costo: n.costoNuevo, moneda: n.moneda, porcentajeIva: 21, impuestoInterno: null, unidadesPorBulto: null, fechaVencimiento: null,
+            costo: n.costoNuevo, moneda: n.moneda, porcentajeIva: 21, impuestoInterno: null, unidadesPorBulto: n.bulto || null, fechaVencimiento: null,
             stockeable: true, aceptaStockNegativo: false, trazable: false, utilizaVariantes: false, indicaCtdBultos: false,
             costoProductoId: null, cantidadMinima: null, stockIdeal: null,
             precio: null, preciosPorLista: n.precios.map(pr => ({ listaId: new ObjectId(pr.listaId), precio: pr.nuevo })),

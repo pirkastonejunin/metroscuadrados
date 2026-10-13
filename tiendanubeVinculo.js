@@ -138,7 +138,7 @@ router.get('/vinculos', auth, async (req, res) => {
     if (!lista) lista = listas.find(l => l.formula === 'cf_x_bulto') || listas.find(l => /tienda/i.test(l.nombre || '')) || listas.find(l => l.predeterminada) || listas[0] || null;
     const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
     const filas = await productosTienda();
-    const prods = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, skuTiendanube: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, porcentajeIva: 1, unidad: 1 }).toArray();
+    const prods = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, skuTiendanube: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, porcentajeIva: 1, unidad: 1, tipoUnidad: 1 }).toArray();
     const porSku = new Map(), porTn = new Map();
     for (const p of prods) { if (p.sku) porSku.set(K(p.sku), p); if (p.skuTiendanube) porTn.set(K(p.skuTiendanube), p); }
     const out = filas.map(f => {
@@ -147,12 +147,12 @@ router.get('/vinculos', auth, async (req, res) => {
       let precioSistema = null;
       if (p && lista) { try { precioSistema = precioResuelto(p, lista, cot).precio; } catch (e) { precioSistema = null; } }
       return { tn: { sku: f.sku, nombre: f.nombre, precio: f.precio, promo: f.promo, stock: f.stock, url: f.url, productId: f.productId, variantId: f.variantId },
-        producto: p ? { _id: String(p._id), sku: p.sku || '', nombre: p.nombre || '', unidad: p.unidad || '', bulto: p.unidadesPorBulto > 0 ? p.unidadesPorBulto : null, precioUnitario: p.precio == null ? null : p.precio } : null, tipo, precioSistema: precioSistema == null ? null : precioSistema };
+        producto: p ? { _id: String(p._id), sku: p.sku || '', nombre: p.nombre || '', unidad: p.unidad || '', porM2: p.unidad === 'm2' || p.tipoUnidad === 'superficie' || /\(m²\)\s*$/.test(String(p.nombre || '')), bulto: p.unidadesPorBulto > 0 ? p.unidadesPorBulto : null, precioUnitario: p.precio == null ? null : p.precio } : null, tipo, precioSistema: precioSistema == null ? null : precioSistema };
     });
     const resumen = { total: out.length, porSku: out.filter(r => r.tipo === 'sku').length, manuales: out.filter(r => r.tipo === 'manual').length, sinVinculo: out.filter(r => r.tipo === 'sin').length,
       conDiferencia: out.filter(r => r.producto && r.precioSistema != null && Number.isFinite(r.tn.precio) && Math.abs(r.precioSistema - r.tn.precio) >= 0.5).length,
       sinPrecioSistema: out.filter(r => r.producto && r.precioSistema == null).length,
-      m2SinBulto: out.filter(r => r.producto && r.producto.unidad === 'm2' && !r.producto.bulto).length };
+      m2SinBulto: out.filter(r => r.producto && r.producto.porM2 && !r.producto.bulto).length };
     res.json({ lista: lista ? String(lista._id) : null, listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), resumen, filas: out });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -282,6 +282,7 @@ router.post('/publicar', auth, async (req, res) => {
     for (const p of prods) {
       try {
         if (p.skuTiendanube) { resultados.push({ sku: p.sku, ok: false, motivo: 'ya está vinculado con Tiendanube' }); continue; }
+        if (require('./productos').sinBultoPorM2(p)) { resultados.push({ sku: p.sku, ok: false, motivo: 'es por m² y no tiene los m² por caja cargados' }); continue; }
         const precio = lista ? precioResuelto(p, lista, cot).precio : null;
         if (!(precio > 0)) { resultados.push({ sku: p.sku, ok: false, motivo: 'no tiene precio en la lista elegida' }); continue; }
         let imagenes = [];

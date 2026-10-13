@@ -1605,6 +1605,7 @@ async function confirmarSincronizarTiendanube(listaId){
         job.errores.slice(0, 100).map(e => `<li>${escapeHtml(e.sku||'')}: ${escapeHtml(e.detalle||'')}</li>`).join('') +
         (job.errores.length > 100 ? `<li>... y ${job.errores.length - 100} más</li>` : '') + '</ul>';
     }
+    if (data.omitidosSinBulto) html += `<p class="err">${data.omitidosSinBulto} producto(s) por m² NO se sincronizaron porque no tienen cargados los m² por caja.</p>`;
     document.getElementById('stnResultado').innerHTML = html;
     btn.textContent = 'Sincronizar de nuevo';
   }catch(e){

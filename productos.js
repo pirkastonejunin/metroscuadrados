@@ -1930,10 +1930,11 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
 
     const productos = await db.collection('productos_catalogo')
       .find(matchProductosDeLista(req, lista))
-      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1 }).toArray();
-    const preciosPorSku = new Map();
+      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1, unidad: 1, tipoUnidad: 1, nombre: 1 }).toArray();
+    const preciosPorSku = new Map(); let omitidosSinBulto = 0;
     productos.forEach(p => {
       if (!p.sku && !p.skuTiendanube) return;
+      if (sinBultoPorM2(p)) { omitidosSinBulto++; return; } // por m² sin m² por caja: no se sincroniza
       const { precio } = precioResuelto(p, lista, null);
       // si el producto está vinculado con Tiendanube bajo otro SKU, el precio va a ese SKU (tiendanubeVinculo.js)
       if (precio != null) preciosPorSku.set(String(p.skuTiendanube || p.sku), precio);
@@ -1943,9 +1944,9 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
     const ahora = new Date();
     const { insertedId: jobId } = await db.collection('productos_import_jobs').insertOne({
       orgId: req.orgId, tipo: 'sync-tiendanube', listaId: id, total: preciosPorSku.size, procesados: 0,
-      actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [], estado: 'procesando', creadoEn: ahora, terminadoEn: null
+      actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [], estado: 'procesando', omitidosSinBulto, creadoEn: ahora, terminadoEn: null
     });
-    res.json({ jobId, total: preciosPorSku.size });
+    res.json({ jobId, total: preciosPorSku.size, omitidosSinBulto });
 
     procesarSincronizacionTiendanube(db, jobId, preciosPorSku).catch(async (e) => {
       try {
@@ -2236,4 +2237,10 @@ router.delete('/:id', authAdmin, async (req, res) => {
 });
 
 module.exports = router;
+// Producto que se vende por m² (o con precio por m²): sin m² por caja no se puede calcular el precio de la caja, así que NO se manda a Tiendanube.
+function sinBultoPorM2(p) {
+  const porM2 = p.unidad === 'm2' || p.tipoUnidad === 'superficie' || /\(m²\)\s*$/.test(String(p.nombre || ''));
+  return porM2 && !(Number(p.unidadesPorBulto) > 0);
+}
+module.exports.sinBultoPorM2 = sinBultoPorM2;
 module.exports.precioResuelto = precioResuelto; // exportado para tiendanubeVinculo.js
