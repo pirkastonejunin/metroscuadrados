@@ -18,13 +18,16 @@ select{padding:6px;border:1px solid var(--bd);border-radius:8px;background:var(-
 <div class="card"><button class="p" id="btn" onclick="analizar()">Leer Tiendanube y proponer vínculos</button> <span class="muted" id="est"></span><div id="err" style="color:var(--er);margin-top:8px"></div></div>
 <div id="out"></div></div>
 <script>
-const TOKEN = localStorage.getItem('obras_admin_token') || ''; const ORG = localStorage.getItem('obras_org_activo') || '';
-const H = () => { const h = {'x-admin-token':TOKEN,'Content-Type':'application/json'}; if (ORG) { h['x-org-id'] = ORG; h['x-org-operar'] = ORG; } return h; };
+const TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORGX = localStorage.getItem('obras_org_activo') || ''; if (ORGX === 'todas') ORGX = localStorage.getItem('obras_org_operar') || '';
+// El catálogo es el mismo para todas las sucursales: si no hay una elegida, se usa la primera que tenga el usuario.
+async function asegurarOrg(){ if (ORGX) return; try { const r = await fetch('/api/usuarios/me', {headers:{'x-admin-token':TOKEN}}); const d = await r.json(); if (d.organizaciones && d.organizaciones[0]) ORGX = d.organizaciones[0]._id; } catch(e) {} }
+const H = () => { const h = {'x-admin-token':TOKEN,'Content-Type':'application/json'}; if (ORGX) { h['x-org-id'] = ORGX; h['x-org-operar'] = ORGX; } return h; };
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const N = n => Number(n||0).toLocaleString('es-AR'); let P = [];
-(async()=>{ try{ const r=await fetch('/api/tiendanube-vinculo/estado',{headers:H()}); const d=await r.json(); if(r.ok) document.getElementById('est').textContent='Productos ya vinculados con otro SKU: '+N(d.vinculados); }catch(e){} })();
+(async()=>{ await asegurarOrg(); try{ const r=await fetch('/api/tiendanube-vinculo/estado',{headers:H()}); const d=await r.json(); if(r.ok) document.getElementById('est').textContent='Productos ya vinculados con otro SKU: '+N(d.vinculados); }catch(e){} })();
 async function analizar(){
-  const err=document.getElementById('err'), out=document.getElementById('out'), b=document.getElementById('btn'); err.textContent=''; b.disabled=true;
+  const err=document.getElementById('err'), out=document.getElementById('out'), b=document.getElementById('btn'); err.textContent=''; b.disabled=true; await asegurarOrg();
   out.innerHTML='<div class="card muted">Leyendo la tienda y comparando… puede tardar un minuto.</div>';
   try{
     const r=await fetch('/api/tiendanube-vinculo/analizar',{headers:H()}); const d=await r.json(); if(!r.ok) throw new Error(d.error||'Error'); P=d.propuestas;
@@ -41,7 +44,7 @@ async function analizar(){
   }catch(e){ out.innerHTML=''; err.textContent=e.message; }
   b.disabled=false;
 }
-async function guardar(){
+async function guardar(){ await asegurarOrg();
   const pares=[]; document.querySelectorAll('.chk').forEach(c=>{ if(!c.checked) return; const i=+c.dataset.i, s=document.querySelector('.sel[data-i="'+i+'"]'); if(s&&s.value) pares.push({productoId:s.value,sku:P[i].sku,productId:P[i].productId,variantId:P[i].variantId}); });
   if(!pares.length){ document.getElementById('res').textContent='No hay nada tildado.'; return; }
   if(!confirm('Se vinculan '+pares.length+' productos con Tiendanube. ¿Seguimos?')) return;
