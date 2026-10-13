@@ -133,12 +133,27 @@ function monedaDe(texto) {
 function numero(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; }
 
 // Una fila por producto: pisos / porcelanatos / revestimientos / decks se cotizan por m² (precioM2), maderas y accesorios por su precio.
+// Fotos del producto: el catálogo las trae en algún campo de imagen (nombre exacto no garantizado): se buscan todos los campos
+// cuyo nombre sugiera imagen y se toman las direcciones http(s) o relativas; las relativas se completan con el dominio del portal.
+function imagenesDeProducto(p, base) {
+  const urls = [];
+  const agregar = (v) => {
+    if (!v) return;
+    if (typeof v === 'string') { const s = v.trim(); if (/^https?:\/\//i.test(s)) urls.push(s); else if (/^\/[^\s]+\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(s)) urls.push((base || '') + s); return; }
+    if (Array.isArray(v)) { v.forEach(agregar); return; }
+    if (typeof v === 'object') { agregar(v.url || v.src || v.secure_url || v.path || v.imagen || v.image); }
+  };
+  for (const k of Object.keys(p || {})) { if (/(imagen|image|foto|img|thumb|galeria|gallery|picture)/i.test(k)) agregar(p[k]); }
+  return [...new Set(urls)].slice(0, 8);
+}
+function camposImagen(p) { return Object.keys(p || {}).filter(k => /(imagen|image|foto|img|thumb|galeria|gallery|picture)/i.test(k)); }
+
 function filaDeProductoMaxipiso(p, i) {
   const precio = numero(p.precioM2) || numero(p.precio);
   const unidad = numero(p.precioM2) ? 'm²' : (p.unidadMedida || 'unidad');
   const nombre = [p.tipoProducto || p._tablaLabel, p.nombre, p.codigo, p.marca].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   const stock = Number(p.stock);
-  return { fila: i + 1, codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
+  return { fila: i + 1, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
 }
 
 async function filasMaxipiso(cred, opciones) {
@@ -164,8 +179,17 @@ async function filasMaxipiso(cred, opciones) {
   });
 }
 
+// Diagnóstico: qué campos trae el catálogo y cuáles se reconocen como fotos (para verificar el conector sin adivinar).
+async function muestraMaxipiso(cred) {
+  const jarra = await loginMaxipiso(cred);
+  const r = await pedirJson(`${MAXIPISO_BASE}/api/catalogo/todos?take=3&skip=0&sortBy=relevancia`, {}, jarra, 45000);
+  const j = await r.json().catch(() => null);
+  const lista = j && j.data && Array.isArray(j.data.productos) ? j.data.productos : [];
+  return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), camposImagen: camposImagen(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE) }));
+}
+
 const CONECTORES = {
-  maxipiso: { nombre: 'Maxipiso (catálogo mayorista)', url: MAXIPISO_BASE, filas: filasMaxipiso }
+  maxipiso: { nombre: 'Maxipiso (catálogo mayorista)', url: MAXIPISO_BASE, filas: filasMaxipiso, muestra: muestraMaxipiso }
 };
 
 async function filasDePortal(portal, regla) {
@@ -175,4 +199,10 @@ async function filasDePortal(portal, regla) {
   return con.filas({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' }, { moneda: regla && regla.moneda });
 }
 
-module.exports = { CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso };
+async function muestraDePortal(portal) {
+  const con = portal && CONECTORES[portal.tipo];
+  if (!con || !con.muestra) throw err(400, 'Este proveedor no tiene un portal configurado.');
+  if (!portal.usuario || !portal.claveCifrada) throw err(400, 'Faltan el usuario y la clave del portal en la ficha del proveedor.');
+  return con.muestra({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' });
+}
+module.exports = { muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso };

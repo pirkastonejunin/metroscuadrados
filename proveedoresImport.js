@@ -666,6 +666,12 @@ router.get('/:id/portal', authAdmin, async (req, res) => {
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+router.get('/:id/portal/muestra', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => portales.muestraDePortal((await proveedorDeOrg(await getDb(), req)).portal));
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.put('/:id/portal', authAdmin, async (req, res) => {
   try {
     const b = req.body || {};

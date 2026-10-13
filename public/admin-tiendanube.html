@@ -136,6 +136,7 @@
     <div class="tabs">
       <button class="tab-btn" id="tabBtnVinculos" onclick="cambiarTab('vinculos')">Vínculos y precios</button>
       <button class="tab-btn" id="tabBtnPendientes" onclick="cambiarTab('pendientes')">Vincular pendientes</button>
+      <button class="tab-btn" id="tabBtnPublicar" onclick="cambiarTab('publicar')">Publicar productos</button>
     </div>
 
     <div id="tabVinculos">
@@ -166,6 +167,26 @@
         <div class="err" id="errP"></div>
       </div>
       <div id="resP"></div>
+    </div>
+
+    <div id="tabPublicar" class="hidden">
+      <div class="card">
+        <div class="section-title">Categorías</div>
+        <p class="muted" style="margin:8px 0">Para cada rubro del sistema, en qué categoría de Tiendanube se crea el producto. Se completa sola cuando los nombres se parecen; revisala y guardá.</p>
+        <div id="mapaCat" class="muted">Cargando…</div>
+        <div style="margin-top:10px"><button class="btn secondary" onclick="guardarMapa()">Guardar categorías</button> <span id="resMapa"></span></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div style="min-width:200px"><label>Lista de precios</label><select id="pbLista" onchange="cargarCandidatos()"></select></div>
+          <div style="min-width:200px"><label>Rubro</label><select id="pbRubro" onchange="cargarCandidatos()"></select></div>
+          <div style="flex:1;min-width:220px"><label>Buscar</label><input id="pbQ" placeholder="Nombre, SKU o marca…" onkeydown="if(event.key==='Enter')cargarCandidatos()"></div>
+          <div><button class="btn" onclick="cargarCandidatos()">Buscar</button></div>
+        </div>
+        <div class="muted" style="margin-top:8px">Productos activos del sistema que todavía no están en Tiendanube. Se crean <b>sin publicar</b>: los revisás en Tiendanube y los activás vos. Llevan nombre, SKU, precio de la lista elegida, stock disponible (todos los depósitos), categoría y marca. Los de Maxipiso llevan además las fotos de su catálogo. Peso y medidas van en cero.</div>
+        <div class="err" id="errB"></div>
+      </div>
+      <div id="resB"></div>
     </div>
   </main>
 </div>
@@ -216,16 +237,17 @@ async function iniciarApp(){
   PiedraSidebar.render(me, 'tiendanube', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
-  cambiarTab(location.hash === '#pendientes' ? 'pendientes' : 'vinculos');
+  cambiarTab(location.hash === '#pendientes' ? 'pendientes' : (location.hash === '#publicar' ? 'publicar' : 'vinculos'));
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
 let tab = '';
 function cambiarTab(t){
-  tab = t; location.hash = t === 'pendientes' ? 'pendientes' : '';
-  document.getElementById('tabVinculos').classList.toggle('hidden', t !== 'vinculos'); document.getElementById('tabPendientes').classList.toggle('hidden', t !== 'pendientes');
+  tab = t; location.hash = (t === 'pendientes' || t === 'publicar') ? t : '';
+  document.getElementById('tabVinculos').classList.toggle('hidden', t !== 'vinculos'); document.getElementById('tabPendientes').classList.toggle('hidden', t !== 'pendientes'); document.getElementById('tabPublicar').classList.toggle('hidden', t !== 'publicar'); document.getElementById('tabBtnPublicar').classList.toggle('active', t === 'publicar');
   document.getElementById('tabBtnVinculos').classList.toggle('active', t === 'vinculos'); document.getElementById('tabBtnPendientes').classList.toggle('active', t === 'pendientes');
   if (t === 'vinculos' && !DV) cargarVinculos();
+  if (t === 'publicar' && !DB) cargarPublicar();
 }
 
 // ---------------------------------------------------------------- Vínculos y precios
@@ -260,6 +282,54 @@ function pintarVinculos(){
 async function desvincular(id){
   if (!confirm('Se quita el vínculo hecho a mano de este producto.')) return;
   try{ const r = await fetch('/api/tiendanube-vinculo/desvincular', {method:'POST', headers: H(), body: JSON.stringify({productoId: id})}); if (r.ok) cargarVinculos(); }catch(e){}
+}
+
+
+// ---------------------------------------------------------------- Publicar productos
+let DB = null, CAND = [];
+async function cargarPublicar(){
+  const err = document.getElementById('errB'); err.textContent = '';
+  try{
+    const r = await fetch('/api/tiendanube-vinculo/publicar/datos', {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); DB = d;
+    const opCat = '<option value="">— sin categoría —</option>' + d.categorias.map(c => '<option value="' + c.id + '">' + esc(c.nombre) + '</option>').join('');
+    document.getElementById('mapaCat').innerHTML = d.rubros.length ? '<table><thead><tr><th>Rubro del sistema</th><th class="n">Productos sin publicar</th><th>Categoría en Tiendanube</th></tr></thead><tbody>' + d.rubros.map(x => '<tr><td>' + esc(x.rubro || '(sin rubro)') + '</td><td class="n">' + N(x.n) + '</td><td><select class="mapa" data-rubro="' + esc(x.rubro) + '" data-sel="' + (x.categoriaId || '') + '">' + opCat + '</select></td></tr>').join('') + '</tbody></table>' : 'No hay rubros.';
+    document.querySelectorAll('.mapa').forEach(s => { s.value = s.dataset.sel || ''; });
+    document.getElementById('pbLista').innerHTML = d.listas.map(x => '<option value="' + x._id + '"' + (x._id === d.lista ? ' selected' : '') + '>' + esc(x.nombre) + '</option>').join('');
+    document.getElementById('pbRubro').innerHTML = '<option value="todos">Todos</option>' + d.rubros.map(x => '<option value="' + esc(x.rubro) + '">' + esc(x.rubro || '(sin rubro)') + ' (' + N(x.n) + ')</option>').join('');
+    cargarCandidatos();
+  }catch(e){ err.textContent = e.message; }
+}
+async function guardarMapa(){
+  const mapa = {}; document.querySelectorAll('.mapa').forEach(s => { if (s.value) mapa[s.dataset.rubro] = s.value; });
+  try{ const r = await fetch('/api/tiendanube-vinculo/publicar/mapa', {method:'POST', headers: H(), body: JSON.stringify({mapa})}); document.getElementById('resMapa').innerHTML = r.ok ? '<span class="ok-msg">Guardado.</span>' : '<span class="err">No se pudo guardar.</span>'; }catch(e){}
+}
+async function cargarCandidatos(){
+  const err = document.getElementById('errB'), out = document.getElementById('resB'); err.textContent = ''; out.innerHTML = '<div class="card muted">Buscando… (lee Tiendanube para no ofrecer lo que ya está)</div>';
+  try{
+    const q = new URLSearchParams({ listaId: document.getElementById('pbLista').value || '', rubro: document.getElementById('pbRubro').value || 'todos', q: document.getElementById('pbQ').value || '' });
+    const r = await fetch('/api/tiendanube-vinculo/publicar/candidatos?' + q, {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); CAND = d.productos;
+    if (!CAND.length) { out.innerHTML = '<div class="card">No hay productos para publicar con este filtro.</div>'; return; }
+    out.innerHTML = '<div class="card"><div class="row" style="align-items:center"><div class="muted"><b>' + N(d.total) + '</b> productos' + (d.hayMas ? ' (se muestran 400: filtrá para ver otros)' : '') + '</div><button class="btn secondary small" onclick="marcarTodos(true)">Tildar los que tienen precio</button><button class="btn secondary small" onclick="marcarTodos(false)">Destildar</button><button class="btn" id="btnPub" onclick="publicar()">Crear en Tiendanube (sin publicar)</button></div><div id="progPub" style="margin-top:8px"></div></div>'
+      + '<div class="card" style="padding:0"><div class="scroll"><table><thead><tr><th></th><th>Producto</th><th>Rubro</th><th class="n">Precio</th><th class="n">Stock</th><th>Fotos</th></tr></thead><tbody>'
+      + CAND.map((p, i) => '<tr><td><input type="checkbox" class="pb" data-i="' + i + '" style="width:auto"' + (p.precio > 0 ? '' : ' disabled') + '></td><td><b>' + esc(p.sku) + '</b><div class="linksub">' + esc(p.nombre) + (p.marca ? ' · ' + esc(p.marca) : '') + '</div></td><td>' + esc(p.rubro || '—') + '</td><td class="n">' + (p.precio > 0 ? M(p.precio) : '<span class="pill sin">Sin precio</span>') + '</td><td class="n">' + N(p.stock) + '</td><td>' + (p.conPortal ? '<span class="pill sku">Del catálogo del proveedor</span>' : '<span class="muted">—</span>') + '</td></tr>').join('') + '</tbody></table></div></div>';
+  }catch(e){ out.innerHTML = ''; err.textContent = e.message; }
+}
+function marcarTodos(on){ document.querySelectorAll('.pb:not(:disabled)').forEach(c => { c.checked = on; }); }
+async function publicar(){
+  const ids = []; document.querySelectorAll('.pb').forEach(c => { if (c.checked) ids.push(CAND[+c.dataset.i]._id); });
+  const prog = document.getElementById('progPub'), btn = document.getElementById('btnPub');
+  if (!ids.length) { prog.innerHTML = '<span class="err">No hay nada tildado.</span>'; return; }
+  if (!confirm('Se van a crear ' + ids.length + ' productos en Tiendanube, sin publicar. ¿Seguimos?')) return;
+  btn.disabled = true; let ok = 0, fotos = 0; const fallos = [];
+  for (let i = 0; i < ids.length; i += 10) {
+    prog.innerHTML = '<span class="muted">Creando… ' + ok + ' de ' + ids.length + '. No cierres esta pantalla.</span>';
+    try{
+      const r = await fetch('/api/tiendanube-vinculo/publicar', {method:'POST', headers: H(), body: JSON.stringify({productoIds: ids.slice(i, i + 10), listaId: document.getElementById('pbLista').value})}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+      d.resultados.forEach(x => { if (x.ok) { ok++; if (x.fotos) fotos++; } else fallos.push(x); });
+    }catch(e){ fallos.push({sku: '(tanda)', motivo: e.message}); break; }
+  }
+  prog.innerHTML = '<span class="ok-msg">' + ok + ' productos creados sin publicar (' + fotos + ' con fotos).</span>' + (fallos.length ? '<div class="err" style="font-size:12px">No se crearon ' + fallos.length + ': ' + fallos.slice(0, 10).map(x => esc(x.sku) + ' (' + esc(x.motivo) + ')').join('; ') + '</div>' : '') + '<div class="muted">Revisalos en Tiendanube y publicalos desde ahí. Ya quedaron vinculados con el sistema.</div>';
+  btn.disabled = false; DV = null;
 }
 
 // ---------------------------------------------------------------- Vincular pendientes

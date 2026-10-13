@@ -2017,4 +2017,6 @@ module.exports.sincronizarPreciosTiendanube = sincronizarPreciosTiendanube; // e
 module.exports.obtenerPreciosTiendanubePorSku = obtenerPreciosTiendanubePorSku; // exportado para productos.js
 module.exports.fetchAllProducts = fetchAllProducts; // exportado para tiendanubeVinculo.js
 module.exports.getStoreById = getStoreById;
+module.exports.API_BASE = API_BASE;
+module.exports.apiHeaders = apiHeaders;
 module.exports.nombreLocalizado = nombreLocalizado;

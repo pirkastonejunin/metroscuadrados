@@ -12,6 +12,7 @@ const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { tokensNombre, parecido } = require('./similitud');
 const cotizador = require('./cotizador');
+const portales = require('./portalesProveedores');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -160,6 +161,133 @@ router.post('/desvincular', auth, async (req, res) => {
     if (!pid) throw err(400, 'Falta el producto.');
     const r = await db.collection('productos_catalogo').updateOne(Object.assign({ _id: pid }, filtroOrg(req)), { $unset: { skuTiendanube: '', tiendanube: '' }, $set: { updatedAt: new Date() } });
     res.json({ ok: true, modificados: r.modifiedCount });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+
+// ---------------------------------------------------------------------------
+// Publicar en Tiendanube productos que están en el sistema y todavía no en la tienda (13/10/2026). Se crean SIN PUBLICAR para
+// revisarlos en Tiendanube. Nombre, SKU, precio (lista elegida), stock (todos los depósitos, menos lo comprometido), categoría
+// (según el rubro), marca y fotos (de Maxipiso, por link, si el producto viene de su catálogo). Peso y medidas van en cero.
+// ---------------------------------------------------------------------------
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function tiendaConfig() {
+  const storeId = process.env.TIENDA_REAL_STORE_ID;
+  if (!storeId) throw err(400, 'Falta configurar la tienda de Tiendanube (TIENDA_REAL_STORE_ID).');
+  const store = await cotizador.getStoreById(storeId);
+  if (!store || !store.access_token) throw err(400, 'La tienda de Tiendanube no tiene un token de acceso válido.');
+  return store;
+}
+async function tnFetch(store, ruta, opts) {
+  const r = await fetch(cotizador.API_BASE + '/' + store.store_id + ruta, Object.assign({ headers: cotizador.apiHeaders(store.access_token) }, opts || {}));
+  const txt = await r.text(); let data = null; try { data = JSON.parse(txt); } catch (e) { data = txt; }
+  return { ok: r.ok, status: r.status, data };
+}
+async function listaDePrecios(db, req, listaId) {
+  const listas = await db.collection('productos_listas_precio').find(Object.assign({ activa: { $ne: false } }, filtroOrg(req))).toArray();
+  return { listas, lista: (listaId && listas.find(l => String(l._id) === String(listaId))) || listas.find(l => l.formula === 'cf_x_bulto') || listas.find(l => /tienda/i.test(l.nombre || '')) || listas.find(l => l.predeterminada) || listas[0] || null };
+}
+async function stockDisponible(db, ids) {
+  const m = new Map();
+  for (let i = 0; i < ids.length; i += 1000) {
+    const rows = await db.collection('stock_actual').aggregate([{ $match: { productoId: { $in: ids.slice(i, i + 1000) } } }, { $group: { _id: '$productoId', c: { $sum: { $ifNull: ['$cantidad', 0] } }, r: { $sum: { $ifNull: ['$cantidadComprometida', 0] } } } }]).toArray();
+    rows.forEach(r => m.set(String(r._id), Math.max(0, (r.c || 0) - (r.r || 0))));
+  }
+  return m;
+}
+const normCat = s => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+router.get('/publicar/datos', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig();
+    const c = await tnFetch(store, '/categories?per_page=200');
+    const categorias = Array.isArray(c.data) ? c.data.map(x => ({ id: x.id, nombre: cotizador.nombreLocalizado(x.name), padre: x.parent || null })) : [];
+    const rubros = await db.collection('productos_catalogo').aggregate([{ $match: Object.assign({ activo: { $ne: false }, skuTiendanube: { $in: [null, ''] } }, filtroOrg(req)) }, { $group: { _id: '$rubro', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray();
+    const guardado = await db.collection('config_general').findOne({ clave: 'tnCategoriasRubro', orgId: req.orgId }).then(d => (d && d.valor) || {}).catch(() => ({}));
+    const sugerir = (rubro) => {
+      const r = normCat(rubro); if (!r) return null;
+      const palabras = r.split(' ').filter(w => w.length > 2); let mejor = null, ms = 0;
+      for (const cat of categorias) { const n = normCat(cat.nombre); let s = 0; if (n === r) s = 100; else if (n.includes(r) || r.includes(n)) s = 60; else s = palabras.filter(w => n.includes(w.replace(/s$/, ''))).length * 10; if (s > ms) { ms = s; mejor = cat; } }
+      return ms >= 10 && mejor ? mejor.id : null;
+    };
+    const { listas, lista } = await listaDePrecios(db, req, req.query.listaId);
+    res.json({ categorias, rubros: rubros.map(r => ({ rubro: r._id || '', n: r.n, categoriaId: guardado[r._id || ''] || sugerir(r._id) })), listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), lista: lista ? String(lista._id) : null });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/publicar/mapa', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const mapa = (req.body || {}).mapa || {};
+    const limpio = {}; for (const k of Object.keys(mapa)) { const v = Number(mapa[k]); if (v) limpio[k] = v; }
+    await db.collection('config_general').updateOne({ clave: 'tnCategoriasRubro', orgId: req.orgId }, { $set: { clave: 'tnCategoriasRubro', orgId: req.orgId, valor: limpio, updatedAt: new Date() } }, { upsert: true });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/publicar/candidatos', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const { precioResuelto } = require('./productos');
+    const { lista } = await listaDePrecios(db, req, req.query.listaId);
+    const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
+    const filtro = Object.assign({ activo: { $ne: false }, skuTiendanube: { $in: [null, ''] }, sku: { $nin: [null, ''] } }, filtroOrg(req));
+    if (req.query.rubro !== undefined && req.query.rubro !== 'todos') filtro.rubro = req.query.rubro === '' ? { $in: [null, ''] } : req.query.rubro;
+    const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (palabras.length) filtro.$and = palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }, { marca: { $regex: w, $options: 'i' } }] }));
+    // los que ya están en la tienda con ese SKU no se ofrecen
+    const store = await tiendaConfig(); const enTienda = new Set((await productosTienda()).map(f => K(f.sku)).filter(Boolean));
+    const prods = (await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(2000).toArray()).filter(p => !enTienda.has(K(p.sku)));
+    const stock = await stockDisponible(db, prods.map(p => p._id));
+    const { precioResuelto: pr } = { precioResuelto };
+    res.json({ total: prods.length, productos: prods.slice(0, 400).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > 400 });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Fotos de Maxipiso (por producto del sistema), con caché de 10 minutos para no iniciar sesión en cada tanda.
+const cachePortal = new Map();
+async function fotosPorCodigo(db, provId, req) {
+  const k = String(provId); const c = cachePortal.get(k);
+  if (c && Date.now() - c.t < 600000) return c.m;
+  const prov = await db.collection('proveedores').findOne(Object.assign({ _id: provId }, filtroOrg(req)));
+  const m = new Map();
+  if (prov && prov.portal) {
+    const filas = await portales.filasDePortal(prov.portal, prov.reglaImport || {});
+    for (const f of filas) if (f.imagenes && f.imagenes.length) m.set(K(f.codigo), f.imagenes);
+  }
+  cachePortal.set(k, { t: Date.now(), m }); return m;
+}
+
+router.post('/publicar', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig(); const { precioResuelto } = require('./productos');
+    const ids = (Array.isArray((req.body || {}).productoIds) ? req.body.productoIds : []).map(oid).filter(Boolean).slice(0, 12);
+    const { lista } = await listaDePrecios(db, req, (req.body || {}).listaId);
+    const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
+    const mapa = await db.collection('config_general').findOne({ clave: 'tnCategoriasRubro', orgId: req.orgId }).then(d => (d && d.valor) || {}).catch(() => ({}));
+    const prods = await db.collection('productos_catalogo').find(Object.assign({ _id: { $in: ids } }, filtroOrg(req))).toArray();
+    const stock = await stockDisponible(db, prods.map(p => p._id));
+    const resultados = [];
+    for (const p of prods) {
+      try {
+        if (p.skuTiendanube) { resultados.push({ sku: p.sku, ok: false, motivo: 'ya está vinculado con Tiendanube' }); continue; }
+        const precio = lista ? precioResuelto(p, lista, cot).precio : null;
+        if (!(precio > 0)) { resultados.push({ sku: p.sku, ok: false, motivo: 'no tiene precio en la lista elegida' }); continue; }
+        let imagenes = [];
+        if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); imagenes = m.get(K(p.codigoExterno)) || []; } catch (e) { /* sin fotos */ } }
+        const cat = mapa[p.rubro || ''];
+        const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: stock.get(String(p._id)) || 0, weight: '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
+        if (p.descripcion) body.description = { es: String(p.descripcion) };
+        if (p.marca) body.brand = p.marca;
+        if (cat) body.categories = [cat];
+        if (imagenes.length) body.images = imagenes.map(src => ({ src }));
+        const r = await tnFetch(store, '/products', { method: 'POST', body: JSON.stringify(body) });
+        if (!r.ok) { resultados.push({ sku: p.sku, ok: false, motivo: 'Tiendanube respondió ' + r.status + ': ' + (typeof r.data === 'string' ? r.data : JSON.stringify(r.data)).slice(0, 180) }); await sleep(600); continue; }
+        const variante = r.data && r.data.variants && r.data.variants[0];
+        await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: { skuTiendanube: p.sku, tiendanube: { productId: r.data && r.data.id || null, variantId: variante && variante.id || null, vinculadoEn: new Date(), creadoDesdeSistema: true }, updatedAt: new Date() } });
+        resultados.push({ sku: p.sku, ok: true, fotos: imagenes.length, categoria: !!cat });
+        await sleep(600);
+      } catch (e) { resultados.push({ sku: p.sku, ok: false, motivo: e.message }); }
+    }
+    res.json({ resultados });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
