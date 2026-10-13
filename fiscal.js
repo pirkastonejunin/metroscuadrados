@@ -56,8 +56,10 @@ const authConsultaCuit = [authUsuario, resolverOrg, (req, res, next) => {
 }];
 
 function exigirOrg(req) {
-  if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
-  return req.orgId;
+  // En "Ver todas" se usa la sucursal con la que se opera (barra de arriba): la conexión con ARCA es siempre de UNA sucursal.
+  const id = req.orgId || req.orgOperar;
+  if (!id) throw err(400, 'Estás viendo todas las sucursales: elegí arriba con qué sucursal operás (Piedra Negra o Pirka) para configurar su conexión con ARCA.');
+  return id;
 }
 
 function estadoPublico(cfg) {

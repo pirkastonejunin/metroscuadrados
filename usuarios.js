@@ -326,6 +326,7 @@ function resolverOrg(req, res, next) {
       // "Vista: todas las sucursales" (solo lectura de datos de todas). Para GUARDAR algo hay que elegir con qué sucursal se opera
       // (header x-org-operar, que manda la barra superior): las altas y cambios se hacen siempre en UNA sucursal.
       req.orgId = null; req.vistaTodas = true;
+      { const opH0 = String(req.headers['x-org-operar'] || ''); if (/^[0-9a-f]{24}$/i.test(opH0)) req.orgOperar = toObjectId(opH0); } // sucursal de operación (también en lecturas): la usan las pantallas que son de UNA sucursal, como Fiscal
       if (header === 'todas' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
         const opH = String(req.headers['x-org-operar'] || ''); const op = /^[0-9a-f]{24}$/i.test(opH) ? toObjectId(opH) : null;
         if (!op) return res.status(400).json({ error: 'Estás viendo todas las sucursales: elegí en la barra de arriba con qué sucursal operás para poder guardar.' });
