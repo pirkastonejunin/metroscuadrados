@@ -1608,30 +1608,23 @@ function botonesImprimible(url){
 // fraccionan — sin pasarse de lo que queda pendiente para ese ítem (lo
 // pendiente ya viene ajustado a bulto entero).
 function sincronizarCantidadEntrega(el, origen){
+  // Se puede cargar en m²/unidades o en bultos, lo que se use manda y el otro se calcula (sin redondear a bulto entero).
   const fila = el.closest('tr');
   const inputCant = fila.querySelector('.ent-cantidad');
   const inputBulto = fila.querySelector('.ent-bultos');
   const pendiente = Number(inputCant.dataset.pendiente) || 0;
   const unidadesPorBulto = Number(inputCant.dataset.bulto) || 0;
-
-  if (unidadesPorBulto > 0 && inputBulto) {
-    const bultosExactos = origen === 'bulto'
-      ? (Number(inputBulto.value) || 0)
-      : (Number(inputCant.value) || 0) / unidadesPorBulto;
-    let bultos = Math.max(0, Math.ceil(bultosExactos - 1e-9));
-    let valor = redondear2(bultos * unidadesPorBulto);
-    if (valor > pendiente + 1e-9) {
-      valor = redondear2(pendiente);
-      bultos = Math.round(valor / unidadesPorBulto);
-    }
+  let valor;
+  if (origen === 'bulto' && unidadesPorBulto > 0 && inputBulto) {
+    valor = redondear2((Number(inputBulto.value) || 0) * unidadesPorBulto);
+    if (valor > pendiente + 1e-9) { valor = redondear2(pendiente); inputBulto.value = redondear2(valor / unidadesPorBulto); }
     inputCant.value = valor;
-    inputBulto.value = bultos;
-  } else {
-    let valor = Number(inputCant.value) || 0;
-    if (valor < 0) valor = 0;
-    if (valor > pendiente) valor = redondear2(pendiente);
-    inputCant.value = valor;
+    return;
   }
+  valor = Number(inputCant.value) || 0;
+  if (valor < 0) valor = 0;
+  if (valor > pendiente) { valor = redondear2(pendiente); inputCant.value = valor; }
+  if (unidadesPorBulto > 0 && inputBulto) inputBulto.value = redondear2(valor / unidadesPorBulto);
 }
 
 async function abrirEntregar(id){
@@ -1650,9 +1643,9 @@ async function abrirEntregar(id){
     // desactiva el redondeo y el segundo input.
     const producto = it.productoId ? productosCache.find(p => String(p._id) === String(it.productoId)) : null;
     const unidadesPorBulto = (producto && producto.unidadesPorBulto > 0) ? producto.unidadesPorBulto : 0;
-    const bultosPendientes = unidadesPorBulto > 0 ? Math.round(pendiente / unidadesPorBulto) : 0;
+    const bultosPendientes = unidadesPorBulto > 0 ? redondear2(pendiente / unidadesPorBulto) : 0;
     const inputBultoHtml = unidadesPorBulto > 0
-      ? ` <input type="number" class="ent-bultos" min="0" step="1" value="${bultosPendientes}" style="width:70px" oninput="sincronizarCantidadEntrega(this,'bulto')"> bultos`
+      ? ` <input type="number" class="ent-bultos" min="0" step="any" value="${bultosPendientes}" style="width:70px" oninput="sincronizarCantidadEntrega(this,'bulto')"> bultos`
       : '';
     return `
       <tr>

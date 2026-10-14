@@ -513,19 +513,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
     if (cantidad > pendiente + 1e-9) {
       throw err(400, `No se puede entregar ${cantidad} de "${it.nombre}": solo queda pendiente ${pendiente}.`);
     }
-    // Los bultos no se fraccionan (igual que al cargar la venta, ver
-    // normalizarItems): red de seguridad server-side, el front ya manda la
-    // cantidad redondeada al bulto entero. Si el redondeo para arriba se
-    // pasa de lo pendiente (pendiente ya viene ajustado a bulto entero),
-    // se entrega directamente todo lo pendiente.
-    if (it.productoId) {
-      const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: it.productoId }, filtroOrg(req)));
-      if (producto && producto.unidadesPorBulto > 0) {
-        const bultos = Math.ceil(cantidad / producto.unidadesPorBulto - 1e-9);
-        cantidad = Math.round(bultos * producto.unidadesPorBulto * 100) / 100;
-        if (cantidad > pendiente + 1e-9) cantidad = Math.round(pendiente * 100) / 100;
-      }
-    }
+    // (14/10/2026, pedido de Mato) en el remito se puede entregar en m²/unidades o en bultos, sin forzar bulto entero.
     itemsAEntregar.push({ index, productoId: it.productoId, sku: it.sku, nombre: it.nombre, cantidad });
   }
   if (!itemsAEntregar.length) throw err(400, 'No hay nada pendiente para entregar en esta venta.');
