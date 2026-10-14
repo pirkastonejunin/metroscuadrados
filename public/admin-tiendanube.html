@@ -306,10 +306,12 @@ async function sincronizarPrecios(){
   b.disabled = true; o.innerHTML = '<span class="muted">Iniciando…</span>';
   try{
     const r = await fetch('/api/productos/listas-precio/' + lid + '/sincronizar-tiendanube', {method:'POST', headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    let job;
+    let job, fallos = 0;
     while (true) {
       await new Promise(x => setTimeout(x, 2000));
-      const rj = await fetch('/api/productos/import/estado/' + d.jobId, {headers: H()}); job = await rj.json(); if (!rj.ok) throw new Error(job.error || 'Error de progreso');
+      let rj;
+      try { rj = await fetch('/api/productos/import/estado/' + d.jobId, {headers: H()}); job = await rj.json(); } catch(e) { if (++fallos < 30) { o.innerHTML = '<span class="muted">Reconectando… la sincronización sigue en el servidor.</span>'; continue; } throw e; }
+      if (!rj.ok) throw new Error(job.error || 'Error de progreso');
       if (job.estado === 'procesando') { o.innerHTML = '<span class="muted">Procesando ' + job.procesados + ' / ' + job.total + '…</span>'; continue; }
       if (job.estado === 'error') throw new Error(job.errorGeneral || 'Falló la sincronización');
       break;

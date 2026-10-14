@@ -1989,10 +1989,18 @@ async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
       resultado.sinCambios++;
     } else if (Number.isFinite(precio)) {
       try {
-        const r = await fetch(
-          API_BASE + '/' + store.store_id + '/products/' + ref.productId + '/variants/' + ref.variantId,
-          { method: 'PUT', headers: apiHeaders(store.access_token), body: JSON.stringify({ price: String(precio) }) }
-        );
+        // Tiendanube limita las escrituras (429): ritmo parejo y reintento esperando lo que pida la tienda
+        let r = null;
+        for (let intento = 0; intento < 6; intento++) {
+          await new Promise(x => setTimeout(x, 550));
+          r = await fetch(
+            API_BASE + '/' + store.store_id + '/products/' + ref.productId + '/variants/' + ref.variantId,
+            { method: 'PUT', headers: apiHeaders(store.access_token), body: JSON.stringify({ price: String(precio) }) }
+          );
+          if (r.status !== 429) break;
+          const reset = Number(r.headers.get('x-rate-limit-reset'));
+          await new Promise(x => setTimeout(x, Math.min(Math.max(Number.isFinite(reset) ? reset : 0, 2000 * (intento + 1)), 15000)));
+        }
         if (r.ok) {
           resultado.actualizados++;
         } else {
