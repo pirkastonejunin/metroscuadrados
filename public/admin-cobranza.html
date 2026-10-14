@@ -666,11 +666,28 @@ async function imprimirDocumento(url, accion){
     ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
   }
 }
+// Copia al portapapeles un link público del documento (comprobante, remito o recibo) para mandárselo al cliente.
+async function copiarLinkPublico(url){
+  let m, body;
+  if ((m = url.match(/\/api\/ventas\/remitos\/([0-9a-f]{24})\/imprimir/))) body = { tipo: 'remito', id: m[1] };
+  else if ((m = url.match(/\/api\/ventas\/([0-9a-f]{24})\/pagos\/(\d+)\/recibo/))) body = { tipo: 'recibo', id: m[1], index: Number(m[2]) };
+  else if ((m = url.match(/\/api\/ventas\/([0-9a-f]{24})\/comprobante/))) body = { tipo: 'comprobante', id: m[1] };
+  else { alert('No se pudo armar el link de este documento.'); return; }
+  try{
+    const r = await fetch('/api/ventas/link-publico', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    const link = location.origin + '/d/' + d.token;
+    try { await navigator.clipboard.writeText(link); alert('Link copiado. Pegalo en el chat con el cliente:\n\n' + link); }
+    catch(e2){ window.prompt('Copiá el link (Ctrl+C):', link); }
+  }catch(e){ alert('No se pudo generar el link: ' + e.message); }
+}
 function botonesImprimible(url){
   return `
     <button class="btn small secondary" onclick="imprimirDocumento('${url}')">Ver</button>
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
-    <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">Compartir</button>
+    <button class="btn small secondary" onclick="copiarLinkPublico('${url}')">Copiar link</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">PDF</button>
   `;
 }
 </script>

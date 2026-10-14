@@ -82,6 +82,7 @@ app.use('/api/mover-visitas', require('./moverVisitas'));
 app.use('/api/reinicio-datos', require('./reinicioDatos'));
 app.use('/api/espacio-db', require('./espacioDb'));
 app.use('/api/ventas', ventasRouter);
+app.get('/d/:token', ventasRouter.servirLinkPublico); // documento compartido por link (sin sesión)
 const presupuestosRouter = require('./presupuestos');
 app.use('/api/presupuestos', presupuestosRouter);
 

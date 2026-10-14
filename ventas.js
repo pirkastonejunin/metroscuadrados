@@ -1860,4 +1860,56 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// -----------------------------------------------------------------------
+// Link público de un documento (14/10/2026, pedido de Mato: "que me copie en el portapapeles el link" para mandarle al
+// cliente sin pasar por WhatsApp). Se guarda un token imposible de adivinar que apunta a un comprobante, remito o recibo;
+// GET /d/:token (sin sesión, ver server.js) devuelve el mismo documento imprimible.
+// -----------------------------------------------------------------------
+router.post('/link-publico', authAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const tipo = String(b.tipo || '');
+    if (!['comprobante', 'remito', 'recibo'].includes(tipo)) throw err(400, 'Tipo de documento inválido.');
+    const id = toObjectId(b.id);
+    if (!id) throw err(400, 'id inválido');
+    const index = tipo === 'recibo' ? Number(b.index) : null;
+    if (tipo === 'recibo' && (!Number.isInteger(index) || index < 0)) throw err(400, 'índice de pago inválido');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const col = tipo === 'remito' ? 'remitos' : 'ventas';
+      let doc = await db.collection(col).findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!doc && req.vistaTodas) doc = await db.collection(col).findOne({ _id: id });
+      if (!doc) throw err(404, 'Documento no encontrado');
+      const filtro = { tipo, docId: id, index, orgId: doc.orgId };
+      let link = await db.collection('links_publicos').findOne(filtro);
+      if (!link) {
+        link = Object.assign({ token: require('crypto').randomBytes(24).toString('hex'), createdAt: new Date(), creadoPor: (req.usuario && req.usuario.nombre) || '' }, filtro);
+        await db.collection('links_publicos').insertOne(link);
+      }
+      return { token: link.token };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Sin sesión: se monta en server.js como GET /d/:token.
+router.servirLinkPublico = async (req, res) => {
+  try {
+    const token = String(req.params.token || '');
+    if (!/^[0-9a-f]{48}$/.test(token)) return res.status(404).send('Link inválido');
+    const db = await getDb();
+    const link = await db.collection('links_publicos').findOne({ token });
+    if (!link) return res.status(404).send('Link inválido o vencido');
+    const path = link.tipo === 'comprobante' ? '/:id/comprobante' : (link.tipo === 'remito' ? '/remitos/:id/imprimir' : '/:id/pagos/:index/recibo');
+    const layer = router.stack.find(l => l.route && l.route.path === path && l.route.methods.get);
+    if (!layer) return res.status(404).send('Documento no disponible');
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const fake = Object.create(req);
+    fake.params = { id: String(link.docId), index: String(link.index == null ? '' : link.index) };
+    fake.orgId = link.orgId; fake.usuario = { nombre: '', rol: {} }; fake.query = {};
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+    await handler(fake, res);
+  } catch (e) { res.status(500).send('No se pudo generar el documento'); }
+};
+
 module.exports = router;
