@@ -52,16 +52,20 @@ function costoCheque(monto, tasaMensual, dias) {
 function diasHasta(venc, desde) { return Math.max(0, Math.round((new Date(venc).getTime() - new Date(desde).getTime()) / DIA)); }
 
 // Arma los ítems de una operación (sin guardar): días, costo teórico y costo asignado (si se pactó otro efectivo, se reparte proporcional).
-function calcularOperacion(chequesRaw, tasaMensual, fecha, efectivoPactadoRaw) {
+// modo 'mensual': tasa mensual simple por los días de cada cheque. modo 'directa': descuento fijo sobre el nominal, sin importar el plazo.
+function calcularOperacion(chequesRaw, tasa, fecha, efectivoPactadoRaw, modo) {
+  modo = modo === 'directa' ? 'directa' : 'mensual';
+  const tasaMensual = tasa;
   if (!Array.isArray(chequesRaw) || !chequesRaw.length) throw err(400, 'Cargá al menos un cheque.');
-  if (!(tasaMensual >= 0)) throw err(400, 'La tasa mensual tiene que ser un número mayor o igual a 0.');
+  if (!(tasa >= 0)) throw err(400, 'La tasa tiene que ser un número mayor o igual a 0.');
+  if (modo === 'directa' && tasa >= 100) throw err(400, 'La tasa directa tiene que ser menor a 100%.');
   const items = chequesRaw.map((c, i) => {
     const monto = Number(c.monto);
     if (!(monto > 0)) throw err(400, `El cheque ${i + 1} necesita un monto mayor a 0.`);
     if (!c.fechaVencimiento) throw err(400, `El cheque ${i + 1} necesita fecha de vencimiento.`);
     const venc = fechaDe(c.fechaVencimiento);
     const dias = diasHasta(venc, fecha);
-    return { numero: txt(c.numero), banco: txt(c.banco), librador: txt(c.librador), cuitLibrador: txt(c.cuitLibrador), monto: r2(monto), fechaVencimiento: venc, dias, costoTeorico: costoCheque(monto, tasaMensual, dias) };
+    return { numero: txt(c.numero), banco: txt(c.banco), librador: txt(c.librador), cuitLibrador: txt(c.cuitLibrador), monto: r2(monto), fechaVencimiento: venc, dias, costoTeorico: modo === 'directa' ? r2(monto * (1 - tasa / 100)) : costoCheque(monto, tasaMensual, dias) };
   });
   const nominal = r2(items.reduce((s, x) => s + x.monto, 0));
   const efectivoSugerido = r2(items.reduce((s, x) => s + x.costoTeorico, 0));
@@ -89,12 +93,19 @@ router.post('/leer-cheques', authOperar, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+function leerTasa(b) {
+  const modo = b.tasaModo === 'directa' ? 'directa' : 'mensual';
+  const valor = Number(b.tasaValor !== undefined && b.tasaValor !== '' ? b.tasaValor : b.tasaMensual);
+  return { modo, valor };
+}
+
 // Vista previa del cálculo (para la pantalla, mientras se cargan los cheques).
 router.post('/calcular', authOperar, async (req, res) => {
   try {
     const b = req.body || {};
     const fecha = fechaDe(b.fecha);
-    const c = calcularOperacion(b.cheques, Number(b.tasaMensual) || 0, fecha, b.efectivoPactado);
+    const t = leerTasa(b);
+    const c = calcularOperacion(b.cheques, t.valor || 0, fecha, b.efectivoPactado, t.modo);
     res.json({ nominal: c.nominal, efectivoSugerido: c.efectivoSugerido, efectivoPactado: c.efectivoPactado, ganancia: c.ganancia, gananciaPct: c.gananciaPct, items: c.items.map(x => ({ dias: x.dias, costo: x.costoAsignado })) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -104,8 +115,8 @@ router.post('/operaciones', authOperar, async (req, res) => {
     if (!req.orgId) throw err(400, 'Elegí con qué sucursal estás trabajando.');
     const b = req.body || {};
     const fecha = fechaDe(b.fecha);
-    const tasaMensual = Number(b.tasaMensual);
-    const calc = calcularOperacion(b.cheques, tasaMensual, fecha, b.efectivoPactado);
+    const t = leerTasa(b);
+    const calc = calcularOperacion(b.cheques, t.valor, fecha, b.efectivoPactado, t.modo);
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const ultima = await db.collection('financiera_operaciones').find(filtroOrg(req)).sort({ numero: -1 }).limit(1).toArray();
@@ -113,7 +124,7 @@ router.post('/operaciones', authOperar, async (req, res) => {
       const ahora = new Date();
       const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
       const op = {
-        numero, fecha, tasaMensual, nominal: calc.nominal, efectivoSugerido: calc.efectivoSugerido, efectivoPactado: calc.efectivoPactado,
+        numero, fecha, tasaModo: t.modo, tasaValor: t.valor, tasaMensual: t.modo === 'mensual' ? t.valor : null, nominal: calc.nominal, efectivoSugerido: calc.efectivoSugerido, efectivoPactado: calc.efectivoPactado,
         ganancia: calc.ganancia, items: [], rechazos: [], observaciones: txt(b.observaciones), anulada: false,
         usuarioNombre, orgId: req.orgId, createdAt: ahora, updatedAt: ahora
       };
@@ -145,8 +156,8 @@ router.put('/operaciones/:id', authOperar, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const b = req.body || {};
     const fecha = fechaDe(b.fecha);
-    const tasaMensual = Number(b.tasaMensual);
-    const calc = calcularOperacion(b.cheques, tasaMensual, fecha, b.efectivoPactado);
+    const t = leerTasa(b);
+    const calc = calcularOperacion(b.cheques, t.valor, fecha, b.efectivoPactado, t.modo);
     const resultado = await conReintento(async () => {
       const db = await getDb();
       const op = await db.collection('financiera_operaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
@@ -194,7 +205,7 @@ router.put('/operaciones/:id', authOperar, async (req, res) => {
       const quitados = actuales.filter(c => !mantenidos.has(String(c._id))).map(c => c._id);
       if (quitados.length) await db.collection('cheques').updateMany({ _id: { $in: quitados } }, { $set: { estado: 'anulado', observaciones: 'Quitado de la operación de la financiera', updatedAt: ahora } });
       await db.collection('financiera_operaciones').updateOne({ _id: id }, { $set: {
-        fecha, tasaMensual, nominal: calc.nominal, efectivoSugerido: calc.efectivoSugerido, efectivoPactado: calc.efectivoPactado, ganancia: calc.ganancia,
+        fecha, tasaModo: t.modo, tasaValor: t.valor, tasaMensual: t.modo === 'mensual' ? t.valor : null, nominal: calc.nominal, efectivoSugerido: calc.efectivoSugerido, efectivoPactado: calc.efectivoPactado, ganancia: calc.ganancia,
         items, observaciones: txt(b.observaciones), updatedAt: ahora } });
       return { ok: true };
     });
@@ -321,7 +332,7 @@ async function armarResumen(db, req) {
     const nominalVigente = r2(o.nominal - rech.reduce((s, x) => { const it = (o.items || []).find(i => String(i.chequeId) === String(x.chequeId)); return s + (it ? it.monto : 0); }, 0));
     const gananciaNeta = r2(o.ganancia - rechGan);
     return {
-      _id: o._id, numero: o.numero, fecha: o.fecha, tasaMensual: o.tasaMensual, observaciones: o.observaciones || '', efectivoSugerido: o.efectivoSugerido, editable: rech.length === 0,
+      _id: o._id, numero: o.numero, fecha: o.fecha, tasaModo: o.tasaModo || 'mensual', tasaValor: o.tasaValor !== undefined ? o.tasaValor : o.tasaMensual, observaciones: o.observaciones || '', efectivoSugerido: o.efectivoSugerido, editable: rech.length === 0,
       nominal: o.nominal, nominalVigente, efectivoPactado: o.efectivoPactado, rechazado: rechCosto, debe, pagado: imputado, pendiente: r2(debe - imputado),
       ganancia: gananciaNeta, gananciaPct: nominalVigente ? r2(gananciaNeta / nominalVigente * 100) : 0,
       items: (o.items || []).map(i => {

@@ -193,7 +193,7 @@ function render(){
   const filas = DATOS.operaciones.map(o => {
     const abierta = ABIERTAS.has(String(o._id));
     let h = `<tr>
-      <td>${o.numero}</td><td>${fechaCorta(o.fecha)}</td><td>${o.tasaMensual}%</td>
+      <td>${o.numero}</td><td>${fechaCorta(o.fecha)}</td><td>${o.tasaValor}% ${o.tasaModo === 'directa' ? 'directa' : 'mens.'}</td>
       <td class="num">${money(o.nominalVigente)}</td><td class="num">${money(o.debe)}</td><td class="num">${money(o.pagado)}</td>
       <td class="num"><strong>${money(o.pendiente)}</strong></td><td class="num" style="color:var(--ok)">${money(o.ganancia)} <span class="muted">${o.gananciaPct}%</span></td>
       <td><button class="btn small secondary" onclick="toggleOp('${o._id}')">${abierta ? 'Ocultar' : 'Cheques'}</button> ${o.editable ? `<button class="btn small secondary" onclick="abrirOperacion('${o._id}')">Editar</button>` : ''}</td></tr>`;
@@ -243,7 +243,8 @@ function abrirOperacion(opId){
     <h2 style="margin-top:0">${op ? 'Editar operación #' + op.numero : 'Nueva operación — cheques recibidos de la financiera'}</h2>
     <div class="row" style="margin-bottom:10px">
       <div style="width:160px"><label>Fecha</label><input id="opFecha" type="date" value="${op ? String(op.fecha).slice(0,10) : hoyISO()}" onchange="recalcular()"></div>
-      <div style="width:160px"><label>Tasa mensual (%) *</label><input id="opTasa" type="number" step="0.01" min="0" value="${op ? op.tasaMensual : ''}" oninput="recalcular()"></div>
+      <div style="width:190px"><label>Tipo de tasa</label><select id="opTasaModo" onchange="recalcular()"><option value="mensual" ${op && op.tasaModo === 'directa' ? '' : 'selected'}>Mensual (según plazo)</option><option value="directa" ${op && op.tasaModo === 'directa' ? 'selected' : ''}>Directa (fija sobre el total)</option></select></div>
+      <div style="width:140px"><label>Tasa (%) *</label><input id="opTasa" type="number" step="0.01" min="0" value="${op ? op.tasaValor : ''}" oninput="recalcular()"></div>
     </div>
     <div class="card" style="background:var(--bg);padding:12px;margin-bottom:12px">
       <strong>🧾 Cargar los cheques con IA</strong>
@@ -267,13 +268,13 @@ function leerOperacion(){
   const cheques = [...document.querySelectorAll('#opCheques .fila-ch')].map(f => ({
     chequeId: f.dataset.chequeid || '', numero: f.querySelector('.c-num').value, banco: f.querySelector('.c-banco').value, librador: f.querySelector('.c-lib').value, cuitLibrador: f.querySelector('.c-cuit').value,
     monto: f.querySelector('.c-monto').value, fechaVencimiento: f.querySelector('.c-venc').value })).filter(c => c.monto || c.fechaVencimiento);
-  return { fecha: document.getElementById('opFecha').value, tasaMensual: document.getElementById('opTasa').value, cheques, efectivoPactado: document.getElementById('opPactado').value, observaciones: document.getElementById('opObs').value };
+  return { fecha: document.getElementById('opFecha').value, tasaModo: document.getElementById('opTasaModo').value, tasaValor: document.getElementById('opTasa').value, cheques, efectivoPactado: document.getElementById('opPactado').value, observaciones: document.getElementById('opObs').value };
 }
 function recalcular(){
   clearTimeout(timerCalc);
   timerCalc = setTimeout(async () => {
     const b = leerOperacion(); const out = document.getElementById('opCalc'); if (!out) return;
-    if (!b.cheques.length || b.tasaMensual === '' || b.cheques.some(c => !(Number(c.monto) > 0) || !c.fechaVencimiento)) { out.innerHTML = '<span class="muted">Completá tasa, monto y vencimiento de cada cheque para ver el efectivo.</span>'; return; }
+    if (!b.cheques.length || b.tasaValor === '' || b.cheques.some(c => !(Number(c.monto) > 0) || !c.fechaVencimiento)) { out.innerHTML = '<span class="muted">Completá tasa, monto y vencimiento de cada cheque para ver el efectivo.</span>'; return; }
     try{
       const d = await post('/calcular', b);
       out.innerHTML = `Nominal <strong>${money(d.nominal)}</strong> · Efectivo sugerido <strong>${money(d.efectivoSugerido)}</strong> · Efectivo a pagar <strong>${money(d.efectivoPactado)}</strong> · Ganancia <strong style="color:var(--ok)">${money(d.ganancia)} (${d.gananciaPct}%)</strong>`;
