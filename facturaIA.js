@@ -297,12 +297,12 @@ function esquemaParaGemini(nodo) {
   return out;
 }
 
-function partesGemini(contenidoArchivo) {
+function partesGemini(contenidoArchivo, pedido) {
   const partes = contenidoArchivo.map(b => {
     if (b.type === 'text') return { text: b.text };
     return { inlineData: { mimeType: b.source.media_type, data: b.source.data } };
   });
-  partes.push({ text: 'Leé este comprobante y devolvé sus datos en el formato pedido.' });
+  partes.push({ text: pedido || 'Leé este comprobante y devolvé sus datos en el formato pedido.' });
   return partes;
 }
 
@@ -319,7 +319,8 @@ async function pedirAlServicio(url, opciones) {
   }
 }
 
-async function llamarGemini(contenidoArchivo) {
+async function llamarGemini(contenidoArchivo, cfg) {
+  cfg = cfg || { instrucciones: INSTRUCCIONES, herramienta: HERRAMIENTA, pedido: 'Leé este comprobante y devolvé sus datos en el formato pedido.' };
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw err(503, 'La lectura de facturas con IA todavía no está configurada: falta la variable GEMINI_API_KEY en el servidor.');
   const modelo = process.env.GEMINI_MODEL || GEMINI_MODELO_DEFAULT;
@@ -327,9 +328,9 @@ async function llamarGemini(contenidoArchivo) {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: INSTRUCCIONES.replace('llamando a la herramienta "registrar_factura"', 'como un objeto JSON con el esquema indicado') }] },
-      contents: [{ role: 'user', parts: partesGemini(contenidoArchivo) }],
-      generationConfig: { responseMimeType: 'application/json', responseJsonSchema: esquemaParaGemini(HERRAMIENTA.input_schema), temperature: 0 }
+      systemInstruction: { parts: [{ text: cfg.instrucciones.replace('llamando a la herramienta "' + cfg.herramienta.name + '"', 'como un objeto JSON con el esquema indicado') }] },
+      contents: [{ role: 'user', parts: partesGemini(contenidoArchivo, cfg.pedido) }],
+      generationConfig: { responseMimeType: 'application/json', responseJsonSchema: esquemaParaGemini(cfg.herramienta.input_schema), temperature: 0 }
     })
   });
   const data = await resp.json().catch(() => ({}));
@@ -352,8 +353,9 @@ async function llamarGemini(contenidoArchivo) {
   return json;
 }
 
-async function llamarIA(contenidoArchivo) {
-  if (proveedorIA() === 'gemini') return llamarGemini(contenidoArchivo);
+async function llamarIA(contenidoArchivo, cfg) {
+  cfg = cfg || { instrucciones: INSTRUCCIONES, herramienta: HERRAMIENTA, pedido: 'Leé este comprobante y registrá sus datos.' };
+  if (proveedorIA() === 'gemini') return llamarGemini(contenidoArchivo, cfg);
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw err(503, 'La lectura de facturas con IA todavía no está configurada: falta la variable GEMINI_API_KEY (o ANTHROPIC_API_KEY) en el servidor.');
   const modelo = process.env.FACTURA_IA_MODEL || MODELO_DEFAULT;
@@ -367,10 +369,10 @@ async function llamarIA(contenidoArchivo) {
       body: JSON.stringify({
         model: modelo,
         max_tokens: 8000,
-        system: INSTRUCCIONES,
-        tools: [HERRAMIENTA],
-        tool_choice: { type: 'tool', name: HERRAMIENTA.name },
-        messages: [{ role: 'user', content: contenidoArchivo.concat([{ type: 'text', text: 'Leé este comprobante y registrá sus datos.' }]) }]
+        system: cfg.instrucciones,
+        tools: [cfg.herramienta],
+        tool_choice: { type: 'tool', name: cfg.herramienta.name },
+        messages: [{ role: 'user', content: contenidoArchivo.concat([{ type: 'text', text: cfg.pedido }]) }]
       }),
       signal: controlador.signal
     });
@@ -387,7 +389,7 @@ async function llamarIA(contenidoArchivo) {
     if (resp.status === 429) throw err(429, 'Se superó el límite de uso de la IA. Esperá un momento y probá de nuevo.');
     throw err(502, 'El servicio de IA devolvió un error: ' + detalle);
   }
-  const bloque = (data.content || []).find(b => b.type === 'tool_use' && b.name === HERRAMIENTA.name);
+  const bloque = (data.content || []).find(b => b.type === 'tool_use' && b.name === cfg.herramienta.name);
   if (!bloque || !bloque.input) throw err(502, 'La IA no devolvió datos de la factura. Probá con una foto más nítida.');
   if (data.usage) console.log(`[facturaIA] modelo=${modelo} tokens_in=${data.usage.input_tokens} tokens_out=${data.usage.output_tokens}`);
   return bloque.input;
@@ -638,7 +640,52 @@ function registrarRutasFacturaIA(router, { modo, authAdmin, getDb, conReintento,
   });
 }
 
+// ---------------------------------------------------------------------------
+// Lectura de cheques (14/10/2026, pedido de Mato): foto o PDF de uno o varios cheques / e-cheqs → datos para cargarlos solos.
+// ---------------------------------------------------------------------------
+const INSTRUCCIONES_CHEQUES = `Sos un asistente que lee cheques argentinos (cheques físicos fotografiados, e-cheqs o PDFs de home banking que pueden traer uno o varios cheques). Extraé los datos llamando a la herramienta "registrar_cheques".
+Reglas:
+- Devolvé un elemento por cada cheque distinto que veas.
+- "numero": número de cheque (puede venir con ceros a la izquierda; dejalos tal cual).
+- "banco": nombre del banco emisor.
+- "librador": razón social o nombre de quien firma/emite el cheque (la cuenta librada), no el beneficiario.
+- "cuitLibrador": CUIT/CUIL/CDI del librador, solo si figura.
+- "monto": importe en pesos como número, sin símbolos ni separadores de miles (decimal con punto).
+- "fechaEmision": fecha de emisión AAAA-MM-DD, si figura.
+- "fechaVencimiento": fecha de pago / vencimiento AAAA-MM-DD (en cheques de pago diferido es la "fecha de pago"; si solo hay una fecha, usala).
+- Si un dato no se ve o no figura, dejá la cadena vacía (o 0 en el monto): nunca inventes datos.
+- Si el archivo no contiene cheques, poné esCheque en false.
+- En "avisos" anotá, en frases cortas en español, cualquier duda de lectura (texto borroso, importe ilegible, etc.).`;
+const HERRAMIENTA_CHEQUES = {
+  name: 'registrar_cheques',
+  description: 'Registra los cheques leídos.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      esCheque: { type: 'boolean' },
+      cheques: { type: 'array', items: { type: 'object', properties: {
+        numero: { type: 'string' }, banco: { type: 'string' }, librador: { type: 'string' }, cuitLibrador: { type: 'string' },
+        monto: { type: 'number' }, fechaEmision: { type: 'string', description: 'AAAA-MM-DD' }, fechaVencimiento: { type: 'string', description: 'AAAA-MM-DD' }
+      }, required: ['numero', 'monto', 'fechaVencimiento'] } },
+      avisos: { type: 'array', items: { type: 'string' } }
+    },
+    required: ['esCheque', 'cheques']
+  }
+};
+async function leerChequesConIA({ base64, mimeType, nombreArchivo }) {
+  const contenido = await armarContenidoArchivo({ base64, mimeType, nombreArchivo });
+  const crudo = await llamarIA(contenido, { instrucciones: INSTRUCCIONES_CHEQUES, herramienta: HERRAMIENTA_CHEQUES, pedido: 'Leé los cheques de este archivo y registrá sus datos.' });
+  if (!crudo || crudo.esCheque === false || !Array.isArray(crudo.cheques) || !crudo.cheques.length) throw err(400, 'No encontré cheques en ese archivo. Probá con una foto más nítida o con otro archivo.');
+  const fechaOk = f => /^\d{4}-\d{2}-\d{2}$/.test(String(f || '')) ? String(f) : '';
+  const cheques = crudo.cheques.map(c => ({
+    numero: String(c.numero || '').trim(), banco: String(c.banco || '').trim(), librador: String(c.librador || '').trim(),
+    cuitLibrador: c.cuitLibrador ? formatearCuit(c.cuitLibrador) : '', monto: redondear2(c.monto), fechaEmision: fechaOk(c.fechaEmision), fechaVencimiento: fechaOk(c.fechaVencimiento)
+  }));
+  return { cheques, avisos: Array.isArray(crudo.avisos) ? crudo.avisos.map(String) : [] };
+}
+
 module.exports = {
+  leerChequesConIA,
   registrarRutasFacturaIA,
   // Expuestos para pruebas:
   cuitValido, formatearCuit, normalizarResultado, similitud, tokens, numero, tipoDeArchivo,

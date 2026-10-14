@@ -16,6 +16,8 @@ const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const { aplicarMovimientoCuenta } = require('./tesoreria');
 
+const { leerChequesConIA } = require('./facturaIA');
+
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 const authOperar = [authUsuario, resolverOrg, requiereModulo('tesoreria')];
@@ -78,6 +80,14 @@ function calcularOperacion(chequesRaw, tasaMensual, fecha, efectivoPactadoRaw) {
   const ganancia = r2(nominal - efectivoPactado);
   return { items, nominal, efectivoSugerido, efectivoPactado, ganancia, gananciaPct: nominal ? r2(ganancia / nominal * 100) : 0 };
 }
+
+// Lectura de cheques con IA: foto o PDF de uno o varios cheques → datos para completar la operación.
+router.post('/leer-cheques', authOperar, async (req, res) => {
+  try {
+    const b = req.body || {};
+    res.json(await leerChequesConIA({ base64: b.archivoBase64, mimeType: b.mimeType, nombreArchivo: b.nombreArchivo }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 
 // Vista previa del cálculo (para la pantalla, mientras se cargan los cheques).
 router.post('/calcular', authOperar, async (req, res) => {
