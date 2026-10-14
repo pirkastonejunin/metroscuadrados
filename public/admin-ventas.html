@@ -1424,7 +1424,7 @@ async function guardarNuevaVenta(cobrarDespues){
     // "Guardar y cobrar": abre la ventana de cobro de la venta recién guardada (solo si quedó saldo y es de la sucursal activa).
     if (cobrarDespues) {
       if (ventaOrgSeleccionada !== ORG) alert('La venta se guardó en otra sucursal: para cobrarla, entrá a esa sucursal.');
-      else { const vNueva = ventasCache.find(x => x._id === data._id); if (vNueva && Number(vNueva.saldoPendiente) > 0) abrirCobro(data._id); }
+      else { let vNueva = ventasCache.find(x => x._id === data._id); if (!vNueva) { vNueva = data; ventasCache.unshift(data); } if (Number(vNueva.saldoPendiente) > 0) abrirCobro(data._id); else alert('La venta no tiene saldo para cobrar.'); }
     }
     // Si se guardó en OTRA sucursal, el listado actual (de la sucursal
     // activa) no la muestra — es esperado, no hace falta recargar nada acá.
