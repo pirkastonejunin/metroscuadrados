@@ -205,8 +205,92 @@ async function muestraMaxipiso(cred) {
   return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), valores: Object.fromEntries(Object.keys(p).map(k => [k, corto(p[k])])), camposImagen: camposImagen(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE), m2PorCaja: bultoDeProducto(p) }));
 }
 
+// ---------------------------------------------------------------- Vigorita (WooCommerce)
+// https://vigorita.com.ar es una tienda WordPress + WooCommerce. El catálogo sale de la Store API pública
+// (/wp-json/wc/store/v1/products) con la sesión del cliente iniciada (mi-cuenta). Datos que se leen:
+//   precio: prices.price en centavos (currency_minor_unit); la moneda y la unidad NO vienen en la API: salen de las
+//   etiquetas del producto ("u$s" / "pesos", "por m2" / "por unidad"). Peso y m² por unidad salen de los atributos.
+const VIGORITA_BASE = process.env.VIGORITA_URL || 'https://vigorita.com.ar';
+
+function decodificarHtml(t) {
+  return String(t == null ? '' : t).replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (m, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&ldquo;|&rdquo;/g, '"').replace(/\s+/g, ' ').trim();
+}
+function numeroEs(texto) { // "0,3124 m2" / "4,9000 kg" / "1.250,50" → número
+  const m = /-?\d[\d.]*(?:,\d+)?/.exec(String(texto == null ? '' : texto)); if (!m) return null;
+  const n = Number(m[0].replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) && n > 0 ? n : null;
+}
+function atributoDe(p, re) {
+  const a = (p.attributes || []).find(x => re.test(String(x.name || '').trim()));
+  return a && a.terms && a.terms[0] ? decodificarHtml(a.terms[0].name) : '';
+}
+function filaDeProductoVigorita(p, i) {
+  const tags = (p.tags || []).map(t => String(t.name || '').trim().toLowerCase());
+  const porM2 = tags.some(t => /^por\s*m(2|²)$/.test(t));
+  const moneda = tags.some(t => /^(u\$s|us\$|usd|u\$d|dolares|dólares)$/.test(t)) ? 'USD' : (tags.includes('pesos') || tags.includes('ars') ? 'ARS' : null);
+  const pr = p.prices || {};
+  const menor = Number.isFinite(Number(pr.currency_minor_unit)) ? Number(pr.currency_minor_unit) : 2;
+  const crudo = numero(pr.regular_price) || numero(pr.price);
+  const precio = crudo ? Math.round(crudo / Math.pow(10, menor) * 10000) / 10000 : null;
+  const m2Unidad = numeroEs(atributoDe(p, /^m\s*2 por unidad$|^m²\s*por unidad$|^m2 por caja$|^m²\s*por caja$/i));
+  const peso = numeroEs(atributoDe(p, /^peso$/i)) || numeroEs(atributoDe(p, /^peso de (caja|display)$/i));
+  const imagenes = (p.images || []).map(x => String(x.src || '').split('?')[0]).filter(Boolean);
+  const unidad = porM2 ? 'm²' : 'unidad';
+  const cat = (p.categories || []).map(c => decodificarHtml(c.name)).filter(Boolean);
+  return { fila: i + 1, pesoCaja: peso, porM2, bulto: porM2 ? m2Unidad : null, imagenes, codigo: String(p.sku || '').trim(), nombre: decodificarHtml(p.name) + ' (' + unidad + ')', precio, moneda, stock: null, stockCelda: p.is_in_stock === false ? 'Sin existencias' : 'Hay existencias', categoria: cat.join(' / '), url: p.permalink || null };
+}
+
+async function loginVigorita(cred) {
+  const jarra = nuevaJarra();
+  const cabH = { Accept: 'text/html,application/xhtml+xml' };
+  const r1 = await pedirJson(VIGORITA_BASE + '/mi-cuenta/', { headers: cabH }, jarra);
+  if (!r1.ok) throw err(502, 'El portal de Vigorita no respondió al iniciar sesión (' + r1.status + ').');
+  const html = await r1.text();
+  const m = /name=["']woocommerce-login-nonce["'][^>]*value=["']([^"']+)["']/i.exec(html) || /value=["']([^"']+)["'][^>]*name=["']woocommerce-login-nonce["']/i.exec(html);
+  if (!m) throw err(502, 'No encontré el formulario de ingreso de Vigorita: puede haber cambiado el sitio.');
+  const body = new URLSearchParams({ username: cred.usuario, password: cred.clave, 'woocommerce-login-nonce': m[1], _wp_http_referer: '/mi-cuenta/', login: 'Acceder' });
+  const r2 = await pedirJson(VIGORITA_BASE + '/mi-cuenta/', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/x-www-form-urlencoded' }, cabH), body: body.toString() }, jarra);
+  if (!jarra.tiene(/^wordpress_logged_in/)) throw err(400, 'Vigorita rechazó el usuario o la clave guardados. Revisalos en la ficha del proveedor.');
+  void r2;
+  return jarra;
+}
+
+async function leerCatalogoVigorita(cred, maxPaginas, porPagina) {
+  const jarra = await loginVigorita(cred);
+  const productos = [];
+  for (let pagina = 1; pagina <= (maxPaginas || 200); pagina++) {
+    const r = await pedirJson(`${VIGORITA_BASE}/wp-json/wc/store/v1/products?per_page=${porPagina || 100}&page=${pagina}`, {}, jarra, 60000);
+    if (!r.ok) {
+      if (pagina > 1 && r.status === 400) break; // WooCommerce responde 400 al pasarse de la última página
+      throw err(502, 'El catálogo de Vigorita respondió con un error (' + r.status + ').');
+    }
+    const lista = await r.json().catch(() => null);
+    if (!Array.isArray(lista)) throw err(502, 'El catálogo de Vigorita devolvió un formato inesperado: puede haber cambiado el sitio.');
+    productos.push(...lista);
+    const total = Number(r.headers.get('x-wp-totalpages'));
+    if (!lista.length || lista.length < (porPagina || 100) || (Number.isFinite(total) && total > 0 && pagina >= total)) break;
+  }
+  return productos;
+}
+
+async function filasVigorita(cred, opciones) {
+  const productos = await leerCatalogoVigorita(cred);
+  if (!productos.length) throw err(502, 'El catálogo de Vigorita vino vacío.');
+  const monedaRegla = (opciones && opciones.moneda) || 'USD';
+  return productos.map(filaDeProductoVigorita).filter(f => f.codigo).map(f => {
+    const m = f.moneda || monedaRegla;
+    return Object.assign(f, m === monedaRegla ? {} : { precio: null, nombre: f.nombre + ' — en ' + m + ', la lista está configurada en ' + monedaRegla });
+  });
+}
+
+async function muestraVigorita(cred) {
+  const productos = await leerCatalogoVigorita(cred, 1, 3);
+  return productos.slice(0, 3).map(p => { const f = filaDeProductoVigorita(p, 0); return { sku: p.sku, nombre: p.name, campos: Object.keys(p), valores: { precioCrudo: p.prices && p.prices.price, tags: (p.tags || []).map(t => t.name).join(', '), atributos: (p.attributes || []).map(a => a.name + ': ' + ((a.terms || [])[0] || {}).name).join(' | ').slice(0, 400) }, camposImagen: ['images'], imagenes: f.imagenes, m2PorCaja: f.bulto ? { campo: 'M2 por unidad', valor: f.bulto } : null, fila: f }; });
+}
+
 const CONECTORES = {
-  maxipiso: { nombre: 'Maxipiso (catálogo mayorista)', url: MAXIPISO_BASE, filas: filasMaxipiso, muestra: muestraMaxipiso }
+  maxipiso: { nombre: 'Maxipiso (catálogo mayorista)', url: MAXIPISO_BASE, filas: filasMaxipiso, muestra: muestraMaxipiso },
+  vigorita: { nombre: 'Vigorita (tienda mayorista)', url: VIGORITA_BASE, filas: filasVigorita, muestra: muestraVigorita }
 };
 
 async function filasDePortal(portal, regla) {
@@ -222,4 +306,4 @@ async function muestraDePortal(portal) {
   if (!portal.usuario || !portal.claveCifrada) throw err(400, 'Faltan el usuario y la clave del portal en la ficha del proveedor.');
   return con.muestra({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' });
 }
-module.exports = { bultoDeProducto, muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso };
+module.exports = { bultoDeProducto, muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso, filaDeProductoVigorita };
