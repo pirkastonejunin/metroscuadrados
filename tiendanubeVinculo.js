@@ -40,7 +40,7 @@ async function productosTienda() {
     const nombreP = cotizador.nombreLocalizado(p.name);
     for (const v of (p.variants || [])) {
       const vals = (v.values || []).map(x => cotizador.nombreLocalizado(x)).filter(Boolean).join(' ');
-      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null });
+      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
     }
   }
   return filas;

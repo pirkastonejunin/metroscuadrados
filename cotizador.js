@@ -277,7 +277,7 @@ async function fetchAllProducts(storeId, accessToken) {
   while (true) {
     const response = await fetch(
       API_BASE + '/' + storeId + '/products?per_page=200&page=' + page +
-        '&fields=id,name,variants,handle,categories,images,brand,visibility,published',
+        '&fields=id,name,variants,handle,categories,images,brand,visibility,published,canonical_url',
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
@@ -393,7 +393,7 @@ async function buscarProductoTiendanubePorSku(sku) {
       if (!coincide) continue;
       return {
         nombre: nombreLocalizado(p.name),
-        url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null,
+        url: p.canonical_url || ((store.domain && nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${nombreLocalizado(p.handle)}` : null),
         imagenes: (p.images || []).map(img => img.src).filter(Boolean)
       };
     }
