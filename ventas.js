@@ -1598,6 +1598,37 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Corrige lo entregado de una venta migrada de Dux (14/10/2026, pedido de Mato: figuraba entregada completa pero era parcial).
+// No mueve stock: solo ajusta cantidadEntregada y el estado, para poder generar remitos por lo que falta.
+router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const items = req.body && Array.isArray(req.body.items) ? req.body.items : null;
+    if (!items) throw err(400, 'Faltan los ítems.');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (!venta.importado) throw err(400, 'Solo se puede corregir la entrega de ventas migradas de Dux.');
+      if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
+      const nuevos = venta.items.map((it, idx) => {
+        const e = items.find(x => Number(x.index) === idx);
+        if (!e) return it;
+        const c = Number(e.cantidadEntregada);
+        if (!Number.isFinite(c) || c < 0 || c > (it.cantidad || 0) + 1e-9) throw err(400, `Cantidad entregada inválida para "${it.nombre}".`);
+        return Object.assign({}, it, { cantidadEntregada: c });
+      });
+      const total = nuevos.reduce((s, it) => s + (it.cantidad || 0), 0);
+      const ent = nuevos.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
+      const estado = ent <= 0 ? 'pendiente' : (ent >= total - 1e-9 ? 'entregada' : 'parcialmente_entregada');
+      await db.collection('ventas').updateOne({ _id: id }, { $set: { items: nuevos, estado, entregaCorregida: true, updatedAt: new Date() } });
+      return db.collection('ventas').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Anula una venta. Si ya se había entregado algo (uno o varios remitos),
 // reingresa al físico lo entregado y libera lo que quedaba pendiente sin
 // entregar. Si todavía estaba "pendiente" (solo comprometido, sin

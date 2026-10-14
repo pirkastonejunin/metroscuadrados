@@ -1505,6 +1505,7 @@ function verDetalle(id){
         <div id="dvRemitos"><p class="muted">Cargando...</p></div>
         <div class="row" style="margin-top:10px">
           ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
+          ${(v.importado && v.estado !== 'anulada' && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="abrirAjusteEntrega('${v._id}')">Corregir entrega (Dux)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 && v.moneda === 'ARS' ? `<button class="btn secondary" onclick="abrirMP('${v._id}','link')">Link de pago</button><button class="btn secondary" onclick="abrirMP('${v._id}','point')">Cobrar con Point</button>` : ''}
         </div>
@@ -1679,6 +1680,34 @@ async function abrirEntregar(id){
       </div>
     </div>
   `;
+}
+
+// Corrige lo ya entregado de una venta migrada de Dux (no mueve stock).
+function abrirAjusteEntrega(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  const filas = v.items.map((it, idx) => `<tr><td>${escapeHtml(it.nombre)}</td><td class="muted">${it.cantidad}</td><td><input type="number" class="aj-ent" data-idx="${idx}" min="0" max="${it.cantidad}" step="any" value="${it.cantidadEntregada || 0}" style="width:90px"></td></tr>`).join('');
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal">
+        <span class="close-x" onclick="cerrarModal()">✕</span>
+        <h2>Corregir entrega — venta ${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : '#' + v.numero}</h2>
+        <p class="muted">Indicá cuánto de cada ítem ya se entregó realmente. Lo que quede pendiente se podrá remitir después. No mueve stock.</p>
+        <table style="margin-top:10px"><thead><tr><th>Producto</th><th>Cantidad</th><th>Ya entregado</th></tr></thead><tbody>${filas}</tbody></table>
+        <div class="err" id="ajErr"></div>
+        <button class="btn" style="margin-top:10px" onclick="confirmarAjusteEntrega('${id}')">Guardar</button>
+      </div>
+    </div>`;
+}
+async function confirmarAjusteEntrega(id){
+  const items = [...document.querySelectorAll('.aj-ent')].map(i => ({ index: Number(i.dataset.idx), cantidadEntregada: Number(i.value) || 0 }));
+  try{
+    const r = await fetch(BASE + '/' + id + '/ajustar-entrega', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ items })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas();
+    verDetalle(id);
+  }catch(e){ document.getElementById('ajErr').textContent = e.message; }
 }
 
 async function confirmarEntregar(id){
