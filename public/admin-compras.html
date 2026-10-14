@@ -288,7 +288,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
@@ -706,7 +706,7 @@ function abrirNuevaCompra(){
         <div class="grid3">
           <div><label>Proveedor *</label><input type="text" id="ncProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('ncProveedor','actualizarCondicionPago')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="ncProveedor"></div>
           <div><label>Condición de pago</label><input id="ncCondicionPago" placeholder="Se autocompleta del proveedor"></div>
-          <div><label>Fecha</label><input id="ncFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="ncFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Moneda</label><select id="ncMoneda" onchange="actualizarVisibilidadCotizacion('ncCotizacionWrap','ncMoneda','ncCotizacionDolar'); recalcularPreciosPorMoneda('#ncFilasItems','ncMoneda','ncCotizacionDolar',actualizarTotalesCompra)"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
@@ -1284,7 +1284,7 @@ function abrirPago(id){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="npCuentaWrap"><label id="npCuentaLabel">¿De qué caja sale? *</label><select id="npCuenta">${opcionesCuentaPago('efectivo')}</select></div>
-          <div><label>Fecha *</label><input id="npFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha *</label><input id="npFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div id="npTerceroWrap" class="hidden" style="margin-top:10px"></div>
         <div id="npChequeWrap" class="hidden" style="margin-top:10px">
@@ -1293,7 +1293,7 @@ function abrirPago(id){
             <div><label>Banco propio *</label><select id="npChequeCuenta">${opcionesBancoPropioCheque()}</select></div>
           </div>
           <div class="grid2" style="margin-top:10px">
-            <div><label>Fecha de emisión</label><input id="npChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Fecha de emisión</label><input id="npChequeFechaEmision" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
             <div><label>Vencimiento *</label><input id="npChequeVencimiento" type="date"></div>
           </div>
         </div>
@@ -1512,7 +1512,7 @@ function abrirPagoCuenta(){
         <div class="grid3">
           <div><label>Proveedor *</label><input type="text" id="pcProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('pcProveedor','cargarComprasPendientesPagoCuenta')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="pcProveedor"></div>
           <div><label>Monto *</label><input id="pcMonto" type="number" min="0.01" step="0.01" value="0" oninput="actualizarRepartidoPagoCuenta()"></div>
-          <div><label>Fecha *</label><input id="pcFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha *</label><input id="pcFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         ${ORGS_ME.length > 1 ? `<div class="grid2" style="margin-top:10px">
           <div><label>Sucursal a la que corresponde el pago *</label><select id="pcOrg" onchange="cambiarSucursalPagoCuenta()">${ORGS_ME.map(o => `<option value="${o._id}" ${o._id === orgPagoDefecto() ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></div>
@@ -1529,7 +1529,7 @@ function abrirPagoCuenta(){
             <div><label>Banco propio *</label><select id="pcChequeCuenta">${opcionesBancoPropioCheque()}</select></div>
           </div>
           <div class="grid2" style="margin-top:10px">
-            <div><label>Fecha de emisión</label><input id="pcChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Fecha de emisión</label><input id="pcChequeFechaEmision" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
             <div><label>Vencimiento *</label><input id="pcChequeVencimiento" type="date"></div>
           </div>
         </div>
@@ -1750,7 +1750,7 @@ function abrirNuevaOrden(){
         <div class="grid3">
           <div><label>Proveedor *</label><input type="text" id="noProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('noProveedor','actualizarCondicionPagoOrden')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="noProveedor"></div>
           <div><label>Condición de pago</label><input id="noCondicionPago" placeholder="Se autocompleta del proveedor"></div>
-          <div><label>Fecha</label><input id="noFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="noFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Moneda</label><select id="noMoneda" onchange="recalcularPreciosPorMoneda('#noFilasItems','noMoneda','noCotizacionDolar',actualizarTotalesOrden)"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
@@ -2114,7 +2114,7 @@ async function abrirConvertirOrden(id){
         <p class="muted" style="margin-top:-8px">Desmarcá lo que todavía no llegó — queda pendiente en la orden para convertir después.</p>
         <div class="grid3">
           <div><label>Condición de pago</label><input id="coCondicionPago" value="${escapeHtml(o.condicionPago||'')}"></div>
-          <div><label>Fecha</label><input id="coFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="coFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
           <div><label>Moneda</label><select id="coMoneda" onchange="actualizarVisibilidadCotizacion('coCotizacionWrap','coMoneda','coCotizacionDolar')"><option value="ARS" ${o.moneda==='ARS'?'selected':''}>Pesos (ARS)</option><option value="USD" ${o.moneda==='USD'?'selected':''}>Dólares (USD)</option></select></div>
         </div>
         <div class="grid3" style="margin-top:10px">

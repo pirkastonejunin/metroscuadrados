@@ -206,7 +206,7 @@ async function exportar(){
     if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'No se pudo exportar'); }
     const blob = await r.blob(), a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'deudores-' + (VER === 'comprobante' ? 'comprobantes' : 'clientes') + '-' + new Date().toISOString().slice(0,10) + '.xlsx';
+    a.download = 'deudores-' + (VER === 'comprobante' ? 'comprobantes' : 'clientes') + '-' + new Date(Date.now()-3*3600000).toISOString().slice(0,10) + '.xlsx';
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }catch(e){ $('err').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
 }

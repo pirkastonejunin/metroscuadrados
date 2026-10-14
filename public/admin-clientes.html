@@ -173,7 +173,7 @@ function money(n){
   const signo = n < 0 ? '-' : '';
   return signo + '$ ' + Math.abs(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -923,7 +923,7 @@ function actualizarTipoValorCobroVentaCC(){
     document.getElementById('cvccCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
     document.getElementById('cvccCuenta').innerHTML = opcionesCuentaCobroVentaCC(tipoValor);
   }
-  if (esCheque) document.getElementById('cvccChequeFechaEmision').value = document.getElementById('cvccChequeFechaEmision').value || new Date().toISOString().slice(0,10);
+  if (esCheque) document.getElementById('cvccChequeFechaEmision').value = document.getElementById('cvccChequeFechaEmision').value || new Date(Date.now()-3*3600000).toISOString().slice(0,10);
 }
 async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, clienteId){
   document.getElementById('modalCobroVentaRoot').innerHTML = `
@@ -939,7 +939,7 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
           <div><label>Monto * (podés poner menos para un cobro parcial)</label><input id="cvccMonto" type="number" min="0.01" step="0.01" value="${saldoPendiente > 0 ? saldoPendiente : ''}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
-          <div><label>Fecha</label><input id="cvccFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="cvccFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
           <div><label>Nota</label><input id="cvccNota"></div>
         </div>
         <div class="grid2" id="cvccCuentaWrap" style="margin-top:10px">

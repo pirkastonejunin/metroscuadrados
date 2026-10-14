@@ -184,7 +184,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
@@ -407,7 +407,7 @@ function abrirNuevoGasto(){
         <div class="grid3">
           <div><label>Proveedor *</label><input type="text" id="ngProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('ngProveedor')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="ngProveedor"></div>
           <div><label>Condición de pago</label><input id="ngCondicionPago" placeholder="Se autocompleta del proveedor"></div>
-          <div><label>Fecha</label><input id="ngFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="ngFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Moneda</label><select id="ngMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
@@ -877,7 +877,7 @@ function abrirPago(id){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="npCuentaWrap"><label id="npCuentaLabel">¿De qué caja sale? *</label><select id="npCuenta">${opcionesCuentaPago('efectivo')}</select></div>
-          <div><label>Fecha *</label><input id="npFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha *</label><input id="npFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div id="npTerceroWrap" class="hidden" style="margin-top:10px"></div>
         <div id="npChequeWrap" class="hidden" style="margin-top:10px">
@@ -886,7 +886,7 @@ function abrirPago(id){
             <div><label>Banco propio *</label><select id="npChequeCuenta">${opcionesBancoPropioCheque()}</select></div>
           </div>
           <div class="grid2" style="margin-top:10px">
-            <div><label>Fecha de emisión</label><input id="npChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Fecha de emisión</label><input id="npChequeFechaEmision" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
             <div><label>Vencimiento *</label><input id="npChequeVencimiento" type="date"></div>
           </div>
         </div>

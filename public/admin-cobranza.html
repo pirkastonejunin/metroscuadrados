@@ -217,7 +217,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function money(n){
   n = Number(n || 0);
   const signo = n < 0 ? '-' : '';
@@ -283,7 +283,7 @@ async function iniciarApp(){
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await Promise.all([cargarCajasYBancosCB(), asegurarClientesCargadosCB()]);
   document.getElementById('cbClienteCombo').innerHTML = comboClienteHtmlCB();
-  document.getElementById('cbFecha').value = new Date().toISOString().slice(0,10);
+  document.getElementById('cbFecha').value = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
   cargarListaCobranzas();
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
@@ -469,7 +469,7 @@ function actualizarTipoValorCB(){
     document.getElementById('cbCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
     document.getElementById('cbCuenta').innerHTML = opcionesCuentaCB(tipoValor);
   }
-  if (esCheque) document.getElementById('cbChequeFechaEmision').value = document.getElementById('cbChequeFechaEmision').value || new Date().toISOString().slice(0,10);
+  if (esCheque) document.getElementById('cbChequeFechaEmision').value = document.getElementById('cbChequeFechaEmision').value || new Date(Date.now()-3*3600000).toISOString().slice(0,10);
 }
 
 // Retenciones en el recibo (5/10/2026, pedido de Mato): "Monto cobrado" es lo

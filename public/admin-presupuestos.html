@@ -175,7 +175,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function fechaHoraCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR') + ' ' + d.toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'}); }
 function money(n){
   n = Number(n || 0);
@@ -637,7 +637,7 @@ function abrirNuevoPresupuesto(prefill){
             <label>Cliente *</label>
             ${comboClienteHtml('p', (prefill && prefill.clienteId) || '')}
           </div>
-          <div><label>Fecha</label><input id="pFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="pFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div class="grid3" style="margin-top:10px">
           <div><label>Vendedor</label><input id="pVendedor" value="${escapeHtml(NOMBRE_USUARIO)}"></div>

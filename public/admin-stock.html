@@ -262,7 +262,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 
 async function login(){
   const usuario = document.getElementById('loginUser').value;
@@ -726,7 +726,7 @@ function abrirNuevoMovimiento(){
           <select id="mmUnidadSelect"></select>
         </div>
         <div class="grid2" style="margin-top:10px">
-          <div><label>Fecha</label><input id="mmFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="mmFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
           <div><label>Sucursal</label><input id="mmSucursal" placeholder="Opcional"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
@@ -882,7 +882,7 @@ function abrirNuevaTransferencia(){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Cantidad *</label><input id="mtCantidad" type="number" min="0.01" step="0.01"></div>
-          <div><label>Fecha</label><input id="mtFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="mtFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div id="mtUnidadWrap" class="hidden" style="margin-top:10px">
           <label>¿La cantidad de arriba es por bulto o por unidad?</label>

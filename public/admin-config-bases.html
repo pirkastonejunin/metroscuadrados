@@ -686,7 +686,7 @@ async function cargarPlanesTarjeta(){
       <td><input id="tp_c_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.costoPorcentaje || 0}" style="width:90px"></td>
       <td><input id="tp_r_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.recargoPorcentaje || 0}" style="width:90px"></td>
       <td><input id="tp_y_${p._id}" value="${escapeHtml(p.leyenda || '')}" style="min-width:160px"></td>
-      <td><input id="tp_h_${p._id}" type="date" value="${escapeHtml(p.vigenteHasta || '')}">${p.vigenteHasta && p.vigenteHasta < new Date().toISOString().slice(0,10) ? '<div class="err" style="margin:0">Vencido</div>' : ''}</td>
+      <td><input id="tp_h_${p._id}" type="date" value="${escapeHtml(p.vigenteHasta || '')}">${p.vigenteHasta && p.vigenteHasta < new Date(Date.now()-3*3600000).toISOString().slice(0,10) ? '<div class="err" style="margin:0">Vencido</div>' : ''}</td>
       <td>${listasPrecioPlanes.map(l => `<label style="display:flex;align-items:center;gap:4px;font-weight:500;white-space:nowrap"><input type="checkbox" style="width:auto" class="tp_l_${p._id}" value="${l._id}" ${(p.listasPrecioIds || []).map(String).includes(String(l._id)) ? 'checked' : ''}> ${escapeHtml(l.nombre)}</label>`).join('') || '<span class="muted">—</span>'}</td>
       <td>${p.activo !== false ? '<span class="pill activo">Activo</span>' : '<span class="pill inactivo">Inactivo</span>'}</td>
       <td style="white-space:nowrap"><button class="btn small" onclick="guardarPlanTarjeta('${p._id}', ${p.activo !== false})">Guardar</button>

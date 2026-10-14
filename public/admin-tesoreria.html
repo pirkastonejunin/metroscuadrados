@@ -278,7 +278,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
@@ -479,7 +479,7 @@ function abrirMovimientoManual(){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Monto *</label><input id="mmMonto" type="number" min="0.01" step="0.01"></div>
-          <div><label>Fecha</label><input id="mmFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="mmFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div style="margin-top:10px"><label>Motivo</label><input id="mmMotivo" placeholder="Ej: Retiro para gastos de caja chica"></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="mmObservaciones"></textarea></div>
@@ -625,7 +625,7 @@ async function abrirCobroCuentaCliente(){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="ccCuentaWrap"><label id="ccCuentaLabel">¿A qué caja va? *</label><select id="ccCuenta">${opcionesCuentaCobroCC('efectivo')}</select></div>
-          <div><label>Fecha *</label><input id="ccFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha *</label><input id="ccFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div id="ccChequeWrap" class="hidden" style="margin-top:10px">
           <div class="grid2">
@@ -637,7 +637,7 @@ async function abrirCobroCuentaCliente(){
             <div><label>CUIT del librador</label><input id="ccChequeCuit" placeholder="Opcional"></div>
           </div>
           <div class="grid2" style="margin-top:10px">
-            <div><label>Fecha de emisión</label><input id="ccChequeFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div><label>Fecha de emisión</label><input id="ccChequeFechaEmision" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
             <div><label>Vencimiento *</label><input id="ccChequeVencimiento" type="date"></div>
           </div>
         </div>
@@ -891,7 +891,7 @@ function abrirNuevoCheque(){
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>CUIT del librador (de terceros)</label><input id="ncqCuitLibrador" placeholder="Opcional"></div>
-          <div><label>Fecha de emisión</label><input id="ncqFechaEmision" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha de emisión</label><input id="ncqFechaEmision" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div style="margin-top:10px"><label>Cliente o proveedor (texto libre)</label><input id="ncqTercero" placeholder="Nombre"></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="ncqObservaciones"></textarea></div>
@@ -1257,7 +1257,7 @@ function abrirTransferencia(){
         <div style="margin-top:10px"><label>Hacia *</label><select id="trDestino"><option value="">Elegí…</option>${opciones}</select></div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Monto *</label><input id="trMonto" type="number" min="0.01" step="0.01"></div>
-          <div><label>Fecha</label><input id="trFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div><label>Fecha</label><input id="trFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="trObs" placeholder="Ej: Depósito de la recaudación del día"></textarea></div>
         <div class="err" id="trErr"></div>

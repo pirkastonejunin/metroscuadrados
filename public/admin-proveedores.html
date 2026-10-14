@@ -173,7 +173,7 @@ function headersAuth(extra){
 }
 function headersAuthJson(extra){ return headersAuth(Object.assign({'Content-Type':'application/json'}, extra||{})); }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR'); }
+function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function money(n){ return '$ ' + Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 const TIPO_COMPROBANTE_LABEL = {
   factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M',
@@ -894,7 +894,7 @@ async function abrirAjusteSaldoProveedor(){
         <p class="muted" style="margin-top:-6px">Saldo actual: <strong>${money(c.saldo)}</strong> ${c.saldo > 0.005 ? '(le debemos)' : (c.saldo < -0.005 ? '(a favor nuestro)' : '')}. Poné el saldo que tiene que quedar y el sistema calcula la diferencia.</p>
         <div class="row">
           <div style="flex:1;min-width:180px"><label>Saldo que tiene que quedar *</label><input id="ajNuevo" type="number" step="0.01" value="${c.saldo}" oninput="calcularAjusteSaldoProveedor()"></div>
-          <div style="flex:1;min-width:150px"><label>Fecha</label><input id="ajFecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div style="flex:1;min-width:150px"><label>Fecha</label><input id="ajFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
         <div id="ajDif" class="muted" style="margin:8px 0"></div>
         ${ORGS_PROV.length > 1 ? `<div><label>Sucursal a la que corresponde *</label><select id="ajOrg">${ORGS_PROV.map(o => `<option value="${o._id}" ${String(o._id) === defOrg ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></div>` : ''}

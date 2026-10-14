@@ -410,7 +410,7 @@ function abrirNuevaObra(){
       <div><label>Teléfono</label><input id="nObTelefono"></div>
       <div><label>Dirección</label><input id="nObDireccion"></div>
       <div><label>Localidad</label><input id="nObLocalidad"></div>
-      <div><label>Fecha de venta</label><input type="date" id="nObFecha" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div><label>Fecha de venta</label><input type="date" id="nObFecha" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
       <div><label>Vendedor</label><select id="nObVendedor">${opcionesVendedorObra(NOMBRE_USUARIO)}</select></div>
     </div>
     <div style="margin-top:10px">
