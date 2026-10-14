@@ -336,6 +336,7 @@
         </div>
         <div class="grid">
           <div class="field"><label id="labelDesperdicioSuperficies">% desperdicio</label><input type="number" id="desperdicioPctSuperficies" min="0" step="0.5" value="0"></div>
+          <div class="field hidden" id="campoPrecioM2Generico"><label>Precio por m² total ($)</label><input type="number" id="precioM2Generico" min="0" step="0.01" placeholder="Vacío = el de la configuración"></div>
         </div>
       </div>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
@@ -489,6 +490,11 @@
 
         <!-- Vista: tarifas de mano de obra de este tipo de obra -->
         <div id="cfg-catalogo-tarifas" class="hidden">
+          <div class="grid hidden" id="t_camposGenerico">
+            <div class="field"><label>Precio por m² total, llave en mano ($)</label><input type="number" id="t_placas_m2_completo" min="0" step="0.01"></div>
+            <div class="field"><label>m² que cubre 1 envase de pegamento</label><input type="number" id="t_pegamento_rinde_m2" min="0" step="0.01"></div>
+            <div class="field"><label>Cómo se llama el envase (balde, bolsa…)</label><input type="text" id="t_pegamento_envase" maxlength="30" placeholder="envase"></div>
+          </div>
           <p class="hint">Se aplican solo cuando la cotización de este tipo de obra tiene tildado "Incluir mano de obra". La manta y la silicona/pegamento no tienen tarifa propia: su colocación se considera incluida en las tarifas de piso y zócalo respectivamente. Para Placas, el valor por m² es solo mano de obra: el pegamento y la masilla se cobran aparte (incluidos en esa tarifa). Para Piedra, "Valor m² completo, llave en mano" es un precio único (materiales + colocación) que se multiplica directo por los m² de la obra: la cotización no discrimina precio por artículo, pero sigue mostrando la cantidad que hace falta de cada material (piedra, pegamento, laca).</p>
           <div class="grid" id="t_camposPiso">
             <div class="field"><label>Por m² de piso ($)</label><input type="number" id="t_pisos_m2" min="0" step="0.01"></div>
@@ -609,6 +615,7 @@ let editandoCotizacionId = null;   // _id de una cotización del historial que s
 let obraOriginalEdicion = null;    // "obra" tal cual estaba guardada al entrar a editar, para no perder utilizaManta si no se vuelve a pasar por paso-productos
 let editandoTipoObraId = null;
 let gestionandoTipoObraId = null;  // tipo de obra cuyo panel de catálogos está abierto en Configuración
+let gestionandoTipoObraGenerico = false;
 let gestionandoTipoObraCategoria = 'piso'; // categoría ('piso'|'piedra'|'placas') del tipo de obra cuyo panel de catálogos está abierto
 let categoriaActivaCatalogo = 'puerta';
 let productosComparar = [];        // ids de productos de piso tildados con "Comparar" en paso 3, para generarlos todos juntos con la misma foto
@@ -863,6 +870,11 @@ $('#btnContinuarDatos').addEventListener('click', () => {
       : 'Cargá cada pared/superficie por separado (largo x alto) — se van a sumar todas para calcular los m² totales de piedra.';
     $('#labelDesperdicioSuperficies').textContent = esPlacas ? '% desperdicio adicional de placas (opcional)' : '% desperdicio de piedra';
     if (esPlacas) $('#desperdicioPctSuperficies').value = 0;
+    const gen = !!tipoObraElegido.generico;
+    $('#campoPrecioM2Generico').classList.toggle('hidden', !gen);
+    $('#precioM2Generico').value = '';
+    document.getElementById('manoObra').closest('label').classList.toggle('hidden', gen);
+    if (gen) document.getElementById('manoObra').checked = false;
   } else {
     $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
   }
@@ -950,6 +962,7 @@ function leerObra(){
     // para que descripcionObra() y el cálculo server-side puedan distinguir
     // una obra de piedra de una de placas aunque compartan la misma forma
     // (superficies sueltas largo x alto).
+    if (categoria === 'placas' && tipoObraElegido.generico) obra.precioM2 = parseFloat($('#precioM2Generico').value) || 0;
     if (categoria === 'placas') obra.desperdicioPctPlacas = desperdicio;
     else obra.desperdicioPctPiedra = desperdicio;
     return obra;
@@ -2042,6 +2055,7 @@ $('#btnCalcular').addEventListener('click', async () => {
     $('#paso-resumen').classList.remove('hidden');
     $('#btnPdf').classList.add('hidden');
     $('#btnNueva').classList.add('hidden');
+    if (data.avisos && data.avisos.length) mostrarMsg(data.avisos.join(' '));
   }catch(e){ mostrarMsg(e.message); }
 });
 
@@ -2116,7 +2130,7 @@ function renderResumen(data, editable, vistaSimple){
     html += '</tbody></table>';
     html += '<div class="totales">' +
       (soloCant
-        ? (data.totalManoObra ? '<div class="grand">Mano de obra: ' + money(data.totalManoObra) + '</div>' : '')
+        ? (data.total ? '<div class="grand">Total: ' + money(data.total) + '</div>' : '')
         : llaveEnMano
         ? '<div class="grand">Llave en mano: ' + money(data.total) + '</div>'
         : 'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
@@ -2592,13 +2606,14 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
   await cargarConfigTipos();
   if (eraNuevo){
     // Recién creado: abrimos directo sus catálogos para que cargue los SKU.
-    abrirCatalogos({ id: data.id, nombre: data.nombre, categoria });
+    abrirCatalogos({ id: data.id, nombre: data.nombre, categoria, generico: esGenerico });
   }
 });
 
 // ---------- Configuración: catálogos por SKU / mano de obra de un tipo de obra ----------
 function abrirCatalogos(tipoObra){
   gestionandoTipoObraId = String(tipoObra.id);
+  gestionandoTipoObraGenerico = !!tipoObra.generico;
   const categoria = (tipoObra.categoria === 'piedra' || tipoObra.categoria === 'placas') ? tipoObra.categoria : 'piso';
   gestionandoTipoObraCategoria = categoria;
   categoriaActivaCatalogo = categoria === 'piedra' ? 'pegamentoPiedra' : categoria === 'placas' ? 'pegamentoPlacas' : 'puerta';
@@ -2612,6 +2627,14 @@ function abrirCatalogos(tipoObra){
   $('#cfg-catalogo-tarifas').classList.add('hidden');
   $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
   $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  if (gestionandoTipoObraGenerico){
+    // Placas genérico: no hay catálogo por SKU, solo precio por m² y rendimiento del pegamento.
+    $('#cfg-catsub-placas').classList.add('hidden');
+    $('#cfg-catalogo-sku').classList.add('hidden');
+    $('#cfg-catalogo-tarifas').classList.remove('hidden');
+    cargarTarifasTipoObra();
+    return;
+  }
   cargarCatalogoActivo();
 }
 
@@ -2732,7 +2755,8 @@ async function cargarTarifasTipoObra(){
   if (!gestionandoTipoObraId) return;
   $('#t_camposPiso').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'piso');
   $('#t_camposPiedra').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'piedra');
-  $('#t_camposPlacas').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'placas');
+  $('#t_camposPlacas').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'placas' || gestionandoTipoObraGenerico);
+  $('#t_camposGenerico').classList.toggle('hidden', !gestionandoTipoObraGenerico);
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId);
   const t = await res.json();
   if (!res.ok) return;
@@ -2742,6 +2766,9 @@ async function cargarTarifasTipoObra(){
   $('#t_nivelacion_m2').value = t.nivelacion_m2;
   $('#t_piedra_m2_completo').value = t.piedra_m2_completo || 0;
   $('#t_placas_m2').value = t.placas_m2 || 0;
+  $('#t_placas_m2_completo').value = t.placas_m2_completo || 0;
+  $('#t_pegamento_rinde_m2').value = t.pegamento_rinde_m2 || 0;
+  $('#t_pegamento_envase').value = t.pegamento_envase || 'envase';
   $('#t_minimoM2Cotizable').value = t.minimoM2Cotizable || 0;
 }
 $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
@@ -2754,6 +2781,9 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
     nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0,
     piedra_m2_completo: parseFloat($('#t_piedra_m2_completo').value) || 0,
     placas_m2: parseFloat($('#t_placas_m2').value) || 0,
+    placas_m2_completo: parseFloat($('#t_placas_m2_completo').value) || 0,
+    pegamento_rinde_m2: parseFloat($('#t_pegamento_rinde_m2').value) || 0,
+    pegamento_envase: ($('#t_pegamento_envase').value || '').trim(),
     minimoM2Cotizable: parseFloat($('#t_minimoM2Cotizable').value) || 0
   };
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId, {

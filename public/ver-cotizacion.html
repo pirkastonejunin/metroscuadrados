@@ -156,7 +156,7 @@ function render(){
     });
     html += '</tbody></table>';
     html += doc.soloCantidades
-      ? (doc.totalManoObra ? '<div class="totales"><div class="grand">Mano de obra: ' + money(doc.totalManoObra) + '</div></div>' : '')
+      ? (doc.total ? '<div class="totales"><div class="grand">Total: ' + money(doc.total) + '</div></div>' : '')
       : '<div class="totales">Subtotal productos: ' + money(doc.totalProductos) + '<br>' +
         (doc.totalManoObra ? 'Mano de obra: ' + money(doc.totalManoObra) + '<br>' : '') +
         '<div class="grand">Total: ' + money(doc.total) + '</div></div>';

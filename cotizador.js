@@ -199,6 +199,10 @@ const TARIFA_DEFAULT = {
   // pero no se borra por si Mato vuelve a necesitarlo).
   piedra_m2_completo: 0,
   placas_m2: 0,
+  // Placas genérico (sin productos): precio por m² total (llave en mano), cuántos m² cubre 1 envase de pegamento y cómo se llama el envase.
+  placas_m2_completo: 0,
+  pegamento_rinde_m2: 0,
+  pegamento_envase: 'envase',
   minimoM2Cotizable: 0
 };
 
@@ -224,6 +228,9 @@ async function setTarifas(storeId, tipoObraId, tarifas) {
     piedra_m2: Number(tarifas.piedra_m2) || 0,
     piedra_m2_completo: Number(tarifas.piedra_m2_completo) || 0,
     placas_m2: Number(tarifas.placas_m2) || 0,
+    placas_m2_completo: Number(tarifas.placas_m2_completo) || 0,
+    pegamento_rinde_m2: Number(tarifas.pegamento_rinde_m2) || 0,
+    pegamento_envase: String(tarifas.pegamento_envase || '').trim().slice(0, 30) || 'envase',
     minimoM2Cotizable: Number(tarifas.minimoM2Cotizable) || 0
   };
   await conReintento(async () => {
@@ -480,7 +487,7 @@ function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago })
   const calcularItems = categoria === 'piedra' ? calcularItemsPiedra
     : categoria === 'placas' ? calcularItemsPlacas
     : calcularItemsPiso;
-  const { items, faltantes, totalProductos: tp, totalManoObra: tm } = calcularItems({ obra, productos, tarifas: t });
+  const { items, faltantes, totalProductos: tp, totalManoObra: tm, avisos } = calcularItems({ obra, productos, tarifas: t });
 
   const totalProductos = round2(tp);
   const totalManoObra = round2(tm);
@@ -503,7 +510,7 @@ function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago })
   const llaveEnMano = categoria === 'piedra' && !!(obra && obra.manoObra);
   const soloCantidades = categoria === 'placas' && !!(obra && obra.generico);
 
-  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano, soloCantidades };
+  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano, soloCantidades, avisos: avisos || [] };
 }
 
 // ---- Piso (lógica original, sin cambios de comportamiento) ----
@@ -681,9 +688,10 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
   const minimoM2 = Number(t.minimoM2Cotizable) || 0;
   const m2CotizableManoObra = m2Placas > 0 ? Math.max(m2Placas, minimoM2) : 0;
 
-  // Cotizador genérico de placas (sin productos del catálogo): solo cantidades (placas de 0,60 x 0,60 por módulos) y,
-  // si se tilda, la mano de obra con la tarifa por m² de placas. No hay precios de material.
+  // Cotizador genérico de placas (sin productos del catálogo): un precio por m² total (llave en mano, el de la cotización o el
+  // de la configuración), y se informa cuántas placas de 0,60 x 0,60 (por módulos) y cuánto pegamento hacen falta.
   if (obra.generico) {
+    const avisos = [];
     if (m2Placas > 0) {
       const cantPlacas = Math.round(m2Placas / (MODULO_PLACA_M * MODULO_PLACA_M));
       const pct = Number(obra.desperdicioPctPlacas) || 0;
@@ -693,9 +701,22 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
         unidadObra: 'm2', cantidadObra: round2(m2Placas), desperdicioPct: pct, cantidadConDesperdicio: round2(conExtra * MODULO_PLACA_M * MODULO_PLACA_M),
         rendimiento: MODULO_PLACA_M * MODULO_PLACA_M, envase: 'placa', paquetesNecesarios: conExtra, precioUnitario: 0, subtotal: 0
       });
-      if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.placas_m2);
+      const rinde = Number(t.pegamento_rinde_m2) || 0;
+      if (rinde > 0) {
+        const envases = Math.ceil(m2Placas / rinde - 1e-9);
+        items.push({
+          rubro: 'Pegamento para placas', productoId: null, producto: 'Pegamento para placas', categoria: '', imagen: null,
+          unidadObra: 'm2', cantidadObra: round2(m2Placas), desperdicioPct: 0, cantidadConDesperdicio: round2(m2Placas),
+          rendimiento: rinde, envase: t.pegamento_envase || 'envase', paquetesNecesarios: envases, precioUnitario: 0, subtotal: 0
+        });
+      } else {
+        avisos.push('No está cargado cuántos m² cubre un envase de pegamento (Configuración → tipo de obra → Mano de obra y precio), por eso no se calcula el pegamento.');
+      }
+      const precioM2 = Number(obra.precioM2) > 0 ? Number(obra.precioM2) : (Number(t.placas_m2_completo) || 0);
+      if (precioM2 > 0) totalManoObra += round2(m2CotizableManoObra * precioM2); // va en este total (el que se guarda con la cotización)
+      else avisos.push('Falta el precio por m²: cargalo en la cotización o en la configuración del tipo de obra.');
     }
-    return { items, faltantes, totalProductos, totalManoObra };
+    return { items, faltantes, totalProductos, totalManoObra, avisos };
   }
 
   if (m2Placas > 0) {
@@ -1842,7 +1863,7 @@ router.get('/pdf/:id', async (req, res) => {
 
       pdf.fontSize(10);
       if (doc.soloCantidades) {
-        if (doc.totalManoObra) pdf.fontSize(13).text('Mano de obra: ' + moneyPdf(doc.totalManoObra), { align: 'right' });
+        if (doc.total) pdf.fontSize(13).text('Total: ' + moneyPdf(doc.total), { align: 'right' });
       } else {
         pdf.text('Subtotal productos: ' + moneyPdf(doc.totalProductos), { align: 'right' });
         if (doc.totalManoObra) pdf.text('Mano de obra: ' + moneyPdf(doc.totalManoObra), { align: 'right' });
