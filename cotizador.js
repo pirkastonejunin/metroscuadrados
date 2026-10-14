@@ -107,7 +107,7 @@ function descripcionObra(o) {
   // ({superficies, manoObra, ...}) — o.categoria (guardado desde el
   // frontend, ver leerObra()) es lo único que distingue cuál de las dos es.
   if (Array.isArray(o.superficies) && o.superficies.length) {
-    const m2Total = o.superficies.reduce((s, x) => s + (Number(x.largo) || 0) * (Number(x.alto) || 0), 0);
+    const m2Total = o.superficies.reduce((s, x) => s + (o.categoria === 'placas' ? m2PlacasDeSuperficie(x) : (Number(x.largo) || 0) * (Number(x.alto) || 0)), 0);
     const etiqueta = o.categoria === 'placas' ? 'placas' : 'piedra';
     if (m2Total > 0) datos.push(round2(m2Total) + ' m2 de ' + etiqueta + ' (' + o.superficies.length + ' superficie' + (o.superficies.length === 1 ? '' : 's') + ')');
   }
@@ -459,6 +459,11 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPc
 }
 
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+// Placas de 0,60 x 0,60 m: cada lado de la pared se mide en módulos enteros de 0,60 (se redondea para arriba), así
+// la superficie a cubrir es la que realmente se compra y el desperdicio queda incluido en el redondeo.
+const MODULO_PLACA_M = 0.6;
+function modulosPlaca(medida) { const n = Number(medida) || 0; return n > 0 ? Math.ceil(n / MODULO_PLACA_M - 1e-9) : 0; }
+function m2PlacasDeSuperficie(x) { return modulosPlaca(x && x.largo) * modulosPlaca(x && x.alto) * MODULO_PLACA_M * MODULO_PLACA_M; }
 
 // productos: { piso, zocalo, puerta, nivelacion, manta, pegamento, piedra, pegamentoPiedra, laca, placas, pegamentoPlacas, masilla } -> cada uno (si aplica)
 // obra (piso): { m2Pisos, mlZocalos, cantidadPuertas, requiereNivelacion, utilizaManta, manoObra, desperdicioPctPiso }
@@ -669,11 +674,8 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
   const manoObra = !!obra.manoObra;
   const desperdicioPctPlacas = Number(obra.desperdicioPctPlacas) || 0;
   const superficies = Array.isArray(obra.superficies) ? obra.superficies : [];
-  const m2Placas = superficies.reduce((s, x) => {
-    const largo = Number(x && x.largo) || 0;
-    const alto = Number(x && x.alto) || 0;
-    return s + (largo > 0 && alto > 0 ? largo * alto : 0);
-  }, 0);
+  // Cada superficie se mide en módulos de 0,60 m (la placa es de 0,60 x 0,60): m² = módulos de largo x módulos de alto x 0,36.
+  const m2Placas = Math.round(superficies.reduce((s, x) => s + m2PlacasDeSuperficie(x), 0) * 10000) / 10000 || 0;
 
   const minimoM2 = Number(t.minimoM2Cotizable) || 0;
   const m2CotizableManoObra = m2Placas > 0 ? Math.max(m2Placas, minimoM2) : 0;
@@ -2019,6 +2021,7 @@ async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
 }
 
 module.exports = router;
+module.exports.m2PlacasDeSuperficie = m2PlacasDeSuperficie; // exportado para tests
 module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
 module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js
 module.exports.sincronizarPreciosTiendanube = sincronizarPreciosTiendanube; // exportado para productos.js

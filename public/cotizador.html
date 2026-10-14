@@ -649,6 +649,11 @@ const CATEGORIAS_ITEM_POR_TIPO = {
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
+// Placas de 0,60 x 0,60 m: cada lado se mide en módulos enteros de 0,60 (redondeo hacia arriba); ahí queda incluido el desperdicio.
+const MODULO_PLACA_M = 0.6;
+function modulosPlaca(m){ const n = Number(m) || 0; return n > 0 ? Math.ceil(n / MODULO_PLACA_M - 1e-9) : 0; }
+function m2PlacasDeSuperficie(x){ return modulosPlaca(x && x.largo) * modulosPlaca(x && x.alto) * MODULO_PLACA_M * MODULO_PLACA_M; }
+function esObraPlacas(){ return !!(tipoObraElegido && tipoObraElegido.categoria === 'placas'); }
 
 // Espejo de descripcionObra() en cotizador.js: descripción del alcance de la
 // obra (sin precios ni productos puntuales), para la vista "llave en mano".
@@ -661,7 +666,7 @@ function descripcionObra(o){
   if (o.requiereNivelacion) datos.push('con nivelación');
   if (o.utilizaManta) datos.push('con manta');
   if (Array.isArray(o.superficies) && o.superficies.length){
-    const m2Total = o.superficies.reduce((s, x) => s + (Number(x.largo)||0) * (Number(x.alto)||0), 0);
+    const m2Total = o.superficies.reduce((s, x) => s + (o.categoria === 'placas' ? m2PlacasDeSuperficie(x) : (Number(x.largo)||0) * (Number(x.alto)||0)), 0);
     const etiqueta = o.categoria === 'placas' ? 'placas' : 'piedra';
     if (m2Total > 0) datos.push(round2(m2Total) + ' m2 de ' + etiqueta + ' (' + o.superficies.length + ' superficie' + (o.superficies.length===1?'':'s') + ')');
   }
@@ -854,9 +859,10 @@ $('#btnContinuarDatos').addEventListener('click', () => {
     const esPlacas = categoria === 'placas';
     $('#camposSuperficiesTitulo').textContent = esPlacas ? 'Superficies a revestir con placas' : 'Superficies a revestir';
     $('#camposSuperficiesHint').textContent = esPlacas
-      ? 'Cargá cada pared/superficie por separado (largo x alto) — se van a sumar todas para calcular los m² totales de placas.'
+      ? 'Cargá cada pared/superficie por separado (largo x alto). Cada lado se mide en módulos de 0,60 m (la placa es de 0,60 x 0,60) y se redondea para arriba: ahí ya queda incluido el desperdicio.'
       : 'Cargá cada pared/superficie por separado (largo x alto) — se van a sumar todas para calcular los m² totales de piedra.';
-    $('#labelDesperdicioSuperficies').textContent = esPlacas ? '% desperdicio de placas' : '% desperdicio de piedra';
+    $('#labelDesperdicioSuperficies').textContent = esPlacas ? '% desperdicio adicional de placas (opcional)' : '% desperdicio de piedra';
+    if (esPlacas) $('#desperdicioPctSuperficies').value = 0;
   } else {
     $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
   }
@@ -881,6 +887,7 @@ function filaSuperficieHtml(largo, alto){
     '<div class="field"><label>Largo (m)</label><input type="number" class="sup-largo" min="0" step="0.01" value="' + (largo || '') + '"></div>' +
     '<div class="field"><label>Alto (m)</label><input type="number" class="sup-alto" min="0" step="0.01" value="' + (alto || '') + '"></div>' +
     '<button type="button" class="secondary small btn-quitar-superficie">Quitar</button>' +
+    '<div class="sup-modulos hint" style="flex-basis:100%;margin:0;"></div>' +
   '</div>';
 }
 function renumerarSuperficies(){
@@ -905,6 +912,17 @@ function agregarFilaSuperficie(largo, alto){
     fila.remove();
     renumerarSuperficies();
   });
+  const avisar = () => {
+    const info = fila.querySelector('.sup-modulos');
+    if (!esObraPlacas()) { info.textContent = ''; return; }
+    const l = parseFloat(fila.querySelector('.sup-largo').value) || 0, a = parseFloat(fila.querySelector('.sup-alto').value) || 0;
+    if (l <= 0 || a <= 0) { info.textContent = ''; return; }
+    const ml = modulosPlaca(l), ma = modulosPlaca(a);
+    info.textContent = 'Se cubre ' + (ml * MODULO_PLACA_M).toFixed(2) + ' x ' + (ma * MODULO_PLACA_M).toFixed(2) + ' m (' + ml + ' x ' + ma + ' = ' + (ml * ma) + ' placas · ' + (ml * ma * MODULO_PLACA_M * MODULO_PLACA_M).toFixed(2) + ' m²)';
+  };
+  fila.querySelector('.sup-largo').addEventListener('input', avisar);
+  fila.querySelector('.sup-alto').addEventListener('input', avisar);
+  fila.__avisar = avisar; avisar();
   renumerarSuperficies();
 }
 function resetSuperficies(){
@@ -967,7 +985,8 @@ async function asegurarCatalogosTipoObra(){
 }
 
 function m2TotalSuperficies(obra){
-  return (obra.superficies || []).reduce((s, x) => s + (Number(x.largo) || 0) * (Number(x.alto) || 0), 0);
+  const placas = obra.categoria === 'placas';
+  return Math.round((obra.superficies || []).reduce((s, x) => s + (placas ? m2PlacasDeSuperficie(x) : (Number(x.largo) || 0) * (Number(x.alto) || 0)), 0) * 10000) / 10000;
 }
 
 $('#btnContinuarProductos').addEventListener('click', async () => {
