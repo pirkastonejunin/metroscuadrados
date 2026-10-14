@@ -250,6 +250,18 @@ const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
 
 const authAdmin = [authUsuario, resolverOrg, requiereModulo('ventas')];
+// En "vista todas" las acciones se hacen con la sucursal de operación elegida arriba; si la venta es de OTRA sucursal
+// no se encontraba ("Venta no encontrada"). Acá se busca por id y se opera con la sucursal propia de la venta.
+async function buscarVentaOperable(db, req, id) {
+  let venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+  if (!venta && req.vistaTodas) {
+    venta = await db.collection('ventas').findOne({ _id: id });
+    if (venta && venta.orgId) { req.orgId = venta.orgId; req.orgOperar = venta.orgId; }
+  }
+  return venta;
+}
+
+
 
 function normalizarCantidadPositiva(v, etiqueta) {
   const n = Number(v);
@@ -1565,7 +1577,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const venta = await buscarVentaOperable(db, req, id);
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito') {
         throw err(400, 'Las notas de crédito/débito no generan remito.');
@@ -1608,7 +1620,7 @@ router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
     if (!items) throw err(400, 'Faltan los ítems.');
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const venta = await buscarVentaOperable(db, req, id);
       if (!venta) throw err(404, 'Venta no encontrada');
       if (!venta.importado) throw err(400, 'Solo se puede corregir la entrega de ventas migradas de Dux.');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
