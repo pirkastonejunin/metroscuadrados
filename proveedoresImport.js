@@ -292,6 +292,24 @@ async function calcular(db, req, prov, regla, filas) {
     if (!porCodigo.has(k)) porCodigo.set(k, []);
     porCodigo.get(k).push(p);
   }
+  // Si el producto ya existe con ESE código como SKU (cargado antes, sin código de proveedor), es el mismo producto:
+  // se vincula (se le completa el código del proveedor al aplicar) en vez de ofrecer crear uno nuevo que chocaría.
+  const porSkuLibre = new Map();
+  if (campo === 'codigoExterno') {
+    for (let i = 0; i < claves.length; i += 1000) {
+      const lote = claves.slice(i, i + 1000);
+      const ps = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, sku: { $in: lote.concat(lote.map(codigoClave)) } }, filtroOrg(req))).toArray();
+      for (const p of ps) {
+        const k = codigoClave(p.sku);
+        if (porCodigo.has(k)) continue; // ya matcheó por código externo
+        const delOtro = p.proveedorId && String(p.proveedorId) !== String(prov._id);
+        if (delOtro) continue;
+        if (!porSkuLibre.has(k)) porSkuLibre.set(k, []);
+        porSkuLibre.get(k).push(p);
+      }
+    }
+    for (const [k, lst] of porSkuLibre) if (lst.length === 1) { porCodigo.set(k, lst); productos.push(lst[0]); }
+  }
   const ids = productos.map(p => p._id);
   const stockPrev = new Map();
   if (deposito && ids.length) {
@@ -342,6 +360,7 @@ async function calcular(db, req, prov, regla, filas) {
     vistos.add(k);
     const p = cands[0];
     const c = { productoId: p._id, sku: p.sku, nombre: p.nombre, fila: f.fila, codigo: f.codigo, moneda: regla.moneda };
+    if (campo === 'codigoExterno' && codigoClave(p.codigoExterno) !== k) c.vinculaCodigo = true; // mismo producto cargado por SKU: se le asocia el código del proveedor
     // Dato de la caja que trae el portal: m² por caja (unidades por bulto) y si el precio es por m². Solo se completa; nunca se borra.
     if (f.bulto > 0 && Number(p.unidadesPorBulto) !== f.bulto) c.bultoNuevo = f.bulto;
     if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
@@ -378,7 +397,7 @@ async function calcular(db, req, prov, regla, filas) {
       const ant = stockPrev.has(String(p._id)) ? stockPrev.get(String(p._id)) : 0;
       c.stock = { anterior: ant, nuevo, cambia: Math.abs(ant - nuevo) > 0.0005 };
     }
-    c.hayCambio = !!(c.cambiaCosto || c.bultoNuevo || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
+    c.hayCambio = !!(c.vinculaCodigo || c.cambiaCosto || c.bultoNuevo || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
     cambios.push(c);
   }
 
@@ -445,13 +464,14 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const aplicables = calc.cambios.filter(c => c.hayCambio && !(omitirAlertas && c.alerta));
       const omitidos = calc.cambios.filter(c => c.hayCambio && omitirAlertas && c.alerta).length;
-      let costos = 0, precios = 0, stocks = 0, bultos = 0;
+      let costos = 0, precios = 0, stocks = 0, bultos = 0, vinculados = 0;
 
       for (let i = 0; i < aplicables.length; i += TANDA) {
         const lote = aplicables.slice(i, i + TANDA);
         const opsProd = [], opsStock = [], movs = [];
         for (const c of lote) {
           const set = { updatedAt: ahora };
+          if (c.vinculaCodigo) { set.codigoExterno = String(c.codigo).trim(); set.proveedorId = prov._id; set.proveedor = prov.razonSocial || ''; vinculados++; }
           if (c.costoNuevo != null) { set.costo = c.costoNuevo; set.moneda = c.moneda; set.costoActualizadoEn = ahora; set.costoProveedorId = prov._id; costos++; }
           for (const pr of (c.precios || [])) if (pr.predeterminada) set.precio = pr.nuevo;
           if (c.bultoNuevo) { set.unidadesPorBulto = c.bultoNuevo; bultos++; }
@@ -528,7 +548,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           await db.collection('stock_movimientos').insertMany(movs.slice(i, i + TANDA), { ordered: false });
         }
       }
-      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, bultosActualizados: bultos, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados, totalPorCrear });
+      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, bultosActualizados: bultos, productosVinculados: vinculados, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados, totalPorCrear });
       await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: (req.body || {}).desdePortal ? 'Portal ' + ((prov.portal && prov.portal.tipo) || '') : String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
       return resumen;
     });
