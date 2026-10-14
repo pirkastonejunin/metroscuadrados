@@ -409,10 +409,12 @@ async function validarStockFisicoParaRemito(db, req, items, depositoId) {
 async function comprometerStockDeVenta(db, req, items, depositoId) {
   for (const item of items) {
     if (!item.productoId) continue;
+    const aComprometer = cantidadPendiente(item); // lo ya entregado (p. ej. migrado de Dux) no se compromete
+    if (aComprometer <= 0) continue;
     await db.collection('stock_actual').updateOne(
       Object.assign({ productoId: item.productoId, depositoId }, filtroOrg(req)),
       {
-        $inc: { cantidadComprometida: item.cantidad },
+        $inc: { cantidadComprometida: aComprometer },
         $setOnInsert: Object.assign({ productoId: item.productoId, depositoId, cantidad: 0 }, filtroOrg(req))
       },
       { upsert: true }
@@ -519,7 +521,8 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
   // Recién ACÁ se cruza contra el stock físico real — si no alcanza, se
   // rechaza el remito (la venta sigue como estaba, con lo pendiente
   // todavía comprometido).
-  await validarStockFisicoParaRemito(db, req, itemsAEntregar, depositoId);
+  // Ventas migradas de Dux: el stock cargado puede no reflejar lo pendiente de entrega histórico, no se bloquea el remito.
+  if (!venta.importado) await validarStockFisicoParaRemito(db, req, itemsAEntregar, depositoId);
   for (const item of itemsAEntregar) {
     if (!item.productoId) continue;
     await aplicarMovimientoStock(db, req, {
