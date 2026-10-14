@@ -277,7 +277,7 @@ async function fetchAllProducts(storeId, accessToken) {
   while (true) {
     const response = await fetch(
       API_BASE + '/' + storeId + '/products?per_page=200&page=' + page +
-        '&fields=id,name,variants,handle,categories,images,brand,visibility',
+        '&fields=id,name,variants,handle,categories,images,brand,visibility,published',
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();

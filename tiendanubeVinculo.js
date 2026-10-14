@@ -40,7 +40,7 @@ async function productosTienda() {
     const nombreP = cotizador.nombreLocalizado(p.name);
     for (const v of (p.variants || [])) {
       const vals = (v.values || []).map(x => cotizador.nombreLocalizado(x)).filter(Boolean).join(' ');
-      filas.push({ stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null });
+      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: (store.domain && p.handle) ? `https://${store.domain}/productos/${p.handle}` : null });
     }
   }
   return filas;
@@ -146,13 +146,13 @@ router.get('/vinculos', auth, async (req, res) => {
       if (k && porTn.has(k)) { p = porTn.get(k); tipo = 'manual'; } else if (k && porSku.has(k)) { p = porSku.get(k); tipo = 'sku'; }
       let precioSistema = null;
       if (p && lista) { try { precioSistema = precioResuelto(p, lista, cot).precio; } catch (e) { precioSistema = null; } }
-      return { tn: { sku: f.sku, nombre: f.nombre, precio: f.precio, promo: f.promo, stock: f.stock, url: f.url, productId: f.productId, variantId: f.variantId },
+      return { tn: { publicado: f.publicado, sku: f.sku, nombre: f.nombre, precio: f.precio, promo: f.promo, stock: f.stock, url: f.url, productId: f.productId, variantId: f.variantId },
         producto: p ? { _id: String(p._id), sku: p.sku || '', nombre: p.nombre || '', unidad: p.unidad || '', porM2: p.unidad === 'm2' || p.tipoUnidad === 'superficie' || /\(m²\)\s*$/.test(String(p.nombre || '')), bulto: p.unidadesPorBulto > 0 ? p.unidadesPorBulto : null, precioUnitario: p.precio == null ? null : p.precio } : null, tipo, precioSistema: precioSistema == null ? null : precioSistema };
     });
     const resumen = { total: out.length, porSku: out.filter(r => r.tipo === 'sku').length, manuales: out.filter(r => r.tipo === 'manual').length, sinVinculo: out.filter(r => r.tipo === 'sin').length,
       conDiferencia: out.filter(r => r.producto && r.precioSistema != null && Number.isFinite(r.tn.precio) && Math.abs(r.precioSistema - r.tn.precio) >= 0.5).length,
       sinPrecioSistema: out.filter(r => r.producto && r.precioSistema == null).length,
-      m2SinBulto: out.filter(r => r.producto && r.producto.porM2 && !r.producto.bulto).length };
+      m2SinBulto: out.filter(r => r.producto && r.producto.porM2 && !r.producto.bulto).length, noPublicados: out.filter(r => r.tn.publicado === false).length };
     res.json({ lista: lista ? String(lista._id) : null, listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), resumen, filas: out });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
