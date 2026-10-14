@@ -501,8 +501,9 @@ function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago })
   // por m2 (ver calcularItemsPiedra) en vez de precio por artículo — el
   // front usa este flag para no mostrar columnas de precio por ítem.
   const llaveEnMano = categoria === 'piedra' && !!(obra && obra.manoObra);
+  const soloCantidades = categoria === 'placas' && !!(obra && obra.generico);
 
-  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano };
+  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano, soloCantidades };
 }
 
 // ---- Piso (lógica original, sin cambios de comportamiento) ----
@@ -679,6 +680,23 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
 
   const minimoM2 = Number(t.minimoM2Cotizable) || 0;
   const m2CotizableManoObra = m2Placas > 0 ? Math.max(m2Placas, minimoM2) : 0;
+
+  // Cotizador genérico de placas (sin productos del catálogo): solo cantidades (placas de 0,60 x 0,60 por módulos) y,
+  // si se tilda, la mano de obra con la tarifa por m² de placas. No hay precios de material.
+  if (obra.generico) {
+    if (m2Placas > 0) {
+      const cantPlacas = Math.round(m2Placas / (MODULO_PLACA_M * MODULO_PLACA_M));
+      const pct = Number(obra.desperdicioPctPlacas) || 0;
+      const conExtra = pct > 0 ? Math.ceil(cantPlacas * (1 + pct / 100) - 1e-9) : cantPlacas;
+      items.push({
+        rubro: 'Placas', productoId: null, producto: 'Placas de 0,60 x 0,60 m', categoria: '', imagen: null,
+        unidadObra: 'm2', cantidadObra: round2(m2Placas), desperdicioPct: pct, cantidadConDesperdicio: round2(conExtra * MODULO_PLACA_M * MODULO_PLACA_M),
+        rendimiento: MODULO_PLACA_M * MODULO_PLACA_M, envase: 'placa', paquetesNecesarios: conExtra, precioUnitario: 0, subtotal: 0
+      });
+      if (manoObra) totalManoObra += round2(m2CotizableManoObra * t.placas_m2);
+    }
+    return { items, faltantes, totalProductos, totalManoObra };
+  }
 
   if (m2Placas > 0) {
     if (!productos.placas) faltantes.push('placas');
@@ -1103,6 +1121,7 @@ function normalizarTipoObra(doc) {
     rubroZocalo: doc.rubroZocalo || '',
     rubroPiedra: doc.rubroPiedra || '',
     rubroPlacas: doc.rubroPlacas || '',
+    generico: doc.categoria === 'placas' && !!doc.generico,
     desperdicioDefaultPct: doc.desperdicioDefaultPct || 0
   };
 }
@@ -1121,7 +1140,7 @@ router.get('/tipos-obra', async (req, res) => {
 router.post('/tipos-obra', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { id, nombre, categoria, rubroPiso, rubroZocalo, rubroPiedra, rubroPlacas, desperdicioDefaultPct } = req.body || {};
+    const { id, nombre, categoria, rubroPiso, rubroZocalo, rubroPiedra, rubroPlacas, desperdicioDefaultPct, generico } = req.body || {};
     const categoriaNorm = (categoria === 'piedra' || categoria === 'placas') ? categoria : 'piso';
     if (!nombre) {
       return res.status(400).json({ error: 'Falta el nombre.' });
@@ -1140,12 +1159,14 @@ router.post('/tipos-obra', async (req, res) => {
         desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
       };
     } else if (categoriaNorm === 'placas') {
-      if (!rubroPlacas) return res.status(400).json({ error: 'Falta el rubro de placas.' });
+      const esGenerico = !!generico;
+      if (!esGenerico && !rubroPlacas) return res.status(400).json({ error: 'Falta el rubro de placas.' });
       datos = {
         store_id: store.store_id,
         nombre: String(nombre).trim(),
         categoria: 'placas',
-        rubroPlacas: String(rubroPlacas).trim(),
+        generico: esGenerico,
+        rubroPlacas: esGenerico ? '' : String(rubroPlacas).trim(),
         rubroPiso: '',
         rubroZocalo: '',
         rubroPiedra: '',
@@ -1370,7 +1391,8 @@ router.post('/calcular', async (req, res) => {
       (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
 
-    const resultado = calcularCotizacion({ categoria, obra, productos: productosElegidos, tarifas, formasPago });
+    const obraCalc = (categoria === 'placas' && tipoObraDoc && tipoObraDoc.generico) ? Object.assign({}, obra, { generico: true }) : Object.assign({}, obra, { generico: false });
+    const resultado = calcularCotizacion({ categoria, obra: obraCalc, productos: productosElegidos, tarifas, formasPago });
     res.json(resultado);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -1426,6 +1448,7 @@ router.post('/guardar', async (req, res) => {
       ? tipoObraDoc.categoria
       : 'piso';
     const llaveEnMano = categoriaGuardado === 'piedra' && !!(obra && obra.manoObra);
+    const soloCantidades = categoriaGuardado === 'placas' && !!(tipoObraDoc && tipoObraDoc.generico);
 
     const itemsFinales = finalizarItems(items);
     const totalProductos = round2(itemsFinales.reduce((s, it) => s + it.subtotal, 0));
@@ -1473,7 +1496,8 @@ router.post('/guardar', async (req, res) => {
       total,
       formasPago: formasPagoFinales,
       simulaciones: simulacionesFinales,
-      llaveEnMano
+      llaveEnMano,
+      soloCantidades
     };
 
     const col = await getCotizacionesCollection();
@@ -1688,13 +1712,15 @@ async function dibujarGaleriaLlaveEnMano(pdf, items) {
   pdf.moveDown(0.4);
 }
 
-function dibujarEncabezadoTabla(pdf) {
+function dibujarEncabezadoTabla(pdf, soloCantidades) {
   const y0 = pdf.y;
   pdf.fontSize(9).fillColor('#555');
   pdf.text('Producto', PDF_COL_PRODUCTO_X, y0, { width: PDF_COL_PRODUCTO_W });
   pdf.text('Cantidad', PDF_COL_CANT_X, y0, { width: PDF_COL_CANT_W });
-  pdf.text('Precio unit.', PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
-  pdf.text('Subtotal', PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+  if (!soloCantidades) {
+    pdf.text('Precio unit.', PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
+    pdf.text('Subtotal', PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+  }
   pdf.fillColor('#000');
   pdf.y = y0 + 14;
   pdf.moveDown(0.4);
@@ -1747,7 +1773,7 @@ router.get('/pdf/:id', async (req, res) => {
       pdf.moveDown(0.8);
       pdf.fontSize(16).text('Total: ' + moneyPdf(doc.total), { align: 'right' });
     } else {
-      dibujarEncabezadoTabla(pdf);
+      dibujarEncabezadoTabla(pdf, !!doc.soloCantidades);
 
       const pageBottom = pdf.page.height - pdf.page.margins.bottom;
 
@@ -1779,7 +1805,7 @@ router.get('/pdf/:id', async (req, res) => {
 
         if (pdf.y + filaAlto > pageBottom) {
           pdf.addPage();
-          dibujarEncabezadoTabla(pdf);
+          dibujarEncabezadoTabla(pdf, !!doc.soloCantidades);
         }
 
         const y0 = pdf.y;
@@ -1802,8 +1828,10 @@ router.get('/pdf/:id', async (req, res) => {
         }
         pdf.fillColor('#000');
 
-        pdf.fontSize(10).text(moneyPdf(it.precioUnitario), PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
-        pdf.fontSize(10).text(moneyPdf(it.subtotal), PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+        if (!doc.soloCantidades) {
+          pdf.fontSize(10).text(moneyPdf(it.precioUnitario), PDF_COL_PRECIO_X, y0, { width: PDF_COL_PRECIO_W });
+          pdf.fontSize(10).text(moneyPdf(it.subtotal), PDF_COL_SUBTOTAL_X, y0, { width: PDF_COL_SUBTOTAL_W });
+        }
 
         pdf.y = y0 + filaAlto + 10;
       }
@@ -1813,9 +1841,13 @@ router.get('/pdf/:id', async (req, res) => {
       pdf.moveDown(0.5);
 
       pdf.fontSize(10);
-      pdf.text('Subtotal productos: ' + moneyPdf(doc.totalProductos), { align: 'right' });
-      if (doc.totalManoObra) pdf.text('Mano de obra: ' + moneyPdf(doc.totalManoObra), { align: 'right' });
-      pdf.fontSize(13).text('Total: ' + moneyPdf(doc.total), { align: 'right' });
+      if (doc.soloCantidades) {
+        if (doc.totalManoObra) pdf.fontSize(13).text('Mano de obra: ' + moneyPdf(doc.totalManoObra), { align: 'right' });
+      } else {
+        pdf.text('Subtotal productos: ' + moneyPdf(doc.totalProductos), { align: 'right' });
+        if (doc.totalManoObra) pdf.text('Mano de obra: ' + moneyPdf(doc.totalManoObra), { align: 'right' });
+        pdf.fontSize(13).text('Total: ' + moneyPdf(doc.total), { align: 'right' });
+      }
     }
 
     if (doc.formasPago && doc.formasPago.length) {

@@ -140,7 +140,7 @@ function render(){
     html += '<div class="llave-en-mano-total"><div class="grand">' + money(doc.total) + '</div></div>';
   } else {
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
-    html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>';
+    html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th>' + (doc.soloCantidades ? '' : '<th>Precio unit.</th><th>Subtotal</th>') + '</tr></thead><tbody>';
     (doc.items || []).forEach((it) => {
       const notaCantidad = it.unidadObra
         ? (it.cantidadObra + ' ' + it.unidadObra + (it.desperdicioPct ? ' (+' + it.desperdicioPct + '% desp.)' : ''))
@@ -151,14 +151,15 @@ function render(){
         '<td><div class="item-rubro">' + escapeHtml(it.rubro) + '</div><div class="item-nombre">' + escapeHtml(it.producto) + '</div></td>' +
         '<td><div class="cant-principal">' + it.paquetesNecesarios + ' ' + escapeHtml(envaseTxt) + '</div>' +
           (notaCantidad ? '<div class="cant-nota">' + escapeHtml(notaCantidad) + '</div>' : '') + '</td>' +
-        '<td>' + money(it.precioUnitario) + '</td>' +
-        '<td>' + money(it.subtotal) + '</td>' +
+        (doc.soloCantidades ? '' : '<td>' + money(it.precioUnitario) + '</td><td>' + money(it.subtotal) + '</td>') +
       '</tr>';
     });
     html += '</tbody></table>';
-    html += '<div class="totales">Subtotal productos: ' + money(doc.totalProductos) + '<br>' +
-      (doc.totalManoObra ? 'Mano de obra: ' + money(doc.totalManoObra) + '<br>' : '') +
-      '<div class="grand">Total: ' + money(doc.total) + '</div></div>';
+    html += doc.soloCantidades
+      ? (doc.totalManoObra ? '<div class="totales"><div class="grand">Mano de obra: ' + money(doc.totalManoObra) + '</div></div>' : '')
+      : '<div class="totales">Subtotal productos: ' + money(doc.totalProductos) + '<br>' +
+        (doc.totalManoObra ? 'Mano de obra: ' + money(doc.totalManoObra) + '<br>' : '') +
+        '<div class="grand">Total: ' + money(doc.total) + '</div></div>';
   }
 
   if (doc.formasPago && doc.formasPago.length){

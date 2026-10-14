@@ -434,7 +434,7 @@
           <div class="field"><label>% desperdicio por defecto</label><input type="number" id="to_desperdicio" min="0" step="0.5" value="0"></div>
         </div>
         <div class="grid">
-          <div class="field"><label>Categoría</label><select id="to_categoria"><option value="piso">Piso</option><option value="piedra">Piedra</option><option value="placas">Placas</option></select></div>
+          <div class="field"><label>Categoría</label><select id="to_categoria"><option value="piso">Piso</option><option value="piedra">Piedra</option><option value="placas">Placas</option><option value="placas_generico">Placas genérico (sin productos)</option></select></div>
         </div>
         <div class="grid" id="to_camposPiso">
           <div class="field"><label>Rubro de piso (obligatorio)</label><select id="to_rubroPiso"></select></div>
@@ -1006,7 +1006,7 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   }
   try{
     await asegurarCatalogo();
-    if (esSuperficies || obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0){
+    if (!(tipoObraElegido && tipoObraElegido.generico) && (esSuperficies || obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0)){
       await asegurarCatalogosTipoObra();
     }
   }catch(e){
@@ -1016,6 +1016,8 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   renderPasoProductos(obra);
   $('#paso-obra').classList.add('hidden');
   $('#paso-productos').classList.remove('hidden');
+  // Placas genérico: no hay productos para elegir, se calcula directo.
+  if (tipoObraElegido && tipoObraElegido.generico){ $('#btnCalcular').click(); }
 });
 
 $('#btnVolverObra').addEventListener('click', () => {
@@ -1028,6 +1030,7 @@ $('#btnVolverObra').addEventListener('click', () => {
 function bloquesRubro(obra){
   const bloques = [];
   const categoria = tipoObraElegido && tipoObraElegido.categoria;
+  if (categoria === 'placas' && tipoObraElegido.generico) return bloques; // genérico: sin productos
   if (categoria === 'piedra' || categoria === 'placas'){
     if (m2TotalSuperficies(obra) > 0){
       bloques.push(categoria === 'placas'
@@ -2053,7 +2056,8 @@ $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => {
 
 $('#btnVolverProductos').addEventListener('click', () => {
   $('#paso-resumen').classList.add('hidden');
-  $('#paso-productos').classList.remove('hidden');
+  // Placas genérico no tiene paso de productos: se vuelve a los datos de la obra.
+  $((tipoObraElegido && tipoObraElegido.generico) ? '#paso-obra' : '#paso-productos').classList.remove('hidden');
 });
 
 // editable=true (paso 4, cotización en curso): cantidad editable a mano y
@@ -2085,7 +2089,8 @@ function renderResumen(data, editable, vistaSimple){
     // artículo — se ocultan las columnas Precio unit./Subtotal y se muestra
     // solo la cantidad que hace falta de cada material, con el total final
     // como "Llave en mano".
-    const llaveEnMano = !!data.llaveEnMano;
+    const llaveEnMano = !!data.llaveEnMano || !!data.soloCantidades;
+    const soloCant = !!data.soloCantidades;
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
     html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th>' +
       (llaveEnMano ? '' : '<th>Precio unit.</th><th>Subtotal</th>') +
@@ -2110,7 +2115,9 @@ function renderResumen(data, editable, vistaSimple){
     });
     html += '</tbody></table>';
     html += '<div class="totales">' +
-      (llaveEnMano
+      (soloCant
+        ? (data.totalManoObra ? '<div class="grand">Mano de obra: ' + money(data.totalManoObra) + '</div>' : '')
+        : llaveEnMano
         ? '<div class="grand">Llave en mano: ' + money(data.total) + '</div>'
         : 'Subtotal productos: ' + money(data.totalProductos) + '<br>' +
           (data.totalManoObra ? 'Mano de obra: ' + money(data.totalManoObra) + '<br>' : '') +
@@ -2465,6 +2472,7 @@ function llenarSelectRubros(sel, opciones, permitirVacio){
 let tiposObraConfigCache = [];
 
 function mostrarCamposCategoriaTipoObra(categoria){
+  // 'placas_generico' = Placas sin productos del catálogo: no hay rubro que elegir.
   $('#to_camposPiso').classList.toggle('hidden', categoria !== 'piso');
   $('#to_camposPiedra').classList.toggle('hidden', categoria !== 'piedra');
   $('#to_camposPlacas').classList.toggle('hidden', categoria !== 'placas');
@@ -2497,7 +2505,7 @@ async function cargarConfigTipos(){
         (t.categoria === 'piedra'
           ? 'Piedra: ' + escapeHtml(t.rubroPiedra || '—')
           : t.categoria === 'placas'
-          ? 'Placas: ' + escapeHtml(t.rubroPlacas || '—')
+          ? 'Placas: ' + (t.generico ? 'genérico (sin productos)' : escapeHtml(t.rubroPlacas || '—'))
           : 'Piso: ' + escapeHtml(t.rubroPiso) + (t.rubroZocalo ? ' · Zócalo: ' + escapeHtml(t.rubroZocalo) : '')) +
         ' · Desperdicio: ' + t.desperdicioDefaultPct + '%</div></div>' +
       '<div style="display:flex;gap:8px;">' +
@@ -2515,12 +2523,12 @@ async function cargarConfigTipos(){
       editandoTipoObraId = t.id;
       $('#to_nombre').value = t.nombre;
       $('#to_desperdicio').value = t.desperdicioDefaultPct;
-      $('#to_categoria').value = t.categoria || 'piso';
+      $('#to_categoria').value = t.generico ? 'placas_generico' : (t.categoria || 'piso');
       $('#to_rubroPiso').value = t.rubroPiso || '';
       $('#to_rubroZocalo').value = t.rubroZocalo || '';
       $('#to_rubroPiedra').value = t.rubroPiedra || '';
       $('#to_rubroPlacas').value = t.rubroPlacas || '';
-      mostrarCamposCategoriaTipoObra(t.categoria || 'piso');
+      mostrarCamposCategoriaTipoObra(t.generico ? 'placas_generico' : (t.categoria || 'piso'));
       $('#cfg-tipos-form-titulo').textContent = 'Editando: ' + t.nombre;
       $('#btnCancelarEdicionTipo').classList.remove('hidden');
     });
@@ -2558,18 +2566,20 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
   mostrarMsg(null);
   const eraNuevo = !editandoTipoObraId;
   const categoriaVal = $('#to_categoria').value;
-  const categoria = (categoriaVal === 'piedra' || categoriaVal === 'placas') ? categoriaVal : 'piso';
+  const esGenerico = categoriaVal === 'placas_generico';
+  const categoria = (categoriaVal === 'piedra' || categoriaVal === 'placas' || esGenerico) ? (esGenerico ? 'placas' : categoriaVal) : 'piso';
   const body = {
     id: editandoTipoObraId || undefined,
     nombre: $('#to_nombre').value.trim(),
     categoria,
+    generico: esGenerico,
     rubroPiso: $('#to_rubroPiso').value,
     rubroZocalo: $('#to_rubroZocalo').value,
     rubroPiedra: $('#to_rubroPiedra').value,
     rubroPlacas: $('#to_rubroPlacas').value,
     desperdicioDefaultPct: parseFloat($('#to_desperdicio').value) || 0
   };
-  if (!body.nombre || (categoria === 'piso' && !body.rubroPiso) || (categoria === 'piedra' && !body.rubroPiedra) || (categoria === 'placas' && !body.rubroPlacas)){
+  if (!body.nombre || (categoria === 'piso' && !body.rubroPiso) || (categoria === 'piedra' && !body.rubroPiedra) || (categoria === 'placas' && !esGenerico && !body.rubroPlacas)){
     mostrarMsg('Falta el nombre o el rubro correspondiente.'); return;
   }
   const res = await fetch('/api/cotizador/tipos-obra?store_id=' + storeId, {
