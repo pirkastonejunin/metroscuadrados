@@ -94,6 +94,7 @@ app.use('/api/gastos', gastosRouter);
 
 const tesoreriaRouter = require('./tesoreria');
 app.use('/api/tesoreria', tesoreriaRouter);
+app.use('/api/financiera', require('./financiera'));
 
 // Mercado Pago (link de pago + Point), independiente de Tiendanube.
 const mercadopagoRouter = require('./mercadopago');

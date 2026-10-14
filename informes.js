@@ -372,6 +372,14 @@ async function resultadosOrg(db, orgId, d0, d1) {
   });
   const mpCobros = await db.collection('mp_cobros').find({ orgId, estado: 'acreditado', acreditadoEn: { $gte: d0, $lte: d1 } }).project({ comision: 1, impuestos: 1, acreditadoEn: 1 }).limit(50000).toArray();
   mpCobros.forEach(c => { finMes(c.acreditadoEn, C_MP, Number(c.comision) || 0); finMes(c.acreditadoEn, C_MPI, Number(c.impuestos) || 0); });
+  // Ganancia financiera (14/10/2026): diferencia entre el nominal de los cheques que da la financiera y el efectivo pactado. Se muestra restando
+  // (ingreso) en la fecha de la operación; si un cheque se devuelve a la financiera, se revierte su parte en la fecha del rechazo.
+  const C_GF = 'Ganancia financiera';
+  const opsFin = await db.collection('financiera_operaciones').find({ orgId, anulada: { $ne: true } }).project({ fecha: 1, ganancia: 1, rechazos: 1 }).limit(50000).toArray();
+  opsFin.forEach(o => {
+    if (enRango(o.fecha)) finMes(o.fecha, C_GF, -(Number(o.ganancia) || 0));
+    (o.rechazos || []).forEach(x => { if (enRango(x.fecha)) finMes(x.fecha, C_GF, Number(x.ganancia) || 0); });
+  });
   return meses;
 }
 
