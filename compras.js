@@ -417,14 +417,16 @@ async function actualizarCostoProductoDesdeCompra(db, req, item, moneda, cotizac
   const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: item.productoId }, filtroOrg(req)));
   if (!producto) return;
   const set = { updatedAt: new Date() };
+  // el costo real es el precio con el descuento del artículo aplicado
+  const precioNeto = Math.round(item.precioUnitario * (1 - (Number(item.descuentoPorcentaje) || 0) / 100) * 10000) / 10000;
   if (moneda === 'USD') {
-    set.costo = item.precioUnitario;
+    set.costo = precioNeto;
     set.moneda = 'USD';
   } else if ((producto.moneda || 'ARS') === 'USD') {
     if (!(cotizacion > 0)) return;
-    set.costo = Math.round((item.precioUnitario / cotizacion) * 100) / 100;
+    set.costo = Math.round((precioNeto / cotizacion) * 100) / 100;
   } else {
-    set.costo = item.precioUnitario;
+    set.costo = precioNeto;
   }
   await db.collection('productos_catalogo').updateOne({ _id: producto._id }, { $set: set });
 }
@@ -466,10 +468,13 @@ async function normalizarItems(db, req, itemsRaw) {
     // propia alícuota, no una sola para todo el comprobante).
     const alicuotaIva = Number(it.alicuotaIva);
     if (!ALICUOTAS_IVA_VALIDAS.includes(alicuotaIva)) throw err(400, `Alícuota de IVA inválida para "${nombre}" (opciones: ${ALICUOTAS_IVA_VALIDAS.join(', ')})`);
-    const itemSubtotal = cantidad * precioUnitario;
+    // Descuento por artículo (14/10/2026, pedido de Mato): % sobre el precio de lista de esa línea; el IVA se calcula sobre el neto ya descontado.
+    const descuentoPorcentaje = it.descuentoPorcentaje ? Number(it.descuentoPorcentaje) : 0;
+    if (!Number.isFinite(descuentoPorcentaje) || descuentoPorcentaje < 0 || descuentoPorcentaje > 100) throw err(400, `El descuento (%) de "${nombre}" tiene que estar entre 0 y 100`);
+    const itemSubtotal = Math.round(cantidad * precioUnitario * (1 - descuentoPorcentaje / 100) * 100) / 100;
     const itemIva = Math.round(itemSubtotal * alicuotaIva) / 100;
     subtotal += itemSubtotal;
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, alicuotaIva, importeIva: itemIva });
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, alicuotaIva, importeIva: itemIva });
   }
   return { items, subtotal };
 }
@@ -1021,7 +1026,8 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
           nombre: ordenItem.nombre,
           cantidad,
           precioUnitario: (it.precioUnitario !== undefined && it.precioUnitario !== null && it.precioUnitario !== '') ? it.precioUnitario : ordenItem.precioUnitario,
-          alicuotaIva: it.alicuotaIva
+          alicuotaIva: it.alicuotaIva,
+          descuentoPorcentaje: it.descuentoPorcentaje
         });
         cantidadesPorIndice.push([idx, cantidad]);
       }
