@@ -173,13 +173,15 @@ function requiereModuloAlguno(...claves) {
     next();
   };
 }
-const authListasPrecio = [authUsuario, resolverOrg, requiereModuloAlguno('productos', 'ventas')];
+// Las listas son de UNA sucursal: en la vista "todas" se usa la sucursal de operación de la barra de arriba.
+const usarSucursalOperar = (req, res, next) => { if (!req.orgId && req.orgOperar) req.orgId = req.orgOperar; next(); };
+const authListasPrecio = [authUsuario, resolverOrg, usarSucursalOperar, requiereModuloAlguno('productos', 'ventas')];
 // Solo para EL LISTADO (nombre + id, nada sensible) — se suma 'clientes'
 // (3/10/2026, pedido de Mato: poder elegir una lista de precio por
 // defecto en la ficha del cliente). Las operaciones más sensibles
 // (exportar, importar, editar precios de una lista) siguen con
 // authListasPrecio tal como estaba, sin abrirle nada nuevo a Clientes.
-const authListasPrecioListado = [authUsuario, resolverOrg, requiereModuloAlguno('productos', 'ventas', 'clientes')];
+const authListasPrecioListado = [authUsuario, resolverOrg, usarSucursalOperar, requiereModuloAlguno('productos', 'ventas', 'clientes')];
 
 const UNIDADES_VALIDAS = ['unidad', 'm2', 'ml', 'kg', 'litro', 'paquete', 'jornal'];
 // "Tipo de unidad" de Dux — una categoría más amplia que la unidad de

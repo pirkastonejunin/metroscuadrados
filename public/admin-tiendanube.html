@@ -155,6 +155,8 @@
         </div>
         <div class="muted" style="margin-top:8px">Cada producto de la tienda con el producto del sistema al que corresponde y los dos precios. No cambia nada: sirve para revisar.</div>
         <div style="margin-top:8px"><button class="btn secondary small" id="btnConf" onclick="confirmarSku()">Marcar como vinculados los de SKU igual</button> <span class="muted">Así aparece el tilde de Tiendanube en el listado de Productos.</span> <span id="resConf"></span></div>
+        <div style="margin-top:8px"><button class="btn" id="btnSync" onclick="sincronizarPrecios()">Enviar precios del sistema a Tiendanube</button> <span class="muted">Pone en la tienda el precio de la lista elegida, de todos los productos con precio (menos los m² sin m² por caja).</span></div>
+        <div id="resSync" style="margin-top:6px"></div>
         <div class="err" id="errV"></div>
       </div>
       <div id="resV" class="hidden">
@@ -295,6 +297,28 @@ function pintarVinculos(){
       + '<td class="n' + (d != null && Math.abs(d) >= 0.5 ? ' dif' : '') + '">' + (d == null ? '—' : (d > 0 ? '+' : '') + M(d)) + '</td>'
       + '<td>' + (r.tipo === 'manual' ? '<button class="btn secondary small" onclick="desvincular(\'' + r.producto._id + '\')">Quitar vínculo</button>' : '') + '</td></tr>'; }).join('')
     + (f.length > 1500 ? '<tr><td colspan="7" class="muted">Se muestran los primeros 1.500: usá el filtro o el buscador.</td></tr>' : '') + (!f.length ? '<tr><td colspan="7" class="muted">No hay nada para mostrar con este filtro.</td></tr>' : '');
+}
+async function sincronizarPrecios(){
+  const lid = document.getElementById('lista').value, b = document.getElementById('btnSync'), o = document.getElementById('resSync');
+  if (!lid) { o.innerHTML = '<span class="err">Primero apretá "Actualizar desde Tiendanube" y elegí la lista.</span>'; return; }
+  const n = DV ? DV.resumen.conDiferencia : null;
+  if (!confirm('Se van a cambiar en Tiendanube los precios que difieren del sistema' + (n != null ? ' (hoy ' + n + ' con diferencia)' : '') + '. Los precios de la tienda se pisan con los del sistema. ¿Seguir?')) return;
+  b.disabled = true; o.innerHTML = '<span class="muted">Iniciando…</span>';
+  try{
+    const r = await fetch('/api/productos/listas-precio/' + lid + '/sincronizar-tiendanube', {method:'POST', headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    let job;
+    while (true) {
+      await new Promise(x => setTimeout(x, 2000));
+      const rj = await fetch('/api/productos/import/estado/' + d.jobId, {headers: H()}); job = await rj.json(); if (!rj.ok) throw new Error(job.error || 'Error de progreso');
+      if (job.estado === 'procesando') { o.innerHTML = '<span class="muted">Procesando ' + job.procesados + ' / ' + job.total + '…</span>'; continue; }
+      if (job.estado === 'error') throw new Error(job.errorGeneral || 'Falló la sincronización');
+      break;
+    }
+    o.innerHTML = '<span class="ok-msg">Actualizados: ' + (job.actualizados || 0) + ' · Sin cambios: ' + (job.sinCambios || 0) + (job.noEncontrados ? ' · No encontrados en la tienda: ' + job.noEncontrados : '') + (d.omitidosSinBulto ? ' · m² sin bulto omitidos: ' + d.omitidosSinBulto : '') + '</span>'
+      + (job.errores && job.errores.length ? '<div class="err">' + job.errores.length + ' con error: ' + job.errores.slice(0, 20).map(e => esc((e.sku || '') + ' ' + (e.detalle || ''))).join(' · ') + '</div>' : '');
+    cargarVinculos();
+  }catch(e){ o.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+  b.disabled = false;
 }
 async function confirmarSku(){
   const b = document.getElementById('btnConf'), o = document.getElementById('resConf'); b.disabled = true; o.textContent = '';
