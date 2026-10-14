@@ -196,7 +196,7 @@ function render(){
       <td>${o.numero}</td><td>${fechaCorta(o.fecha)}</td><td>${o.tasaMensual}%</td>
       <td class="num">${money(o.nominalVigente)}</td><td class="num">${money(o.debe)}</td><td class="num">${money(o.pagado)}</td>
       <td class="num"><strong>${money(o.pendiente)}</strong></td><td class="num" style="color:var(--ok)">${money(o.ganancia)} <span class="muted">${o.gananciaPct}%</span></td>
-      <td><button class="btn small secondary" onclick="toggleOp('${o._id}')">${abierta ? 'Ocultar' : 'Cheques'}</button></td></tr>`;
+      <td><button class="btn small secondary" onclick="toggleOp('${o._id}')">${abierta ? 'Ocultar' : 'Cheques'}</button> ${o.editable ? `<button class="btn small secondary" onclick="abrirOperacion('${o._id}')">Editar</button>` : ''}</td></tr>`;
     if (abierta) {
       h += `<tr class="sub"><td colspan="9"><table><thead><tr><th>Cheque</th><th>Banco</th><th>Librador</th><th>Vence</th><th class="num">Días</th><th class="num">Nominal</th><th class="num">Costo</th><th>Estado</th><th></th></tr></thead><tbody>` +
         o.items.map(i => `<tr><td>${escapeHtml(i.numero||'—')}</td><td>${escapeHtml(i.banco||'')}</td><td>${escapeHtml(i.librador||'')}</td><td>${fechaCorta(i.fechaVencimiento)}</td><td class="num">${i.dias}</td><td class="num">${money(i.monto)}</td><td class="num">${money(i.costo)}</td>
@@ -225,20 +225,25 @@ async function devolver(chequeId){
 
 // ---- Nueva operación ----
 let timerCalc = null;
-function filaCheque(){
-  return `<div class="fila-ch">
-    <div><label>Nº cheque</label><input class="c-num"></div><div><label>Banco</label><input class="c-banco"></div>
-    <div><label>Librador</label><input class="c-lib"></div><div><label>CUIT librador</label><input class="c-cuit"></div>
-    <div><label>Monto *</label><input class="c-monto" type="number" step="0.01" min="0" oninput="recalcular()"></div>
-    <div><label>Vencimiento *</label><input class="c-venc" type="date" onchange="recalcular()"></div>
+function filaCheque(c){
+  c = c || {};
+  const v = x => escapeHtml(x == null ? '' : x);
+  return `<div class="fila-ch" data-chequeid="${v(c.chequeId)}">
+    <div><label>Nº cheque</label><input class="c-num" value="${v(c.numero)}"></div><div><label>Banco</label><input class="c-banco" value="${v(c.banco)}"></div>
+    <div><label>Librador</label><input class="c-lib" value="${v(c.librador)}"></div><div><label>CUIT librador</label><input class="c-cuit" value="${v(c.cuitLibrador)}"></div>
+    <div><label>Monto *</label><input class="c-monto" type="number" step="0.01" min="0" value="${v(c.monto)}" oninput="recalcular()"></div>
+    <div><label>Vencimiento *</label><input class="c-venc" type="date" value="${c.fechaVencimiento ? String(c.fechaVencimiento).slice(0,10) : ''}" onchange="recalcular()"></div>
     <button class="btn small secondary" onclick="this.closest('.fila-ch').remove(); recalcular()">×</button></div>`;
 }
-function abrirOperacion(){
+let EDITANDO = null;
+function abrirOperacion(opId){
+  const op = opId ? DATOS.operaciones.find(o => String(o._id) === String(opId)) : null;
+  EDITANDO = op ? String(op._id) : null;
   document.getElementById('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal"><span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2 style="margin-top:0">Nueva operación — cheques recibidos de la financiera</h2>
+    <h2 style="margin-top:0">${op ? 'Editar operación #' + op.numero : 'Nueva operación — cheques recibidos de la financiera'}</h2>
     <div class="row" style="margin-bottom:10px">
-      <div style="width:160px"><label>Fecha</label><input id="opFecha" type="date" value="${hoyISO()}" onchange="recalcular()"></div>
-      <div style="width:160px"><label>Tasa mensual (%) *</label><input id="opTasa" type="number" step="0.01" min="0" oninput="recalcular()"></div>
+      <div style="width:160px"><label>Fecha</label><input id="opFecha" type="date" value="${op ? String(op.fecha).slice(0,10) : hoyISO()}" onchange="recalcular()"></div>
+      <div style="width:160px"><label>Tasa mensual (%) *</label><input id="opTasa" type="number" step="0.01" min="0" value="${op ? op.tasaMensual : ''}" oninput="recalcular()"></div>
     </div>
     <div class="card" style="background:var(--bg);padding:12px;margin-bottom:12px">
       <strong>🧾 Cargar los cheques con IA</strong>
@@ -249,17 +254,18 @@ function abrirOperacion(){
       </div>
       <div id="iaEstado" class="muted" style="margin-top:6px"></div>
     </div>
-    <div id="opCheques">${filaCheque()}</div>
+    <div id="opCheques">${op ? op.items.filter(i => i.estado !== 'devuelto').map(i => filaCheque(i)).join('') : filaCheque()}</div>
     <button class="btn small secondary" onclick="document.getElementById('opCheques').insertAdjacentHTML('beforeend', filaCheque())">+ Agregar cheque</button>
     <div class="card" style="margin-top:14px;background:var(--bg)" id="opCalc"><span class="muted">Cargá la tasa y los cheques para ver el efectivo.</span></div>
-    <div class="row"><div style="width:240px"><label>Efectivo pactado (dejá vacío para usar el sugerido)</label><input id="opPactado" type="number" step="0.01" min="0" oninput="recalcular()"></div>
-      <div style="flex:1"><label>Observaciones</label><input id="opObs"></div></div>
+    <div class="row"><div style="width:240px"><label>Efectivo pactado (dejá vacío para usar el sugerido)</label><input id="opPactado" type="number" step="0.01" min="0" value="${op && Math.abs(op.efectivoPactado - op.efectivoSugerido) > 0.005 ? op.efectivoPactado : ''}" oninput="recalcular()"></div>
+      <div style="flex:1"><label>Observaciones</label><input id="opObs" value="${op ? escapeHtml(op.observaciones) : ''}"></div></div>
     <div class="err" id="opErr"></div>
-    <button class="btn" style="margin-top:10px" onclick="guardarOperacion()">Guardar operación</button></div></div>`;
+    <button class="btn" style="margin-top:10px" onclick="guardarOperacion()">${op ? 'Guardar cambios' : 'Guardar operación'}</button></div></div>`;
+  if (op) recalcular();
 }
 function leerOperacion(){
   const cheques = [...document.querySelectorAll('#opCheques .fila-ch')].map(f => ({
-    numero: f.querySelector('.c-num').value, banco: f.querySelector('.c-banco').value, librador: f.querySelector('.c-lib').value, cuitLibrador: f.querySelector('.c-cuit').value,
+    chequeId: f.dataset.chequeid || '', numero: f.querySelector('.c-num').value, banco: f.querySelector('.c-banco').value, librador: f.querySelector('.c-lib').value, cuitLibrador: f.querySelector('.c-cuit').value,
     monto: f.querySelector('.c-monto').value, fechaVencimiento: f.querySelector('.c-venc').value })).filter(c => c.monto || c.fechaVencimiento);
   return { fecha: document.getElementById('opFecha').value, tasaMensual: document.getElementById('opTasa').value, cheques, efectivoPactado: document.getElementById('opPactado').value, observaciones: document.getElementById('opObs').value };
 }
@@ -275,7 +281,11 @@ function recalcular(){
   }, 250);
 }
 async function guardarOperacion(){
-  try{ await post('/operaciones', leerOperacion()); cerrarModal(); await cargar(); }
+  try{
+    if (EDITANDO) { const r = await fetch(BASE + '/operaciones/' + EDITANDO, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(leerOperacion())}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); }
+    else await post('/operaciones', leerOperacion());
+    cerrarModal(); await cargar();
+  }
   catch(e){ document.getElementById('opErr').textContent = e.message; }
 }
 

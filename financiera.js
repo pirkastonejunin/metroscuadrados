@@ -137,6 +137,71 @@ router.post('/operaciones', authOperar, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Editar una operación ya cargada (tasa, fecha, efectivo pactado, observaciones y cheques). Los cheques con chequeId se actualizan, los
+// sin chequeId se agregan y los que ya no están en la lista se quitan (solo si siguen en cartera). No se edita si ya hay cheques devueltos.
+router.put('/operaciones/:id', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const fecha = fechaDe(b.fecha);
+    const tasaMensual = Number(b.tasaMensual);
+    const calc = calcularOperacion(b.cheques, tasaMensual, fecha, b.efectivoPactado);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const op = await db.collection('financiera_operaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!op) throw err(404, 'Operación no encontrada');
+      if (op.anulada) throw err(400, 'Esta operación está anulada.');
+      if ((op.rechazos || []).length) throw err(400, 'La operación tiene cheques devueltos a la financiera: ya no se puede editar.');
+      const actuales = await db.collection('cheques').find({ _id: { $in: op.items.map(i => i.chequeId) } }).toArray();
+      const porId = new Map(actuales.map(c => [String(c._id), c]));
+      const ahora = new Date();
+      const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+      const items = [];
+      const mantenidos = new Set();
+      // 1) validar todo antes de escribir
+      b.cheques.forEach((raw, idx) => {
+        if (!raw.chequeId) return;
+        const ch = porId.get(String(raw.chequeId));
+        if (!ch) throw err(400, `El cheque ${idx + 1} no pertenece a esta operación.`);
+        const libre = ['en_cartera', 'endosado'].includes(ch.estado);
+        const it = calc.items[idx];
+        if (!libre && (Math.abs(ch.monto - it.monto) > 0.005 || new Date(ch.fechaVencimiento).getTime() !== it.fechaVencimiento.getTime())) {
+          throw err(400, `El cheque Nº ${ch.numero || '(s/n)'} ya está "${ch.estado}": no se puede cambiar su monto ni su vencimiento.`);
+        }
+        mantenidos.add(String(ch._id));
+      });
+      for (const ch of actuales) if (!mantenidos.has(String(ch._id)) && ch.estado !== 'en_cartera') throw err(400, `El cheque Nº ${ch.numero || '(s/n)'} ya está "${ch.estado}": no se puede quitar de la operación.`);
+      // 2) escribir
+      for (let idx = 0; idx < b.cheques.length; idx++) {
+        const raw = b.cheques[idx], it = calc.items[idx];
+        let chequeId;
+        if (raw.chequeId) {
+          chequeId = toObjectId(raw.chequeId);
+          await db.collection('cheques').updateOne({ _id: chequeId }, { $set: { numero: it.numero, banco: it.banco, librador: it.librador, cuitLibrador: it.cuitLibrador, monto: it.monto, fechaVencimiento: it.fechaVencimiento, fechaEmision: fecha, updatedAt: ahora } });
+        } else {
+          const cheque = {
+            tipo: 'tercero', numero: it.numero, banco: it.banco, cuentaId: null, clienteId: null, clienteNombre: '', proveedorId: null, proveedorNombre: '',
+            ventaId: null, compraId: null, librador: it.librador, cuitLibrador: it.cuitLibrador, fechaEmision: fecha, fechaVencimiento: it.fechaVencimiento,
+            moneda: 'ARS', monto: it.monto, estado: 'en_cartera', depositadoEnCuentaId: null, endosadoA: '',
+            observaciones: `Financiera — operación #${op.numero}`, origenFinanciera: true, financieraOperacionId: op._id,
+            usuarioNombre, fecha: ahora, orgId: op.orgId, createdAt: ahora, updatedAt: ahora
+          };
+          chequeId = (await db.collection('cheques').insertOne(cheque)).insertedId;
+        }
+        items.push(Object.assign({ chequeId }, it));
+      }
+      const quitados = actuales.filter(c => !mantenidos.has(String(c._id))).map(c => c._id);
+      if (quitados.length) await db.collection('cheques').updateMany({ _id: { $in: quitados } }, { $set: { estado: 'anulado', observaciones: 'Quitado de la operación de la financiera', updatedAt: ahora } });
+      await db.collection('financiera_operaciones').updateOne({ _id: id }, { $set: {
+        fecha, tasaMensual, nominal: calc.nominal, efectivoSugerido: calc.efectivoSugerido, efectivoPactado: calc.efectivoPactado, ganancia: calc.ganancia,
+        items, observaciones: txt(b.observaciones), updatedAt: ahora } });
+      return { ok: true };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Anular una operación: solo si ninguno de sus cheques salió de cartera y no hay rechazos.
 router.post('/operaciones/:id/anular', authOperar, async (req, res) => {
   try {
@@ -256,13 +321,13 @@ async function armarResumen(db, req) {
     const nominalVigente = r2(o.nominal - rech.reduce((s, x) => { const it = (o.items || []).find(i => String(i.chequeId) === String(x.chequeId)); return s + (it ? it.monto : 0); }, 0));
     const gananciaNeta = r2(o.ganancia - rechGan);
     return {
-      _id: o._id, numero: o.numero, fecha: o.fecha, tasaMensual: o.tasaMensual, observaciones: o.observaciones || '',
+      _id: o._id, numero: o.numero, fecha: o.fecha, tasaMensual: o.tasaMensual, observaciones: o.observaciones || '', efectivoSugerido: o.efectivoSugerido, editable: rech.length === 0,
       nominal: o.nominal, nominalVigente, efectivoPactado: o.efectivoPactado, rechazado: rechCosto, debe, pagado: imputado, pendiente: r2(debe - imputado),
       ganancia: gananciaNeta, gananciaPct: nominalVigente ? r2(gananciaNeta / nominalVigente * 100) : 0,
       items: (o.items || []).map(i => {
         const c = chPorId.get(String(i.chequeId)) || {};
         const dev = rech.some(x => String(x.chequeId) === String(i.chequeId));
-        return { chequeId: i.chequeId, numero: i.numero, banco: i.banco, librador: i.librador, monto: i.monto, fechaVencimiento: i.fechaVencimiento, dias: i.dias, costo: i.costoAsignado, estado: dev ? 'devuelto' : (c.estado || ''), endosadoA: c.endosadoA || '' };
+        return { chequeId: i.chequeId, numero: i.numero, banco: i.banco, librador: i.librador, cuitLibrador: i.cuitLibrador || '', libre: ['en_cartera', 'endosado'].includes(c.estado), monto: i.monto, fechaVencimiento: i.fechaVencimiento, dias: i.dias, costo: i.costoAsignado, estado: dev ? 'devuelto' : (c.estado || ''), endosadoA: c.endosadoA || '' };
       })
     };
   });
