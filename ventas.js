@@ -162,6 +162,19 @@ async function conReintento(fn) {
 }
 
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
+
+// Nombre completo del cliente para mostrar/imprimir: "Apellido Nombre" (apellido/razón social + nombre). Si el comprobante se
+// guardó antes con solo el apellido, al imprimir se vuelve a armar desde la ficha del cliente.
+function nombreCompletoCliente(c) { return c ? [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ').trim() : ''; }
+async function nombreClienteImpreso(clienteId, guardado) {
+  try {
+    if (!clienteId) return guardado || '';
+    const db = await getDb();
+    const c = await db.collection('clientes').findOne({ _id: clienteId }, { projection: { apellidoRazonSocial: 1, nombre: 1 } });
+    return nombreCompletoCliente(c) || guardado || '';
+  } catch (e) { return guardado || ''; }
+}
+
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 
@@ -1112,7 +1125,7 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
     const bodyHtml = `
       ${avisoFiscalHtml}
       ${recuadroClienteComprobante({
-        nombre: venta.clienteNombre,
+        nombre: await nombreClienteImpreso(venta.clienteId, venta.clienteNombre),
         iva: ivaClienteLabel,
         cuit: cuitImpreso,
         domicilio: cliente ? cliente.domicilio : '',
@@ -1195,7 +1208,7 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       <h1>Remito Nº ${numeroFmt}</h1>
       <div class="datos-doc">
         <div>
-          <strong>Cliente:</strong> ${escHtml(remito.clienteNombre)}<br>
+          <strong>Cliente:</strong> ${escHtml(await nombreClienteImpreso(remito.clienteId, remito.clienteNombre))}<br>
           <span class="muted">Comprobante asociado: Nº ${String(remito.ventaNumero).padStart(5, '0')}</span>
         </div>
         <div>
@@ -1247,7 +1260,7 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
       <h1>Recibo — Venta Nº ${String(venta.numero).padStart(5, '0')}</h1>
       <div class="datos-doc">
         <div>
-          <strong>Recibí de:</strong> ${escHtml(venta.clienteNombre)}<br>
+          <strong>Recibí de:</strong> ${escHtml(await nombreClienteImpreso(venta.clienteId, venta.clienteNombre))}<br>
           <strong>La suma de:</strong> ${moneyImp(totalMedios, venta.moneda)}${retsTodas.length ? `<br><strong>Retenciones practicadas:</strong> ${retsTodas.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(totalMedios + totalRet, venta.moneda)}` : ''}${recargoTotal > 0 ? `<br><strong>Recargo por financiación (tarjeta):</strong> ${moneyImp(recargoTotal, venta.moneda)}<br><strong>Total cobrado con tarjeta:</strong> ${moneyImp(grupo.reduce((a, p) => a + (p.tarjetaTotalCobrado || 0), 0), venta.moneda)}` : ''}
         </div>
         <div>
@@ -1387,7 +1400,7 @@ router.post('/', authAdmin, async (req, res) => {
         tipoComprobante,
         letra, esFiscal,
         clienteId,
-        clienteNombre: cliente.apellidoRazonSocial || cliente.nombre || '',
+        clienteNombre: nombreCompletoCliente(cliente) || cliente.apellidoRazonSocial || cliente.nombre || '',
         vendedor,
         usuarioId: (req.usuario && req.usuario._id) || null,
         fecha,

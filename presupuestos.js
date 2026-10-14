@@ -93,6 +93,9 @@ async function asegurarIndices(db) {
     console.error('No se pudieron crear los índices de presupuestos:', e.message);
   }
 }
+// Nombre completo del cliente para mostrar/imprimir: "Apellido Nombre". Si el presupuesto se guardó antes con solo el apellido,
+// al imprimir se vuelve a armar desde la ficha del cliente.
+function nombreCompletoCliente(c) { return c ? [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ').trim() : ''; }
 async function getDb() {
   if (!mongoClient) {
     // Carrera de conexión (4/10/2026, ver compras.js): se guarda la
@@ -405,7 +408,7 @@ router.post('/', authAdmin, async (req, res) => {
       const presupuesto = {
         numero,
         clienteId,
-        clienteNombre: cliente.apellidoRazonSocial || cliente.nombre || '',
+        clienteNombre: nombreCompletoCliente(cliente) || cliente.apellidoRazonSocial || cliente.nombre || '',
         vendedor,
         fecha,
         moneda,
@@ -464,7 +467,7 @@ router.put('/:id', authAdmin, async (req, res) => {
         const cliente = await cargarClienteParaOperar(db, req, clienteId);
         if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
         set.clienteId = clienteId;
-        set.clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
+        set.clienteNombre = nombreCompletoCliente(cliente) || cliente.apellidoRazonSocial || cliente.nombre || '';
       }
       if (body.items !== undefined) {
         const { items, subtotal } = await normalizarItemsPresupuesto(db, req, body.items);
@@ -701,7 +704,7 @@ router.get('/:id/imprimir', authAdmin, async (req, res) => {
     });
     const bodyHtml = `
       ${recuadroClienteComprobante({
-        nombre: presupuesto.clienteNombre,
+        nombre: nombreCompletoCliente(cliente) || presupuesto.clienteNombre,
         iva: ivaClienteLabel,
         cuit: cliente ? cliente.cuit : '',
         domicilio: cliente ? cliente.domicilio : '',

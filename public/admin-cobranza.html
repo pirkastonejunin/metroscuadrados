@@ -320,7 +320,7 @@ async function asegurarClientesCargadosCB(){
   const r = await fetch('/api/clientes', {headers: headersAuth()});
   if (r.ok) clientesCache = await r.json();
 }
-function textoClienteCB(c){ return c.apellidoRazonSocial || c.nombre || '(sin nombre)'; }
+function textoClienteCB(c){ return [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ') || '(sin nombre)'; }
 const LIMITE_SUGERENCIAS_CLIENTE_CB = 30;
 function buscarClientesComboCB(query){
   const q = (query || '').trim().toLowerCase();

@@ -1052,7 +1052,7 @@ async function cobroCuentaVariosMedios(req, res) {
     const db = await getDb();
     const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
     if (!cliente) throw err(404, 'Cliente no encontrado');
-    const clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
+    const clienteNombre = [cliente.apellidoRazonSocial, cliente.nombre].filter(Boolean).join(' ').trim();
     const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
     // Antes de escribir nada: que todas las cajas/bancos existan y estén habilitados (así no queda un recibo a medias).
     for (const v of valores) {
@@ -1155,7 +1155,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
       const db = await getDb();
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
       if (!cliente) throw err(404, 'Cliente no encontrado');
-      const clienteNombre = cliente.apellidoRazonSocial || cliente.nombre || '';
+      const clienteNombre = [cliente.apellidoRazonSocial, cliente.nombre].filter(Boolean).join(' ').trim();
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;
       let movimientoId = null; // 3/10/2026: para poder imprimir el recibo de este cobro recién hecho.

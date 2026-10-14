@@ -900,7 +900,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-manual', authVendedor
         const cli = await clienteParaVisita(db, visita.orgId, visita.cliente);
         const cl = await db.collection('clientes').findOne({ _id: cli.clienteId }, { projection: { apellidoRazonSocial: 1, nombre: 1 } });
         const pc = await require('./presupuestos').sincronizarDesdeVisita(db, {
-          visita, clienteId: cli.clienteId, clienteNombre: (cl && (cl.apellidoRazonSocial || cl.nombre)) || String(visita.cliente.nombre || ''),
+          visita, clienteId: cli.clienteId, clienteNombre: (cl && [cl.apellidoRazonSocial, cl.nombre].filter(Boolean).join(' ').trim()) || String(visita.cliente.nombre || ''),
           items: itemsFinales, formasPago, notas: notas || '', usuarioNombre: visita.vendedorNombre || ''
         });
         set.presupuestoComercialId = pc.presupuestoId;

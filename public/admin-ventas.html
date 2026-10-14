@@ -534,7 +534,7 @@ async function cargarVentas(){
 // en el filtro de cliente del listado (fv), con un "prefix" para poder
 // reusar las mismas funciones en los dos lugares.
 function textoCliente(c){
-  return c.apellidoRazonSocial || c.nombre || '(sin nombre)';
+  return [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ') || '(sin nombre)';
 }
 function buscarClientesVenta(query){
   const q = (query || '').trim().toLowerCase();
@@ -854,6 +854,7 @@ async function abrirNuevaVenta(prefill){
         <div class="totales-box" id="nvTotales"></div>
         <div class="err" id="nvErr"></div>
         <button class="btn" id="nvGuardarBtn" style="margin-top:10px" onclick="guardarNuevaVenta()">Guardar venta</button>
+        ${prefill && (prefill.tipoComprobante === 'nota_credito' || prefill.tipoComprobante === 'nota_debito') ? '' : `<button class="btn secondary" id="nvGuardarCobrarBtn" style="margin-top:10px;margin-left:8px" onclick="guardarNuevaVenta(true)">Guardar y cobrar</button>`}
       </div>
     </div>
   `;
@@ -1332,7 +1333,7 @@ function actualizarTotalesVenta(){
   `;
 }
 
-async function guardarNuevaVenta(){
+async function guardarNuevaVenta(cobrarDespues){
   const items = juntarItemsVenta();
   const tipoComprobante = document.getElementById('nvTipoComprobante') ? document.getElementById('nvTipoComprobante').value : 'comprobante_x';
   const esNotaCredito = tipoComprobante === 'nota_credito';
@@ -1382,8 +1383,10 @@ async function guardarNuevaVenta(){
   // de un rechazo, esperando que "ahora sí" funcione) disparaba un POST
   // por cada click y podía duplicar el comprobante.
   const btn = document.getElementById('nvGuardarBtn');
+  const btnCobrar = document.getElementById('nvGuardarCobrarBtn');
   if (btn.disabled) return;
   btn.disabled = true;
+  if (btnCobrar) btnCobrar.disabled = true;
   const textoOriginal = btn.textContent;
   btn.textContent = 'Guardando…';
   try{
@@ -1418,11 +1421,17 @@ async function guardarNuevaVenta(){
       presupuestoOrigenActual = null;
     }
     if (ventaOrgSeleccionada === ORG) await cargarVentas();
+    // "Guardar y cobrar": abre la ventana de cobro de la venta recién guardada (solo si quedó saldo y es de la sucursal activa).
+    if (cobrarDespues) {
+      if (ventaOrgSeleccionada !== ORG) alert('La venta se guardó en otra sucursal: para cobrarla, entrá a esa sucursal.');
+      else { const vNueva = ventasCache.find(x => x._id === data._id); if (vNueva && Number(vNueva.saldoPendiente) > 0) abrirCobro(data._id); }
+    }
     // Si se guardó en OTRA sucursal, el listado actual (de la sucursal
     // activa) no la muestra — es esperado, no hace falta recargar nada acá.
   }catch(e){
     document.getElementById('nvErr').textContent = e.message;
     btn.disabled = false;
+    if (btnCobrar) btnCobrar.disabled = false;
     btn.textContent = textoOriginal;
   }
 }

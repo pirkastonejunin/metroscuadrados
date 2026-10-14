@@ -532,7 +532,7 @@ async function asegurarClientesCargados(){
   const r = await fetch('/api/clientes', {headers: headersAuth()});
   if (r.ok) { clientesCache = await r.json(); clientesCargados = true; }
 }
-function textoClienteCC(c){ return c.apellidoRazonSocial || c.nombre || '(sin nombre)'; }
+function textoClienteCC(c){ return [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ') || '(sin nombre)'; }
 const LIMITE_SUGERENCIAS_CLIENTE_CC = 30;
 function buscarClientesComboCC(query){
   const q = (query || '').trim().toLowerCase();

@@ -419,7 +419,7 @@ async function borrarPresupuesto(id){
 // simplificado — este archivo no comparte JS con esa pantalla)
 // -----------------------------------------------------------------------
 const LIMITE_SUGERENCIAS = 30;
-function textoCliente(c){ return c.apellidoRazonSocial || c.nombre || '(sin nombre)'; }
+function textoCliente(c){ return [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' ') || '(sin nombre)'; }
 function buscarClientes(query){
   const q = (query || '').trim().toLowerCase();
   const resultados = q ? clientesCache.filter(c => textoCliente(c).toLowerCase().includes(q)) : clientesCache;
