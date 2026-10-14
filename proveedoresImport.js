@@ -511,7 +511,11 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           const n = porCod.get(codigoClave(pd.codigo));
           const sku = String(pd.sku || pd.codigo || '').trim().toUpperCase();
           const nombre = String(pd.nombre || n && n.nombre || pd.codigo || '').trim();
-          if (!n) { noCreados.push({ codigo: pd.codigo, motivo: 'No está en el archivo.' }); continue; }
+          if (!n) {
+            const yaEsta = calc.cambios.some(c => codigoClave(c.codigo) === codigoClave(pd.codigo));
+            noCreados.push({ codigo: pd.codigo, motivo: yaEsta ? 'Ya existe en el sistema: se actualiza como producto existente (no hace falta crearlo).' : 'La lista que trae el portal ahora no incluye este código (¿cambió la moneda de la regla o la lista?). Generá la vista previa de nuevo.' });
+            continue;
+          }
           if (n.costoNuevo == null) { noCreados.push({ codigo: pd.codigo, motivo: 'No tiene precio en la lista.' }); continue; }
           if (!sku || !nombre) { noCreados.push({ codigo: pd.codigo, motivo: 'Falta el SKU o el nombre.' }); continue; }
           if (await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)))) { noCreados.push({ codigo: pd.codigo, motivo: `Ya hay un producto con el SKU ${sku}.` }); continue; }
