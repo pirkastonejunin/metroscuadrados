@@ -488,6 +488,19 @@ function renderStockActual(limite){
 // Detalle de qué ventas pendientes de remito componen el "comprometido"
 // de un producto en un depósito (2/10/2026, pedido de Mato) — para ver a
 // qué cliente y qué cantidad corresponde ese número.
+async function recalcularComprometido(productoId){
+  const msg = document.getElementById('rcMsg');
+  try{
+    const h = Object.assign({'Content-Type':'application/json'}, headersAuth());
+    let r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({productoId})});
+    let d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    if (!d.filasCorregidas) { msg.textContent = 'El comprometido ya coincide con las ventas.'; return; }
+    if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de este producto (' + d.unidadesQuitadas + ' unidades menos comprometidas). ¿Continuar?')) return;
+    r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({productoId, aplicar:true})});
+    d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cerrarModal(); cargarStockActual();
+  }catch(e){ msg.textContent = e.message; }
+}
 async function verComprometido(productoId, depositoId){
   const fila = stockActualCache.find(f => String(f.productoId) === productoId && String(f.depositoId) === depositoId);
   const titulo = fila ? `${escapeHtml(fila.sku)} — ${escapeHtml(fila.nombre)}` : 'Producto';
@@ -506,19 +519,20 @@ async function verComprometido(productoId, depositoId){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al cargar');
     const cont = document.getElementById('cpContenido');
-    if (!data.length) { cont.innerHTML = '<p class="muted">No hay ventas pendientes que lo expliquen (puede haberse liberado recién).</p>'; return; }
+    const btnRecalc = `<div style="margin-top:12px"><button class="btn small secondary" onclick="recalcularComprometido('${productoId}')">Recalcular comprometido de este producto</button><div class="muted" style="font-size:12px;margin-top:4px">Lo recalcula desde las ventas pendientes. Si ninguna lo explica, queda en 0.</div><div id="rcMsg" class="muted"></div></div>`;
+    if (!data.length) { cont.innerHTML = '<p class="muted">No hay ventas pendientes que lo expliquen.</p>' + btnRecalc; return; }
     cont.innerHTML = `
       <table>
         <thead><tr><th>Comprobante</th><th>Cliente</th><th>Fecha</th><th>Cantidad</th></tr></thead>
         <tbody>${data.map(v => `
           <tr>
-            <td>${v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')}-${String(v.numero).padStart(5,'0')}</td>
+            <td>${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')) + '-' + String(v.numero).padStart(5,'0')}</td>
             <td>${escapeHtml(v.clienteNombre)}</td>
             <td class="muted">${fechaCorta(v.fecha)}</td>
             <td>${v.cantidad}</td>
           </tr>
         `).join('')}</tbody>
-      </table>
+      </table>${btnRecalc}
     `;
   }catch(e){
     document.getElementById('cpContenido').innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`;

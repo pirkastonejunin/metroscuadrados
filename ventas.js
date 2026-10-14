@@ -1603,7 +1603,21 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
       }
 
       const entregas = itemsBody ? itemsBody.map(it => ({ index: it.index, cantidad: it.cantidad })) : null;
-      await generarRemitoDeVenta(db, req, venta, depositoId, entregas);
+      try {
+        await generarRemitoDeVenta(db, req, venta, depositoId, entregas);
+      } catch (e) {
+        // Si el remito falla, no dejar comprometido lo que recién se reservó (quedaba stock "comprometido" sin explicación).
+        if (!venta.stockComprometido) {
+          for (const item of venta.items) {
+            if (!item.productoId) continue;
+            const q = cantidadPendiente(item);
+            if (q > 0) await db.collection('stock_actual').updateOne(Object.assign({ productoId: item.productoId, depositoId }, filtroOrg(req)), { $inc: { cantidadComprometida: -q } });
+          }
+        } else {
+          await migrarCompromisoDeposito(db, req, venta, depositoId, venta.depositoId || null).catch(() => {});
+        }
+        throw e;
+      }
       return db.collection('ventas').findOne({ _id: id });
     });
     res.json(resultado);

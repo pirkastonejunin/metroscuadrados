@@ -366,12 +366,58 @@ router.get('/comprometido', authAdmin, async (req, res) => {
         return {
           ventaId: v._id,
           numero: v.numero,
+          numeroOriginal: v.numeroOriginal || null,
           tipoComprobante: v.tipoComprobante,
           clienteNombre: v.clienteNombre,
           cantidad,
           fecha: v.fecha
         };
       }).filter(v => v.cantidad > 0);
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Recalcula el "comprometido" desde las ventas (14/10/2026, pedido de Mato: había comprometido sin venta que lo explique en
+// lo migrado de Dux). Comprometido = lo pendiente de entrega de las ventas no anuladas que reservaron stock (stockComprometido).
+// body: { aplicar?: bool, productoId? } — sin aplicar solo informa las diferencias.
+router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
+  try {
+    const aplicar = !!(req.body && req.body.aplicar);
+    const productoId = req.body && req.body.productoId ? toObjectId(req.body.productoId) : null;
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, stockComprometido: true }, filtroOrg(req));
+      if (productoId) filtroV['items.productoId'] = productoId;
+      const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1 }).toArray();
+      const esperado = new Map();
+      const k = (o, p, d) => `${o}|${p}|${d == null ? 'null' : d}`;
+      for (const v of ventas) for (const it of (v.items || [])) {
+        if (!it.productoId) continue;
+        if (productoId && String(it.productoId) !== String(productoId)) continue;
+        const pend = Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0));
+        if (pend <= 0) continue;
+        const key = k(v.orgId, it.productoId, v.depositoId);
+        const e = esperado.get(key) || { orgId: v.orgId, productoId: it.productoId, depositoId: v.depositoId || null, cantidad: 0 };
+        e.cantidad += pend; esperado.set(key, e);
+      }
+      const filtroS = Object.assign({}, filtroOrg(req));
+      if (productoId) filtroS.productoId = productoId;
+      const filas = await db.collection('stock_actual').find(filtroS).toArray();
+      const cambios = [];
+      for (const f of filas) {
+        const key = k(f.orgId, f.productoId, f.depositoId);
+        const exp = esperado.get(key); esperado.delete(key);
+        const nuevo = Math.round(((exp ? exp.cantidad : 0)) * 100) / 100;
+        const actual = Math.round((f.cantidadComprometida || 0) * 100) / 100;
+        if (Math.abs(nuevo - actual) > 1e-9) cambios.push({ _id: f._id, productoId: f.productoId, depositoId: f.depositoId || null, antes: actual, despues: nuevo });
+      }
+      const nuevas = [...esperado.values()];
+      if (aplicar) {
+        for (const c of cambios) await db.collection('stock_actual').updateOne({ _id: c._id }, { $set: { cantidadComprometida: c.despues, actualizadoEn: new Date() } });
+        for (const e of nuevas) await db.collection('stock_actual').updateOne({ orgId: e.orgId, productoId: e.productoId, depositoId: e.depositoId }, { $set: { cantidadComprometida: Math.round(e.cantidad * 100) / 100 }, $setOnInsert: { cantidad: 0 } }, { upsert: true });
+      }
+      return { aplicado: aplicar, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
