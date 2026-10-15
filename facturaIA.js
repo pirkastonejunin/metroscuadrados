@@ -588,9 +588,15 @@ function registrarRutasFacturaIA(router, { modo, authAdmin, getDb, conReintento,
       if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de leer una factura.');
       const b = req.body || {};
       const contenido = await armarContenidoArchivo({ base64: b.archivoBase64, mimeType: b.mimeType, nombreArchivo: b.nombreArchivo });
-      const crudo = await llamarIA(contenido);
+      // documento === 'orden': un pedido / orden de compra / presupuesto / remito del proveedor (no hace falta que sea una factura).
+      const esOrden = modo !== 'gastos' && b.documento === 'orden';
+      const cfgIA = esOrden ? {
+        instrucciones: INSTRUCCIONES + '\n\nIMPORTANTE (para este archivo): puede ser una ORDEN DE COMPRA, un pedido, un presupuesto/cotización, una lista de precios o un remito de un proveedor, no necesariamente una factura. Extraé igual el proveedor y todos los ítems con su código, descripción y cantidad; si no figura el precio, dejá precioUnitario en 0. Devolvé esComprobante en true siempre que haya ítems de productos.',
+        herramienta: HERRAMIENTA, pedido: 'Leé este documento del proveedor y registrá el proveedor y los ítems.'
+      } : undefined;
+      const crudo = await llamarIA(contenido, cfgIA);
       const factura = normalizarResultado(crudo);
-      if (!factura.esComprobante) throw err(400, 'Ese archivo no parece ser una factura o comprobante. Probá con otra foto o archivo.');
+      if (!factura.esComprobante) throw err(400, esOrden ? 'Ese archivo no parece tener productos para una orden de compra. Probá con otro archivo.' : 'Ese archivo no parece ser una factura o comprobante. Probá con otra foto o archivo.');
 
       const resultado = await conReintento(async () => {
         const db = await getDb();
@@ -608,7 +614,7 @@ function registrarRutasFacturaIA(router, { modo, authAdmin, getDb, conReintento,
         }
         // Aviso si el comprobante ya está cargado para ese proveedor.
         let duplicado = null;
-        if (proveedor && factura.comprobante.tipoComprobante && factura.comprobante.puntoVenta && factura.comprobante.comprobanteNumero) {
+        if (!esOrden && proveedor && factura.comprobante.tipoComprobante && factura.comprobante.puntoVenta && factura.comprobante.comprobanteNumero) {
           const coleccion = modo === 'gastos' ? 'gastos' : 'compras';
           const dupe = await db.collection(coleccion).findOne(Object.assign({
             proveedorId: proveedor._id, tipoComprobante: factura.comprobante.tipoComprobante,

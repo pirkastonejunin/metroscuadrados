@@ -43,10 +43,10 @@ window.FacturaIAUI = (function () {
     document.head.appendChild(st);
   }
 
-  function cajaHtml(prefix, ayuda) {
+  function cajaHtml(prefix, ayuda, titulo) {
     inyectarEstilos();
     return '<div class="fia-box" id="' + prefix + 'FiaBox">' +
-      '<div class="fia-titulo">🧾 Cargar la factura con IA</div>' +
+      '<div class="fia-titulo">' + esc(titulo || '🧾 Cargar la factura con IA') + '</div>' +
       '<div class="fia-ayuda">' + esc(ayuda || 'Sacá una foto o subí un PDF u otro archivo de la factura: la IA lee los datos y completa el formulario. Revisá todo antes de guardar.') + '</div>' +
       '<div class="fia-botones" id="' + prefix + 'FiaBotones">' +
       '<label class="btn secondary small fia-btn">📷 Sacar foto<input type="file" accept="image/*" capture="environment" hidden onchange="FacturaIAUI.elegido(this,\'' + prefix + '\')"></label>' +
@@ -123,7 +123,7 @@ window.FacturaIAUI = (function () {
       var base64 = await leerComoBase64(reducida || file);
       var r = await fetch(cfg.url, {
         method: 'POST', headers: cfg.headers(),
-        body: JSON.stringify({ archivoBase64: base64, mimeType: reducida ? 'image/jpeg' : (file.type || ''), nombreArchivo: file.name || '' })
+        body: JSON.stringify(Object.assign({ archivoBase64: base64, mimeType: reducida ? 'image/jpeg' : (file.type || ''), nombreArchivo: file.name || '' }, cfg.extra || {}))
       });
       var data = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(data.error || 'No se pudo leer la factura.');

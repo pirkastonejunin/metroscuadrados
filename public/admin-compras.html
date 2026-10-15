@@ -778,6 +778,7 @@ function abrirNuevaCompra(){
   actualizarVisibilidadCotizacion('ncCotizacionWrap', 'ncMoneda', 'ncCotizacionDolar');
   window._iaItemsPendientes = [];
   window._iaTotalFactura = 0;
+  IA_PFX = 'nc';
   FacturaIAUI.registrar('nc', { url: BASE + '/leer-factura', headers: headersAuthJson, alResultado: aplicarFacturaLeida });
 }
 
@@ -918,6 +919,13 @@ function actualizarTotalesCompra(){
 // uno nuevo u omitir); no se puede guardar mientras haya ítems sin resolver.
 // -------------------------------------------------------------------
 let iaSeq = 0;
+// Los mismos pasos (proveedor, ítems sin resolver) sirven para Compras ('nc') y para Órdenes de compra ('no').
+let IA_PFX = 'nc';
+const iaOrden = () => IA_PFX === 'no';
+const iaFilas = () => iaOrden() ? 'noFilasItems' : 'ncFilasItems';
+const iaAgregarFila = () => iaOrden() ? agregarFilaOrden() : agregarFilaCompra();
+const iaActualizarFila = f => iaOrden() ? actualizarFilaOrden(f) : actualizarFilaCompra(f);
+const iaTotales = () => iaOrden() ? actualizarTotalesOrden() : actualizarTotalesCompra();
 function iaSetearValor(id, valor){
   const el = document.getElementById(id);
   if (el && valor !== undefined && valor !== null && valor !== '') el.value = valor;
@@ -926,47 +934,53 @@ function iaPend(id){ return (window._iaItemsPendientes || []).find(x => x._iaId 
 function iaQuitarPend(id){
   window._iaItemsPendientes = (window._iaItemsPendientes || []).filter(x => x._iaId !== id);
   iaRenderPendientes();
-  actualizarTotalesCompra();
+  iaTotales();
 }
 
 async function aplicarFacturaLeida(d){
-  document.getElementById('ncFiaRevision').innerHTML = '<div id="ncIaProveedor"></div><div id="ncIaItems"></div>';
+  document.getElementById(IA_PFX + 'FiaRevision').innerHTML = '<div id="' + IA_PFX + 'IaProveedor"></div><div id="' + IA_PFX + 'IaItems"></div>';
   const c = d.comprobante || {};
-  if (c.tipoComprobante) iaSetearValor('ncTipoComprobante', c.tipoComprobante);
-  iaSetearValor('ncPuntoVenta', c.puntoVenta);
-  iaSetearValor('ncComprobanteNumero', c.comprobanteNumero);
-  iaSetearValor('ncFecha', c.fecha);
-  if (c.moneda) {
-    iaSetearValor('ncMoneda', c.moneda);
-    actualizarVisibilidadCotizacion('ncCotizacionWrap', 'ncMoneda', 'ncCotizacionDolar');
+  if (iaOrden()) {
+    iaSetearValor('noFecha', c.fecha);
+    if (c.moneda) iaSetearValor('noMoneda', c.moneda);
+    window._iaTotalFactura = 0;
+  } else {
+    if (c.tipoComprobante) iaSetearValor('ncTipoComprobante', c.tipoComprobante);
+    iaSetearValor('ncPuntoVenta', c.puntoVenta);
+    iaSetearValor('ncComprobanteNumero', c.comprobanteNumero);
+    iaSetearValor('ncFecha', c.fecha);
+    if (c.moneda) {
+      iaSetearValor('ncMoneda', c.moneda);
+      actualizarVisibilidadCotizacion('ncCotizacionWrap', 'ncMoneda', 'ncCotizacionDolar');
+    }
+    window._iaTotalFactura = (d.totales && d.totales.total) || 0;
   }
-  window._iaTotalFactura = (d.totales && d.totales.total) || 0;
   iaRenderProveedor(d);
 
-  document.getElementById('ncFilasItems').innerHTML = '';
+  document.getElementById(iaFilas()).innerHTML = '';
   window._iaItemsPendientes = [];
   for (const it of (d.items || [])) {
     if (it.producto) await iaAgregarFilaConProducto(it, it.producto._id);
     else { it._iaId = ++iaSeq; window._iaItemsPendientes.push(it); }
   }
-  if (!document.querySelector('#ncFilasItems .fila-item') && !window._iaItemsPendientes.length) agregarFilaCompra();
+  if (!document.querySelector('#' + iaFilas() + ' .fila-item') && !window._iaItemsPendientes.length) iaAgregarFila();
   iaRenderPendientes();
 
-  ImpuestosUI.cargar('impNC', d.impuestos);
+  if (!iaOrden()) ImpuestosUI.cargar('impNC', d.impuestos);
   const avisos = (d.avisos || []).slice();
-  if (d.duplicado) avisos.unshift('Esta factura ya está cargada para ese proveedor (compra #' + d.duplicado.numero + '). Si la guardás de nuevo, el sistema la va a rechazar.');
-  FacturaIAUI.avisos('nc', avisos);
-  actualizarTotalesCompra();
+  if (d.duplicado && !iaOrden()) avisos.unshift('Esta factura ya está cargada para ese proveedor (compra #' + d.duplicado.numero + '). Si la guardás de nuevo, el sistema la va a rechazar.');
+  FacturaIAUI.avisos(IA_PFX, avisos);
+  iaTotales();
 }
 
 function iaRenderProveedor(d){
-  const cont = document.getElementById('ncIaProveedor');
-  const sel = document.getElementById('ncProveedor');
+  const cont = document.getElementById(IA_PFX + 'IaProveedor');
+  const sel = document.getElementById(iaOrden() ? 'noProveedor' : 'ncProveedor');
   const co = d.proveedorCoincidencia;
   if (co) {
     if (!proveedoresCache.some(p => String(p._id) === String(co._id))) proveedoresCache.push({ _id: co._id, razonSocial: co.razonSocial, condicionPago: co.condicionPago || '' });
-    elegirProveedor('ncProveedor', String(co._id));
-    actualizarCondicionPago();
+    elegirProveedor(iaOrden() ? 'noProveedor' : 'ncProveedor', String(co._id));
+    iaOrden() ? actualizarCondicionPagoOrden() : actualizarCondicionPago();
     cont.innerHTML = `<div class="muted" style="margin-top:8px">Proveedor reconocido: <strong>${escapeHtml(co.razonSocial)}</strong> (${co.criterio === 'cuit' ? 'por CUIT' : 'por nombre'}).</div>`;
     return;
   }
@@ -996,36 +1010,36 @@ async function iaCrearProveedor(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'No se pudo crear el proveedor');
     proveedoresCache.push(data);
-    const sel = document.getElementById('ncProveedor');
-    elegirProveedor('ncProveedor', String(data._id));
-    actualizarCondicionPago();
-    document.getElementById('ncIaProveedor').innerHTML = `<div class="muted" style="margin-top:8px">Proveedor creado y elegido: <strong>${escapeHtml(data.razonSocial)}</strong>.</div>`;
+    const sel = document.getElementById(iaOrden() ? 'noProveedor' : 'ncProveedor');
+    elegirProveedor(iaOrden() ? 'noProveedor' : 'ncProveedor', String(data._id));
+    iaOrden() ? actualizarCondicionPagoOrden() : actualizarCondicionPago();
+    document.getElementById(IA_PFX + 'IaProveedor').innerHTML = `<div class="muted" style="margin-top:8px">Proveedor creado y elegido: <strong>${escapeHtml(data.razonSocial)}</strong>.</div>`;
   }catch(e){ errEl.textContent = e.message; }
 }
 
 async function iaAgregarFilaConProducto(it, productoId){
   await asegurarProductos([productoId]);
-  agregarFilaCompra();
-  const filas = document.querySelectorAll('#ncFilasItems .fila-item');
+  iaAgregarFila();
+  const filas = document.querySelectorAll('#' + iaFilas() + ' .fila-item');
   const fila = filas[filas.length - 1];
   const producto = productosCache.find(p => String(p._id) === String(productoId));
   fila.querySelector('.producto-id').value = String(productoId);
   fila.querySelector('.producto-buscar').value = producto ? textoProducto(producto) : it.descripcion;
-  actualizarFilaCompra(fila);
+  iaActualizarFila(fila);
   // Lo que vale es lo que dice la factura, no el costo de la ficha.
   fila.querySelector('.campo-precio input').value = it.precioUnitario;
-  fila.querySelector('select.select-iva').value = String(it.alicuotaIva);
+  const selIva = fila.querySelector('select.select-iva'); if (selIva) selIva.value = String(it.alicuotaIva);
   const cant = fila.querySelector('.cant-unidad');
   cant.value = it.cantidad;
-  sincronizarCantidadCompra(cant, 'unidad', productosCache, actualizarTotalesCompra);
+  sincronizarCantidadCompra(cant, 'unidad', productosCache, iaOrden() ? actualizarTotalesOrden : actualizarTotalesCompra);
 }
 
 function iaRenderPendientes(){
-  const cont = document.getElementById('ncIaItems');
+  const cont = document.getElementById(IA_PFX + 'IaItems');
   if (!cont) return;
   const pend = window._iaItemsPendientes || [];
   if (!pend.length) { cont.innerHTML = ''; return; }
-  cont.innerHTML = `<div style="margin-top:10px;font-size:13px"><strong>${pend.length} ítem(s) de la factura no coinciden con tu catálogo.</strong> Elegí qué hacer con cada uno:</div>` + pend.map(it => `
+  cont.innerHTML = `<div style="margin-top:10px;font-size:13px"><strong>${pend.length} ítem(s) del documento no coinciden con tu catálogo.</strong> Elegí qué hacer con cada uno:</div>` + pend.map(it => `
     <div class="fia-item" id="iaPend${it._iaId}">
       <h4>${escapeHtml(it.descripcion)}${it.codigo ? ' <span class="muted">(código ' + escapeHtml(it.codigo) + ')</span>' : ''}</h4>
       <div class="muted">${it.cantidad} × ${money(it.precioUnitario)} — IVA ${it.alicuotaIva}%</div>
@@ -1795,6 +1809,7 @@ function abrirNuevaOrden(){
           <div><label>Cotización dólar</label><input id="noCotizacionDolar" type="number" min="0" step="0.01" placeholder="Opcional (se usa la vigente)" onchange="recalcularPreciosPorMoneda('#noFilasItems','noMoneda','noCotizacionDolar',actualizarTotalesOrden)"></div>
         </div>
 
+        ${FacturaIAUI.cajaHtml('no', 'Subí el PDF (o una foto) de la orden, pedido o presupuesto del proveedor: la IA lee el proveedor y los productos y los carga abajo. Los que no reconozca te los pregunta. Revisá todo antes de guardar.', '📄 Cargar la orden desde un PDF con IA')}
         <div class="section-title">Productos</div>
         <div id="noFilasItems"></div>
         <div class="row" style="gap:8px">
@@ -1810,6 +1825,8 @@ function abrirNuevaOrden(){
     </div>
   `;
   agregarFilaOrden();
+  IA_PFX = 'no'; window._iaItemsPendientes = []; window._iaTotalFactura = 0;
+  FacturaIAUI.registrar('no', { url: BASE + '/leer-factura', headers: headersAuthJson, alResultado: aplicarFacturaLeida, extra: { documento: 'orden' } });
 }
 
 function actualizarCondicionPagoOrden(){
@@ -1955,6 +1972,8 @@ async function guardarNuevaOrden(){
   document.getElementById('noErrNueva').textContent = '';
   if (!body.proveedorId) { document.getElementById('noErrNueva').textContent = 'Elegí un proveedor'; return; }
   if (!items.length) { document.getElementById('noErrNueva').textContent = 'Agregá al menos un producto'; return; }
+  const pendientesIAo = (window._iaItemsPendientes || []).length;
+  if (pendientesIAo) { document.getElementById('noErrNueva').textContent = 'Todavía hay ' + pendientesIAo + ' ítem(s) del documento sin resolver (están arriba): vinculalos a un producto, creá uno nuevo o elegí "No cargar este ítem".'; return; }
   try{
     const r = await fetch(BASE + '/ordenes', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
