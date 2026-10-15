@@ -853,6 +853,14 @@ async function abrirNuevaVenta(prefill){
         <div class="grid3" style="margin-top:10px">
           <div><label>Moneda</label><select id="nvMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
           <div id="nvTipoEntregaWrap"><label>Tipo de entrega *</label><select id="nvTipoEntrega" onchange="actualizarVisibilidadDeposito()"><option value="inmediata">Entrega inmediata (genera el remito y descuenta el stock ahora)</option><option value="pendiente">Pendiente (el stock queda comprometido hasta generar el remito)</option></select></div>
+          <div id="nvReingresaWrap" class="hidden">
+            <label>Mercadería</label>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:400">
+              <input type="checkbox" id="nvReingresa" onchange="actualizarVisibilidadDeposito()" style="width:auto"${(!prefill || prefill.reingresaStock !== false) ? ' checked' : ''}>
+              Devuelve y reingresa la mercadería al stock
+            </label>
+            <span class="muted" style="font-size:12px">Destildalo si la factura no salió (no se entregó nada): la nota solo ajusta la cuenta.</span>
+          </div>
           <div id="nvDepositoWrap">
             <label id="nvDepositoLabel">Depósito *</label>
             <div class="row" style="gap:6px">
@@ -968,7 +976,10 @@ function actualizarVisibilidadDeposito(){
 
   document.getElementById('nvTipoEntregaWrap').classList.toggle('hidden', esNotaCredito || esNotaDebito);
 
-  const mostrarDeposito = esNotaCredito || (!esNotaDebito && esInmediata);
+  const chkRe = document.getElementById('nvReingresa');
+  document.getElementById('nvReingresaWrap').classList.toggle('hidden', !esNotaCredito);
+  const reingresa = !esNotaCredito || !chkRe || chkRe.checked;
+  const mostrarDeposito = (esNotaCredito && reingresa) || (!esNotaDebito && !esNotaCredito && esInmediata);
   document.getElementById('nvDepositoWrap').classList.toggle('hidden', !mostrarDeposito);
   document.getElementById('nvDepositoLabel').textContent = esNotaCredito
     ? 'Depósito donde reingresa la mercadería *'
@@ -1506,7 +1517,8 @@ async function guardarNuevaVenta(cobrarDespues){
     esFiscal: (document.getElementById('nvEsFiscal') && document.getElementById('nvEsFiscal').checked) || false,
     // La Nota de Débito no reingresa ni descuenta stock, así que no usa
     // depósito (3/10/2026).
-    depositoId: esNotaDebito ? null : (document.getElementById('nvDeposito').value || null),
+    reingresaStock: esNotaCredito ? !!(document.getElementById('nvReingresa') && document.getElementById('nvReingresa').checked) : undefined,
+    depositoId: (esNotaDebito || (esNotaCredito && !(document.getElementById('nvReingresa') && document.getElementById('nvReingresa').checked))) ? null : (document.getElementById('nvDeposito').value || null),
     listaPrecioId: document.getElementById('nvListaPrecio') ? (document.getElementById('nvListaPrecio').value || null) : null,
     items,
     descuentoPorcentaje: Number(document.getElementById('nvDescuentoPorcentaje').value) || 0,
@@ -1528,7 +1540,7 @@ async function guardarNuevaVenta(cobrarDespues){
   // Nota de Crédito (necesita saber a qué depósito reingresa la
   // mercadería) — con "no entrega" (venta normal) se puede elegir
   // después, al generar el remito. La Nota de Débito no pide depósito.
-  if (esNotaCredito && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito reingresa la mercadería de esta nota de crédito'; return; }
+  if (esNotaCredito && body.reingresaStock && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito reingresa la mercadería de esta nota de crédito'; return; }
   if (!esNotaCredito && !esNotaDebito && tipoEntrega === 'inmediata' && !body.depositoId) { document.getElementById('nvErr').textContent = 'Elegí a qué depósito le vas a entregar la venta'; return; }
   // Bloquea el botón mientras la venta se está guardando (2/10/2026) — sin
   // esto, tocar "Guardar venta" varias veces seguidas (por ejemplo después
@@ -1640,6 +1652,9 @@ function verDetalle(id){
           ${v.canceladaPorNota ? '<div class="fila-total" style="color:var(--ok,#2a7);font-weight:700"><span>✔ Comprobante cancelado con nota de crédito</span><span></span></div>' : ''}
         </div>
         ${(v.notasAplicadas && v.notasAplicadas.length) ? `<p class="muted" style="margin:6px 0;font-size:13px">Notas de crédito aplicadas: ${v.notasAplicadas.map(n => 'NC ' + escapeHtml(n.letra) + '-' + String(n.numero).padStart(5,'0') + ' (' + money(n.monto) + ')').join(', ')}</p>` : ''}
+        ${(v.tipoComprobante === 'nota_credito' && v.estado !== 'anulada' && (v.items || []).some(it => it.productoId)) ? (v.reingresaStock === false
+          ? `<p style="margin:6px 0;font-size:13px" class="muted">Esta nota <strong>no movió stock</strong>. <button class="btn small secondary" onclick="stockNota('${v._id}', true)">Reingresar mercadería</button></p>`
+          : `<p style="margin:6px 0;font-size:13px">Esta nota reingresó la mercadería al stock. <button class="btn small secondary" onclick="stockNota('${v._id}', false)">Quitar el reingreso de stock</button></p>`) : ''}
         ${(v.tipoComprobante === 'nota_credito' && v.estado !== 'anulada') ? (v.aplicadaA
           ? `<p style="margin:6px 0;font-size:13px">Aplicada a <strong>${escapeHtml(v.aplicadaA.letra || 'X')}-${String(v.aplicadaA.numero).padStart(5,'0')}</strong> por ${money(v.aplicadaA.monto)} <button class="btn small secondary" onclick="desasociarNota('${v._id}')">Desasociar</button></p>`
           : `<p style="margin:6px 0;font-size:13px" class="muted">Esta nota no está asociada a ninguna factura. <button class="btn small" onclick="abrirAsociarNota('${v._id}')">Asociar a una factura</button></p>`) : ''}
@@ -2155,6 +2170,22 @@ function generarNotaContraria(id){
   });
 }
 
+async function stockNota(id, reingresa){
+  let depositoId = null;
+  if (reingresa) {
+    const opts = (depositosCache || []).map((d, i) => (i + 1) + ') ' + d.nombre).join('\n');
+    const n = parseInt(prompt('¿A qué depósito reingresa la mercadería?\n' + opts + '\n\nEscribí el número:'), 10);
+    if (!n || !depositosCache[n - 1]) return;
+    depositoId = depositosCache[n - 1]._id;
+  } else if (!confirm('¿Quitar el reingreso de stock de esta nota? Se descuenta del depósito lo que había ingresado.')) return;
+  try {
+    const r = await fetch(BASE + '/' + id + '/stock-nota', { method: 'POST', headers: headersAuthJson(), body: JSON.stringify({ reingresa, depositoId }) });
+    const d = await r.json();
+    if (!r.ok) { alert(d.error || 'No se pudo'); return; }
+    cerrarModal(); await cargarVentas(); verDetalle(id);
+  } catch (e) { alert(e.message); }
+}
+
 function generarNotaCreditoDesdeVenta(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
@@ -2172,6 +2203,8 @@ function generarNotaCreditoDesdeVenta(id){
     // Solo si el original tiene CAE de ARCA (una nota fiscal se asocia a una factura
     // autorizada); si es un comprobante X o una venta histórica de Dux, arranca NO fiscal (letra X).
     esFiscalOrigen: !!v.cae,
+    // Solo reingresa mercadería si la factura salió (se entregó algo).
+    reingresaStock: (v.estado === 'entregada' || v.estado === 'parcialmente_entregada' || (v.items || []).some(it => (it.cantidadEntregada || 0) > 0)),
     items: (v.items || []).map(it => ({
       productoId: it.productoId || null,
       nombre: it.nombre,

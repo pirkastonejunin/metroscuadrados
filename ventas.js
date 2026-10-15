@@ -600,6 +600,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
 // físico, porque nunca se había descontado.
 async function revertirStockDeVentaAnulada(db, req, venta) {
   if (venta.tipoComprobante === 'nota_credito') {
+    if (venta.reingresaStock === false || !venta.stockDescontado) return; // no movió stock
     // Al crearse, una Nota de Crédito reingresa stock DE VERDAD (ingreso
     // directo, ver POST /) — anularla deshace exactamente eso: un egreso
     // por la misma cantidad, del mismo depósito.
@@ -1442,7 +1443,11 @@ router.post('/', authAdmin, async (req, res) => {
     // les hace falta, ya lo dice el tipo de comprobante elegido.
     const esFiscalNota = !!body.esFiscal;
     if (esNotaDebito) { /* depositoId no aplica */ }
-    else if (esNotaCredito && !depositoId) throw err(400, 'Elegí a qué depósito reingresa la mercadería de esta nota de crédito.');
+    // (15/10/2026, pedido de Mato) la nota de crédito reingresa la mercadería
+    // solo si se elige: si la factura nunca salió no hay nada que devolver.
+    // Sin el dato (clientes viejos) se mantiene el comportamiento anterior.
+    const reingresaStock = esNotaCredito ? (body.reingresaStock === undefined ? true : !!body.reingresaStock) : false;
+    if (esNotaCredito && reingresaStock && !depositoId) throw err(400, 'Elegí a qué depósito reingresa la mercadería de esta nota de crédito.');
     else if (tipoEntrega === 'inmediata' && !depositoId) throw err(400, 'Elegí a qué depósito le vas a entregar la venta.');
     const vendedor = normalizarTexto(body.vendedor) || (req.usuario && req.usuario.nombre) || '';
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
@@ -1567,8 +1572,9 @@ router.post('/', authAdmin, async (req, res) => {
         // front). Nota de Débito sí funciona como una venta para esto.
         saldoPendiente: esNotaCredito ? 0 : total,
         observaciones,
-        stockDescontado: esNotaCredito, // reingreso directo ya aplicado (ver más abajo)
-        stockDescontadoEn: esNotaCredito ? ahora : null,
+        reingresaStock: esNotaCredito ? reingresaStock : undefined,
+        stockDescontado: esNotaCredito && reingresaStock, // reingreso directo ya aplicado (ver más abajo)
+        stockDescontadoEn: (esNotaCredito && reingresaStock) ? ahora : null,
         remitoId: null,
         remitoNumero: null,
         remitosIds: [],
@@ -1609,7 +1615,7 @@ router.post('/', authAdmin, async (req, res) => {
         // Reingresa stock DE VERDAD ahora mismo (no es un compromiso: es
         // la devolución física de la mercadería) al depósito elegido.
         for (const item of items) {
-          if (!item.productoId) continue;
+          if (!item.productoId || !reingresaStock) continue;
           await aplicarMovimientoStock(db, req, {
             productoId: item.productoId, depositoId, tipo: 'ingreso', cantidad: item.cantidad,
             motivo: 'Nota de crédito', observaciones: `Nota de crédito Nº ${numero}`.trim(),
@@ -1836,6 +1842,47 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
         { _id: id, cae: { $exists: false }, fiscalEstado: { $ne: 'autorizando' } },
         { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
       );
+      return db.collection('ventas').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Cambia si una Nota de Crédito ya emitida reingresó o no la mercadería
+// (15/10/2026): quita el ingreso (egreso compensatorio) o lo agrega.
+router.post('/:id/stock-nota', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const reingresa = !!(req.body && req.body.reingresa);
+    const depositoIdBody = (req.body && req.body.depositoId) ? toObjectId(req.body.depositoId) : null;
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await buscarVentaOperable(db, req, id);
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.tipoComprobante !== 'nota_credito') throw err(400, 'Solo aplica a notas de crédito.');
+      if (venta.estado === 'anulada') throw err(400, 'La nota está anulada.');
+      const yaReingreso = venta.reingresaStock !== false && !!venta.stockDescontado;
+      const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+      if (reingresa) {
+        if (yaReingreso) throw err(400, 'Esta nota ya reingresó la mercadería.');
+        const depositoId = depositoIdBody || venta.depositoId;
+        if (!depositoId) throw err(400, 'Elegí el depósito.');
+        for (const item of venta.items || []) {
+          if (!item.productoId) continue;
+          await aplicarMovimientoStock(db, req, { productoId: item.productoId, depositoId, tipo: 'ingreso', cantidad: item.cantidad,
+            motivo: 'Nota de crédito', observaciones: `Nota de crédito Nº ${venta.numero}`, ventaId: venta._id, usuarioNombre, fecha: new Date() });
+        }
+        await db.collection('ventas').updateOne({ _id: id }, { $set: { reingresaStock: true, stockDescontado: true, stockDescontadoEn: new Date(), depositoId, updatedAt: new Date() } });
+      } else {
+        if (!yaReingreso) throw err(400, 'Esta nota no reingresó stock.');
+        for (const item of venta.items || []) {
+          if (!item.productoId) continue;
+          await aplicarMovimientoStock(db, req, { productoId: item.productoId, depositoId: venta.depositoId, tipo: 'egreso', cantidad: item.cantidad,
+            motivo: 'Corrección de nota de crédito', observaciones: `Se quita el reingreso de la nota de crédito Nº ${venta.numero}`, ventaId: venta._id, usuarioNombre, fecha: new Date() });
+        }
+        await db.collection('ventas').updateOne({ _id: id }, { $set: { reingresaStock: false, stockDescontado: false, updatedAt: new Date() } });
+      }
       return db.collection('ventas').findOne({ _id: id });
     });
     res.json(resultado);
