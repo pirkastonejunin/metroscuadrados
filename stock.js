@@ -389,9 +389,8 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
     const productoId = req.body && req.body.productoId ? toObjectId(req.body.productoId) : null;
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      // Incluye también las ventas pendientes que quedaron sin la marca de "reservada" (cargadas por otro camino o antes de que existiera);
-    // las importadas de Dux solo cuentan si ya estaban marcadas.
-    const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] }, $or: [{ stockComprometido: true }, { importado: { $ne: true } }] }, filtroOrg(req));
+      // Incluye todas las ventas pendientes de entrega, tengan o no la marca de "reservada" y sean cargadas acá o importadas de Dux.
+    const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
       const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1 }).toArray();
       const conPendiente = v => (v.items || []).some(it => it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0);
