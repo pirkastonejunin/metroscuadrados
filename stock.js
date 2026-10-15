@@ -389,9 +389,13 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
     const productoId = req.body && req.body.productoId ? toObjectId(req.body.productoId) : null;
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, stockComprometido: true, canceladaPorNota: { $ne: true } }, filtroOrg(req));
+      // Incluye también las ventas pendientes que quedaron sin la marca de "reservada" (cargadas por otro camino o antes de que existiera);
+    // las importadas de Dux solo cuentan si ya estaban marcadas.
+    const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] }, $or: [{ stockComprometido: true }, { importado: { $ne: true } }] }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
-      const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1 }).toArray();
+      const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1 }).toArray();
+      const conPendiente = v => (v.items || []).some(it => it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0);
+      const ventasSinReserva = ventas.filter(v => !v.stockComprometido && conPendiente(v)).length;
       // Lo comprometido sin depósito va contra el depósito Junín de su sucursal (15/10/2026, pedido de Mato).
       const juninPorOrg = new Map();
       // (solo en el recálculo general: cambiar el depósito de una venta afecta a todos sus productos)
@@ -427,11 +431,13 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       }
       const nuevas = [...esperado.values()];
       if (aplicar) {
+        const sinMarca = ventas.filter(v => !v.stockComprometido).map(v => v._id);
+        if (sinMarca.length) await db.collection('ventas').updateMany({ _id: { $in: sinMarca } }, { $set: { stockComprometido: true } });
         for (const v of ventas) if (v._reasignada) await db.collection('ventas').updateOne({ _id: v._id, depositoId: null }, { $set: { depositoId: v.depositoId } });
         for (const c of cambios) await db.collection('stock_actual').updateOne({ _id: c._id }, { $set: { cantidadComprometida: c.despues, actualizadoEn: new Date() } });
         for (const e of nuevas) await db.collection('stock_actual').updateOne({ orgId: e.orgId, productoId: e.productoId, depositoId: e.depositoId }, { $set: { cantidadComprometida: Math.round(e.cantidad * 100) / 100 }, $setOnInsert: { cantidad: 0 } }, { upsert: true });
       }
-      return { aplicado: aplicar, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
+      return { aplicado: aplicar, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
