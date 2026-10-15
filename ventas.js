@@ -201,6 +201,7 @@ const TIPOS_COMPROBANTE_VALIDOS = ['comprobante_x', 'fiscal', 'nota_credito', 'n
 // mercadería física de por medio. Numeración propia para cada una (ver
 // proximoNumero, que ya separa por tipoComprobante).
 const PREFIJO_COMPROBANTE = { fiscal: 'F', comprobante_x: 'X', nota_credito: 'NC', nota_debito: 'ND' };
+const TITULO_DOC_RECIBO = (v, conArticulo) => v.tipoComprobante === 'nota_debito' ? (conArticulo ? 'la Nota de Débito' : 'Nota de Débito') : v.tipoComprobante === 'nota_credito' ? (conArticulo ? 'la Nota de Crédito' : 'Nota de Crédito') : (conArticulo ? 'la Venta' : 'Venta');
 const TITULO_COMPROBANTE = { fiscal: 'FACTURA', comprobante_x: 'COMPROBANTE', nota_credito: 'NOTA DE CRÉDITO', nota_debito: 'NOTA DE DÉBITO' };
 // Usado solo como FALLBACK al imprimir un comprobante viejo (de antes del
 // 3/10/2026) que no tiene `letra` guardada — todo lo nuevo usa
@@ -1260,7 +1261,7 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
     const detalleMedio = p => (TIPO_VALOR_LABEL[p.tipoValor] || escHtml(p.tipoValor))
       + (p.tipoValor === 'tarjeta' ? ` (Lote ${escHtml(p.tarjetaLote || '—')} / Cupón ${escHtml(p.tarjetaCupon || '—')})` : '');
     const bodyHtml = `
-      <h1>Recibo — Venta Nº ${String(venta.numero).padStart(5, '0')}</h1>
+      <h1>Recibo — ${TITULO_DOC_RECIBO(venta)} Nº ${String(venta.numero).padStart(5, '0')}</h1>
       <div class="datos-doc">
         <div>
           <strong>Recibí de:</strong> ${escHtml(await nombreClienteImpreso(venta.clienteId, venta.clienteNombre))}<br>
@@ -1272,11 +1273,11 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
         </div>
       </div>
       ${grupo.length > 1 ? `<table style="width:100%;border-collapse:collapse;margin:10px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #999">Medio</th><th style="text-align:right;border-bottom:1px solid #999">Importe</th></tr></thead><tbody>${grupo.map(p => `<tr><td>${detalleMedio(p)}</td><td style="text-align:right">${moneyImp(p.monto, venta.moneda)}</td></tr>`).join('')}</tbody></table>` : ''}
-      <p>En concepto de pago de la Venta Nº ${String(venta.numero).padStart(5, '0')}.${pago.nota ? ` ${escHtml(pago.nota)}` : ''}</p>
+      <p>En concepto de pago de ${TITULO_DOC_RECIBO(venta, true)} Nº ${String(venta.numero).padStart(5, '0')}.${pago.nota ? ` ${escHtml(pago.nota)}` : ''}</p>
       <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(paginaImprimible({ titulo: `Recibo — Venta Nº ${venta.numero}`, org: datosNegocioParaImprimir(org), bodyHtml }));
+    res.send(paginaImprimible({ titulo: `Recibo — ${TITULO_DOC_RECIBO(venta)} Nº ${venta.numero}`, org: datosNegocioParaImprimir(org), bodyHtml }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -1661,7 +1662,9 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       if (venta.estado === 'anulada') throw err(400, 'Esta venta ya está anulada.');
       if (venta.importado) throw err(400, 'Es una venta histórica importada de Dux: no se puede anular desde acá.');
       // Un comprobante con CAE existe para ARCA: no se borra, se compensa (5/10/2026).
-      if (venta.cae) throw err(400, `Este comprobante ya fue autorizado por ARCA (CAE ${venta.cae}) y no se puede anular: hacé una Nota de Crédito.`);
+      if (venta.cae) throw err(400, (venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito')
+        ? `Esta nota ya fue autorizada por ARCA (CAE ${venta.cae}) y no se puede borrar: se compensa con la nota contraria (${venta.tipoComprobante === 'nota_credito' ? 'Nota de Débito' : 'Nota de Crédito'}).`
+        : `Este comprobante ya fue autorizado por ARCA (CAE ${venta.cae}) y no se puede anular: hacé una Nota de Crédito.`);
       if (venta.fiscalEstado === 'autorizando') throw err(409, 'Se está autorizando en ARCA en este momento. Esperá unos segundos.');
       if (venta.fiscalIntento) throw err(409, 'La autorización en ARCA de este comprobante quedó incierta (se cortó la conexión). Pedí el CAE de nuevo desde el detalle para confirmar si ARCA lo emitió; después, si hace falta, hacé una Nota de Crédito.');
 

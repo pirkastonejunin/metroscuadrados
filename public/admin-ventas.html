@@ -199,6 +199,9 @@
 
 <script>
 const BASE = '/api/ventas';
+// Cómo se llama el comprobante según su tipo: una nota de crédito/débito no es una "venta".
+function nombreDoc(tipo){ return tipo === 'nota_credito' ? 'nota de crédito' : tipo === 'nota_debito' ? 'nota de débito' : 'venta'; }
+function nombreDocCap(tipo){ const n = nombreDoc(tipo); return n.charAt(0).toUpperCase() + n.slice(1); }
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
 function headersAuth(extra){
@@ -782,7 +785,7 @@ async function abrirNuevaVenta(prefill){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>${prefill && prefill.tipoComprobante === 'nota_credito' ? 'Nota de Crédito' : 'Nueva venta'}</h2>
+        <h2 id="nvTitulo">${prefill && (prefill.tipoComprobante === 'nota_credito' || prefill.tipoComprobante === 'nota_debito') ? nombreDocCap(prefill.tipoComprobante) : 'Nueva venta'}</h2>
         <div id="avisoCargaBase" class="err"></div>
         <div class="venta-top-compacto">
         ${puedeElegirSucursal() ? `
@@ -903,6 +906,12 @@ function actualizarVisibilidadDeposito(){
     : 'Depósito *';
 
   document.getElementById('nvFiscalWrap').classList.toggle('hidden', !(esNotaCredito || esNotaDebito));
+  const tituloNv = document.getElementById('nvTitulo');
+  if (tituloNv) tituloNv.textContent = (esNotaCredito || esNotaDebito) ? nombreDocCap(tipoComprobante) : 'Nueva venta';
+  const btnGuardarNv = document.getElementById('nvGuardarBtn');
+  if (btnGuardarNv && !btnGuardarNv.disabled) btnGuardarNv.textContent = 'Guardar ' + nombreDoc(tipoComprobante);
+  const btnCobrarNv = document.getElementById('nvGuardarCobrarBtn');
+  if (btnCobrarNv) btnCobrarNv.classList.toggle('hidden', esNotaCredito);
   actualizarPreviewLetra();
 }
 
@@ -1404,7 +1413,7 @@ async function guardarNuevaVenta(cobrarDespues){
     // avisoFiscal (5/10/2026): la venta se guardó pero ARCA no autorizó el
     // comprobante (conexión sin configurar, rechazo o corte): queda
     // pendiente y se reintenta desde el detalle.
-    if (data.avisoFiscal) alert('La venta se guardó, pero el comprobante todavía NO tiene CAE de ARCA:\n\n' + data.avisoFiscal + '\n\nQuedó pendiente — podés reintentar desde el detalle de la venta.');
+    if (data.avisoFiscal) alert('La ' + nombreDoc(tipoComprobante) + ' se guardó, pero el comprobante todavía NO tiene CAE de ARCA:\n\n' + data.avisoFiscal + '\n\nQuedó pendiente — podés reintentar desde el detalle.');
     if (data.avisoRemito) alert('La venta se guardó, pero no se pudo generar el remito todavía:\n\n' + data.avisoRemito + '\n\nQuedó pendiente — generá el remito desde el detalle cuando haya stock.');
     // Si esta venta viene de "Convertir en venta" en Presupuestos, se
     // deja la trazabilidad del lado del presupuesto (no bloquea la venta
@@ -1416,15 +1425,15 @@ async function guardarNuevaVenta(cobrarDespues){
           body: JSON.stringify({ ventaId: data._id, ventaNumero: data.numero })
         });
       } catch (eVinculo) {
-        alert('La venta se guardó bien, pero no se pudo marcar el presupuesto de origen como convertido: ' + eVinculo.message);
+        alert('La ' + nombreDoc(tipoComprobante) + ' se guardó bien, pero no se pudo marcar el presupuesto de origen como convertido: ' + eVinculo.message);
       }
       presupuestoOrigenActual = null;
     }
     if (ventaOrgSeleccionada === ORG) await cargarVentas();
     // "Guardar y cobrar": abre la ventana de cobro de la venta recién guardada (solo si quedó saldo y es de la sucursal activa).
     if (cobrarDespues) {
-      if (ventaOrgSeleccionada !== ORG) alert('La venta se guardó en otra sucursal: para cobrarla, entrá a esa sucursal.');
-      else { let vNueva = ventasCache.find(x => x._id === data._id); if (!vNueva) { vNueva = data; ventasCache.unshift(data); } if (Number(vNueva.saldoPendiente) > 0) abrirCobro(data._id); else alert('La venta no tiene saldo para cobrar.'); }
+      if (ventaOrgSeleccionada !== ORG) alert('La ' + nombreDoc(tipoComprobante) + ' se guardó en otra sucursal: para cobrarla, entrá a esa sucursal.');
+      else { let vNueva = ventasCache.find(x => x._id === data._id); if (!vNueva) { vNueva = data; ventasCache.unshift(data); } if (Number(vNueva.saldoPendiente) > 0) abrirCobro(data._id); else alert('La ' + nombreDoc(tipoComprobante) + ' no tiene saldo para cobrar.'); }
     }
     // Si se guardó en OTRA sucursal, el listado actual (de la sucursal
     // activa) no la muestra — es esperado, no hace falta recargar nada acá.
@@ -1468,7 +1477,7 @@ function verDetalle(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Venta ${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
+        <h2>${nombreDocCap(v.tipoComprobante)} ${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
         <p class="muted" style="margin-top:-8px">
           ${escapeHtml(v.clienteNombre)} — ${fechaCorta(v.fecha)}${v.vendedor ? ' — Vendedor: ' + escapeHtml(v.vendedor) : ''} — ${TIPO_COMPROBANTE_LABEL[v.tipoComprobante] || 'Comprobante X'}
         </p>
@@ -1499,7 +1508,7 @@ function verDetalle(id){
           ${(v.estado !== 'anulada' && (v.tipoComprobante === 'fiscal' || v.tipoComprobante === 'comprobante_x')) ? `<button class="btn small secondary" onclick="generarNotaCreditoDesdeVenta('${v._id}')">Generar Nota de Crédito</button>` : ''}
           ${(v.estado !== 'anulada' && v.tipoComprobante === 'comprobante_x' && !v.esFiscal && !v.importado) ? `<button class="btn small" id="btnConvertirFiscal" onclick="convertirAFiscal('${v._id}')">Convertir a fiscal</button>` : ''}
           ${(v.estado !== 'anulada' && !v.cae) ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
-          ${v.cae ? `<span class="muted" style="font-size:12px">Con CAE no se anula: corregilo con una Nota de Crédito.</span>` : ''}
+          ${(v.cae && (v.tipoComprobante === 'nota_credito' || v.tipoComprobante === 'nota_debito') && v.estado !== 'anulada') ? `<button class="btn small danger" onclick="generarNotaContraria('${v._id}')">Anular con ${v.tipoComprobante === 'nota_credito' ? 'Nota de Débito' : 'Nota de Crédito'}</button><span class="muted" style="font-size:12px">Con CAE no se borra: se compensa con la nota contraria.</span>` : (v.cae ? `<span class="muted" style="font-size:12px">Con CAE no se anula: corregilo con una Nota de Crédito.</span>` : '')}
         </div>
         <div class="section-title" style="margin-top:14px">Remitos</div>
         <div id="dvRemitos"><p class="muted">Cargando...</p></div>
@@ -1834,7 +1843,7 @@ function abrirCobro(id){
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Registrar cobro — venta #${v.numero}</h2>
+        <h2>Registrar cobro — ${nombreDoc(v.tipoComprobante)} #${v.numero}</h2>
         <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
         <div class="grid2">
           <div><label>Tipo de valor *</label><select id="ncTipoValor" onchange="actualizarTipoValorCobro()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
@@ -1972,6 +1981,25 @@ async function confirmarCobro(id){
 // existente, para emitir una Nota de Crédito contra ella (3/10/2026,
 // pedido de Mato). Las cantidades y montos quedan editables — el vendedor
 // puede ajustar antes de guardar (por ej. una nota de crédito parcial).
+// Anular una nota fiscal con CAE: ARCA no permite borrarla, se compensa con la nota contraria
+// (la de crédito se anula con una de débito y viceversa), mismas líneas y misma letra.
+function generarNotaContraria(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  const tipo = v.tipoComprobante === 'nota_credito' ? 'nota_debito' : 'nota_credito';
+  abrirNuevaVenta({
+    tipoComprobante: tipo,
+    clienteId: v.clienteId,
+    moneda: v.moneda,
+    observaciones: `Anula ${nombreDoc(v.tipoComprobante)} ${v.letra || ''}-${String(v.numero).padStart(5,'0')}`,
+    comprobanteOrigenId: v._id,
+    comprobanteOrigenNumero: v.numero,
+    comprobanteOrigenTipo: v.tipoComprobante,
+    esFiscalOrigen: true,
+    items: (v.items || []).map(it => ({ productoId: it.productoId || null, nombre: it.nombre, cantidad: it.cantidad, precioUnitario: it.precioUnitario }))
+  });
+}
+
 function generarNotaCreditoDesdeVenta(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
@@ -1986,7 +2014,9 @@ function generarNotaCreditoDesdeVenta(id){
     // Si la venta original era fiscal (letra A/B), la Nota de Crédito
     // arranca con el casillero "Es fiscal" ya marcado — se puede
     // destildar antes de guardar (3/10/2026).
-    esFiscalOrigen: v.letra ? v.letra !== 'X' : (v.tipoComprobante === 'fiscal'),
+    // Solo si el original tiene CAE de ARCA (una nota fiscal se asocia a una factura
+    // autorizada); si es un comprobante X o una venta histórica de Dux, arranca NO fiscal (letra X).
+    esFiscalOrigen: !!v.cae,
     items: (v.items || []).map(it => ({
       productoId: it.productoId || null,
       nombre: it.nombre,
@@ -2047,9 +2077,9 @@ async function convertirAFiscal(id){
 
 async function anularVenta(id){
   const v = ventasCache.find(x => x._id === id);
-  const motivo = prompt('¿Por qué se anula esta venta? (opcional)') || '';
+  const motivo = prompt('¿Por qué se anula esta ' + nombreDoc(v.tipoComprobante) + '? (opcional)') || '';
   if (motivo === null) return;
-  if (!confirm(`¿Anular la venta #${v.numero}?${v.stockDescontado ? ' Se va a reingresar el stock descontado.' : ''}`)) return;
+  if (!confirm(`¿Anular la ${nombreDoc(v.tipoComprobante)} #${v.numero}?${v.stockDescontado ? ' Se va a reingresar el stock descontado.' : ''}`)) return;
   try{
     const r = await fetch(BASE + '/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
     const data = await r.json();
@@ -2142,7 +2172,7 @@ async function abrirMP(id, tipo){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this && !mpTimer) cerrarModal()"><div class="modal">
       <span class="close-x" onclick="mpParar();cerrarModal()">✕</span>
-      <h2>${tipo === 'point' ? 'Cobrar con Point' : 'Link de pago'} — venta #${v.numero}</h2>
+      <h2>${tipo === 'point' ? 'Cobrar con Point' : 'Link de pago'} — ${nombreDoc(v.tipoComprobante)} #${v.numero}</h2>
       <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
       <label>Monto a cobrar</label><input id="mpMonto" type="number" step="0.01" min="0.01" value="${v.saldoPendiente}">
       ${tipo === 'point' ? `<label style="margin-top:8px">Terminal</label><select id="mpTerm"><option value="">Usar la terminal por defecto</option>${terminales.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.nombre || t.id)}${t.pdv ? '' : ' (no está en modo PDV)'}</option>`).join('')}</select>` : ''}
