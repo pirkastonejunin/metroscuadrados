@@ -439,7 +439,7 @@ async function comprometerStockDeVenta(db, req, items, depositoId) {
 // el cliente puede retirar parcialmente) cuánto queda sin entregar de
 // cada ítem — lo que ya salió por algún remito anterior no cuenta.
 function cantidadPendiente(item) {
-  return Math.max(0, (item.cantidad || 0) - (item.cantidadEntregada || 0));
+  return Math.max(0, (item.cantidad || 0) - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0));
 }
 
 // Mueve lo comprometido de un depósito a otro (3/10/2026, pedido de
@@ -569,7 +569,8 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
   });
   const totalCantidad = itemsActualizados.reduce((s, it) => s + (it.cantidad || 0), 0);
   const totalEntregada = itemsActualizados.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
-  const nuevoEstado = totalEntregada <= 0 ? 'pendiente' : (totalEntregada >= totalCantidad - 1e-9 ? 'entregada' : 'parcialmente_entregada');
+  const totalCerrado = totalEntregada + itemsActualizados.reduce((s, it) => s + (it.cantidadAcreditada || 0), 0);
+  const nuevoEstado = totalCerrado <= 0 ? 'pendiente' : (totalCerrado >= totalCantidad - 1e-9 ? 'entregada' : 'parcialmente_entregada');
 
   await db.collection('ventas').updateOne(
     { _id: venta._id },
@@ -798,7 +799,55 @@ async function aplicarNotaAFactura(db, req, nota, facturaId, montoPedido) {
     $set: { aplicadaA: { ventaId: fact._id, numero: fact.numero, letra: fact.letra || 'X', tipoComprobante: fact.tipoComprobante, monto, fecha: ahora }, totalAplicado: r2n((nota.totalAplicado || 0) + monto), updatedAt: ahora },
     $unset: { desasociadaEn: '' }
   });
+  if (nota.reingresaStock === false) await ajustarCompromisoPorNota(db, nota, fact, true);
   return { monto, saldoFactura: nuevoSaldo, cancelada: nuevoSaldo <= 0.005 };
+}
+// Una nota de crédito que NO reingresa mercadería (la factura no salió) cancela también lo que la factura tenía comprometido sin entregar
+// (15/10/2026, pedido de Mato). liberar=true: libera el compromiso por las cantidades de la nota; liberar=false: lo restituye.
+function estadoSegunItems(items) {
+  const total = items.reduce((s, it) => s + (it.cantidad || 0), 0);
+  const ent = items.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
+  const cerrado = ent + items.reduce((s, it) => s + (it.cantidadAcreditada || 0), 0);
+  return cerrado <= 0 ? 'pendiente' : (cerrado >= total - 1e-9 ? 'entregada' : (ent > 0 || cerrado > 0 ? 'parcialmente_entregada' : 'pendiente'));
+}
+async function ajustarCompromisoPorNota(db, nota, fact, liberar) {
+  if (!fact || !fact.stockComprometido) return;
+  const ahora = new Date();
+  const incStock = (productoId, depositoId, delta) => db.collection('stock_actual').updateOne(
+    { productoId, depositoId: depositoId || null, orgId: fact.orgId }, { $inc: { cantidadComprometida: delta } });
+  const items = (fact.items || []).map(i => Object.assign({}, i));
+  if (liberar) {
+    if (fact.estado !== 'pendiente' && fact.estado !== 'parcialmente_entregada') return;
+    if ((fact.acreditadoPorNota || []).some(e => String(e.notaId) === String(nota._id))) return;
+    const reducciones = [];
+    for (const ni of nota.items || []) {
+      if (!ni.productoId) continue;
+      let resto = ni.cantidad || 0;
+      items.forEach((fi, idx) => {
+        if (resto <= 0 || !fi.productoId || String(fi.productoId) !== String(ni.productoId)) return;
+        const r = Math.min(cantidadPendiente(fi), resto);
+        if (r <= 0) return;
+        fi.cantidadAcreditada = (fi.cantidadAcreditada || 0) + r; resto -= r;
+        reducciones.push({ index: idx, productoId: fi.productoId, cantidad: r });
+      });
+    }
+    if (!reducciones.length) return;
+    for (const r of reducciones) await incStock(r.productoId, fact.depositoId, -r.cantidad);
+    await db.collection('ventas').updateOne({ _id: fact._id }, {
+      $set: { items, estado: estadoSegunItems(items), updatedAt: ahora },
+      $push: { acreditadoPorNota: { notaId: nota._id, reducciones, fecha: ahora } }
+    });
+  } else {
+    const entrada = (fact.acreditadoPorNota || []).find(e => String(e.notaId) === String(nota._id));
+    if (!entrada) return;
+    for (const r of entrada.reducciones || []) {
+      if (items[r.index]) items[r.index].cantidadAcreditada = Math.max(0, (items[r.index].cantidadAcreditada || 0) - r.cantidad);
+      await incStock(r.productoId, fact.depositoId, r.cantidad);
+    }
+    const set = { items, updatedAt: ahora };
+    if (fact.estado !== 'anulada') set.estado = estadoSegunItems(items);
+    await db.collection('ventas').updateOne({ _id: fact._id }, { $set: set, $pull: { acreditadoPorNota: { notaId: nota._id } } });
+  }
 }
 // Deshace la aplicación de una nota (al anularla o al desasociarla): la factura recupera el saldo.
 async function desaplicarNota(db, nota) {
@@ -806,6 +855,7 @@ async function desaplicarNota(db, nota) {
   if (!ap || !ap.ventaId) return null;
   const fact = await db.collection('ventas').findOne({ _id: ap.ventaId });
   const ahora = new Date();
+  if (fact) await ajustarCompromisoPorNota(db, nota, fact, false);
   if (fact) {
     const total = fact.total || 0;
     const totalAcreditado = Math.max(0, r2n((fact.totalAcreditado || 0) - ap.monto));
@@ -1712,6 +1762,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
       }
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
       if (venta.estado === 'entregada') throw err(400, 'Esta venta ya tiene todo entregado.');
+      if (venta.canceladaPorNota) throw err(400, 'Esta factura está cancelada con una nota de crédito: no se entrega.');
 
       const depositoId = venta.depositoId || depositoIdBody;
       if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a descontar el stock.');
@@ -1883,7 +1934,12 @@ router.post('/:id/stock-nota', authAdmin, async (req, res) => {
         }
         await db.collection('ventas').updateOne({ _id: id }, { $set: { reingresaStock: false, stockDescontado: false, updatedAt: new Date() } });
       }
-      return db.collection('ventas').findOne({ _id: id });
+      const notaFinal = await db.collection('ventas').findOne({ _id: id });
+      if (notaFinal.aplicadaA && notaFinal.aplicadaA.ventaId) {
+        const fact = await db.collection('ventas').findOne({ _id: notaFinal.aplicadaA.ventaId });
+        await ajustarCompromisoPorNota(db, notaFinal, fact, !reingresa);
+      }
+      return notaFinal;
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

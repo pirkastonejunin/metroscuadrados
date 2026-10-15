@@ -362,7 +362,7 @@ router.get('/comprometido', authAdmin, async (req, res) => {
       }, filtroOrg(req))).sort({ fecha: 1 }).toArray();
       return ventas.map(v => {
         const item = (v.items || []).find(it => String(it.productoId) === String(productoId));
-        const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0)) : 0;
+        const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0)) : 0;
         return {
           ventaId: v._id,
           numero: v.numero,
@@ -387,7 +387,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
     const productoId = req.body && req.body.productoId ? toObjectId(req.body.productoId) : null;
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, stockComprometido: true }, filtroOrg(req));
+      const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, stockComprometido: true, canceladaPorNota: { $ne: true } }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
       const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1 }).toArray();
       const esperado = new Map();
@@ -395,7 +395,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       for (const v of ventas) for (const it of (v.items || [])) {
         if (!it.productoId) continue;
         if (productoId && String(it.productoId) !== String(productoId)) continue;
-        const pend = Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0));
+        const pend = Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0));
         if (pend <= 0) continue;
         const key = k(v.orgId, it.productoId, v.depositoId);
         const e = esperado.get(key) || { orgId: v.orgId, productoId: it.productoId, depositoId: v.depositoId || null, cantidad: 0 };
