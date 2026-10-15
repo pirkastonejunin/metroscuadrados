@@ -23,6 +23,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/mp-cobro.js"></script>
 <script src="/impuestos-ui.js"></script>
 <style>
   :root{
@@ -201,6 +202,9 @@
         <div class="err" id="cbErr"></div>
         <div class="ok-msg" id="cbOk"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarReciboCB()">Registrar recibo</button>
+        <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">O cobrar con Mercado Pago:</span>
+          <button class="btn secondary" type="button" onclick="mpDesdeCB('point')">Cobrar con Point</button>
+          <button class="btn secondary" type="button" onclick="mpDesdeCB('link')">Link de pago</button></div>
       </div>
     </div>
   </main>
@@ -547,6 +551,12 @@ function agregarValorCB(){
   renderValoresCB();
 }
 
+function mpDesdeCB(tipo){
+  const clienteId = document.getElementById('cbCliente').value;
+  if (!clienteId) { document.getElementById('cbErr').textContent = 'Elegí un cliente'; return; }
+  MPCobro.abrir({ tipo, clienteId, titulo: 'Cobro a cuenta', montoFn: () => document.getElementById('cbMonto').value,
+    onAcreditado: async () => { await Promise.all([cargarCajasYBancosCB(), mostrarClienteSeleccionadoCB(clienteId)]); cargarListaCobranzas(); } });
+}
 async function confirmarReciboCB(){
   const errEl = document.getElementById('cbErr');
   const okEl = document.getElementById('cbOk');

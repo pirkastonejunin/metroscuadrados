@@ -181,36 +181,50 @@ async function ventaParaCobrar(db, req, monto) {
   if (m > saldo + 0.009) throw err(400, `El monto no puede superar el saldo pendiente (${saldo}).`);
   return { venta, monto: m };
 }
+// Cobro a cuenta de un cliente (sin venta puntual) — desde Cobranza / Cuenta corriente (15/10/2026).
+async function clienteParaCobrar(db, req, monto) {
+  const clienteId = toObjectId(req.params.clienteId);
+  if (!clienteId) throw err(400, 'id inválido');
+  const cliente = await db.collection('clientes').findOne(Object.assign({ _id: clienteId }, filtroOrg(req)));
+  if (!cliente) throw err(404, 'Cliente no encontrado');
+  const m = redondear(monto);
+  if (!(m > 0)) throw err(400, 'Indicá el monto a cobrar.');
+  const nombre = [cliente.apellidoRazonSocial, cliente.nombre].filter(Boolean).join(' ') || 'Cliente';
+  return { cliente, clienteNombre: nombre, monto: m };
+}
 function numeroVenta(v) { return `${v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')}-${String(v.numero).padStart(5, '0')}`; }
 
-router.post('/ventas/:ventaId/link', auth, async (req, res) => {
+async function crearLink(req, res) {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const db = await getDb();
     const cfg = await cargarConfig(db, req.orgId);
     if (!cfg || !cfg.accessToken) throw err(400, 'Falta configurar Mercado Pago (access token).');
     if (!cfg.bancoId) throw err(400, 'Falta elegir en qué banco de Tesorería entra la plata de Mercado Pago.');
-    const { venta, monto } = await ventaParaCobrar(db, req, req.body && req.body.monto);
+    const esCuenta = !!req.params.clienteId;
+    const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const hoy = new Date();
     const vence = new Date(hoy.getTime() + 7 * 24 * 3600 * 1000); // el link vive 7 días
     const pref = await mp(cfg, 'POST', '/checkout/preferences', {
-      items: [{ id: String(venta._id), title: `Venta ${numeroVenta(venta)}`.slice(0, 120), quantity: 1, unit_price: monto, currency_id: 'ARS' }],
+      items: [{ id: String(esCuenta ? cliente._id : venta._id), title: (esCuenta ? `Pago a cuenta — ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 120), quantity: 1, unit_price: monto, currency_id: 'ARS' }],
       external_reference: ref,
       notification_url: urlWebhook(req, cfg),
       expires: true, expiration_date_to: vence.toISOString()
     });
     const link = pref.init_point;
     if (!link) throw err(502, 'Mercado Pago no devolvió el link de pago.');
-    const doc = { _id: cobroId, orgId: req.orgId, ventaId: venta._id, tipo: 'link', externalReference: ref, monto, estado: 'pendiente',
+    const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'link', externalReference: ref, monto, estado: 'pendiente',
       preferenciaId: pref.id, linkUrl: link, venceEn: vence, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: hoy, updatedAt: hoy };
     await db.collection('mp_cobros').insertOne(doc);
     res.json(publico(doc));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
+}
+router.post('/ventas/:ventaId/link', auth, crearLink);
+router.post('/clientes/:clienteId/link', auth, crearLink);
 
-router.post('/ventas/:ventaId/point', auth, async (req, res) => {
+async function crearPoint(req, res) {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const db = await getDb();
@@ -219,25 +233,28 @@ router.post('/ventas/:ventaId/point', auth, async (req, res) => {
     if (!cfg.bancoId) throw err(400, 'Falta elegir en qué banco de Tesorería entra la plata de Mercado Pago.');
     const terminalId = txt(req.body && req.body.terminalId) || cfg.terminalId;
     if (!terminalId) throw err(400, 'Elegí la terminal Point (o dejá una por defecto en la configuración).');
-    const { venta, monto } = await ventaParaCobrar(db, req, req.body && req.body.monto);
+    const esCuenta = !!req.params.clienteId;
+    const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const orden = await mp(cfg, 'POST', '/v1/orders', {
       type: 'point', external_reference: ref, expiration_time: 'PT15M',
       transactions: { payments: [{ amount: monto.toFixed(2) }] },
       config: { point: { terminal_id: terminalId, print_on_terminal: 'no_ticket' } },
-      description: `Venta ${numeroVenta(venta)}`.slice(0, 150)
+      description: (esCuenta ? `Pago a cuenta ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 150)
     }, { 'X-Idempotency-Key': crypto.randomUUID() });
     const hoy = new Date();
-    const doc = { _id: cobroId, orgId: req.orgId, ventaId: venta._id, tipo: 'point', externalReference: ref, monto, estado: 'pendiente',
+    const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'point', externalReference: ref, monto, estado: 'pendiente',
       ordenId: orden.id, terminalId, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: hoy, updatedAt: hoy };
     await db.collection('mp_cobros').insertOne(doc);
     res.json(publico(doc));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
-});
+}
+router.post('/ventas/:ventaId/point', auth, crearPoint);
+router.post('/clientes/:clienteId/point', auth, crearPoint);
 
 function publico(c) {
-  return { _id: c._id, ventaId: c.ventaId, tipo: c.tipo, monto: c.monto, estado: c.estado, linkUrl: c.linkUrl || null,
+  return { _id: c._id, ventaId: c.ventaId, clienteId: c.clienteId || null, aCuenta: !!c.aCuenta, tipo: c.tipo, monto: c.monto, estado: c.estado, linkUrl: c.linkUrl || null,
     estadoMp: c.estadoMp || '', error: c.error || '', createdAt: c.createdAt, acreditadoEn: c.acreditadoEn || null, venceEn: c.venceEn || null };
 }
 
@@ -251,13 +268,23 @@ router.get('/ventas/:ventaId/cobros', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+router.get('/clientes/:clienteId/cobros', auth, async (req, res) => {
+  try {
+    const clienteId = toObjectId(req.params.clienteId);
+    if (!clienteId) throw err(400, 'id inválido');
+    const db = await getDb();
+    const lista = await db.collection('mp_cobros').find(Object.assign({ clienteId, aCuenta: true }, filtroOrg(req))).sort({ createdAt: -1 }).limit(30).toArray();
+    res.json(lista.map(publico));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/cobros', auth, async (req, res) => {
   try {
     const db = await getDb();
     const lista = await db.collection('mp_cobros').find(filtroOrg(req)).sort({ createdAt: -1 }).limit(100).toArray();
     const ventas = await db.collection('ventas').find({ _id: { $in: lista.map(c => c.ventaId) } }).project({ numero: 1, letra: 1, tipoComprobante: 1, clienteNombre: 1 }).toArray();
     const pv = {}; ventas.forEach(v => { pv[String(v._id)] = v; });
-    res.json(lista.map(c => { const v = pv[String(c.ventaId)]; return Object.assign(publico(c), { venta: v ? numeroVenta(v) : '', cliente: v ? v.clienteNombre : '' }); }));
+    res.json(lista.map(c => { const v = pv[String(c.ventaId)]; return Object.assign(publico(c), { venta: v ? numeroVenta(v) : (c.aCuenta ? 'A cuenta' : ''), cliente: v ? v.clienteNombre : (c.clienteNombre || '') }); }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -317,7 +344,41 @@ async function completarDescuentos(cfg, info) {
   return info;
 }
 
+async function registrarCobroACuenta(db, cfg, cobro, info) {
+  const cliente = await db.collection('clientes').findOne({ _id: cobro.clienteId, orgId: cobro.orgId });
+  if (!cliente) throw err(404, 'El cliente del cobro ya no existe.');
+  if (!cfg.bancoId) throw err(400, 'Falta elegir el banco de Tesorería para Mercado Pago.');
+  const reqFalso = { orgId: cobro.orgId, usuario: { nombre: 'Mercado Pago' } };
+  const clienteNombre = cobro.clienteNombre || [cliente.apellidoRazonSocial, cliente.nombre].filter(Boolean).join(' ');
+  const monto = redondear(info.monto || cobro.monto);
+  const fecha = new Date();
+  const esTarjeta = /card/.test(info.metodo || '');
+  const nota = `Mercado Pago ${cobro.tipo === 'point' ? 'Point' : 'link de pago'} · pago ${info.paymentId}`;
+  const mov = await aplicarMovimientoCuenta(db, reqFalso, {
+    cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'ingreso', monto, moneda: 'ARS',
+    motivo: `Cobro a cuenta — ${clienteNombre}`, observaciones: nota, origen: 'cobro_cuenta', fecha, omitirPermiso: true
+  });
+  if (info.comision > 0) {
+    await aplicarMovimientoCuenta(db, reqFalso, {
+      cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.comision, moneda: 'ARS',
+      motivo: 'Comisión Mercado Pago', observaciones: `Cobro a cuenta ${clienteNombre} · pago ${info.paymentId}`, origen: 'manual', fecha, omitirPermiso: true
+    });
+  }
+  if (info.impuestos > 0) {
+    await aplicarMovimientoCuenta(db, reqFalso, {
+      cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.impuestos, moneda: 'ARS',
+      motivo: 'Impuestos y retenciones Mercado Pago', observaciones: `Cobro a cuenta ${clienteNombre} · pago ${info.paymentId}`, origen: 'manual', fecha, omitirPermiso: true
+    });
+  }
+  await registrarMovimientoCuentaCorriente(db, reqFalso, {
+    clienteId: cliente._id, clienteNombre, tipo: 'credito', monto, moneda: 'ARS',
+    concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId: null, observaciones: nota, fecha,
+    extra: { tipoValor: esTarjeta ? 'tarjeta' : 'cuenta', reciboTipo: 'movimiento', reciboId: mov._id }
+  });
+}
+
 async function registrarCobroEnVenta(db, cfg, cobro, info) {
+  if (!cobro.ventaId && cobro.aCuenta) return registrarCobroACuenta(db, cfg, cobro, info);
   const venta = await db.collection('ventas').findOne({ _id: cobro.ventaId, orgId: cobro.orgId });
   if (!venta) throw err(404, 'La venta del cobro ya no existe.');
   if (venta.estado === 'anulada') throw err(400, 'La venta está anulada: el cobro de Mercado Pago quedó sin imputar, revisalo.');

@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/mp-cobro.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -610,6 +611,13 @@ function actualizarTipoValorCobroCC(){
     document.getElementById('ccCuenta').innerHTML = opcionesCuentaCobroCC(tipoValor);
   }
 }
+function mpDesdeTeso(tipo){
+  const clienteId = document.getElementById('ccCliente').value;
+  if (!clienteId) { alert('Elegí primero el cliente.'); return; }
+  const nombre = (document.querySelector('#ccClienteWrap input[type=text], #ccClienteWrap input:not([type=hidden])') || {}).value || '';
+  MPCobro.abrir({ tipo, clienteId, titulo: 'Cobro a cuenta · ' + nombre, montoFn: () => document.getElementById('ccMonto').value,
+    onAcreditado: async () => { cerrarModal(); await cargarSaldos(); } });
+}
 async function abrirCobroCuentaCliente(){
   await asegurarClientesCargados();
   document.getElementById('modalRoot').innerHTML = `
@@ -658,6 +666,9 @@ async function abrirCobroCuentaCliente(){
         <div style="margin-top:10px"><label>Nota</label><input id="ccNota" placeholder="Opcional"></div>
         <div class="err" id="ccErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarCobroCuentaCliente()">Registrar</button>
+        <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><span class="muted">O cobrar con Mercado Pago:</span>
+          <button class="btn secondary" type="button" onclick="mpDesdeTeso('point')">Cobrar con Point</button>
+          <button class="btn secondary" type="button" onclick="mpDesdeTeso('link')">Link de pago</button></div>
       </div>
     </div>
   `;

@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/mp-cobro.js"></script>
 <script src="/impuestos-ui.js"></script>
 <style>
   :root{
@@ -1902,6 +1903,9 @@ function abrirCobro(id){
         <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
         <div class="err" id="ncErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarCobro('${id}')">Registrar</button>
+        ${v.moneda === 'ARS' ? `<div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><span class="muted">O cobrar con Mercado Pago:</span>
+          <button class="btn secondary" type="button" onclick="MPCobro.abrir({tipo:'point', ventaId:'${id}', titulo:'${nombreDoc(v.tipoComprobante)} #${v.numero}', saldo:${v.saldoPendiente}, montoFn:()=>document.getElementById('ncMonto').value, onAcreditado:()=>{cerrarModal();cargarVentas();}})">Cobrar con Point</button>
+          <button class="btn secondary" type="button" onclick="MPCobro.abrir({tipo:'link', ventaId:'${id}', titulo:'${nombreDoc(v.tipoComprobante)} #${v.numero}', saldo:${v.saldoPendiente}, montoFn:()=>document.getElementById('ncMonto').value, onAcreditado:()=>{cerrarModal();cargarVentas();}})">Link de pago</button></div>` : ''}
       </div>
     </div>
   `;

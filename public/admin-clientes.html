@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/mp-cobro.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -945,6 +946,7 @@ function actualizarTipoValorCobroVentaCC(){
   if (esCheque) document.getElementById('cvccChequeFechaEmision').value = document.getElementById('cvccChequeFechaEmision').value || new Date(Date.now()-3*3600000).toISOString().slice(0,10);
 }
 async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, clienteId){
+  window.__cvccCtx = { ventaId, numero, saldoPendiente, moneda, clienteId };
   document.getElementById('modalCobroVentaRoot').innerHTML = `
     <div class="modal-bg">
       <div class="modal">
@@ -982,6 +984,9 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
         </div>
         <div class="err" id="cvccErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarCobroVentaCC()">${ventaId ? 'Registrar cobro' : 'Registrar recibo'}</button>
+        ${moneda === 'ARS' ? `<div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><span class="muted">O cobrar con Mercado Pago:</span>
+          <button class="btn secondary" type="button" onclick="mpDesdeCC('point')">Cobrar con Point</button>
+          <button class="btn secondary" type="button" onclick="mpDesdeCC('link')">Link de pago</button></div>` : ''}
       </div>
     </div>
   `;
@@ -991,6 +996,14 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
 // Cobro a cuenta (recibo sin venta puntual) sin salir de la cuenta corriente del cliente
 function abrirCobroCuentaCC(clienteId, saldo, nombre){
   return abrirCobroVentaDesdeCC('', nombre || '', Math.max(0, Number(saldo) || 0), 'ARS', clienteId);
+}
+function mpDesdeCC(tipo){
+  const c = window.__cvccCtx || {};
+  const o = { tipo, titulo: c.ventaId ? 'Venta Nº ' + String(c.numero).padStart(5,'0') : 'Cobro a cuenta · ' + (c.numero || ''), saldo: c.saldoPendiente,
+    montoFn: () => document.getElementById('cvccMonto').value,
+    onAcreditado: () => { cerrarModalCobroVentaCC(); cargarCuentaCorrienteTab(c.clienteId); } };
+  if (c.ventaId) o.ventaId = c.ventaId; else o.clienteId = c.clienteId;
+  MPCobro.abrir(o);
 }
 function cerrarModalCobroVentaCC(){ document.getElementById('modalCobroVentaRoot').innerHTML = ''; }
 async function confirmarCobroVentaCC(){
