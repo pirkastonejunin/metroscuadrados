@@ -809,7 +809,7 @@ function ajProductoDeFila(n){
   const id = document.getElementById('ajf' + n + 'Producto').value;
   return id ? productosCache.find(p => String(p._id) === id) : null;
 }
-function ajBultoDe(prod){ return (prod && prod.unidadesPorBulto > 1) ? Number(prod.unidadesPorBulto) : 0; }
+function ajBultoDe(prod){ return (prod && Number(prod.unidadesPorBulto) > 0) ? Number(prod.unidadesPorBulto) : 0; }
 function ajRedondear(v, d){ const f = Math.pow(10, d); return Math.round(Number(v) * f) / f; }
 function ajAgregarFila(){
   const n = ++ajSeq;
@@ -819,7 +819,7 @@ function ajAgregarFila(){
     ${comboProductoHtml('ajf' + n, '', 'ajRefrescarTodo')}
     <div class="ajf-act" id="ajf${n}Actual">—</div>
     <input id="ajf${n}M2" type="number" min="0" step="0.01" placeholder="m²" oninput="ajDesdeMetros(${n})">
-    <input id="ajf${n}Bultos" type="number" min="0" step="0.01" placeholder="bultos" disabled oninput="ajDesdeBultos(${n})">
+    <input id="ajf${n}Bultos" type="number" min="0" step="0.01" placeholder="bultos" oninput="ajDesdeBultos(${n})">
     <button type="button" class="btn small secondary" title="Quitar" onclick="ajQuitarFila(${n})" style="padding:6px 8px">✕</button>
     <div class="ajf-msg err" id="ajf${n}Msg"></div>`;
   document.getElementById('ajFilas').appendChild(div);
@@ -849,8 +849,9 @@ async function ajRefrescarTodo(forzar){
     const act = document.getElementById('ajf' + n + 'Actual');
     const bul = document.getElementById('ajf' + n + 'Bultos');
     const prod = ajProductoDeFila(n);
-    bul.disabled = !ajBultoDe(prod);
-    if (!ajBultoDe(prod)) bul.value = '';
+    bul.disabled = !!prod && !ajBultoDe(prod);
+    bul.placeholder = (prod && !ajBultoDe(prod)) ? 'sin bultos' : 'bultos';
+    if (prod && !ajBultoDe(prod)) bul.value = '';
     if (!productoId || !depositoId) { act.textContent = '—'; f.dataset.prod = ''; continue; }
     if (forzar !== true && f.dataset.prod === productoId + '|' + depositoId) continue;
     f.dataset.prod = productoId + '|' + depositoId;
