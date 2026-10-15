@@ -49,6 +49,7 @@
     [/^descargar/, '⬇'],
     [/^imprimir/, '🖨'],
     [/^compartir/, '📤'],
+    [/^duplicar/, '⧉'],
     [/^copiar/, '⧉'],
     [/^ver\b/, '👁'],
     [/^buscar/, '🔍'],

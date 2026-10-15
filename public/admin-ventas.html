@@ -910,6 +910,10 @@ async function abrirNuevaVenta(prefill){
   if (prefill) {
     document.getElementById('nvMoneda').value = prefill.moneda || 'ARS';
     if (prefill.observaciones) document.getElementById('nvObservaciones').value = prefill.observaciones;
+    if (prefill.descuentoPorcentaje) document.getElementById('nvDescuentoPorcentaje').value = prefill.descuentoPorcentaje;
+    if (prefill.descuentoMonto) document.getElementById('nvDescuentoMonto').value = prefill.descuentoMonto;
+    if (prefill.listaPrecioId && document.getElementById('nvListaPrecio')) document.getElementById('nvListaPrecio').value = prefill.listaPrecioId;
+    if (prefill.tipoEntrega && document.getElementById('nvTipoEntrega')) { try { document.getElementById('nvTipoEntrega').value = prefill.tipoEntrega; } catch(e){} }
   }
   if (prefill && prefill.items && prefill.items.length) {
     await asegurarProductos(prefill.items.map(it => it.productoId));
@@ -919,6 +923,26 @@ async function abrirNuevaVenta(prefill){
   }
   if (prefill && prefill.esFiscalOrigen) document.getElementById('nvEsFiscal').checked = true;
   actualizarVisibilidadDeposito();
+  if (prefill && prefill.duplicaDe) { actualizarPreviewLetra(); actualizarTotalesVenta(); }
+}
+
+// Duplicar una factura / comprobante (15/10/2026): abre "Nueva venta" con los mismos datos (cliente, ítems con su
+// descuento e IVA, descuentos generales, observaciones) para revisarlos y guardar como un comprobante nuevo.
+function duplicarVenta(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  cerrarModal();
+  abrirNuevaVenta({
+    duplicaDe: v._id,
+    tipoComprobante: v.tipoComprobante === 'fiscal' ? 'fiscal' : 'comprobante_x',
+    clienteId: v.clienteId,
+    moneda: v.moneda,
+    observaciones: v.observaciones || '',
+    descuentoPorcentaje: v.descuentoPorcentaje || 0,
+    descuentoMonto: v.descuentoMonto || 0,
+    listaPrecioId: v.listaPrecioId || '',
+    items: (v.items || []).map(it => ({ productoId: it.productoId || null, nombre: it.nombre, cantidad: it.cantidad, precioUnitario: it.precioUnitario, descuentoPorcentaje: it.descuentoPorcentaje || 0, porcentajeIva: it.porcentajeIva }))
+  });
 }
 
 // El depósito es obligatorio SOLO con entrega inmediata (3/10/2026,
@@ -1632,6 +1656,7 @@ function verDetalle(id){
         <div class="row" style="margin-top:14px;align-items:center;flex-wrap:wrap;gap:6px">
           <span class="muted" style="font-size:12px">Comprobante:</span>
           ${botonesImprimible(BASE+'/'+v._id+'/comprobante')}
+          ${(v.tipoComprobante === 'fiscal' || v.tipoComprobante === 'comprobante_x') ? `<button class="btn small secondary" onclick="duplicarVenta('${v._id}')">Duplicar</button>` : ''}
           ${(v.estado !== 'anulada' && (v.tipoComprobante === 'fiscal' || v.tipoComprobante === 'comprobante_x')) ? `<button class="btn small secondary" onclick="generarNotaCreditoDesdeVenta('${v._id}')">Generar Nota de Crédito</button>` : ''}
           ${(v.estado !== 'anulada' && v.tipoComprobante === 'comprobante_x' && !v.esFiscal && !v.importado) ? `<button class="btn small" id="btnConvertirFiscal" onclick="convertirAFiscal('${v._id}')">Convertir a fiscal</button>` : ''}
           ${(v.estado !== 'anulada' && !v.cae) ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
