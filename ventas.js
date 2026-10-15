@@ -419,6 +419,12 @@ async function validarStockFisicoParaRemito(db, req, items, depositoId) {
 // vinculado. NO valida disponibilidad — la venta se compromete siempre,
 // aunque el comprometido termine superando el stock físico (ver nota
 // arriba). El chequeo real pasa a generarRemitoDeVenta.
+// El comprometido es siempre contra el depósito Junín de la sucursal (15/10/2026, pedido de Mato: Colome es solo el depósito del
+// proveedor; el faltante se compara contra Junín). Devuelve su _id, o null si la organización no tiene un depósito Junín.
+async function depositoJuninDe(db, orgId) {
+  const d = await db.collection('depositos').findOne({ orgId, activo: { $ne: false }, nombre: /jun[ií]n/i });
+  return d ? d._id : null;
+}
 async function comprometerStockDeVenta(db, req, items, depositoId) {
   for (const item of items) {
     if (!item.productoId) continue;
@@ -1538,6 +1544,8 @@ router.post('/', authAdmin, async (req, res) => {
         const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
         if (!deposito) throw err(404, 'Depósito no encontrado');
       }
+      // Sin depósito elegido, la venta (no las notas) reserva contra Junín.
+      const depositoCompromiso = (depositoId || esNotaCredito || esNotaDebito) ? depositoId : await depositoJuninDe(db, req.orgId);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       // La venta se carga SIEMPRE, haya o no stock (2/10/2026, pedido de
       // Mato) — puede quedar pendiente de retiro mientras entra
@@ -1593,7 +1601,7 @@ router.post('/', authAdmin, async (req, res) => {
         listaPrecioId,
         cotizacionDolar: body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null,
         tipoEntrega: (esNotaCredito || esNotaDebito) ? null : tipoEntrega,
-        depositoId: esNotaDebito ? null : depositoId,
+        depositoId: esNotaDebito ? null : depositoCompromiso,
         comprobanteOrigenId, comprobanteOrigenNumero, comprobanteOrigenTipo, comprobanteOrigenLetra,
         // stockComprometido (3/10/2026): true desde ahora, siempre, para
         // una venta normal — se compromete al cargar la venta tenga o no
@@ -1687,7 +1695,7 @@ router.post('/', authAdmin, async (req, res) => {
       // (sin asignar todavía) que Stock muestra aparte. Cuando se elija
       // un depósito real (al generar el remito), ese compromiso se
       // migra ahí — ver migrarCompromisoDeposito.
-      await comprometerStockDeVenta(db, req, items, depositoId);
+      await comprometerStockDeVenta(db, req, items, depositoCompromiso);
 
       if (tipoEntrega === 'inmediata') {
         // Entrega inmediata: la misma venta dispara el remito en el acto

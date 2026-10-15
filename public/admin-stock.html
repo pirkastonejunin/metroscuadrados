@@ -504,11 +504,11 @@ async function recalcularComprometido(productoId){
   const msg = document.getElementById('rcMsg');
   try{
     const h = Object.assign({'Content-Type':'application/json'}, headersAuth());
-    let r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({productoId})});
+    let r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({})});
     let d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     if (!d.filasCorregidas) { msg.textContent = 'El comprometido ya coincide con las ventas.'; return; }
-    if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de este producto (' + d.unidadesQuitadas + ' unidades menos comprometidas). ¿Continuar?')) return;
-    r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({productoId, aplicar:true})});
+    if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de stock (todos los productos; lo comprometido sin depósito pasa a Junín). ¿Continuar?')) return;
+    r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({aplicar:true})});
     d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     cerrarModal(); cargarStockActual();
   }catch(e){ msg.textContent = e.message; }
@@ -531,7 +531,7 @@ async function verComprometido(productoId, depositoId){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al cargar');
     const cont = document.getElementById('cpContenido');
-    const btnRecalc = `<div style="margin-top:12px"><button class="btn small secondary" onclick="recalcularComprometido('${productoId}')">Recalcular comprometido de este producto</button><div class="muted" style="font-size:12px;margin-top:4px">Lo recalcula desde las ventas pendientes. Si ninguna lo explica, queda en 0.</div><div id="rcMsg" class="muted"></div></div>`;
+    const btnRecalc = `<div style="margin-top:12px"><button class="btn small secondary" onclick="recalcularComprometido('${productoId}')">Recalcular comprometido (todos los productos)</button><div class="muted" style="font-size:12px;margin-top:4px">Lo recalcula desde las ventas pendientes. Si ninguna lo explica, queda en 0.</div><div id="rcMsg" class="muted"></div></div>`;
     if (!data.length) { cont.innerHTML = '<p class="muted">No hay ventas pendientes que lo expliquen.</p>' + btnRecalc; return; }
     cont.innerHTML = `
       <table>

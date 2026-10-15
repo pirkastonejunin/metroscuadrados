@@ -392,6 +392,17 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, stockComprometido: true, canceladaPorNota: { $ne: true } }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
       const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1 }).toArray();
+      // Lo comprometido sin depósito va contra el depósito Junín de su sucursal (15/10/2026, pedido de Mato).
+      const juninPorOrg = new Map();
+      // (solo en el recálculo general: cambiar el depósito de una venta afecta a todos sus productos)
+      for (const v of (productoId ? [] : ventas)) {
+        const k0 = String(v.orgId);
+        if (!v.depositoId && !juninPorOrg.has(k0)) {
+          const d = await db.collection('depositos').findOne({ orgId: v.orgId, activo: { $ne: false }, nombre: /jun[ií]n/i });
+          juninPorOrg.set(k0, d ? d._id : null);
+        }
+        if (!v.depositoId && juninPorOrg.get(k0)) v.depositoId = juninPorOrg.get(k0), v._reasignada = true;
+      }
       const esperado = new Map();
       const k = (o, p, d) => `${o}|${p}|${d == null ? 'null' : d}`;
       for (const v of ventas) for (const it of (v.items || [])) {
@@ -416,6 +427,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       }
       const nuevas = [...esperado.values()];
       if (aplicar) {
+        for (const v of ventas) if (v._reasignada) await db.collection('ventas').updateOne({ _id: v._id, depositoId: null }, { $set: { depositoId: v.depositoId } });
         for (const c of cambios) await db.collection('stock_actual').updateOne({ _id: c._id }, { $set: { cantidadComprometida: c.despues, actualizadoEn: new Date() } });
         for (const e of nuevas) await db.collection('stock_actual').updateOne({ orgId: e.orgId, productoId: e.productoId, depositoId: e.depositoId }, { $set: { cantidadComprometida: Math.round(e.cantidad * 100) / 100 }, $setOnInsert: { cantidad: 0 } }, { upsert: true });
       }
