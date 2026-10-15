@@ -529,7 +529,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
     await aplicarMovimientoStock(db, req, {
       productoId: item.productoId, depositoId, tipo: 'egreso', cantidad: item.cantidad,
       motivo: 'Venta', observaciones: `Venta ${venta.numero ? '#' + venta.numero : ''}`.trim(),
-      ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date() // la baja es del día del remito, no de la venta
+      ventaId: venta._id, usuarioNombre: (req.usuario && req.usuario.nombre) || venta.usuarioNombre, fecha: new Date() // la baja es del día del remito, no de la venta
     });
     await db.collection('stock_actual').updateOne(
       Object.assign({ productoId: item.productoId, depositoId }, filtroOrg(req)),
@@ -549,7 +549,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
     depositoNombre: deposito.nombre,
     items: itemsAEntregar.map(it => ({ productoId: it.productoId, sku: it.sku, nombre: it.nombre, cantidad: it.cantidad })),
     fecha: ahora,
-    usuarioNombre: venta.usuarioNombre,
+    usuarioNombre: (req.usuario && req.usuario.nombre) || venta.usuarioNombre,
     orgId: req.orgId,
     createdAt: ahora
   };
@@ -608,7 +608,7 @@ async function revertirStockDeVentaAnulada(db, req, venta) {
       await aplicarMovimientoStock(db, req, {
         productoId: item.productoId, depositoId: venta.depositoId, tipo: 'egreso', cantidad: item.cantidad,
         motivo: 'Anulación de nota de crédito', observaciones: `Anulación de nota de crédito ${venta.numero ? '#' + venta.numero : ''}`.trim(),
-        ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date()
+        ventaId: venta._id, usuarioNombre: (req.usuario && req.usuario.nombre) || venta.usuarioNombre, fecha: new Date()
       });
     }
     return;
@@ -624,7 +624,7 @@ async function revertirStockDeVentaAnulada(db, req, venta) {
       await aplicarMovimientoStock(db, req, {
         productoId: item.productoId, depositoId: venta.depositoId, tipo: 'ingreso', cantidad: entregada,
         motivo: 'Anulación de venta', observaciones: `Anulación de venta ${venta.numero ? '#' + venta.numero : ''}`.trim(),
-        ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date()
+        ventaId: venta._id, usuarioNombre: (req.usuario && req.usuario.nombre) || venta.usuarioNombre, fecha: new Date()
       });
     }
     // (3/10/2026) antes se chequeaba `venta.depositoId` para saber si
