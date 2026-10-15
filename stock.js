@@ -708,6 +708,13 @@ router.get('/movimientos', authAdmin, async (req, res) => {
         : [];
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));
       const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
+      // Paquetes (15/10/2026): cantidad / rendimiento por paquete del producto (Costos de Producción), por SKU.
+      const skus = Array.from(new Set(productos.map(p => p.sku).filter(Boolean)));
+      const rindePorSku = new Map();
+      if (skus.length) {
+        const cps = await db.collection('costos_productos').find({ sku: { $in: skus }, rendimientoPorPaquete: { $gt: 0 } }).project({ sku: 1, rendimientoPorPaquete: 1 }).toArray();
+        cps.forEach(c => { if (!rindePorSku.has(c.sku)) rindePorSku.set(c.sku, c.rendimientoPorPaquete); });
+      }
       // Comprobante y cliente/proveedor de origen (15/10/2026, pedido de Mato): se resuelven desde la venta o la compra del movimiento.
       const idsVenta = Array.from(new Set(movimientos.filter(m => m.ventaId).map(m => String(m.ventaId)))).map(toObjectId).filter(Boolean);
       const idsCompra = Array.from(new Set(movimientos.filter(m => m.compraId).map(m => String(m.compraId)))).map(toObjectId).filter(Boolean);
@@ -731,8 +738,10 @@ router.get('/movimientos', authAdmin, async (req, res) => {
           documento = 'Compra #' + c.numero + (c.comprobanteNumero ? ' (' + c.comprobanteNumero + ')' : '');
           tercero = c.proveedorNombre || '';
         }
+        const rinde = p && p.sku ? rindePorSku.get(p.sku) : null;
         return Object.assign({}, m, {
           documento, tercero,
+          paquetes: rinde ? Math.round(m.cantidad / rinde * 100) / 100 : null,
           sku: p ? p.sku : null,
           producto: p ? p.nombre : '(producto eliminado)',
           deposito: d ? d.nombre : '(depósito eliminado)'
