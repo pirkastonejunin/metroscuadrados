@@ -529,7 +529,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
     await aplicarMovimientoStock(db, req, {
       productoId: item.productoId, depositoId, tipo: 'egreso', cantidad: item.cantidad,
       motivo: 'Venta', observaciones: `Venta ${venta.numero ? '#' + venta.numero : ''}`.trim(),
-      ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: venta.fecha
+      ventaId: venta._id, usuarioNombre: venta.usuarioNombre, fecha: new Date() // la baja es del día del remito, no de la venta
     });
     await db.collection('stock_actual').updateOne(
       Object.assign({ productoId: item.productoId, depositoId }, filtroOrg(req)),
