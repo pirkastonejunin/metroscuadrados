@@ -365,6 +365,8 @@ router.get('/comprometido', authAdmin, async (req, res) => {
         const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0)) : 0;
         return {
           ventaId: v._id,
+          clienteId: v.clienteId || null,
+          letra: v.letra || null,
           numero: v.numero,
           numeroOriginal: v.numeroOriginal || null,
           tipoComprobante: v.tipoComprobante,
