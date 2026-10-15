@@ -82,6 +82,40 @@
     gastos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 6v.01M18 18v-.01"/></svg>'
   };
 
+  // Íconos extra (15/10/2026) para que cada pantalla del menú tenga el suyo, y un color por pantalla (pedido de Mato: "algún icono con
+  // colores para que sea más fácil de identificar").
+  const SVG_ATTR = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  Object.assign(ICONOS, {
+    tarjeta: `<svg ${SVG_ATTR}><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/><line x1="6" y1="15" x2="10" y2="15"/></svg>`,
+    libro: `<svg ${SVG_ATTR}><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>`,
+    grafico: `<svg ${SVG_ATTR}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`,
+    tendencia: `<svg ${SVG_ATTR}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>`,
+    banco: `<svg ${SVG_ATTR}><path d="M3 10l9-6 9 6"/><line x1="5" y1="10" x2="5" y2="18"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="14" y1="10" x2="14" y2="18"/><line x1="19" y1="10" x2="19" y2="18"/><line x1="3" y1="21" x2="21" y2="21"/></svg>`,
+    recibo: `<svg ${SVG_ATTR}><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>`,
+    alerta: `<svg ${SVG_ATTR}><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+    mail: `<svg ${SVG_ATTR}><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>`,
+    etiqueta: `<svg ${SVG_ATTR}><path d="M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L2 12V2h10l8.6 8.6a2 2 0 010 2.8z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`
+  });
+  // Ícono propio y color por pantalla.
+  const ESTILO_ITEM = {
+    costos: ['#d97706'], fabrica: ['#ea580c'],
+    visitas: ['#7c3aed'], 'mis-visitas': ['#8b5cf6'], calendario: ['#0ea5e9'], obras: ['#b45309'], 'mis-obras': ['#a16207'],
+    clientes: ['#2563eb'], ventas: ['#16a34a'], cobranza: ['#0d9488', 'recibo'], cotizador: ['#9333ea'], remitos: ['#0891b2'], presupuestos: ['#c026d3'],
+    productos: ['#ea580c'], stock: ['#65a30d'], tiendanube: ['#0284c7', 'etiqueta'],
+    proveedores: ['#4f46e5'], compras: ['#db2777'], gastos: ['#dc2626'],
+    sueldos: ['#0f766e'],
+    tesoreria: ['#059669', 'banco'], mercadopago: ['#0ea5e9', 'tarjeta'], financiera: ['#7c3aed', 'tendencia'],
+    'fiscal-config': ['#475569'], 'fiscal-ventas': ['#16a34a', 'libro'], 'fiscal-compras': ['#db2777', 'libro'], 'fiscal-retenciones': ['#d97706', 'libro'],
+    'informe-ventas': ['#16a34a', 'grafico'], 'informe-resultados': ['#2563eb', 'tendencia'], 'informe-deudores': ['#dc2626', 'alerta'],
+    'informe-proveedores': ['#4f46e5', 'alerta'], facturacion: ['#0891b2', 'grafico']
+  };
+  function iconoItem(it) {
+    const est = ESTILO_ITEM[it.key];
+    const svg = (est && est[1] && ICONOS[est[1]]) || it.icon;
+    const color = est ? est[0] : 'var(--accent, #555)';
+    return `<span class="pn-ico" style="--c:${color}">${svg}</span>`;
+  }
+
   function slug(s) {
     return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-');
   }
@@ -234,8 +268,11 @@
       .pn-grupo.pn-colapsado .pn-grupo-header svg { transform: rotate(-90deg); }
       .pn-grupo-items { display: flex; flex-direction: column; gap: 2px; }
       .pn-grupo.pn-colapsado .pn-grupo-items { display: none; }
-      .pn-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; text-decoration: none; color: var(--pn-ink); font-size: 13px; font-weight: 600; }
+      .pn-item { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 9px; text-decoration: none; color: var(--pn-ink); font-size: 13px; font-weight: 600; }
       .pn-item svg { width: 17px; height: 17px; flex-shrink: 0; }
+      .pn-ico { width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: var(--c); background: color-mix(in srgb, var(--c) 15%, transparent); }
+      .pn-ico svg { width: 16px; height: 16px; }
+      .pn-item.pn-activo .pn-ico { background: var(--c); color: #fff; }
       .pn-item:hover { background: var(--bg); }
       .pn-item.pn-activo { background: var(--accent-soft); color: var(--accent); }
       .pn-sidebar-footer { padding: 12px 16px 16px; border-top: 1px solid var(--border); font-size: 12px; }
@@ -445,7 +482,7 @@
           <div class="pn-grupo-items">
             ${itemsVisibles.map(it => `
               <a class="pn-item${it.key === paginaActual ? ' pn-activo' : ''}" href="${it.href}">
-                ${it.icon}<span>${escapeHtml(it.label)}</span>
+                ${iconoItem(it)}<span>${escapeHtml(it.label)}</span>
               </a>
             `).join('')}
           </div>
