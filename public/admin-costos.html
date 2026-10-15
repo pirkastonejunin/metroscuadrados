@@ -358,7 +358,7 @@ function descargarCSV(nombreArchivo, filas){
 }
 
 function modal(html, ancho){
-  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal${ancho==='wide'?' wide':''}">${html}</div></div>`;
+  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal${ancho==='wide'?' wide':''}">${html}</div></div>`;
 }
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
 function escapeHtml(s){

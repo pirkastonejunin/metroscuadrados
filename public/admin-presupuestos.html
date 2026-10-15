@@ -627,7 +627,7 @@ function actualizarTotalesPresupuesto(){
 // -----------------------------------------------------------------------
 function abrirNuevoPresupuesto(prefill){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo presupuesto</h2>
@@ -717,7 +717,7 @@ function abrirEditarPresupuesto(id){
   const p = presupuestosCache.find(x => x._id === id);
   if (!p) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar presupuesto Nº ${String(p.numero).padStart(5,'0')}</h2>
@@ -880,7 +880,7 @@ async function guardarEdicionPresupuesto(id){
 async function abrirImportarCotizador(){
   const prefillModal = document.getElementById('modalRoot').innerHTML;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar del cotizador</h2>
@@ -940,7 +940,7 @@ function verPresupuesto(id){
     </div>
   `).join('') || '<p class="muted">Sin movimientos todavía.</p>';
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Presupuesto Nº ${String(p.numero).padStart(5,'0')} <span class="pill ${p.estado}" style="margin-left:8px">${ESTADO_LABEL[p.estado]||p.estado}</span></h2>

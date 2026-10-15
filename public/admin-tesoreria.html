@@ -469,7 +469,7 @@ function opcionesCuentaMovimiento(){
 
 function abrirMovimientoManual(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Movimiento manual</h2>
@@ -613,7 +613,7 @@ function actualizarTipoValorCobroCC(){
 async function abrirCobroCuentaCliente(){
   await asegurarClientesCargados();
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Cobro a cuenta de cliente</h2>
@@ -713,7 +713,7 @@ async function confirmarCobroCuentaCliente(){
     // "Imprimir recibo" sea su propio gesto del usuario.
     const reciboUrl = (data.reciboTipo && data.reciboId) ? (BASE + '/recibo-cuenta/' + data.reciboTipo + '/' + data.reciboId) : null;
     document.getElementById('modalRoot').innerHTML = `
-      <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+      <div class="modal-bg">
         <div class="modal">
           <span class="close-x" onclick="cerrarModal()">✕</span>
           <h2>Cobro registrado</h2>
@@ -817,7 +817,7 @@ async function abrirImportarChequesDux(){
   const ids = impChqOrgs.map(o => String(o._id)); const op = localStorage.getItem('obras_org_operar');
   const def = (ORG && ORG !== 'todas' && ids.includes(ORG)) ? ORG : (op && ids.includes(op) ? op : ids[0]);
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar historial de cheques de Dux</h2>
@@ -872,7 +872,7 @@ async function aplicarImportChequesDux(){
 
 function abrirNuevoCheque(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Cargar cheque suelto</h2>
@@ -954,7 +954,7 @@ function verCheque(id){
     acciones.push(`<button class="btn danger" onclick="rechazarCheque('${id}')">Rechazar</button>`);
   }
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Cheque ${escapeHtml(c.numero||'')} <span class="pill ${c.estado}">${ESTADO_CHEQUE_LABEL[c.estado]||c.estado}</span></h2>
@@ -984,7 +984,7 @@ function opcionesCajaCheque(){
 function abrirDepositarCheque(id, tipo){
   tipo = tipo === 'caja' ? 'caja' : 'banco';
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${tipo === 'caja' ? 'Cobrar cheque en caja' : 'Depositar cheque'}</h2>
@@ -1248,7 +1248,7 @@ function imprimirCajaDiaria(){
 function abrirTransferencia(){
   const opciones = opcionesCuentaTransferencia();
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Transferir entre cuentas</h2>

@@ -730,7 +730,7 @@ function opcionesDepositosCompra(seleccionado){
 
 function abrirNuevaCompra(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nueva compra</h2>
@@ -1168,7 +1168,7 @@ function verDetalle(id){
     : '<p class="muted">Sin pagos registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Compra ${nroImportado(c)} <span class="pill ${c.estado}">${ESTADO_LABEL[c.estado]||c.estado}</span></h2>
@@ -1217,7 +1217,7 @@ function abrirRecibir(id){
   const c = comprasCache.find(x => x._id === id);
   if (!c) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Recibir compra #${c.numero}</h2>
@@ -1311,7 +1311,7 @@ function abrirPago(id){
   const c = comprasCache.find(x => x._id === id);
   if (!c) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Registrar pago — compra #${c.numero}</h2>
@@ -1543,7 +1543,7 @@ async function restaurarCuentasBase(){
 
 function abrirPagoCuenta(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Pago a cuenta</h2>
@@ -1780,7 +1780,7 @@ async function cargarOrdenes(){
 
 function abrirNuevaOrden(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nueva orden de compra</h2>
@@ -1891,7 +1891,7 @@ function actualizarTotalesOrden(){
 function abrirAltaRapidaProducto(){
   const modalPrevio = document.getElementById('modalRoot').innerHTML;
   document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
-    <div class="modal-bg" id="arpBg" onclick="if(event.target===this) cerrarAltaRapidaProducto()">
+    <div class="modal-bg" id="arpBg">
       <div class="modal">
         <span class="close-x" onclick="cerrarAltaRapidaProducto()">✕</span>
         <h2>Crear producto nuevo</h2>
@@ -1988,7 +1988,7 @@ function verDetalleOrden(id){
   const haypendienteRecibir = o.items.some(it => (it.cantidad - (it.cantidadRecibida || 0)) > 0.0001);
 
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Orden de compra #${o.numero} <span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span> <span class="pill ${o.estadoRecepcion === 'recibida' ? 'recibida' : 'pendiente'}">${ESTADO_RECEPCION_ORDEN_LABEL[o.estadoRecepcion]||'Sin recibir'}</span></h2>
@@ -2066,7 +2066,7 @@ async function abrirRecibirOrden(id){
   `;}).join('');
 
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Recibir mercadería — Orden #${o.numero}</h2>
@@ -2149,7 +2149,7 @@ async function abrirConvertirOrden(id){
   `;}).join('');
 
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Convertir orden #${o.numero} en compra</h2>
@@ -2312,7 +2312,7 @@ async function abrirImportarDux(pagos){
   impDuxB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar historial de ${IMP.pagos ? 'pagos a proveedores' : 'compras'} de Dux</h2>
@@ -2386,7 +2386,7 @@ async function abrirImportarDetalleDux(){
   impDetArchivos = []; impDetSucursales = {};
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar detalle de compras y gastos de Dux</h2>
@@ -2479,7 +2479,7 @@ async function abrirImportarNotasDux(){
   impNtB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar notas de crédito y débito de compras de Dux</h2>

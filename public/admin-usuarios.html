@@ -433,7 +433,7 @@ function checksModulos(seleccionados){
 
 function abrirNuevoRol(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo rol</h2>
@@ -460,7 +460,7 @@ function abrirEditarRol(id){
   const rol = ROLES.find(r => r._id === id);
   if (!rol) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar rol</h2>
@@ -570,7 +570,7 @@ function leerDatosNegocioOrg(){
 }
 function abrirNuevaOrganizacion(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nueva organización</h2>
@@ -597,7 +597,7 @@ function abrirEditarOrganizacion(id){
   const o = ORGANIZACIONES.find(x => x._id === id);
   if (!o) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar organización</h2>
@@ -683,7 +683,7 @@ async function abrirNuevoUsuario(){
   if (!ROLES.length) { alert('Primero creá al menos un rol (aparte de Administrador) en la pestaña Roles.'); return; }
   const optsVend = await opcionesVendedores('');
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo usuario</h2>
@@ -718,7 +718,7 @@ async function abrirEditarUsuario(id){
   if (!u) return;
   const optsVend = await opcionesVendedores(u.vendedorId ? String(u.vendedorId) : '');
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar usuario</h2>
@@ -904,7 +904,7 @@ function abrirEditarColocador(id){ abrirFormColocador(COLOCADORES.find(c=>c._id=
 function abrirFormColocador(c){
   const costosHtml = (c && c.costos && c.costos.length) ? c.costos.map(x=>filaCosto(x.tipoTrabajo,x.costoPorM2)).join('') : filaCosto();
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${c ? 'Editar colocador' : 'Nuevo colocador'}</h2>
@@ -1099,7 +1099,7 @@ function abrirNuevaCaja(){ abrirFormCaja(null); }
 function abrirEditarCaja(id){ abrirFormCaja(CAJAS_CONFIG.find(c => c._id === id)); }
 function abrirFormCaja(c){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${c ? 'Editar caja' : 'Nueva caja'}</h2>
@@ -1150,7 +1150,7 @@ function abrirNuevoBanco(){ abrirFormBanco(null); }
 function abrirEditarBanco(id){ abrirFormBanco(BANCOS_CONFIG.find(b => b._id === id)); }
 function abrirFormBanco(b){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${b ? 'Editar banco' : 'Nuevo banco'}</h2>

@@ -473,7 +473,7 @@ function formularioProveedor(p){
 
 function abrirNuevoProveedor(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo proveedor</h2>
@@ -538,7 +538,7 @@ function abrirEditarProveedor(id){
   const p = proveedoresCache.find(x => x._id === id);
   if (!p) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${escapeHtml(p.razonSocial || p.nombreFantasia || 'Editar proveedor')}</h2>
@@ -667,7 +667,7 @@ function exportarXlsx(){ descargarBlob(BASE + '/export', 'proveedores.xlsx'); }
 
 function abrirImportar(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar proveedores desde Excel</h2>
@@ -887,7 +887,7 @@ async function abrirAjusteSaldoProveedor(){
   const defOrg = (ORG && ORG !== 'todas' && idsOrg.includes(ORG)) ? ORG : (op && idsOrg.includes(op) ? op : (idsOrg[0] || ''));
   const nombre = nombreProvCC(c);
   document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
-    <div class="modal-bg" id="ajBg" onclick="if(event.target===this) cerrarAjusteSaldoProveedor()" style="z-index:950">
+    <div class="modal-bg" id="ajBg" style="z-index:950">
       <div class="modal">
         <span class="close-x" onclick="cerrarAjusteSaldoProveedor()">✕</span>
         <h2>Ajustar saldo — ${escapeHtml(nombre)}</h2>
@@ -961,7 +961,7 @@ function verDetalleMovimientoProveedor(index){
     </tr>
   `).join('');
   document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
-    <div class="modal-bg" id="dmpBg" onclick="if(event.target===this) cerrarDetalleMovimientoProveedor()">
+    <div class="modal-bg" id="dmpBg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarDetalleMovimientoProveedor()">✕</span>
         <h2>${escapeHtml(m.concepto)}</h2>
@@ -1030,7 +1030,7 @@ async function buscarCuitEnArca(pref, idNombre, conCategoria){
 let concilFilas = [];
 async function abrirConciliacionDux(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal" style="max-width:1000px;width:96%">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Conciliar saldos con Dux</h2>
@@ -1081,7 +1081,7 @@ function descargarConcilCsv(){
 let unifGruposP = [];
 async function abrirUnificarP(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal" style="max-width:900px;width:96%">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Unificar proveedores duplicados</h2>
@@ -1173,7 +1173,7 @@ async function abrirFichasDux(){
   impFpB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impFpOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar fichas de proveedores de Dux</h2>
@@ -1224,7 +1224,7 @@ async function abrirSaldosProvDux(){
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impSpOrgs = (await r.json()).organizaciones || []; }catch(e){}
   const hoy = new Date(Date.now() - 3*3600e3).toISOString().slice(0,10);
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar saldos de proveedores de Dux</h2>

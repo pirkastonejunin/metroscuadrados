@@ -505,7 +505,7 @@ async function verComprometido(productoId, depositoId){
   const fila = stockActualCache.find(f => String(f.productoId) === productoId && String(f.depositoId) === depositoId);
   const titulo = fila ? `${escapeHtml(fila.sku)} — ${escapeHtml(fila.nombre)}` : 'Producto';
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Comprometido — ${titulo}</h2>
@@ -709,7 +709,7 @@ function opcionesDepositosSelect(seleccionado){
 
 function abrirNuevoMovimiento(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo movimiento</h2>
@@ -775,7 +775,7 @@ async function guardarMovimiento(){
 // diferencia y carga el movimiento correspondiente (ver POST /ajustar).
 function abrirAjusteStock(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide" style="max-width:840px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Ajustar stock</h2>
@@ -874,7 +874,7 @@ async function ajRefrescarTodo(forzar){
 
 async function abrirPonerEnCero(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Poner depósitos en cero</h2>
@@ -945,7 +945,7 @@ async function guardarAjusteStock(){
 
 function abrirNuevaTransferencia(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Transferencia entre depósitos</h2>
@@ -1032,7 +1032,7 @@ function formularioDeposito(d){
 
 function abrirNuevoDeposito(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo depósito</h2>
@@ -1066,7 +1066,7 @@ function abrirEditarDeposito(id){
   const d = depositosCache.find(x => x._id === id);
   if (!d) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar depósito</h2>
@@ -1156,7 +1156,7 @@ async function importarGenerico(url, archivoInputId, mensajeExito, recargar){
 
 function abrirImportarDepositos(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar depósitos desde Excel</h2>
@@ -1174,7 +1174,7 @@ function abrirImportarDepositos(){
 
 function abrirImportarMovimientos(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Carga inicial de stock desde Excel</h2>
@@ -1196,7 +1196,7 @@ function abrirStockDux(){
   impSkB64 = null;
   const ops = depositosCache.filter(d => d.activo !== false).map(d => `<option value="${d._id}">${escapeHtml(d.nombre)}</option>`).join('');
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Cargar stock desde Dux</h2>

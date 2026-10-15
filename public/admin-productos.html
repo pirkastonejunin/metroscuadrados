@@ -491,7 +491,7 @@ async function verProductosRubroAdm(rubro, subrubro){
   ultimaListaRubroAdm = [rubro, subrubro];
   const titulo = rubro ? (subrubro === '__sin__' ? `${rubro} › Sin subrubro` : (subrubro ? `${rubro} › ${subrubro}` : rubro)) : 'Sin rubro';
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal" style="max-width:820px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${escapeHtml(titulo)}</h2>
@@ -555,7 +555,7 @@ function abrirUnificarAdm(tipo, id){
     : subrubrosAdmCache.filter(x => String(x._id) !== id && String(x.rubroId) === String(origen.rubroId));
   if (!opciones.length) { errArbol('No hay otro ' + tipo + ' con el que unificar.'); return; }
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Unificar ${tipo}</h2>
@@ -715,7 +715,7 @@ function columnasProductosVisibles(){
 function abrirColumnas(){
   const visibles = columnasProductosVisibles();
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal" style="max-width:360px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Columnas a mostrar</h2>
@@ -851,7 +851,7 @@ function formularioProducto(p){
 
 function abrirNuevoProducto(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo producto</h2>
@@ -921,7 +921,7 @@ function abrirEditarProducto(id){
   const p = productosCache.find(x => x._id === id);
   if (!p) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Editar producto</h2>
@@ -1034,7 +1034,7 @@ function exportarXlsx(){ descargarBlob(BASE + '/export', 'productos.xlsx'); }
 
 function abrirImportar(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar productos desde Excel</h2>
@@ -1205,7 +1205,7 @@ async function resolverMapeoColumnas(base64, endpointEncabezados, contenedorId){
 // tenga algo cargado — es seguro de correr más de una vez.
 function abrirRecuperarPreciosTiendanube(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Recuperar precios vacíos desde Tiendanube</h2>
@@ -1247,7 +1247,7 @@ async function confirmarRecuperarPreciosTiendanube(){
 // automáticamente.
 async function abrirDuplicadosSku(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>SKUs duplicados por mayúsculas/minúsculas</h2>
@@ -1320,7 +1320,7 @@ async function confirmarConsolidarSku(){
 let listasPrecioModalCache = [];
 async function abrirListasPrecio(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal" style="max-width:1040px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Listas de precio</h2>

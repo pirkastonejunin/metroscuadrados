@@ -494,7 +494,7 @@ function formularioCliente(c){
 
 function abrirNuevoCliente(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo cliente</h2>
@@ -576,7 +576,7 @@ function abrirEditarCliente(id){
   const c = clientesCache.find(x => x._id === id);
   if (!c) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${escapeHtml(c.apellidoRazonSocial)}</h2>
@@ -944,7 +944,7 @@ function actualizarTipoValorCobroVentaCC(){
 }
 async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, clienteId){
   document.getElementById('modalCobroVentaRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModalCobroVentaCC()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModalCobroVentaCC()">✕</span>
         <h2>${ventaId ? 'Cobrar venta Nº ' + String(numero).padStart(5,'0') : 'Cobrar a cuenta · ' + escapeHtml(numero || '')}</h2>
@@ -1065,7 +1065,7 @@ function exportarXlsx(){ descargarBlob(BASE + '/export', 'clientes.xlsx'); }
 
 function abrirImportar(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar clientes desde Excel</h2>
@@ -1209,7 +1209,7 @@ function accionCC(que){
 let unifGrupos = [];
 async function abrirUnificar(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal" style="max-width:900px;width:96%">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Unificar clientes duplicados</h2>
@@ -1300,7 +1300,7 @@ async function abrirFichasCliDux(){
   impFcB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impFcOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar fichas de clientes de Dux</h2>
@@ -1353,7 +1353,7 @@ async function abrirSaldosDux(){
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impSdOrgs = (await r.json()).organizaciones || []; }catch(e){}
   const hoy = new Date(Date.now() - 3*3600e3).toISOString().slice(0,10);
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar saldos de clientes de Dux</h2>

@@ -267,7 +267,7 @@ function showTab(tab){
 }
 
 function modal(html){
-  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal">${html}</div></div>`;
+  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
 }
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
 

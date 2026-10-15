@@ -783,7 +783,7 @@ async function abrirNuevaVenta(prefill){
   `;
   await refrescarDepositosYListasVenta(ventaOrgSeleccionada === ORG ? undefined : ventaOrgSeleccionada);
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2 id="nvTitulo">${prefill && (prefill.tipoComprobante === 'nota_credito' || prefill.tipoComprobante === 'nota_debito') ? nombreDocCap(prefill.tipoComprobante) : 'Nueva venta'}</h2>
@@ -1475,7 +1475,7 @@ function verDetalle(id){
     : '<p class="muted">Sin cobros registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${nombreDocCap(v.tipoComprobante)} ${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')} <span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></h2>
@@ -1685,7 +1685,7 @@ async function abrirEntregar(id){
     `;
   }).join('');
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Generar remito — venta #${v.numero}</h2>
@@ -1708,7 +1708,7 @@ function abrirAjusteEntrega(id){
   if (!v) return;
   const filas = v.items.map((it, idx) => `<tr><td>${escapeHtml(it.nombre)}</td><td class="muted">${it.cantidad}</td><td><input type="number" class="aj-ent" data-idx="${idx}" min="0" max="${it.cantidad}" step="any" value="${it.cantidadEntregada || 0}" style="width:90px"></td></tr>`).join('');
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Corregir entrega — venta ${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : '#' + v.numero}</h2>
@@ -1841,7 +1841,7 @@ function abrirCobro(id){
   ncValores = [];
   montoCobroTocado = false;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Registrar cobro — ${nombreDoc(v.tipoComprobante)} #${v.numero}</h2>
@@ -2149,7 +2149,7 @@ function mpMostrarLink(url, monto){
   const v = ventaMPActual;
   const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}`;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()"><div class="modal">
+    <div class="modal-bg"><div class="modal">
       <span class="close-x" onclick="cerrarModal()">✕</span>
       <h2>Link de pago — ${money(monto)}</h2>
       <input id="mpLinkTxt" readonly value="${escapeHtml(url)}" onclick="this.select()">
@@ -2171,7 +2171,7 @@ async function abrirMP(id, tipo){
     terminales = r.ok ? await r.json() : [];
   }
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this && !mpTimer) cerrarModal()"><div class="modal">
+    <div class="modal-bg"><div class="modal">
       <span class="close-x" onclick="mpParar();cerrarModal()">✕</span>
       <h2>${tipo === 'point' ? 'Cobrar con Point' : 'Link de pago'} — ${nombreDoc(v.tipoComprobante)} #${v.numero}</h2>
       <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
@@ -2215,7 +2215,7 @@ let impDuxBase64 = null;
 async function abrirImportarDux(){
   impDuxBase64 = null;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar historial de Dux</h2>

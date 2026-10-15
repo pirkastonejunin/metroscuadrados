@@ -399,7 +399,7 @@ async function manejarSelectConcepto(select){
 
 function abrirNuevoGasto(){
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Nuevo gasto</h2>
@@ -759,7 +759,7 @@ function verDetalle(id){
     : '<p class="muted">Sin pagos registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal wide">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>${g.tipoComprobante && g.comprobanteNumero ? '' : 'Gasto '}${nombreComp(g)} <span class="pill ${g.estado}">${ESTADO_LABEL[g.estado]||g.estado}</span></h2>
@@ -866,7 +866,7 @@ function abrirPago(id){
   const g = gastosCache.find(x => x._id === id);
   if (!g) return;
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Registrar pago — gasto #${g.numero}</h2>
@@ -1006,7 +1006,7 @@ async function abrirImportarDux(){
   impDuxB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar historial de gastos de Dux</h2>
@@ -1068,7 +1068,7 @@ async function abrirImportarNotasDux(){
   impNtB64 = null;
   try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
   document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
+    <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Importar notas de crédito y débito de gastos de Dux</h2>
