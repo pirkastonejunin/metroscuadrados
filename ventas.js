@@ -711,7 +711,10 @@ async function normalizarItems(db, req, itemsRaw) {
       cantidad = Math.round(bultos * producto.unidadesPorBulto * 100) / 100;
     }
     const precioUnitario = normalizarMontoNoNegativo(precioBase, `El precio unitario de "${nombre}"`);
-    const itemSubtotal = cantidad * precioUnitario;
+    // Descuento por artículo (15/10/2026, pedido de Mato, igual que en Compras): % sobre el precio de esa línea.
+    const descuentoPorcentaje = it.descuentoPorcentaje ? Number(it.descuentoPorcentaje) : 0;
+    if (!Number.isFinite(descuentoPorcentaje) || descuentoPorcentaje < 0 || descuentoPorcentaje > 100) throw err(400, `El descuento (%) de "${nombre}" tiene que estar entre 0 y 100`);
+    const itemSubtotal = Math.round(cantidad * precioUnitario * (1 - descuentoPorcentaje / 100) * 100) / 100;
     subtotal += itemSubtotal;
     // cantidadEntregada (3/10/2026, pedido de Mato: "una venta puede
     // tener varios remitos" — el cliente puede retirar parcialmente) va
@@ -720,7 +723,7 @@ async function normalizarItems(db, req, itemsRaw) {
     // momento de la venta; null si el producto no la tiene cargada (para una
     // venta fiscal se usa entonces la alícuota por defecto de Fiscal).
     const porcentajeIva = (producto && producto.porcentajeIva !== undefined && producto.porcentajeIva !== null && producto.porcentajeIva !== '') ? Number(producto.porcentajeIva) : null;
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, subtotal: itemSubtotal, porcentajeIva, cantidadEntregada: 0 });
+    items.push({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, porcentajeIva, cantidadEntregada: 0 });
   }
   return { items, subtotal };
 }
@@ -1072,7 +1075,7 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
           <td>${escHtml(it.sku || '—')} - ${escHtml(it.nombre)}</td>
           <td class="num">${cantidadHtml}</td>
           <td class="num">${bultosHtml}</td>
-          <td class="num">${moneyImp(fl ? (it.cantidad ? fl.neto / it.cantidad : 0) : it.precioUnitario, venta.moneda)}</td>
+          <td class="num">${moneyImp(fl ? (it.cantidad ? fl.neto / it.cantidad : 0) : it.precioUnitario, venta.moneda)}${(!fl && it.descuentoPorcentaje) ? `<br><small>(-${numImp(it.descuentoPorcentaje)}%)</small>` : ''}</td>
           <td class="num">${moneyImp(fl ? fl.neto : it.subtotal, venta.moneda)}</td>
           <td class="num">${fl ? String(fl.porcentajeIva).replace('.', ',') + '%' : '0%'}</td>
           <td class="num">${moneyImp(fl ? fl.total : it.subtotal, venta.moneda)}</td>
