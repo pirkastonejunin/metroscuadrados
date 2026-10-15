@@ -675,6 +675,20 @@ router.get('/movimientos', authAdmin, async (req, res) => {
       if (!TIPOS_MOVIMIENTO_VALIDOS.includes(req.query.tipo)) throw err(400, 'Tipo de movimiento inválido');
       match.tipo = req.query.tipo;
     }
+    // Filtro por origen (15/10/2026): venta, compra, producción, transferencia, ajuste u otros.
+    const ORIGENES = {
+      venta: { ventaId: { $exists: true, $ne: null } },
+      compra: { compraId: { $exists: true, $ne: null } },
+      produccion: { motivo: 'Producción de fábrica' },
+      transferencia: { transferenciaId: { $exists: true, $ne: null } },
+      ajuste: { $or: [{ origen: 'ajuste' }, { motivo: /^Ajuste/i }] }
+    };
+    if (req.query.origen) {
+      const cond = req.query.origen === 'otro'
+        ? { $nor: Object.values(ORIGENES) }
+        : ORIGENES[req.query.origen];
+      if (cond) match.$and = (match.$and || []).concat([cond]);
+    }
     if (req.query.desde || req.query.hasta) {
       match.fecha = {};
       if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
@@ -816,7 +830,7 @@ router.post('/ajustar', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const nuevo = {
         productoId, depositoId, tipo, cantidad: cantidadMovimiento,
-        motivo: `${motivo} (${cantidadAnterior} → ${cantidadReal})`,
+        motivo: `${motivo} (${cantidadAnterior} → ${cantidadReal})`, origen: 'ajuste',
         sucursal: '', codigoExterno: '', observaciones,
         usuarioNombre, fecha, orgId: req.orgId, createdAt: new Date()
       };

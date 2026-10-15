@@ -200,6 +200,18 @@
                 <option value="egreso">Egreso</option>
               </select>
             </div>
+            <div style="min-width:150px">
+              <label>Origen</label>
+              <select id="fmOrigen" onchange="cargarMovimientos()">
+                <option value="">Todos</option>
+                <option value="venta">Ventas (y notas)</option>
+                <option value="compra">Compras</option>
+                <option value="produccion">Producción</option>
+                <option value="transferencia">Transferencias</option>
+                <option value="ajuste">Ajustes de stock</option>
+                <option value="otro">Otros</option>
+              </select>
+            </div>
             <div style="min-width:140px">
               <label>Desde</label>
               <input id="fmDesde" type="date" onchange="cargarMovimientos()">
@@ -549,6 +561,7 @@ async function cargarMovimientos(){
   if (document.getElementById('fmProducto').value) params.set('productoId', document.getElementById('fmProducto').value);
   if (document.getElementById('fmDeposito').value) params.set('depositoId', document.getElementById('fmDeposito').value);
   if (document.getElementById('fmTipo').value) params.set('tipo', document.getElementById('fmTipo').value);
+  if (document.getElementById('fmOrigen').value) params.set('origen', document.getElementById('fmOrigen').value);
   if (document.getElementById('fmDesde').value) params.set('desde', document.getElementById('fmDesde').value);
   if (document.getElementById('fmHasta').value) params.set('hasta', document.getElementById('fmHasta').value);
   const r = await fetch(BASE + '/movimientos?' + params.toString(), {headers: headersAuth()});
