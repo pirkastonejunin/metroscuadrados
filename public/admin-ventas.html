@@ -309,6 +309,7 @@ async function iniciarApp(){
 // Enlace desde el tablero de inicio: /admin-ventas.html?abrir=<id de la venta>
 async function abrirVentaPorParametro(){
   const id = new URLSearchParams(location.search).get('abrir'); if (!id) return;
+  const entregar = new URLSearchParams(location.search).get('entregar') === '1';
   history.replaceState(null, '', location.pathname);
   try{
     if (!ventasCache.some(x => x._id === id)) {
@@ -316,6 +317,7 @@ async function abrirVentaPorParametro(){
       ventasCache.unshift(await r.json());
     }
     verDetalle(id);
+    if (entregar) setTimeout(() => { const v = ventasCache.find(x => x._id === id); if (v && (v.estado === 'pendiente' || v.estado === 'parcialmente_entregada')) abrirEntregar(id); }, 400);
   }catch(e){}
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
@@ -1827,7 +1829,7 @@ async function abrirEntregar(id){
   const deposito = v.depositoId ? depositosCache.find(d => String(d._id) === String(v.depositoId)) : null;
   const filasItems = v.items.map((it, idx) => {
     const entregada = it.cantidadEntregada || 0;
-    const pendiente = Math.max(0, it.cantidad - entregada);
+    const pendiente = Math.max(0, it.cantidad - entregada - (it.cantidadAcreditada || 0));
     if (pendiente <= 0) return '';
     // Igual que al cargar la venta: si el producto se vende por bulto, no
     // se puede remitir una fracción de bulto, y se puede elegir la
