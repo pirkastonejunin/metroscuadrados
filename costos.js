@@ -762,9 +762,11 @@ function validarFecha(v) {
 // una carga anterior), cuánto representa "N paquetes" de cada ítem. Si el
 // producto no tiene rendimiento por paquete cargado, no hay forma de
 // convertir — se guarda tal cual en paquetes, para no inventar un número.
-function convertirItemProduccion(producto, paquetes) {
+function convertirItemProduccion(producto, paquetes, unidades) {
   const rinde = producto.rendimientoPorPaquete || null;
-  const cantidadConvertida = rinde ? paquetes * rinde : paquetes;
+  // Si se cargó por unidad / m² (15/10/2026), esa cantidad manda tal cual y los paquetes se deducen.
+  if (unidades && rinde) paquetes = Math.round(unidades / rinde * 10000) / 10000;
+  const cantidadConvertida = rinde ? (unidades ? unidades : paquetes * rinde) : paquetes;
   const unidadConvertida = rinde ? (producto.tipoCosteo === 'm2' ? 'm2' : 'unidad') : 'paquete';
   return {
     productoId: producto._id,
@@ -899,11 +901,14 @@ router.post('/produccion/ingresar', authProduccion, async (req, res) => {
       for (const it of itemsRaw) {
         const productoId = toObjectId(it.productoId);
         if (!productoId) throw err(400, 'productoId inválido');
+        const unidades = it.unidades !== undefined && it.unidades !== null && it.unidades !== '' ? Number(it.unidades) : null;
         const paquetes = Number(it.paquetes);
-        if (!Number.isFinite(paquetes) || paquetes <= 0) throw err(400, 'La cantidad de paquetes tiene que ser un número mayor a 0');
+        if (unidades !== null) { if (!Number.isFinite(unidades) || unidades <= 0) throw err(400, 'La cantidad (unidades o m²) tiene que ser un número mayor a 0'); }
+        else if (!Number.isFinite(paquetes) || paquetes <= 0) throw err(400, 'La cantidad de paquetes tiene que ser un número mayor a 0');
         const producto = await db.collection('costos_productos').findOne({ _id: productoId, orgId: req.orgId });
         if (!producto) throw err(400, 'Uno de los productos cargados no existe');
-        items.push(convertirItemProduccion(producto, paquetes));
+        if (unidades !== null && !producto.rendimientoPorPaquete) throw err(400, `"${producto.nombre}" no tiene rendimiento por paquete configurado: cargalo en paquetes.`);
+        items.push(convertirItemProduccion(producto, unidades !== null ? 0 : paquetes, unidades));
       }
       const ahora = new Date();
       const doc = { orgId: req.orgId, fecha, items, actualizadoPor: { usuarioId: req.usuario._id, nombre: req.usuario.nombre }, createdAt: ahora, updatedAt: ahora };

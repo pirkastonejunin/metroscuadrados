@@ -41,8 +41,8 @@
   #loginScreen .card{width:100%;max-width:340px;text-align:center;}
   #loginScreen .logo{height:24px;width:auto;margin:0 auto 16px;display:block;}
   .hidden{display:none !important;}
-  .fila-item{display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;}
-  .fila-item .campo-producto{flex:2;min-width:0;}
+  .fila-item{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;}
+  .fila-item .campo-producto{flex:1 1 100%;min-width:0;}
   .fila-item .campo-paquetes{flex:1;min-width:0;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:38px;height:38px;font-size:16px;font-weight:700;cursor:pointer;}
   .conversion-preview{font-size:12px;color:var(--muted);margin-top:-4px;margin-bottom:8px;}
@@ -261,7 +261,11 @@ function agregarFila(productoId, paquetes){
       </div>
       <div class="campo-paquetes">
         <label>Paquetes</label>
-        <input type="number" min="0" step="1" value="${paquetes||''}" oninput="actualizarPreview(this)">
+        <input type="number" min="0" step="1" class="in-paquetes" value="${paquetes||''}" oninput="sincronizarCant(this,'paquetes')">
+      </div>
+      <div class="campo-paquetes">
+        <label class="lbl-unidades">m² / Unid.</label>
+        <input type="number" min="0" step="0.01" class="in-unidades" oninput="sincronizarCant(this,'unidades')">
       </div>
       <button class="btn-quitar" onclick="this.closest('.fila-item-wrap').remove()">×</button>
     </div>
@@ -271,12 +275,36 @@ function agregarFila(productoId, paquetes){
   if (productoId) actualizarPreview(fila.querySelector('select'));
 }
 
+// Se puede cargar por paquete o por unidad / m²: lo que se escribe en uno completa el otro según el rendimiento por paquete.
+function sincronizarCant(inp, cual){
+  const wrap = inp.closest('.fila-item-wrap');
+  const select = wrap.querySelector('select');
+  const producto = PRODUCTOS.find(p => String(p._id) === select.value);
+  const rinde = producto && producto.rendimientoPorPaquete;
+  const inPaq = wrap.querySelector('.in-paquetes'), inUni = wrap.querySelector('.in-unidades');
+  wrap.dataset.ultimo = cual;
+  if (rinde) {
+    if (cual === 'paquetes') inUni.value = inPaq.value === '' ? '' : String(Math.round(Number(inPaq.value) * rinde * 100) / 100);
+    else inPaq.value = inUni.value === '' ? '' : String(Math.round(Number(inUni.value) / rinde * 100) / 100);
+  }
+  actualizarPreview(select);
+}
+function actualizarEtiquetaUnidad(wrap){
+  const select = wrap.querySelector('select');
+  const producto = PRODUCTOS.find(p => String(p._id) === select.value);
+  wrap.querySelector('.lbl-unidades').textContent = producto && producto.rendimientoPorPaquete ? (producto.tipoCosteo === 'm2' ? 'm²' : 'Unidades') : 'm² / Unid.';
+}
 function actualizarPreview(el){
   const wrap = el.closest('.fila-item-wrap');
   const select = wrap.querySelector('select');
-  const input = wrap.querySelector('input');
+  const input = wrap.querySelector('.in-paquetes');
   const preview = wrap.querySelector('.conversion-preview');
   const producto = PRODUCTOS.find(p => String(p._id) === select.value);
+  actualizarEtiquetaUnidad(wrap);
+  // Al elegir/cambiar el producto, si ya había una cantidad en m²/unidades se recalculan los paquetes con el rendimiento nuevo.
+  if (producto && producto.rendimientoPorPaquete && wrap.dataset.ultimo === 'unidades' && wrap.querySelector('.in-unidades').value !== '' && el === select) {
+    input.value = String(Math.round(Number(wrap.querySelector('.in-unidades').value) / producto.rendimientoPorPaquete * 100) / 100);
+  }
   const paquetes = Number(input.value);
   if (!producto || !paquetes || paquetes <= 0) { preview.textContent = ''; return; }
   const rinde = producto.rendimientoPorPaquete || null;
@@ -291,9 +319,14 @@ function juntarItems(){
   const items = [];
   filas.forEach(fila => {
     const select = fila.querySelector('select');
-    const input = fila.querySelector('input');
-    const paquetes = Number(input.value);
-    if (select.value && paquetes > 0) items.push({ productoId: select.value, paquetes });
+    const paquetes = Number(fila.querySelector('.in-paquetes').value);
+    const unidades = Number(fila.querySelector('.in-unidades').value);
+    const producto = PRODUCTOS.find(p => String(p._id) === select.value);
+    if (!select.value) return;
+    // Si lo último que se tocó fue m²/unidades (y el producto tiene rendimiento) se manda esa cantidad exacta.
+    if (fila.dataset.ultimo === 'unidades' && unidades > 0 && producto && producto.rendimientoPorPaquete) items.push({ productoId: select.value, unidades });
+    else if (paquetes > 0) items.push({ productoId: select.value, paquetes });
+    else if (unidades > 0 && producto && producto.rendimientoPorPaquete) items.push({ productoId: select.value, unidades });
   });
   return items;
 }
