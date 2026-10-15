@@ -776,28 +776,94 @@ async function guardarMovimiento(){
 function abrirAjusteStock(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg" onclick="if(event.target===this) cerrarModal()">
-      <div class="modal">
+      <div class="modal wide" style="max-width:840px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Ajustar stock</h2>
-        <p class="muted">Elegí el producto y el depósito, y escribí la cantidad que contaste — el sistema calcula la diferencia sola y la carga como ingreso o egreso, según corresponda.</p>
+        <p class="muted">Elegí el depósito y cargá todos los productos que contaste. Escribí los metros o los bultos (se calculan entre sí) — el sistema calcula la diferencia sola y la carga como ingreso o egreso.</p>
         <div class="grid2">
-          <div><label>Producto *</label>${comboProductoHtml('aj', '', 'actualizarCantidadActualAjuste')}</div>
-          <div><label>Depósito *</label><select id="ajDeposito" onchange="actualizarCantidadActualAjuste()">${opcionesDepositosSelect()}</select></div>
+          <div><label>Depósito *</label><select id="ajDeposito" onchange="ajRefrescarTodo(true)">${opcionesDepositosSelect()}</select></div>
+          <div><label>Motivo (para todos)</label><input id="ajMotivo" placeholder="Ej: Conteo físico, Rotura, Diferencia de inventario"></div>
         </div>
-        <div class="grid2" style="margin-top:10px">
-          <div><label>Stock actual</label><input id="ajActual" value="—" disabled></div>
-          <div><label>Cantidad contada (real) *</label><input id="ajCantidadReal" type="number" min="0" step="0.01"></div>
-        </div>
-        <div id="ajUnidadWrap" class="hidden" style="margin-top:10px">
-          <label>¿Contaste por bulto o por unidad?</label>
-          <select id="ajUnidadSelect"></select>
-        </div>
-        <div style="margin-top:10px"><label>Motivo</label><input id="ajMotivo" placeholder="Ej: Conteo físico, Rotura, Diferencia de inventario"></div>
+        <div class="ajf-cab"><span>Producto</span><span>Stock actual</span><span>Contado (m² / unidad)</span><span>Contado (bultos)</span><span></span></div>
+        <div id="ajFilas"></div>
+        <button class="btn secondary small" style="margin-top:8px" onclick="ajAgregarFila()">+ Agregar producto</button>
         <div class="err" id="ajErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="guardarAjusteStock()">Guardar ajuste</button>
+        <button class="btn" id="ajGuardarBtn" style="margin-top:10px" onclick="guardarAjusteStock()">Guardar ajuste</button>
       </div>
     </div>
+    <style>
+      .ajf-cab,.ajf-fila{display:grid;grid-template-columns:minmax(200px,2.6fr) 1.3fr 1fr 1fr 32px;gap:8px;align-items:start}
+      .ajf-cab{margin-top:14px;font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted)}
+      .ajf-fila{margin-top:8px}
+      .ajf-act{font-size:13px;padding-top:9px}
+      .ajf-msg{grid-column:1 / -1;font-size:12px}
+      @media(max-width:700px){.ajf-cab{display:none}.ajf-fila{grid-template-columns:1fr 1fr}.ajf-fila>.campo-combo-producto{grid-column:1 / -1}}
+    </style>
   `;
+  ajSeq = 0;
+  ajAgregarFila();
+}
+
+let ajSeq = 0;
+function ajProductoDeFila(n){
+  const id = document.getElementById('ajf' + n + 'Producto').value;
+  return id ? productosCache.find(p => String(p._id) === id) : null;
+}
+function ajBultoDe(prod){ return (prod && prod.unidadesPorBulto > 1) ? Number(prod.unidadesPorBulto) : 0; }
+function ajRedondear(v, d){ const f = Math.pow(10, d); return Math.round(Number(v) * f) / f; }
+function ajAgregarFila(){
+  const n = ++ajSeq;
+  const div = document.createElement('div');
+  div.className = 'ajf-fila'; div.id = 'ajf' + n + 'Fila'; div.dataset.n = n;
+  div.innerHTML = `
+    ${comboProductoHtml('ajf' + n, '', 'ajRefrescarTodo')}
+    <div class="ajf-act" id="ajf${n}Actual">—</div>
+    <input id="ajf${n}M2" type="number" min="0" step="0.01" placeholder="m²" oninput="ajDesdeMetros(${n})">
+    <input id="ajf${n}Bultos" type="number" min="0" step="0.01" placeholder="bultos" disabled oninput="ajDesdeBultos(${n})">
+    <button type="button" class="btn small secondary" title="Quitar" onclick="ajQuitarFila(${n})" style="padding:6px 8px">✕</button>
+    <div class="ajf-msg err" id="ajf${n}Msg"></div>`;
+  document.getElementById('ajFilas').appendChild(div);
+}
+function ajQuitarFila(n){
+  const f = document.getElementById('ajf' + n + 'Fila');
+  if (f) f.remove();
+  if (!document.querySelector('#ajFilas .ajf-fila')) ajAgregarFila();
+}
+function ajDesdeMetros(n){
+  const prod = ajProductoDeFila(n), b = ajBultoDe(prod);
+  const v = document.getElementById('ajf' + n + 'M2').value;
+  document.getElementById('ajf' + n + 'Bultos').value = (b && v !== '') ? ajRedondear(Number(v) / b, 2) : '';
+}
+function ajDesdeBultos(n){
+  const prod = ajProductoDeFila(n), b = ajBultoDe(prod);
+  const v = document.getElementById('ajf' + n + 'Bultos').value;
+  if (b && v !== '') document.getElementById('ajf' + n + 'M2').value = ajRedondear(Number(v) * b, 4);
+}
+// Refresca el "stock actual" de las filas (solo las que cambiaron de producto, o todas si cambió el depósito).
+async function ajRefrescarTodo(forzar){
+  const depositoId = document.getElementById('ajDeposito').value;
+  const filas = [...document.querySelectorAll('#ajFilas .ajf-fila')];
+  for (const f of filas) {
+    const n = f.dataset.n;
+    const productoId = document.getElementById('ajf' + n + 'Producto').value;
+    const act = document.getElementById('ajf' + n + 'Actual');
+    const bul = document.getElementById('ajf' + n + 'Bultos');
+    const prod = ajProductoDeFila(n);
+    bul.disabled = !ajBultoDe(prod);
+    if (!ajBultoDe(prod)) bul.value = '';
+    if (!productoId || !depositoId) { act.textContent = '—'; f.dataset.prod = ''; continue; }
+    if (forzar !== true && f.dataset.prod === productoId + '|' + depositoId) continue;
+    f.dataset.prod = productoId + '|' + depositoId;
+    act.textContent = '…';
+    try{
+      const r = await fetch(BASE + '/actual?productoId=' + encodeURIComponent(productoId) + '&depositoId=' + encodeURIComponent(depositoId), {headers: headersAuth()});
+      const data = await r.json();
+      const cant = (r.ok && data.length) ? Number(data[0].cantidad) : 0;
+      const b = ajBultoDe(prod), u = (prod && prod.unidad) || 'un.';
+      act.textContent = ajRedondear(cant, 2) + ' ' + u + (b ? ' · ' + ajRedondear(cant / b, 2) + ' bultos' : '');
+    }catch(e){ act.textContent = '—'; }
+    if (document.getElementById('ajf' + n + 'M2').value !== '') ajDesdeMetros(n);
+  }
 }
 
 async function abrirPonerEnCero(){
@@ -832,41 +898,43 @@ async function ejecutarPonerEnCero(){
   }catch(e){ document.getElementById('pcErr').textContent = e.message; }
 }
 
-async function actualizarCantidadActualAjuste(){
-  const productoId = document.getElementById('ajProducto').value;
-  const depositoId = document.getElementById('ajDeposito').value;
-  const campo = document.getElementById('ajActual');
-  if (!productoId || !depositoId) { campo.value = '—'; return; }
-  try{
-    const r = await fetch(BASE + '/actual?productoId=' + encodeURIComponent(productoId) + '&depositoId=' + encodeURIComponent(depositoId), {headers: headersAuth()});
-    const data = await r.json();
-    campo.value = (r.ok && data.length) ? data[0].cantidad : 0;
-  }catch(e){
-    campo.value = '—';
-  }
-}
-
 async function guardarAjusteStock(){
-  const cantidadRealTipeada = document.getElementById('ajCantidadReal').value;
-  const body = {
-    productoId: document.getElementById('ajProducto').value,
-    depositoId: document.getElementById('ajDeposito').value,
-    cantidadReal: cantidadRealTipeada === '' ? '' : cantidadBaseDesde('aj', cantidadRealTipeada),
-    motivo: document.getElementById('ajMotivo').value.trim()
-  };
-  if (!body.productoId) { document.getElementById('ajErr').textContent = 'Elegí un producto'; return; }
-  if (!body.depositoId) { document.getElementById('ajErr').textContent = 'Elegí un depósito'; return; }
-  if (body.cantidadReal === '' || Number(body.cantidadReal) < 0) { document.getElementById('ajErr').textContent = 'Escribí la cantidad contada (puede ser 0)'; return; }
-  try{
-    const r = await fetch(BASE + '/ajustar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error');
-    cerrarModal();
-    await cargarMovimientos();
-    if (tabActiva === 'actual') await cargarStockActual();
-  }catch(e){
-    document.getElementById('ajErr').textContent = e.message;
+  const depositoId = document.getElementById('ajDeposito').value;
+  const motivo = document.getElementById('ajMotivo').value.trim();
+  const errEl = document.getElementById('ajErr');
+  errEl.textContent = '';
+  if (!depositoId) { errEl.textContent = 'Elegí un depósito'; return; }
+  const filas = [...document.querySelectorAll('#ajFilas .ajf-fila')];
+  const aCargar = [];
+  for (const f of filas) {
+    const n = f.dataset.n;
+    const productoId = document.getElementById('ajf' + n + 'Producto').value;
+    const cant = document.getElementById('ajf' + n + 'M2').value;
+    const msg = document.getElementById('ajf' + n + 'Msg'); msg.textContent = '';
+    if (!productoId && cant === '' && !document.getElementById('ajf' + n + 'Buscar').value.trim()) continue; // fila vacía
+    if (!productoId) { msg.textContent = 'Elegí el producto de la lista.'; errEl.textContent = 'Revisá las filas marcadas.'; return; }
+    if (cant === '' || Number(cant) < 0) { msg.textContent = 'Escribí la cantidad contada (puede ser 0).'; errEl.textContent = 'Revisá las filas marcadas.'; return; }
+    aCargar.push({ n, f, body: { productoId, depositoId, cantidadReal: Number(cant), motivo } });
   }
+  if (!aCargar.length) { errEl.textContent = 'Cargá al menos un producto.'; return; }
+  const btn = document.getElementById('ajGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  let ok = 0, fallidas = 0;
+  for (const it of aCargar) {
+    const msg = document.getElementById('ajf' + it.n + 'Msg');
+    try{
+      const r = await fetch(BASE + '/ajustar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(it.body)});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Error');
+      ok++; it.f.remove();
+    }catch(e){ fallidas++; msg.textContent = e.message; }
+  }
+  btn.disabled = false; btn.textContent = 'Guardar ajuste';
+  await cargarMovimientos();
+  if (tabActiva === 'actual') await cargarStockActual();
+  if (!fallidas) { cerrarModal(); return; }
+  if (!document.querySelector('#ajFilas .ajf-fila')) ajAgregarFila();
+  errEl.textContent = ok + ' ajustado(s). ' + fallidas + ' con problema (las que quedan abajo, con el motivo en rojo); las ya ajustadas se sacaron de la lista.';
 }
 
 function abrirNuevaTransferencia(){
