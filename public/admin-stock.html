@@ -801,6 +801,8 @@ function abrirAjusteStock(){
     </style>
   `;
   ajSeq = 0;
+  const activos = depositosCache.filter(d => d.activo !== false);
+  if (activos.length === 1) document.getElementById('ajDeposito').value = String(activos[0]._id);
   ajAgregarFila();
 }
 
@@ -852,17 +854,20 @@ async function ajRefrescarTodo(forzar){
     bul.disabled = !!prod && !ajBultoDe(prod);
     bul.placeholder = (prod && !ajBultoDe(prod)) ? 'sin bultos' : 'bultos';
     if (prod && !ajBultoDe(prod)) bul.value = '';
-    if (!productoId || !depositoId) { act.textContent = '—'; f.dataset.prod = ''; continue; }
+    if (!productoId) { act.textContent = '—'; f.dataset.prod = ''; continue; }
     if (forzar !== true && f.dataset.prod === productoId + '|' + depositoId) continue;
     f.dataset.prod = productoId + '|' + depositoId;
     act.textContent = '…';
     try{
-      const r = await fetch(BASE + '/actual?productoId=' + encodeURIComponent(productoId) + '&depositoId=' + encodeURIComponent(depositoId), {headers: headersAuth()});
+      // Sin depósito elegido todavía se muestra el total de todos los depósitos.
+      const r = await fetch(BASE + '/actual?productoId=' + encodeURIComponent(productoId) + (depositoId ? '&depositoId=' + encodeURIComponent(depositoId) : ''), {headers: headersAuth()});
       const data = await r.json();
-      const cant = (r.ok && data.length) ? Number(data[0].cantidad) : 0;
+      if (!r.ok) throw new Error(data.error || 'Error');
+      const filas = Array.isArray(data) ? data : (data.items || data.filas || []);
+      const cant = filas.reduce((t, x) => t + (Number(x.cantidad) || 0), 0);
       const b = ajBultoDe(prod), u = (prod && prod.unidad) || 'un.';
-      act.textContent = ajRedondear(cant, 2) + ' ' + u + (b ? ' · ' + ajRedondear(cant / b, 2) + ' bultos' : '');
-    }catch(e){ act.textContent = '—'; }
+      act.textContent = ajRedondear(cant, 2) + ' ' + u + (b ? ' · ' + ajRedondear(cant / b, 2) + ' bultos' : '') + (depositoId ? '' : ' (todos los depósitos)');
+    }catch(e){ act.textContent = 'No se pudo leer'; act.title = e.message; }
     if (document.getElementById('ajf' + n + 'M2').value !== '') ajDesdeMetros(n);
   }
 }
