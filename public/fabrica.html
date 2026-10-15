@@ -215,6 +215,19 @@ function opcionesProductos(seleccionadoId){
 }
 
 function textoProducto(p){ return p ? (p.sku ? p.sku + ' — ' : '') + p.nombre : ''; }
+// Si se editó un producto en Costos mientras esta pantalla estaba abierta, al volver se recargan los datos (rendimiento, etc.).
+async function refrescarProductos(){
+  await cargarProductos();
+  asegurarDatalistProductos();
+  document.querySelectorAll('#filasItems .fila-item-wrap').forEach(w => {
+    const sel = w.querySelector('select'), inp = w.querySelector('.prod-buscar');
+    if (!sel || !inp || !inp.value.trim()) return;
+    sel.innerHTML = opcionesProductos(sel.value);
+    elegirProductoTexto(inp, true);
+  });
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && TOKEN) refrescarProductos(); });
+window.addEventListener('focus', () => { if (TOKEN) refrescarProductos(); });
 function asegurarDatalistProductos(){
   let dl = document.getElementById('dlProductos');
   if (!dl) { dl = document.createElement('datalist'); dl.id = 'dlProductos'; document.body.appendChild(dl); }
@@ -225,7 +238,10 @@ function elegirProductoTexto(inp, alSalir){
   const wrap = inp.closest('.fila-item-wrap');
   const select = wrap.querySelector('select');
   const q = inp.value.trim().toLowerCase();
-  let p = PRODUCTOS.find(x => textoProducto(x).toLowerCase() === q);
+  // Si hay productos repetidos con el mismo nombre, se prefiere el que tiene rendimiento por paquete cargado.
+  const mejor = lista => lista.slice().sort((a, b) => (b.rendimientoPorPaquete ? 1 : 0) - (a.rendimientoPorPaquete ? 1 : 0))[0];
+  const iguales = PRODUCTOS.filter(x => textoProducto(x).toLowerCase() === q);
+  let p = iguales.length ? mejor(iguales) : undefined;
   if (!p && alSalir && q) {
     const c = PRODUCTOS.filter(x => textoProducto(x).toLowerCase().includes(q));
     if (c.length === 1) { p = c[0]; inp.value = textoProducto(p); }
