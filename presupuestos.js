@@ -777,4 +777,72 @@ async function sincronizarDesdeVisita(db, { visita, clienteId, clienteNombre, it
 }
 router.sincronizarDesdeVisita = sincronizarDesdeVisita;
 
+// Sincroniza con el panel de Presupuestos el presupuesto de UNA visita, sea manual o armado con el cotizador (15/10/2026, pedido de
+// Mato: "los presupuestos de visitas me deberían salir también en el panel de presupuestos"). Crea o actualiza el presupuesto enlazado
+// y deja el vínculo en la visita. Devuelve null si la visita no tiene nada para presupuestar.
+async function sincronizarVisitaCompleta(db, visita) {
+  const p = visita && visita.presupuesto;
+  if (!p) return null;
+  let items = [];
+  if (p.tipo === 'manual') {
+    items = (p.items || []).slice();
+  } else if (p.tipo === 'cotizador') {
+    let cots = Array.isArray(p.cotizaciones) ? p.cotizaciones : (p.cotizacionId ? [{ cotizacionId: p.cotizacionId, storeId: p.storeId, tipoObraNombre: p.tipoObraNombre, baseTotal: p.baseTotal }] : []);
+    for (const c of cots) {
+      let base = Number(c.baseTotal) || 0;
+      if (!(base > 0) && c.cotizacionId) {
+        const cot = await db.collection('cotizaciones').findOne({ _id: c.cotizacionId, store_id: Number(c.storeId) }).catch(() => null);
+        base = cot ? Number(cot.total) || 0 : 0;
+      }
+      items.push({ tipoTrabajo: 'Cotización ' + (c.tipoObraNombre || 'del cotizador'), descripcion: '', cantidad: 1, valor: base });
+    }
+    items = items.concat(Array.isArray(p.itemsExtra) ? p.itemsExtra : []);
+  }
+  items = items.filter(it => it && it.tipoTrabajo && Number(it.cantidad) > 0);
+  if (!items.length) return null;
+  const { clienteParaVisita } = require('./clienteVinculo');
+  const cli = await clienteParaVisita(db, visita.orgId, visita.cliente);
+  const cl = await db.collection('clientes').findOne({ _id: cli.clienteId }, { projection: { apellidoRazonSocial: 1, nombre: 1 } });
+  const pc = await sincronizarDesdeVisita(db, {
+    visita, clienteId: cli.clienteId,
+    clienteNombre: (cl && [cl.apellidoRazonSocial, cl.nombre].filter(Boolean).join(' ').trim()) || String((visita.cliente && visita.cliente.nombre) || ''),
+    items: items.map(it => ({ tipoTrabajo: it.tipoTrabajo, descripcion: it.descripcion || '', cantidad: Number(it.cantidad), valor: Number(it.valor) || 0 })),
+    formasPago: p.formasPago || [], notas: p.notas || '', usuarioNombre: visita.vendedorNombre || ''
+  });
+  await db.collection('visitas').updateOne({ _id: visita._id }, { $set: {
+    presupuestoComercialId: pc.presupuestoId, presupuestoComercialNumero: pc.numero, presupuestoComercialEstado: pc.estado, presupuestoComercialCongelado: !!pc.congelado
+  }, $unset: { presupuestoComercialError: '' } });
+  return pc;
+}
+router.sincronizarVisitaCompleta = sincronizarVisitaCompleta;
+
+// Trae al panel los presupuestos de visitas que todavía no tienen su presupuesto enlazado (los cargados antes de esta función).
+router.post('/sincronizar-visitas', authAdmin, async (req, res) => {
+  try {
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const visitas = await db.collection('visitas').find(Object.assign({
+        presupuesto: { $ne: null }, estado: { $ne: 'cancelada' },
+        $or: [{ presupuestoComercialId: { $exists: false } }, { presupuestoComercialId: null }]
+      }, filtroOrg(req))).toArray();
+      let creados = 0, sinItems = 0; const errores = [];
+      for (const v of visitas) {
+        try {
+          const pc = await sincronizarVisitaCompleta(db, v);
+          if (!pc) { sinItems++; continue; }
+          if (pc.creado) {
+            creados++;
+            if (['vendido', 'instalado'].includes(v.estado)) {
+              await db.collection('presupuestos').updateOne({ _id: pc.presupuestoId }, { $set: { estado: 'aprobado' }, $push: { seguimiento: { fecha: new Date(), estado: 'aprobado', nota: 'La visita figura como ' + v.estado, usuarioNombre: '' } } });
+              await db.collection('visitas').updateOne({ _id: v._id }, { $set: { presupuestoComercialEstado: 'aprobado' } });
+            }
+          }
+        } catch (e) { errores.push('Visita #' + v.numero + ': ' + e.message); }
+      }
+      return { revisadas: visitas.length, creados, sinItems, errores };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;

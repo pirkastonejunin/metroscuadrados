@@ -846,6 +846,14 @@ router.delete('/vendedor/:vendedorId/visitas/:id/fotos/:index', authVendedor, as
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Mantiene al día el presupuesto del panel comercial cuando cambia el presupuesto de la visita (sin romper la operación si falla).
+async function sincronizarComercialSilencioso(db, visitaId) {
+  try {
+    const v = await db.collection('visitas').findOne({ _id: visitaId });
+    if (v && v.presupuesto) await require('./presupuestos').sincronizarVisitaCompleta(db, v);
+  } catch (e) { console.error('Presupuesto comercial de la visita:', e.message); }
+}
+
 // Presupuesto cargado a mano, sin pasar por el cotizador.
 // items: [{ tipoTrabajo (= "producto", del catálogo de tipos de trabajo),
 //           descripcion, cantidad, valor }]
@@ -1001,6 +1009,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador', authVende
       const set = { presupuesto, updatedAt: new Date() };
       if (visita.estado === 'sin_visita') set.estado = 'presupuestada';
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
+      await sincronizarComercialSilencioso(db, visita._id);
       return db.collection('visitas').findOne({ _id: visita._id });
     });
     res.json(resultado);
@@ -1045,6 +1054,7 @@ router.delete('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/:cotizaci
         };
       }
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
+      await sincronizarComercialSilencioso(db, visita._id);
       return db.collection('visitas').findOne({ _id: visita._id });
     });
     res.json(resultado);
@@ -1104,6 +1114,7 @@ router.post('/vendedor/:vendedorId/visitas/:id/presupuesto-cotizador/items-extra
         updatedAt: new Date()
       };
       await db.collection('visitas').updateOne({ _id: visita._id }, { $set: set });
+      await sincronizarComercialSilencioso(db, visita._id);
       return db.collection('visitas').findOne({ _id: visita._id });
     });
     res.json(resultado);

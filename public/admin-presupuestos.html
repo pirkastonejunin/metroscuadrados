@@ -136,7 +136,7 @@
   <main>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div><button class="btn" onclick="abrirNuevoPresupuesto()">+ Nuevo presupuesto</button></div>
+        <div class="row" style="gap:8px"><button class="btn" onclick="abrirNuevoPresupuesto()">+ Nuevo presupuesto</button><button class="btn secondary" id="btnTraerVisitas" title="Trae al panel los presupuestos armados desde Visitas que todavía no figuran acá" onclick="traerPresupuestosDeVisitas()">Traer presupuestos de visitas</button></div>
         <div class="row" style="gap:8px">
           <div style="min-width:160px"><label>Estado</label><select id="fEstado" onchange="renderPresupuestos()">
             <option value="">Todos</option>
@@ -309,6 +309,20 @@ if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.r
 // Listado
 // -----------------------------------------------------------------------
 let presupuestosCache = [];
+
+async function traerPresupuestosDeVisitas(){
+  const btn = document.getElementById('btnTraerVisitas');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try{
+    const r = await fetch(BASE + '/sincronizar-visitas', {method:'POST', headers: headersAuthJson()});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    await cargarPresupuestos();
+    alert('Listo: se trajeron ' + d.creados + ' presupuesto(s) de visitas (' + d.revisadas + ' visitas revisadas' + (d.sinItems ? ', ' + d.sinItems + ' sin productos cargados' : '') + ').' + (d.errores.length ? '\n\nNo se pudieron traer:\n' + d.errores.join('\n') : ''));
+  }catch(e){ alert(e.message); }
+  btn.disabled = false;
+}
 async function cargarPresupuestos(){
   const params = new URLSearchParams();
   const desde = document.getElementById('fDesde').value;
