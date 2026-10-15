@@ -623,6 +623,37 @@ function proveedorTipeado(idCampo, fnName){
   oculto.value = nuevo;
   if (fnName && typeof window[fnName] === 'function') window[fnName]();
 }
+
+// Alta rápida de proveedor desde la carga de una compra / orden / pago (15/10/2026).
+function abrirProveedorNuevo(idCampo, fnName){
+  const cont = document.getElementById(idCampo + 'Nuevo');
+  if (!cont) return;
+  const txt = (document.getElementById(idCampo + 'Txt').value || '').trim();
+  cont.innerHTML = `<div class="fia-item" style="margin-top:6px">
+    <div class="grid2">
+      <div><label>Razón social *</label><input id="${idCampo}NNombre" value="${escapeHtml(txt)}"></div>
+      <div><label>CUIT</label><input id="${idCampo}NCuit" placeholder="Opcional"></div>
+    </div>
+    <div class="fia-acciones"><button type="button" class="btn small" onclick="crearProveedorNuevo('${idCampo}','${fnName}')">Crear y usar</button> <button type="button" class="btn small secondary" onclick="document.getElementById('${idCampo}Nuevo').innerHTML=''">Cancelar</button></div>
+    <div class="err" id="${idCampo}NErr"></div></div>`;
+  document.getElementById(idCampo + 'NNombre').focus();
+}
+async function crearProveedorNuevo(idCampo, fnName){
+  const razonSocial = document.getElementById(idCampo + 'NNombre').value.trim();
+  const cuit = document.getElementById(idCampo + 'NCuit').value.trim();
+  const errEl = document.getElementById(idCampo + 'NErr');
+  errEl.textContent = '';
+  if (!razonSocial) { errEl.textContent = 'Falta la razón social'; return; }
+  try{
+    const r = await fetch(BASE + '/proveedor-rapido', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ razonSocial, cuit })});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo crear el proveedor');
+    if (!proveedoresCache.some(p => String(p._id) === String(data._id))) proveedoresCache.push(data);
+    elegirProveedor(idCampo, String(data._id));
+    if (fnName && typeof window[fnName] === 'function') window[fnName]();
+    document.getElementById(idCampo + 'Nuevo').innerHTML = `<div class="muted" style="margin-top:6px">Proveedor creado y elegido: <strong>${escapeHtml(data.razonSocial || razonSocial)}</strong>.</div>`;
+  }catch(e){ errEl.textContent = e.message; }
+}
 function elegirProveedor(idCampo, id){
   const p = proveedoresCache.find(x => String(x._id) === String(id));
   const o = document.getElementById(idCampo), t = document.getElementById(idCampo + 'Txt');
@@ -705,7 +736,7 @@ function abrirNuevaCompra(){
         <h2>Nueva compra</h2>
         ${FacturaIAUI.cajaHtml('nc')}
         <div class="grid3">
-          <div><label>Proveedor *</label><input type="text" id="ncProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('ncProveedor','actualizarCondicionPago')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="ncProveedor"></div>
+          <div><label>Proveedor *</label><input type="text" id="ncProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('ncProveedor','actualizarCondicionPago')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="ncProveedor"><a href="#" style="font-size:12px;display:inline-block;margin-top:4px" onclick="abrirProveedorNuevo('ncProveedor','actualizarCondicionPago');return false">+ Nuevo proveedor (si no está en la lista)</a><div id="ncProveedorNuevo"></div></div>
           <div><label>Condición de pago</label><input id="ncCondicionPago" placeholder="Se autocompleta del proveedor"></div>
           <div><label>Fecha</label><input id="ncFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
@@ -1517,7 +1548,7 @@ function abrirPagoCuenta(){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Pago a cuenta</h2>
         <div class="grid3">
-          <div><label>Proveedor *</label><input type="text" id="pcProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('pcProveedor','cargarComprasPendientesPagoCuenta')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="pcProveedor"></div>
+          <div><label>Proveedor *</label><input type="text" id="pcProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('pcProveedor','cargarComprasPendientesPagoCuenta')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="pcProveedor"><a href="#" style="font-size:12px;display:inline-block;margin-top:4px" onclick="abrirProveedorNuevo('pcProveedor','cargarComprasPendientesPagoCuenta');return false">+ Nuevo proveedor (si no está en la lista)</a><div id="pcProveedorNuevo"></div></div>
           <div><label>Monto *</label><input id="pcMonto" type="number" min="0.01" step="0.01" value="0" oninput="actualizarRepartidoPagoCuenta()"></div>
           <div><label>Fecha *</label><input id="pcFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
@@ -1755,7 +1786,7 @@ function abrirNuevaOrden(){
         <h2>Nueva orden de compra</h2>
         <p class="muted" style="margin-top:-8px">Es un pedido al proveedor — todavía no mueve stock ni genera saldo a pagar. Cuando llegue la factura, se convierte en una compra.</p>
         <div class="grid3">
-          <div><label>Proveedor *</label><input type="text" id="noProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('noProveedor','actualizarCondicionPagoOrden')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="noProveedor"></div>
+          <div><label>Proveedor *</label><input type="text" id="noProveedorTxt" list="dlProveedores" placeholder="Escribí el proveedor…" autocomplete="off" oninput="proveedorTipeado('noProveedor','actualizarCondicionPagoOrden')" style="font-size:16px;padding:11px 13px"><input type="hidden" id="noProveedor"><a href="#" style="font-size:12px;display:inline-block;margin-top:4px" onclick="abrirProveedorNuevo('noProveedor','actualizarCondicionPagoOrden');return false">+ Nuevo proveedor (si no está en la lista)</a><div id="noProveedorNuevo"></div></div>
           <div><label>Condición de pago</label><input id="noCondicionPago" placeholder="Se autocompleta del proveedor"></div>
           <div><label>Fecha</label><input id="noFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
         </div>
