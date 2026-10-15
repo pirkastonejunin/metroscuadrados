@@ -60,7 +60,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, asegurarOrgPorDefecto } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 
 const router = express.Router();
@@ -653,6 +653,14 @@ router.get('/actual/export', authAdmin, async (req, res) => {
 router.get('/movimientos', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
+    // La producción siempre se carga en la organización de la planta: sus movimientos se ven desde cualquier sucursal (15/10/2026).
+    if (req.orgId) {
+      const orgPlanta = await asegurarOrgPorDefecto(await getDb());
+      if (orgPlanta && String(orgPlanta) !== String(req.orgId)) {
+        delete match.orgId;
+        match.$or = [{ orgId: req.orgId }, { orgId: orgPlanta, motivo: 'Producción de fábrica' }];
+      }
+    }
     if (req.query.productoId) {
       const pid = toObjectId(req.query.productoId);
       if (!pid) throw err(400, 'productoId inválido');
