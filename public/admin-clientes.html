@@ -890,7 +890,7 @@ async function cargarCuentaCorrienteTab(id){
               <td class="muted">${money(saldo)}</td>
               <td style="white-space:nowrap">
                 ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
-                ${(venta && !m.importado && m.tipo === 'debito' && (venta.estado === 'pendiente' || venta.estado === 'parcialmente_entregada')) ? ` <a class="btn small secondary" href="/admin-ventas.html?abrir=${m.ventaId}&entregar=1" target="_blank" title="Generar el remito (descuenta stock)">Generar remito</a>` : ''}
+                ${(venta && !m.importado && m.tipo === 'debito' && (venta.estado === 'pendiente' || venta.estado === 'parcialmente_entregada')) ? ` <button class="btn small secondary" onclick="window.open('/admin-ventas.html?abrir=${m.ventaId}&entregar=1', '_blank')" title="Generar el remito (descuenta stock)">Generar remito</button>` : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
                 ${venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
