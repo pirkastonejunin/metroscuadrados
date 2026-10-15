@@ -847,6 +847,7 @@ async function cargarCuentaCorrienteTab(id){
     // (cobro a cuenta, manual) no llevan botón.
     const ventasPorId = data.ventasPorId || {};
     window._ccCtx = { id, cliente: data.cliente, saldo: data.saldo, filas, saldoAnterior };
+    window._ccVentas = ventasPorId;
     cont.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative">
         <p class="muted" style="margin:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong></p>
@@ -863,7 +864,7 @@ async function cargarCuentaCorrienteTab(id){
         </div>
       </div>
       <table>
-        <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Concepto</th><th>Comprobante</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>
           ${filas.length ? filas.map(({m, saldo}) => {
             // Antes solo resolvía la venta para un DÉBITO (una venta
@@ -882,6 +883,7 @@ async function cargarCuentaCorrienteTab(id){
               <td>${venta
                 ? `<a href="javascript:void(0)" onclick="imprimirDocumento('/api/ventas/${m.ventaId}/comprobante')" style="text-decoration:underline;cursor:pointer" title="Ver el comprobante">${conceptoHtml}</a>`
                 : conceptoHtml}</td>
+              <td style="white-space:nowrap">${venta && venta.comprobante ? `<strong>${escapeHtml(venta.comprobante)}</strong> <span class="pill ${venta.fiscalComprobante ? 'entregada' : 'pendiente'}" style="font-size:11px">${venta.fiscalComprobante ? 'Fiscal' : 'No fiscal'}</span>` : '<span class="muted">—</span>'}</td>
               <td class="muted">${ORIGEN_CC_LABEL[m.origen] || escapeHtml(m.origen || '—')}${m.importado ? ' <span style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : ''}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
@@ -892,7 +894,7 @@ async function cargarCuentaCorrienteTab(id){
                 ${venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
             </tr>
-          `; }).join('') + (saldoAnterior !== null && Math.abs(saldoAnterior) >= 0.01 ? `<tr><td></td><td colspan="2" class="muted"><i>Saldo anterior al historial cargado (lo que ya traía la cuenta antes de los movimientos importados de Dux)</i></td><td>${saldoAnterior > 0 ? money(saldoAnterior) : ''}</td><td>${saldoAnterior < 0 ? money(-saldoAnterior) : ''}</td><td class="muted">${money(saldoAnterior)}</td><td></td></tr>` : '') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
+          `; }).join('') + (saldoAnterior !== null && Math.abs(saldoAnterior) >= 0.01 ? `<tr><td></td><td colspan="3" class="muted"><i>Saldo anterior al historial cargado (lo que ya traía la cuenta antes de los movimientos importados de Dux)</i></td><td>${saldoAnterior > 0 ? money(saldoAnterior) : ''}</td><td>${saldoAnterior < 0 ? money(-saldoAnterior) : ''}</td><td class="muted">${money(saldoAnterior)}</td><td></td></tr>` : '') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
       </table>
     `;
@@ -1170,12 +1172,17 @@ function toggleAccionesCC(ev){
   m.classList.toggle('hidden');
   if (!m.classList.contains('hidden')) setTimeout(() => document.addEventListener('click', function cerrar(){ m.classList.add('hidden'); document.removeEventListener('click', cerrar); }), 0);
 }
+// Comprobante completo + si es fiscal (para la tabla, el resumen impreso, el CSV y el texto de WhatsApp/mail).
+function compCC(m){
+  const v = m.ventaId && window._ccVentas ? window._ccVentas[String(m.ventaId)] : null;
+  return v ? { num: v.comprobante || '', fiscal: v.fiscalComprobante ? 'Fiscal' : 'No fiscal' } : { num: '', fiscal: '' };
+}
 function resumenCCTexto(maxFilas){
   const c = window._ccCtx; if (!c) return '';
   const nombre = [c.cliente.apellidoRazonSocial, c.cliente.nombre].filter(Boolean).join(', ');
   const fil = c.filas.filter(f => !(f.m.importado && f.m.origen === 'saldo_inicial_dux')).slice(0, maxFilas || 10);
   const estado = c.saldo > 0.005 ? 'Saldo a pagar: ' + money(c.saldo) : (c.saldo < -0.005 ? 'Saldo a favor: ' + money(-c.saldo) : 'Cuenta al día (saldo $ 0)');
-  return 'Resumen de cuenta corriente — ' + nombre + '\n' + estado + '\n\nÚltimos movimientos:\n' + fil.map(f => fechaCorta(f.m.fecha) + ' · ' + (f.m.concepto || f.m.origen || '') + ' · ' + (f.m.tipo === 'debito' ? '+' : '−') + money(f.m.monto)).join('\n');
+  return 'Resumen de cuenta corriente — ' + nombre + '\n' + estado + '\n\nÚltimos movimientos:\n' + fil.map(f => fechaCorta(f.m.fecha) + ' · ' + (f.m.concepto || f.m.origen || '') + (compCC(f.m).num ? ' · ' + compCC(f.m).num + ' (' + compCC(f.m).fiscal + ')' : '') + ' · ' + (f.m.tipo === 'debito' ? '+' : '−') + money(f.m.monto)).join('\n');
 }
 function telefonoWhatsApp(c){
   let d = String(c.celular || c.telefono || '').replace(/\D/g, '');
@@ -1204,18 +1211,18 @@ function accionCC(que){
   const filas = c.filas;
   if (que === 'excel') {
     const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-    const lineas = [['Fecha', 'Concepto', 'Origen', 'Débito', 'Crédito', 'Saldo'].map(q).join(';')].concat(filas.map(f => [fechaCorta(f.m.fecha), f.m.concepto || '', f.m.origen || '', f.m.tipo === 'debito' ? f.m.monto : '', f.m.tipo === 'credito' ? f.m.monto : '', f.saldo == null ? '' : f.saldo].map(q).join(';')));
-    if (c.saldoAnterior != null) lineas.push(['', 'Saldo anterior al historial cargado', '', '', '', c.saldoAnterior].map(q).join(';'));
+    const lineas = [['Fecha', 'Concepto', 'Comprobante', 'Fiscal', 'Origen', 'Débito', 'Crédito', 'Saldo'].map(q).join(';')].concat(filas.map(f => [fechaCorta(f.m.fecha), f.m.concepto || '', compCC(f.m).num, compCC(f.m).fiscal, f.m.origen || '', f.m.tipo === 'debito' ? f.m.monto : '', f.m.tipo === 'credito' ? f.m.monto : '', f.saldo == null ? '' : f.saldo].map(q).join(';')));
+    if (c.saldoAnterior != null) lineas.push(['', 'Saldo anterior al historial cargado', '', '', '', '', '', c.saldoAnterior].map(q).join(';'));
     const blob = new Blob(['﻿' + lineas.join('\n')], {type: 'text/csv;charset=utf-8'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'cuenta-corriente-' + nombre.replace(/[^\w]+/g, '-') + '.csv'; a.click(); return;
   }
   // imprimir / ver
   const w = window.open('', '_blank'); if (!w) { alert('El navegador bloqueó la ventana. Permití ventanas emergentes.'); return; }
-  const tr = filas.map(f => `<tr><td>${fechaCorta(f.m.fecha)}</td><td>${escapeHtml(f.m.concepto || '')}</td><td style="text-align:right">${f.m.tipo === 'debito' ? money(f.m.monto) : ''}</td><td style="text-align:right">${f.m.tipo === 'credito' ? money(f.m.monto) : ''}</td><td style="text-align:right">${f.saldo == null ? '' : money(f.saldo)}</td></tr>`).join('');
-  const ant = c.saldoAnterior != null && Math.abs(c.saldoAnterior) >= 0.01 ? `<tr><td></td><td><i>Saldo anterior al historial cargado</i></td><td></td><td></td><td style="text-align:right">${money(c.saldoAnterior)}</td></tr>` : '';
+  const tr = filas.map(f => `<tr><td>${fechaCorta(f.m.fecha)}</td><td>${escapeHtml(f.m.concepto || '')}</td><td style="white-space:nowrap">${escapeHtml(compCC(f.m).num)}${compCC(f.m).fiscal ? ' <small>(' + compCC(f.m).fiscal + ')</small>' : ''}</td><td style="text-align:right">${f.m.tipo === 'debito' ? money(f.m.monto) : ''}</td><td style="text-align:right">${f.m.tipo === 'credito' ? money(f.m.monto) : ''}</td><td style="text-align:right">${f.saldo == null ? '' : money(f.saldo)}</td></tr>`).join('');
+  const ant = c.saldoAnterior != null && Math.abs(c.saldoAnterior) >= 0.01 ? `<tr><td></td><td><i>Saldo anterior al historial cargado</i></td><td></td><td></td><td></td><td style="text-align:right">${money(c.saldoAnterior)}</td></tr>` : '';
   w.document.write(`<!doctype html><meta charset="utf-8"><title>Resumen de cuenta corriente</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#111}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #ddd;padding:5px 6px;text-align:left}th{background:#f3f3f3}</style>
     <h2>Resumen de cuenta corriente</h2><p><b>${escapeHtml(nombre)}</b>${c.cliente.cuit ? ' · CUIT ' + escapeHtml(c.cliente.cuit) : ''}<br>Emitido el ${new Date().toLocaleDateString('es-AR')} · <b>Saldo: ${money(c.saldo)}</b> ${c.saldo > 0.005 ? '(a pagar)' : (c.saldo < -0.005 ? '(a favor del cliente)' : '')}</p>
-    <table><thead><tr><th>Fecha</th><th>Concepto</th><th style="text-align:right">Débito</th><th style="text-align:right">Crédito</th><th style="text-align:right">Saldo</th></tr></thead><tbody>${tr}${ant}</tbody></table>
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Comprobante</th><th style="text-align:right">Débito</th><th style="text-align:right">Crédito</th><th style="text-align:right">Saldo</th></tr></thead><tbody>${tr}${ant}</tbody></table>
     <p><button onclick="window.print()">Imprimir</button></p>`);
   w.document.close();
 }

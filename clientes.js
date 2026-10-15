@@ -486,9 +486,15 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       if (ventaIds.length) {
         const ventas = await db.collection('ventas')
           .find({ _id: { $in: ventaIds } })
-          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1, stockDescontado: 1 })
+          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1, stockDescontado: 1, letra: 1, tipoComprobante: 1, numeroOriginal: 1, esFiscal: 1, cae: 1 })
           .toArray();
-        for (const v of ventas) ventasPorId[String(v._id)] = v;
+        // Número de comprobante completo y si es fiscal o no (15/10/2026, pedido de Mato).
+        const ETQ = { fiscal: 'FACT', nota_credito: 'NC', nota_debito: 'ND', comprobante_x: 'COMP X' };
+        for (const v of ventas) {
+          v.comprobante = (ETQ[v.tipoComprobante] || 'COMP X') + ' ' + (v.numeroOriginal || ((v.tipoComprobante === 'comprobante_x' ? '' : (v.letra || '') + '-') + String(v.numero).padStart(5, '0')));
+          v.fiscalComprobante = v.tipoComprobante === 'fiscal' || !!v.esFiscal || !!v.cae;
+          ventasPorId[String(v._id)] = v;
+        }
       }
       // Totales de TODO el historial importado (aunque la lista se corte en `limite`): sirven para mostrar el "saldo anterior al historial cargado"
       const usd = { $cond: [{ $eq: ['$moneda', 'USD'] }, { $ifNull: ['$cotizacionDolar', 1] }, 1] };
