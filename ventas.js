@@ -330,7 +330,7 @@ router.get('/productos', authAdmin, async (req, res) => {
       // unidad real del producto (ver normalizarItems más abajo — la
       // conversión la hace el frontend antes de mandar la cantidad).
       return db.collection('productos_catalogo')
-        .find(match, { projection: { sku: 1, nombre: 1, precio: 1, costo: 1, preciosPorLista: 1, unidad: 1, unidadesPorBulto: 1, stockeable: 1, aceptaStockNegativo: 1 } })
+        .find(match, { projection: { sku: 1, nombre: 1, precio: 1, costo: 1, preciosPorLista: 1, unidad: 1, unidadesPorBulto: 1, porcentajeIva: 1, stockeable: 1, aceptaStockNegativo: 1 } })
         .sort({ nombre: 1 }).limit(limiteProd || 0).toArray();
     });
     res.json(lista);
@@ -722,7 +722,13 @@ async function normalizarItems(db, req, itemsRaw) {
     // porcentajeIva (5/10/2026, parte fiscal): alícuota de IVA del producto al
     // momento de la venta; null si el producto no la tiene cargada (para una
     // venta fiscal se usa entonces la alícuota por defecto de Fiscal).
-    const porcentajeIva = (producto && producto.porcentajeIva !== undefined && producto.porcentajeIva !== null && producto.porcentajeIva !== '') ? Number(producto.porcentajeIva) : null;
+    let porcentajeIva = (producto && producto.porcentajeIva !== undefined && producto.porcentajeIva !== null && producto.porcentajeIva !== '') ? Number(producto.porcentajeIva) : null;
+    // IVA editable por ítem (15/10/2026, pedido de Mato): si el ítem trae su alícuota, manda sobre la del producto.
+    if (it.porcentajeIva !== undefined && it.porcentajeIva !== null && it.porcentajeIva !== '') {
+      const p = Number(it.porcentajeIva);
+      if (!Number.isFinite(p) || ![0, 2.5, 5, 10.5, 21, 27].some(a => Math.abs(a - p) < 1e-9)) throw err(400, `La alícuota de IVA de "${nombre}" tiene que ser 0, 2.5, 5, 10.5, 21 o 27`);
+      porcentajeIva = p;
+    }
     items.push({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, porcentajeIva, cantidadEntregada: 0 });
   }
   return { items, subtotal };
@@ -745,6 +751,15 @@ function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
 // monto, y ninguna de las dos cuenta como "venta" en la cantidad.
 // Próximo número de comprobante (sin consumirlo) para mostrarlo en la
 // pantalla de carga: ?tipo=comprobante_x|fiscal|nota_credito|nota_debito&letra=A|B|X
+// Criterios fiscales por defecto de la sucursal (para mostrar el IVA al cargar una factura).
+router.get('/fiscal-defaults', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const cfg = await emisionFiscal.getConfig(db, req.orgId);
+    res.json({ ivaDefecto: cfg.ivaDefecto, preciosIncluyenIvaDefecto: cfg.preciosIncluyenIvaDefecto !== false });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/proximo-numero', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) return res.json({ numero: null });
