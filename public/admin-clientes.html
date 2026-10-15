@@ -486,6 +486,7 @@ function formularioCliente(c){
       <div><label>Correo electrónico</label><input id="fcEmail" type="email" value="${escapeHtml(c.email||'')}"></div>
       <div><label>Página web</label><input id="fcPaginaWeb" value="${escapeHtml(c.paginaWeb||'')}"></div>
     </div>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:400;margin-top:8px"><input type="checkbox" id="fcNoMails" style="width:auto" ${c.noEnviarMails ? 'checked' : ''}> No enviarle mails automáticos (comprobantes y recibos) <span class="muted" style="font-size:12px">— por defecto se le mandan si tiene correo cargado</span></label>
     <div style="margin-top:10px"><label>Observaciones (internas)</label><textarea id="fcObservaciones">${escapeHtml(c.observaciones||'')}</textarea></div>
     <div style="margin-top:10px"><label>Descripción (interna)</label><textarea id="fcDescripcion">${escapeHtml(c.descripcion||'')}</textarea></div>
     <div style="margin-top:10px"><label>Notas internas</label><textarea id="fcNotas">${escapeHtml(c.notas||'')}</textarea></div>
@@ -543,6 +544,7 @@ function leerFormularioCliente(){
     celular: document.getElementById('fcCelular').value.trim(),
     personaContacto: document.getElementById('fcPersonaContacto').value.trim(),
     email: document.getElementById('fcEmail').value.trim(),
+    noEnviarMails: document.getElementById('fcNoMails').checked,
     paginaWeb: document.getElementById('fcPaginaWeb').value.trim(),
     observaciones: document.getElementById('fcObservaciones').value.trim(),
     descripcion: document.getElementById('fcDescripcion').value.trim(),

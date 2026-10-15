@@ -1496,6 +1496,7 @@ function verDetalle(id){
         </div>
 
         ${bloqueFiscal(v)}
+        ${v.mailEnviadoA ? `<p class="muted" style="margin:6px 0;font-size:12px">✉ Comprobante enviado por mail a ${escapeHtml(v.mailEnviadoA)}${v.mailEnviadoEn ? ' — ' + fechaHora(v.mailEnviadoEn) : ''}</p>` : (v.mailError ? `<p class="err" style="margin:6px 0;font-size:12px">✉ No se pudo enviar el mail: ${escapeHtml(v.mailError)}</p>` : '')}
         ${v.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(v.observaciones)}</p>` : ''}
         ${v.estado === 'pendiente' ? `<p class="muted" style="margin-top:10px">Stock comprometido, remito sin generar todavía.</p>` : ''}
 

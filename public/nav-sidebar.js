@@ -172,7 +172,8 @@
   // con "Cerrar sesión".
   const ITEMS_CONFIGURACION = [
     { key: 'usuarios', href: '/admin-usuarios.html', modulo: 'usuarios', label: 'Configuración (usuarios, roles, notificaciones)', icon: ICONOS.usuarios },
-    { key: 'bases', href: '/admin-config-bases.html', modulo: 'productos', label: 'Bases y catálogos', icon: ICONOS.bases }
+    { key: 'bases', href: '/admin-config-bases.html', modulo: 'productos', label: 'Bases y catálogos', icon: ICONOS.bases },
+    { key: 'correo', href: '/admin-correo.html', modulo: 'usuarios', label: 'Correo a clientes', icon: ICONOS.usuarios }
   ];
 
   function tieneModulo(rol, claveCombinada) {

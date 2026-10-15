@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Correo a clientes - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:var(--shadow);}
+  .kpi .v{font-size:22px;font-weight:800;margin-top:4px;}
+  .num{text-align:right;white-space:nowrap;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);z-index:500;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow-y:auto;}
+  .modal{background:var(--card);border-radius:14px;width:min(900px,100%);padding:18px 20px;position:relative;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .modal .close-x{position:absolute;top:10px;right:14px;cursor:pointer;font-size:18px;}
+  .fila-ch{display:grid;grid-template-columns:1fr 1fr 1.2fr 1.2fr 1fr 1fr 34px;gap:6px;margin-bottom:6px;align-items:end;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);}
+  .pill.ok{background:var(--ok-soft);color:var(--ok);} .pill.mal{background:var(--danger-soft);color:var(--danger);}
+  .sub td{background:var(--bg);}
+</style>
+</head>
+<body>
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Correo a clientes</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Esta pantalla es solo para administradores.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><h1>Correo automático a clientes</h1></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <p style="margin-top:0">Cuando se emite una <b>venta, nota de crédito o nota de débito</b>, o se registra un <b>cobro o una cobranza</b>, el sistema le manda un mail al cliente que tenga correo cargado, con el link para ver el comprobante o el recibo. Las facturas fiscales salen recién cuando ARCA les da el CAE. Un cliente se puede excluir desde su ficha ("No enviarle mails automáticos").</p>
+      <div id="estado" class="muted">Cargando…</div>
+    </div>
+  </main>
+</div>
+<div id="modalRoot"></div>
+<script>
+const BASE = '/api/correo';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function headersAuthJson(){ return headersAuth({'Content-Type':'application/json'}); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function login(){
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario: document.getElementById('loginUser').value, password: document.getElementById('loginPass').value})});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN); await iniciarApp();
+  }catch(e){ document.getElementById('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  if (orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas')) return;
+  const def = orgs.find(o => o.nombre === 'Piedra Negra');
+  ORG = orgs.length === 1 ? orgs[0]._id : (def ? def._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  if (ORG) localStorage.setItem('obras_org_activo', ORG);
+}
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    if (!(me.rol && me.rol.protegido)) { document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'correo', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
+  await cargar();
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+
+let EST = null;
+async function cargar(){
+  const cont = document.getElementById('estado');
+  const q = new URLSearchParams(location.search);
+  let aviso = '';
+  if (q.get('conectado')) aviso = '<p class="pill ok" style="padding:6px 12px">¡Gmail conectado!</p>';
+  if (q.get('error')) aviso = '<p class="err">No se pudo conectar: ' + escapeHtml(q.get('error')) + '</p>';
+  try{
+    const r = await fetch(BASE + '/estado', {headers: headersAuth()});
+    EST = await r.json(); if (!r.ok) throw new Error(EST.error || 'Error');
+  }catch(e){ cont.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; return; }
+  if (!EST.oauthConfigurado) {
+    cont.innerHTML = aviso + `<h3 style="margin:0 0 8px">Falta un paso en Google (una sola vez)</h3>
+      <ol style="line-height:1.7;font-size:14px;margin:0 0 10px 18px;padding:0">
+        <li>Entrá a <b>console.cloud.google.com</b> con la cuenta de la empresa y elegí tu proyecto (o creá uno).</li>
+        <li><b>APIs y servicios → Biblioteca</b> → activá <b>Gmail API</b>.</li>
+        <li><b>APIs y servicios → Pantalla de consentimiento de OAuth</b>: tipo <b>Interno</b> (si es Google Workspace) o <b>Externo</b> y agregá tu mail como usuario de prueba.</li>
+        <li><b>Credenciales → Crear credenciales → ID de cliente de OAuth</b> → tipo <b>Aplicación web</b>. En <b>URI de redireccionamiento autorizados</b> pegá exactamente:<br><code style="user-select:all;background:var(--bg);padding:2px 6px;border-radius:6px">${escapeHtml(EST.redirectUri)}</code></li>
+        <li>Copiá el <b>ID de cliente</b> y el <b>Secreto</b> y cargalos en <b>Render → Environment</b> como <code>GOOGLE_OAUTH_CLIENT_ID</code> y <code>GOOGLE_OAUTH_CLIENT_SECRET</code>. Render reinicia solo.</li>
+        <li>Volvé a esta pantalla y tocá <b>Conectar Gmail</b>.</li>
+      </ol>`;
+    return;
+  }
+  const errores = (EST.ultimosErrores || []).map(e => `<tr><td>${new Date(e.fecha).toLocaleString('es-AR')}</td><td>${escapeHtml((e.para||[]).join(', '))}</td><td class="err" style="margin:0">${escapeHtml(e.error||'')}</td></tr>`).join('');
+  cont.innerHTML = aviso + (EST.conectado ? `
+    <p style="margin:0 0 10px">Cuenta conectada: <b>${escapeHtml(EST.email || '(sin dato)')}</b> — mails enviados hasta ahora: <b>${EST.enviados}</b></p>
+    <div class="row" style="gap:12px;align-items:flex-end">
+      <div style="min-width:240px"><label>Nombre que ven los clientes como remitente</label><input id="nomRem" value="${escapeHtml(EST.nombreRemitente)}" placeholder="Ej: Grupo Piedra Negra"></div>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;margin:0 0 8px"><input type="checkbox" id="chkActivo" style="width:auto" ${EST.activo ? 'checked' : ''}> Envío automático activado</label>
+      <button class="btn" onclick="guardarConfig()">Guardar</button>
+    </div>
+    <div class="row" style="gap:12px;align-items:flex-end;margin-top:14px">
+      <div style="min-width:240px"><label>Mail de prueba a</label><input id="mailPrueba" value="${escapeHtml(EST.email)}"></div>
+      <button class="btn secondary" onclick="enviarPrueba()">Enviar prueba</button>
+      <button class="btn secondary" onclick="desconectar()">Desconectar Gmail</button>
+    </div>
+    <div class="err" id="cfgErr"></div>` : `
+    <p style="margin:0 0 10px">Todavía no hay una cuenta de Gmail conectada.</p>
+    <button class="btn" onclick="conectar()">Conectar Gmail</button><div class="err" id="cfgErr"></div>`)
+    + (errores ? `<h3 style="margin:18px 0 6px">Últimos errores de envío</h3><table><thead><tr><th>Fecha</th><th>Para</th><th>Error</th></tr></thead><tbody>${errores}</tbody></table>` : '');
+}
+async function conectar(){
+  try{
+    const r = await fetch(BASE + '/google/url', {method:'POST', headers: headersAuthJson()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    location.href = d.url;
+  }catch(e){ document.getElementById('cfgErr').textContent = e.message; }
+}
+async function guardarConfig(){
+  try{
+    const r = await fetch(BASE + '/configurar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ activo: document.getElementById('chkActivo').checked, nombreRemitente: document.getElementById('nomRem').value })});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    alert('Guardado.'); await cargar();
+  }catch(e){ document.getElementById('cfgErr').textContent = e.message; }
+}
+async function enviarPrueba(){
+  document.getElementById('cfgErr').textContent = '';
+  try{
+    const r = await fetch(BASE + '/prueba', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ para: document.getElementById('mailPrueba').value })});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    alert('Mail de prueba enviado a ' + d.para.join(', ') + '. Revisá la bandeja (y spam).');
+  }catch(e){ document.getElementById('cfgErr').textContent = e.message; }
+}
+async function desconectar(){
+  if (!confirm('¿Desconectar Gmail? Se deja de enviar mails automáticos hasta que lo conectes de nuevo.')) return;
+  try{
+    const r = await fetch(BASE + '/desconectar', {method:'POST', headers: headersAuthJson()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    await cargar();
+  }catch(e){ document.getElementById('cfgErr').textContent = e.message; }
+}
+</script>
+</body>
+</html>

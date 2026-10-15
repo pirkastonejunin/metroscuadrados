@@ -302,7 +302,9 @@ function validarCliente(body) {
     transporteEntregaPorDefecto, lugarEntregaPorDefecto,
     provincia, localidad, domicilio, barrio, codigoPostal, zona, telefono, fax,
     companiaCelular, celular, personaContacto, email, paginaWeb, observaciones,
-    descripcion, notas
+    descripcion, notas,
+    // No mandarle mails automáticos (comprobantes, recibos) a este cliente.
+    noEnviarMails: body.noEnviarMails === true || body.noEnviarMails === 'true'
   };
 }
 

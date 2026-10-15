@@ -1522,7 +1522,10 @@ router.post('/', authAdmin, async (req, res) => {
       }
       return venta;
     });
-    res.json(await autorizarAlGuardar(req, resultado));
+    const ventaFinal = await autorizarAlGuardar(req, resultado);
+    res.json(ventaFinal);
+    // Mail al cliente con el comprobante (una factura fiscal solo sale si ya tiene CAE; ver correo.js).
+    try { const correo = require('./correo'); correo.enviarComprobante(ventaFinal._id, correo.baseUrlDe(req)); } catch (e) { /* el mail nunca frena la venta */ }
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -1857,9 +1860,13 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         try { venta = await procesarPagoVenta(req, id, v, grupo); }
         catch (e) { if (i > 0) e.message = `Se registraron ${i} de ${body.valores.length} medios de pago y falló el siguiente: ${e.message}`; throw e; }
       }
-      return res.json(venta);
+      res.json(venta);
+      try { const correo = require('./correo'); const iG = (venta.pagos || []).findIndex(p => p.reciboGrupo === grupo); correo.enviarRecibo(id, iG >= 0 ? iG : (venta.pagos || []).length - 1, correo.baseUrlDe(req)); } catch (e) { /* el mail nunca frena el cobro */ }
+      return;
     }
-    res.json(await procesarPagoVenta(req, id, body.valores && body.valores.length === 1 ? Object.assign({}, body, body.valores[0]) : body, null));
+    const ventaPago = await procesarPagoVenta(req, id, body.valores && body.valores.length === 1 ? Object.assign({}, body, body.valores[0]) : body, null);
+    res.json(ventaPago);
+    try { const correo = require('./correo'); correo.enviarRecibo(id, (ventaPago.pagos || []).length - 1, correo.baseUrlDe(req)); } catch (e) { /* el mail nunca frena el cobro */ }
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

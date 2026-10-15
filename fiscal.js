@@ -255,6 +255,8 @@ router.post('/ventas/:id/autorizar', authFiscal, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const venta = await conReintento(async () => emision.autorizarVenta(await getDb(), { orgId, ventaId: id, usuarioNombre: (req.usuario && req.usuario.nombre) || '' }));
     res.json(venta);
+    // Recién ahora el comprobante tiene CAE: sale el mail al cliente (si no salió antes).
+    try { const correo = require('./correo'); if (venta && venta.cae) correo.enviarComprobante(id, correo.baseUrlDe(req)); } catch (e) { /* el mail nunca frena la autorización */ }
   } catch (e) { responder(res, e); }
 });
 

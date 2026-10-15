@@ -1098,7 +1098,13 @@ async function cobroCuentaVariosMedios(req, res) {
 
 router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
   try {
-    if (Array.isArray(req.body && req.body.valores) && req.body.valores.length > 1) return res.json(await cobroCuentaVariosMedios(req, res));
+    if (Array.isArray(req.body && req.body.valores) && req.body.valores.length > 1) {
+      const rMulti = await cobroCuentaVariosMedios(req, res);
+      res.json(rMulti);
+      // Mail de confirmación al cliente (si tiene email cargado).
+      try { require('./correo').enviarCobroCuenta({ orgId: req.orgId, clienteId: toObjectId(req.body.clienteId), monto: req.body.valores.reduce((t, v) => t + (Number(v && v.monto) || 0), 0), moneda: String(req.body.moneda || 'ARS').toUpperCase(), fecha: req.body.fecha }); } catch (e) { /* el mail nunca frena el cobro */ }
+      return;
+    }
     const body = req.body || {};
     const clienteId = toObjectId(body.clienteId);
     if (!clienteId) throw err(400, 'Elegí un cliente');
@@ -1200,6 +1206,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
       return { ok: true, reciboTipo: chequeId ? 'cheque' : 'movimiento', reciboId: chequeId || movimientoId };
     });
     res.json(resultado);
+    try { require('./correo').enviarCobroCuenta({ orgId: req.orgId, clienteId, monto: monto + totalRetenciones, moneda, fecha }); } catch (e) { /* el mail nunca frena el cobro */ }
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
