@@ -222,8 +222,8 @@
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Fecha</th><th>Producto</th><th>Depósito</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Usuario</th></tr></thead>
-          <tbody id="movimientosBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Depósito</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Comprobante</th><th>Cliente / Proveedor</th><th>Usuario</th></tr></thead>
+          <tbody id="movimientosBody"><tr><td colspan="9" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -553,9 +553,9 @@ async function cargarMovimientos(){
   if (document.getElementById('fmHasta').value) params.set('hasta', document.getElementById('fmHasta').value);
   const r = await fetch(BASE + '/movimientos?' + params.toString(), {headers: headersAuth()});
   const body = document.getElementById('movimientosBody');
-  if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
+  if (!r.ok) { body.innerHTML = '<tr><td colspan="9" class="err">No se pudo cargar.</td></tr>'; return; }
   const movimientos = await r.json();
-  if (!movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos todavía.</td></tr>'; return; }
+  if (!movimientos.length) { body.innerHTML = '<tr><td colspan="9" class="muted">No hay movimientos todavía.</td></tr>'; return; }
   body.innerHTML = movimientos.map(m => `
     <tr>
       <td class="muted">${fechaCorta(m.fecha)}</td>
@@ -564,6 +564,8 @@ async function cargarMovimientos(){
       <td><span class="pill ${m.tipo}">${TIPO_MOVIMIENTO_LABEL[m.tipo]||m.tipo}</span></td>
       <td>${m.cantidad}</td>
       <td class="muted">${escapeHtml(m.motivo||'—')}${m.transferenciaId ? ' <span class="muted">(transferencia)</span>' : ''}</td>
+      <td>${m.documento ? '<strong>' + escapeHtml(m.documento) + '</strong>' : '<span class="muted">—</span>'}</td>
+      <td class="muted">${escapeHtml(m.tercero||'—')}</td>
       <td class="muted">${escapeHtml(m.usuarioNombre||'—')}</td>
     </tr>
   `).join('');

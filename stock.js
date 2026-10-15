@@ -686,10 +686,31 @@ router.get('/movimientos', authAdmin, async (req, res) => {
         : [];
       const productosPorId = new Map(productos.map(p => [String(p._id), p]));
       const depositosPorId = new Map(depositos.map(d => [String(d._id), d]));
+      // Comprobante y cliente/proveedor de origen (15/10/2026, pedido de Mato): se resuelven desde la venta o la compra del movimiento.
+      const idsVenta = Array.from(new Set(movimientos.filter(m => m.ventaId).map(m => String(m.ventaId)))).map(toObjectId).filter(Boolean);
+      const idsCompra = Array.from(new Set(movimientos.filter(m => m.compraId).map(m => String(m.compraId)))).map(toObjectId).filter(Boolean);
+      const [ventasDocs, comprasDocs] = await Promise.all([
+        idsVenta.length ? db.collection('ventas').find({ _id: { $in: idsVenta } }).project({ numero: 1, numeroOriginal: 1, letra: 1, tipoComprobante: 1, clienteNombre: 1 }).toArray() : [],
+        idsCompra.length ? db.collection('compras').find({ _id: { $in: idsCompra } }).project({ numero: 1, proveedorNombre: 1, comprobanteNumero: 1 }).toArray() : []
+      ]);
+      const ventasPorId = new Map(ventasDocs.map(v => [String(v._id), v]));
+      const comprasPorId = new Map(comprasDocs.map(c => [String(c._id), c]));
+      const ETQ = { fiscal: 'FACT', nota_credito: 'NC', nota_debito: 'ND', comprobante_x: 'COMP X' };
       return movimientos.map(m => {
         const p = productosPorId.get(String(m.productoId));
         const d = depositosPorId.get(String(m.depositoId));
+        let documento = '', tercero = '';
+        const v = m.ventaId ? ventasPorId.get(String(m.ventaId)) : null;
+        const c = m.compraId ? comprasPorId.get(String(m.compraId)) : null;
+        if (v) {
+          documento = (ETQ[v.tipoComprobante] || 'COMP X') + ' ' + (v.numeroOriginal || ((v.tipoComprobante === 'comprobante_x' ? '' : (v.letra || '') + '-') + String(v.numero).padStart(5, '0')));
+          tercero = v.clienteNombre || '';
+        } else if (c) {
+          documento = 'Compra #' + c.numero + (c.comprobanteNumero ? ' (' + c.comprobanteNumero + ')' : '');
+          tercero = c.proveedorNombre || '';
+        }
         return Object.assign({}, m, {
+          documento, tercero,
           sku: p ? p.sku : null,
           producto: p ? p.nombre : '(producto eliminado)',
           deposito: d ? d.nombre : '(depósito eliminado)'
