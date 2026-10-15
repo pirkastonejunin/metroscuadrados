@@ -364,8 +364,22 @@ function renderCargas(cargas){
   div.innerHTML = cargas.map(c => {
     const hora = c.hora ? new Date(c.hora).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'}) : '';
     return '<div style="padding:8px 0;border-top:1px solid var(--border)"><b>' + hora + '</b> <span class="muted">' + escapeHtml(c.por || '') + (c.ingresada ? '' : ' · sin ingresar a stock') + '</span>' +
+      (c.items.some(it => it.unidad === 'paquete') ? ' <button class="btn secondary small" onclick="reintentarCarga(\'' + c._id + '\')">Reintentar conversión</button>' : '') +
       c.items.map(it => '<div>• ' + escapeHtml(it.nombre) + ': ' + it.paquetes + ' paquete' + (it.paquetes === 1 ? '' : 's') + ' = ' + Number(it.cantidad).toLocaleString('es-AR', {maximumFractionDigits:2}) + ' ' + (it.unidad === 'm2' ? 'm²' : it.unidad === 'unidad' ? 'unidades' : 'paquetes') + '</div>').join('') + '</div>';
   }).join('');
+}
+
+async function reintentarCarga(id){
+  document.getElementById('formErr').textContent = '';
+  await refrescarProductos();
+  const r = await fetch(BASE + '/produccion/cargas/' + id + '/reintentar', { method: 'POST', headers: headersAuthJson() });
+  const data = await r.json();
+  if (!r.ok) { document.getElementById('formErr').textContent = data.error || 'No se pudo reintentar.'; return; }
+  const div = document.getElementById('avisoStockAvisos');
+  const msj = ['Convertido e ingresado a stock: ' + data.aplicados.map(a => a.nombre + ' (' + a.cantidad + ')').join(', ')];
+  if (data.siguenSinRendimiento && data.siguenSinRendimiento.length) msj.push('Siguen sin rendimiento: ' + data.siguenSinRendimiento.join(', '));
+  div.innerHTML = msj.join(' · '); div.classList.remove('hidden');
+  await cargarProduccion();
 }
 
 async function cargarProduccion(){

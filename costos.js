@@ -987,6 +987,46 @@ async function aplicarProduccionAStock(db, req, doc, fecha, deposito) {
   return { aplicados, sinCatalogo, sinConvertir, stockIngresadoEn: ahora, stockIngresadoPor };
 }
 
+// Reintenta la conversión de una carga que quedó en "paquetes" porque el producto no tenía rendimiento (15/10/2026):
+// si ahora lo tiene, se convierte a m²/unidades y esos ítems entran a stock.
+router.post('/produccion/cargas/:id/reintentar', authProduccion, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const doc = await db.collection('costos_produccion_diaria').findOne({ _id: id, orgId: req.orgId });
+      if (!doc) throw err(404, 'Carga no encontrada');
+      const deposito = await depositoProduccion(db, req.orgId);
+      if (!deposito) throw err(400, 'No existe el depósito Junín. Crealo en Stock con ese nombre: toda la producción entra ahí.');
+      const items = doc.items || [];
+      const aplicar = [];
+      const faltan = [];
+      const nuevos = [];
+      for (const it of items) {
+        if (it.unidadConvertida !== 'paquete') { nuevos.push(it); continue; }
+        // Producto actual: por id; si no, por SKU o nombre (puede haber una copia con el rendimiento cargado).
+        const cand = await db.collection('costos_productos').find({ orgId: req.orgId, activo: { $ne: false }, $or: [{ _id: it.productoId }].concat(it.sku ? [{ sku: it.sku }] : [{ nombre: it.nombre }]) }).toArray();
+        const prod = cand.find(c => c.rendimientoPorPaquete) || null;
+        if (!prod) {
+          const base = cand[0];
+          faltan.push(`"${it.nombre}"${base && base.unidadesPorPaquete ? ` (tiene "Unidades por paquete" = ${base.unidadesPorPaquete}, pero falta "Rinde por paquete")` : ''}`);
+          nuevos.push(it);
+          continue;
+        }
+        const conv = convertirItemProduccion(prod, it.paquetes);
+        nuevos.push(conv); aplicar.push(conv);
+      }
+      if (!aplicar.length && !faltan.length) throw err(400, 'Esta carga no tiene ítems pendientes de conversión.');
+      if (!aplicar.length) throw err(400, 'Sigue sin rendimiento por paquete: ' + faltan.join(', ') + '. Cargalo en Costos (campo "Rinde por paquete") y reintentá.');
+      await db.collection('costos_produccion_diaria').updateOne({ _id: id }, { $set: { items: nuevos, updatedAt: new Date() } });
+      const res2 = await aplicarProduccionAStock(db, req, Object.assign({}, doc, { items: aplicar }), doc.fecha, deposito);
+      return Object.assign(res2, { siguenSinRendimiento: faltan });
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Ingresa a Stock, de una sola vez, lo fabricado ese día — ver el comentario
 // grande más arriba ("Conexión con Stock") para el porqué del diseño.
 router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res) => {
