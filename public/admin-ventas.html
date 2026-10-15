@@ -200,6 +200,7 @@
 <script>
 const BASE = '/api/ventas';
 // Cómo se llama el comprobante según su tipo: una nota de crédito/débito no es una "venta".
+function etiquetaTipoComprobante(t){ return t === 'fiscal' ? 'FACT' : t === 'nota_credito' ? 'NC' : t === 'nota_debito' ? 'ND' : 'COMP X'; }
 function nombreDoc(tipo){ return tipo === 'nota_credito' ? 'nota de crédito' : tipo === 'nota_debito' ? 'nota de débito' : 'venta'; }
 function nombreDocCap(tipo){ const n = nombreDoc(tipo); return n.charAt(0).toUpperCase() + n.slice(1); }
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
@@ -515,7 +516,7 @@ async function cargarVentas(){
   if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
   body.innerHTML = ventasCache.map(v => `
     <tr>
-      <td><strong>${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')}</strong>${v.importado ? ' <span class="muted" style="font-size:11px" title="Venta histórica importada de Dux">Dux</span>' : ''}${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>
+      <td><span class="pill" style="font-size:10.5px;margin-right:4px">${etiquetaTipoComprobante(v.tipoComprobante)}</span><strong>${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')}</strong>${v.importado ? ' <span class="muted" style="font-size:11px" title="Venta histórica importada de Dux">Dux</span>' : ''}${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>
       <td class="muted">${fechaCorta(v.fecha)}</td>
       <td>${escapeHtml(v.clienteNombre)}</td>
       <td>${money(v.total)}</td>
