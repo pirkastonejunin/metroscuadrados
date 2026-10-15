@@ -273,6 +273,14 @@ function nombreComprobante(d) {
   return tipo + ' ' + (d.puntoVenta ? d.puntoVenta + '-' : '') + d.comprobanteNumero;
 }
 
+// Número de comprobante completo (tipo + punto de venta + número), o el original de Dux tal cual vino.
+function comprobanteCompleto(d) {
+  if (!d) return '';
+  const n = nombreComprobante(d);
+  if (n) return n;
+  return String(d.comprobanteNumero || d.numeroOriginal || '').replace(/^S\/N$/, '');
+}
+
 // Los saldos iniciales cargados de Dux antes de la corrección tenían el signo al revés (Dux: negativo = le debemos). Se invierten una sola vez.
 router.post('/corregir-signo-dux', authAdmin, async (req, res) => {
   try {
@@ -549,7 +557,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           tipo: /^nota_credito/.test(c.tipoComprobante || '') ? 'credito' : 'debito', monto: c.total, fecha: c.fecha,
           concepto: nombreComprobante(c) || (/^nota_(credito|debito)/.test(c.tipoComprobante || '') ? `${/^nota_credito/.test(c.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${c.numeroOriginal || ''} (Dux)` : c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`), origen: 'compra',
           docId: c._id, docNumero: c.numero, docEstado: c.estado, importado: !!c.importado,
-          tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
+          tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal, comprobanteCompleto: comprobanteCompleto(c),
           items: c.items, observaciones: c.observaciones, moneda: c.moneda,
           totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
         });
@@ -567,7 +575,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           tipo: /^nota_credito/.test(g.tipoComprobante || '') ? 'credito' : 'debito', monto: g.total, fecha: g.fecha,
           concepto: nombreComprobante(g) || (/^nota_(credito|debito)/.test(g.tipoComprobante || '') ? `${/^nota_credito/.test(g.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${g.numeroOriginal || ''} (Dux)` : g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`), origen: 'gasto',
           docId: g._id, docNumero: g.numero, docEstado: g.estado, importado: !!g.importado,
-          tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
+          tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal, comprobanteCompleto: comprobanteCompleto(g),
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
           totalPagado: g.totalPagado, saldoPendiente: g.saldoPendiente
         });

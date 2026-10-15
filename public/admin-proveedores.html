@@ -789,7 +789,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
         </div>
       </div>
       <table>
-        <thead><tr><th>Fecha</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Comprobante</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>
           ${filas.length ? filas.map(({m, saldo, index}) => {
             const tieneDetalle = m.origen === 'compra' || m.origen === 'gasto';
@@ -799,6 +799,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
             return `
             <tr>
               <td>${fechaCorta(m.fecha)}</td>
+              <td style="white-space:nowrap">${escapeHtml(m.comprobanteCompleto || '')}</td>
               <td>${conceptoHtml}${m.nota ? `<div class="muted">${escapeHtml(m.nota)}</div>` : ''}</td>
               <td class="muted">${ORIGEN_CC_PROVEEDOR_LABEL[m.origen] || escapeHtml(m.origen || '—')}${m.importado ? ' <span style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : ''}</td>
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
@@ -806,7 +807,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
               <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
               <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : (m.origen === 'ajuste' ? `<button class="btn small secondary" title="Quitar este ajuste" onclick="quitarAjusteSaldoProveedor('${m.docId}')">Quitar</button>` : '')}</td>
             </tr>
-          `; }).join('') : '<tr><td colspan="7" class="muted">Todavía no hay movimientos.</td></tr>'}
+          `; }).join('') : '<tr><td colspan="8" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
       </table>
     `;
