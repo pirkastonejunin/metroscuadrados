@@ -526,7 +526,7 @@ async function cargarVentas(){
       <td>${money(v.total)}</td>
       <td class="muted">${money(v.totalCobrado)}</td>
       <td>${v.saldoPendiente > 0 ? money(v.saldoPendiente) : '<span class="muted">—</span>'}</td>
-      <td><span class="pill ${v.estado}">${estadoLabelVenta(v)}</span></td>
+      <td><span class="pill ${v.estado}">${estadoLabelVenta(v)}</span>${v.canceladaPorNota ? ' <span class="pill" style="background:rgba(46,160,67,.15);color:var(--ok,#2a7)" title="Cancelada con una nota de crédito">Cancelada por NC</span>' : ''}${(v.tipoComprobante === 'nota_credito' && v.aplicadaA) ? ' <span class="pill" title="Aplicada a ' + (v.aplicadaA.letra || 'X') + '-' + String(v.aplicadaA.numero).padStart(5,'0') + '">Aplicada</span>' : ''}</td>
       <td><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button></td>
     </tr>
   `).join('');
@@ -741,6 +741,45 @@ function prefijoComprobante(tipo){ return PREFIJO_COMPROBANTE_LABEL[tipo] || 'X'
 // Una Nota de Crédito/Débito nunca pasa por "pendiente"/remito — queda
 // 'entregada' directo (ver ventas.js) pero esa etiqueta no tiene sentido
 // para ellas ("remito generado"), así que se muestran como "Emitida".
+// Asociar una nota de crédito a una factura (15/10/2026): la factura baja su saldo y queda cancelada si la nota la cubre.
+async function abrirAsociarNota(notaId){
+  const n = ventasCache.find(x => x._id === notaId); if (!n) return;
+  const r = await fetch(BASE + '/con-saldo?clienteId=' + n.clienteId, {headers: headersAuth()});
+  const lista = r.ok ? await r.json() : [];
+  const disp = Math.max(0, n.total - (n.totalAplicado || 0));
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg"><div class="modal">
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>Asociar nota de crédito ${escapeHtml(n.letra || 'X')}-${String(n.numero).padStart(5,'0')}</h2>
+      <p class="muted">Importe de la nota: ${money(disp)}. Elegí la factura (o comprobante) de ${escapeHtml(n.clienteNombre)} que cancela. Si la nota cubre todo su saldo, la factura queda cancelada y sin deuda.</p>
+      ${lista.length ? `<label>Comprobante a cancelar</label>
+      <select id="anFactura" onchange="anActualizarMonto()">${lista.map(f => `<option value="${f._id}" data-saldo="${f.saldoPendiente}">${etiquetaTipoComprobante(f.tipoComprobante)} ${escapeHtml(f.letra)}-${String(f.numero).padStart(5,'0')} · ${fechaCorta(f.fecha)} · saldo ${money(f.saldoPendiente)}</option>`).join('')}</select>
+      <label style="margin-top:8px">Monto a aplicar</label><input id="anMonto" type="number" step="0.01" min="0.01" data-disp="${disp}">
+      <div class="err" id="anErr"></div>
+      <button class="btn" style="margin-top:10px" onclick="asociarNota('${notaId}')">Asociar</button>` : '<p class="err">Este cliente no tiene comprobantes con saldo pendiente.</p>'}
+    </div></div>`;
+  if (lista.length) anActualizarMonto();
+}
+function anActualizarMonto(){
+  const sel = document.getElementById('anFactura'), m = document.getElementById('anMonto');
+  const saldo = Number(sel.selectedOptions[0].dataset.saldo), disp = Number(m.dataset.disp);
+  m.value = Math.round(Math.min(saldo, disp) * 100) / 100;
+}
+async function asociarNota(notaId){
+  const err = document.getElementById('anErr'); err.textContent = '';
+  const body = {facturaId: document.getElementById('anFactura').value, monto: Number(document.getElementById('anMonto').value)};
+  const r = await fetch(BASE + '/' + notaId + '/asociar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { err.textContent = d.error || 'No se pudo asociar'; return; }
+  cerrarModal(); await cargarVentas(); verDetalle(notaId);
+}
+async function desasociarNota(notaId){
+  if (!confirm('¿Desasociar la nota? La factura vuelve a quedar con su saldo pendiente.')) return;
+  const r = await fetch(BASE + '/' + notaId + '/desasociar', {method:'POST', headers: headersAuthJson()});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(d.error || 'No se pudo desasociar'); return; }
+  cerrarModal(); await cargarVentas(); verDetalle(notaId);
+}
 function estadoLabelVenta(v){
   if (v.estado === 'entregada' && (v.tipoComprobante === 'nota_credito' || v.tipoComprobante === 'nota_debito')) return 'Emitida';
   return ESTADO_LABEL[v.estado] || v.estado;
@@ -1493,6 +1532,7 @@ async function guardarNuevaVenta(cobrarDespues){
     // avisoFiscal (5/10/2026): la venta se guardó pero ARCA no autorizó el
     // comprobante (conexión sin configurar, rechazo o corte): queda
     // pendiente y se reintenta desde el detalle.
+    if (data.avisoAsociacion) alert('La nota se guardó, pero no se pudo aplicar a la factura:\n\n' + data.avisoAsociacion + '\n\nPodés asociarla desde el detalle de la nota.');
     if (data.avisoFiscal) alert('La ' + nombreDoc(tipoComprobante) + ' se guardó, pero el comprobante todavía NO tiene CAE de ARCA:\n\n' + data.avisoFiscal + '\n\nQuedó pendiente — podés reintentar desde el detalle.');
     if (data.avisoRemito) alert('La venta se guardó, pero no se pudo generar el remito todavía:\n\n' + data.avisoRemito + '\n\nQuedó pendiente — generá el remito desde el detalle cuando haya stock.');
     // Si esta venta viene de "Convertir en venta" en Presupuestos, se
@@ -1571,8 +1611,14 @@ function verDetalle(id){
           ${v.descuentoMonto ? `<div class="fila-total"><span>Descuento</span><span>-${money(v.descuentoMonto)}</span></div>` : ''}
           <div class="fila-total grande"><span>Total</span><span>${money(v.total)}</span></div>
           <div class="fila-total"><span>Cobrado</span><span>${money(v.totalCobrado)}</span></div>
+          ${v.totalAcreditado ? `<div class="fila-total"><span>Acreditado con notas de crédito</span><span>${money(v.totalAcreditado)}</span></div>` : ''}
           <div class="fila-total" style="font-weight:700"><span>Saldo</span><span>${money(v.saldoPendiente)}</span></div>
+          ${v.canceladaPorNota ? '<div class="fila-total" style="color:var(--ok,#2a7);font-weight:700"><span>✔ Comprobante cancelado con nota de crédito</span><span></span></div>' : ''}
         </div>
+        ${(v.notasAplicadas && v.notasAplicadas.length) ? `<p class="muted" style="margin:6px 0;font-size:13px">Notas de crédito aplicadas: ${v.notasAplicadas.map(n => 'NC ' + escapeHtml(n.letra) + '-' + String(n.numero).padStart(5,'0') + ' (' + money(n.monto) + ')').join(', ')}</p>` : ''}
+        ${(v.tipoComprobante === 'nota_credito' && v.estado !== 'anulada') ? (v.aplicadaA
+          ? `<p style="margin:6px 0;font-size:13px">Aplicada a <strong>${escapeHtml(v.aplicadaA.letra || 'X')}-${String(v.aplicadaA.numero).padStart(5,'0')}</strong> por ${money(v.aplicadaA.monto)} <button class="btn small secondary" onclick="desasociarNota('${v._id}')">Desasociar</button></p>`
+          : `<p style="margin:6px 0;font-size:13px" class="muted">Esta nota no está asociada a ninguna factura. <button class="btn small" onclick="abrirAsociarNota('${v._id}')">Asociar a una factura</button></p>`) : ''}
 
         ${bloqueFiscal(v)}
         ${v.mailEnviadoA ? `<p class="muted" style="margin:6px 0;font-size:12px">✉ Comprobante enviado por mail a ${escapeHtml(v.mailEnviadoA)}${v.mailEnviadoEn ? ' — ' + fechaHora(v.mailEnviadoEn) : ''}</p>` : (v.mailError ? `<p class="err" style="margin:6px 0;font-size:12px">✉ No se pudo enviar el mail: ${escapeHtml(v.mailError)}</p>` : '')}

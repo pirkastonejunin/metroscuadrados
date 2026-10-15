@@ -406,7 +406,7 @@ async function registrarCobroEnVenta(db, cfg, cobro, info) {
     });
   }
   const totalCobrado = (venta.totalCobrado || 0) + monto;
-  const saldoPendiente = Math.max(0, venta.total - totalCobrado);
+  const saldoPendiente = Math.max(0, redondear(venta.total - totalCobrado - (venta.totalAcreditado || 0)));
   await db.collection('ventas').updateOne({ _id: venta._id }, {
     $push: { pagos: { tipoValor, monto, fecha, nota, usuarioNombre: 'Mercado Pago', cuentaTipo: 'banco', cuentaId: cfg.bancoId, mercadoPagoId: info.paymentId } },
     $set: { totalCobrado, saldoPendiente, updatedAt: new Date() }

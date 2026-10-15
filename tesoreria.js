@@ -1288,7 +1288,7 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
       if (venta) {
         const pagos = venta.pagos.map((p, i) => i === pagoIdx ? Object.assign({}, p, { anulado: true, anuladoEn: ahora, anuladoMotivo: motivo }) : p);
         const totalCobrado = pagos.filter(p => !p.anulado).reduce((t, p) => t + (p.monto || 0) + (p.totalRetenciones || 0), 0);
-        await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { pagos, totalCobrado, saldoPendiente: Math.max(0, venta.total - totalCobrado), updatedAt: ahora } });
+        await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { pagos, totalCobrado, saldoPendiente: Math.max(0, Math.round((venta.total - totalCobrado - (venta.totalAcreditado || 0)) * 100) / 100), updatedAt: ahora } });
         await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_venta', ventaId: venta._id, fecha: mov.fecha });
       } else if (mov.reciboId) {
         await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_cuenta', reciboId: mov.reciboId });

@@ -760,6 +760,114 @@ router.get('/fiscal-defaults', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Asociar una Nota de Crédito a una factura (15/10/2026, pedido de Mato): la nota se "aplica" a la factura, que baja su saldo
+// (y queda CANCELADA si la nota la cubre entera). La cuenta corriente del cliente no se toca: la nota ya le acreditó el total.
+// En la factura: totalAcreditado + notasAplicadas:[{notaId, numero, letra, monto, fecha}]. En la nota: aplicadaA:{ventaId, ...}, totalAplicado.
+// ---------------------------------------------------------------------------
+const r2n = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+function etiquetaNota(n) { return `${n.letra || 'X'}-${String(n.numero).padStart(5, '0')}`; }
+async function aplicarNotaAFactura(db, req, nota, facturaId, montoPedido) {
+  if (nota.tipoComprobante !== 'nota_credito') throw err(400, 'Solo una Nota de Crédito se puede aplicar a una factura.');
+  if (nota.estado === 'anulada') throw err(400, 'La nota está anulada.');
+  const fact = await db.collection('ventas').findOne(Object.assign({ _id: facturaId }, filtroOrg(req)));
+  if (!fact) throw err(404, 'El comprobante a cancelar no existe.');
+  if (fact.estado === 'anulada') throw err(400, 'El comprobante está anulado.');
+  if (fact.tipoComprobante === 'nota_credito') throw err(400, 'No se puede aplicar una nota de crédito a otra nota de crédito.');
+  if (String(fact.clienteId) !== String(nota.clienteId)) throw err(400, 'La nota y el comprobante son de clientes distintos.');
+  if ((fact.moneda || 'ARS') !== (nota.moneda || 'ARS')) throw err(400, 'La nota y el comprobante están en monedas distintas.');
+  if (nota.aplicadaA && nota.aplicadaA.ventaId) throw err(400, 'Esta nota ya está aplicada a un comprobante. Desasociala primero.');
+  const disponibleNota = r2n(nota.total - (nota.totalAplicado || 0));
+  const saldoFact = r2n(fact.saldoPendiente != null ? fact.saldoPendiente : fact.total);
+  if (!(saldoFact > 0)) throw err(400, 'Ese comprobante no tiene saldo pendiente.');
+  let monto = montoPedido === undefined || montoPedido === null || montoPedido === '' ? Math.min(disponibleNota, saldoFact) : r2n(montoPedido);
+  if (!(monto > 0)) throw err(400, 'No hay monto para aplicar.');
+  if (monto > disponibleNota + 0.009) throw err(400, `El monto supera lo disponible de la nota (${disponibleNota}).`);
+  if (monto > saldoFact + 0.009) throw err(400, `El monto supera el saldo del comprobante (${saldoFact}).`);
+  const ahora = new Date();
+  const nuevoSaldo = Math.max(0, r2n(saldoFact - monto));
+  const totalAcreditado = r2n((fact.totalAcreditado || 0) + monto);
+  const upd = await db.collection('ventas').updateOne(
+    { _id: fact._id, saldoPendiente: fact.saldoPendiente },
+    { $set: { saldoPendiente: nuevoSaldo, totalAcreditado, canceladaPorNota: nuevoSaldo <= 0.005, updatedAt: ahora },
+      $push: { notasAplicadas: { notaId: nota._id, numero: nota.numero, letra: nota.letra || 'X', monto, fecha: ahora } } }
+  );
+  if (!upd.modifiedCount) throw err(409, 'El comprobante cambió mientras se aplicaba la nota. Probá de nuevo.');
+  await db.collection('ventas').updateOne({ _id: nota._id }, {
+    $set: { aplicadaA: { ventaId: fact._id, numero: fact.numero, letra: fact.letra || 'X', tipoComprobante: fact.tipoComprobante, monto, fecha: ahora }, totalAplicado: r2n((nota.totalAplicado || 0) + monto), updatedAt: ahora },
+    $unset: { desasociadaEn: '' }
+  });
+  return { monto, saldoFactura: nuevoSaldo, cancelada: nuevoSaldo <= 0.005 };
+}
+// Deshace la aplicación de una nota (al anularla o al desasociarla): la factura recupera el saldo.
+async function desaplicarNota(db, nota) {
+  const ap = nota.aplicadaA;
+  if (!ap || !ap.ventaId) return null;
+  const fact = await db.collection('ventas').findOne({ _id: ap.ventaId });
+  const ahora = new Date();
+  if (fact) {
+    const total = fact.total || 0;
+    const totalAcreditado = Math.max(0, r2n((fact.totalAcreditado || 0) - ap.monto));
+    const saldo = Math.max(0, r2n(total - (fact.totalCobrado || 0) - totalAcreditado));
+    await db.collection('ventas').updateOne({ _id: fact._id }, {
+      $set: { totalAcreditado, saldoPendiente: fact.estado === 'anulada' ? 0 : saldo, canceladaPorNota: totalAcreditado > 0 && saldo <= 0.005, updatedAt: ahora },
+      $pull: { notasAplicadas: { notaId: nota._id } }
+    });
+  }
+  await db.collection('ventas').updateOne({ _id: nota._id }, { $unset: { aplicadaA: '' }, $set: { totalAplicado: 0, desasociadaEn: ahora, updatedAt: ahora } });
+  return ap;
+}
+
+// Notas de crédito del cliente que todavía tienen importe sin aplicar (para asociarlas a una factura).
+router.get('/notas-sin-aplicar', authAdmin, async (req, res) => {
+  try {
+    const cid = toObjectId(req.query.clienteId);
+    if (!cid) throw err(400, 'clienteId inválido');
+    const db = await getDb();
+    const lista = await db.collection('ventas').find(Object.assign({ clienteId: cid, tipoComprobante: 'nota_credito', estado: { $ne: 'anulada' } }, filtroOrg(req))).sort({ fecha: -1 }).limit(100).toArray();
+    res.json(lista.map(n => ({ _id: n._id, numero: n.numero, letra: n.letra || 'X', fecha: n.fecha, total: n.total, moneda: n.moneda || 'ARS', disponible: r2n(n.total - (n.totalAplicado || 0)) })).filter(n => n.disponible > 0.005));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Comprobantes del cliente con saldo pendiente (para asociarles una nota de crédito).
+router.get('/con-saldo', authAdmin, async (req, res) => {
+  try {
+    const cid = toObjectId(req.query.clienteId);
+    if (!cid) throw err(400, 'clienteId inválido');
+    const db = await getDb();
+    const lista = await db.collection('ventas').find(Object.assign({ clienteId: cid, tipoComprobante: { $in: ['fiscal', 'comprobante_x', 'nota_debito'] }, estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0.005 } }, filtroOrg(req))).sort({ fecha: -1 }).limit(100).toArray();
+    res.json(lista.map(v => ({ _id: v._id, numero: v.numero, letra: v.letra || 'X', tipoComprobante: v.tipoComprobante, fecha: v.fecha, total: v.total, saldoPendiente: v.saldoPendiente, moneda: v.moneda || 'ARS' })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Asocia una nota de crédito existente a una factura. body: { facturaId, monto? }
+router.post('/:id/asociar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    const facturaId = toObjectId(req.body && req.body.facturaId);
+    if (!id || !facturaId) throw err(400, 'Faltan datos.');
+    const r = await conReintento(async () => {
+      const db = await getDb();
+      const nota = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!nota) throw err(404, 'Nota no encontrada');
+      return aplicarNotaAFactura(db, req, nota, facturaId, req.body.monto);
+    });
+    res.json(r);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/:id/desasociar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const nota = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!nota) throw err(404, 'Nota no encontrada');
+      if (!nota.aplicadaA) throw err(400, 'La nota no está asociada a ningún comprobante.');
+      await desaplicarNota(db, nota);
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/proximo-numero', authAdmin, async (req, res) => {
   try {
     if (!req.orgId) return res.json({ numero: null });
@@ -814,7 +922,7 @@ router.post('/:id/convertir-fiscal', authAdmin, async (req, res) => {
       const diferencia = Math.round((totalNuevo - venta.total) * 100) / 100;
       const numero = await proximoNumero(db, orgVenta, `fiscal_${letra}`);
       const ahora = new Date();
-      const nuevoSaldo = Math.max(0, Math.round((totalNuevo - (venta.totalCobrado || 0)) * 100) / 100);
+      const nuevoSaldo = Math.max(0, Math.round((totalNuevo - (venta.totalCobrado || 0) - (venta.totalAcreditado || 0)) * 100) / 100);
       const upd = await db.collection('ventas').updateOne(
         { _id: id, tipoComprobante: 'comprobante_x', estado: { $ne: 'anulada' } },
         { $set: {
@@ -1508,6 +1616,10 @@ router.post('/', authAdmin, async (req, res) => {
             ventaId: venta._id, usuarioNombre, fecha
           });
         }
+        // Si la nota viene de una factura (o se asoció a una), esa factura queda cancelada por el monto de la nota.
+        if (comprobanteOrigenId) {
+          try { await aplicarNotaAFactura(db, req, venta, comprobanteOrigenId); } catch (eAp) { venta.avisoAsociacion = eAp.message; }
+        }
         return venta;
       }
 
@@ -1704,6 +1816,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       // así que anularla necesita el movimiento inverso explícito: un
       // débito por el total, deshaciendo el crédito que se había dado.
       if (venta.tipoComprobante === 'nota_credito') {
+        await desaplicarNota(db, venta);
         if (venta.total > 0) {
           await registrarMovimientoCuentaCorriente(db, req, {
             clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'debito', monto: venta.total, moneda: venta.moneda || 'ARS',
@@ -1802,6 +1915,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada, no se le pueden registrar cobros.');
+      if (venta.canceladaPorNota) throw err(400, 'Este comprobante ya está cancelado con una nota de crédito: no tiene saldo para cobrar.');
       if (venta.importado) throw err(400, 'Es una venta histórica importada de Dux: no admite cobros nuevos.');
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
@@ -1839,7 +1953,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
         reciboGrupo ? { reciboGrupo } : {}
       );
       const totalCobrado = (venta.totalCobrado || 0) + monto + totalRetenciones; // las retenciones también cancelan deuda
-      const saldoPendiente = Math.max(0, venta.total - totalCobrado);
+      const saldoPendiente = Math.max(0, Math.round((venta.total - totalCobrado - (venta.totalAcreditado || 0)) * 100) / 100);
       await db.collection('ventas').updateOne(
         { _id: id },
         { $push: { pagos: pago }, $set: { totalCobrado, saldoPendiente, updatedAt: new Date() } }
