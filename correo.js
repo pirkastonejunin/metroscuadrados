@@ -138,15 +138,17 @@ async function activo(db) { const c = await getConfig(db); return !!(c.activo !=
 const TITULO = { fiscal: 'Factura', comprobante_x: 'Comprobante', nota_credito: 'Nota de crédito', nota_debito: 'Nota de débito' };
 
 // Mail con el comprobante de una venta / nota de crédito / nota de débito. Una factura fiscal solo sale una vez que tiene CAE.
-async function notificarVenta(db, ventaId, baseUrl) {
+async function notificarVenta(db, ventaId, baseUrl, forzar) {
   try {
-    if (!(await activo(db))) return null;
     const v = await db.collection('ventas').findOne({ _id: ventaId });
     if (!v || v.estado === 'anulada' || v.importado) return null;
-    if (v.mailEnviadoEn) return null; // ya salió (por ejemplo, antes del reintento de ARCA)
+    if (v.mailEnviadoEn && !forzar) return null; // ya salió (por ejemplo, antes del reintento de ARCA)
     if (v.esFiscal && !v.cae) return null;
+    // Cuando no sale, se deja el motivo en la venta (16/10/2026): antes no se veía nada y no se sabía por qué.
+    const noSalio = async motivo => { await db.collection('ventas').updateOne({ _id: v._id }, { $set: { mailError: motivo } }); return null; };
+    if (!(await activo(db))) return noSalio('El correo del sistema no está conectado (falta conectar Gmail en la configuración de correo).');
     const dest = await datosDestino(db, v.clienteId);
-    if (!dest) return null;
+    if (!dest) return noSalio('El cliente no tiene un email válido cargado (o está marcado para no enviarle mails).');
     const orgNombre = await nombreOrg(db, v.orgId);
     const tipo = TITULO[v.tipoComprobante] || 'Comprobante';
     const numero = v.esFiscal && v.numeroFiscal ? `${String(v.puntoVenta || '').padStart(4, '0')}-${String(v.numeroFiscal).padStart(8, '0')}` : `${v.letra && v.tipoComprobante !== 'comprobante_x' ? v.letra + '-' : ''}${String(v.numero).padStart(5, '0')}`;
@@ -305,6 +307,21 @@ router.post('/desconectar', authAdmin, async (req, res) => {
     soloAdmin(req);
     await conReintento(async () => { const db = await getDb(); await db.collection('correo_config').updateOne({ _id: 'global' }, { $unset: { refreshToken: '', email: '', conectadoEn: '' }, $set: { activo: false } }, { upsert: true }); });
     res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Reenviar (o enviar por primera vez) el mail de un comprobante desde el detalle de la venta.
+router.post('/reenviar-comprobante/:ventaId', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.ventaId);
+    if (!id) throw err(400, 'id inválido');
+    const db = await getDb();
+    const v = await db.collection('ventas').findOne({ _id: id, orgId: req.orgId });
+    if (!v) throw err(404, 'Venta no encontrada');
+    if (v.esFiscal && !v.cae) throw err(400, 'La factura todavía no tiene CAE: el mail sale cuando ARCA la autoriza.');
+    await notificarVenta(db, id, baseUrlDe(req), true);
+    const nueva = await db.collection('ventas').findOne({ _id: id }, { projection: { mailEnviadoA: 1, mailEnviadoEn: 1, mailError: 1 } });
+    res.json({ mailEnviadoA: nueva.mailEnviadoA || '', mailEnviadoEn: nueva.mailEnviadoEn || null, mailError: nueva.mailError || '' });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

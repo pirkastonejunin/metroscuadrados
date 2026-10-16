@@ -953,6 +953,17 @@ function retomarDuplicadoSiCorresponde(){
   try { const crudo = sessionStorage.getItem('venta_duplicar_prefill'); sessionStorage.removeItem('venta_duplicar_prefill'); if (crudo) datos = JSON.parse(crudo); } catch (e) { return; }
   if (datos) { duplicadoEnCurso = datos; abrirNuevaVenta(datos); }
 }
+async function reenviarMailVenta(id, btn){
+  btn.disabled = true;
+  try{
+    const r = await fetch('/api/correo/reenviar-comprobante/' + id, {method:'POST', headers: headersAuthJson()});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al enviar');
+    alert(d.mailEnviadoA ? 'Mail enviado a ' + d.mailEnviadoA : 'No se pudo enviar: ' + (d.mailError || 'sin detalle'));
+    await cargarVentas();
+    verDetalle(id);
+  }catch(e){ alert(e.message); btn.disabled = false; }
+}
 function duplicarVenta(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
@@ -1714,7 +1725,7 @@ function verDetalle(id){
           : `<p style="margin:6px 0;font-size:13px" class="muted">Esta nota no está asociada a ninguna factura. <button class="btn small" onclick="abrirAsociarNota('${v._id}')">Asociar a una factura</button></p>`) : ''}
 
         ${bloqueFiscal(v)}
-        ${v.mailEnviadoA ? `<p class="muted" style="margin:6px 0;font-size:12px">✉ Comprobante enviado por mail a ${escapeHtml(v.mailEnviadoA)}${v.mailEnviadoEn ? ' — ' + fechaHora(v.mailEnviadoEn) : ''}</p>` : (v.mailError ? `<p class="err" style="margin:6px 0;font-size:12px">✉ No se pudo enviar el mail: ${escapeHtml(v.mailError)}</p>` : '')}
+        ${(v.estado !== 'anulada' && !v.importado && (!v.esFiscal || v.cae)) ? `<p class="${v.mailEnviadoA ? 'muted' : (v.mailError ? 'err' : 'muted')}" style="margin:6px 0;font-size:12px">✉ ${v.mailEnviadoA ? 'Comprobante enviado por mail a ' + escapeHtml(v.mailEnviadoA) + (v.mailEnviadoEn ? ' — ' + fechaHora(v.mailEnviadoEn) : '') : (v.mailError ? 'No se pudo enviar el mail: ' + escapeHtml(v.mailError) : 'El mail todavía no se envió.')} <button class="btn small secondary" onclick="reenviarMailVenta('${v._id}', this)">${v.mailEnviadoA ? 'Reenviar mail' : 'Enviar mail'}</button></p>` : ''}
         ${v.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(v.observaciones)}</p>` : ''}
         ${v.estado === 'pendiente' ? `<p class="muted" style="margin-top:10px">Stock comprometido, remito sin generar todavía.</p>` : ''}
 
