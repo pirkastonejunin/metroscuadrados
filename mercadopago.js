@@ -405,6 +405,13 @@ async function registrarCobroACuenta(db, cfg, cobro, info) {
   });
 }
 
+// Idempotencia: si un registro quedó a medias (el servidor se reinició o se cortó), al reintentar se saltean los pasos ya hechos.
+async function movimientoYaRegistrado(db, motivo, info) {
+  const id = String(info.paymentId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (!id) return false;
+  return !!(await db.collection('tesoreria_movimientos').findOne({ motivo, observaciones: { $regex: 'pago ' + id + '$|pago ' + id + '[^0-9]' } }));
+}
+
 async function registrarCobroEnVenta(db, cfg, cobro, info) {
   if (!cobro.ventaId && cobro.aCuenta) return registrarCobroACuenta(db, cfg, cobro, info);
   const venta = await db.collection('ventas').findOne({ _id: cobro.ventaId, orgId: cobro.orgId });
@@ -417,29 +424,31 @@ async function registrarCobroEnVenta(db, cfg, cobro, info) {
   const esTarjeta = /card/.test(info.metodo || '');
   const tipoValor = esTarjeta ? 'tarjeta' : 'cuenta';
   const nota = `Mercado Pago ${cobro.tipo === 'point' ? 'Point' : 'link de pago'} · pago ${info.paymentId}`;
-  await aplicarMovimientoCuenta(db, reqFalso, {
+  if (!(await movimientoYaRegistrado(db, `Cobro venta Nº ${venta.numero}`, info))) await aplicarMovimientoCuenta(db, reqFalso, {
     cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'ingreso', monto, moneda: 'ARS',
     motivo: `Cobro venta Nº ${venta.numero}`, observaciones: nota, origen: 'venta', ventaId: venta._id, fecha, omitirPermiso: true
   });
-  if (info.comision > 0) {
+  if (info.comision > 0 && !(await movimientoYaRegistrado(db, 'Comisión Mercado Pago', info))) {
     await aplicarMovimientoCuenta(db, reqFalso, {
       cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.comision, moneda: 'ARS',
       motivo: 'Comisión Mercado Pago', observaciones: `Venta Nº ${venta.numero} · pago ${info.paymentId}`, origen: 'manual', ventaId: venta._id, fecha, omitirPermiso: true
     });
   }
-  if (info.impuestos > 0) {
+  if (info.impuestos > 0 && !(await movimientoYaRegistrado(db, 'Impuestos y retenciones Mercado Pago', info))) {
     await aplicarMovimientoCuenta(db, reqFalso, {
       cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.impuestos, moneda: 'ARS',
       motivo: 'Impuestos y retenciones Mercado Pago', observaciones: `Venta Nº ${venta.numero} · pago ${info.paymentId}`, origen: 'manual', ventaId: venta._id, fecha, omitirPermiso: true
     });
   }
+  const yaEnVenta = (venta.pagos || []).some(x => x.mercadoPagoId && String(x.mercadoPagoId) === String(info.paymentId));
   const totalCobrado = (venta.totalCobrado || 0) + monto;
   const saldoPendiente = Math.max(0, redondear(venta.total - totalCobrado - (venta.totalAcreditado || 0)));
-  await db.collection('ventas').updateOne({ _id: venta._id }, {
+  if (!yaEnVenta) await db.collection('ventas').updateOne({ _id: venta._id }, {
     $push: { pagos: { tipoValor, monto, fecha, nota, usuarioNombre: 'Mercado Pago', cuentaTipo: 'banco', cuentaId: cfg.bancoId, mercadoPagoId: info.paymentId } },
     $set: { totalCobrado, saldoPendiente, updatedAt: new Date() }
   });
-  await registrarMovimientoCuentaCorriente(db, reqFalso, {
+  const yaEnCC = await db.collection('cuenta_corriente_movimientos').findOne({ ventaId: venta._id, origen: 'cobro_venta', observaciones: nota });
+  if (!yaEnCC) await registrarMovimientoCuentaCorriente(db, reqFalso, {
     clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto, moneda: 'ARS',
     concepto: `Cobro venta Nº ${venta.numero}`, origen: 'cobro_venta', ventaId: venta._id, chequeId: null, fecha, observaciones: nota
   });
@@ -460,7 +469,7 @@ async function conciliarCobro(db, cfg, cobro) {
   if (info.estado === 'aprobado') {
     // Se "reclama" el cobro de forma atómica: si dos caminos (webhook + verificación) llegan a la vez, solo uno lo registra.
     const reclamado = await db.collection('mp_cobros').findOneAndUpdate(
-      { _id: cobro._id, estado: { $in: ['pendiente', 'error'] } }, { $set: Object.assign({ estado: 'registrando', error: '' }, base) }, { returnDocument: 'after' });
+      { _id: cobro._id, $or: [{ estado: { $in: ['pendiente', 'error'] } }, { estado: 'registrando', updatedAt: { $lt: new Date(Date.now() - 60000) } }] }, { $set: Object.assign({ estado: 'registrando', error: '' }, base) }, { returnDocument: 'after' });
     const doc = reclamado && (reclamado.value !== undefined ? reclamado.value : reclamado);
     if (!doc) return db.collection('mp_cobros').findOne({ _id: cobro._id });
     try {

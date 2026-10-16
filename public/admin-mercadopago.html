@@ -223,7 +223,7 @@ async function cargarCobros(){
   const r=await fetch(BASE+'/cobros',{headers:headersAuth()}); const d=r.ok?await r.json():[];
   const b=document.getElementById('mpCobrosBody');
   if(!d.length){ b.innerHTML='<tr><td colspan="6" class="muted">Todavía no hay cobros con Mercado Pago.</td></tr>'; return; }
-  b.innerHTML=d.map(c=>`<tr><td>${new Date(c.createdAt).toLocaleString('es-AR')}</td><td>${escapeHtml((c.venta||"")+(c.cliente?" · "+c.cliente:"")||'')}</td><td>${c.tipo==='point'?'Point':'Link'}</td><td>${money(c.monto)}</td><td>${EST[c.estado]||c.estado}${c.error?'<div class="muted">'+escapeHtml(c.error)+'</div>':''}</td><td>${(c.estado==='pendiente'||c.estado==='error')?`<button class="btn secondary" onclick="verificar('${c._id}')">Verificar</button>`:''}</td></tr>`).join('');
+  b.innerHTML=d.map(c=>`<tr><td>${new Date(c.createdAt).toLocaleString('es-AR')}</td><td>${escapeHtml((c.venta||"")+(c.cliente?" · "+c.cliente:"")||'')}</td><td>${c.tipo==='point'?'Point':'Link'}</td><td>${money(c.monto)}</td><td>${EST[c.estado]||c.estado}${c.error?'<div class="muted">'+escapeHtml(c.error)+'</div>':''}</td><td>${(c.estado==='pendiente'||c.estado==='error'||c.estado==='registrando')?`<button class="btn secondary" onclick="verificar('${c._id}')">Verificar</button>`:''}</td></tr>`).join('');
 }
 async function verificar(id){ await fetch(BASE+'/cobros/'+id+'/verificar',{method:'POST',headers:headersAuthJson()}); cargarCobros(); }
 </script>

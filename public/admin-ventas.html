@@ -2324,7 +2324,7 @@ async function cargarCobrosMP(ventaId){
       <div class="row" style="align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0">
         <span>${c.tipo === 'point' ? 'Point' : 'Link'} · ${money(c.monto)} · <b>${MP_EST[c.estado] || c.estado}</b>${c.error ? ' — ' + escapeHtml(c.error) : ''}</span>
         ${c.estado === 'pendiente' && c.linkUrl ? `<button class="btn small secondary" onclick="mpMostrarLink('${c.linkUrl}', ${c.monto})">Ver link</button>` : ''}
-        ${c.estado === 'pendiente' || c.estado === 'error' ? `<button class="btn small secondary" onclick="mpVerificar('${c._id}','${ventaId}')">Verificar pago</button>` : ''}
+        ${c.estado === 'pendiente' || c.estado === 'error' || c.estado === 'registrando' ? `<button class="btn small secondary" onclick="mpVerificar('${c._id}','${ventaId}')">Verificar pago</button>` : ''}
         ${c.estado === 'pendiente' ? `<button class="btn small danger" onclick="mpCancelar('${c._id}','${ventaId}')">Cancelar</button>` : ''}
       </div>`).join('');
   }catch(e){ box.innerHTML = ''; }
