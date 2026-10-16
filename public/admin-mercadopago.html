@@ -99,6 +99,22 @@
       <div id="mpOk" style="color:var(--ok);margin-top:8px"></div>
     </div>
     <div class="card">
+      <h3 style="margin-top:0">Sucursal y caja en Mercado Pago</h3>
+      <p class="muted">Cada Point tiene que estar en su propia caja (Mercado Pago solo deja un Point en modo PDV por caja). Acá podés ver las sucursales y cajas de la cuenta y crear una nueva, por ejemplo para Pirka. Después, en el Point: Más opciones → Ajustes → vincular, y elegí esa sucursal y caja.</p>
+      <div id="mpSucursales" class="muted" style="margin-bottom:10px">—</div>
+      <button class="btn secondary" onclick="cargarSucursales()">Ver sucursales y cajas</button>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px">
+        <div><label>Nombre</label><input id="sNombre" placeholder="Pirka"></div>
+        <div><label>Calle</label><input id="sCalle"></div>
+        <div><label>Número</label><input id="sNumero"></div>
+        <div><label>Ciudad</label><input id="sCiudad" value="Junín"></div>
+        <div><label>Provincia</label><input id="sProvincia" value="Buenos Aires"></div>
+        <div><label>Latitud</label><input id="sLat" placeholder="-34.58"></div>
+        <div><label>Longitud</label><input id="sLng" placeholder="-60.94"></div>
+      </div>
+      <button class="btn" style="margin-top:10px" onclick="crearSucursal()">Crear sucursal y caja</button>
+    </div>
+    <div class="card">
       <h3 style="margin-top:0">Aviso automático (webhook)</h3>
       <p class="muted">Copiá esta dirección en el panel de Mercado Pago Developers → tu aplicación → Webhooks → Modo producción, y marcá los eventos “Pagos” y “Order (Mercado Pago Point)”. Así el sistema se entera apenas se acredita un pago.</p>
       <div style="display:flex;gap:8px"><input id="mpWebhook" readonly><button class="btn secondary" onclick="copiar('mpWebhook')">Copiar</button></div>
@@ -188,6 +204,18 @@ async function activarPdv(){
   const r=await fetch(BASE+'/terminales/'+encodeURIComponent(id)+'/pdv',{method:'POST',headers:headersAuthJson()}); const d=await r.json();
   if(!r.ok) return msg(false,d.error||'No se pudo activar');
   msg(true,d.aviso||'Listo.'); setTimeout(()=>cargarTerminales(true),1500);
+}
+async function cargarSucursales(){
+  const r=await fetch(BASE+'/sucursales',{headers:headersAuth()}); const d=await r.json();
+  if(!r.ok) return msg(false,d.error||'No se pudieron traer las sucursales');
+  document.getElementById('mpSucursales').innerHTML=d.length?d.map(t=>'<div><strong>'+escapeHtml(t.nombre||t.id)+'</strong> — cajas: '+(t.cajas.map(c=>escapeHtml(c.nombre||c.id)).join(', ')||'ninguna')+'</div>').join(''):'No hay sucursales creadas.';
+}
+async function crearSucursal(){
+  const v=id=>document.getElementById(id).value;
+  const body={nombre:v('sNombre'),calle:v('sCalle'),numero:v('sNumero'),ciudad:v('sCiudad'),provincia:v('sProvincia'),latitud:v('sLat'),longitud:v('sLng')};
+  const r=await fetch(BASE+'/sucursales',{method:'POST',headers:headersAuthJson(),body:JSON.stringify(body)}); const d=await r.json();
+  if(!r.ok) return msg(false,d.error||'No se pudo crear');
+  msg(true,'Listo: sucursal "'+d.sucursal.nombre+'" con '+d.caja.nombre+'. Ahora vinculá el Point a esa caja.'); cargarSucursales();
 }
 function copiar(id){ const el=document.getElementById(id); el.select(); try{ navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand('copy'); } }
 const EST={pendiente:'Esperando pago',registrando:'Registrando',acreditado:'Cobrado',error:'Error al registrar',rechazado:'Rechazado',cancelado:'Cancelado'};

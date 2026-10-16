@@ -165,6 +165,34 @@ router.post('/terminales/:id/pdv', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Crea una sucursal + caja en Mercado Pago (para que cada Point quede en su propia caja: solo se permite un Point en modo PDV por caja).
+router.get('/sucursales', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const cfg = await cargarConfig(db, req.orgId);
+    const u = await mp(cfg, 'GET', '/users/me');
+    const st = await mp(cfg, 'GET', `/users/${u.id}/stores/search?limit=50`);
+    const pos = await mp(cfg, 'GET', '/pos?limit=100');
+    const tiendas = ((st && st.results) || []).map(x => ({ id: x.id, nombre: x.name, cajas: ((pos && pos.results) || []).filter(c => String(c.store_id) === String(x.id)).map(c => ({ id: c.id, nombre: c.name })) }));
+    res.json(tiendas);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/sucursales', auth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const nombre = txt(b.nombre), calle = txt(b.calle), numero = txt(b.numero), ciudad = txt(b.ciudad), provincia = txt(b.provincia);
+    const lat = Number(b.latitud), lng = Number(b.longitud);
+    if (!nombre || !calle || !numero || !ciudad || !provincia) throw err(400, 'Completá nombre, calle, número, ciudad y provincia.');
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw err(400, 'Falta la latitud y longitud (en Google Maps: clic derecho sobre el local → copiar coordenadas).');
+    const db = await getDb();
+    const cfg = await cargarConfig(db, req.orgId);
+    const u = await mp(cfg, 'GET', '/users/me');
+    const tienda = await mp(cfg, 'POST', `/users/${u.id}/stores`, { name: nombre, location: { street_number: numero, street_name: calle, city_name: ciudad, state_name: provincia, latitude: lat, longitude: lng, reference: txt(b.referencia) } });
+    const caja = await mp(cfg, 'POST', '/pos', { name: 'Caja ' + nombre, fixed_amount: false, store_id: tienda.id, external_id: ('caja' + nombre).replace(/[^A-Za-z0-9]/g, '').slice(0, 40) + Date.now().toString().slice(-5) });
+    res.json({ ok: true, sucursal: { id: tienda.id, nombre: tienda.name }, caja: { id: caja.id, nombre: caja.name } });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // ---------------------------------------------------------------------------
 // Crear cobros
 // ---------------------------------------------------------------------------
