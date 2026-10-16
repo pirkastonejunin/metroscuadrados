@@ -90,6 +90,9 @@ const authSueldos = [authUsuario, resolverOrg, requiereModulo('sueldos'), (req, 
   next();
 }];
 
+// Lecturas que pueden verse con "Ver: todas las sucursales" (sin sucursal elegida): filtroOrg devuelve {} y suma todas.
+const authSueldosLectura = [authUsuario, resolverOrg, requiereModulo('sueldos')];
+
 const SECTORES = { obra: 'Obra', produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
 // Frecuencia de pago: el sueldo se liquida igual una vez por mes, pero se paga en cuotas.
 const FRECUENCIAS = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual' };
@@ -742,7 +745,7 @@ async function armarColocadores(db, req, periodo) {
   }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 }
 
-router.get('/colocadores', authSueldos, async (req, res) => {
+router.get('/colocadores', authSueldosLectura, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
     const filas = await conReintento(async () => armarColocadores(await getDb(), req, periodo));
