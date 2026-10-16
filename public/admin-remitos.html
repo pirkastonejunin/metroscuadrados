@@ -271,6 +271,12 @@ async function imprimirDocumento(url, accion){
   }
 }
 // Copia al portapapeles un link público del documento (comprobante, remito o recibo) para mandárselo al cliente.
+function avisoLinkCopiado(){
+  const d = document.createElement('div');
+  d.textContent = '✓ Link copiado — pegalo en el chat';
+  d.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;z-index:99999;box-shadow:0 4px 14px rgba(0,0,0,.3)';
+  document.body.appendChild(d); setTimeout(() => d.remove(), 2200);
+}
 async function copiarLinkPublico(url){
   let m, body;
   if ((m = url.match(/\/api\/ventas\/remitos\/([0-9a-f]{24})\/imprimir/))) body = { tipo: 'remito', id: m[1] };
@@ -282,7 +288,7 @@ async function copiarLinkPublico(url){
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Error');
     const link = location.origin + '/d/' + d.token;
-    try { await navigator.clipboard.writeText(link); alert('Link copiado. Pegalo en el chat con el cliente:\n\n' + link); }
+    try { await navigator.clipboard.writeText(link); avisoLinkCopiado(); }
     catch(e2){ window.prompt('Copiá el link (Ctrl+C):', link); }
   }catch(e){ alert('No se pudo generar el link: ' + e.message); }
 }
