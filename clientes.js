@@ -617,4 +617,21 @@ router.get('/:id/obras', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Visitas del cliente (las visitas guardan al cliente como texto): se muestran solo si este es el ÚNICO cliente que coincide por nombre/teléfono.
+router.get('/:id/visitas', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const c = await clienteDeLaOrg(db, req);
+      const visitas = await db.collection('visitas').find(Object.assign({}, filtroOrg(req))).project({ numero: 1, cliente: 1, vendedorNombre: 1, fechaHora: 1, estado: 1, obraId: 1, notasEmpleada: 1 }).sort({ fechaHora: -1 }).limit(5000).toArray();
+      const clientes = await clientesActivos(db, req.orgId);
+      return visitas.filter(v => {
+        const el = elegirClienteUnico(clientes, { nombre: v.cliente && v.cliente.nombre, telefono: v.cliente && v.cliente.telefono });
+        return el && String(el) === String(c._id);
+      });
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;

@@ -667,6 +667,7 @@ function abrirEditarCliente(id){
           <button data-tab="presupuestos" onclick="mostrarTabCliente('presupuestos', '${id}')">Presupuestos</button>
           <button data-tab="productos" onclick="mostrarTabCliente('productos', '${id}')">Productos comprados</button>
           <button data-tab="obras" onclick="mostrarTabCliente('obras', '${id}')">Obras</button>
+          <button data-tab="visitas" onclick="mostrarTabCliente('visitas', '${id}')">Visitas</button>
         </div>
         <div id="tabClienteDatos">
           ${formularioCliente(c)}
@@ -679,6 +680,7 @@ function abrirEditarCliente(id){
         <div id="tabClientePresupuestos" class="hidden"><div id="presContenido" class="muted">Cargando...</div></div>
         <div id="tabClienteProductos" class="hidden"><div id="prodContenido" class="muted">Cargando...</div></div>
         <div id="tabClienteObras" class="hidden"><div id="obrasContenido" class="muted">Cargando...</div></div>
+        <div id="tabClienteVisitas" class="hidden"><div id="visitasContenido" class="muted">Cargando...</div></div>
       </div>
     </div>
   `;
@@ -691,10 +693,12 @@ function mostrarTabCliente(tab, clienteId){
   document.getElementById('tabClientePresupuestos').classList.toggle('hidden', tab !== 'presupuestos');
   document.getElementById('tabClienteProductos').classList.toggle('hidden', tab !== 'productos');
   document.getElementById('tabClienteObras').classList.toggle('hidden', tab !== 'obras');
+  document.getElementById('tabClienteVisitas').classList.toggle('hidden', tab !== 'visitas');
   if (tab === 'cuenta-corriente') cargarCuentaCorrienteTab(clienteId);
   if (tab === 'presupuestos') cargarPresupuestosTab(clienteId);
   if (tab === 'productos') cargarProductosTab(clienteId);
   if (tab === 'obras') cargarObrasTab(clienteId);
+  if (tab === 'visitas') cargarVisitasTab(clienteId);
 }
 
 function moneyMon(n, mon){ return (mon && mon !== 'ARS' ? mon + ' ' : '') + money(n); }
@@ -763,6 +767,20 @@ async function cargarObrasTab(id){
       </div>`;
     }).join('');
   }catch(e){ errTab('obrasContenido', e); }
+}
+const ESTADO_VISITA_LABEL = {sin_visita:'Sin visita', presupuestada:'Presupuestada', vendido:'Vendido', instalado:'Instalado', cancelada:'Cancelada'};
+async function cargarVisitasTab(id){
+  try{
+    const lista = await traerTab(id, 'visitas', 'visitasContenido');
+    const cont = document.getElementById('visitasContenido'); if (!cont) return;
+    if (!lista.length) { cont.innerHTML = '<p class="muted">Este cliente no tiene visitas registradas.</p>'; return; }
+    cont.innerHTML = `<table><thead><tr><th>#</th><th>Fecha</th><th>Domicilio</th><th>Vendedor</th><th>Estado</th></tr></thead><tbody>` + lista.map(v => `<tr>
+      <td><a href="/admin-visitas.html?abrir=visita-${v._id}" target="_blank">#${escapeHtml(v.numero)}</a></td>
+      <td>${new Date(v.fechaHora).toLocaleString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${escapeHtml((v.cliente && v.cliente.direccion) || '')}${v.cliente && v.cliente.localidad ? ', ' + escapeHtml(v.cliente.localidad) : ''}</td>
+      <td>${escapeHtml(v.vendedorNombre || '')}</td>
+      <td>${ESTADO_VISITA_LABEL[v.estado] || escapeHtml(v.estado || '')}</td></tr>`).join('') + '</tbody></table>';
+  }catch(e){ errTab('visitasContenido', e); }
 }
 function verFotoObra(src){
   const d = document.createElement('div');

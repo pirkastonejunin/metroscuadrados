@@ -215,6 +215,14 @@
               <option value="cancelada">Cancelada</option>
             </select>
           </div>
+          <div style="min-width:140px"><label>Desde</label><input type="date" id="fVisDesde" onchange="cargarVisitas()"></div>
+          <div style="min-width:140px"><label>Hasta</label><input type="date" id="fVisHasta" onchange="cargarVisitas()"></div>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <button class="btn small secondary" onclick="rangoVisitas('hoy')">Hoy</button>
+            <button class="btn small secondary" onclick="rangoVisitas('semana')">Semana</button>
+            <button class="btn small secondary" onclick="rangoVisitas('mes')">Mes</button>
+            <button class="btn small secondary" onclick="rangoVisitas('')">Todas</button>
+          </div>
           <div><button class="btn" onclick="abrirNuevaVisita()">+ Nueva visita</button></div>
         </div>
       </div>
@@ -667,7 +675,7 @@ function modal(html){
 }
 function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
-function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
+function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
 
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -814,8 +822,20 @@ async function cargarVisitas(){
   if (q) params.set('q', q);
   if (vendedorId) params.set('vendedorId', vendedorId);
   if (estado) params.set('estado', estado);
+  const fd = document.getElementById('fVisDesde').value, fh = document.getElementById('fVisHasta').value;
+  if (fd) params.set('desde', fd + 'T00:00:00');
+  if (fh) params.set('hasta', fh);
   VISITAS_ACTUALES = await api('?' + params.toString());
   renderVisitasTabla();
+}
+function rangoVisitas(r){
+  const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  const hoy = new Date(); let d1 = '', d2 = '';
+  if (r === 'hoy') d1 = d2 = iso(hoy);
+  else if (r === 'semana') { const l = new Date(hoy); l.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7)); const f = new Date(l); f.setDate(l.getDate() + 6); d1 = iso(l); d2 = iso(f); }
+  else if (r === 'mes') { d1 = iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1)); d2 = iso(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0)); }
+  document.getElementById('fVisDesde').value = d1; document.getElementById('fVisHasta').value = d2;
+  cargarVisitas();
 }
 function renderVisitasTabla(){
   const visitas = VISITAS_ACTUALES.slice().sort((a,b) => {
