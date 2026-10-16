@@ -261,11 +261,9 @@ async function cargarMisObras(){
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
         <b>Fotos del trabajo terminado</b>
         ${fotosDespues.length ? `<div class="foto-galeria">${fotosDespues.map(f=>`<img src="${f.data}">`).join('')}</div>` : '<p class="muted">Todavía no subiste fotos del resultado.</p>'}
-        ${!VIENDO_HISTORIAL ? `
-          <input type="file" accept="image/*" multiple id="inputFotosObra-${o.obraId}" style="margin-top:8px">
-          <button class="btn small secondary" style="margin-top:8px;width:auto" onclick="subirFotosObra('${o.obraId}')">Agregar fotos</button>
-          <div class="err" id="fotoObraErr-${o.obraId}"></div>
-        ` : ''}
+        <input type="file" accept="image/*" multiple id="inputFotosObra-${o.obraId}" style="margin-top:8px">
+        <button class="btn small secondary" style="margin-top:8px;width:auto" onclick="subirFotosObra('${o.obraId}')">Agregar fotos</button>
+        <div class="err" id="fotoObraErr-${o.obraId}"></div>
       </div>
     </div>
   `; }).join('');

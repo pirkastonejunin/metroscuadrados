@@ -459,6 +459,19 @@ async function guardarObraNueva(){
   }catch(e){ document.getElementById('nObErr').textContent = e.message; }
 }
 
+function leerFotoComoDataURL(file){
+  return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
+}
+async function subirFotosAdmin(obraId){
+  const input = document.getElementById('inputFotosAdmin'), err = document.getElementById('fotoAdminErr');
+  err.textContent = '';
+  if (!input.files.length){ err.textContent = 'Elegí al menos una foto'; return; }
+  try{
+    const fotos = await Promise.all([...input.files].map(leerFotoComoDataURL));
+    await api('/colocador/obras/' + obraId + '/fotos', {method:'POST', body:{fotos}});
+    await abrirObra(obraId);
+  }catch(e){ err.textContent = e.message; }
+}
 async function abrirObra(id){
   const o = await api('/'+id);
   const tareas = o.tareas || [];
@@ -570,6 +583,9 @@ async function abrirObra(id){
     <div class="muted">Venta: ${o.fechaVenta?new Date(o.fechaVenta).toLocaleDateString('es-AR'):''} ${o.vendedor?'· Vendedor: '+o.vendedor:''}${o.precioVentaCliente?' · Presupuestado: $'+o.precioVentaCliente.toLocaleString('es-AR'):''}</div>
     ${o.visitaId ? '<div class="muted">Generada automáticamente desde una visita confirmada</div>' : ''}
     ${fotosHtml}
+    <div style="margin-top:10px"><label>Agregar fotos a la obra</label>
+      <div class="row" style="gap:8px;align-items:center"><input type="file" accept="image/*" multiple id="inputFotosAdmin" style="flex:1"><button class="btn small secondary" onclick="subirFotosAdmin('${o._id}')">Subir fotos</button></div>
+      <div class="err" id="fotoAdminErr"></div></div>
     <div style="margin:14px 0">${tareasHtml}</div>
     <div class="row">
       <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('')}</select>
