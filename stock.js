@@ -360,7 +360,9 @@ router.get('/comprometido', authAdmin, async (req, res) => {
       // comprometido al generarse su remito).
       const ventas = await db.collection('ventas').find(Object.assign({
         estado: { $in: ['pendiente', 'parcialmente_entregada'] }, depositoId, 'items.productoId': productoId
-      }, filtroOrg(req))).sort({ fecha: 1 }).toArray();
+      })).sort({ fecha: 1 }).toArray(); // sin filtro de sucursal: el depósito es compartido y el comprometido suma las ventas de TODAS (16/10/2026, pedido de Mato)
+      const orgs = await db.collection('organizaciones').find({ _id: { $in: [...new Set(ventas.map(v => String(v.orgId || '')).filter(Boolean))].map(toObjectId).filter(Boolean) } }).project({ nombre: 1 }).toArray();
+      const nombreOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
       return ventas.map(v => {
         const item = (v.items || []).find(it => String(it.productoId) === String(productoId));
         const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0)) : 0;
@@ -373,7 +375,9 @@ router.get('/comprometido', authAdmin, async (req, res) => {
           tipoComprobante: v.tipoComprobante,
           clienteNombre: v.clienteNombre,
           cantidad,
-          fecha: v.fecha
+          fecha: v.fecha,
+          sucursal: nombreOrg.get(String(v.orgId || '')) || '',
+          propia: !req.orgId || String(v.orgId) === String(req.orgId)
         };
       }).filter(v => v.cantidad > 0);
     });

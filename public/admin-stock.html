@@ -535,11 +535,12 @@ async function verComprometido(productoId, depositoId){
     if (!data.length) { cont.innerHTML = '<p class="muted">No hay ventas pendientes que lo expliquen.</p>' + btnRecalc; return; }
     cont.innerHTML = `
       <table>
-        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Fecha</th><th>Cantidad</th></tr></thead>
+        <thead><tr><th>Comprobante</th><th>Cliente</th><th>Sucursal</th><th>Fecha</th><th>Cantidad</th></tr></thead>
         <tbody>${data.map(v => `
           <tr>
-            <td><a href="/admin-ventas.html?abrir=${v.ventaId}" target="_blank" style="color:var(--accent);text-decoration:underline" title="Abrir el comprobante">${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')) + '-' + String(v.numero).padStart(5,'0')}</a></td>
+            <td>${v.propia ? `<a href="/admin-ventas.html?abrir=${v.ventaId}" target="_blank" style="color:var(--accent);text-decoration:underline" title="Abrir el comprobante">${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')) + '-' + String(v.numero).padStart(5,'0')}</a>` : `<span title="Es de otra sucursal: se abre cambiando a esa sucursal">${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')) + '-' + String(v.numero).padStart(5,'0')}</span>`}</td>
             <td>${v.clienteId ? `<a href="/admin-clientes.html?id=${v.clienteId}" target="_blank" style="color:var(--accent);text-decoration:underline" title="Abrir el cliente">${escapeHtml(v.clienteNombre)}</a>` : escapeHtml(v.clienteNombre)}</td>
+            <td class="muted">${escapeHtml(v.sucursal || '')}${v.propia ? '' : ' <span style="color:var(--warn,#b45309);font-weight:700">· otra sucursal</span>'}</td>
             <td class="muted">${fechaCorta(v.fecha)}</td>
             <td>${v.cantidad}</td>
           </tr>
