@@ -280,6 +280,24 @@
       .pn-sidebar-footer button { display: flex; align-items: center; gap: 7px; width: 100%; background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 12px; font-family: inherit; font-weight: 600; }
       .pn-sidebar-footer button:hover { border-color: var(--danger, #c53030); color: var(--danger, #c53030); }
       .pn-sidebar-footer button svg { width: 15px; height: 15px; }
+      .pn-extras { display: inline-flex; align-items: center; gap: 8px; margin-right: 10px; vertical-align: middle; }
+      .pn-dolar { display: inline-flex; flex-direction: column; line-height: 1.1; padding: 4px 10px; border: 1px solid var(--border, #ccc); border-radius: 8px; font-size: 13px; font-weight: 800; color: var(--pn-ink, inherit); background: var(--card, #fff); white-space: nowrap; }
+      .pn-dolar small { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted, #777); }
+      .pn-bell { position: relative; }
+      .pn-bell-btn { position: relative; background: transparent; border: 1px solid var(--border, #ccc); border-radius: 8px; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--muted, #777); padding: 0; }
+      .pn-bell-btn:hover { border-color: var(--accent, #555); color: var(--accent, #555); }
+      .pn-bell-btn svg { width: 18px; height: 18px; }
+      .pn-bell-badge { position: absolute; top: -5px; right: -5px; background: #c53030; color: #fff; font-size: 10px; font-weight: 800; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px; line-height: 1; }
+      .pn-bell-panel { position: absolute; top: 44px; right: 0; width: 320px; max-width: calc(100vw - 24px); background: var(--card, #fff); border: 1px solid var(--border, #ccc); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: 500; max-height: 420px; overflow: auto; display: none; }
+      .pn-bell.pn-abierto .pn-bell-panel { display: block; }
+      .pn-bell-head { padding: 12px 14px; border-bottom: 1px solid var(--border, #ddd); font-weight: 700; font-size: 13px; }
+      .pn-bell-item { padding: 10px 14px; border-bottom: 1px solid var(--border, #ddd); cursor: pointer; }
+      .pn-bell-item:last-child { border-bottom: none; }
+      .pn-bell-item:hover { background: var(--bg, #f5f5f5); }
+      .pn-bell-item b { display: block; font-size: 13px; }
+      .pn-bell-item span { display: block; font-size: 12px; color: var(--muted, #777); margin-top: 2px; }
+      .pn-bell-item em { display: block; font-style: normal; font-size: 11px; color: #c53030; font-weight: 700; margin-top: 4px; }
+      .pn-bell-vacio { padding: 20px 14px; text-align: center; color: var(--muted, #777); font-size: 13px; }
       .pn-orgbar { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; vertical-align: middle; }
       .pn-orgbar .pn-orgbar-lbl { white-space: nowrap; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
       .pn-orgbar select, .pn-orgbar .pn-orgbar-fija { padding: 7px 10px; border: 1px solid var(--accent, #555); border-radius: 8px; font-size: 13px; font-weight: 700; background: var(--accent-soft, var(--bg)); color: var(--accent, var(--pn-ink)); font-family: inherit; max-width: 220px; cursor: pointer; }
@@ -388,6 +406,64 @@
       location.reload();
     });
   }
+  // Campanita de notificaciones + cotización del dólar, siempre visibles arriba al lado del usuario (16/10/2026).
+  function montarExtrasTopbar(wrap) {
+    if (document.querySelector('.pn-extras')) return;
+    const token = localStorage.getItem(TOKEN_KEY) || '';
+    if (!token) return;
+    const hdrs = { 'x-admin-token': token };
+    const org = localStorage.getItem(ORG_KEY) || '';
+    if (org) hdrs['x-org-id'] = org;
+    const enInicio = !!document.getElementById('notifWrap'); // inicio.html ya trae su propia campanita
+    const box = document.createElement('div');
+    box.className = 'pn-extras';
+    box.innerHTML = '<span class="pn-dolar" style="display:none" title="Dólar oficial Banco Nación (venta)"><small>Dólar</small><span class="pn-dolar-v">—</span></span>' +
+      (enInicio ? '' : '<div class="pn-bell"><button type="button" data-iconizado="1" class="pn-bell-btn" aria-label="Notificaciones" title="Notificaciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="pn-bell-badge" style="display:none">0</span></button><div class="pn-bell-panel"><div class="pn-bell-head">Notificaciones</div><div class="pn-bell-body"></div></div></div>');
+    wrap.parentElement.insertBefore(box, wrap);
+    const dolarEl = box.querySelector('.pn-dolar');
+    fetch('/api/productos/config/cotizacion-dolar', { headers: hdrs }).then(r => r.ok ? r.json() : null).then(function (d) {
+      if (!d) return;
+      const v = (d.bna && d.bna.venta) || d.valor;
+      if (!v) return;
+      dolarEl.querySelector('.pn-dolar-v').textContent = '$ ' + Number(v).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      dolarEl.style.display = '';
+    }).catch(function () {});
+    if (enInicio) return;
+    const bell = box.querySelector('.pn-bell'), btn = bell.querySelector('.pn-bell-btn'), badge = bell.querySelector('.pn-bell-badge'), body = bell.querySelector('.pn-bell-body');
+    let items = [];
+    const destino = function (tipo, id) {
+      if (tipo === 'crm') return '/admin-visitas.html?abrir=crm-' + id;
+      if (tipo === 'visita') return '/admin-visitas.html?abrir=visita-' + id;
+      if (tipo === 'obra') return '/admin-obras.html?abrir=obra-' + id;
+      if (tipo === 'cheque_vencido' || tipo === 'cheque_por_vencer') return '/admin-tesoreria.html?tab=cheques';
+      if (tipo === 'caja_sin_cerrar') { const p = String(id).split('|'); return '/admin-tesoreria.html?tab=cajadiaria&dia=' + encodeURIComponent(p[0]) + '&caja=' + encodeURIComponent(p[1] || ''); }
+      if (tipo === 'orden_compra' || tipo === 'compra_por_pagar') return '/admin-compras.html';
+      if (tipo === 'venta_sin_entregar' || tipo === 'venta_sin_cobrar') return '/admin-ventas.html';
+      if (tipo === 'stock_bajo') return '/admin-stock.html';
+      return '';
+    };
+    const pintar = function () {
+      badge.textContent = items.length > 9 ? '9+' : String(items.length);
+      badge.style.display = items.length ? '' : 'none';
+      body.innerHTML = items.length ? items.map(function (it, i) {
+        return '<div class="pn-bell-item" data-i="' + i + '"><b>' + escapeHtml(it.titulo) + '</b><span>' + escapeHtml(it.subtitulo || '') + '</span>' + (it.fecha ? '<em>' + escapeHtml(it.etiquetaFecha || 'Venció el') + ' ' + new Date(it.fecha).toLocaleDateString('es-AR') + '</em>' : '') + '</div>';
+      }).join('') : '<div class="pn-bell-vacio">Sin pendientes.</div>';
+    };
+    const cargar = function () {
+      fetch('/api/notificaciones', { headers: hdrs }).then(r => r.ok ? r.json() : null).then(function (d) {
+        if (!d) { bell.style.display = 'none'; return; }
+        items = d.items || []; pintar();
+      }).catch(function () {});
+    };
+    btn.addEventListener('click', function (e) { e.stopPropagation(); bell.classList.toggle('pn-abierto'); });
+    body.addEventListener('click', function (e) {
+      const el = e.target.closest('.pn-bell-item'); if (!el) return;
+      const it = items[Number(el.dataset.i)]; const url = it && destino(it.tipo, it.id);
+      if (url) location.href = url;
+    });
+    document.addEventListener('click', function (e) { if (!bell.contains(e.target)) bell.classList.remove('pn-abierto'); });
+    cargar(); setInterval(cargar, 5 * 60 * 1000);
+  }
   function montarMenuUsuario(me, paginaActual, nombreUsuario) {
     const spanUser = document.getElementById('topbarUser') || document.getElementById('oficinaNombre');
     if (!spanUser || document.querySelector('.pn-usermenu')) return;
@@ -411,6 +487,7 @@
     if (btnLogoutOriginal) btnLogoutOriginal.style.display = 'none';
     if (btnLogoutOriginal) contenedor.insertBefore(wrap, btnLogoutOriginal); else contenedor.appendChild(wrap);
     montarSelectorOrg(me, wrap);
+    montarExtrasTopbar(wrap);
     const btn = wrap.querySelector('.pn-usermenu-btn');
     btn.addEventListener('click', function (e) {
       e.stopPropagation();

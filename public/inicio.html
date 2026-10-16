@@ -1125,6 +1125,8 @@ async function iniciarTablero(me){
       // panel lateral dentro de #oficinaSesion, que acá se oculta: lo traemos a la
       // barra superior, al lado de la campanita, como en el resto de las pantallas.
       const menuUsuario = document.querySelector('.pn-usermenu');
+      const extrasTop = document.querySelector('.pn-extras');
+      if (extrasTop) hdr.appendChild(extrasTop);
       if (menuUsuario) hdr.appendChild(menuUsuario);
     }
     document.getElementById('oficinaSesion').classList.add('hidden');
