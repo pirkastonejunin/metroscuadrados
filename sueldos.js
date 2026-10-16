@@ -470,8 +470,8 @@ async function registrarPago(db, req, l, { monto: m, montoComision, fecha, cuent
   const saldo = r2(l.neto - (l.totalPagado || 0));
   if (m > saldo + 0.005) throw err(400, 'El monto supera lo que falta pagar (' + saldo + ').');
   const dd = fecha.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
-  await egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo: 'Sueldo ' + l.empleadoNombre + ' ' + l.periodo + (l.frecuenciaPago && l.frecuenciaPago !== 'mensual' ? ' · pago del ' + dd : ''), observaciones: nota, origen: 'sueldo', fecha });
-  const pago = { monto: m, fecha, cuentaTipo, cuentaId: toObjectId(cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '' };
+  const mov = await egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo: 'Sueldo ' + l.empleadoNombre + ' ' + l.periodo + (l.frecuenciaPago && l.frecuenciaPago !== 'mensual' ? ' · pago del ' + dd : ''), observaciones: nota, origen: 'sueldo', fecha });
+  const pago = { monto: m, fecha, cuentaTipo, cuentaId: toObjectId(cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '', movimientoId: mov && mov._id };
   if (montoComision > 0) pago.montoComision = r2(montoComision);
   l.pagos = (l.pagos || []).concat([pago]);
   l.totalPagado = r2((l.totalPagado || 0) + m);
@@ -516,7 +516,7 @@ async function armarPagos(db, req, periodo, fechaISO) {
     const l = porEmp.get(String(emp._id));
     if (!l) { f.sinLiquidacion = true; filas.push(f); continue; }
     const saldo = Math.max(0, r2(l.neto - (l.totalPagado || 0)));
-    const pagos = l.pagos || [];
+    const pagos = (l.pagos || []).filter(p => !p.anulado);
     const comPag = pagos.reduce((s, p) => s + (p.montoComision || 0), 0);
     const fijoPag = pagos.reduce((s, p) => s + p.monto - (p.montoComision || 0), 0);
     const fijoTotal = Math.max(0, r2(l.neto - (l.comisiones || 0)));
@@ -615,6 +615,42 @@ router.post('/pagar-lote', authSueldos, async (req, res) => {
     res.json({ resultados: out, pagados: out.filter(r => r.ok).length, total: r2(out.filter(r => r.ok).reduce((s, r) => s + r.monto, 0)) });
   } catch (e) { responder(res, e); }
 });
+
+
+// Anular un pago de liquidación (sueldo o colocador): se revierte la caja/banco con un movimiento inverso, el pago queda marcado como anulado
+// (no se borra) y la liquidación recalcula lo pagado y su estado, todo junto.
+async function anularPagoLiquidacion(req, res, coleccion, origen, motivoDe, totalDe) {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const idx = Number(req.params.idx);
+    const motivo = texto((req.body || {}).motivo);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const l = await db.collection(coleccion).findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!l) throw err(404, 'Liquidación no encontrada.');
+      const p = (l.pagos || [])[idx];
+      if (!p) throw err(404, 'No se encontró ese pago.');
+      if (p.anulado) throw err(400, 'Ese pago ya está anulado.');
+      // Se marca primero (condicional) para que un doble clic no revierta la caja dos veces.
+      const marca = await db.collection(coleccion).updateOne({ _id: id, ['pagos.' + idx + '.anulado']: { $ne: true } }, { $set: { ['pagos.' + idx + '.anulado']: true, ['pagos.' + idx + '.anuladoEn']: new Date(), ['pagos.' + idx + '.anuladoPor']: (req.usuario && req.usuario.nombre) || '', ['pagos.' + idx + '.anuladoMotivo']: motivo } });
+      if (!marca.modifiedCount) throw err(409, 'Ese pago ya se estaba anulando.');
+      try {
+        await tesoreria.revertirEgresoPago(db, req, { movimientoId: p.movimientoId || null, cuentaTipo: p.cuentaTipo, cuentaId: p.cuentaId, monto: p.monto, origen, motivo: motivoDe(l), fecha: p.fecha, motivoAnulacion: motivo });
+      } catch (e) {
+        await db.collection(coleccion).updateOne({ _id: id }, { $unset: { ['pagos.' + idx + '.anulado']: '', ['pagos.' + idx + '.anuladoEn']: '', ['pagos.' + idx + '.anuladoPor']: '', ['pagos.' + idx + '.anuladoMotivo']: '' } });
+        throw e;
+      }
+      const pagos = (l.pagos || []).map((x, i) => i === idx ? Object.assign({}, x, { anulado: true }) : x);
+      const totalPagado = r2(pagos.filter(x => !x.anulado).reduce((s, x) => s + x.monto, 0));
+      const estado = estadoPago({ neto: totalDe(l), totalPagado });
+      await db.collection(coleccion).updateOne({ _id: id }, { $set: { totalPagado, estado, updatedAt: new Date() } });
+      return { ok: true, totalPagado, estado };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+}
+router.post('/liquidaciones/:id/pagos/:idx/anular', authSueldos, (req, res) => anularPagoLiquidacion(req, res, 'sueldos_liquidaciones', 'sueldo', l => null, l => l.neto));
+router.post('/colocadores/liquidaciones/:id/pagos/:idx/anular', authSueldos, (req, res) => anularPagoLiquidacion(req, res, 'sueldos_colocadores', 'sueldo_colocador', l => null, l => l.total));
 
 router.post('/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
   try {
@@ -802,8 +838,8 @@ router.post('/colocadores/liquidaciones/:id/pagos', authSueldos, async (req, res
       if (!l) throw err(404, 'Liquidación no encontrada.');
       const saldo = r2(l.total - (l.totalPagado || 0));
       if (m > saldo + 0.005) throw err(400, 'El monto supera lo que falta pagar (' + saldo + ').');
-      await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Colocación ' + l.colocadorNombre + ' ' + l.periodo, observaciones: nota, origen: 'sueldo_colocador', fecha });
-      l.pagos = (l.pagos || []).concat([{ monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '' }]);
+      const mov = await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Colocación ' + l.colocadorNombre + ' ' + l.periodo, observaciones: nota, origen: 'sueldo_colocador', fecha });
+      l.pagos = (l.pagos || []).concat([{ monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), nota, usuarioNombre: (req.usuario && req.usuario.nombre) || '', movimientoId: mov && mov._id }]);
       l.totalPagado = r2((l.totalPagado || 0) + m);
       l.estado = estadoPago({ neto: l.total, totalPagado: l.totalPagado });
       await db.collection('sueldos_colocadores').updateOne({ _id: id }, { $set: { pagos: l.pagos, totalPagado: l.totalPagado, estado: l.estado, updatedAt: new Date() } });

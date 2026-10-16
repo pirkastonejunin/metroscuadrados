@@ -613,6 +613,54 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
 // mismo circuito de Tesorería que Compras (efectivo/cuenta/tarjeta salen
 // de una caja/banco real; cheque propio queda "emitido" hasta
 // confirmarse desde Tesorería).
+
+// Anular un pago de un gasto (16/10/2026, pedido de Mato): revierte junto la caja/banco (movimiento inverso, nada se borra), el cheque
+// emitido o el endoso del cheque de tercero, y el saldo del gasto.
+router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    const idx = Number(req.params.idx);
+    if (!id || !Number.isInteger(idx) || idx < 0) throw err(400, 'Pago inválido');
+    const motivo = normalizarTexto(req.body && req.body.motivo);
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const gasto = await db.collection('gastos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!gasto) throw err(404, 'Gasto no encontrado');
+      const p = (gasto.pagos || [])[idx];
+      if (!p) throw err(404, 'No se encontró ese pago.');
+      if (p.anulado) throw err(400, 'Ese pago ya está anulado.');
+      let cheques = [];
+      if (p.tipoValor === 'cheque') {
+        const ch = p.chequeId ? await db.collection('cheques').findOne({ _id: p.chequeId }) : null;
+        if (ch && ch.estado !== 'emitido') throw err(400, `El cheque Nº ${ch.numero || ''} ya está "${ch.estado}": no se puede anular el pago. Resolvelo primero desde Cheques.`);
+        if (ch) cheques = [ch];
+      } else if (p.tipoValor === 'cheque_tercero') {
+        cheques = await db.collection('cheques').find({ _id: { $in: p.chequeIds || [] } }).toArray();
+        const mal = cheques.find(c => c.estado !== 'endosado');
+        if (mal) throw err(400, `El cheque Nº ${mal.numero || ''} está "${mal.estado}" (no sigue endosado al proveedor): no se puede anular el pago.`);
+      }
+      const ahora = new Date();
+      const marca = await db.collection('gastos').updateOne({ _id: id, ['pagos.' + idx + '.anulado']: { $ne: true } }, { $set: { ['pagos.' + idx + '.anulado']: true, ['pagos.' + idx + '.anuladoEn']: ahora, ['pagos.' + idx + '.anuladoPor']: usuarioNombre, ['pagos.' + idx + '.anuladoMotivo']: motivo } });
+      if (!marca.modifiedCount) throw err(409, 'Ese pago ya se estaba anulando.');
+      try {
+        if (p.tipoValor !== 'cheque' && p.tipoValor !== 'cheque_tercero') {
+          await require('./tesoreria').revertirEgresoPago(db, req, { movimientoId: p.movimientoId || null, cuentaTipo: p.cuentaTipo, cuentaId: p.cuentaId, monto: p.monto, origen: 'gasto', motivo: `Pago gasto Nº ${gasto.numero}`, fecha: p.fecha, motivoAnulacion: motivo });
+        }
+        if (p.tipoValor === 'cheque' && cheques.length) await db.collection('cheques').updateOne({ _id: cheques[0]._id }, { $set: { estado: 'anulado', anuladoEn: ahora, anuladoMotivo: motivo || 'Pago anulado', updatedAt: ahora } });
+        if (p.tipoValor === 'cheque_tercero' && cheques.length) await db.collection('cheques').updateMany({ _id: { $in: cheques.map(c => c._id) }, estado: 'endosado' }, { $set: { estado: 'en_cartera', endosadoA: null, endosadoProveedorId: null, endosadoFecha: null, updatedAt: ahora } });
+      } catch (e) {
+        await db.collection('gastos').updateOne({ _id: id }, { $unset: { ['pagos.' + idx + '.anulado']: '', ['pagos.' + idx + '.anuladoEn']: '', ['pagos.' + idx + '.anuladoPor']: '', ['pagos.' + idx + '.anuladoMotivo']: '' } });
+        throw e;
+      }
+      const totalPagado = Math.round(gasto.pagos.filter((x, k) => k !== idx && !x.anulado).reduce((a, x) => a + x.monto, 0) * 100) / 100;
+      await db.collection('gastos').updateOne({ _id: id }, { $set: { totalPagado, saldoPendiente: Math.max(0, Math.round((gasto.total - totalPagado) * 100) / 100), updatedAt: ahora } });
+      return db.collection('gastos').findOne({ _id: id });
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/:id/pagos', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -674,6 +722,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
 
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       let chequeId = null;
+      let movimientoId = null;
       let chequesTercero = [];
       if (tipoValor === 'cheque_tercero') {
         chequesTercero = await db.collection('cheques').find(Object.assign({ _id: { $in: chequesTerceroIds }, tipo: 'tercero', estado: 'en_cartera' }, filtroOrg(req))).toArray();
@@ -699,15 +748,17 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         const observacionesMovimiento = tipoValor === 'tarjeta'
           ? [nota, `Lote ${tarjetaDatos.tarjetaLote || '—'} / Cupón ${tarjetaDatos.tarjetaCupon || '—'}`].filter(Boolean).join(' — ')
           : nota;
-        await aplicarMovimientoCuenta(db, req, {
+        const movPago = await aplicarMovimientoCuenta(db, req, {
           cuentaTipo, cuentaId, tipo: 'egreso', monto, moneda: gasto.moneda || 'ARS',
           motivo: `Pago gasto Nº ${gasto.numero}`, observaciones: observacionesMovimiento, origen: 'gasto', gastoId: id, fecha
         });
+        movimientoId = movPago && movPago._id || null;
       }
 
       const pago = Object.assign(
         { tipoValor, monto, fecha, nota, usuarioNombre },
         cuentaTipo ? { cuentaTipo, cuentaId } : {},
+        movimientoId ? { movimientoId } : {},
         chequeId ? { chequeId } : {},
         chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {},
         tarjetaDatos || {}

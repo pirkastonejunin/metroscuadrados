@@ -123,11 +123,11 @@ async function resumenSucursal(db, org, d0, d1, desdeS, hastaS) {
       { $group: { _id: null, total: { $sum: { $ifNull: ['$monto', 0] } } } }
     ]),
     sumar(db.collection('compras_pagos'), [
-      { $match: { orgId, fecha: enRango } },
+      { $match: { orgId, fecha: enRango, anulado: { $ne: true } } },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$monto', 0] } } } }
     ]),
     sumar(gastos, [
-      { $match: sinAnular }, { $unwind: '$pagos' }, { $match: { 'pagos.fecha': enRango } },
+      { $match: sinAnular }, { $unwind: '$pagos' }, { $match: { 'pagos.fecha': enRango, 'pagos.anulado': { $ne: true } } },
       { $group: { _id: null, total: { $sum: { $ifNull: ['$pagos.monto', 0] } } } }
     ]),
     sumar(ventas, [

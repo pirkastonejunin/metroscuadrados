@@ -758,7 +758,7 @@ async function imprimirDocumento(url){
 // -------------------------------------------------------------------
 // MOVIMIENTOS
 // -------------------------------------------------------------------
-const ORIGEN_LABEL_MOV = { manual: 'Manual', venta: 'Venta', compra: 'Compra', gasto: 'Gasto', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta', financiera: 'Financiera', prestamo: 'Préstamo', sueldos: 'Sueldos', anulacion_movimiento: 'Anulación', anulacion_cobro: 'Anulación de cobro' };
+const ORIGEN_LABEL_MOV = { manual: 'Manual', venta: 'Venta', compra: 'Compra', gasto: 'Gasto', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta', financiera: 'Financiera', prestamo: 'Préstamo', sueldos: 'Sueldos', anulacion_movimiento: 'Anulación', anulacion_pago: 'Anulación de pago', sueldo: 'Sueldo', sueldo_colocador: 'Colocador', anulacion_cobro: 'Anulación de cobro' };
 // Una caja/banco elegida: cada movimiento con el saldo que quedó después (saldo parcial), para ir controlando.
 async function cargarMovimientosCuenta(cuenta){
   const [cuentaTipo, cuentaId] = cuenta.split(':');

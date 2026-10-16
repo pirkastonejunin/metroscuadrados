@@ -27,8 +27,8 @@ async function saldosProveedores(db, orgMatch) {
   const [ini, comp, gas, pag] = await Promise.all([
     db.collection('proveedores_saldos_iniciales').find(orgMatch).project({ proveedorId: 1, monto: 1, proveedorNombre: 1 }).toArray(),
     db.collection('compras').aggregate([{ $match: nativo }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: [{ $ifNull: ['$total', 0] }, signo, usd] } } } }]).toArray(),
-    db.collection('gastos').aggregate([{ $match: nativo }, { $group: { _id: '$proveedorId', t: { $sum: { $subtract: [{ $multiply: [{ $ifNull: ['$total', 0] }, signo, usd] }, { $sum: '$pagos.monto' }] } } } }]).toArray(),
-    db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true }, proveedorId: { $ne: null } }, orgMatch) }, { $group: { _id: '$proveedorId', t: { $sum: { $ifNull: ['$monto', 0] } } } }]).toArray()
+    db.collection('gastos').aggregate([{ $match: nativo }, { $group: { _id: '$proveedorId', t: { $sum: { $subtract: [{ $multiply: [{ $ifNull: ['$total', 0] }, signo, usd] }, { $reduce: { input: { $ifNull: ['$pagos', []] }, initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.anulado', true] }, 0, { $ifNull: ['$$this.monto', 0] }] }] } } }] } } } }]).toArray(),
+    db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true }, anulado: { $ne: true }, proveedorId: { $ne: null } }, orgMatch) }, { $group: { _id: '$proveedorId', t: { $sum: { $ifNull: ['$monto', 0] } } } }]).toArray()
   ]);
   const m = new Map(); const sumar = (id, v) => m.set(String(id), (m.get(String(id)) || 0) + v);
   ini.forEach(i => sumar(i.proveedorId, i.monto || 0)); comp.forEach(c => sumar(c._id, c.t)); gas.forEach(g => sumar(g._id, g.t)); pag.forEach(p => sumar(p._id, -p.t));

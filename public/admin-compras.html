@@ -1181,7 +1181,7 @@ function verDetalle(id){
     </tr>
   `).join('');
   const filasPagos = (c.pagos||[]).length
-    ? c.pagos.map(p => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)}</span></div>`).join('')
+    ? c.pagos.map((p,i) => `<div class="detalle-pago" style="${p.anulado?'opacity:.55;text-decoration:line-through;':''}"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}${p.anulado?' <b style="text-decoration:none;display:inline-block;color:#b91c1c;">ANULADO</b>':''}</span><span>${money(p.monto)}${p.anulado||c.estado==='anulada'?'':` <button type="button" class="btn-sec" style="margin-left:8px;padding:2px 8px;font-size:12px;" onclick="anularPago${'compra'.charAt(0).toUpperCase()+'compra'.slice(1)}('${c._id}',${i})">Anular pago</button>`}</span></div>`).join('')
     : '<p class="muted">Sin pagos registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
@@ -1422,6 +1422,19 @@ async function confirmarPago(id){
   }
 }
 
+async function anularPagoCompra(id, idx){
+  if (!confirm('¿Anular este pago? Se revierte la salida de caja/banco y el saldo vuelve a quedar pendiente. Queda registrado como anulado (no se borra).')) return;
+  const motivo = prompt('Motivo de la anulación (opcional):', '');
+  if (motivo === null) return;
+  try{
+    const r = await fetchUnico(BASE + '/' + id + '/pagos/' + idx + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarCompras();
+    verDetalle(id);
+  }catch(e){ alert(e.message); }
+}
+
 async function anularCompra(id){
   const c = comprasCache.find(x => x._id === id);
   const motivo = prompt('¿Por qué se anula esta compra? (opcional)') || '';
@@ -1502,8 +1515,8 @@ async function cargarPagos(){
   pagosCache = await r.json();
   if (!pagosCache.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No hay pagos registrados todavía.</td></tr>'; return; }
   body.innerHTML = pagosCache.map(p => `
-    <tr>
-      <td class="muted">${fechaCorta(p.fecha)}</td>
+    <tr${p.anulado?' style="opacity:.55;text-decoration:line-through;"':''}>
+      <td class="muted">${fechaCorta(p.fecha)}${p.anulado?' <b style="color:#b91c1c;text-decoration:none;display:inline-block;">ANULADO</b>':''}</td>
       <td>${linkProveedor(p.proveedorId, p.proveedorNombre)}</td>
       <td>${p.importado ? '<span class="muted" title="Historial de Dux (sin forma de pago)">Dux</span>' : (TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor)}</td>
       <td>${money(p.monto)}</td>

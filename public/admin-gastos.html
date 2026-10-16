@@ -758,7 +758,7 @@ function verDetalle(id){
     </tr>
   `).join('');
   const filasPagos = (g.pagos||[]).length
-    ? g.pagos.map(p => `<div class="detalle-pago"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}</span><span>${money(p.monto)}</span></div>`).join('')
+    ? g.pagos.map((p,i) => `<div class="detalle-pago" style="${p.anulado?'opacity:.55;text-decoration:line-through;':''}"><span>${TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor} — ${fechaHora(p.fecha)}${p.nota?' ('+escapeHtml(p.nota)+')':''}${p.anulado?' <b style="text-decoration:none;display:inline-block;color:#b91c1c;">ANULADO</b>':''}</span><span>${money(p.monto)}${p.anulado||g.estado==='anulada'?'':` <button type="button" class="btn-sec" style="margin-left:8px;padding:2px 8px;font-size:12px;" onclick="anularPago${'gasto'.charAt(0).toUpperCase()+'gasto'.slice(1)}('${g._id}',${i})">Anular pago</button>`}</span></div>`).join('')
     : '<p class="muted">Sin pagos registrados.</p>';
 
   document.getElementById('modalRoot').innerHTML = `
@@ -961,6 +961,19 @@ async function confirmarPago(id){
   }catch(e){
     document.getElementById('npErr').textContent = e.message;
   }
+}
+
+async function anularPagoGasto(id, idx){
+  if (!confirm('¿Anular este pago? Se revierte la salida de caja/banco y el saldo vuelve a quedar pendiente. Queda registrado como anulado (no se borra).')) return;
+  const motivo = prompt('Motivo de la anulación (opcional):', '');
+  if (motivo === null) return;
+  try{
+    const r = await fetchUnico(BASE + '/' + id + '/pagos/' + idx + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarGastos();
+    verDetalle(id);
+  }catch(e){ alert(e.message); }
 }
 
 async function anularGasto(id){

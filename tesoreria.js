@@ -236,6 +236,33 @@ async function aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, mo
 router.aplicarMovimientoCuenta = aplicarMovimientoCuenta;
 router.cuentaHabilitada = cuentaHabilitada;
 
+// Anular un pago hecho desde otro módulo (Sueldos, Compras, Gastos): deshace la salida de caja/banco con un movimiento inverso (nada se borra)
+// y marca el original como anulado. Si el pago guardó el id del movimiento se usa ese; si es un pago viejo se busca por cuenta/monto/motivo.
+async function revertirEgresoPago(db, req, { movimientoId, cuentaTipo, cuentaId, monto, origen, motivo, fecha, motivoAnulacion }) {
+  let mov = null;
+  if (movimientoId) mov = await db.collection('tesoreria_movimientos').findOne({ _id: movimientoId });
+  if (!mov && cuentaId) {
+    const q = { cuentaTipo, cuentaId, monto, tipo: 'egreso', origen, anulado: { $ne: true }, reversaDe: { $exists: false } };
+    if (motivo) q.motivo = motivo;
+    const cand = await db.collection('tesoreria_movimientos').find(q).sort({ createdAt: -1 }).limit(20).toArray();
+    const t = fecha ? new Date(fecha).getTime() : null;
+    mov = (t && cand.find(x => new Date(x.fecha).getTime() === t)) || cand[0] || null;
+  }
+  if (mov && mov.anulado) throw err(400, 'El movimiento de caja de este pago ya estaba anulado.');
+  const reversa = await aplicarMovimientoCuenta(db, Object.assign({}, req, { orgId: (mov && mov.orgId) || req.orgId }), {
+    cuentaTipo, cuentaId, tipo: 'ingreso', monto, moneda: mov ? mov.moneda : undefined,
+    motivo: 'Anulación — ' + ((mov && mov.motivo) || motivo || 'pago'), observaciones: motivoAnulacion || '', origen: 'anulacion_pago', fecha: new Date()
+  });
+  if (mov) {
+    await db.collection('tesoreria_movimientos').updateOne({ _id: reversa._id }, { $set: { reversaDe: mov._id } });
+    await db.collection('tesoreria_movimientos').updateOne({ _id: mov._id }, { $set: { anulado: true, anuladoEn: new Date(), anuladoPor: (req.usuario && req.usuario.nombre) || '', anuladoMotivo: motivoAnulacion || '', reversaId: reversa._id } });
+  } else {
+    await db.collection('tesoreria_movimientos').updateOne({ _id: reversa._id }, { $set: { reversaDe: 'pago_sin_vinculo' } });
+  }
+  return reversa;
+}
+router.revertirEgresoPago = revertirEgresoPago;
+
 // -----------------------------------------------------------------------
 // Tarjetas y planes (13/10/2026, pedido de Mato): cada tarjeta tiene planes (contado, 3 cuotas, 6 cuotas…) con su costo (lo que
 // descuenta el procesador/banco al acreditar, IVA incluido) y, si se quiere, un recargo para el cliente. Al cobrar con tarjeta se
@@ -979,11 +1006,11 @@ const GUIA_ANULACION_MOV = {
   venta: 'Nació de una venta: se corrige desde la venta / Cobranza, no desde la caja.',
   cheque: 'Es un movimiento de un cheque: se deshace desde Cheques.',
   transferencia: 'Es una transferencia entre cuentas (tiene dos movimientos): corregila registrando la transferencia inversa, o reabriendo el cierre si vino de un cierre de caja.',
-  compra: 'Es un pago de una compra. Todavía no existe "Anular pago" en Compras, y anularlo solo acá dejaría la compra como pagada: no se puede anular sin dejar datos inconsistentes.',
-  gasto: 'Es un pago de un gasto. Todavía no existe "Anular pago" en Gastos, y anularlo solo acá dejaría el gasto como pagado: no se puede anular sin dejar datos inconsistentes.',
-  sueldo: 'Es un pago de sueldo: todavía no se puede anular un pago de liquidación (sí un adelanto, desde Sueldos → Adelantos).',
-  sueldos: 'Es un pago de sueldo: todavía no se puede anular un pago de liquidación (sí un adelanto, desde Sueldos → Adelantos).',
-  sueldo_colocador: 'Es un pago a un colocador: todavía no se puede anular un pago de liquidación de colocadores.',
+  compra: 'Es un pago de una compra: anulalo desde Compras (abrí la compra y usá "Anular pago"), así la compra vuelve a quedar con saldo pendiente.',
+  gasto: 'Es un pago de un gasto: anulalo desde Gastos (abrí el gasto y usá "Anular pago"), así el gasto vuelve a quedar con saldo pendiente.',
+  sueldo: 'Es un pago de sueldo: anulalo desde Sueldos → Liquidaciones (botón "Anular" en el pago), así la liquidación vuelve a quedar pendiente.',
+  sueldos: 'Es un pago de sueldo: anulalo desde Sueldos → Liquidaciones (botón "Anular" en el pago), así la liquidación vuelve a quedar pendiente.',
+  sueldo_colocador: 'Es un pago a un colocador: anulalo desde Sueldos → Colocadores (botón "Anular" en el pago).',
   sueldo_adelanto: 'Es un adelanto de sueldo: se anula desde Sueldos → Adelantos.',
   financiera: 'Nació de Financiera: se anula desde allí (anular el pago o la operación).',
   prestamo: 'Nació de un préstamo: se anula desde Financiera (anular la liquidación del préstamo).'

@@ -244,8 +244,8 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
         db.collection('proveedores_saldos_iniciales').aggregate([{ $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
         db.collection('compras').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
         db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
-        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, fo) }, { $unwind: '$pagos' }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray(),
-        db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, fo) }, { $unwind: '$pagos' }, { $match: { 'pagos.anulado': { $ne: true } } }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray(),
+        db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true }, anulado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
         db.collection('proveedores_ajustes').aggregate([{ $match: fo }, { $group: { _id: '$proveedorId', t: { $sum: { $cond: [{ $eq: ['$tipo', 'debito'] }, '$monto', { $multiply: ['$monto', -1] }] } } } }]).toArray()
       ]);
       iniciales.forEach(x => suma(x._id, x.t)); compras.forEach(x => suma(x._id, x.t)); gastos.forEach(x => suma(x._id, x.t));
@@ -538,7 +538,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       const [compras, gastos, pagosCompra, saldosIni, ajustes] = await Promise.all([
         db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
         db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
-        db.collection('compras_pagos').find(Object.assign({ proveedorId: id }, fOrg)).toArray(),
+        db.collection('compras_pagos').find(Object.assign({ proveedorId: id, anulado: { $ne: true } }, fOrg)).toArray(),
         db.collection('proveedores_saldos_iniciales').find({ proveedorId: id }).toArray(),
         db.collection('proveedores_ajustes').find(Object.assign({ proveedorId: id }, fOrg)).toArray()
       ]);
@@ -580,7 +580,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
           totalPagado: g.totalPagado, saldoPendiente: g.saldoPendiente
         });
-        for (const p of (g.pagos || [])) {
+        for (const p of (g.pagos || []).filter(x => !x.anulado)) {
           movimientos.push({
             tipo: 'credito', monto: p.monto, fecha: p.fecha,
             concepto: `Pago — ${nombreComprobante(g) || 'Gasto #' + g.numero}`, origen: 'pago_gasto',
