@@ -794,15 +794,20 @@ async function cargarMovimientosCuenta(cuenta){
       <td style="text-decoration:none">${botonAnularMov(m)}</td>
     </tr>`).join('');
 }
-const ORIGEN_ANULABLE_MOV = ['manual','venta','compra','gasto','sueldo','sueldos','sueldo_colocador','sueldo_adelanto','financiera','prestamo'];
+// Solo los movimientos manuales se anulan desde acá; el resto se anula desde el módulo de origen (si no, quedan datos inconsistentes).
+let GUIA_ANUL_MOV = {};
+fetch(BASE + '/guia-anulacion', {headers: headersAuth()}).then(r => r.ok ? r.json() : {}).then(g => { GUIA_ANUL_MOV = g || {}; }).catch(() => {});
 function botonAnularMov(m){
   if (m.anulado) return '<span class="pill" title="' + escapeHtml(m.anuladoMotivo || '') + '">Anulado</span>';
-  if (m.reversaDe || !ORIGEN_ANULABLE_MOV.includes(m.origen || 'manual')) return '';
-  return '<button class="btn small secondary" onclick="anularMovimiento(\'' + m._id + '\',\'' + (m.origen || 'manual') + '\')">Anular</button>';
+  if (m.reversaDe || m.importado) return '';
+  const origen = m.origen || 'manual';
+  if (origen === 'manual') return '<button class="btn small secondary" onclick="anularMovimiento(\'' + m._id + '\')">Anular</button>';
+  if (origen.indexOf('anulacion') === 0) return '';
+  const guia = GUIA_ANUL_MOV[origen] || 'Nació en otro módulo: se anula desde allí, no desde la caja.';
+  return '<span class="muted" style="cursor:help;text-decoration:none" title="' + escapeHtml(guia) + '" onclick="alert(this.title)">ⓘ Desde su origen</span>';
 }
-async function anularMovimiento(id, origen){
-  const aviso = origen && origen !== 'manual' ? '\n\nOJO: este movimiento viene de un comprobante (' + (ORIGEN_LABEL_MOV[origen] || origen) + '). Anularlo corrige solo la caja/banco; el comprobante de origen no cambia.' : '';
-  if (!confirm('¿Anular este movimiento? Se registra el movimiento inverso y el saldo vuelve a lo que era. No se borra nada.' + aviso)) return;
+async function anularMovimiento(id){
+  if (!confirm('¿Anular este movimiento? Se registra el movimiento inverso y el saldo vuelve a lo que era. No se borra nada.')) return;
   const motivo = prompt('Motivo de la anulación (opcional):', '') || '';
   const r = await fetch(BASE + '/movimientos/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
   const d = await r.json().catch(() => ({}));

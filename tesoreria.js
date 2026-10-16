@@ -969,10 +969,26 @@ router.post('/movimientos', authOperar, async (req, res) => {
 
 // Anular un movimiento de caja/banco cargado por error o repetido (16/10/2026, pedido de Mato). No se borra nada: el movimiento queda marcado
 // como anulado y se registra el movimiento inverso, así el saldo vuelve a lo correcto y queda el rastro de qué pasó.
-//  - Manuales: los puede anular cualquiera con acceso a la cuenta.
-//  - Los que vienen de una venta, compra, gasto, sueldo, etc.: solo un administrador, y OJO que solo se corrige la caja (el comprobante de origen no cambia).
-//  - No se anulan desde acá: transferencias, cheques y cobranzas (tienen su propia anulación, para no dejar los saldos desparejos), ni los ya anulados.
-const ORIGEN_ANULABLE_ADMIN = ['venta', 'compra', 'gasto', 'sueldo', 'sueldos', 'sueldo_colocador', 'sueldo_adelanto', 'financiera', 'prestamo'];
+// SOLO los movimientos MANUALES se pueden anular desde acá (16/10/2026, pedido de Mato: "lo que no se pueda anular, que no me permita hacerlo,
+// porque nos va a quedar inconsistente"). Cualquier movimiento que nació de otro comprobante (cobro, compra, gasto, sueldo, cheque, etc.)
+// tiene su dato en otro lado (cuenta corriente, saldo de la venta, estado del cheque…): anularlo solo en la caja los dejaría desparejados,
+// así que se bloquea y se indica desde dónde corresponde anularlo (GUIA_ANULACION_MOV, que usa también la pantalla).
+const GUIA_ANULACION_MOV = {
+  cobro_venta: 'Es el cobro de un cliente: anulalo desde Cobranza (así también se corrige la cuenta corriente y la venta).',
+  cobro_cuenta: 'Es el cobro de un cliente: anulalo desde Cobranza (así también se corrige la cuenta corriente).',
+  venta: 'Nació de una venta: se corrige desde la venta / Cobranza, no desde la caja.',
+  cheque: 'Es un movimiento de un cheque: se deshace desde Cheques.',
+  transferencia: 'Es una transferencia entre cuentas (tiene dos movimientos): corregila registrando la transferencia inversa, o reabriendo el cierre si vino de un cierre de caja.',
+  compra: 'Es un pago de una compra. Todavía no existe "Anular pago" en Compras, y anularlo solo acá dejaría la compra como pagada: no se puede anular sin dejar datos inconsistentes.',
+  gasto: 'Es un pago de un gasto. Todavía no existe "Anular pago" en Gastos, y anularlo solo acá dejaría el gasto como pagado: no se puede anular sin dejar datos inconsistentes.',
+  sueldo: 'Es un pago de sueldo: todavía no se puede anular un pago de liquidación (sí un adelanto, desde Sueldos → Adelantos).',
+  sueldos: 'Es un pago de sueldo: todavía no se puede anular un pago de liquidación (sí un adelanto, desde Sueldos → Adelantos).',
+  sueldo_colocador: 'Es un pago a un colocador: todavía no se puede anular un pago de liquidación de colocadores.',
+  sueldo_adelanto: 'Es un adelanto de sueldo: se anula desde Sueldos → Adelantos.',
+  financiera: 'Nació de Financiera: se anula desde allí (anular el pago o la operación).',
+  prestamo: 'Nació de un préstamo: se anula desde Financiera (anular la liquidación del préstamo).'
+};
+router.get('/guia-anulacion', authOperar, (req, res) => res.json(GUIA_ANULACION_MOV));
 router.post('/movimientos/:id/anular', authOperar, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -987,13 +1003,7 @@ router.post('/movimientos/:id/anular', authOperar, async (req, res) => {
       if (mov.reversaDe) throw err(400, 'Este movimiento es una anulación de otro: no se puede anular.');
       if (mov.importado) throw err(400, 'Es un movimiento histórico importado de Dux: no se puede anular desde acá.');
       const origen = mov.origen || 'manual';
-      if (origen === 'cobro_cuenta' || origen === 'cobro_venta') throw err(400, 'Es el cobro de un cliente: anulalo desde Cobranza (así también se corrige la cuenta corriente y la venta).');
-      if (origen === 'cheque') throw err(400, 'Es un movimiento de un cheque: deshacelo desde Cheques.');
-      if (origen === 'transferencia') throw err(400, 'Es una transferencia entre cuentas (tiene dos movimientos): para corregirla registrá la transferencia inversa.');
-      if (origen.indexOf('anulacion') === 0 || origen === 'sueldo_adelanto_anulado') throw err(400, 'Este movimiento ya es una anulación.');
-      const esAdmin = !!(req.usuario && req.usuario.rol && req.usuario.rol.protegido);
-      if (origen !== 'manual' && !ORIGEN_ANULABLE_ADMIN.includes(origen)) throw err(400, 'Este tipo de movimiento no se puede anular desde acá.');
-      if (origen !== 'manual' && !esAdmin) throw err(403, 'Este movimiento viene de otro comprobante: solo un administrador puede anularlo.');
+      if (origen !== 'manual') throw err(400, GUIA_ANULACION_MOV[origen] || 'Este movimiento nació en otro módulo: se anula desde allí, no desde la caja (quedaría inconsistente).');
       const reqOrg = Object.assign({}, req, { orgId: mov.orgId || req.orgId });
       const reversa = await aplicarMovimientoCuenta(db, reqOrg, {
         cuentaTipo: mov.cuentaTipo, cuentaId: mov.cuentaId, tipo: mov.tipo === 'ingreso' ? 'egreso' : 'ingreso', monto: mov.monto, moneda: mov.moneda,
