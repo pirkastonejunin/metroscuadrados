@@ -917,6 +917,22 @@ router.post('/colocador/obras/:obraId/estado', authColocadorOAdmin, async (req, 
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
+// Fotos en Cloudinary (16/10/2026): en vez de guardar la imagen dentro de la base, el navegador la sube directo a Cloudinary con
+// una firma de este servidor y acá solo se guarda el link (en el mismo campo `data`, así el resto de las pantallas no cambia).
+// Variables de entorno: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET.
+function cloudinaryConfig() {
+  const c = { cloudName: process.env.CLOUDINARY_CLOUD_NAME, apiKey: process.env.CLOUDINARY_API_KEY, apiSecret: process.env.CLOUDINARY_API_SECRET };
+  return (c.cloudName && c.apiKey && c.apiSecret) ? c : null;
+}
+router.get('/colocador/fotos/firma', authColocadorOAdmin, (req, res) => {
+  const c = cloudinaryConfig();
+  if (!c) return res.json({ habilitado: false });
+  const timestamp = Math.floor(Date.now() / 1000);
+  const folder = 'piedranegra/obras';
+  const signature = crypto.createHash('sha1').update('folder=' + folder + '&timestamp=' + timestamp + c.apiSecret).digest('hex');
+  res.json({ habilitado: true, cloudName: c.cloudName, apiKey: c.apiKey, timestamp, folder, signature });
+});
+
 // Fotos del trabajo terminado, sacadas por el colocador — quedan en el mismo
 // arreglo obra.fotos que las "antes" heredadas de la visita (sacadas por el
 // vendedor), etiquetadas con origen para poder separarlas en el panel.
@@ -926,8 +942,10 @@ router.post('/colocador/obras/:obraId/fotos', authColocadorOAdmin, async (req, r
     if (!obraId) return res.status(400).json({ error: 'id inválido' });
     const { fotos } = req.body || {};
     if (!Array.isArray(fotos) || !fotos.length) return res.status(400).json({ error: 'No llegaron fotos' });
+    const cl = cloudinaryConfig();
+    const prefijoCl = cl ? 'https://res.cloudinary.com/' + cl.cloudName + '/' : null;
     const nuevas = fotos
-      .filter(f => typeof f === 'string' && f.indexOf('data:image/') === 0)
+      .filter(f => typeof f === 'string' && (f.indexOf('data:image/') === 0 || (prefijoCl && f.indexOf(prefijoCl) === 0)))
       .map(f => ({ data: f, fecha: new Date(), origen: 'colocador', colocadorNombre: req.esAdminObras ? 'Oficina' : req.colocador.nombre }));
     if (!nuevas.length) return res.status(400).json({ error: 'Formato de foto inválido' });
 

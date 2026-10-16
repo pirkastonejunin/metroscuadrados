@@ -460,17 +460,17 @@ async function guardarObraNueva(){
 }
 
 // Las fotos del celular pesan varios MB: se achican (lado mayor 1280 px, JPEG) antes de subir, para que entren en el límite del servidor y de la base.
-function comprimirFoto(file){
+function comprimirFoto(file, max, calidad){
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const max = 1280, esc = Math.min(1, max / Math.max(img.width, img.height));
+      max = max || 1280; const esc = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement('canvas');
       c.width = Math.round(img.width * esc); c.height = Math.round(img.height * esc);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
-      resolve(c.toDataURL('image/jpeg', 0.72));
+      resolve(c.toDataURL('image/jpeg', calidad || 0.72));
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer una de las fotos')); };
     img.src = url;
@@ -479,12 +479,31 @@ function comprimirFoto(file){
 function leerFotoComoDataURL(file){
   return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
 }
+// Subida de fotos: si Cloudinary está configurado se suben directo allá (original, hasta ~9 MB; si pesa más se achica) y se guarda solo el link;
+// si no, se achican y viajan como antes.
+async function fotosParaSubir(files, apiFn){
+  let firma = null;
+  try { firma = await apiFn('/colocador/fotos/firma'); } catch (e) {}
+  if (!firma || !firma.habilitado) return Promise.all([...files].map(comprimirFoto));
+  return Promise.all([...files].map(async f => {
+    let blob = f;
+    if (f.size > 9 * 1024 * 1024) { blob = await (await fetch(await comprimirFoto(f, 2560, 0.9))).blob(); }
+    const fd = new FormData();
+    fd.append('file', blob); fd.append('api_key', firma.apiKey); fd.append('timestamp', firma.timestamp); fd.append('folder', firma.folder); fd.append('signature', firma.signature);
+    const r = await fetch('https://api.cloudinary.com/v1_1/' + firma.cloudName + '/image/upload', {method:'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok || !d.secure_url) throw new Error((d.error && d.error.message) || 'No se pudo subir una foto');
+    return d.secure_url;
+  }));
+}
+// Miniatura liviana para las galerías (las fotos de Cloudinary se entregan achicadas; al tocar se abre el original).
+function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
 async function subirFotosAdmin(obraId){
   const input = document.getElementById('inputFotosAdmin'), err = document.getElementById('fotoAdminErr');
   err.textContent = '';
   if (!input.files.length){ err.textContent = 'Elegí al menos una foto'; return; }
   try{
-    const fotos = await Promise.all([...input.files].map(comprimirFoto));
+    const fotos = await fotosParaSubir(input.files, path => api(path));
     await api('/colocador/obras/' + obraId + '/fotos', {method:'POST', body:{fotos}});
     await abrirObra(obraId);
   }catch(e){ err.textContent = e.message; }
@@ -587,7 +606,7 @@ async function abrirObra(id){
 
   const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
   const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
-  const galeria = fotos => `<div class="foto-galeria">${fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`;
+  const galeria = fotos => `<div class="foto-galeria">${fotos.map(f=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`;
   const fotosHtml = (fotosAntes.length || fotosDespues.length) ? `
     ${fotosAntes.length ? `<div style="margin-top:8px"><label>Fotos antes (vendedor)</label>${galeria(fotosAntes)}</div>` : ''}
     ${fotosDespues.length ? `<div style="margin-top:8px"><label>Fotos después (colocador)</label>${galeria(fotosDespues)}</div>` : ''}
