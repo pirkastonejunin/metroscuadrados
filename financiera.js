@@ -369,6 +369,8 @@ const CONCEPTO_INTERES = 'Gastos financieros · Intereses de préstamos';
 // Lectura de facturas con IA (la misma de Gastos): para completar la liquidación desde el PDF que manda el acreedor.
 registrarRutasFacturaIA(router, { modo: 'gastos', authAdmin: authOperar, getDb, conReintento, filtroOrg });
 
+// Una fecha sin hora (AAAA-MM-DD) se guarda al mediodía de Argentina: a medianoche UTC los reportes (Libro IVA, Estado de resultados) la leen como el día anterior.
+const mediodiaAR = f => (/^\d{4}-\d{2}-\d{2}$/.test(txt(f)) ? txt(f) + 'T12:00:00-03:00' : f);
 function periodoDe(fecha) { const x = new Date(new Date(fecha).getTime() - 3 * 3600 * 1000); return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}`; }
 function resumenPrestamo(p, liqs) {
   const vig = liqs.filter(l => !l.anulada);
@@ -546,7 +548,7 @@ router.post('/prestamos/:id/liquidaciones', authOperar, async (req, res) => {
       if (interesNeto > 0) {
         gasto = await gastosRouter.crearGastoDesdeBody(req, {
           proveedorId: prestamo.proveedorId, tipoComprobante: txt(b.tipoComprobante) || 'factura_a', puntoVenta: b.puntoVenta, comprobanteNumero: b.comprobanteNumero,
-          fecha: b.fechaComprobante || b.fecha, moneda: 'ARS', observaciones: `Préstamo "${prestamo.nombre}" · intereses ${periodo}`,
+          fecha: mediodiaAR(b.fechaComprobante || b.fecha), moneda: 'ARS', observaciones: `Préstamo "${prestamo.nombre}" · intereses ${periodo}`,
           items: [{ conceptoNombre: CONCEPTO_INTERES, cantidad: 1, precioUnitario: interesNeto, alicuotaIva, observaciones: `${prestamo.nombre} · ${periodo}` }]
         });
       }
