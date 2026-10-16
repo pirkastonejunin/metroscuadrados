@@ -923,8 +923,8 @@ router.get('/movimientos-cuenta', authOperar, async (req, res) => {
       todos.forEach(m => { acum = r2(acum + delta(m)); m.saldo = acum; });
       // posibles repetidos
       const porClave = new Map();
-      todos.forEach(m => { const k = `${m.tipo}|${m.monto}|${m.motivo || ''}`; (porClave.get(k) || porClave.set(k, []).get(k)).push(m); });
-      porClave.forEach(lista => lista.forEach(m => { m.posibleDuplicado = lista.some(o => o !== m && Math.abs(new Date(o.createdAt || o.fecha) - new Date(m.createdAt || m.fecha)) < 120000); }));
+      todos.filter(m => !m.anulado && !m.reversaDe).forEach(m => { const k = `${m.tipo}|${m.monto}|${m.motivo || ''}`; (porClave.get(k) || porClave.set(k, []).get(k)).push(m); });
+      porClave.forEach(lista => lista.forEach(m => { m.posibleDuplicado = !m.anulado && !m.reversaDe && lista.some(o => o !== m && Math.abs(new Date(o.createdAt || o.fecha) - new Date(m.createdAt || m.fecha)) < 120000); }));
       const enRango = m => (!desde || m.fecha >= desde) && (!hasta || m.fecha <= hasta);
       const incluidos = todos.filter(enRango);
       const antes = desde ? todos.filter(m => m.fecha < desde) : [];
@@ -961,6 +961,46 @@ router.post('/movimientos', authOperar, async (req, res) => {
     const resultado = await conReintento(async () => {
       const db = await getDb();
       await aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, monto, motivo, observaciones, origen: 'manual', fecha });
+      return { ok: true };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Anular un movimiento de caja/banco cargado por error o repetido (16/10/2026, pedido de Mato). No se borra nada: el movimiento queda marcado
+// como anulado y se registra el movimiento inverso, así el saldo vuelve a lo correcto y queda el rastro de qué pasó.
+//  - Manuales: los puede anular cualquiera con acceso a la cuenta.
+//  - Los que vienen de una venta, compra, gasto, sueldo, etc.: solo un administrador, y OJO que solo se corrige la caja (el comprobante de origen no cambia).
+//  - No se anulan desde acá: transferencias, cheques y cobranzas (tienen su propia anulación, para no dejar los saldos desparejos), ni los ya anulados.
+const ORIGEN_ANULABLE_ADMIN = ['venta', 'compra', 'gasto', 'sueldo', 'sueldos', 'sueldo_colocador', 'sueldo_adelanto', 'financiera', 'prestamo'];
+router.post('/movimientos/:id/anular', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const motivo = normalizarTexto(req.body && req.body.motivo);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const mov = await db.collection('tesoreria_movimientos').findOne({ _id: id });
+      if (!mov) throw err(404, 'Movimiento no encontrado');
+      if (req.orgId && mov.orgId && String(req.orgId) !== String(mov.orgId)) throw err(404, 'Movimiento no encontrado');
+      if (mov.anulado) throw err(400, 'Este movimiento ya está anulado.');
+      if (mov.reversaDe) throw err(400, 'Este movimiento es una anulación de otro: no se puede anular.');
+      if (mov.importado) throw err(400, 'Es un movimiento histórico importado de Dux: no se puede anular desde acá.');
+      const origen = mov.origen || 'manual';
+      if (origen === 'cobro_cuenta' || origen === 'cobro_venta') throw err(400, 'Es el cobro de un cliente: anulalo desde Cobranza (así también se corrige la cuenta corriente y la venta).');
+      if (origen === 'cheque') throw err(400, 'Es un movimiento de un cheque: deshacelo desde Cheques.');
+      if (origen === 'transferencia') throw err(400, 'Es una transferencia entre cuentas (tiene dos movimientos): para corregirla registrá la transferencia inversa.');
+      if (origen.indexOf('anulacion') === 0 || origen === 'sueldo_adelanto_anulado') throw err(400, 'Este movimiento ya es una anulación.');
+      const esAdmin = !!(req.usuario && req.usuario.rol && req.usuario.rol.protegido);
+      if (origen !== 'manual' && !ORIGEN_ANULABLE_ADMIN.includes(origen)) throw err(400, 'Este tipo de movimiento no se puede anular desde acá.');
+      if (origen !== 'manual' && !esAdmin) throw err(403, 'Este movimiento viene de otro comprobante: solo un administrador puede anularlo.');
+      const reqOrg = Object.assign({}, req, { orgId: mov.orgId || req.orgId });
+      const reversa = await aplicarMovimientoCuenta(db, reqOrg, {
+        cuentaTipo: mov.cuentaTipo, cuentaId: mov.cuentaId, tipo: mov.tipo === 'ingreso' ? 'egreso' : 'ingreso', monto: mov.monto, moneda: mov.moneda,
+        motivo: 'Anulación — ' + (mov.motivo || 'movimiento'), observaciones: motivo, origen: 'anulacion_movimiento', fecha: new Date()
+      });
+      await db.collection('tesoreria_movimientos').updateOne({ _id: reversa._id }, { $set: { reversaDe: mov._id } });
+      await db.collection('tesoreria_movimientos').updateOne({ _id: mov._id }, { $set: { anulado: true, anuladoEn: new Date(), anuladoPor: (req.usuario && req.usuario.nombre) || '', anuladoMotivo: motivo, reversaId: reversa._id } });
       return { ok: true };
     });
     res.json(resultado);

@@ -758,14 +758,14 @@ async function imprimirDocumento(url){
 // -------------------------------------------------------------------
 // MOVIMIENTOS
 // -------------------------------------------------------------------
-const ORIGEN_LABEL_MOV = { manual: 'Manual', venta: 'Venta', compra: 'Compra', gasto: 'Gasto', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta', financiera: 'Financiera', prestamo: 'Préstamo', sueldos: 'Sueldos' };
+const ORIGEN_LABEL_MOV = { manual: 'Manual', venta: 'Venta', compra: 'Compra', gasto: 'Gasto', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta', financiera: 'Financiera', prestamo: 'Préstamo', sueldos: 'Sueldos', anulacion_movimiento: 'Anulación', anulacion_cobro: 'Anulación de cobro' };
 // Una caja/banco elegida: cada movimiento con el saldo que quedó después (saldo parcial), para ir controlando.
 async function cargarMovimientosCuenta(cuenta){
   const [cuentaTipo, cuentaId] = cuenta.split(':');
   const params = new URLSearchParams({ cuentaTipo, cuentaId });
   ['fmTipo:tipo', 'fmDesde:desde', 'fmHasta:hasta'].forEach(p => { const [id, k] = p.split(':'); if (document.getElementById(id).value) params.set(k, document.getElementById(id).value); });
   const body = document.getElementById('movimientosBody'), head = document.getElementById('movHead'), resumen = document.getElementById('movResumen');
-  head.innerHTML = '<tr><th>Fecha</th><th>Tipo</th><th style="text-align:right">Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th style="text-align:right">Saldo</th></tr>';
+  head.innerHTML = '<tr><th>Fecha</th><th>Tipo</th><th style="text-align:right">Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th style="text-align:right">Saldo</th><th></th></tr>';
   const r = await fetch(BASE + '/movimientos-cuenta?' + params.toString(), {headers: headersAuth()});
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { resumen.innerHTML = ''; body.innerHTML = `<tr><td colspan="7" class="err">${escapeHtml(d.error || 'No se pudo cargar.')}</td></tr>`; return; }
@@ -781,9 +781,9 @@ async function cargarMovimientosCuenta(cuenta){
     ${d.duplicados ? `<div class="err" style="margin:0 0 8px">⚠ ${d.duplicados} movimiento(s) parecen repetidos (mismo tipo, monto y motivo con menos de 2 minutos de diferencia). Están marcados abajo: revisalos.</div>` : ''}
     ${Math.abs(d.saldoPrevio) > 0.005 ? `<div class="muted" style="margin-bottom:8px">Antes del primer movimiento registrado la cuenta ya tenía ${moneyMoneda(d.saldoPrevio, mon)} (saldo que no pasó por movimientos).</div>` : ''}
     ${d.truncado ? '<div class="muted" style="margin-bottom:8px">Se muestran los 2000 movimientos más recientes del período; los saldos son los reales.</div>' : ''}`;
-  if (!d.movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos en este período.</td></tr>'; return; }
+  if (!d.movimientos.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay movimientos en este período.</td></tr>'; return; }
   body.innerHTML = d.movimientos.map(m => `
-    <tr${m.posibleDuplicado ? ' style="background:var(--danger-soft,#fbe4e1)"' : ''}>
+    <tr style="${m.anulado ? 'opacity:.55;text-decoration:line-through;' : ''}${m.posibleDuplicado && !m.anulado ? 'background:var(--danger-soft,#fbe4e1)' : ''}">
       <td class="muted">${fechaHora(m.fecha)}</td>
       <td><span class="pill ${m.tipo}">${m.tipo === 'ingreso' ? 'Ingreso' : 'Egreso'}</span></td>
       <td style="text-align:right;white-space:nowrap">${m.tipo === 'egreso' ? '−' : ''}${moneyMoneda(m.monto, mon)}</td>
@@ -791,7 +791,24 @@ async function cargarMovimientosCuenta(cuenta){
       <td class="muted">${ORIGEN_LABEL_MOV[m.origen]||m.origen||''}</td>
       <td class="muted">${escapeHtml(m.usuarioNombre||'')}</td>
       <td style="text-align:right;white-space:nowrap;font-weight:700;${m.saldo < 0 ? 'color:var(--danger,#c53030)' : ''}">${moneyMoneda(m.saldo, mon)}</td>
+      <td style="text-decoration:none">${botonAnularMov(m)}</td>
     </tr>`).join('');
+}
+const ORIGEN_ANULABLE_MOV = ['manual','venta','compra','gasto','sueldo','sueldos','sueldo_colocador','sueldo_adelanto','financiera','prestamo'];
+function botonAnularMov(m){
+  if (m.anulado) return '<span class="pill" title="' + escapeHtml(m.anuladoMotivo || '') + '">Anulado</span>';
+  if (m.reversaDe || !ORIGEN_ANULABLE_MOV.includes(m.origen || 'manual')) return '';
+  return '<button class="btn small secondary" onclick="anularMovimiento(\'' + m._id + '\',\'' + (m.origen || 'manual') + '\')">Anular</button>';
+}
+async function anularMovimiento(id, origen){
+  const aviso = origen && origen !== 'manual' ? '\n\nOJO: este movimiento viene de un comprobante (' + (ORIGEN_LABEL_MOV[origen] || origen) + '). Anularlo corrige solo la caja/banco; el comprobante de origen no cambia.' : '';
+  if (!confirm('¿Anular este movimiento? Se registra el movimiento inverso y el saldo vuelve a lo que era. No se borra nada.' + aviso)) return;
+  const motivo = prompt('Motivo de la anulación (opcional):', '') || '';
+  const r = await fetch(BASE + '/movimientos/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(d.error || 'No se pudo anular'); return; }
+  await cargarMovimientos();
+  if (typeof cargarSaldos === 'function') { try { await cargarSaldos(); } catch (e) {} }
 }
 function verMovimientosCuenta(valor){
   document.getElementById('fmCuenta').value = valor;
@@ -802,7 +819,7 @@ async function cargarMovimientos(){
   const params = new URLSearchParams();
   const cuenta = document.getElementById('fmCuenta').value;
   if (cuenta) return cargarMovimientosCuenta(cuenta);
-  document.getElementById('movHead').innerHTML = '<tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th></tr>';
+  document.getElementById('movHead').innerHTML = '<tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th></th></tr>';
   document.getElementById('movResumen').innerHTML = '';
   if (document.getElementById('fmTipo').value) params.set('tipo', document.getElementById('fmTipo').value);
   if (document.getElementById('fmDesde').value) params.set('desde', document.getElementById('fmDesde').value);
@@ -814,7 +831,7 @@ async function cargarMovimientos(){
   if (!movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos todavía.</td></tr>'; return; }
   const ORIGEN_LABEL = ORIGEN_LABEL_MOV;
   body.innerHTML = movimientos.map(m => `
-    <tr>
+    <tr style="${m.anulado ? 'opacity:.55;text-decoration:line-through' : ''}">
       <td class="muted">${fechaHora(m.fecha)}</td>
       <td>${escapeHtml(m.cuentaNombre)}</td>
       <td><span class="pill ${m.tipo}">${m.tipo === 'ingreso' ? 'Ingreso' : 'Egreso'}</span></td>
@@ -822,6 +839,7 @@ async function cargarMovimientos(){
       <td>${escapeHtml(m.motivo||'')}</td>
       <td class="muted">${ORIGEN_LABEL[m.origen]||m.origen||''}</td>
       <td class="muted">${escapeHtml(m.usuarioNombre||'')}</td>
+      <td style="text-decoration:none">${botonAnularMov(m)}</td>
     </tr>
   `).join('');
 }
