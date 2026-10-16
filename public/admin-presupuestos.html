@@ -1014,7 +1014,11 @@ async function guardarEstadoPresupuesto(id){
     const r = await fetch(BASE + '/' + id + '/estado', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
+    const previo = presupuestosCache.find(x => x._id === id);
+    const recienAprobado = estado === 'aprobado' && !(previo && previo.estado === 'aprobado');
     await cargarPresupuestos();
+    // Al aprobar, se abre directo el formulario de venta con los datos del presupuesto (pedido de Mato 16/10/2026).
+    if (recienAprobado) { convertirEnVenta(id); return; }
     verPresupuesto(id);
   }catch(e){ document.getElementById('vErr').textContent = e.message; }
 }
