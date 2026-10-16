@@ -1097,15 +1097,51 @@ function abrirFichaClienteDesdeVenta(){
 async function cambiarSucursalVenta(){
   const nuevaOrg = document.getElementById('nvSucursal').value;
   if (!nuevaOrg || nuevaOrg === ventaOrgSeleccionada) return;
+  // Se recuerda lo cargado para no perderlo (16/10/2026, pedido de Mato: al duplicar y cambiar de sucursal se borraba el detalle).
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const guardado = {
+    clienteId: val('nvCliente'), observaciones: val('nvObservaciones'), moneda: val('nvMoneda'),
+    descuentoPorcentaje: val('nvDescuentoPorcentaje'), descuentoMonto: val('nvDescuentoMonto'),
+    items: Array.from(document.querySelectorAll('#nvFilasItems .fila-item')).map(f => {
+      const pid = f.querySelector('.producto-id').value;
+      const prod = pid ? productosCache.find(x => String(x._id) === String(pid)) : null;
+      return {
+        sku: prod ? prod.sku : '', nombre: prod ? prod.nombre : f.querySelector('.producto-buscar').value,
+        cantidad: f.querySelector('.cant-unidad').value, precioUnitario: f.querySelector('.campo-precio input').value,
+        descuentoPorcentaje: f.querySelector('.campo-desc input').value, porcentajeIva: f.querySelector('.select-iva').value
+      };
+    }).filter(it => it.nombre)
+  };
   ventaOrgSeleccionada = nuevaOrg;
   await cargarListasBase(nuevaOrg);
   try { const rf = await fetch(BASE + '/fiscal-defaults', {headers: headersAuthOrg(nuevaOrg)}); if (rf.ok) { const d = await rf.json(); fiscalDefVenta = { ivaDefecto: Number(d.ivaDefecto) || 21, preciosIncluyenIvaDefecto: d.preciosIncluyenIvaDefecto !== false }; } } catch(e){}
   productosCache = [];
-  document.getElementById('nvClienteWrap').outerHTML = comboClienteHtml('nv', '', '');
+  const clienteSigue = guardado.clienteId && clientesCache.some(c => String(c._id) === String(guardado.clienteId));
+  document.getElementById('nvClienteWrap').outerHTML = comboClienteHtml('nv', clienteSigue ? guardado.clienteId : '', '');
   document.getElementById('nvDeposito').outerHTML = `<select id="nvDeposito" style="flex:1">${opcionesDepositosVenta()}</select>`;
   document.getElementById('nvListaPrecio').innerHTML = opcionesListasPrecioVenta((listasPrecioCache.find(l=>l.predeterminada)||{})._id);
   document.getElementById('nvFilasItems').innerHTML = '';
-  agregarFilaVenta();
+  // Cada sucursal tiene su catálogo: se busca el mismo producto (por SKU, o por nombre) en la sucursal nueva.
+  const sinProducto = [];
+  for (const it of guardado.items) {
+    let productoId = null;
+    try {
+      const res = await buscarProductosVenta(it.sku || it.nombre);
+      const hit = (res || []).find(x => it.sku ? x.sku === it.sku : x.nombre === it.nombre);
+      if (hit) { agregarAlCacheProductos([hit]); productoId = hit._id; }
+    } catch (e) {}
+    if (!productoId) sinProducto.push(it.nombre);
+    agregarFilaVentaPrefill(Object.assign({}, it, { productoId }));
+  }
+  if (!guardado.items.length) agregarFilaVenta();
+  if (guardado.observaciones) document.getElementById('nvObservaciones').value = guardado.observaciones;
+  if (guardado.descuentoPorcentaje) document.getElementById('nvDescuentoPorcentaje').value = guardado.descuentoPorcentaje;
+  if (guardado.descuentoMonto) document.getElementById('nvDescuentoMonto').value = guardado.descuentoMonto;
+  actualizarTotalesVenta();
+  const avisos = [];
+  if (guardado.clienteId && !clienteSigue) avisos.push('El cliente no existe en esta sucursal: elegilo de nuevo.');
+  if (sinProducto.length) avisos.push('Estos productos no están en esta sucursal, elegilos de nuevo: ' + sinProducto.join(', ') + '.');
+  if (avisos.length) alert(avisos.join('\n'));
 }
 
 // -------------------------------------------------------------------
