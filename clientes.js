@@ -314,7 +314,7 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
   try {
     const saldos = await conReintento(async () => {
       const db = await getDb();
-      const ids = (await db.collection('clientes').find(Object.assign({}, filtroOrgClientes(req))).project({ _id: 1 }).toArray()).map(c => String(c._id));
+      const ids = (await db.collection('clientes').find(Object.assign({}, filtroOrgClientes(req))).project({ _id: 1 }).toArray()).map(c => c._id); // clienteId se guarda como ObjectId
       const docs = await db.collection('cuenta_corriente_saldos').find({ clienteId: { $in: ids } }).toArray();
       const out = {};
       docs.forEach(d => { out[String(d.clienteId)] = Math.round((d.saldo || 0) * 100) / 100; });
