@@ -325,6 +325,16 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
         }
       }
 
+      // ---- Recordatorios propios (campanita → "+"): los pendientes que ya llegaron a su hora ----
+      {
+        const recs = await db.collection('recordatorios')
+          .find(Object.assign({ usuarioId: req.usuario._id, hecho: { $ne: true }, fechaHora: { $lte: ahora } }, filtroOrg(req)))
+          .sort({ fechaHora: 1 }).limit(50).toArray();
+        for (const r of recs) {
+          items.push({ tipo: 'recordatorio', id: String(r._id), titulo: r.titulo, subtitulo: r.nota || 'Recordatorio', fecha: r.fechaHora, etiquetaFecha: 'Era para el' });
+        }
+      }
+
       // ---- Stock bajo mínimo (productos con cantidadMinima cargada) ----
       if (activa('stockBajoMinimo')) {
         const productos = await db.collection('productos_catalogo')
@@ -399,6 +409,54 @@ router.put('/config', authUsuario, resolverOrg, async (req, res) => {
       await db.collection('configuracion').updateOne({ _id: configId(req.orgId) }, { $set: set }, { upsert: true });
     });
     res.json(await leerConfig(req.orgId));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// Recordatorios personales (16/10/2026, pedido de Mato): "+" en la campanita → crea el recordatorio
+// y un evento en el Google Calendar (el del vendedor del usuario si tiene, si no el general).
+// ---------------------------------------------------------------------------
+const googleCalendar = require('./google-calendar');
+const { ObjectId } = require('mongodb');
+function parseFechaHoraLocal(str) {
+  const t = String(str || '').trim();
+  return new Date(/Z$|[+-]\d{2}:\d{2}$/.test(t) ? t : t + '-03:00');
+}
+router.post('/recordatorios', authUsuario, resolverOrg, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const titulo = String(b.titulo || '').trim();
+    if (!titulo) return res.status(400).json({ error: 'Poné un título para el recordatorio.' });
+    const fecha = parseFechaHoraLocal(b.fechaHora);
+    if (isNaN(fecha.getTime())) return res.status(400).json({ error: 'La fecha y hora no son válidas.' });
+    const nota = String(b.nota || '').trim();
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      let calendarId = null;
+      if (req.usuario.vendedorId) {
+        let vid = req.usuario.vendedorId; try { vid = new ObjectId(String(vid)); } catch (e) { /* queda como vino */ }
+        const v = await db.collection('visitas_vendedores').findOne({ _id: vid });
+        calendarId = (v && v.googleCalendarId) || null;
+      }
+      const doc = { orgId: req.orgId || null, usuarioId: req.usuario._id, usuarioNombre: req.usuario.nombre || '', titulo, nota, fechaHora: fecha, hecho: false, googleEventId: null, calendarId, createdAt: new Date() };
+      doc.googleEventId = await googleCalendar.upsertEvento(null, { titulo: '🔔 ' + titulo, descripcion: nota, inicio: fecha, fin: new Date(fecha.getTime() + 30 * 60000) }, calendarId);
+      const r = await db.collection('recordatorios').insertOne(doc);
+      return { id: String(r.insertedId), enCalendario: !!doc.googleEventId, calendarioConectado: googleCalendar.habilitado() };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/recordatorios/:id/hecho', authUsuario, resolverOrg, async (req, res) => {
+  try {
+    let id; try { id = new ObjectId(req.params.id); } catch (e) { return res.status(400).json({ error: 'id inválido' }); }
+    await conReintento(async () => {
+      const db = await getDb();
+      const r = await db.collection('recordatorios').findOneAndUpdate({ _id: id, usuarioId: req.usuario._id }, { $set: { hecho: true, hechoEn: new Date() } });
+      const doc = r && (r.value !== undefined ? r.value : r);
+      if (doc && doc.googleEventId) await googleCalendar.eliminarEvento(doc.googleEventId, doc.calendarId || null);
+    });
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
