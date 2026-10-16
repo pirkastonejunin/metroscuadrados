@@ -305,6 +305,7 @@ async function iniciarApp(){
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   await cargarVentas();
   abrirVentaDesdePresupuestoSiCorresponde();
+  retomarDuplicadoSiCorresponde();
   abrirVentaPorParametro();
   { const pre = new URLSearchParams(location.search).get('vender'); // enlace desde la cuenta corriente del cliente
     if (pre) { history.replaceState(null, '', location.pathname); abrirNuevaVenta({ clienteId: pre }); } }
@@ -346,7 +347,7 @@ function abrirVentaDesdePresupuestoSiCorresponde(){
   });
 }
 
-function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+function cerrarModal(){ duplicadoEnCurso = null; document.getElementById('modalRoot').innerHTML = ''; }
 
 // -------------------------------------------------------------------
 // Clientes, productos y depósitos — se cargan una sola vez al entrar
@@ -941,11 +942,22 @@ async function abrirNuevaVenta(prefill){
 
 // Duplicar una factura / comprobante (15/10/2026): abre "Nueva venta" con los mismos datos (cliente, ítems con su
 // descuento e IVA, descuentos generales, observaciones) para revisarlos y guardar como un comprobante nuevo.
+// Si en medio de duplicar se cambia la sucursal de arriba, la página se recarga y el formulario se perdía (16/10/2026):
+// se guarda lo que se estaba duplicando y se vuelve a abrir al recargar.
+let duplicadoEnCurso = null;
+window.addEventListener('pagehide', () => {
+  try { if (duplicadoEnCurso && document.getElementById('nvTipoComprobante')) sessionStorage.setItem('venta_duplicar_prefill', JSON.stringify(duplicadoEnCurso)); } catch (e) {}
+});
+function retomarDuplicadoSiCorresponde(){
+  let datos = null;
+  try { const crudo = sessionStorage.getItem('venta_duplicar_prefill'); sessionStorage.removeItem('venta_duplicar_prefill'); if (crudo) datos = JSON.parse(crudo); } catch (e) { return; }
+  if (datos) { duplicadoEnCurso = datos; abrirNuevaVenta(datos); }
+}
 function duplicarVenta(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
   cerrarModal();
-  abrirNuevaVenta({
+  duplicadoEnCurso = {
     duplicaDe: v._id,
     tipoComprobante: v.tipoComprobante === 'fiscal' ? 'fiscal' : 'comprobante_x',
     clienteId: v.clienteId,
@@ -955,7 +967,8 @@ function duplicarVenta(id){
     descuentoMonto: v.descuentoMonto || 0,
     listaPrecioId: v.listaPrecioId || '',
     items: (v.items || []).map(it => ({ productoId: it.productoId || null, nombre: it.nombre, cantidad: it.cantidad, precioUnitario: it.precioUnitario, descuentoPorcentaje: it.descuentoPorcentaje || 0, porcentajeIva: it.porcentajeIva }))
-  });
+  };
+  abrirNuevaVenta(duplicadoEnCurso);
 }
 
 // El depósito es obligatorio SOLO con entrega inmediata (3/10/2026,
