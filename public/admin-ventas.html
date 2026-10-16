@@ -225,6 +225,9 @@ function headersAuthOrg(orgId, extra){
   return h;
 }
 function headersAuthJsonOrg(orgId, extra){ return headersAuthOrg(orgId, Object.assign({'Content-Type':'application/json'}, extra||{})); }
+// Anti doble clic (16/10/2026): mientras un pago está viajando al servidor no se acepta otro igual.
+let _pagoEnCurso = false;
+async function fetchUnico(url, opts){ if (_pagoEnCurso) throw new Error('Ya se está registrando el pago, esperá un momento…'); _pagoEnCurso = true; try{ return await fetch(url, opts); } finally{ _pagoEnCurso = false; } }
 function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fechaCorta(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('es-AR', /T00:00:00(\.000)?Z$/.test(String(iso)) ? {timeZone:'UTC'} : undefined); }
 function fechaHora(iso){ if (!iso) return '—'; const d = new Date(iso); return d.toLocaleString('es-AR'); }
@@ -2139,7 +2142,7 @@ async function confirmarCobro(id){
   };
   const body = valores.length > 1 ? Object.assign({}, comun, { valores }) : Object.assign({}, comun, valores[0]);
   try{
-    const r = await fetch(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const r = await fetchUnico(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarVentas();

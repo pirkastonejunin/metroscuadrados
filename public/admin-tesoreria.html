@@ -204,8 +204,9 @@
         </div>
       </div>
       <div class="card">
+        <div id="movResumen"></div>
         <table>
-          <thead><tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th></tr></thead>
+          <thead id="movHead"><tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th></tr></thead>
           <tbody id="movimientosBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
@@ -345,6 +346,7 @@ async function iniciarApp(){
   const tabPedida = qs.get('tab');
   if (['movimientos','cajadiaria','cheques'].includes(tabPedida)) {
     if (tabPedida === 'cajadiaria') cajaDiariaPendiente = { dia: qs.get('dia'), caja: qs.get('caja') };
+    if (tabPedida === 'movimientos' && qs.get('cuenta')) { const sel = document.getElementById('fmCuenta'); if (sel && [...sel.options].some(o => o.value === qs.get('cuenta'))) sel.value = qs.get('cuenta'); }
     showTab(tabPedida);
   }
 }
@@ -442,14 +444,14 @@ async function cargarSaldos(){
   bancosCache = rb.ok ? await rb.json() : [];
   document.getElementById('saldosCajas').innerHTML = cajasCache.length
     ? cajasCache.map(c => `
-      <div class="saldo-card">
+      <div class="saldo-card" style="cursor:pointer" title="Ver los movimientos y el saldo parcial" onclick="verMovimientosCuenta('caja:${c._id}')">
         <span class="nombre">${escapeHtml(c.nombre)} <span class="muted">(${escapeHtml(c.moneda)})</span></span>
         <span class="monto ${c.saldo<0?'negativo':''}">${money(c.saldo)}</span>
       </div>`).join('')
     : '<p class="muted">No tenés ninguna caja habilitada.</p>';
   document.getElementById('saldosBancos').innerHTML = bancosCache.length
     ? bancosCache.map(b => `
-      <div class="saldo-card">
+      <div class="saldo-card" style="cursor:pointer" title="Ver los movimientos y el saldo parcial" onclick="verMovimientosCuenta('banco:${b._id}')">
         <span class="nombre">${escapeHtml(b.nombre)} <span class="muted">(${escapeHtml(b.banco||'')} — ${escapeHtml(b.moneda)})</span></span>
         <span class="monto ${b.saldo<0?'negativo':''}">${money(b.saldo)}</span>
       </div>`).join('')
@@ -756,14 +758,52 @@ async function imprimirDocumento(url){
 // -------------------------------------------------------------------
 // MOVIMIENTOS
 // -------------------------------------------------------------------
+const ORIGEN_LABEL_MOV = { manual: 'Manual', venta: 'Venta', compra: 'Compra', gasto: 'Gasto', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta', financiera: 'Financiera', prestamo: 'Préstamo', sueldos: 'Sueldos' };
+// Una caja/banco elegida: cada movimiento con el saldo que quedó después (saldo parcial), para ir controlando.
+async function cargarMovimientosCuenta(cuenta){
+  const [cuentaTipo, cuentaId] = cuenta.split(':');
+  const params = new URLSearchParams({ cuentaTipo, cuentaId });
+  ['fmTipo:tipo', 'fmDesde:desde', 'fmHasta:hasta'].forEach(p => { const [id, k] = p.split(':'); if (document.getElementById(id).value) params.set(k, document.getElementById(id).value); });
+  const body = document.getElementById('movimientosBody'), head = document.getElementById('movHead'), resumen = document.getElementById('movResumen');
+  head.innerHTML = '<tr><th>Fecha</th><th>Tipo</th><th style="text-align:right">Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th style="text-align:right">Saldo</th></tr>';
+  const r = await fetch(BASE + '/movimientos-cuenta?' + params.toString(), {headers: headersAuth()});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { resumen.innerHTML = ''; body.innerHTML = `<tr><td colspan="7" class="err">${escapeHtml(d.error || 'No se pudo cargar.')}</td></tr>`; return; }
+  const mon = d.cuenta.moneda;
+  const kpi = (t, v, extra) => `<div style="flex:1;min-width:150px"><div class="muted" style="font-size:12px">${t}</div><strong style="font-size:18px">${v}</strong>${extra ? `<div class="muted" style="font-size:11px">${extra}</div>` : ''}</div>`;
+  resumen.innerHTML = `<div class="row" style="gap:18px;margin-bottom:12px;align-items:flex-start">
+      <div style="flex:1;min-width:150px"><div class="muted" style="font-size:12px">${d.cuenta.tipo === 'caja' ? 'Caja' : 'Banco'}</div><strong style="font-size:18px">${escapeHtml(d.cuenta.nombre)}</strong></div>
+      ${kpi('Saldo inicial', moneyMoneda(d.saldoInicial, mon), 'antes del período')}
+      ${kpi('Ingresos', moneyMoneda(d.ingresos, mon))}
+      ${kpi('Egresos', moneyMoneda(d.egresos, mon))}
+      ${kpi('Saldo final', moneyMoneda(d.saldoFinal, mon), 'saldo actual de la cuenta: ' + moneyMoneda(d.cuenta.saldoActual, mon))}
+    </div>
+    ${d.duplicados ? `<div class="err" style="margin:0 0 8px">⚠ ${d.duplicados} movimiento(s) parecen repetidos (mismo tipo, monto y motivo con menos de 2 minutos de diferencia). Están marcados abajo: revisalos.</div>` : ''}
+    ${Math.abs(d.saldoPrevio) > 0.005 ? `<div class="muted" style="margin-bottom:8px">Antes del primer movimiento registrado la cuenta ya tenía ${moneyMoneda(d.saldoPrevio, mon)} (saldo que no pasó por movimientos).</div>` : ''}
+    ${d.truncado ? '<div class="muted" style="margin-bottom:8px">Se muestran los 2000 movimientos más recientes del período; los saldos son los reales.</div>' : ''}`;
+  if (!d.movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos en este período.</td></tr>'; return; }
+  body.innerHTML = d.movimientos.map(m => `
+    <tr${m.posibleDuplicado ? ' style="background:var(--danger-soft,#fbe4e1)"' : ''}>
+      <td class="muted">${fechaHora(m.fecha)}</td>
+      <td><span class="pill ${m.tipo}">${m.tipo === 'ingreso' ? 'Ingreso' : 'Egreso'}</span></td>
+      <td style="text-align:right;white-space:nowrap">${m.tipo === 'egreso' ? '−' : ''}${moneyMoneda(m.monto, mon)}</td>
+      <td>${escapeHtml(m.motivo||'')}${m.observaciones ? ' <span class="muted">— ' + escapeHtml(m.observaciones) + '</span>' : ''}${m.posibleDuplicado ? ' <span class="pill" style="background:var(--danger-soft,#fbe4e1);color:var(--danger,#c53030)" title="Mismo tipo, monto y motivo hace menos de 2 minutos">⚠ ¿repetido?</span>' : ''}</td>
+      <td class="muted">${ORIGEN_LABEL_MOV[m.origen]||m.origen||''}</td>
+      <td class="muted">${escapeHtml(m.usuarioNombre||'')}</td>
+      <td style="text-align:right;white-space:nowrap;font-weight:700;${m.saldo < 0 ? 'color:var(--danger,#c53030)' : ''}">${moneyMoneda(m.saldo, mon)}</td>
+    </tr>`).join('');
+}
+function verMovimientosCuenta(valor){
+  document.getElementById('fmCuenta').value = valor;
+  document.getElementById('fmDesde').value = ''; document.getElementById('fmHasta').value = ''; document.getElementById('fmTipo').value = '';
+  showTab('movimientos');
+}
 async function cargarMovimientos(){
   const params = new URLSearchParams();
   const cuenta = document.getElementById('fmCuenta').value;
-  if (cuenta) {
-    const [cuentaTipo, cuentaId] = cuenta.split(':');
-    params.set('cuentaTipo', cuentaTipo);
-    params.set('cuentaId', cuentaId);
-  }
+  if (cuenta) return cargarMovimientosCuenta(cuenta);
+  document.getElementById('movHead').innerHTML = '<tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th></tr>';
+  document.getElementById('movResumen').innerHTML = '';
   if (document.getElementById('fmTipo').value) params.set('tipo', document.getElementById('fmTipo').value);
   if (document.getElementById('fmDesde').value) params.set('desde', document.getElementById('fmDesde').value);
   if (document.getElementById('fmHasta').value) params.set('hasta', document.getElementById('fmHasta').value);
@@ -772,7 +812,7 @@ async function cargarMovimientos(){
   if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
   const movimientos = await r.json();
   if (!movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos todavía.</td></tr>'; return; }
-  const ORIGEN_LABEL = { manual: 'Manual', venta: 'Venta', compra: 'Compra', cheque: 'Cheque', transferencia: 'Transferencia', cobro_cuenta: 'Cobro a cuenta' };
+  const ORIGEN_LABEL = ORIGEN_LABEL_MOV;
   body.innerHTML = movimientos.map(m => `
     <tr>
       <td class="muted">${fechaHora(m.fecha)}</td>

@@ -119,6 +119,7 @@ async function conReintento(fn) {
   try {
     return await fn();
   } catch (e) {
+    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
     mongoClient = null;
     return await fn();
   }

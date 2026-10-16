@@ -107,6 +107,7 @@ async function conReintento(fn) {
   try {
     return await fn();
   } catch (e) {
+    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
     mongoClientPromise = null;
     return await fn();
   }
@@ -1432,6 +1433,22 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
     const sumaCheques = Math.round(chequesTercero.reduce((a, c) => a + (c.monto || 0), 0) * 100) / 100;
     if (Math.abs(sumaCheques - montoTotal) > 0.01) throw err(400, `Los cheques elegidos suman ${sumaCheques} y el pago es de ${montoTotal}. Tienen que coincidir.`);
   }
+
+  // Se valida TODO antes de mover plata (16/10/2026): antes la salida de caja se registraba primero y recién después se controlaban las
+  // compras; si algo fallaba (por ejemplo un doble clic: la compra ya no tenía saldo), el movimiento de caja quedaba sin pago.
+  for (const aplic of aplicaciones) {
+    const compra = await db.collection('compras').findOne(Object.assign({ _id: aplic.compraId }, filtroOrg(req)));
+    if (!compra) throw err(404, 'Una de las compras elegidas no existe o es de otra sucursal. Si es de otra sucursal, cambiá "Opero en" (barra de arriba) a esa sucursal para pagarla.');
+    if (compra.estado === 'anulada') throw err(400, `La compra #${compra.numero} está anulada, no se le pueden registrar pagos.`);
+    if (String(compra.proveedorId) !== String(proveedorId)) throw err(400, `La compra #${compra.numero} no es de este proveedor.`);
+    if (aplic.monto > compra.saldoPendiente + 0.01) throw err(400, `El monto aplicado a la compra #${compra.numero} (${aplic.monto}) es mayor que su saldo pendiente (${compra.saldoPendiente}).`);
+  }
+  // Doble clic: el mismo pago (mismo proveedor, monto, forma, caja y compras) en los últimos 20 segundos se rechaza.
+  const repetido = await db.collection('compras_pagos').findOne(Object.assign({
+    proveedorId, monto: montoTotal, tipoValor, createdAt: { $gte: new Date(Date.now() - 20000) },
+    'aplicaciones.compraId': { $all: aplicaciones.map(a => a.compraId) }, aplicaciones: { $size: aplicaciones.length }
+  }, cuentaId ? { cuentaId } : {}, filtroOrg(req)));
+  if (repetido) throw err(409, 'Este pago ya se registró hace unos segundos (¿doble clic?). Revisá la pestaña Pagos antes de cargarlo de nuevo.');
 
   if (tipoValor === 'cheque') {
     const cheque = Object.assign({

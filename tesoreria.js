@@ -148,6 +148,7 @@ async function conReintento(fn) {
   try {
     return await fn();
   } catch (e) {
+    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
     mongoClient = null;
     return await fn();
   }
@@ -889,6 +890,60 @@ router.get('/movimientos', authOperar, async (req, res) => {
       }));
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Movimientos de UNA caja/banco con el saldo parcial después de cada uno (16/10/2026, pedido de Mato: "poder entrar y ver los saldos
+// parciales en cada caja para ir controlando"). El saldo se arma en orden de fecha (y de carga, si es el mismo día) y queda anclado al
+// saldo actual de la cuenta: saldoPrevio = saldo actual − suma de todos los movimientos (normalmente 0; si no es 0 hay plata que no
+// pasó por movimientos). También marca los movimientos que parecen repetidos (mismo tipo, monto y motivo en menos de 2 minutos).
+router.get('/movimientos-cuenta', authOperar, async (req, res) => {
+  try {
+    const cuentaTipo = normalizarTexto(req.query.cuentaTipo).toLowerCase();
+    if (!['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'cuentaTipo inválido (caja o banco)');
+    const cuentaId = toObjectId(req.query.cuentaId);
+    if (!cuentaId) throw err(400, 'cuentaId inválido');
+    if (req.query.tipo && !TIPOS_MOVIMIENTO_VALIDOS.includes(req.query.tipo)) throw err(400, 'Tipo inválido');
+    const desde = req.query.desde ? new Date(req.query.desde + 'T00:00:00.000Z') : null;
+    const hasta = req.query.hasta ? new Date(req.query.hasta + 'T23:59:59.999Z') : null;
+    if ((desde && isNaN(desde)) || (hasta && isNaN(hasta))) throw err(400, 'Fecha inválida');
+    const r2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+    const delta = m => (m.tipo === 'ingreso' ? m.monto : -m.monto);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const cuenta = await db.collection(cuentaTipo === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos').findOne({ _id: cuentaId });
+      if (!cuenta) throw err(404, 'Cuenta no encontrada');
+      if (!cuentaHabilitada(cuenta, req)) throw err(403, 'No tenés habilitada esta cuenta.');
+      const saldoDoc = await db.collection('tesoreria_saldos').findOne({ cuentaTipo, cuentaId });
+      const todos = await db.collection('tesoreria_movimientos').find({ cuentaTipo, cuentaId }).sort({ fecha: 1, createdAt: 1, _id: 1 }).limit(100000).toArray();
+      const suma = r2(todos.reduce((s, m) => s + delta(m), 0));
+      const saldoActual = r2(saldoDoc ? saldoDoc.saldo : suma);
+      const saldoPrevio = r2(saldoActual - suma);
+      let acum = saldoPrevio;
+      todos.forEach(m => { acum = r2(acum + delta(m)); m.saldo = acum; });
+      // posibles repetidos
+      const porClave = new Map();
+      todos.forEach(m => { const k = `${m.tipo}|${m.monto}|${m.motivo || ''}`; (porClave.get(k) || porClave.set(k, []).get(k)).push(m); });
+      porClave.forEach(lista => lista.forEach(m => { m.posibleDuplicado = lista.some(o => o !== m && Math.abs(new Date(o.createdAt || o.fecha) - new Date(m.createdAt || m.fecha)) < 120000); }));
+      const enRango = m => (!desde || m.fecha >= desde) && (!hasta || m.fecha <= hasta);
+      const incluidos = todos.filter(enRango);
+      const antes = desde ? todos.filter(m => m.fecha < desde) : [];
+      const saldoInicial = antes.length ? antes[antes.length - 1].saldo : (desde ? saldoPrevio : saldoPrevio);
+      const ingresos = r2(incluidos.filter(m => m.tipo === 'ingreso').reduce((s, m) => s + m.monto, 0));
+      const egresos = r2(incluidos.filter(m => m.tipo === 'egreso').reduce((s, m) => s + m.monto, 0));
+      const saldoFinal = incluidos.length ? incluidos[incluidos.length - 1].saldo : saldoInicial;
+      let lista = incluidos.filter(m => !req.query.tipo || m.tipo === req.query.tipo).reverse();
+      const total = lista.length, LIMITE = 2000;
+      if (lista.length > LIMITE) lista = lista.slice(0, LIMITE);
+      return {
+        cuenta: { tipo: cuentaTipo, nombre: cuenta.nombre, moneda: cuenta.moneda || 'ARS', saldoActual },
+        saldoPrevio, saldoInicial: r2(saldoInicial), ingresos, egresos, saldoFinal: r2(saldoFinal),
+        cantidad: incluidos.length, truncado: total > LIMITE,
+        duplicados: incluidos.filter(m => m.posibleDuplicado).length,
+        movimientos: lista.map(m => Object.assign({}, m, { cuentaNombre: cuenta.nombre }))
+      };
+    });
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
