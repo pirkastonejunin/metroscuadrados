@@ -320,7 +320,7 @@ async function mostrarDetalleVisita(id){
   VISITA_ACTUAL = v;
 
   const fotosHtml = (v.fotos && v.fotos.length)
-    ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${f.data}">`).join('')}</div>`
+    ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
     : '<p class="muted">Todavía no sacaste fotos.</p>';
 
   // Se puede editar/rehacer el presupuesto mientras la visita no se haya
@@ -429,13 +429,43 @@ function leerComoDataURL(file){
     reader.readAsDataURL(file);
   });
 }
+// Fotos: se achican si hace falta, y si Cloudinary está configurado se suben directo allá (se guarda solo el link).
+function comprimirFoto(file, max, calidad){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => {
+      max = max || 1280; const esc = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * esc); c.height = Math.round(img.height * esc);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', calidad || 0.72));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer una de las fotos')); };
+    img.src = url;
+  });
+}
+async function fotosParaSubir(files, apiFn){
+  let firma = null;
+  try { firma = await apiFn(); } catch (e) {}
+  if (!firma || !firma.habilitado) return Promise.all([...files].map(f => comprimirFoto(f)));
+  return Promise.all([...files].map(async f => {
+    let blob = f;
+    if (f.size > 9 * 1024 * 1024) { blob = await (await fetch(await comprimirFoto(f, 2560, 0.9))).blob(); }
+    const fd = new FormData();
+    fd.append('file', blob); fd.append('api_key', firma.apiKey); fd.append('timestamp', firma.timestamp); fd.append('folder', firma.folder); fd.append('signature', firma.signature);
+    const r = await fetch('https://api.cloudinary.com/v1_1/' + firma.cloudName + '/image/upload', {method:'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok || !d.secure_url) throw new Error((d.error && d.error.message) || 'No se pudo subir una foto');
+    return d.secure_url;
+  }));
+}
+function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
 async function subirFotos(visitaId){
   const input = document.getElementById('inputFotos');
   const errEl = document.getElementById('fotoErr');
   errEl.textContent = '';
   if (!input.files.length){ errEl.textContent = 'Elegí al menos una foto'; return; }
   try{
-    const fotos = await Promise.all([...input.files].map(leerComoDataURL));
+    const fotos = await fotosParaSubir(input.files, () => api(`/vendedor/${VENDEDOR_ID}/fotos/firma`));
     await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/fotos`, {method:'POST', body:{fotos}});
     mostrarDetalleVisita(visitaId);
   }catch(e){ errEl.textContent = e.message; }

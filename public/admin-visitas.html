@@ -677,6 +677,7 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML=''; }
 
 function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
 
+function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
 function escapeHtml(s){
   return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -1029,7 +1030,7 @@ async function abrirVisita(id){
 function renderDetalleVisita(v, editando){
   VISITA_DETALLE_ACTUAL = v;
   const fotosHtml = (v.fotos && v.fotos.length)
-    ? `<div class="foto-galeria">${v.fotos.map(f=>`<img src="${f.data}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
+    ? `<div class="foto-galeria">${v.fotos.map(f=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
     : '<p class="muted">El vendedor todavía no cargó fotos.</p>';
 
   let presupuestoHtml = '<p class="muted">Todavía no se cargó un presupuesto.</p>';

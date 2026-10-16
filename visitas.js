@@ -41,6 +41,7 @@
 //                            ya en esa tienda y para leer sus tipos de obra.
 // ---------------------------------------------------------------------------
 
+const cloudinary = require('./cloudinary');
 const express = require('express');
 const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
@@ -810,14 +811,16 @@ router.get('/vendedor/:vendedorId/visitas/:id', authVendedor, async (req, res) =
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-// Agrega fotos del lugar (base64 data URLs), función propia de la visita,
+router.get('/vendedor/:vendedorId/fotos/firma', authVendedor, (req, res) => res.json(cloudinary.firma('piedranegra/visitas')));
+
+// Agrega fotos del lugar (base64 data URLs o links de Cloudinary), función propia de la visita,
 // separada del simulador de piso con IA del cotizador.
 router.post('/vendedor/:vendedorId/visitas/:id/fotos', authVendedor, async (req, res) => {
   try {
     const { fotos } = req.body || {};
     if (!Array.isArray(fotos) || !fotos.length) throw err(400, 'No llegaron fotos');
     const nuevas = fotos
-      .filter(f => typeof f === 'string' && f.indexOf('data:image/') === 0)
+      .filter(f => typeof f === 'string' && (f.indexOf('data:image/') === 0 || cloudinary.esLinkPropio(f)))
       .map(f => ({ data: f, fecha: new Date(), origen: 'vendedor' }));
     if (!nuevas.length) throw err(400, 'Formato de foto inválido');
 
@@ -1356,7 +1359,9 @@ function itemsParaPdf(p) {
   return [...base, ...(p.itemsExtra || [])];
 }
 
-function enviarPdfPresupuestoManual(res, visita, vistaDetalle) {
+async function enviarPdfPresupuestoManual(res, visita, vistaDetalle) {
+  // Las fotos guardadas en Cloudinary se descargan acá para dibujarlas en el PDF.
+  visita = Object.assign({}, visita, { fotos: await Promise.all((visita.fotos || []).map(async f => Object.assign({}, f, { data: await cloudinary.dataUrlParaPdf(f.data) }))) });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', 'inline; filename="presupuesto-' + visita._id + (vistaDetalle ? '-detalle' : '') + '.pdf"');
   const pdf = new PDFDocument({ margin: 50 });
@@ -1373,7 +1378,7 @@ router.get('/vendedor/:vendedorId/visitas/:id/presupuesto-pdf', authVendedor, as
       return visitaDelVendedor(db, req.params.id, req.params.vendedorId);
     });
     validarPresupuestoManualParaPdf(visita);
-    enviarPdfPresupuestoManual(res, visita, req.query.vista === 'detalle');
+    await enviarPdfPresupuestoManual(res, visita, req.query.vista === 'detalle');
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -1387,7 +1392,7 @@ router.get('/:id/presupuesto-pdf', authAdmin, async (req, res) => {
     });
     if (!visita) throw err(404, 'Visita no encontrada');
     validarPresupuestoManualParaPdf(visita);
-    enviarPdfPresupuestoManual(res, visita, req.query.vista === 'detalle');
+    await enviarPdfPresupuestoManual(res, visita, req.query.vista === 'detalle');
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
