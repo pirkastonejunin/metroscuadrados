@@ -144,6 +144,7 @@
           </div>
           <button class="btn secondary" onclick="exportarXlsx()">Exportar</button>
           <button class="btn secondary" onclick="abrirImportar()">Importar</button>
+          <button class="btn secondary" onclick="abrirRevisarCategorias()" title="Consulta ARCA y corrige la categoría fiscal de los clientes con CUIT">Revisar categorías (ARCA)</button>
           <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirUnificar()" title="Buscar clientes duplicados y unificarlos">Unificar duplicados</button>
           <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirFichasCliDux()" title="Ficha de clientes de Dux (Listado de Clientes)">Fichas Dux</button>
           <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirSaldosDux()" title="Saldos de cuenta corriente de Dux (Consulta de Clientes con Saldo)">Saldos Dux</button>
@@ -1182,6 +1183,55 @@ async function descargarBlob(url, nombreArchivo){
   URL.revokeObjectURL(a.href);
 }
 function exportarXlsx(){ descargarBlob(BASE + '/export', 'clientes.xlsx'); }
+
+// Revisión masiva de categoría fiscal contra ARCA (16/10/2026): propone pasar a Responsable Inscripto a los clientes con CUIT
+// que figuran con otra categoría. Se consulta por tandas y recién se aplica al confirmar.
+let revCambios = [];
+function abrirRevisarCategorias(){
+  revCambios = [];
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg"><div class="modal" style="max-width:720px">
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>Revisar categorías con ARCA</h2>
+      <p class="muted">Consulta el padrón de ARCA de cada cliente activo con CUIT que no figura como Responsable Inscripto y te muestra a cuáles habría que corregir. Nada se cambia hasta que confirmes.</p>
+      <div class="err" id="revErr"></div>
+      <div id="revEstado" class="muted"></div>
+      <div id="revLista" style="max-height:340px;overflow:auto"></div>
+      <button class="btn" id="revBtn" style="margin-top:10px" onclick="correrRevisionCategorias()">Consultar ARCA</button>
+      <button class="btn" id="revAplicar" style="margin-top:10px;display:none" onclick="aplicarRevisionCategorias()">Aplicar cambios</button>
+    </div></div>`;
+}
+async function correrRevisionCategorias(){
+  const btn = document.getElementById('revBtn'); btn.disabled = true;
+  document.getElementById('revErr').textContent = '';
+  revCambios = []; let desde = 0, errores = [];
+  try{
+    while (desde !== null){
+      const r = await fetch(BASE + '/revisar-categorias-arca', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({desde})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error al consultar ARCA');
+      revCambios = revCambios.concat(d.cambios); errores = errores.concat(d.errores);
+      document.getElementById('revEstado').textContent = `Consultados ${Math.min(d.siguiente === null ? d.total : d.siguiente, d.total)} de ${d.total}…`;
+      desde = d.siguiente;
+    }
+    document.getElementById('revEstado').textContent = `Listo. A corregir: ${revCambios.length}. Sin poder consultar: ${errores.length}.`;
+    document.getElementById('revLista').innerHTML = revCambios.length
+      ? '<table style="width:100%"><tr><th>Cliente</th><th>CUIT</th><th>Hoy</th><th>ARCA</th></tr>' + revCambios.map(c => `<tr><td>${escapeHtml(c.nombre)}</td><td>${c.cuit}</td><td>${escapeHtml(CATEGORIA_FISCAL_LABEL[c.de] || c.de || '—')}</td><td>Responsable Inscripto</td></tr>`).join('') + '</table>'
+      : '<p class="ok-msg">No hay nada para corregir.</p>';
+    document.getElementById('revAplicar').style.display = revCambios.length ? '' : 'none';
+  }catch(e){ document.getElementById('revErr').textContent = e.message; }
+  btn.disabled = false;
+}
+async function aplicarRevisionCategorias(){
+  try{
+    const r = await fetch(BASE + '/aplicar-categorias', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({cambios: revCambios})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al aplicar');
+    document.getElementById('revAplicar').style.display = 'none';
+    document.getElementById('revEstado').textContent = `Listo: ${d.actualizados} cliente(s) pasaron a Responsable Inscripto.`;
+    await cargarClientes();
+  }catch(e){ document.getElementById('revErr').textContent = e.message; }
+}
 
 function abrirImportar(){
   document.getElementById('modalRoot').innerHTML = `

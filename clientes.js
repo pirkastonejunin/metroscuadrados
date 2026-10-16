@@ -324,6 +324,51 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Revisión masiva de categoría fiscal contra el padrón de ARCA (16/10/2026, pedido de Mato: clientes con CUIT que son
+// Responsable Inscripto pero quedaron cargados con otra categoría, por eso la factura salía B). Se hace por tandas para
+// no pasarse de tiempo: el frontend va llamando con `desde` hasta terminar. Solo propone pasar a Responsable Inscripto.
+router.post('/revisar-categorias-arca', authAdmin, async (req, res) => {
+  try {
+    const arca = require('./arca');
+    const emision = require('./fiscalEmision');
+    const db = await getDb();
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí una sucursal para consultar ARCA.' });
+    const cfg = await emision.getConfig(db, req.orgId);
+    if (!cfg.certPem) return res.status(400).json({ error: 'Falta configurar la conexión con ARCA (módulo Fiscal) en esta sucursal.' });
+    const desde = Math.max(0, parseInt(req.body && req.body.desde, 10) || 0);
+    const TANDA = 15;
+    const todos = await db.collection('clientes').find(Object.assign({ activo: { $ne: false }, categoriaFiscal: { $ne: 'responsable_inscripto' } }, filtroOrgClientes(req))).sort({ _id: 1 }).toArray();
+    const conCuit = todos.map(c => {
+      const dig = arca.soloDigitos(c.cuit || ((c.tipoDocumento === 'cuit' || c.tipoDocumento === 'cuil') ? c.numeroDocumento : '') || '');
+      return { c, cuit: dig };
+    }).filter(x => x.cuit.length === 11 && arca.cuitValido(x.cuit));
+    const tanda = conCuit.slice(desde, desde + TANDA);
+    const cambios = [], errores = [];
+    for (const x of tanda) {
+      try {
+        const d = await arca.consultarCuit(db, cfg, x.cuit);
+        if (d.categoriaFiscal === 'responsable_inscripto') cambios.push({ id: String(x.c._id), nombre: x.c.apellidoRazonSocial || '', cuit: x.cuit, de: x.c.categoriaFiscal || '', a: 'responsable_inscripto' });
+      } catch (e) { errores.push({ nombre: x.c.apellidoRazonSocial || '', cuit: x.cuit, error: e.message }); }
+    }
+    const siguiente = desde + TANDA;
+    res.json({ total: conCuit.length, siguiente: siguiente < conCuit.length ? siguiente : null, cambios, errores });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/aplicar-categorias', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const lista = Array.isArray(req.body && req.body.cambios) ? req.body.cambios : [];
+    let n = 0;
+    for (const c of lista) {
+      if (c.a !== 'responsable_inscripto' || !ObjectId.isValid(c.id)) continue;
+      const r = await db.collection('clientes').updateOne(Object.assign({ _id: new ObjectId(c.id) }, filtroOrgClientes(req)), { $set: { categoriaFiscal: 'responsable_inscripto', updatedAt: new Date() } });
+      n += r.modifiedCount;
+    }
+    res.json({ actualizados: n });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
