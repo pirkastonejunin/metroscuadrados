@@ -114,6 +114,13 @@
       <p style="margin:0">Todas las conexiones del sistema con servicios externos, en un solo lugar. Las <b>variables</b> se cargan en <b>Render → Environment</b> (el panel solo muestra si están cargadas, nunca su valor). Las integraciones que se agreguen en el futuro aparecen acá solas.</p>
     </div>
     <div id="lista" class="integ"><span class="muted">Cargando…</span></div>
+    <div class="card" id="cardMigrar" style="margin-top:16px">
+      <h3 style="margin:0 0 6px;font-size:15px">Pasar las fotos guardadas a Cloudinary</h3>
+      <div class="muted" style="margin-bottom:8px">Las fotos de visitas y obras que se subieron antes de conectar Cloudinary siguen ocupando espacio en la base. Este botón las sube a Cloudinary y deja en el sistema solo el link. Cada foto se reemplaza recién cuando Cloudinary confirmó la subida, y se puede repetir sin riesgo.</div>
+      <div id="migEstado" style="font-size:13px;margin-bottom:8px">Cargando…</div>
+      <button class="btn" id="migBtn" onclick="migrarFotos()" style="display:none">Migrar fotos ahora</button>
+      <div class="err" id="migErr"></div>
+    </div>
   </main>
 </div>
 <div id="modalRoot"></div>
@@ -152,7 +159,7 @@ async function iniciarApp(){
   document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
-  await cargar();
+  await cargar(); estadoMigracion();
 }
 const ETIQ = { ok: ['Conectada', 'ok'], parcial: ['Incompleta', 'parcial'], falta: ['Sin configurar', 'mal'] };
 async function cargar(){
@@ -172,6 +179,32 @@ async function cargar(){
       </div>`;
     }).join('');
   }catch(e){ cont.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
+}
+async function estadoMigracion(){
+  try{
+    const r = await fetch('/api/migrar-fotos/estado', {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const est = document.getElementById('migEstado'), btn = document.getElementById('migBtn');
+    if (!d.cloudinary) { est.textContent = 'Primero hay que conectar Cloudinary (variables en Render).'; btn.style.display = 'none'; return; }
+    if (!d.fotos) { est.innerHTML = '<b style="color:var(--ok)">✓ No quedan fotos guardadas en la base.</b>'; btn.style.display = 'none'; return; }
+    est.innerHTML = 'Quedan <b>' + d.fotos + '</b> fotos en la base (<b>' + d.mb + ' MB</b>).';
+    btn.style.display = '';
+  }catch(e){ document.getElementById('migEstado').textContent = e.message; }
+}
+async function migrarFotos(){
+  const btn = document.getElementById('migBtn'), est = document.getElementById('migEstado'), err = document.getElementById('migErr');
+  btn.disabled = true; err.textContent = ''; let total = 0, fallos = [];
+  try{
+    for (;;){
+      const r = await fetch('/api/migrar-fotos/lote', {method:'POST', headers: headersAuth()});
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+      total += d.migradas; fallos = fallos.concat(d.errores || []);
+      est.textContent = 'Migradas ' + total + '… quedan ' + d.fotos + ' (' + d.mb + ' MB)';
+      if (!d.migradas) break;
+    }
+    if (fallos.length) err.textContent = 'Algunas fotos no se pudieron subir (' + [...new Set(fallos)].join('; ') + '). Quedaron como estaban en el sistema.';
+  }catch(e){ err.textContent = e.message; }
+  btn.disabled = false; await estadoMigracion();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 </script>

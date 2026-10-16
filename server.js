@@ -97,6 +97,7 @@ app.use('/api/tesoreria', tesoreriaRouter);
 app.use('/api/financiera', require('./financiera'));
 app.use('/api/correo', require('./correo'));
 app.use('/api/integraciones', require('./integraciones'));
+app.use('/api/migrar-fotos', require('./migrarFotos'));
 
 // Mercado Pago (link de pago + Point), independiente de Tiendanube.
 const mercadopagoRouter = require('./mercadopago');
