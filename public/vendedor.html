@@ -153,7 +153,7 @@ async function abrirPdfConAuth(url){
     window.open(URL.createObjectURL(blob), '_blank');
   }catch(e){ alert(e.message); }
 }
-function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{weekday:'short', day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
+function fmtFecha(f){ return f ? new Date(f).toLocaleString('es-AR',{weekday:'short', day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : ''; }
 // Un presupuesto tipo "cotizador" puede tener más de una cotización
 // vinculada (ver visitas.js/cotizacionesDePresupuesto) — acá se normaliza
 // igual, así el resto de este archivo siempre trabaja con la lista, nunca
@@ -234,22 +234,52 @@ if (TOKEN) iniciarApp(); else document.getElementById('vendedorScreen').classLis
 
 // ---------------- LISTA DE VISITAS ----------------
 
+let FILTRO_DESDE = '', FILTRO_HASTA = '', FILTRO_TODAS = false;
+function isoLocal(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function rangoVisitasLista(r){
+  const hoy = new Date(); FILTRO_TODAS = false; FILTRO_DESDE = ''; FILTRO_HASTA = '';
+  if (r === 'hoy') FILTRO_DESDE = FILTRO_HASTA = isoLocal(hoy);
+  else if (r === 'semana') { const l = new Date(hoy); l.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7)); const f = new Date(l); f.setDate(l.getDate() + 6); FILTRO_DESDE = isoLocal(l); FILTRO_HASTA = isoLocal(f); }
+  else if (r === 'mes') { FILTRO_DESDE = isoLocal(new Date(hoy.getFullYear(), hoy.getMonth(), 1)); FILTRO_HASTA = isoLocal(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0)); }
+  else if (r === 'todas') FILTRO_TODAS = true;
+  mostrarListaVisitas();
+}
+function cambioFechaLista(){
+  FILTRO_TODAS = false;
+  FILTRO_DESDE = document.getElementById('fLDesde').value; FILTRO_HASTA = document.getElementById('fLHasta').value;
+  mostrarListaVisitas();
+}
 async function mostrarListaVisitas(){
   const pant = document.getElementById('pantalla');
   pant.innerHTML = '<p class="muted">Cargando…</p>';
   try{
     // Admin: mismo listado que ya usa Panel de Visitas (todas, sin filtrar
     // por vendedor), excluyendo canceladas como hace el listado propio del
-    // vendedor. Vendedor normal: sin cambios, solo las suyas.
+    // vendedor. Vendedor normal: solo las suyas (por defecto, de hoy en adelante).
+    const qs = new URLSearchParams();
+    const desde = FILTRO_TODAS ? '2000-01-01' : FILTRO_DESDE;
+    if (desde) qs.set('desde', desde + 'T00:00:00');
+    if (FILTRO_HASTA) qs.set('hasta', FILTRO_HASTA);
+    const q = qs.toString() ? '?' + qs.toString() : '';
     VISITAS = ADMIN_MODE
-      ? (await api('')).filter(v => v.estado !== 'cancelada')
-      : await api(`/vendedor/${VENDEDOR_ID}/visitas`);
+      ? (await api(q)).filter(v => v.estado !== 'cancelada')
+      : await api(`/vendedor/${VENDEDOR_ID}/visitas${q}`);
   }catch(e){
     pant.innerHTML = `<p class="err">${e.message}</p>`;
     return;
   }
+  const fechasHtml = `<div class="card" style="padding:10px;margin-bottom:10px">
+    <div style="display:flex;gap:8px"><div style="flex:1"><label style="font-size:12px;color:var(--muted);font-weight:600">Desde</label><input type="date" id="fLDesde" value="${FILTRO_DESDE}" onchange="cambioFechaLista()" style="width:100%"></div>
+    <div style="flex:1"><label style="font-size:12px;color:var(--muted);font-weight:600">Hasta</label><input type="date" id="fLHasta" value="${FILTRO_HASTA}" onchange="cambioFechaLista()" style="width:100%"></div></div>
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn small secondary" onclick="rangoVisitasLista('hoy')">Hoy</button>
+      <button class="btn small secondary" onclick="rangoVisitasLista('semana')">Semana</button>
+      <button class="btn small secondary" onclick="rangoVisitasLista('mes')">Mes</button>
+      <button class="btn small secondary" onclick="rangoVisitasLista('todas')">Historial completo</button>
+      <button class="btn small secondary" onclick="rangoVisitasLista('')">${ADMIN_MODE ? 'Limpiar' : 'Próximas'}</button>
+    </div></div>`;
   if (!VISITAS.length){
-    pant.innerHTML = '<p class="muted">No tenés visitas agendadas por ahora.</p>';
+    pant.innerHTML = fechasHtml + '<p class="muted">No hay visitas para este filtro.</p>';
     return;
   }
   let filtroHtml = '';
@@ -266,7 +296,7 @@ async function mostrarListaVisitas(){
         ${vendedores.map(x => `<option value="${x.id}" ${x.id===FILTRO_VENDEDOR?'selected':''}>${x.nombre}${x.id && x.id===MI_VENDEDOR_ID ? ' (yo)' : ''} (${VISITAS.filter(v => (v.vendedorId||'')===x.id).length})</option>`).join('')}
       </select></div>`;
   }
-  pant.innerHTML = filtroHtml + lista.map(v => `
+  pant.innerHTML = fechasHtml + filtroHtml + lista.map(v => `
     <div class="card" onclick="${ADMIN_MODE ? `VENDEDOR_ID='${v.vendedorId||''}';` : ''}mostrarDetalleVisita('${v._id}')" style="cursor:pointer">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div class="visita-titulo">${v.cliente.nombre}</div>
