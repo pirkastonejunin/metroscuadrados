@@ -49,7 +49,8 @@
   .hidden{display:none !important;}
   .vend-btn{display:block;width:100%;text-align:left;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:15px;margin-bottom:8px;font-family:inherit;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;margin:10px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
+  .foto-item{position:relative;}.foto-item .foto-x{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:14px;line-height:22px;padding:0;cursor:pointer;}
+.foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
   .item-row{display:flex;gap:6px;margin-bottom:6px;}
   .item-row select{flex:2} .item-row input{flex:1}
   .back-link{color:var(--accent);font-size:13px;text-decoration:none;display:inline-block;margin-bottom:10px;font-weight:700;}
@@ -320,7 +321,7 @@ async function mostrarDetalleVisita(id){
   VISITA_ACTUAL = v;
 
   const fotosHtml = (v.fotos && v.fotos.length)
-    ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
+    ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<div class="foto-item"><img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')"><button class="foto-x" title="Borrar foto" onclick="borrarFotoVisita('${v._id}',${i})">×</button></div>`).join('')}</div>`
     : '<p class="muted">Todavía no sacaste fotos.</p>';
 
   // Se puede editar/rehacer el presupuesto mientras la visita no se haya
@@ -459,6 +460,11 @@ async function fotosParaSubir(files, apiFn){
   }));
 }
 function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
+async function borrarFotoVisita(visitaId, i){
+  if (!confirm('¿Borrar esta foto?')) return;
+  try{ await api(`/vendedor/${VENDEDOR_ID}/visitas/${visitaId}/fotos/${i}`, {method:'DELETE'}); } catch(e){ alert(e.message); return; }
+  location.reload();
+}
 async function subirFotos(visitaId){
   const input = document.getElementById('inputFotos');
   const errEl = document.getElementById('fotoErr');

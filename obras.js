@@ -965,4 +965,29 @@ router.post('/colocador/obras/:obraId/fotos', authColocadorOAdmin, async (req, r
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
+// Borrar una foto de la obra (por posición en obra.fotos). La oficina puede borrar cualquiera; un colocador, solo las que subió él (origen colocador).
+router.delete('/colocador/obras/:obraId/fotos/:index', authColocadorOAdmin, async (req, res) => {
+  try {
+    const obraId = toObjectId(req.params.obraId);
+    const idx = Number(req.params.index);
+    if (!obraId || !Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'id inválido' });
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: obraId }, req.esAdminObras ? filtroOrg(req) : {}));
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+      const f = (obra.fotos || [])[idx];
+      if (!f) throw Object.assign(new Error('La foto no existe'), { status: 404 });
+      if (!req.esAdminObras) {
+        const tienenTarea = (obra.tareas || []).some(t => String(t.colocadorId) === String(req.colocador._id));
+        if (!tienenTarea) throw Object.assign(new Error('Esta obra no está asignada a tu usuario'), { status: 403 });
+        if (f.origen !== 'colocador') throw Object.assign(new Error('Solo podés borrar las fotos que subiste vos'), { status: 403 });
+      }
+      const fotos = (obra.fotos || []).filter((_, i) => i !== idx);
+      await db.collection('obras').updateOne({ _id: obraId }, { $set: { fotos, updatedAt: new Date() } });
+      return fotos;
+    });
+    res.json({ fotos: resultado });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 module.exports = router;

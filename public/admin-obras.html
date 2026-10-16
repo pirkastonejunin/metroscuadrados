@@ -76,7 +76,8 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .total-box{font-size:14px;font-weight:700;margin-top:8px;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
+  .foto-item{position:relative;}.foto-item .foto-x{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:14px;line-height:22px;padding:0;cursor:pointer;}
+.foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
@@ -498,6 +499,10 @@ async function fotosParaSubir(files, apiFn){
 }
 // Miniatura liviana para las galerías (las fotos de Cloudinary se entregan achicadas; al tocar se abre el original).
 function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
+async function borrarFotoObra(obraId, i){
+  if (!confirm('¿Borrar esta foto?')) return;
+  try{ await api('/colocador/obras/' + obraId + '/fotos/' + i, {method:'DELETE'}); await abrirObra(obraId); } catch(e){ alert(e.message); }
+}
 async function subirFotosAdmin(obraId){
   const input = document.getElementById('inputFotosAdmin'), err = document.getElementById('fotoAdminErr');
   err.textContent = '';
@@ -604,9 +609,10 @@ async function abrirObra(id){
     </div>
   `;
 
-  const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
-  const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
-  const galeria = fotos => `<div class="foto-galeria">${fotos.map(f=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`;
+  const conIdx = (o.fotos||[]).map((f,i)=>Object.assign({}, f, {_i:i}));
+  const fotosAntes = conIdx.filter(f=>(f.origen||'vendedor')==='vendedor');
+  const fotosDespues = conIdx.filter(f=>f.origen==='colocador');
+  const galeria = fotos => `<div class="foto-galeria">${fotos.map(f=>`<div class="foto-item"><img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')"><button class="foto-x" title="Borrar foto" onclick="borrarFotoObra('${o._id}',${f._i})">×</button></div>`).join('')}</div>`;
   const fotosHtml = (fotosAntes.length || fotosDespues.length) ? `
     ${fotosAntes.length ? `<div style="margin-top:8px"><label>Fotos antes (vendedor)</label>${galeria(fotosAntes)}</div>` : ''}
     ${fotosDespues.length ? `<div style="margin-top:8px"><label>Fotos después (colocador)</label>${galeria(fotosDespues)}</div>` : ''}

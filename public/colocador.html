@@ -46,7 +46,8 @@
   #loginScreen .logo{height:24px;width:auto;margin:0 auto 16px;display:block;}
   .hidden{display:none !important;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin:8px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
+  .foto-item{position:relative;}.foto-item .foto-x{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:14px;line-height:22px;padding:0;cursor:pointer;}
+.foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);}
   .modal-overlay{position:fixed;inset:0;background:rgba(17,20,24,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
   .modal-overlay.hidden{display:none !important;}
   .modal-card{background:var(--card);border-radius:16px;padding:26px 22px;max-width:340px;width:100%;text-align:center;box-shadow:var(--shadow);animation:modalPop .25s ease;}
@@ -226,8 +227,9 @@ async function cargarMisObras(){
       </select></div>`;
   }
   document.getElementById('listaObras').innerHTML = filtroHtml + obras.map(o => {
-    const fotosAntes = (o.fotos||[]).filter(f=>(f.origen||'vendedor')==='vendedor');
-    const fotosDespues = (o.fotos||[]).filter(f=>f.origen==='colocador');
+    const conIdx = (o.fotos||[]).map((f,i)=>Object.assign({}, f, {_i:i}));
+    const fotosAntes = conIdx.filter(f=>(f.origen||'vendedor')==='vendedor');
+    const fotosDespues = conIdx.filter(f=>f.origen==='colocador');
     return `
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -260,7 +262,7 @@ async function cargarMisObras(){
 
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid #eee">
         <b>Fotos del trabajo terminado</b>
-        ${fotosDespues.length ? `<div class="foto-galeria">${fotosDespues.map(f=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>` : '<p class="muted">Todavía no subiste fotos del resultado.</p>'}
+        ${fotosDespues.length ? `<div class="foto-galeria">${fotosDespues.map(f=>`<div class="foto-item"><img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')"><button class="foto-x" title="Borrar foto" onclick="borrarFotoObra('${o.obraId}',${f._i})">×</button></div>`).join('')}</div>` : '<p class="muted">Todavía no subiste fotos del resultado.</p>'}
         <input type="file" accept="image/*" multiple id="inputFotosObra-${o.obraId}" style="margin-top:8px">
         <button class="btn small secondary" style="margin-top:8px;width:auto" onclick="subirFotosObra('${o.obraId}')">Agregar fotos</button>
         <div class="err" id="fotoObraErr-${o.obraId}"></div>
@@ -341,6 +343,10 @@ async function fotosParaSubir(files, apiFn){
 }
 // Miniatura liviana para las galerías (las fotos de Cloudinary se entregan achicadas; al tocar se abre el original).
 function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
+async function borrarFotoObra(obraId, i){
+  if (!confirm('¿Borrar esta foto?')) return;
+  try{ await api(`/colocador/obras/${obraId}/fotos/${i}`, {method:'DELETE'}); cargarMisObras(); }catch(e){ alert(e.message); }
+}
 async function subirFotosObra(obraId){
   const input = document.getElementById(`inputFotosObra-${obraId}`);
   const errEl = document.getElementById(`fotoObraErr-${obraId}`);

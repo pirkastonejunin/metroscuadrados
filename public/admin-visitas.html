@@ -95,7 +95,8 @@
   .mini-cal-dia .n{font-weight:700;}
   .mini-cal-dia .c{font-size:9px;color:var(--accent);font-weight:700;}
   .foto-galeria{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;margin:10px 0;}
-  .foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
+  .foto-item{position:relative;}.foto-item .foto-x{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:14px;line-height:22px;padding:0;cursor:pointer;}
+.foto-galeria img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer;}
   .section-title{font-weight:700;margin-bottom:10px;font-size:14px;}
   .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
   .stat-tile{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;}
@@ -1021,6 +1022,10 @@ async function guardarVisitaNueva(){
 
 let VISITA_DETALLE_ACTUAL = null;
 
+async function borrarFotoVisitaAdmin(visitaId, vendedorId, i){
+  if (!confirm('¿Borrar esta foto?')) return;
+  try{ await api('/vendedor/' + vendedorId + '/visitas/' + visitaId + '/fotos/' + i, {method:'DELETE'}); await abrirVisita(visitaId); } catch(e){ alert(e.message); }
+}
 async function abrirVisita(id){
   const v = await api('/'+id);
   VISITA_DETALLE_ACTUAL = v;
@@ -1030,7 +1035,7 @@ async function abrirVisita(id){
 function renderDetalleVisita(v, editando){
   VISITA_DETALLE_ACTUAL = v;
   const fotosHtml = (v.fotos && v.fotos.length)
-    ? `<div class="foto-galeria">${v.fotos.map(f=>`<img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')">`).join('')}</div>`
+    ? `<div class="foto-galeria">${v.fotos.map((f,i)=>`<div class="foto-item"><img src="${miniFoto(f.data)}" onclick="window.open('${f.data}','_blank')"><button class="foto-x" title="Borrar foto" onclick="borrarFotoVisitaAdmin('${v._id}','${v.vendedorId}',${i})">×</button></div>`).join('')}</div>`
     : '<p class="muted">El vendedor todavía no cargó fotos.</p>';
 
   let presupuestoHtml = '<p class="muted">Todavía no se cargó un presupuesto.</p>';
