@@ -233,7 +233,7 @@ function normalizarFechaOpcional(v, etiqueta) {
 
 async function validarCodigoUnico(db, req, codigo, idExcluir) {
   if (!codigo) return;
-  const match = Object.assign({ codigo, activo: { $ne: false } }, filtroOrg(req));
+  const match = Object.assign({ codigo, activo: { $ne: false } }, filtroOrgClientes(req));
   if (idExcluir) match._id = { $ne: idExcluir };
   const existente = await db.collection('clientes').findOne(match);
   if (existente) throw err(400, `Ya hay otro cliente activo con el código "${codigo}" (${existente.apellidoRazonSocial}).`);
@@ -241,7 +241,7 @@ async function validarCodigoUnico(db, req, codigo, idExcluir) {
 
 async function validarCuitUnico(db, req, cuit, idExcluir) {
   if (!cuit) return;
-  const match = Object.assign({ cuit, activo: { $ne: false } }, filtroOrg(req));
+  const match = Object.assign({ cuit, activo: { $ne: false } }, filtroOrgClientes(req));
   if (idExcluir) match._id = { $ne: idExcluir };
   const existente = await db.collection('clientes').findOne(match);
   if (existente) throw err(400, `Ya hay otro cliente activo con el CUIT/CUIL "${cuit}" (${existente.apellidoRazonSocial}).`);
@@ -424,10 +424,10 @@ router.post('/import', authAdmin, async (req, res) => {
           const datos = validarCliente(fila);
           let existente = null;
           if (datos.codigo) {
-            existente = await db.collection('clientes').findOne(Object.assign({ codigo: datos.codigo, activo: { $ne: false } }, filtroOrg(req)));
+            existente = await db.collection('clientes').findOne(Object.assign({ codigo: datos.codigo, activo: { $ne: false } }, filtroOrgClientes(req)));
           }
           if (!existente && datos.cuit) {
-            existente = await db.collection('clientes').findOne(Object.assign({ cuit: datos.cuit, activo: { $ne: false } }, filtroOrg(req)));
+            existente = await db.collection('clientes').findOne(Object.assign({ cuit: datos.cuit, activo: { $ne: false } }, filtroOrgClientes(req)));
           }
           const ahora = new Date();
           if (existente) {
@@ -478,7 +478,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       const db = await getDb();
       await validarCodigoUnico(db, req, datos.codigo, id);
       await validarCuitUnico(db, req, datos.cuit, id);
-      const match = Object.assign({ _id: id }, filtroOrg(req));
+      const match = Object.assign({ _id: id }, filtroOrgClientes(req));
       const r = await db.collection('clientes').findOneAndUpdate(
         match,
         { $set: Object.assign({}, datos, { updatedAt: new Date() }) },
@@ -497,7 +497,7 @@ router.delete('/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     await conReintento(async () => {
       const db = await getDb();
-      const match = Object.assign({ _id: id }, filtroOrg(req));
+      const match = Object.assign({ _id: id }, filtroOrgClientes(req));
       const r = await db.collection('clientes').updateOne(match, { $set: { activo: false, updatedAt: new Date() } });
       if (!r.matchedCount) throw err(404, 'Cliente no encontrado');
     });
