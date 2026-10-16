@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/factura-ia-ui.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -73,6 +74,14 @@
   .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);}
   .pill.ok{background:var(--ok-soft);color:var(--ok);} .pill.mal{background:var(--danger-soft);color:var(--danger);}
   .sub td{background:var(--bg);}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);}
+  .tabs button{background:transparent;border:none;border-bottom:3px solid transparent;padding:10px 16px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;font-family:inherit;margin-bottom:-1px;}
+  .tabs button.activa{color:var(--text);border-bottom-color:var(--accent);}
+  .prog{height:8px;border-radius:99px;background:var(--bg);border:1px solid var(--border);overflow:hidden;margin:8px 0 4px;}
+  .prog > div{height:100%;background:var(--ok);}
+  .liq-anulada td{opacity:.5;text-decoration:line-through;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (max-width:640px){ .grid2,.grid3{grid-template-columns:1fr;} }
 </style>
 </head>
 <body>
@@ -98,13 +107,18 @@
 </div>
 <div id="app" class="hidden">
   <header>
-    <div class="brand"><h1>Financiera — cheques y cuenta corriente</h1></div>
+    <div class="brand"><h1>Financiera</h1></div>
     <div style="display:flex;gap:8px;align-items:center">
       <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
       <button onclick="logout()">Cerrar sesión</button>
     </div>
   </header>
   <main>
+    <div class="tabs">
+      <button data-iconizado="1" data-tab="cheques" class="activa" onclick="cambiarTab('cheques')">Cheques y cuenta corriente</button>
+      <button data-iconizado="1" data-tab="prestamos" onclick="cambiarTab('prestamos')">Préstamos</button>
+    </div>
+    <div id="tabCheques">
     <div class="kpis" id="kpis"></div>
     <div class="card">
       <div class="row">
@@ -125,6 +139,13 @@
         <thead><tr><th>Fecha</th><th class="num">Monto</th><th>Nota</th><th></th></tr></thead>
         <tbody id="pagosBody"></tbody>
       </table>
+    </div>
+    </div>
+    <div id="tabPrestamos" class="hidden">
+      <div class="kpis" id="prKpis"></div>
+      <div class="card"><div class="row"><button data-iconizado="1" class="btn" onclick="abrirPrestamo()">Nuevo préstamo</button>
+        <span class="muted">Cada mes: cargás la liquidación → el capital baja el saldo del crédito y los intereses van como gasto financiero (con su IVA al Libro IVA).</span></div></div>
+      <div id="prLista"><p class="muted">Cargando...</p></div>
     </div>
   </main>
 </div>
@@ -172,6 +193,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
   await cargar();
+  if (location.hash === '#prestamos') cambiarTab('prestamos');
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -338,6 +360,218 @@ async function guardarPago(){
     await post('/pagos', { monto: document.getElementById('pgMonto').value, cuentaTipo: 'caja', cuentaId: document.getElementById('pgCaja').value, fecha: document.getElementById('pgFecha').value, nota: document.getElementById('pgNota').value });
     cerrarModal(); await cargar();
   }catch(e){ document.getElementById('pgErr').textContent = e.message; }
+}
+
+// ================= Préstamos =================
+const $id = id => document.getElementById(id);
+const val = id => ($id(id) || {}).value || '';
+function cambiarTab(t){
+  $id('tabCheques').classList.toggle('hidden', t !== 'cheques');
+  $id('tabPrestamos').classList.toggle('hidden', t !== 'prestamos');
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('activa', b.dataset.tab === t));
+  try{ history.replaceState(null, '', t === 'prestamos' ? '#prestamos' : location.pathname + location.search); }catch(e){}
+  if (t === 'prestamos') cargarPrestamos();
+}
+const TIPOS_FACT = [['factura_a','Factura A'],['factura_b','Factura B'],['factura_c','Factura C'],['factura_m','Factura M'],['nota_debito_a','Nota de débito A'],['nota_debito_b','Nota de débito B'],['nota_debito_c','Nota de débito C'],['nota_debito_m','Nota de débito M'],['recibo','Recibo'],['otro','Otro (no fiscal)']];
+const etqTipo = t => { const x = TIPOS_FACT.find(a => a[0] === t); return x ? x[1] : (t || ''); };
+let PREST = null, PROVS = [], CUENTAS = [];
+async function cargarPrestamos(){
+  try{
+    const r = await fetch(BASE + '/prestamos', {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    PREST = d; renderPrestamos();
+  }catch(e){ $id('prLista').innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`; }
+}
+function renderPrestamos(){
+  const t = PREST.total;
+  $id('prKpis').innerHTML = `
+    <div class="kpi"><div class="muted">Saldo del crédito (capital)</div><div class="v" style="color:${t.saldoCapital > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(t.saldoCapital)}</div></div>
+    <div class="kpi"><div class="muted">Crédito total / capital devuelto</div><div class="v" style="font-size:16px">${money(t.montoTotal)} / ${money(t.capitalPagado)}</div></div>
+    <div class="kpi"><div class="muted">Intereses (gasto financiero)</div><div class="v">${money(t.interesNeto)}</div><div class="muted">+ IVA ${money(t.iva)} (crédito fiscal)</div></div>
+    ${t.pendientePago > 0 ? `<div class="kpi"><div class="muted">Liquidaciones sin pagar</div><div class="v" style="color:var(--danger)">${money(t.pendientePago)}</div></div>` : ''}`;
+  $id('prLista').innerHTML = PREST.prestamos.map(p => {
+    const pct = p.montoTotal ? Math.min(100, Math.max(0, p.capitalPagado / p.montoTotal * 100)) : 0;
+    const filas = p.liquidaciones.map(l => {
+      const cbte = l.comprobante ? `${escapeHtml(etqTipo(l.comprobante.tipoComprobante))} ${escapeHtml(l.comprobante.puntoVenta)}-${escapeHtml(l.comprobante.comprobanteNumero)}` : '—';
+      const estado = l.anulada ? '<span class="pill mal">anulada</span>' : (l.pagada ? '<span class="pill ok">pagada</span>' : '<span class="pill">sin pagar</span>');
+      const acc = l.anulada ? '' : ((l.pagada ? '' : `<button data-iconizado="1" class="btn small secondary" onclick="abrirPagoLiq('${l._id}')">Registrar pago</button> `) + `<button class="btn small secondary" onclick="anularLiq('${l._id}')">Anular</button>`);
+      return `<tr class="${l.anulada ? 'liq-anulada' : ''}"><td>${escapeHtml(l.periodo || '')}</td><td>${fechaCorta(l.fecha)}</td><td>${cbte}</td>
+        <td class="num">${money(l.interesNeto)}</td><td class="num">${money(l.iva)}</td><td class="num">${money(l.capital)}</td><td class="num"><strong>${money(l.totalAPagar)}</strong></td><td>${estado}</td><td>${acc}</td></tr>`;
+    }).join('') || '<tr><td colspan="9" class="muted">Todavía no hay liquidaciones cargadas.</td></tr>';
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
+        <div><h3 style="margin:0">${escapeHtml(p.nombre)} ${p.estado === 'cancelado' ? '<span class="pill">cancelado</span>' : ''}</h3>
+          <div class="muted">Acreedor: ${escapeHtml(p.proveedorNombre || '—')}${p.fechaOtorgamiento ? ' · otorgado ' + fechaCorta(p.fechaOtorgamiento) : ''}${p.nota ? ' · ' + escapeHtml(p.nota) : ''}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button data-iconizado="1" class="btn small" onclick="abrirLiquidacion('${p._id}')">Registrar liquidación</button>
+          <button class="btn small secondary" onclick="abrirPrestamo('${p._id}')">Editar</button>
+          ${p.cuotas === 0 ? `<button class="btn small secondary" onclick="eliminarPrestamo('${p._id}')">Eliminar</button>` : ''}
+        </div>
+      </div>
+      <div class="prog"><div style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="muted">Devuelto ${money(p.capitalPagado)} de ${money(p.montoTotal)} (${pct.toFixed(1)}%) · <strong>Saldo ${money(p.saldoCapital)}</strong> · Intereses ${money(p.interesNeto)} + IVA ${money(p.iva)} · ${p.cuotas} liquidación(es)</div>
+      <div style="overflow-x:auto;margin-top:10px"><table>
+        <thead><tr><th>Período</th><th>Fecha</th><th>Factura de intereses</th><th class="num">Intereses (neto)</th><th class="num">IVA</th><th class="num">Capital</th><th class="num">Total a pagar</th><th>Pago</th><th></th></tr></thead>
+        <tbody>${filas}</tbody></table></div>
+    </div>`;
+  }).join('') || '<div class="card"><p class="muted" style="margin:0">Todavía no cargaste ningún préstamo. Tocá "Nuevo préstamo" para empezar.</p></div>';
+}
+async function cargarProveedores(){
+  if (PROVS.length) return;
+  try{ const r = await fetch(BASE + '/prestamos/proveedores', {headers: headersAuth()}); const d = await r.json(); if (r.ok) PROVS = d; }catch(e){}
+}
+const provEtq = p => p.nombre + (p.cuit ? ' — ' + p.cuit : '');
+async function cargarCuentas(){
+  CUENTAS = [];
+  try{
+    const [c, b] = await Promise.all([fetch('/api/tesoreria/cajas', {headers: headersAuth()}), fetch('/api/tesoreria/bancos', {headers: headersAuth()})]);
+    const cajas = c.ok ? await c.json() : [], bancos = b.ok ? await b.json() : [];
+    (Array.isArray(cajas) ? cajas : []).forEach(x => CUENTAS.push({ v: 'caja:' + x._id, n: 'Caja · ' + x.nombre }));
+    (Array.isArray(bancos) ? bancos : []).forEach(x => CUENTAS.push({ v: 'banco:' + x._id, n: 'Banco · ' + x.nombre }));
+  }catch(e){}
+}
+const opcionesCuentas = sel => CUENTAS.map(c => `<option value="${c.v}" ${c.v === sel ? 'selected' : ''}>${escapeHtml(c.n)}</option>`).join('');
+
+// ---- Alta / edición del préstamo ----
+let PR_EDIT = null;
+async function abrirPrestamo(id){
+  await cargarProveedores();
+  const p = id ? PREST.prestamos.find(x => String(x._id) === String(id)) : null;
+  PR_EDIT = p ? String(p._id) : null;
+  const prov = p ? PROVS.find(x => String(x._id) === String(p.proveedorId)) : null;
+  $id('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:560px"><span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2 style="margin-top:0">${p ? 'Editar préstamo' : 'Nuevo préstamo'}</h2>
+    <label>Nombre *</label><input id="pmNombre" placeholder="Ej: Crédito FONDEP" value="${p ? escapeHtml(p.nombre) : ''}">
+    <label style="margin-top:8px">Acreedor (proveedor que te manda la factura de intereses) *</label>
+    <input id="pmProv" list="pmProvList" autocomplete="off" placeholder="Escribí para buscar…" value="${prov ? escapeHtml(provEtq(prov)) : (p ? escapeHtml(p.proveedorNombre || '') : '')}" ${p && p.cuotas ? 'disabled' : ''}>
+    <datalist id="pmProvList">${PROVS.map(x => `<option value="${escapeHtml(provEtq(x))}"></option>`).join('')}</datalist>
+    <div class="grid2" style="margin-top:8px">
+      <div><label>Monto total del crédito * (el capital a devolver)</label><input id="pmMonto" type="number" step="0.01" min="0" value="${p ? p.montoTotal : ''}"></div>
+      <div><label>Fecha de otorgamiento</label><input id="pmFecha" type="date" value="${p && p.fechaOtorgamiento ? String(p.fechaOtorgamiento).slice(0,10) : ''}"></div>
+    </div>
+    <label style="margin-top:8px">Nota</label><input id="pmNota" value="${p ? escapeHtml(p.nota || '') : ''}">
+    ${p ? `<label style="margin-top:8px">Estado</label><select id="pmEstado"><option value="vigente" ${p.estado !== 'cancelado' ? 'selected' : ''}>Vigente</option><option value="cancelado" ${p.estado === 'cancelado' ? 'selected' : ''}>Cancelado (ya no suma a los totales)</option></select>` : ''}
+    <div class="err" id="pmErr"></div>
+    <button data-iconizado="1" class="btn" style="margin-top:10px" onclick="guardarPrestamo()">${p ? 'Guardar cambios' : 'Crear préstamo'}</button></div></div>`;
+}
+async function guardarPrestamo(){
+  try{
+    const txtProv = val('pmProv').trim();
+    const prov = PROVS.find(x => provEtq(x) === txtProv) || PROVS.find(x => x.nombre.toLowerCase() === txtProv.toLowerCase());
+    const body = { nombre: val('pmNombre'), montoTotal: val('pmMonto'), fechaOtorgamiento: val('pmFecha'), nota: val('pmNota') };
+    if (prov) body.proveedorId = prov._id;
+    else if (!PR_EDIT) throw new Error('Elegí el acreedor de la lista (tiene que estar cargado como proveedor).');
+    if (PR_EDIT) {
+      body.estado = val('pmEstado');
+      const r = await fetch(BASE + '/prestamos/' + PR_EDIT, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    } else await post('/prestamos', body);
+    cerrarModal(); await cargarPrestamos();
+  }catch(e){ $id('pmErr').textContent = e.message; }
+}
+async function eliminarPrestamo(id){ if (!confirm('¿Eliminar este préstamo? No tiene liquidaciones cargadas.')) return; try{ await post('/prestamos/' + id + '/eliminar'); await cargarPrestamos(); }catch(e){ alert(e.message); } }
+
+// ---- Liquidación mensual ----
+let LQ_ID = null;
+async function abrirLiquidacion(id){
+  await cargarCuentas();
+  LQ_ID = String(id);
+  const p = PREST.prestamos.find(x => String(x._id) === LQ_ID);
+  const hoy = hoyISO();
+  $id('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:720px"><span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2 style="margin-top:0">Liquidación — ${escapeHtml(p.nombre)}</h2>
+    <p class="muted">Saldo actual del crédito: <strong>${money(p.saldoCapital)}</strong></p>
+    ${FacturaIAUI.cajaHtml('lq', 'Subí el PDF (o una foto) de la factura/liquidación que te mandan: la IA completa la factura de intereses y busca el capital en el detalle. Revisá todo antes de guardar.', '🧾 Leer la liquidación desde el PDF con IA')}
+    <div class="grid3">
+      <div><label>Período *</label><input id="lqPeriodo" type="month" value="${hoy.slice(0,7)}"></div>
+      <div><label>Fecha de la factura *</label><input id="lqFecha" type="date" value="${hoy}"></div>
+      <div><label>Comprobante</label><select id="lqTipo">${TIPOS_FACT.map(t => `<option value="${t[0]}">${t[1]}</option>`).join('')}</select></div>
+    </div>
+    <div class="grid3" style="margin-top:8px">
+      <div><label>Punto de venta</label><input id="lqPV" placeholder="0004"></div>
+      <div><label>Número</label><input id="lqNro" placeholder="00033927"></div>
+      <div><label>Alícuota de IVA de los intereses</label><select id="lqAlic" onchange="calcLiq()"><option value="21">21%</option><option value="10.5">10,5%</option><option value="27">27%</option><option value="0">0% (sin IVA)</option></select></div>
+    </div>
+    <div class="grid2" style="margin-top:8px">
+      <div><label>Intereses (neto, sin IVA) → gasto financiero</label><input id="lqInteres" type="number" step="0.01" min="0" oninput="calcLiq()"></div>
+      <div><label>Capital de la cuota → baja el saldo del crédito</label><input id="lqCapital" type="number" step="0.01" min="0" oninput="calcLiq()"></div>
+    </div>
+    <div class="card" style="margin:12px 0;background:var(--bg)" id="lqCalc"></div>
+    <div class="grid2">
+      <div><label>Pagar desde</label><select id="lqCuenta"><option value="">Todavía no la pagué</option>${opcionesCuentas('')}</select></div>
+      <div><label>Fecha de pago</label><input id="lqFechaPago" type="date" value="${hoy}"></div>
+    </div>
+    <label style="margin-top:8px">Nota</label><input id="lqNota">
+    <div class="err" id="lqErr"></div>
+    <button data-iconizado="1" class="btn" style="margin-top:10px" onclick="guardarLiquidacion()">Registrar liquidación</button></div></div>`;
+  FacturaIAUI.registrar('lq', { url: BASE + '/leer-factura', headers: headersAuthJson, alResultado: aplicarLiquidacionLeida });
+  calcLiq();
+}
+function calcLiq(){
+  const p = PREST.prestamos.find(x => String(x._id) === LQ_ID); if (!p || !$id('lqCalc')) return;
+  const neto = Number(val('lqInteres')) || 0, al = Number(val('lqAlic')), cap = Number(val('lqCapital')) || 0;
+  const iva = Math.round(neto * al) / 100, fact = Math.round((neto + iva) * 100) / 100;
+  $id('lqCalc').innerHTML = `Factura de intereses <strong>${money(fact)}</strong> (IVA ${money(iva)}) · Capital <strong>${money(cap)}</strong> · <strong>Total a pagar ${money(fact + cap)}</strong>
+    <div class="muted" style="margin-top:4px">Saldo del crédito después de esta cuota: <strong>${money(p.saldoCapital - cap)}</strong></div>`;
+}
+const MESES_NUM = { enero:1, febrero:2, marzo:3, abril:4, mayo:5, junio:6, julio:7, agosto:8, septiembre:9, setiembre:9, octubre:10, noviembre:11, diciembre:12 };
+function numAR(s){ return Number(String(s).replace(/[.,]+$/, '').replace(/\./g, '').replace(',', '.')); }
+async function aplicarLiquidacionLeida(d){
+  const avisos = (d.avisos || []).filter(a => !/CUIT del proveedor/i.test(a));
+  const c = d.comprobante || {}, items = d.items || [];
+  if (c.tipoComprobante && TIPOS_FACT.some(t => t[0] === c.tipoComprobante)) $id('lqTipo').value = c.tipoComprobante;
+  if (c.puntoVenta) $id('lqPV').value = c.puntoVenta;
+  if (c.comprobanteNumero) $id('lqNro').value = c.comprobanteNumero;
+  if (c.fecha) { $id('lqFecha').value = c.fecha; $id('lqPeriodo').value = c.fecha.slice(0, 7); }
+  const neto = (d.totales && d.totales.neto > 0) ? d.totales.neto : items.reduce((a, i) => a + i.cantidad * i.precioUnitario, 0);
+  if (neto > 0) $id('lqInteres').value = Math.round(neto * 100) / 100;
+  if (items[0] && [0, 10.5, 21, 27].includes(items[0].alicuotaIva)) $id('lqAlic').value = String(items[0].alicuotaIva);
+  const texto = items.map(i => i.descripcion).join(' ');
+  const mc = texto.match(/capital[^0-9]{0,15}([0-9][0-9.,]*)/i);
+  if (mc && numAR(mc[1]) > 0) { $id('lqCapital').value = numAR(mc[1]); avisos.push('El capital (' + money(numAR(mc[1])) + ') se tomó del detalle de la factura: confirmá que es el de esta cuota.'); }
+  else avisos.push('No encontré el capital en la factura: cargalo a mano (es lo que baja el saldo del crédito).');
+  const mm = texto.toLowerCase().match(new RegExp('(' + Object.keys(MESES_NUM).join('|') + ')\\s*(?:de\\s*)?(20\\d\\d)'));
+  if (mm) $id('lqPeriodo').value = mm[2] + '-' + String(MESES_NUM[mm[1]]).padStart(2, '0');
+  const p = PREST.prestamos.find(x => String(x._id) === LQ_ID);
+  if (d.proveedorCoincidencia && p && String(d.proveedorCoincidencia._id) !== String(p.proveedorId)) avisos.push('La factura parece ser de "' + d.proveedorCoincidencia.razonSocial + '", que no es el acreedor de este préstamo (' + (p.proveedorNombre || '—') + ').');
+  if (!d.proveedorCoincidencia && d.proveedor && d.proveedor.razonSocial) avisos.push('Proveedor leído: "' + d.proveedor.razonSocial + '" — no coincide con ninguno cargado. Se va a usar el acreedor del préstamo.');
+  if (d.duplicado) avisos.unshift('Esta factura ya está cargada como gasto #' + d.duplicado.numero + '. Si la registrás de nuevo, el sistema la va a rechazar.');
+  FacturaIAUI.avisos('lq', avisos);
+  calcLiq();
+}
+async function guardarLiquidacion(){
+  try{
+    const cuenta = val('lqCuenta'), partes = cuenta ? cuenta.split(':') : ['', ''];
+    await post('/prestamos/' + LQ_ID + '/liquidaciones', {
+      periodo: val('lqPeriodo'), fecha: val('lqFecha'), tipoComprobante: val('lqTipo'), puntoVenta: val('lqPV'), comprobanteNumero: val('lqNro'),
+      alicuotaIva: val('lqAlic'), interesNeto: val('lqInteres'), capital: val('lqCapital'),
+      cuentaTipo: partes[0], cuentaId: partes[1], fechaPago: val('lqFechaPago'), nota: val('lqNota')
+    });
+    cerrarModal(); await cargarPrestamos();
+  }catch(e){ $id('lqErr').textContent = e.message; }
+}
+async function abrirPagoLiq(id){
+  await cargarCuentas();
+  const l = PREST.prestamos.flatMap(p => p.liquidaciones).find(x => String(x._id) === String(id));
+  $id('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal" style="max-width:460px"><span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2 style="margin-top:0">Registrar pago de la liquidación ${escapeHtml(l.periodo || '')}</h2>
+    <p class="muted">Sale de la caja o banco: factura de intereses <strong>${money(l.totalFactura)}</strong> + capital <strong>${money(l.capital)}</strong> = <strong>${money(l.totalAPagar)}</strong></p>
+    <label>Pagar desde *</label><select id="plCuenta"><option value="">Elegí…</option>${opcionesCuentas('')}</select>
+    <label style="margin-top:8px">Fecha de pago</label><input id="plFecha" type="date" value="${hoyISO()}">
+    <div class="err" id="plErr"></div>
+    <button data-iconizado="1" class="btn" style="margin-top:10px" onclick="guardarPagoLiq('${id}')">Registrar pago</button></div></div>`;
+}
+async function guardarPagoLiq(id){
+  try{
+    const cuenta = val('plCuenta'); if (!cuenta) throw new Error('Elegí de qué caja o banco sale.');
+    const [t, c] = cuenta.split(':');
+    await post('/prestamos/liquidaciones/' + id + '/pagar', { cuentaTipo: t, cuentaId: c, fecha: val('plFecha') });
+    cerrarModal(); await cargarPrestamos();
+  }catch(e){ $id('plErr').textContent = e.message; }
+}
+async function anularLiq(id){
+  if (!confirm('¿Anular esta liquidación?\n\n· El capital vuelve al saldo del crédito.\n· La factura de intereses se anula (sale del Libro IVA y del Estado de resultados).\n· Si estaba pagada, la plata vuelve a la caja/banco.')) return;
+  try{ await post('/prestamos/liquidaciones/' + id + '/anular'); await cargarPrestamos(); }catch(e){ alert(e.message); }
 }
 </script>
 </body>

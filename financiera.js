@@ -13,10 +13,11 @@
 // ---------------------------------------------------------------------------
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const { aplicarMovimientoCuenta } = require('./tesoreria');
 
-const { leerChequesConIA } = require('./facturaIA');
+const { leerChequesConIA, registrarRutasFacturaIA } = require('./facturaIA');
+const gastosRouter = require('./gastos');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -353,6 +354,264 @@ async function armarResumen(db, req) {
 router.get('/resumen', authOperar, async (req, res) => {
   try { res.json(await conReintento(async () => armarResumen(await getDb(), req))); }
   catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------------
+// Préstamos (16/10/2026, pedido de Mato). Un crédito que se paga todos los meses con una liquidación del acreedor, que trae:
+//   · una factura por los INTERESES (con IVA) → se carga como un Gasto fiscal (concepto "Gastos financieros · Intereses de
+//     préstamos"), así entra solo al Libro IVA Compras (crédito fiscal) y al Estado de resultados como gasto financiero;
+//   · el CAPITAL de la cuota → NO es gasto: baja el saldo del crédito.
+// Colecciones: prestamos (el crédito: monto total, acreedor = un proveedor) y prestamo_liquidaciones (una por mes: interés neto, IVA,
+// capital, factura/gasto asociado y de dónde se pagó). Saldo del crédito = monto total − Σ capital de las liquidaciones no anuladas.
+// Pagar una liquidación saca de una caja/banco de Tesorería: el total de la factura (se registra como pago del gasto) y el capital.
+// ---------------------------------------------------------------------------
+const CONCEPTO_INTERES = 'Gastos financieros · Intereses de préstamos';
+// Lectura de facturas con IA (la misma de Gastos): para completar la liquidación desde el PDF que manda el acreedor.
+registrarRutasFacturaIA(router, { modo: 'gastos', authAdmin: authOperar, getDb, conReintento, filtroOrg });
+
+function periodoDe(fecha) { const x = new Date(new Date(fecha).getTime() - 3 * 3600 * 1000); return `${x.getUTCFullYear()}-${String(x.getUTCMonth() + 1).padStart(2, '0')}`; }
+function resumenPrestamo(p, liqs) {
+  const vig = liqs.filter(l => !l.anulada);
+  const capitalPagado = r2(vig.reduce((s, l) => s + (l.capital || 0), 0));
+  return Object.assign({}, p, {
+    capitalPagado, saldoCapital: r2((p.montoTotal || 0) - capitalPagado),
+    interesNeto: r2(vig.reduce((s, l) => s + (l.interesNeto || 0), 0)), iva: r2(vig.reduce((s, l) => s + (l.iva || 0), 0)),
+    cuotas: vig.length, pendientePago: r2(vig.filter(l => !l.pagada).reduce((s, l) => s + (l.totalAPagar || 0), 0)),
+    liquidaciones: liqs.slice().sort((a, b) => (b.periodo || '').localeCompare(a.periodo || '') || new Date(b.fecha) - new Date(a.fecha))
+  });
+}
+
+router.get('/prestamos', authOperar, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const f = filtroOrg(req);
+      const [prestamos, liqs] = await Promise.all([
+        db.collection('prestamos').find(f).sort({ createdAt: -1 }).toArray(),
+        db.collection('prestamo_liquidaciones').find(f).sort({ fecha: 1, createdAt: 1 }).toArray()
+      ]);
+      const lista = prestamos.map(p => resumenPrestamo(p, liqs.filter(l => String(l.prestamoId) === String(p._id))));
+      const vig = lista.filter(p => p.estado !== 'cancelado');
+      const total = {
+        montoTotal: r2(vig.reduce((s, p) => s + p.montoTotal, 0)), capitalPagado: r2(vig.reduce((s, p) => s + p.capitalPagado, 0)),
+        saldoCapital: r2(vig.reduce((s, p) => s + p.saldoCapital, 0)), interesNeto: r2(vig.reduce((s, p) => s + p.interesNeto, 0)),
+        iva: r2(vig.reduce((s, p) => s + p.iva, 0)), pendientePago: r2(vig.reduce((s, p) => s + p.pendientePago, 0))
+      };
+      return { total, prestamos: lista, conceptoInteres: CONCEPTO_INTERES };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Proveedores para elegir el acreedor (Financiera puede no tener el módulo Gastos, por eso no se usa /api/gastos/proveedores).
+router.get('/prestamos/proveedores', authOperar, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('proveedores')
+      .find(Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req))).project({ razonSocial: 1, nombreFantasia: 1, cuit: 1 }).sort({ razonSocial: 1 }).limit(3000).toArray());
+    res.json(lista.map(p => ({ _id: p._id, nombre: p.razonSocial || p.nombreFantasia || '', cuit: p.cuit || '' })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/prestamos', authOperar, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal estás trabajando.');
+    const b = req.body || {};
+    const nombre = txt(b.nombre);
+    if (!nombre) throw err(400, 'Poné un nombre para el préstamo (por ejemplo "Crédito FONDEP").');
+    const proveedorId = toObjectId(b.proveedorId);
+    if (!proveedorId) throw err(400, 'Elegí el acreedor: es el proveedor que te manda la factura de intereses.');
+    const montoTotal = Number(b.montoTotal);
+    if (!(montoTotal > 0)) throw err(400, 'El monto total del crédito tiene que ser mayor a 0.');
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrgClientes(req)));
+      if (!prov) throw err(400, 'El acreedor no existe (o no pertenece a esta sucursal).');
+      const d = {
+        orgId: req.orgId, nombre, proveedorId, proveedorNombre: prov.razonSocial || prov.nombreFantasia || '', montoTotal: r2(montoTotal),
+        fechaOtorgamiento: b.fechaOtorgamiento ? fechaDe(b.fechaOtorgamiento) : null, nota: txt(b.nota), estado: 'vigente',
+        usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date()
+      };
+      d._id = (await db.collection('prestamos').insertOne(d)).insertedId;
+      return d;
+    });
+    res.json(doc);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.put('/prestamos/:id', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    await conReintento(async () => {
+      const db = await getDb();
+      const p = await db.collection('prestamos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!p) throw err(404, 'Préstamo no encontrado');
+      const liqs = await db.collection('prestamo_liquidaciones').find({ prestamoId: id, anulada: { $ne: true } }).toArray();
+      const capitalPagado = r2(liqs.reduce((s, l) => s + (l.capital || 0), 0));
+      const set = {};
+      if (b.nombre !== undefined) { if (!txt(b.nombre)) throw err(400, 'El nombre no puede quedar vacío.'); set.nombre = txt(b.nombre); }
+      if (b.montoTotal !== undefined) {
+        const m = Number(b.montoTotal);
+        if (!(m > 0)) throw err(400, 'El monto total tiene que ser mayor a 0.');
+        if (m + 0.005 < capitalPagado) throw err(400, `El monto total no puede ser menor al capital ya pagado (${capitalPagado}).`);
+        set.montoTotal = r2(m);
+      }
+      if (b.nota !== undefined) set.nota = txt(b.nota);
+      if (b.fechaOtorgamiento !== undefined) set.fechaOtorgamiento = b.fechaOtorgamiento ? fechaDe(b.fechaOtorgamiento) : null;
+      if (b.estado !== undefined) { if (!['vigente', 'cancelado'].includes(b.estado)) throw err(400, 'Estado inválido.'); set.estado = b.estado; }
+      if (b.proveedorId !== undefined && String(b.proveedorId) !== String(p.proveedorId)) {
+        if (liqs.length) throw err(400, 'No se puede cambiar el acreedor de un préstamo que ya tiene liquidaciones.');
+        const prov = await db.collection('proveedores').findOne(Object.assign({ _id: toObjectId(b.proveedorId) }, filtroOrgClientes(req)));
+        if (!prov) throw err(400, 'El acreedor no existe.');
+        set.proveedorId = prov._id; set.proveedorNombre = prov.razonSocial || prov.nombreFantasia || '';
+      }
+      await db.collection('prestamos').updateOne({ _id: id }, { $set: Object.assign(set, { updatedAt: new Date() }) });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/prestamos/:id/eliminar', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const p = await db.collection('prestamos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!p) throw err(404, 'Préstamo no encontrado');
+      if (await db.collection('prestamo_liquidaciones').findOne({ prestamoId: id, anulada: { $ne: true } })) throw err(400, 'Tiene liquidaciones cargadas: anulalas primero (o marcá el préstamo como cancelado).');
+      await db.collection('prestamo_liquidaciones').deleteMany({ prestamoId: id });
+      await db.collection('prestamos').deleteOne({ _id: id });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Saca de una caja/banco el total de la factura de intereses (queda como pago del gasto) y el capital. Si algo falla, deshace lo hecho.
+async function pagarLiquidacion(db, req, prestamo, liq, { cuentaTipo, cuentaId, fecha, nota }) {
+  const hechos = [];
+  try {
+    if (liq.totalFactura > 0) {
+      const m = await aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo: 'egreso', monto: liq.totalFactura, moneda: 'ARS',
+        motivo: `Pago gasto Nº ${liq.gastoNumero}`, observaciones: `Préstamo "${prestamo.nombre}" · intereses ${liq.periodo}`, origen: 'gasto', fecha });
+      hechos.push({ concepto: 'intereses', monto: liq.totalFactura, movimientoId: m._id });
+    }
+    if (liq.capital > 0) {
+      const m = await aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo: 'egreso', monto: liq.capital, moneda: 'ARS',
+        motivo: `Capital préstamo "${prestamo.nombre}" (${liq.periodo})`, observaciones: txt(nota), origen: 'prestamo', fecha });
+      hechos.push({ concepto: 'capital', monto: liq.capital, movimientoId: m._id });
+    }
+  } catch (e) {
+    for (const h of hechos) { try { await aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo: 'ingreso', monto: h.monto, moneda: 'ARS', motivo: 'Se deshizo un pago de préstamo por un error', origen: 'prestamo' }); } catch (e2) { /* nada más que hacer */ } }
+    throw e;
+  }
+  const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+  if (liq.gastoId && liq.totalFactura > 0) {
+    const g = await db.collection('gastos').findOne({ _id: liq.gastoId });
+    if (g) {
+      const totalPagado = r2((g.totalPagado || 0) + liq.totalFactura);
+      await db.collection('gastos').updateOne({ _id: g._id }, {
+        $push: { pagos: { tipoValor: cuentaTipo === 'caja' ? 'efectivo' : 'cuenta', monto: liq.totalFactura, fecha, nota: `Liquidación préstamo "${prestamo.nombre}" ${liq.periodo}`, usuarioNombre, cuentaTipo, cuentaId } },
+        $set: { totalPagado, saldoPendiente: Math.max(0, r2(g.total - totalPagado)), updatedAt: new Date() }
+      });
+    }
+  }
+  await db.collection('prestamo_liquidaciones').updateOne({ _id: liq._id }, { $set: { pagada: true, pagadaEn: fecha, cuentaTipo, cuentaId, pagos: hechos.map(h => Object.assign({ cuentaTipo, cuentaId, fecha }, h)) } });
+}
+
+router.post('/prestamos/:id/liquidaciones', authOperar, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal estás trabajando.');
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const fecha = fechaDe(b.fecha);
+    const periodo = /^\d{4}-\d{2}$/.test(txt(b.periodo)) ? txt(b.periodo) : periodoDe(fecha);
+    const interesNeto = r2(Number(b.interesNeto) || 0), capital = r2(Number(b.capital) || 0);
+    if (interesNeto < 0 || capital < 0) throw err(400, 'Los importes no pueden ser negativos.');
+    if (!(interesNeto > 0) && !(capital > 0)) throw err(400, 'Cargá el capital de la cuota, los intereses, o los dos.');
+    const alicuotaIva = b.alicuotaIva === undefined || b.alicuotaIva === '' ? 21 : Number(b.alicuotaIva);
+    const cuentaTipo = txt(b.cuentaTipo).toLowerCase();
+    const cuentaId = b.cuentaId ? toObjectId(b.cuentaId) : null;
+    if (b.cuentaId && (!cuentaId || !['caja', 'banco'].includes(cuentaTipo))) throw err(400, 'Caja o banco inválido.');
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const prestamo = await db.collection('prestamos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!prestamo) throw err(404, 'Préstamo no encontrado');
+      const previas = await db.collection('prestamo_liquidaciones').find({ prestamoId: id, anulada: { $ne: true } }).toArray();
+      const saldo = r2(prestamo.montoTotal - previas.reduce((s, l) => s + (l.capital || 0), 0));
+      if (capital > saldo + 0.005) throw err(400, `El capital de la cuota (${capital}) supera el saldo que queda del crédito (${saldo}).`);
+      let gasto = null;
+      if (interesNeto > 0) {
+        gasto = await gastosRouter.crearGastoDesdeBody(req, {
+          proveedorId: prestamo.proveedorId, tipoComprobante: txt(b.tipoComprobante) || 'factura_a', puntoVenta: b.puntoVenta, comprobanteNumero: b.comprobanteNumero,
+          fecha: b.fechaComprobante || b.fecha, moneda: 'ARS', observaciones: `Préstamo "${prestamo.nombre}" · intereses ${periodo}`,
+          items: [{ conceptoNombre: CONCEPTO_INTERES, cantidad: 1, precioUnitario: interesNeto, alicuotaIva, observaciones: `${prestamo.nombre} · ${periodo}` }]
+        });
+      }
+      const totalFactura = gasto ? r2(gasto.total) : 0;
+      const liq = {
+        orgId: req.orgId, prestamoId: id, periodo, fecha, interesNeto, alicuotaIva, iva: gasto ? r2(gasto.importeIva) : 0, totalFactura, capital, totalAPagar: r2(capital + totalFactura),
+        comprobante: gasto ? { tipoComprobante: gasto.tipoComprobante, puntoVenta: gasto.puntoVenta, comprobanteNumero: gasto.comprobanteNumero } : null,
+        gastoId: gasto ? gasto._id : null, gastoNumero: gasto ? gasto.numero : null, pagada: false, pagos: [], anulada: false, nota: txt(b.nota),
+        usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date()
+      };
+      try {
+        liq._id = (await db.collection('prestamo_liquidaciones').insertOne(liq)).insertedId;
+        if (cuentaId) await pagarLiquidacion(db, req, prestamo, liq, { cuentaTipo, cuentaId, fecha: b.fechaPago ? fechaDe(b.fechaPago) : fecha, nota: b.nota });
+      } catch (e) {
+        // No se pudo completar: no deja la factura de intereses cargada a medias.
+        if (liq._id) await db.collection('prestamo_liquidaciones').deleteOne({ _id: liq._id });
+        if (gasto) await db.collection('gastos').updateOne({ _id: gasto._id }, { $set: { estado: 'anulada', anuladaEn: new Date(), anuladaMotivo: 'No se pudo completar la liquidación del préstamo' } });
+        throw e;
+      }
+      return db.collection('prestamo_liquidaciones').findOne({ _id: liq._id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/prestamos/liquidaciones/:id/pagar', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const cuentaTipo = txt(b.cuentaTipo).toLowerCase(), cuentaId = toObjectId(b.cuentaId);
+    if (!cuentaId || !['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
+    await conReintento(async () => {
+      const db = await getDb();
+      const liq = await db.collection('prestamo_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!liq) throw err(404, 'Liquidación no encontrada');
+      if (liq.anulada) throw err(400, 'Esta liquidación está anulada.');
+      if (liq.pagada) throw err(400, 'Esta liquidación ya está pagada.');
+      const prestamo = await db.collection('prestamos').findOne({ _id: liq.prestamoId });
+      await pagarLiquidacion(db, req, prestamo, liq, { cuentaTipo, cuentaId, fecha: fechaDe(b.fecha), nota: b.nota });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Anula la liquidación: el capital vuelve al saldo del crédito, la factura de intereses queda anulada (sale del Libro IVA y del
+// Estado de resultados) y, si estaba pagada, la plata vuelve a la caja/banco.
+router.post('/prestamos/liquidaciones/:id/anular', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const liq = await db.collection('prestamo_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!liq) throw err(404, 'Liquidación no encontrada');
+      if (liq.anulada) throw err(400, 'Esta liquidación ya está anulada.');
+      for (const p of (liq.pagos || [])) {
+        await aplicarMovimientoCuenta(db, req, { cuentaTipo: p.cuentaTipo, cuentaId: p.cuentaId, tipo: 'ingreso', monto: p.monto, moneda: 'ARS',
+          motivo: `Anulación de liquidación de préstamo (${p.concepto === 'capital' ? 'capital' : 'intereses'} ${liq.periodo})`, origen: 'prestamo' });
+      }
+      if (liq.gastoId) await db.collection('gastos').updateOne({ _id: liq.gastoId }, { $set: { estado: 'anulada', anuladaEn: new Date(), anuladaPor: (req.usuario && req.usuario.nombre) || '', anuladaMotivo: 'Anulación de la liquidación del préstamo', updatedAt: new Date() } });
+      await db.collection('prestamo_liquidaciones').updateOne({ _id: id }, { $set: { anulada: true, anuladaEn: new Date() } });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 module.exports = router;

@@ -481,10 +481,11 @@ router.get('/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-router.post('/', authAdmin, async (req, res) => {
-  try {
+// Alta de un gasto. Está separada de la ruta para poder reusarla: Financiera → Préstamos carga con esto la factura de intereses
+// de cada liquidación (así entra al Libro IVA y al Estado de resultados igual que cualquier gasto).
+async function crearGastoDesdeBody(req, body) {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar un gasto.');
-    const body = req.body || {};
+    body = body || {};
     const proveedorId = toObjectId(body.proveedorId);
     if (!proveedorId) throw err(400, 'Elegí un proveedor');
     const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
@@ -571,8 +572,12 @@ router.post('/', authAdmin, async (req, res) => {
         referencia: { gastoId: gasto._id, gastoNumero: gasto.numero, proveedorId: gasto.proveedorId, proveedorNombre: gasto.proveedorNombre } });
       return gasto;
     });
-    res.json(resultado);
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+    return resultado;
+}
+router.crearGastoDesdeBody = crearGastoDesdeBody;
+router.post('/', authAdmin, async (req, res) => {
+  try { res.json(await crearGastoDesdeBody(req, req.body || {})); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 // Anula un gasto — sin stock de por medio, es una baja simple; los pagos
