@@ -41,7 +41,15 @@
   .btn.danger{background:var(--danger);}
   .btn.small{padding:5px 10px;font-size:12px;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);line-height:1.25;}
+  td .btn.small{padding:3px 8px;}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);}
+  .kpi .t{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .kpi .v{font-size:20px;font-weight:800;margin-top:6px;}
+  .kpi .s{font-size:12px;color:var(--muted);margin-top:4px;}
+  .kpi .v.neg{color:var(--danger);}
+  .kpi .v.pos{color:var(--ok);}
   th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
   tr:hover td{background:var(--bg);}
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
@@ -143,6 +151,7 @@
         </div>
       </div>
     </div>
+    <div class="kpis" id="kpisClientes"></div>
     <div class="card">
       <table>
         <thead id="clientesHead"></thead>
@@ -259,7 +268,73 @@ async function cargarClientes(){
   const body = document.getElementById('clientesBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
   clientesCache = await r.json();
+  await cargarResumenSaldosCli();
   renderClientes();
+}
+
+// Tarjetas dinámicas (como en Proveedores): siguen la búsqueda / "Ver inactivos" y al tocar una se filtra la lista.
+let resumenSaldosCli = null;
+let filtroSaldoCli = '';   // '' | 'deuda' | 'favor'
+async function cargarResumenSaldosCli(){
+  try {
+    const r = await fetch(BASE + '/resumen-saldos', {headers: headersAuth()});
+    resumenSaldosCli = r.ok ? await r.json() : null;
+  } catch (e) { resumenSaldosCli = null; }
+}
+function saldoCli(id){
+  if (!resumenSaldosCli) return null;
+  const s = resumenSaldosCli.saldos[String(id)];
+  return s === undefined ? 0 : s;
+}
+function clientesVisibles(){
+  const l = clientesCache.filter(c => {
+    const s = saldoCli(c._id) || 0;
+    if (filtroSaldoCli === 'deuda') return s > 0.5;
+    if (filtroSaldoCli === 'favor') return s < -0.5;
+    return true;
+  });
+  if (filtroSaldoCli === 'deuda') l.sort((a, b) => saldoCli(b._id) - saldoCli(a._id));
+  if (filtroSaldoCli === 'favor') l.sort((a, b) => saldoCli(a._id) - saldoCli(b._id));
+  return l;
+}
+function toggleFiltroSaldoCli(f){ filtroSaldoCli = filtroSaldoCli === f ? '' : f; renderClientes(); }
+function nombreCli(c){ return (c.apellidoRazonSocial || '') + (c.nombre ? ' ' + c.nombre : ''); }
+function renderKpisClientes(){
+  const el = document.getElementById('kpisClientes'); if (!el) return;
+  if (!resumenSaldosCli) { el.innerHTML = ''; return; }
+  const lista = clientesCache.map(c => ({ c, s: saldoCli(c._id) || 0 }));
+  const deudores = lista.filter(x => x.s > 0.5).sort((a, b) => b.s - a.s);
+  const favor = lista.filter(x => x.s < -0.5);
+  const deuda = deudores.reduce((a, x) => a + x.s, 0), aFavor = favor.reduce((a, x) => a - x.s, 0), neto = deuda - aFavor;
+  const top = deudores.slice(0, 8), max = top.length ? top[0].s : 1;
+  const act = (f) => filtroSaldoCli === f ? 'outline:2px solid var(--accent);' : '';
+  el.innerHTML = `
+    <div class="kpi" style="cursor:pointer;${act('deuda')}" onclick="toggleFiltroSaldoCli('deuda')" title="Tocá para ver solo los clientes que nos deben">
+      <div class="t">Nos deben</div><div class="v ${deuda > 0 ? 'neg' : ''}">${money(deuda)}</div><div class="s">${deudores.length} cliente${deudores.length === 1 ? '' : 's'} con saldo a cobrar</div></div>
+    <div class="kpi" style="cursor:pointer;${act('favor')}" onclick="toggleFiltroSaldoCli('favor')" title="Tocá para ver solo los clientes con saldo a favor">
+      <div class="t">A favor de clientes</div><div class="v ${aFavor > 0 ? 'pos' : ''}">${money(aFavor)}</div><div class="s">${favor.length} cliente${favor.length === 1 ? '' : 's'} — cobros a cuenta y créditos</div></div>
+    <div class="kpi">
+      <div class="t">Neto</div><div class="v ${neto > 0 ? 'neg' : 'pos'}">${money(neto)}</div><div class="s">lo que nos deben menos lo que tienen a favor</div></div>
+    <div class="kpi" style="grid-column:span 2;min-width:300px">
+      <div class="t">Ranking de deuda</div>
+      ${top.length ? `<div style="margin-top:8px;display:grid;gap:6px">${top.map((x, i) => `
+        <div style="display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center;font-size:13px;cursor:pointer" onclick="abrirCuentaClienteDesdeRanking('${x.c._id}')" title="Ver su cuenta corriente">
+          <span class="muted" style="font-weight:800">${i + 1}</span>
+          <div style="min-width:0"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${escapeHtml(nombreCli(x.c))}</div>
+            <div style="height:5px;border-radius:3px;background:var(--border);margin-top:3px"><div style="height:5px;border-radius:3px;background:var(--danger);width:${Math.max(3, Math.round(x.s / max * 100))}%"></div></div></div>
+          <strong>${money(x.s)}</strong>
+        </div>`).join('')}</div>${deudores.length > top.length ? `<div class="s">y ${deudores.length - top.length} más</div>` : ''}` : '<div class="s" style="margin-top:8px">Ningún cliente con deuda.</div>'}
+    </div>`;
+}
+function abrirCuentaClienteDesdeRanking(id){
+  abrirEditarCliente(id);
+  mostrarTabCliente('cuenta-corriente', id);
+}
+function saldoCeldaCli(id){
+  const s = saldoCli(id);
+  if (s === null) return '<span class="muted">—</span>';
+  if (Math.abs(s) < 0.5) return '<span class="muted">$ 0,00</span>';
+  return `<strong style="color:${s > 0 ? 'var(--danger)' : 'var(--ok)'}">${money(s)}</strong>`;
 }
 
 const CATEGORIA_FISCAL_LABEL = {
@@ -290,6 +365,7 @@ const COLUMNAS_CLIENTES = [
   { k: 'condicionPago', l: 'Condición de pago', th: 'Cond. de pago', td: c => escapeHtml(c.condicionPago || '—') },
   { k: 'descuento', l: '% descuento', th: '% Desc.', td: c => c.porcentajeDescuento ? escapeHtml(String(c.porcentajeDescuento)) + '%' : '—' },
   { k: 'limiteCtaCte', l: 'Límite cta. cte.', th: 'Límite cta. cte.', td: c => c.limiteCtaCteFacturacion ? money(c.limiteCtaCteFacturacion) : '—' },
+  { k: 'saldo', l: 'Saldo', def: true, th: 'Saldo', td: c => saldoCeldaCli(c._id) },
   { k: 'estado', l: 'Estado', def: true, th: 'Estado', td: c => `<span class="pill ${c.activo === false ? 'inactivo' : 'activo'}">${c.activo === false ? 'Inactivo' : 'Activo'}</span>` }
 ];
 function claveColumnasClientes(){ return 'clientes_columnas_' + (typeof NOMBRE_USUARIO !== 'undefined' ? NOMBRE_USUARIO : ''); }
@@ -325,10 +401,12 @@ function renderClientes(){
   const body = document.getElementById('clientesBody');
   const cols = columnasClientesVisibles();
   document.getElementById('clientesHead').innerHTML = '<tr>' + cols.map(c => `<th>${c.th}</th>`).join('') + '<th></th></tr>';
-  if (!clientesCache.length) { body.innerHTML = `<tr><td colspan="${cols.length + 1}" class="muted">No hay clientes todavía.</td></tr>`; return; }
-  body.innerHTML = clientesCache.map(c => `
+  renderKpisClientes();
+  const visibles = clientesVisibles();
+  if (!visibles.length) { body.innerHTML = `<tr><td colspan="${cols.length + 1}" class="muted">${clientesCache.length ? 'Ningún cliente coincide con el filtro.' : 'No hay clientes todavía.'}</td></tr>`; return; }
+  body.innerHTML = visibles.map(c => `
     <tr>
-      ${cols.map(col => `<td${col.k === 'codigo' || col.k === 'cliente' || col.k === 'estado' ? '' : ' class="muted"'}>${col.td(c)}</td>`).join('')}
+      ${cols.map(col => `<td${col.k === 'codigo' || col.k === 'cliente' || col.k === 'estado' || col.k === 'saldo' ? '' : ' class="muted"'}>${col.td(c)}</td>`).join('')}
       <td>
         <button class="btn small secondary" onclick="abrirEditarCliente('${c._id}')">Editar</button>
         ${c.activo === false ? '' : `<button class="btn small danger" onclick="desactivarCliente('${c._id}', '${escapeHtml(c.apellidoRazonSocial).replace(/'/g,"\\'")}')">Desactivar</button>`}

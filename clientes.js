@@ -309,6 +309,21 @@ function validarCliente(body) {
   };
 }
 
+// Saldo de cada cliente (cache cuenta_corriente_saldos, el mismo de su cuenta corriente). Positivo = nos debe; negativo = a favor del cliente.
+router.get('/resumen-saldos', authAdmin, async (req, res) => {
+  try {
+    const saldos = await conReintento(async () => {
+      const db = await getDb();
+      const ids = (await db.collection('clientes').find(Object.assign({}, filtroOrgClientes(req))).project({ _id: 1 }).toArray()).map(c => String(c._id));
+      const docs = await db.collection('cuenta_corriente_saldos').find({ clienteId: { $in: ids } }).toArray();
+      const out = {};
+      docs.forEach(d => { out[String(d.clienteId)] = Math.round((d.saldo || 0) * 100) / 100; });
+      return out;
+    });
+    res.json({ saldos });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
