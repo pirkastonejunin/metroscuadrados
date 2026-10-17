@@ -193,7 +193,7 @@ router.post('/planes/importar', auth, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Costos de cobrar con crédito en Mercado Pago (17/10/2026, pedido de Mato). Mercado Pago no los expone por API:
 // se cargan a mano desde "Costos y cuotas" del panel de MP, UNO POR CANAL (link de pago / Point), porque difieren.
-//   costo de un plan = comisión base del canal + costo de financiación de esa cantidad de cuotas.
+//   costo de un plan = (comisión base del canal + costo de financiación de esas cuotas) + IVA (los % de MP son siempre más IVA, 21%).
 // Valores iniciales: los que informó Mato desde su panel. Link: comisión 5,99% + cuotas 2c 4,40 … 18c 26,10. Point: comisión 1,80% + cuotas 2c 4,00 … 18c 24,35.
 // ---------------------------------------------------------------------------
 const CANALES_COSTO = { link: 'Link de pago', point: 'Point' };
@@ -203,7 +203,9 @@ const COSTOS_INICIALES = {
 };
 function leerCostosCanal(c, def) {
   const base = Number(c && c.base); const fin = (c && Array.isArray(c.financiacion)) ? c.financiacion : def.financiacion;
+  const iva = Number(c && c.iva);
   return { base: Number.isFinite(base) && c && c.base !== undefined ? base : def.base,
+    iva: (c && c.iva !== undefined && Number.isFinite(iva) && iva >= 0 && iva <= 100) ? iva : 21,
     financiacion: fin.map(f => ({ cuotas: Math.floor(Number(f.cuotas)), pct: Number(f.pct) })).filter(f => f.cuotas >= 2 && Number.isFinite(f.pct) && f.pct >= 0 && f.pct <= 100).sort((a, b) => a.cuotas - b.cuotas) };
 }
 router.get('/costos', auth, async (req, res) => {
@@ -222,7 +224,7 @@ router.put('/costos/:canal', auth, async (req, res) => {
     const b = req.body || {};
     const base = Number(b.base);
     if (!Number.isFinite(base) || base < 0 || base > 100) throw err(400, 'La comisión base tiene que estar entre 0 y 100.');
-    const val = leerCostosCanal({ base, financiacion: b.financiacion || [] }, COSTOS_INICIALES[req.params.canal]);
+    const val = leerCostosCanal({ base, iva: b.iva, financiacion: b.financiacion || [] }, COSTOS_INICIALES[req.params.canal]);
     await (await getDb()).collection('mp_config').updateOne({ orgId: req.orgId }, { $set: { ['costos.' + req.params.canal]: val, updatedAt: new Date() }, $setOnInsert: { orgId: req.orgId, webhookToken: crypto.randomBytes(24).toString('hex'), createdAt: new Date() } }, { upsert: true });
     res.json(val);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -243,7 +245,7 @@ router.post('/costos/:canal/aplicar', auth, async (req, res) => {
       const cuotas = Math.max(1, Number(pl.cuotas) || 1);
       const f = cuotas === 1 ? { pct: 0 } : c.financiacion.find(x => x.cuotas === cuotas);
       if (!f) { r.omitidos.push(`${pl.tarjeta} ${cuotas} cuotas (sin costo cargado para esa cantidad)`); continue; }
-      const costo = redondear(c.base + f.pct);
+      const costo = redondear((c.base + f.pct) * (1 + c.iva / 100)); // los % de Mercado Pago son más IVA
       const set = { costoPorcentaje: costo, updatedAt: new Date() };
       if (cubrir && cuotas > 1) set.recargoPorcentaje = redondear((1 / (1 - costo / 100) - 1) * 100);
       await db.collection('tarjetas_planes').updateOne({ _id: pl._id }, { $set: set });
