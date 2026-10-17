@@ -912,7 +912,18 @@ router.get('/movimientos', authOperar, async (req, res) => {
       ]);
       const cajasPorId = new Map(cajas.map(c => [String(c._id), c.nombre]));
       const bancosPorId = new Map(bancos.map(b => [String(b._id), b.nombre]));
+      // Saldo de la cuenta después de cada movimiento: se parte del saldo actual y se camina hacia atrás por los movimientos de esa cuenta.
+      const saldoDe = new Map();
+      const cuentasVistas = new Map();
+      movimientos.forEach(m => { const k = m.cuentaTipo + ':' + m.cuentaId; const t = new Date(m.fecha).getTime(); if (!cuentasVistas.has(k) || t < cuentasVistas.get(k).min) cuentasVistas.set(k, { cuentaTipo: m.cuentaTipo, cuentaId: m.cuentaId, min: t }); });
+      for (const [k, c] of cuentasVistas) {
+        const sal = await db.collection('tesoreria_saldos').findOne({ cuentaTipo: c.cuentaTipo, cuentaId: c.cuentaId });
+        const todos = await db.collection('tesoreria_movimientos').find({ cuentaTipo: c.cuentaTipo, cuentaId: c.cuentaId, fecha: { $gte: new Date(c.min) } }).project({ tipo: 1, monto: 1 }).sort({ fecha: -1, createdAt: -1 }).toArray();
+        let s = (sal && sal.saldo) || 0;
+        for (const x of todos) { saldoDe.set(String(x._id), Math.round(s * 100) / 100); s -= x.tipo === 'ingreso' ? x.monto : -x.monto; }
+      }
       return movimientos.map(m => Object.assign({}, m, {
+        saldo: saldoDe.has(String(m._id)) ? saldoDe.get(String(m._id)) : null,
         cuentaNombre: m.cuentaTipo === 'caja' ? (cajasPorId.get(String(m.cuentaId)) || '(caja eliminada)') : (bancosPorId.get(String(m.cuentaId)) || '(banco eliminado)')
       }));
     });

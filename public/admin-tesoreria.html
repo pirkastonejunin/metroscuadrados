@@ -206,7 +206,7 @@
       <div class="card">
         <div id="movResumen"></div>
         <table>
-          <thead id="movHead"><tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th></tr></thead>
+          <thead id="movHead"><tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th style="text-align:right">Saldo</th><th></th></tr></thead>
           <tbody id="movimientosBody"><tr><td colspan="7" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
@@ -801,10 +801,10 @@ function botonAnularMov(m){
   if (m.anulado) return '<span class="pill" title="' + escapeHtml(m.anuladoMotivo || '') + '">Anulado</span>';
   if (m.reversaDe || m.importado) return '';
   const origen = m.origen || 'manual';
-  if (origen === 'manual') return '<button class="btn small secondary" onclick="anularMovimiento(\'' + m._id + '\')">Anular</button>';
+  if (origen === 'manual') return '<button class="btn small secondary" title="Anular movimiento" style="text-decoration:none" onclick="anularMovimiento(\'' + m._id + '\')">🗑</button>';
   if (origen.indexOf('anulacion') === 0) return '';
   const guia = GUIA_ANUL_MOV[origen] || 'Nació en otro módulo: se anula desde allí, no desde la caja.';
-  return '<span class="muted" style="cursor:help;text-decoration:none" title="' + escapeHtml(guia) + '" onclick="alert(this.title)">ⓘ Desde su origen</span>';
+  return '<span class="muted" style="cursor:help;text-decoration:none" title="' + escapeHtml(guia) + '" onclick="alert(this.title)">ⓘ</span>';
 }
 async function anularMovimiento(id){
   if (!confirm('¿Anular este movimiento? Se registra el movimiento inverso y el saldo vuelve a lo que era. No se borra nada.')) return;
@@ -824,7 +824,7 @@ async function cargarMovimientos(){
   const params = new URLSearchParams();
   const cuenta = document.getElementById('fmCuenta').value;
   if (cuenta) return cargarMovimientosCuenta(cuenta);
-  document.getElementById('movHead').innerHTML = '<tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th></th></tr>';
+  document.getElementById('movHead').innerHTML = '<tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Monto</th><th>Motivo</th><th>Origen</th><th>Usuario</th><th style="text-align:right">Saldo</th><th></th></tr>';
   document.getElementById('movResumen').innerHTML = '';
   if (document.getElementById('fmTipo').value) params.set('tipo', document.getElementById('fmTipo').value);
   if (document.getElementById('fmDesde').value) params.set('desde', document.getElementById('fmDesde').value);
@@ -833,7 +833,7 @@ async function cargarMovimientos(){
   const body = document.getElementById('movimientosBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
   const movimientos = await r.json();
-  if (!movimientos.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay movimientos todavía.</td></tr>'; return; }
+  if (!movimientos.length) { body.innerHTML = '<tr><td colspan="9" class="muted">No hay movimientos todavía.</td></tr>'; return; }
   const ORIGEN_LABEL = ORIGEN_LABEL_MOV;
   body.innerHTML = movimientos.map(m => `
     <tr style="${m.anulado ? 'opacity:.55;text-decoration:line-through' : ''}">
@@ -844,6 +844,7 @@ async function cargarMovimientos(){
       <td>${escapeHtml(m.motivo||'')}</td>
       <td class="muted">${ORIGEN_LABEL[m.origen]||m.origen||''}</td>
       <td class="muted">${escapeHtml(m.usuarioNombre||'')}</td>
+      <td style="text-align:right;white-space:nowrap;font-weight:700;text-decoration:none">${m.saldo == null ? '' : money(m.saldo)}</td>
       <td style="text-decoration:none">${botonAnularMov(m)}</td>
     </tr>
   `).join('');
