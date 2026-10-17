@@ -42,6 +42,27 @@
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
   th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
   tr:hover td{background:var(--bg);}
+  .tp-nuevo{border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin-bottom:12px;}
+  .tp-nuevo-tit{font-weight:700;font-size:13px;margin-bottom:8px;}
+  .tp-nuevo-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;}
+  .tp-nuevo-grid .btn{white-space:nowrap;}
+  @media(max-width:900px){.tp-nuevo-grid{grid-template-columns:repeat(2,1fr);}.tp-nuevo-grid > div{grid-column:auto !important;}}
+  .tp-grupo{border:1px solid var(--border);border-radius:12px;margin-bottom:14px;overflow:hidden;}
+  .tp-grupo-tit{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg);font-weight:700;font-size:14px;border-bottom:1px solid var(--border);}
+  .tp-grupo-tit small{font-weight:500;color:var(--muted);font-size:12px;}
+  .tp-cab,.tp-fila{display:grid;grid-template-columns:minmax(120px,1.6fr) 80px 100px 100px 90px 200px;gap:10px;align-items:center;padding:8px 14px;}
+  .tp-cab{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding-top:8px;padding-bottom:0;}
+  .tp-fila{border-top:1px solid var(--border);}
+  .tp-fila.off{background:rgba(0,0,0,.025);}
+  .tp-fila input{padding:6px 8px;font-size:13px;}
+  .tp-acc{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;}
+  .tp-mas{grid-column:1/-1;display:none;gap:12px;flex-wrap:wrap;align-items:flex-end;background:var(--bg);border-radius:8px;padding:10px;}
+  .tp-mas.abierto{display:flex;}
+  .tp-mas > div{flex:1;min-width:170px;}
+  .tp-mas .listas{display:flex;gap:12px;flex-wrap:wrap;}
+  .tp-mas .listas label{display:flex;align-items:center;gap:5px;margin:0;font-weight:500;white-space:nowrap;}
+  .tp-mas .listas input{width:auto;}
+  @media(max-width:760px){.tp-cab{display:none;}.tp-fila{grid-template-columns:1fr 1fr;}.tp-acc{grid-column:1/-1;justify-content:flex-start;}}
   .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
   .pill.activo{background:var(--ok-soft);color:var(--ok);}
   .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
@@ -154,15 +175,18 @@
       </button>
       <div id="contTarjetas">
         <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes son de la sucursal elegida arriba. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
-        <div class="row" style="margin-bottom:12px;align-items:flex-end">
-          <div style="flex:2;min-width:150px"><label>Tarjeta</label><input id="tpTarjeta" placeholder="Ej: Visa crédito"></div>
-          <div style="flex:2;min-width:150px"><label>Plan</label><input id="tpNombre" placeholder="Ej: 3 cuotas"></div>
-          <div style="width:80px"><label>Cuotas</label><input id="tpCuotas" type="number" min="1" step="1" value="1"></div>
-          <div style="width:100px"><label>Costo %</label><input id="tpCosto" type="number" min="0" max="100" step="0.01" value="0"></div>
-          <div style="width:100px"><label>Recargo %</label><input id="tpRecargo" type="number" min="0" max="100" step="0.01" value="0"></div>
-          <div style="flex:2;min-width:180px"><label>Leyenda (se muestra al cobrar)</label><input id="tpLeyenda" placeholder="Ej: Promo Ahora 12 — hasta agotar stock"></div>
-          <div style="width:150px"><label>Vigente hasta</label><input id="tpVigente" type="date"></div>
-          <div><button class="btn" onclick="crearPlanTarjeta()">Agregar</button></div>
+        <div class="tp-nuevo">
+          <div class="tp-nuevo-tit">Agregar un plan a mano</div>
+          <div class="tp-nuevo-grid">
+            <div><label>Tarjeta</label><input id="tpTarjeta" placeholder="Ej: Visa crédito"></div>
+            <div><label>Plan</label><input id="tpNombre" placeholder="Ej: 3 cuotas"></div>
+            <div><label>Cuotas</label><input id="tpCuotas" type="number" min="1" step="1" value="1"></div>
+            <div><label>Costo %</label><input id="tpCosto" type="number" min="0" max="100" step="0.01" value="0"></div>
+            <div><label>Recargo %</label><input id="tpRecargo" type="number" min="0" max="100" step="0.01" value="0"></div>
+            <div><label>Vigente hasta</label><input id="tpVigente" type="date"></div>
+            <div style="grid-column:1/-2"><label>Leyenda (se muestra al cobrar)</label><input id="tpLeyenda" placeholder="Ej: Promo Ahora 12 — hasta agotar stock"></div>
+            <div style="align-self:end"><button class="btn" style="width:100%" onclick="crearPlanTarjeta()">Agregar plan</button></div>
+          </div>
         </div>
         <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <button class="btn secondary" id="btnImportarMP" onclick="importarPlanesMP()">⟳ Traer planes de Mercado Pago</button>
@@ -170,10 +194,7 @@
         </div>
         <div class="err" id="tarjetasErr"></div>
         <div id="tarjetasMPInfo" class="muted" style="margin-bottom:8px"></div>
-        <table>
-          <thead><tr><th>Tarjeta</th><th>Plan</th><th>Cuotas</th><th>Costo %</th><th>Recargo %</th><th>Leyenda</th><th>Vigente hasta</th><th>Listas de precio</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="tarjetasBody"><tr><td colspan="10" class="muted">Cargando...</td></tr></tbody>
-        </table>
+        <div id="tarjetasBody" class="tp-lista"><p class="muted">Cargando...</p></div>
       </div>
     </div>
 
@@ -678,25 +699,46 @@ async function apiTarjetas(ruta, opts){
 }
 let planesTarjetaCache = [];
 let listasPrecioPlanes = [];
+function tpMas(id){ document.getElementById('tp_mas_' + id).classList.toggle('abierto'); }
 async function cargarPlanesTarjeta(){
   const body = document.getElementById('tarjetasBody');
   try{ listasPrecioPlanes = await fetch('/api/productos/listas-precio', {headers: headersAuth()}).then(r => r.ok ? r.json() : []).catch(() => []); }catch(e){ listasPrecioPlanes = []; }
   try{ planesTarjetaCache = await apiTarjetas('/tarjetas-planes?todos=1'); }
-  catch(e){ body.innerHTML = '<tr><td colspan="7" class="muted">' + escapeHtml(e.message) + '</td></tr>'; return; }
-  body.innerHTML = planesTarjetaCache.map(p => `
-    <tr>
-      <td><input id="tp_t_${p._id}" value="${escapeHtml(p.tarjeta)}"></td>
-      <td><input id="tp_n_${p._id}" value="${escapeHtml(p.nombre)}"></td>
-      <td><input id="tp_q_${p._id}" type="number" min="1" step="1" value="${p.cuotas || 1}" style="width:70px"></td>
-      <td><input id="tp_c_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.costoPorcentaje || 0}" style="width:90px"></td>
-      <td><input id="tp_r_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.recargoPorcentaje || 0}" style="width:90px"></td>
-      <td><input id="tp_y_${p._id}" value="${escapeHtml(p.leyenda || '')}" style="min-width:160px"></td>
-      <td><input id="tp_h_${p._id}" type="date" value="${escapeHtml(p.vigenteHasta || '')}">${p.vigenteHasta && p.vigenteHasta < new Date(Date.now()-3*3600000).toISOString().slice(0,10) ? '<div class="err" style="margin:0">Vencido</div>' : ''}</td>
-      <td>${listasPrecioPlanes.map(l => `<label style="display:flex;align-items:center;gap:4px;font-weight:500;white-space:nowrap"><input type="checkbox" style="width:auto" class="tp_l_${p._id}" value="${l._id}" ${(p.listasPrecioIds || []).map(String).includes(String(l._id)) ? 'checked' : ''}> ${escapeHtml(l.nombre)}</label>`).join('') || '<span class="muted">—</span>'}</td>
-      <td>${p.activo !== false ? '<span class="pill activo">Activo</span>' : '<span class="pill inactivo">Inactivo</span>'}</td>
-      <td style="white-space:nowrap"><button class="btn small" onclick="guardarPlanTarjeta('${p._id}', ${p.activo !== false})">Guardar</button>
-        <button class="btn small secondary" onclick="guardarPlanTarjeta('${p._id}', ${p.activo === false})">${p.activo === false ? 'Reactivar' : 'Desactivar'}</button></td>
-    </tr>`).join('') || '<tr><td colspan="10" class="muted">Todavía no hay planes de tarjeta</td></tr>';
+  catch(e){ body.innerHTML = '<p class="muted">' + escapeHtml(e.message) + '</p>'; return; }
+  if (!planesTarjetaCache.length){ body.innerHTML = '<p class="muted">Todavía no hay planes de tarjeta. Agregá uno arriba o traelos de Mercado Pago.</p>'; return; }
+  const hoy = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
+  const grupos = {};
+  planesTarjetaCache.forEach(p => { (grupos[p.tarjeta] = grupos[p.tarjeta] || []).push(p); });
+  body.innerHTML = Object.keys(grupos).sort().map(nombre => {
+    const lista = grupos[nombre].sort((a, b) => (a.cuotas || 1) - (b.cuotas || 1));
+    const activos = lista.filter(p => p.activo !== false).length;
+    return `<div class="tp-grupo">
+      <div class="tp-grupo-tit">💳 ${escapeHtml(nombre)} <small>${activos} de ${lista.length} planes activos</small></div>
+      <div class="tp-cab"><span>Plan</span><span>Cuotas</span><span>Costo %</span><span>Recargo %</span><span>Estado</span><span></span></div>
+      ${lista.map(p => {
+        const vencido = p.vigenteHasta && p.vigenteHasta < hoy;
+        const activo = p.activo !== false;
+        return `<div class="tp-fila ${activo ? '' : 'off'}">
+          <input type="hidden" id="tp_t_${p._id}" value="${escapeHtml(p.tarjeta)}">
+          <input id="tp_n_${p._id}" value="${escapeHtml(p.nombre)}">
+          <input id="tp_q_${p._id}" type="number" min="1" step="1" value="${p.cuotas || 1}">
+          <input id="tp_c_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.costoPorcentaje || 0}" title="Lo que te descuenta el procesador al acreditar">
+          <input id="tp_r_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.recargoPorcentaje || 0}" title="Lo que se le suma al cliente">
+          <span>${activo ? '<span class="pill activo">Activo</span>' : '<span class="pill inactivo">Inactivo</span>'}${vencido ? '<div class="err" style="margin:2px 0 0;font-size:11px">Vencido</div>' : ''}</span>
+          <div class="tp-acc">
+            <button class="btn small" onclick="guardarPlanTarjeta('${p._id}', ${activo})">Guardar</button>
+            <button class="btn small secondary" onclick="guardarPlanTarjeta('${p._id}', ${!activo})">${activo ? 'Desactivar' : 'Activar'}</button>
+            <button class="btn small secondary" onclick="tpMas('${p._id}')" title="Leyenda, vigencia y listas de precio">⋯ Más</button>
+          </div>
+          <div class="tp-mas" id="tp_mas_${p._id}">
+            <div><label>Leyenda (se muestra al cobrar)</label><input id="tp_y_${p._id}" value="${escapeHtml(p.leyenda || '')}"></div>
+            <div style="max-width:170px"><label>Vigente hasta</label><input id="tp_h_${p._id}" type="date" value="${escapeHtml(p.vigenteHasta || '')}"></div>
+            <div style="flex:2"><label>Listas de precio donde se ofrece (vacío = todas)</label><div class="listas">${listasPrecioPlanes.map(l => `<label><input type="checkbox" class="tp_l_${p._id}" value="${l._id}" ${(p.listasPrecioIds || []).map(String).includes(String(l._id)) ? 'checked' : ''}> ${escapeHtml(l.nombre)}</label>`).join('') || '<span class="muted">—</span>'}</div></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
 }
 async function crearPlanTarjeta(){
   document.getElementById('tarjetasErr').textContent = '';
