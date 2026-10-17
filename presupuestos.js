@@ -188,6 +188,35 @@ async function normalizarItemsPresupuesto(db, req, itemsRaw) {
   return { items, subtotal: round2(subtotal) };
 }
 
+
+// ---------------------------------------------------------------------------
+// Opciones de pago con tarjeta (17/10/2026, pedido de Mato): el presupuesto muestra el precio contado (= total) y,
+// por cada plan elegido, el precio con el recargo de la tarjeta. El recargo NO forma parte del total del presupuesto
+// (ni de la venta, ni de las comisiones): es solo informativo. Al cobrar con ese plan, el recargo y el costo
+// financiero se registran como resultado financiero (ver tesoreria.calcularPlanTarjeta / informes.js).
+// ---------------------------------------------------------------------------
+async function calcularPlanesTarjeta(db, orgId, total, ids) {
+  const lista = (Array.isArray(ids) ? ids : []).map(String).filter(x => /^[0-9a-f]{24}$/i.test(x));
+  if (!lista.length || !(total > 0)) return [];
+  const tesoreria = require('./tesoreria');
+  const out = [];
+  for (const planId of lista) {
+    try {
+      const pl = await tesoreria.calcularPlanTarjeta(db, { orgId }, { planId, monto: total });
+      if (!pl) continue;
+      out.push({
+        planId: pl.tarjetaPlanId, nombre: pl.tarjetaPlanNombre, cuotas: pl.tarjetaCuotas, leyenda: pl.tarjetaPlanLeyenda,
+        recargoPorcentaje: pl.tarjetaRecargoPorcentaje, recargo: pl.tarjetaRecargo, total: pl.tarjetaTotalCobrado,
+        valorCuota: round2(pl.tarjetaTotalCobrado / (pl.tarjetaCuotas || 1))
+      });
+    } catch (e) { /* plan inexistente o vencido: no se ofrece */ }
+  }
+  return out;
+}
+function idsPlanesDeBody(v) {
+  return (Array.isArray(v) ? v : []).map(String).filter(x => /^[0-9a-f]{24}$/i.test(x));
+}
+
 function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
   let total = subtotal;
   if (descuentoPorcentaje) total -= total * (descuentoPorcentaje / 100);
@@ -304,7 +333,9 @@ async function espejarEnVisita(db, presupuesto) {
   const set = {
     presupuesto: {
       tipo: 'manual', comercial: true, presupuestoId: presupuesto._id, numero: presupuesto.numero,
-      items, total: presupuesto.total, formasPago: [], notas: presupuesto.observaciones || '', fecha: new Date()
+      items, total: presupuesto.total,
+      formasPago: (presupuesto.planesTarjeta || []).map(pt => ({ nombre: pt.nombre + (pt.cuotas > 1 ? ` (${pt.cuotas} cuotas de $${pt.valorCuota})` : ''), tipo: 'recargo', porcentaje: pt.recargoPorcentaje, total: pt.total })),
+      notas: presupuesto.observaciones || '', fecha: new Date()
     },
     presupuestoComercialId: presupuesto._id,
     presupuestoComercialNumero: presupuesto.numero,
@@ -339,6 +370,16 @@ router.get('/desde-visita/:visitaId', authAdmin, async (req, res) => {
       return Object.assign(info, { prefill: { clienteId: String(cli.clienteId), items, observaciones: obs } });
     });
     res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/planes-tarjeta', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('tarjetas_planes')
+      .find(Object.assign({}, filtroOrg(req), { activo: { $ne: false } })).sort({ tarjeta: 1, cuotas: 1 }).toArray());
+    const hoyAR = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+    res.json(lista.filter(p => !p.vigenteHasta || hoyAR <= p.vigenteHasta)
+      .map(p => ({ _id: p._id, nombre: `${p.tarjeta} — ${p.nombre}`, cuotas: p.cuotas || 1, recargoPorcentaje: Number(p.recargoPorcentaje) || 0 })));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -403,6 +444,8 @@ router.post('/', authAdmin, async (req, res) => {
       const { items, subtotal } = await normalizarItemsPresupuesto(db, req, body.items);
       const total = calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto);
       const numero = await proximoNumeroPresupuesto(db, req.orgId);
+      const planesTarjetaIds = idsPlanesDeBody(body.planesTarjetaIds);
+      const planesTarjeta = await calcularPlanesTarjeta(db, req.orgId, total, planesTarjetaIds);
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const ahora = new Date();
 
@@ -419,6 +462,8 @@ router.post('/', authAdmin, async (req, res) => {
         descuentoMonto,
         subtotal,
         total,
+        planesTarjetaIds,
+        planesTarjeta,
         observaciones,
         estado: 'presupuestado',
         seguimiento: [{ fecha: ahora, estado: 'presupuestado', nota: '', usuarioNombre }],
@@ -495,6 +540,10 @@ router.put('/:id', authAdmin, async (req, res) => {
         set.moneda = moneda;
       }
 
+      if (body.planesTarjetaIds !== undefined) set.planesTarjetaIds = idsPlanesDeBody(body.planesTarjetaIds);
+      if (body.planesTarjetaIds !== undefined || set.total !== undefined) {
+        set.planesTarjeta = await calcularPlanesTarjeta(db, actual.orgId, set.total !== undefined ? set.total : actual.total, set.planesTarjetaIds || actual.planesTarjetaIds);
+      }
       await db.collection('presupuestos').updateOne({ _id: id }, { $set: set });
       const nuevo = await db.collection('presupuestos').findOne({ _id: id });
       if (nuevo.origenVisita) await espejarEnVisita(db, nuevo);
@@ -723,8 +772,14 @@ router.get('/:id/imprimir', authAdmin, async (req, res) => {
       <table class="totales">
         <tr><td>Subtotal</td><td class="num">${moneyImp(presupuesto.subtotal, presupuesto.moneda)}</td></tr>
         ${presupuesto.descuentoMonto ? `<tr><td>Descuento</td><td class="num">-${moneyImp(presupuesto.descuentoMonto, presupuesto.moneda)}</td></tr>` : ''}
-        <tr class="total-final"><td>Total</td><td class="num">${moneyImp(presupuesto.total, presupuesto.moneda)}</td></tr>
+        <tr class="total-final"><td>Total${(presupuesto.planesTarjeta || []).length ? ' (contado / transferencia)' : ''}</td><td class="num">${moneyImp(presupuesto.total, presupuesto.moneda)}</td></tr>
       </table>
+      ${(presupuesto.planesTarjeta || []).length ? `
+      <p style="margin:14px 0 4px;font-weight:700">Pagando con tarjeta</p>
+      <table>
+        <thead><tr><th>Plan</th><th class="num">Recargo</th><th class="num">Total con tarjeta</th><th class="num">Valor cuota</th></tr></thead>
+        <tbody>${presupuesto.planesTarjeta.map(pt => `<tr><td>${escHtml(pt.nombre)}${pt.cuotas > 1 ? ' · ' + pt.cuotas + ' cuotas' : ''}${pt.leyenda ? '<br><span class="muted">' + escHtml(pt.leyenda) + '</span>' : ''}</td><td class="num">${pt.recargoPorcentaje ? numImp(pt.recargoPorcentaje) + '% · ' + moneyImp(pt.recargo, presupuesto.moneda) : '—'}</td><td class="num">${moneyImp(pt.total, presupuesto.moneda)}</td><td class="num">${pt.cuotas > 1 ? moneyImp(pt.valorCuota, presupuesto.moneda) : '—'}</td></tr>`).join('')}</tbody>
+      </table>` : ''}
       ${org && org.condicionVenta ? `<div class="cmp-condicion-venta"><strong>Condición de venta:</strong><br>${escHtml(org.condicionVenta)}</div>` : ''}
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
@@ -761,7 +816,9 @@ async function sincronizarDesdeVisita(db, { visita, clienteId, clienteNombre, it
   if (existente) {
     const abierto = ['presupuestado', 'en_seguimiento'].includes(existente.estado) && !existente.convertidoEnVentaId;
     if (!abierto) return { presupuestoId: existente._id, numero: existente.numero, estado: existente.estado, congelado: true };
-    await db.collection('presupuestos').updateOne({ _id: existente._id }, { $set: { clienteId, clienteNombre, items: itemsPres, subtotal, total: calcularTotal(subtotal, existente.descuentoPorcentaje || 0, existente.descuentoMonto || 0), observaciones: obs, updatedAt: ahora } });
+    const totalNuevo = calcularTotal(subtotal, existente.descuentoPorcentaje || 0, existente.descuentoMonto || 0);
+    const planesTarjeta = await calcularPlanesTarjeta(db, orgId, totalNuevo, existente.planesTarjetaIds);
+    await db.collection('presupuestos').updateOne({ _id: existente._id }, { $set: { clienteId, clienteNombre, items: itemsPres, subtotal, total: totalNuevo, planesTarjeta, observaciones: obs, updatedAt: ahora } });
     return { presupuestoId: existente._id, numero: existente.numero, estado: existente.estado, actualizado: true };
   }
   const numero = await proximoNumeroPresupuesto(db, orgId);

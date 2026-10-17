@@ -633,7 +633,41 @@ function actualizarTotalesPresupuesto(){
   document.getElementById('pTotales').innerHTML = `
     <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
     <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+    ${htmlTotalesTarjeta('p', total)}
   `;
+}
+
+
+// ---- Planes de tarjeta (precio con recargo, solo informativo) ----
+let PLANES_TARJETA = null;
+async function cargarPlanesTarjeta(pre, elegidos){
+  const cont = document.getElementById(pre + 'Planes');
+  try{
+    if (!PLANES_TARJETA){
+      const r = await fetch(BASE + '/planes-tarjeta', {headers: headersAuth()});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Error');
+      PLANES_TARJETA = d;
+    }
+    const sel = (elegidos || []).map(String);
+    cont.className = '';
+    cont.innerHTML = PLANES_TARJETA.length ? PLANES_TARJETA.map(pl => `
+      <label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-weight:400">
+        <input type="checkbox" class="${pre}PlanChk" value="${pl._id}" ${sel.includes(String(pl._id))?'checked':''} onchange="${pre==='pe'?'actualizarTotalesEdicion':'actualizarTotalesPresupuesto'}()">
+        ${escapeHtml(pl.nombre)}${pl.recargoPorcentaje ? ' (+' + pl.recargoPorcentaje + '%)' : ''}
+      </label>`).join('') : '<span class="muted">No hay planes de tarjeta cargados (Tesorería → Tarjetas).</span>';
+    if (pre === 'pe') actualizarTotalesEdicion(); else actualizarTotalesPresupuesto();
+  }catch(e){ cont.textContent = 'No se pudieron cargar los planes: ' + e.message; }
+}
+function planesElegidos(pre){ return [...document.querySelectorAll('.' + pre + 'PlanChk:checked')].map(c => c.value); }
+function htmlTotalesTarjeta(pre, total){
+  const ids = planesElegidos(pre);
+  if (!ids.length || !PLANES_TARJETA || !(total > 0)) return '';
+  return ids.map(id => PLANES_TARJETA.find(x => String(x._id) === id)).filter(Boolean).map(pl => {
+    const rec = Math.round(total * pl.recargoPorcentaje) / 100;
+    const tot = total + rec;
+    return `<div class="fila-total"><span>Con ${escapeHtml(pl.nombre)}${pl.recargoPorcentaje ? ' · recargo ' + pl.recargoPorcentaje + '% (' + money(rec) + ')' : ''}</span><span>${money(tot)}${pl.cuotas > 1 ? ' · ' + pl.cuotas + ' x ' + money(tot / pl.cuotas) : ''}</span></div>`;
+  }).join('');
 }
 
 // -----------------------------------------------------------------------
@@ -667,6 +701,9 @@ function abrirNuevoPresupuesto(prefill){
           <div><label>Descuento (%)</label><input id="pDescuentoPorcentaje" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()"></div>
           <div><label>Descuento ($)</label><input id="pDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()"></div>
         </div>
+
+        <div style="margin-top:10px"><label>Ofrecer también pagando con tarjeta <span class="muted">(el presupuesto muestra el precio contado y el de cada plan)</span></label>
+          <div id="pPlanes" class="muted">Cargando planes…</div></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="pObservaciones"></textarea></div>
 
         <div class="totales-box" id="pTotales"></div>
@@ -686,6 +723,7 @@ function abrirNuevoPresupuesto(prefill){
   }
   if (prefill && prefill.observaciones) document.getElementById('pObservaciones').value = prefill.observaciones;
   actualizarTotalesPresupuesto();
+  cargarPlanesTarjeta('p', []);
 }
 let origenCotizadorPendiente = null;
 async function guardarNuevoPresupuesto(){
@@ -703,7 +741,8 @@ async function guardarNuevoPresupuesto(){
     items,
     descuentoPorcentaje: Number(document.getElementById('pDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('pDescuentoMonto').value) || 0,
-    observaciones: document.getElementById('pObservaciones').value.trim()
+    observaciones: document.getElementById('pObservaciones').value.trim(),
+    planesTarjetaIds: planesElegidos('p')
   };
   if (origenCotizadorPendiente) body.origenCotizador = origenCotizadorPendiente;
   if (VISITA_PENDIENTE) body.origenVisita = { visitaId: VISITA_PENDIENTE.visitaId };
@@ -755,6 +794,9 @@ function abrirEditarPresupuesto(id){
           <div><label>Descuento (%)</label><input id="peDescuentoPorcentaje" type="number" min="0" step="0.01" value="${p.descuentoPorcentaje||0}" oninput="actualizarTotalesEdicion()"></div>
           <div><label>Descuento ($)</label><input id="peDescuentoMonto" type="number" min="0" step="0.01" value="${p.descuentoMonto||0}" oninput="actualizarTotalesEdicion()"></div>
         </div>
+
+        <div style="margin-top:10px"><label>Ofrecer también pagando con tarjeta <span class="muted">(el presupuesto muestra el precio contado y el de cada plan)</span></label>
+          <div id="pePlanes" class="muted">Cargando planes…</div></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="peObservaciones">${escapeHtml(p.observaciones||'')}</textarea></div>
 
         <div class="totales-box" id="peTotales"></div>
@@ -766,6 +808,7 @@ function abrirEditarPresupuesto(id){
   const cont = document.getElementById('peItemsBody');
   (p.items || []).forEach(it => agregarFilaItemGenerica(cont, it));
   actualizarTotalesEn('peItemsBody', 'peDescuentoPorcentaje', 'peDescuentoMonto', 'peTotales');
+  cargarPlanesTarjeta('pe', p.planesTarjetaIds);
 }
 // Variantes genéricas (acepta un contenedor distinto a 'pItemsBody') para
 // poder reusar las mismas filas de ítem en el modal de edición, sin
@@ -842,6 +885,7 @@ function actualizarTotalesEn(contId, descPorcId, descMontoId, totalesId){
   document.getElementById(totalesId).innerHTML = `
     <div class="fila-total"><span>Subtotal</span><span>${money(subtotal)}</span></div>
     <div class="fila-total grande"><span>Total</span><span>${money(total)}</span></div>
+    ${htmlTotalesTarjeta(totalesId === 'peTotales' ? 'pe' : 'p', total)}
   `;
 }
 function actualizarTotalesEdicion(){ actualizarTotalesEn('peItemsBody', 'peDescuentoPorcentaje', 'peDescuentoMonto', 'peTotales'); }
@@ -876,7 +920,8 @@ async function guardarEdicionPresupuesto(id){
     items,
     descuentoPorcentaje: Number(document.getElementById('peDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('peDescuentoMonto').value) || 0,
-    observaciones: document.getElementById('peObservaciones').value.trim()
+    observaciones: document.getElementById('peObservaciones').value.trim(),
+    planesTarjetaIds: planesElegidos('pe')
   };
   try{
     const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
@@ -968,7 +1013,8 @@ function verPresupuesto(id){
         <div class="totales-box">
           <div class="fila-total"><span>Subtotal</span><span>${money(p.subtotal)}</span></div>
           ${p.descuentoMonto ? `<div class="fila-total"><span>Descuento</span><span>-${money(p.descuentoMonto)}</span></div>` : ''}
-          <div class="fila-total grande"><span>Total</span><span>${money(p.total)}</span></div>
+          <div class="fila-total grande"><span>Total (contado)</span><span>${money(p.total)}</span></div>
+          ${(p.planesTarjeta||[]).map(pt => `<div class="fila-total"><span>Con ${escapeHtml(pt.nombre)}${pt.recargoPorcentaje ? ' · recargo ' + pt.recargoPorcentaje + '% (' + money(pt.recargo) + ')' : ''}</span><span>${money(pt.total)}${pt.cuotas > 1 ? ' · ' + pt.cuotas + ' x ' + money(pt.valorCuota) : ''}</span></div>`).join('')}
         </div>
         ${p.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(p.observaciones)}</p>` : ''}
 
