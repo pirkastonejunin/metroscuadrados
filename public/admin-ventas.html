@@ -2421,25 +2421,10 @@ function mpMostrarLink(url, monto){
 }
 function mpCopiar(){ const el = document.getElementById('mpLinkTxt'); el.select(); try{ navigator.clipboard.writeText(el.value); }catch(e){ document.execCommand('copy'); } }
 let ventaMPActual = null;
-async function abrirMP(id, tipo){
+function abrirMP(id, tipo){
   const v = ventasCache.find(x => x._id === id); if (!v) return;
-  ventaMPActual = v; mpParar();
-  let terminales = [];
-  if (tipo === 'point') {
-    const r = await fetch(MPB + '/terminales', {headers: headersAuth()});
-    terminales = r.ok ? await r.json() : [];
-  }
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg"><div class="modal">
-      <span class="close-x" onclick="mpParar();cerrarModal()">✕</span>
-      <h2>${tipo === 'point' ? 'Cobrar con Point' : 'Link de pago'} — ${nombreDoc(v.tipoComprobante)} #${v.numero}</h2>
-      <p class="muted">Saldo pendiente: ${money(v.saldoPendiente)}</p>
-      <label>Monto a cobrar</label><input id="mpMonto" type="number" step="0.01" min="0.01" value="${v.saldoPendiente}">
-      ${tipo === 'point' ? `<label style="margin-top:8px">Terminal</label><select id="mpTerm"><option value="">Usar la terminal por defecto</option>${terminales.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.nombre || t.id)}${t.pdv ? '' : ' (no está en modo PDV)'}</option>`).join('')}</select>` : ''}
-      <div class="err" id="mpErrV"></div>
-      <div id="mpEstadoV" class="muted" style="margin-top:8px"></div>
-      <button class="btn" id="mpGo" style="margin-top:10px" onclick="mpIniciar('${id}','${tipo}')">${tipo === 'point' ? 'Enviar a la terminal' : 'Generar link'}</button>
-    </div></div>`;
+  mpParar();
+  MPCobro.abrir({tipo, ventaId:id, titulo:nombreDoc(v.tipoComprobante)+' #'+v.numero, saldo:v.saldoPendiente, onAcreditado:()=>{cerrarModal();cargarVentas();}});
 }
 async function mpIniciar(id, tipo){
   const monto = Number(document.getElementById('mpMonto').value);

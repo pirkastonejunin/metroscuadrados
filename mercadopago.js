@@ -362,6 +362,36 @@ async function clienteParaCobrar(db, req, monto) {
 }
 function numeroVenta(v) { return `${v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')}-${String(v.numero).padStart(5, '0')}`; }
 
+// Plan de tarjeta elegido al cobrar con Point/link (17/10/2026, pedido de Mato): a la terminal / al link va el monto MÁS el recargo
+// del plan (el cliente absorbe el costo si así está configurado). Lo que cancela deuda sigue siendo el monto sin recargo, el recargo
+// se registra como ingreso financiero y el costo es el REAL que informa Mercado Pago (no el cargado en el plan).
+async function planParaCobro(db, req, planId, monto) {
+  if (!planId) return null;
+  const pl = await require('./tesoreria').calcularPlanTarjeta(db, req, { planId, monto });
+  if (!pl) throw err(400, 'El plan elegido no existe.');
+  return pl;
+}
+function camposPlanCobro(pl) {
+  return pl ? { planId: pl.tarjetaPlanId, planNombre: pl.tarjetaPlanNombre, planCuotas: pl.tarjetaCuotas, recargoPorcentaje: pl.tarjetaRecargoPorcentaje, recargo: pl.tarjetaRecargo, montoCobrar: pl.tarjetaTotalCobrado } : {};
+}
+
+// Planes ofrecibles al cobrar (activos y vigentes) para el canal Point / link, con el recargo ya calculado sobre el monto.
+router.get('/planes-cobro', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const canal = req.query.canal === 'link' ? 'link' : 'point';
+    const monto = Number(req.query.monto) || 0;
+    const db = await getDb();
+    const lista = await db.collection('tarjetas_planes').find({ orgId: req.orgId, tarjeta: CANAL_TARJETA[canal], activo: { $ne: false } }).sort({ cuotas: 1 }).toArray();
+    const hoyAR = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+    res.json(lista.filter(p => !p.vigenteHasta || hoyAR <= p.vigenteHasta).map(p => {
+      const pct = Number(p.recargoPorcentaje) || 0;
+      const recargo = Math.round(monto * pct) / 100;
+      return { _id: p._id, nombre: p.nombre, cuotas: p.cuotas || 1, recargoPorcentaje: pct, recargo, total: Math.round((monto + recargo) * 100) / 100 };
+    }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 async function crearLink(req, res) {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
@@ -371,19 +401,22 @@ async function crearLink(req, res) {
     if (!cfg.bancoId) throw err(400, 'Falta elegir en qué banco de Tesorería entra la plata de Mercado Pago.');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
+    const plan = esCuenta ? null : await planParaCobro(db, req, req.body && req.body.planId, monto);
+    const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const hoy = new Date();
     const vence = new Date(hoy.getTime() + 7 * 24 * 3600 * 1000); // el link vive 7 días
     const pref = await mp(cfg, 'POST', '/checkout/preferences', {
-      items: [{ id: String(esCuenta ? cliente._id : venta._id), title: (esCuenta ? `Pago a cuenta — ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 120), quantity: 1, unit_price: monto, currency_id: 'ARS' }],
+      items: [{ id: String(esCuenta ? cliente._id : venta._id), title: (esCuenta ? `Pago a cuenta — ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 120), quantity: 1, unit_price: aCobrar, currency_id: 'ARS' }],
       external_reference: ref,
       notification_url: urlWebhook(req, cfg),
-      expires: true, expiration_date_to: vence.toISOString()
+      expires: true, expiration_date_to: vence.toISOString(),
+      ...(plan && plan.tarjetaCuotas ? { payment_methods: { installments: plan.tarjetaCuotas, default_installments: plan.tarjetaCuotas } } : {})
     });
     const link = pref.init_point;
     if (!link) throw err(502, 'Mercado Pago no devolvió el link de pago.');
-    const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'link', externalReference: ref, monto, estado: 'pendiente',
+    const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'link', externalReference: ref, monto, estado: 'pendiente', ...camposPlanCobro(plan),
       preferenciaId: pref.id, linkUrl: link, venceEn: vence, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: hoy, updatedAt: hoy };
     await db.collection('mp_cobros').insertOne(doc);
     res.json(publico(doc));
@@ -403,16 +436,18 @@ async function crearPoint(req, res) {
     if (!terminalId) throw err(400, 'Elegí la terminal Point (o dejá una por defecto en la configuración).');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
+    const plan = esCuenta ? null : await planParaCobro(db, req, req.body && req.body.planId, monto);
+    const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const orden = await mp(cfg, 'POST', '/v1/orders', {
       type: 'point', external_reference: ref, expiration_time: 'PT15M',
-      transactions: { payments: [{ amount: monto.toFixed(2) }] },
+      transactions: { payments: [{ amount: aCobrar.toFixed(2) }] },
       config: { point: { terminal_id: terminalId, print_on_terminal: 'no_ticket' } },
       description: (esCuenta ? `Pago a cuenta ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 150)
     }, { 'X-Idempotency-Key': crypto.randomUUID() });
     const hoy = new Date();
-    const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'point', externalReference: ref, monto, estado: 'pendiente',
+    const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'point', externalReference: ref, monto, estado: 'pendiente', ...camposPlanCobro(plan),
       ordenId: orden.id, terminalId, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: hoy, updatedAt: hoy };
     await db.collection('mp_cobros').insertOne(doc);
     res.json(publico(doc));
@@ -422,7 +457,7 @@ router.post('/ventas/:ventaId/point', auth, crearPoint);
 router.post('/clientes/:clienteId/point', auth, crearPoint);
 
 function publico(c) {
-  return { _id: c._id, ventaId: c.ventaId, clienteId: c.clienteId || null, aCuenta: !!c.aCuenta, tipo: c.tipo, monto: c.monto, estado: c.estado, linkUrl: c.linkUrl || null,
+  return { _id: c._id, ventaId: c.ventaId, clienteId: c.clienteId || null, aCuenta: !!c.aCuenta, tipo: c.tipo, monto: c.monto, montoCobrar: c.montoCobrar || c.monto, recargo: c.recargo || 0, planNombre: c.planNombre || '', estado: c.estado, linkUrl: c.linkUrl || null,
     estadoMp: c.estadoMp || '', error: c.error || '', createdAt: c.createdAt, acreditadoEn: c.acreditadoEn || null, venceEn: c.venceEn || null };
 }
 
@@ -559,7 +594,9 @@ async function registrarCobroEnVenta(db, cfg, cobro, info) {
   if (venta.estado === 'anulada') throw err(400, 'La venta está anulada: el cobro de Mercado Pago quedó sin imputar, revisalo.');
   if (!cfg.bancoId) throw err(400, 'Falta elegir el banco de Tesorería para Mercado Pago.');
   const reqFalso = { orgId: cobro.orgId, usuario: { nombre: 'Mercado Pago' } };
-  const monto = redondear(info.monto || cobro.monto);
+  const monto = redondear(info.monto || cobro.monto);            // lo que realmente entró al banco (incluye el recargo del plan, si hubo)
+  const aplicado = cobro.recargo > 0 ? Math.min(redondear(cobro.monto), monto) : monto;   // lo que cancela deuda de la venta
+  const recargoCobrado = cobro.recargo > 0 ? redondear(monto - aplicado) : 0;
   const fecha = new Date();
   const esTarjeta = /card/.test(info.metodo || '');
   const tipoValor = esTarjeta ? 'tarjeta' : 'cuenta';
@@ -581,15 +618,16 @@ async function registrarCobroEnVenta(db, cfg, cobro, info) {
     });
   }
   const yaEnVenta = (venta.pagos || []).some(x => x.mercadoPagoId && String(x.mercadoPagoId) === String(info.paymentId));
-  const totalCobrado = (venta.totalCobrado || 0) + monto;
+  const totalCobrado = (venta.totalCobrado || 0) + aplicado;
   const saldoPendiente = Math.max(0, redondear(venta.total - totalCobrado - (venta.totalAcreditado || 0)));
   if (!yaEnVenta) await db.collection('ventas').updateOne({ _id: venta._id }, {
-    $push: { pagos: { tipoValor, monto, fecha, nota, usuarioNombre: 'Mercado Pago', cuentaTipo: 'banco', cuentaId: cfg.bancoId, mercadoPagoId: info.paymentId } },
+    $push: { pagos: { tipoValor, monto: aplicado, fecha, nota, usuarioNombre: 'Mercado Pago', cuentaTipo: 'banco', cuentaId: cfg.bancoId, mercadoPagoId: info.paymentId,
+      ...(recargoCobrado > 0 ? { tarjetaPlanId: cobro.planId, tarjetaPlanNombre: cobro.planNombre, tarjetaCuotas: cobro.planCuotas, tarjetaRecargoPorcentaje: cobro.recargoPorcentaje, tarjetaRecargo: recargoCobrado, tarjetaTotalCobrado: monto } : {}) } },
     $set: { totalCobrado, saldoPendiente, updatedAt: new Date() }
   });
   const yaEnCC = await db.collection('cuenta_corriente_movimientos').findOne({ ventaId: venta._id, origen: 'cobro_venta', observaciones: nota });
   if (!yaEnCC) await registrarMovimientoCuentaCorriente(db, reqFalso, {
-    clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto, moneda: 'ARS',
+    clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto: aplicado, moneda: 'ARS',
     concepto: `Cobro venta Nº ${venta.numero}`, origen: 'cobro_venta', ventaId: venta._id, chequeId: null, fecha, observaciones: nota
   });
 }

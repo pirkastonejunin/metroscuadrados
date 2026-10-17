@@ -38,15 +38,40 @@
     if (ctx.tipo === 'point') {
       try { const r = await fetch(BASE + '/terminales', { headers: hdr() }); terminales = r.ok ? await r.json() : []; } catch (e) {}
     }
+    ctx.planes = [];
+    ctx.monto0 = monto;
     pintar(`
       <h2>${nombreTipo()}</h2>
       <p class="muted">${esc(ctx.titulo || '')}${ctx.saldo != null && ctx.ventaId ? ' · Saldo pendiente: ' + money(ctx.saldo) : ''}</p>
-      <label>Monto a cobrar</label><input id="mpcMonto" type="number" step="0.01" min="0.01" value="${monto}">
+      <label>Monto a cobrar</label><input id="mpcMonto" type="number" step="0.01" min="0.01" value="${monto}" oninput="MPCobro.planes()">
+      ${ctx.ventaId ? '<div id="mpcPlanBox"></div>' : ''}
       ${ctx.tipo === 'point' ? `<label style="margin-top:8px">Terminal</label><select id="mpcTerm"><option value="">Usar la terminal por defecto</option>${terminales.map(t => `<option value="${esc(t.id)}">${esc(t.nombre || t.id)}${t.pdv ? '' : ' (no está en modo PDV)'}</option>`).join('')}</select>` : ''}
       ${!ctx.ventaId ? '<p class="muted" style="margin-top:8px">Es un cobro a cuenta: queda como recibo en la cuenta corriente del cliente.</p>' : ''}
       <div class="err" id="mpcErr"></div>
       <div id="mpcEstado" class="muted" style="margin-top:8px"></div>
       <button class="btn" id="mpcGo" style="margin-top:10px" onclick="MPCobro.iniciar()">${ctx.tipo === 'point' ? 'Enviar a la terminal' : 'Generar link'}</button>`);
+    if (ctx.ventaId) cargarPlanes();
+  }
+
+  // Planes de cuotas del canal: el cliente paga monto + recargo del plan (el costo lo absorbe el cliente si así está configurado).
+  let planTimer = null;
+  function planes() { clearTimeout(planTimer); planTimer = setTimeout(cargarPlanes, 300); }
+  async function cargarPlanes() {
+    const box = document.getElementById('mpcPlanBox'); if (!box) return;
+    const monto = Number(document.getElementById('mpcMonto').value) || 0;
+    const previo = (document.getElementById('mpcPlan') || {}).value || ctx.planSugeridoId || '';
+    let lista = [];
+    try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}`, { headers: hdr() }); lista = r.ok ? await r.json() : []; } catch (e) {}
+    ctx.planes = lista;
+    if (!lista.length) { box.innerHTML = ''; return; }
+    box.innerHTML = `<label style="margin-top:8px">Plan de pago</label><select id="mpcPlan" onchange="MPCobro.resumen()"><option value="">Sin plan (un pago, sin recargo)</option>${lista.map(p => `<option value="${esc(p._id)}"${String(p._id) === String(previo) ? ' selected' : ''}>${esc(p.nombre)}${p.recargoPorcentaje ? ' — recargo ' + p.recargoPorcentaje + '%' : ' — sin recargo'}</option>`).join('')}</select><div id="mpcResumen" class="muted" style="margin-top:6px"></div>`;
+    resumen();
+  }
+  function resumen() {
+    const sel = document.getElementById('mpcPlan'), el = document.getElementById('mpcResumen'); if (!sel || !el) return;
+    const p = ctx.planes.find(x => String(x._id) === sel.value);
+    const monto = Number(document.getElementById('mpcMonto').value) || 0;
+    el.innerHTML = p && p.recargo > 0 ? `El cliente paga <b>${money(p.total)}</b> (${money(monto)} + recargo ${money(p.recargo)}). La venta se cancela por ${money(monto)}; el recargo queda como ingreso financiero.` : (p ? `El cliente paga ${money(monto)} en ${p.cuotas} cuota${p.cuotas > 1 ? 's' : ''}, sin recargo.` : '');
   }
 
   async function iniciar() {
@@ -54,20 +79,21 @@
     const err = document.getElementById('mpcErr'); err.textContent = '';
     if (!(monto > 0)) { err.textContent = 'El monto tiene que ser mayor a 0'; return; }
     const body = { monto };
+    const ps = document.getElementById('mpcPlan'); if (ps && ps.value) body.planId = ps.value;
     if (ctx.tipo === 'point') { const t = document.getElementById('mpcTerm').value; if (t) body.terminalId = t; }
     document.getElementById('mpcGo').disabled = true;
     try {
       const r = await fetch(rutaBase() + '/' + ctx.tipo, { method: 'POST', headers: hdr(true), body: JSON.stringify(body) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Error');
-      ctx.cobroId = d._id; ctx.monto = d.monto;
-      if (ctx.tipo === 'link') mostrarLink(d.linkUrl, d.monto); else esperarPoint();
+      ctx.cobroId = d._id; ctx.monto = d.monto; ctx.montoCobrar = d.montoCobrar;
+      if (ctx.tipo === 'link') mostrarLink(d.linkUrl, d.montoCobrar || d.monto); else esperarPoint();
       timer = setInterval(verificar, ctx.tipo === 'point' ? 4000 : 8000);
     } catch (e) { err.textContent = e.message; const b = document.getElementById('mpcGo'); if (b) b.disabled = false; }
   }
 
   function esperarPoint() {
-    document.getElementById('mpcEstado').innerHTML = `Cobro enviado a la terminal. Pedile al cliente que pase o acerque la tarjeta.<br><b>Esperando el pago…</b> <button class="btn small danger" onclick="MPCobro.cancelar()">Cancelar cobro</button>`;
+    document.getElementById('mpcEstado').innerHTML = `Cobro enviado a la terminal${ctx.montoCobrar && ctx.montoCobrar !== ctx.monto ? ' por ' + money(ctx.montoCobrar) : ''}. Pedile al cliente que pase o acerque la tarjeta.<br><b>Esperando el pago…</b> <button class="btn small danger" onclick="MPCobro.cancelar()">Cancelar cobro</button>`;
     document.getElementById('mpcGo').style.display = 'none';
   }
 
@@ -117,5 +143,5 @@
 
   function copiar() { const el = document.getElementById('mpcLink'); el.select(); try { navigator.clipboard.writeText(el.value); } catch (e) { document.execCommand('copy'); } }
 
-  window.MPCobro = { abrir, iniciar, verificar, cancelar, cerrar, copiar };
+  window.MPCobro = { planes, resumen, abrir, iniciar, verificar, cancelar, cerrar, copiar };
 })();
