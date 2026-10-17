@@ -653,6 +653,8 @@ router.post('/:id/vincular-venta', authAdmin, async (req, res) => {
       const update = { $set: set };
       if (push.seguimiento) update.$push = { seguimiento: push.seguimiento };
       await db.collection('presupuestos').updateOne({ _id: id }, update);
+      // Los planes de tarjeta que se le ofrecieron al cliente quedan en la venta: al cobrar con Point / link se sugiere el que corresponda.
+      if ((actual.planesTarjetaIds || []).length) await db.collection('ventas').updateOne({ _id: ventaId }, { $set: { planesSugeridosIds: actual.planesTarjetaIds } });
       return db.collection('presupuestos').findOne({ _id: id });
     });
     res.json(resultado);

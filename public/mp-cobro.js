@@ -59,7 +59,8 @@
   async function cargarPlanes() {
     const box = document.getElementById('mpcPlanBox'); if (!box) return;
     const monto = Number(document.getElementById('mpcMonto').value) || 0;
-    const previo = (document.getElementById('mpcPlan') || {}).value || ctx.planSugeridoId || '';
+    const sug = (ctx.planesSugeridos || []).map(String);
+    const previo = (document.getElementById('mpcPlan') || {}).value || (lista.find(p => sug.includes(String(p._id))) || {})._id || '';
     let lista = [];
     try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}`, { headers: hdr() }); lista = r.ok ? await r.json() : []; } catch (e) {}
     ctx.planes = lista;
