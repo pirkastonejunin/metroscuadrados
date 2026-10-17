@@ -94,7 +94,6 @@ const authSueldos = [authUsuario, resolverOrg, requiereModulo('sueldos'), (req, 
 // se toma la del propio empleado / liquidación / colocador. Así se puede liquidar y pagar desde una sola pantalla sin cambiar de organización.
 async function derivarOrg(req, res, next) {
   try {
-    if (req.orgId) return next();
     const db = await getDb(); const b = req.body || {};
     let org = null;
     const empId = toObjectId(b.empleadoId || req.query.empleadoId);
@@ -106,8 +105,13 @@ async function derivarOrg(req, res, next) {
       const col = p.startsWith('/colocadores/especiales') ? 'sueldos_tareas_especiales' : p.startsWith('/colocadores/liquidaciones') ? 'sueldos_colocadores' : p.startsWith('/liquidaciones') ? 'sueldos_liquidaciones' : p.startsWith('/adelantos') ? 'sueldos_adelantos' : p.startsWith('/empleados') ? 'empleados' : null;
       if (col) { const d = await db.collection(col).findOne({ _id: id }, { projection: { orgId: 1 } }); org = d && d.orgId; }
     }
-    if (!org) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando (o asignale una sucursal al empleado).' });
-    req.orgId = org;
+    // Se opera siempre en la sucursal propia del empleado / liquidación / colocador (aunque se esté mirando otra), si el usuario tiene acceso a ella.
+    if (org && (!req.orgId || String(org) !== String(req.orgId))) {
+      const u = req.usuario || {};
+      const acceso = (u.rol && u.rol.protegido) || (u.orgIds || []).some(o => String(o) === String(org));
+      if (acceso || !req.orgId) req.orgId = org;
+    }
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando (o asignale una sucursal al empleado).' });
     next();
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 }
