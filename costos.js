@@ -931,6 +931,105 @@ router.get('/produccion/cargas', authProduccion, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Panel de producción (17/10/2026, pedido de Mato): producción día a día y, por cada producto de
+// producción, stock físico, comprometido (ventas pendientes de entrega) y faltante (lo comprometido
+// que el stock no cubre = lo que hay que fabricar). El stock y lo comprometido se leen de stock_actual
+// por producto del catálogo (se vincula por SKU con el producto de Costos) sumando todos los depósitos
+// y la demanda sin depósito asignado: el catálogo es compartido entre sucursales.
+// GET /produccion/panel?dias=14  (hasta 90)
+function fechaARCostos(d) {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d);
+  const g = t => p.find(x => x.type === t).value;
+  return `${g('year')}-${g('month')}-${g('day')}`;
+}
+const redond2 = n => Math.round((Number(n) || 0) * 100) / 100;
+router.get('/produccion/panel', authProduccion, async (req, res) => {
+  try {
+    const nDias = Math.min(90, Math.max(1, parseInt(req.query.dias, 10) || 14));
+    const hoy = fechaARCostos(new Date());
+    const fechas = [];
+    for (let i = nDias - 1; i >= 0; i--) fechas.push(fechaARCostos(new Date(new Date(hoy + 'T12:00:00-03:00').getTime() - i * 864e5)));
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const productos = await db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req)))
+        .project({ nombre: 1, sku: 1, tipoCosteo: 1, rendimientoPorPaquete: 1, unidadesPorPaquete: 1 }).sort({ nombre: 1 }).toArray();
+      const docs = await db.collection('costos_produccion_diaria').find(Object.assign({ fecha: { $gte: fechas[0], $lte: hoy } }, filtroOrg(req)))
+        .project({ fecha: 1, items: 1 }).toArray();
+      // Catálogo por SKU y existencias por producto del catálogo.
+      const skus = productos.map(p => p.sku).filter(Boolean);
+      const catalogo = skus.length ? await db.collection('productos_catalogo').find(Object.assign({ sku: { $in: skus }, activo: { $ne: false } }, filtroOrg(req)))
+        .project({ sku: 1, unidad: 1, cantidadMinima: 1 }).toArray() : [];
+      const catPorSku = new Map(catalogo.map(c => [c.sku, c]));
+      const existencias = catalogo.length ? await db.collection('stock_actual').find({ productoId: { $in: catalogo.map(c => c._id) } }).toArray() : [];
+      const stockPorProd = new Map();
+      for (const e of existencias) {
+        const k = String(e.productoId);
+        const a = stockPorProd.get(k) || { stock: 0, comprometido: 0 };
+        if (e.depositoId != null) a.stock += Number(e.cantidad) || 0;
+        a.comprometido += Number(e.cantidadComprometida) || 0;
+        stockPorProd.set(k, a);
+      }
+      // Producción por día y por producto (misma clave que usa la carga: productoId, y si no, SKU o nombre).
+      const idx = new Map(fechas.map((f, i) => [f, i]));
+      const claveDe = it => String(it.productoId || it.sku || it.nombre);
+      const porProd = new Map();
+      const dias = fechas.map(f => ({ fecha: f, m2: 0, unidades: 0, paquetes: 0, cargas: 0 }));
+      const sinProducto = new Map(); // producido de productos que ya no están en Costos
+      for (const d of docs) {
+        const i = idx.get(d.fecha);
+        if (i === undefined) continue;
+        dias[i].cargas += 1;
+        for (const it of (d.items || [])) {
+          const cant = Number(it.cantidadConvertida) || 0, paq = Number(it.paquetes) || 0, u = it.unidadConvertida || 'paquete';
+          if (!cant && !paq) continue;
+          if (u === 'm2') dias[i].m2 += cant; else if (u === 'unidad') dias[i].unidades += cant;
+          dias[i].paquetes += paq;
+          const k = claveDe(it);
+          const arr = porProd.get(k) || (porProd.set(k, new Array(fechas.length).fill(0)), porProd.get(k));
+          arr[i] += cant || paq;
+          if (!productos.some(p => String(p._id) === k) && !sinProducto.has(k)) sinProducto.set(k, { nombre: it.nombre || it.sku || 'Sin nombre', sku: it.sku || null, unidad: u });
+        }
+      }
+      const fila = (p, nombre, sku, unidad, rinde, porDia, cat) => {
+        const st = cat ? (stockPorProd.get(String(cat._id)) || { stock: 0, comprometido: 0 }) : null;
+        const disponible = st ? st.stock - st.comprometido : null;
+        const faltante = st ? Math.max(0, st.comprometido - st.stock) : null;
+        return {
+          productoId: p ? p._id : null, nombre, sku, unidad,
+          porDia: porDia.map(redond2),
+          hoy: redond2(porDia[porDia.length - 1]),
+          periodo: redond2(porDia.reduce((s, n) => s + n, 0)),
+          vinculado: !!st,
+          unidadStock: cat ? (cat.unidad || null) : null,
+          stock: st ? redond2(st.stock) : null,
+          comprometido: st ? redond2(st.comprometido) : null,
+          disponible: st ? redond2(disponible) : null,
+          faltante: st ? redond2(faltante) : null,
+          paquetesAFabricar: st && rinde && faltante > 0 ? Math.ceil(faltante / rinde) : null
+        };
+      };
+      const filas = productos.map(p => {
+        const rinde = p.rendimientoPorPaquete || null;
+        const unidad = rinde ? (p.tipoCosteo === 'm2' ? 'm2' : 'unidad') : 'paquete';
+        return fila(p, p.nombre, p.sku || null, unidad, rinde, porProd.get(String(p._id)) || new Array(fechas.length).fill(0), p.sku ? catPorSku.get(p.sku) : null);
+      });
+      for (const [k, v] of sinProducto) filas.push(Object.assign(fila(null, v.nombre, v.sku, v.unidad, null, porProd.get(k), v.sku ? catPorSku.get(v.sku) : null), { archivado: true }));
+      const conFaltante = filas.filter(f => f.faltante > 0);
+      return {
+        hoy, dias: dias.map(d => ({ fecha: d.fecha, m2: redond2(d.m2), unidades: redond2(d.unidades), paquetes: redond2(d.paquetes), cargas: d.cargas })),
+        productos: filas,
+        resumen: {
+          m2Hoy: redond2(dias[dias.length - 1].m2), unidadesHoy: redond2(dias[dias.length - 1].unidades),
+          m2Periodo: redond2(dias.reduce((s, d) => s + d.m2, 0)), unidadesPeriodo: redond2(dias.reduce((s, d) => s + d.unidades, 0)),
+          diasConProduccion: dias.filter(d => d.cargas > 0).length,
+          productosConFaltante: conFaltante.length, sinVincular: filas.filter(f => !f.vinculado).length
+        }
+      };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Ingresa a Stock los ítems de una carga de producción (un documento de costos_produccion_diaria)
 // en el depósito dado y la marca como ingresada. Los movimientos de Stock son un libro inmutable,
 // por eso cada carga se ingresa una sola vez.

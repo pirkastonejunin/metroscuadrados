@@ -80,7 +80,10 @@ Informe de ventas, Estado de resultados (incluye costos financieros de tarjetas 
 
 ## Producción y Personal
 
-Costos de Producción (costeo de fabricación) y Registrar producción (carga diaria de la fábrica, que puede ingresar a stock el producto terminado una sola vez por día). Sueldos para personal.
+Costos de Producción (costeo de fabricación), Registrar producción (carga diaria de la fábrica, que ingresa a stock el producto terminado) y **Panel de producción**. Sueldos para personal.
+
+### Panel de producción
+Tablero para ver lo fabricado y qué falta fabricar. Arriba elige el período (7, 14, 30 o 60 días). Muestra lo producido hoy y en el período, el promedio por día de fabricación y cuántos productos tienen faltante. Después, un gráfico de m² fabricados día a día y una tabla con, por cada producto de producción: lo producido hoy y en el período, el **stock** (físico en todos los depósitos), lo **comprometido** (reservado por ventas pendientes de entrega), el **disponible** (stock menos comprometido), el **faltante** (lo comprometido que el stock no cubre, o sea lo que hay que fabricar) y **A fabricar** (ese faltante en paquetes, según el rendimiento por paquete del producto). Se puede filtrar "Solo con faltante". Abajo hay una matriz con la producción de cada producto por día. El stock se vincula con el producto de Costos por SKU: si un producto no tiene SKU o el SKU no está en el catálogo, se ve su producción pero no su stock ni su faltante. Si falta el rendimiento por paquete, "A fabricar" no se puede calcular.
 
 ## Usuarios y permisos
 

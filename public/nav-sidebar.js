@@ -98,7 +98,7 @@
   });
   // Ícono propio y color por pantalla.
   const ESTILO_ITEM = {
-    costos: ['#d97706'], fabrica: ['#ea580c'],
+    costos: ['#d97706'], fabrica: ['#ea580c'], 'panel-produccion': ['#ea580c', 'grafico'],
     visitas: ['#7c3aed'], 'mis-visitas': ['#8b5cf6'], calendario: ['#0ea5e9'], obras: ['#b45309'], 'mis-obras': ['#a16207'],
     clientes: ['#2563eb'], ventas: ['#16a34a'], cobranza: ['#0d9488', 'recibo'], cotizador: ['#9333ea'], remitos: ['#0891b2'], presupuestos: ['#c026d3'],
     productos: ['#ea580c'], stock: ['#65a30d'], tiendanube: ['#0284c7', 'etiqueta'],
@@ -123,7 +123,8 @@
   const GRUPOS = [
     { nombre: 'Producción', items: [
       { key: 'costos', href: '/admin-costos.html', modulo: 'costos', label: 'Costos de Producción', icon: ICONOS.costos },
-      { key: 'fabrica', href: '/fabrica.html', moduloAlguno: ['fabrica', 'costos'], label: 'Registrar producción', icon: ICONOS.fabrica }
+      { key: 'fabrica', href: '/fabrica.html', moduloAlguno: ['fabrica', 'costos'], label: 'Registrar producción', icon: ICONOS.fabrica },
+      { key: 'panel-produccion', href: '/panel-produccion.html', moduloAlguno: ['fabrica', 'costos'], label: 'Panel de producción', icon: ICONOS.fabrica }
     ]},
     // Grupo CRM (1/10/2026, pedido de Mato): todo lo que es seguimiento de
     // visitas y obras en sí (no facturación) queda acá, separado de
