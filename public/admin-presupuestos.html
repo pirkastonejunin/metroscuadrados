@@ -74,6 +74,18 @@
   .fila-item .campo-precio{flex:1;min-width:100px;}
   .fila-item .campo-subtotal{flex:1;min-width:90px;text-align:right;font-weight:700;padding-top:8px;}
   .fila-item .btn-quitar{flex-shrink:0;background:transparent;border:1px solid var(--border);color:var(--danger);border-radius:8px;width:36px;height:36px;font-size:15px;font-weight:700;cursor:pointer;}
+  .planes-box{margin-top:14px;border:1px solid var(--border);border-radius:10px;padding:12px;}
+  .planes-box .planes-tit{font-weight:700;font-size:13px;}
+  .planes-box .planes-sub{font-size:12px;color:var(--muted);margin:2px 0 10px;}
+  .planes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;}
+  .plan-op{display:flex;align-items:center;gap:8px;margin:0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-weight:400;font-size:13px;color:inherit;background:var(--bg);}
+  .plan-op input{width:auto;margin:0;flex:none;}
+  .plan-op.on{border-color:var(--primary,#2563eb);background:rgba(37,99,235,.08);}
+  .plan-op .pn{display:block;font-weight:600;line-height:1.25;}
+  .plan-op .pd{display:block;font-size:11.5px;color:var(--muted);}
+  .totales-box .tarjeta-tit{font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-top:1px dashed var(--border);margin-top:8px;padding-top:8px;}
+  .totales-box .fila-total.tarjeta span:last-child{font-weight:700;}
+  .totales-box .fila-total.tarjeta small{display:block;color:var(--muted);font-size:11.5px;}
   .totales-box{background:var(--bg);border-radius:10px;padding:12px;margin-top:10px;font-size:13px;}
   .totales-box .fila-total{display:flex;justify-content:space-between;padding:2px 0;}
   .totales-box .fila-total.grande{font-size:16px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px;}
@@ -650,11 +662,12 @@ async function cargarPlanesTarjeta(pre, elegidos){
       PLANES_TARJETA = d;
     }
     const sel = (elegidos || []).map(String);
-    cont.className = '';
+    cont.className = 'planes-grid';
+    const fn = pre === 'pe' ? 'actualizarTotalesEdicion' : 'actualizarTotalesPresupuesto';
     cont.innerHTML = PLANES_TARJETA.length ? PLANES_TARJETA.map(pl => `
-      <label style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-weight:400">
-        <input type="checkbox" class="${pre}PlanChk" value="${pl._id}" ${sel.includes(String(pl._id))?'checked':''} onchange="${pre==='pe'?'actualizarTotalesEdicion':'actualizarTotalesPresupuesto'}()">
-        ${escapeHtml(pl.nombre)}${pl.recargoPorcentaje ? ' (+' + pl.recargoPorcentaje + '%)' : ''}
+      <label class="plan-op ${sel.includes(String(pl._id))?'on':''}">
+        <input type="checkbox" class="${pre}PlanChk" value="${pl._id}" ${sel.includes(String(pl._id))?'checked':''} onchange="this.parentNode.classList.toggle('on', this.checked);${fn}()">
+        <span><span class="pn">${escapeHtml(pl.nombre)}</span><span class="pd">${pl.cuotas > 1 ? pl.cuotas + ' cuotas · ' : 'Un pago · '}${pl.recargoPorcentaje ? 'recargo ' + pl.recargoPorcentaje + '%' : 'sin recargo'}</span></span>
       </label>`).join('') : '<span class="muted">No hay planes de tarjeta cargados (Tesorería → Tarjetas).</span>';
     if (pre === 'pe') actualizarTotalesEdicion(); else actualizarTotalesPresupuesto();
   }catch(e){ cont.textContent = 'No se pudieron cargar los planes: ' + e.message; }
@@ -663,10 +676,10 @@ function planesElegidos(pre){ return [...document.querySelectorAll('.' + pre + '
 function htmlTotalesTarjeta(pre, total){
   const ids = planesElegidos(pre);
   if (!ids.length || !PLANES_TARJETA || !(total > 0)) return '';
-  return ids.map(id => PLANES_TARJETA.find(x => String(x._id) === id)).filter(Boolean).map(pl => {
+  return '<div class="tarjeta-tit">Pagando con tarjeta</div>' + ids.map(id => PLANES_TARJETA.find(x => String(x._id) === id)).filter(Boolean).map(pl => {
     const rec = Math.round(total * pl.recargoPorcentaje) / 100;
     const tot = total + rec;
-    return `<div class="fila-total"><span>Con ${escapeHtml(pl.nombre)}${pl.recargoPorcentaje ? ' · recargo ' + pl.recargoPorcentaje + '% (' + money(rec) + ')' : ''}</span><span>${money(tot)}${pl.cuotas > 1 ? ' · ' + pl.cuotas + ' x ' + money(tot / pl.cuotas) : ''}</span></div>`;
+    return `<div class="fila-total tarjeta"><span>${escapeHtml(pl.nombre)}<small>${pl.recargoPorcentaje ? 'Recargo ' + pl.recargoPorcentaje + '% (' + money(rec) + ')' : 'Sin recargo'}${pl.cuotas > 1 ? ' · ' + pl.cuotas + ' cuotas de ' + money(tot / pl.cuotas) : ''}</small></span><span>${money(tot)}</span></div>`;
   }).join('');
 }
 
@@ -702,8 +715,11 @@ function abrirNuevoPresupuesto(prefill){
           <div><label>Descuento ($)</label><input id="pDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()"></div>
         </div>
 
-        <div style="margin-top:10px"><label>Ofrecer también pagando con tarjeta <span class="muted">(el presupuesto muestra el precio contado y el de cada plan)</span></label>
-          <div id="pPlanes" class="muted">Cargando planes…</div></div>
+        <div class="planes-box">
+          <div class="planes-tit">Pago con tarjeta</div>
+          <div class="planes-sub">Tildá los planes que querés ofrecer: el presupuesto muestra el precio contado y el de cada plan.</div>
+          <div id="pPlanes" class="planes-grid muted">Cargando planes…</div>
+        </div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="pObservaciones"></textarea></div>
 
         <div class="totales-box" id="pTotales"></div>
@@ -795,8 +811,11 @@ function abrirEditarPresupuesto(id){
           <div><label>Descuento ($)</label><input id="peDescuentoMonto" type="number" min="0" step="0.01" value="${p.descuentoMonto||0}" oninput="actualizarTotalesEdicion()"></div>
         </div>
 
-        <div style="margin-top:10px"><label>Ofrecer también pagando con tarjeta <span class="muted">(el presupuesto muestra el precio contado y el de cada plan)</span></label>
-          <div id="pePlanes" class="muted">Cargando planes…</div></div>
+        <div class="planes-box">
+          <div class="planes-tit">Pago con tarjeta</div>
+          <div class="planes-sub">Tildá los planes que querés ofrecer: el presupuesto muestra el precio contado y el de cada plan.</div>
+          <div id="pePlanes" class="planes-grid muted">Cargando planes…</div>
+        </div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="peObservaciones">${escapeHtml(p.observaciones||'')}</textarea></div>
 
         <div class="totales-box" id="peTotales"></div>
@@ -1014,7 +1033,7 @@ function verPresupuesto(id){
           <div class="fila-total"><span>Subtotal</span><span>${money(p.subtotal)}</span></div>
           ${p.descuentoMonto ? `<div class="fila-total"><span>Descuento</span><span>-${money(p.descuentoMonto)}</span></div>` : ''}
           <div class="fila-total grande"><span>Total (contado)</span><span>${money(p.total)}</span></div>
-          ${(p.planesTarjeta||[]).map(pt => `<div class="fila-total"><span>Con ${escapeHtml(pt.nombre)}${pt.recargoPorcentaje ? ' · recargo ' + pt.recargoPorcentaje + '% (' + money(pt.recargo) + ')' : ''}</span><span>${money(pt.total)}${pt.cuotas > 1 ? ' · ' + pt.cuotas + ' x ' + money(pt.valorCuota) : ''}</span></div>`).join('')}
+          ${(p.planesTarjeta||[]).length ? '<div class="tarjeta-tit">Pagando con tarjeta</div>' + p.planesTarjeta.map(pt => `<div class="fila-total tarjeta"><span>${escapeHtml(pt.nombre)}<small>${pt.recargoPorcentaje ? 'Recargo ' + pt.recargoPorcentaje + '% (' + money(pt.recargo) + ')' : 'Sin recargo'}${pt.cuotas > 1 ? ' · ' + pt.cuotas + ' cuotas de ' + money(pt.valorCuota) : ''}</small></span><span>${money(pt.total)}</span></div>`).join('') : ''}
         </div>
         ${p.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(p.observaciones)}</p>` : ''}
 
