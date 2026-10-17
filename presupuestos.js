@@ -547,6 +547,8 @@ router.put('/:id', authAdmin, async (req, res) => {
       await db.collection('presupuestos').updateOne({ _id: id }, { $set: set });
       const nuevo = await db.collection('presupuestos').findOne({ _id: id });
       if (nuevo.origenVisita) await espejarEnVisita(db, nuevo);
+      // Si ya se convirtió en venta, la venta también recibe los planes sugeridos para el cobro.
+      if (body.planesTarjetaIds !== undefined && nuevo.convertidoEnVentaId) await db.collection('ventas').updateOne({ _id: nuevo.convertidoEnVentaId }, { $set: { planesSugeridosIds: nuevo.planesTarjetaIds || [] } });
       return nuevo;
     });
     res.json(resultado);
