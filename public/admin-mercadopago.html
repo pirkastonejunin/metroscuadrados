@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mercado Pago - Piedra Negra</title>
+<title>Mercado Pago y tarjetas - Piedra Negra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -106,9 +106,13 @@
   <h2 style="margin-top:0">Sin acceso</h2><p class="muted">Tu usuario no tiene habilitado el módulo de Tesorería.</p>
   <button class="btn secondary" onclick="logout()">Cerrar sesión</button></div></div>
 <div id="app" class="hidden">
-  <header><div class="brand"><h1>Mercado Pago</h1></div>
+  <header><div class="brand"><h1>Mercado Pago y tarjetas</h1></div>
     <div style="display:flex;gap:8px;align-items:center"><span class="muted" id="topbarUser" style="font-size:12px;font-weight:600"></span><button onclick="logout()">Salir</button></div></header>
   <main>
+    <div style="margin-bottom:14px">
+      <h2 style="font-size:26px;font-weight:800;margin:0 0 4px;letter-spacing:-.01em">Mercado Pago y tarjetas</h2>
+      <p class="muted" style="font-size:13px;margin:0">Conexión con Mercado Pago, planes de cuotas de cada tarjeta y cobros realizados.</p>
+    </div>
     <div class="tabs" id="mpTabs"><button data-v="conexion" class="on">Conexión</button><button data-v="cuotas">Tarjetas y cuotas</button><button data-v="cobros">Cobros</button></div>
     <div id="v-conexion">
     <div class="card">
