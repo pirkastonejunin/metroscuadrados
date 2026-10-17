@@ -354,6 +354,9 @@ async function resultadosOrg(db, orgId, d0, d1) {
       { $project: { fin: '$tareas.fechaFinReal', monto: { $multiply: [{ $ifNull: ['$tareas.m2Presupuestados', 0] }, { $ifNull: ['$tareas.costoPorM2Aplicado', 0] }] } } }
     ]).toArray();
     obras.forEach(o => { const m = mes(mesDe(o.fin)); const c = 'Sueldos y cargas · Obra (colocadores)'; m.gastos[c] = (m.gastos[c] || 0) + Number(o.monto || 0); });
+    // Trabajos especiales de colocadores (monto acordado por tarea, fuera del esquema por m²): cuentan en el mes en que se terminan.
+    const esp = await db.collection('sueldos_tareas_especiales').find({ orgId, estado: 'terminada', fechaFin: { $gte: d0, $lte: d1 } }).project({ fechaFin: 1, monto: 1 }).toArray();
+    esp.forEach(o => { const m = mes(mesDe(o.fechaFin)); const c = 'Sueldos y cargas · Obra (colocadores)'; m.gastos[c] = (m.gastos[c] || 0) + Number(o.monto || 0); });
   }
   // Costos financieros (13/10/2026): lo que descuentan las tarjetas al acreditar (según el plan elegido en el cobro) y las comisiones
   // e impuestos de Mercado Pago. Los recargos que se le cobraron al cliente por financiar se muestran restando, como "Recargos financieros cobrados".

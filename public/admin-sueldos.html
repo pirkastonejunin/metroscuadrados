@@ -147,6 +147,9 @@
       </div>
       <div class="panel hidden" id="pCol"></div>
       <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Sucursal</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
+      <h3 style="margin:22px 0 6px">Trabajos especiales <span class="tb-info" title="Obras atípicas que se presupuestan una por una: cargás cada tarea con el monto acordado para el colocador. Cuando la marcás terminada entra a su liquidación (junto con las demás tareas) y se paga igual que el resto.">ⓘ</span></h3>
+      <div class="panel" id="pEsp"></div>
+      <div class="tabla"><table><thead><tr><th>Colocador</th><th>Obra / cliente</th><th>Trabajo</th><th class="n">Monto acordado</th><th>Estado</th><th></th></tr></thead><tbody id="tEsp"></tbody></table></div>
     </div>
 
     <div class="vista hidden" id="v-emp">
@@ -402,7 +405,7 @@ function iniciarCol(){
   cargarCol();
 }
 async function cargarCol(){
-  $('pCol').classList.add('hidden');
+  $('pCol').classList.add('hidden'); cargarEsp();
   // la fecha "hasta" siempre cae dentro del mes mirado
   const per = $('cPeriodo').value, h = $('cHasta').value;
   if (!h || h.slice(0, 7) !== per) { const hoy = hoyISO(); $('cHasta').value = hoy.slice(0, 7) === per ? hoy : per + '-' + String(new Date(Number(per.slice(0, 4)), Number(per.slice(5, 7)), 0).getDate()).padStart(2, '0'); }
@@ -419,6 +422,38 @@ async function cargarCol(){
       (f.pendienteLiquidar > 0 ? '<button class="btn secondary" onclick="liquidarCol(\'parcial\',\'' + f.colocadorId + '\')">Liquidar semana</button> <button class="btn secondary" onclick="liquidarCol(\'final\',\'' + f.colocadorId + '\')">Cerrar mes</button> ' : '') + (f.saldo > 0 ? '<button class="btn" onclick="formPagoCol(null,' + i + ')">Pagar</button>' : '') + '</td></tr>' + det;
   }).join('') : '<tr><td colspan="10" class="vacio">No hay tareas terminadas por colocadores en este mes.</td></tr>';
 }
+
+// ---- Trabajos especiales (tareas con monto acordado, fuera del esquema por m²)
+let ESP = [], COL_LISTA = [];
+async function cargarEsp(){
+  try{ ESP = await api('GET', '/colocadores/especiales'); }catch(e){ return error(e); }
+  $('tEsp').innerHTML = ESP.length ? ESP.map(x => '<tr><td>' + escapeHtml(x.colocadorNombre) + '</td><td>' + escapeHtml(x.obra || '') + '</td><td>' + escapeHtml(x.descripcion) + '</td><td class="n">' + pesos(x.monto) + '</td><td>' +
+    (x.liquidada ? '<span class="chip ok">Liquidado</span>' : x.estado === 'terminada' ? '<span class="chip par">Terminado ' + fmtF(x.fechaFin) + ' · a liquidar</span>' : '<span class="chip">En curso</span>') + '</td><td class="acc">' +
+    (x.liquidada ? '' : (x.estado === 'terminada' ? '<button class="btn secondary" onclick="reabrirEsp(\'' + x._id + '\')">Reabrir</button> ' : '<button class="btn" onclick="terminarEsp(\'' + x._id + '\')">Marcar terminado</button> ') + '<button class="btn secondary" onclick="formEsp(\'' + x._id + '\')">Editar</button> <button class="btn secondary" title="Borrar" onclick="borrarEsp(\'' + x._id + '\')">🗑</button>') + '</td></tr>').join('') : '<tr><td colspan="6" class="vacio">Sin trabajos especiales.</td></tr>';
+  if (!$('pEsp').innerHTML) formEsp();
+}
+async function formEsp(id){
+  if (!COL_LISTA.length) { try{ COL_LISTA = await api('GET', '/colocadores/lista'); }catch(e){ return error(e); } }
+  const x = id ? ESP.find(y => y._id === id) : null;
+  $('pEsp').innerHTML = '<div class="form" data-id="' + (id || '') + '"><div><label>Colocador</label><select id="esCol"' + (x ? ' disabled' : '') + '>' + COL_LISTA.map(c => '<option value="' + c._id + '"' + (x && String(x.colocadorId) === c._id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></div>' +
+    '<div><label>Obra / cliente</label><input type="text" id="esObra" placeholder="Ej: Casa Pérez" value="' + escapeHtml(x ? x.obra : '') + '"></div>' +
+    '<div class="ancho"><label>Trabajo</label><input type="text" id="esDesc" placeholder="Ej: Revestimiento de fachada" value="' + escapeHtml(x ? x.descripcion : '') + '"></div>' +
+    '<div><label>Monto acordado</label><input type="number" min="0" step="any" id="esMonto" value="' + (x ? x.monto : '') + '"></div>' +
+    (x ? '' : '<div><label><input type="checkbox" id="esTerm"> Ya está terminado</label><input type="date" id="esFin" value="' + hoyISO() + '"></div>') +
+    '</div><div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarEsp()">' + (x ? 'Guardar cambios' : 'Agregar trabajo') + '</button>' + (x ? '<button data-iconizado="1" class="btn secondary" onclick="formEsp()">Cancelar</button>' : '') + '</div>';
+}
+async function guardarEsp(){
+  const id = document.querySelector('#pEsp .form').dataset.id;
+  const b = {obra: $('esObra').value, descripcion: $('esDesc').value, monto: n$('esMonto')};
+  try{
+    if (id) await api('PUT', '/colocadores/especiales/' + id, b);
+    else await api('POST', '/colocadores/especiales', Object.assign(b, {colocadorId: $('esCol').value, terminada: $('esTerm').checked, fechaFin: $('esFin').value}));
+    exito('Trabajo guardado.'); $('pEsp').innerHTML = ''; await cargarCol();
+  }catch(e){ error(e); }
+}
+async function terminarEsp(id){ const f = prompt('Fecha en que se terminó (AAAA-MM-DD):', hoyISO()); if (!f) return; try{ await api('POST', '/colocadores/especiales/' + id + '/terminar', {fecha: f}); await cargarCol(); }catch(e){ error(e); } }
+async function reabrirEsp(id){ try{ await api('POST', '/colocadores/especiales/' + id + '/reabrir', {}); await cargarCol(); }catch(e){ error(e); } }
+async function borrarEsp(id){ if (!confirm('¿Borrar este trabajo especial?')) return; try{ await api('DELETE', '/colocadores/especiales/' + id); await cargarCol(); }catch(e){ error(e); } }
 function abrirCol(id){ COL_ABIERTO[id] = !COL_ABIERTO[id]; cargarCol(); }
 async function liquidarCol(tipo, colocadorId){
   if (tipo === 'final' && !confirm('Cerrar el mes liquida todo lo que falte liquidar de ' + $('cPeriodo').value + (colocadorId ? ' de este colocador' : ' de todos los colocadores') + '. ¿Seguimos?')) return;

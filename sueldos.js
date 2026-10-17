@@ -103,7 +103,7 @@ async function derivarOrg(req, res, next) {
     const id = toObjectId(req.params && req.params.id);
     if (!org && id) {
       const p = req.path;
-      const col = p.startsWith('/colocadores/liquidaciones') ? 'sueldos_colocadores' : p.startsWith('/liquidaciones') ? 'sueldos_liquidaciones' : p.startsWith('/adelantos') ? 'sueldos_adelantos' : p.startsWith('/empleados') ? 'empleados' : null;
+      const col = p.startsWith('/colocadores/especiales') ? 'sueldos_tareas_especiales' : p.startsWith('/colocadores/liquidaciones') ? 'sueldos_colocadores' : p.startsWith('/liquidaciones') ? 'sueldos_liquidaciones' : p.startsWith('/adelantos') ? 'sueldos_adelantos' : p.startsWith('/empleados') ? 'empleados' : null;
       if (col) { const d = await db.collection(col).findOne({ _id: id }, { projection: { orgId: 1 } }); org = d && d.orgId; }
     }
     if (!org) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando (o asignale una sucursal al empleado).' });
@@ -813,10 +813,12 @@ async function tareasTerminadasDelPeriodo(db, req, periodo) {
     { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
     { $project: { numero: 1, orgId: 1, cliente: '$cliente.nombre', t: '$tareas' } }
   ]).toArray();
+  const esp = await db.collection('sueldos_tareas_especiales').find({ estado: 'terminada', fechaFin: { $gte: d0, $lte: d1 } }).toArray();
+  const especiales = esp.map(e => ({ colocadorId: e.colocadorId, obraOrgId: e.orgId || null, obraId: null, tareaId: e._id, obra: ('Especial · ' + (e.obra || '')).trim(), tipoTrabajo: e.descripcion || '', m2: 0, costoPorM2: 0, monto: r2(e.monto), fecha: e.fechaFin, especial: true }));
   return filas.map(f => {
     const m2 = Number(f.t.m2Presupuestados || 0), costo = Number(f.t.costoPorM2Aplicado || 0);
     return { colocadorId: f.t.colocadorId, obraOrgId: f.orgId || null, obraId: f._id, tareaId: f.t._id, obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', m2, costoPorM2: costo, monto: r2(m2 * costo), fecha: f.t.fechaFinReal };
-  });
+  }).concat(especiales);
 }
 
 function isoAR(d) { return new Date(new Date(d).getTime() - 3 * 3600e3).toISOString().slice(0, 10); }
@@ -890,7 +892,7 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
         if (soloCol && f.colocadorId !== soloCol) continue;
         const nuevas = f.tareas.filter(t => !t.liquidada && new Date(t.fecha) <= corte);
         if (!nuevas.length) continue;
-        const docs = nuevas.map(t => ({ obraId: t.obraId, tareaId: t.tareaId, obra: t.obra, tipoTrabajo: t.tipoTrabajo, m2: t.m2, costoPorM2: t.costoPorM2, monto: t.monto, fecha: t.fecha }));
+        const docs = nuevas.map(t => ({ obraId: t.obraId, tareaId: t.tareaId, obra: t.obra, tipoTrabajo: t.tipoTrabajo, m2: t.m2, costoPorM2: t.costoPorM2, monto: t.monto, fecha: t.fecha, especial: !!t.especial }));
         const suma = r2(docs.reduce((s, t) => s + t.monto, 0));
         const orgLiq = toObjectId(f.orgLiq) || req.orgId;
         if (!orgLiq) throw err(400, 'Asignale una sucursal a ' + f.nombre + ' (en la lista de colocadores) para poder liquidarlo.');
@@ -944,6 +946,80 @@ router.delete('/colocadores/liquidaciones/:id', authSueldosDoc, async (req, res)
 // ---------------------------------------------------------------------------
 // Sucursal de cada empleado y colocador (asignación y traslado del historial)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Trabajos especiales: obras atípicas que se presupuestan una por una. Se carga el monto acordado de cada tarea, se marca terminada
+// y entra a la liquidación del colocador como cualquier otra tarea (se liquida y se paga con el mismo circuito).
+// sueldos_tareas_especiales: { colocadorId, colocadorNombre, obra, descripcion, monto, estado (pendiente|terminada), fechaFin, orgId }
+// ---------------------------------------------------------------------------
+router.get('/colocadores/lista', authSueldosLectura, async (req, res) => {
+  try {
+    const l = await conReintento(async () => (await getDb()).collection('obras_colocadores').find({ activo: { $ne: false } }).project({ nombre: 1 }).sort({ nombre: 1 }).toArray());
+    res.json(l.map(c => ({ _id: String(c._id), nombre: c.nombre })));
+  } catch (e) { responder(res, e); }
+});
+async function liquidadaLa(db, tareaId) { return !!(await db.collection('sueldos_colocadores').findOne({ 'tareas.tareaId': tareaId }, { projection: { _id: 1 } })); }
+router.get('/colocadores/especiales', authSueldosLectura, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const l = await db.collection('sueldos_tareas_especiales').find(filtroOrg(req)).sort({ createdAt: -1 }).limit(500).toArray();
+      const liq = new Set();
+      if (l.length) (await db.collection('sueldos_colocadores').find({ 'tareas.tareaId': { $in: l.map(x => x._id) } }).project({ 'tareas.tareaId': 1 }).toArray()).forEach(d => (d.tareas || []).forEach(t => liq.add(String(t.tareaId))));
+      return l.map(x => Object.assign(x, { liquidada: liq.has(String(x._id)) }));
+    });
+    res.json(lista);
+  } catch (e) { responder(res, e); }
+});
+function datosEspecial(b) {
+  const descripcion = texto(b.descripcion), obra = texto(b.obra);
+  const m = monto(b.monto, 'El monto');
+  if (!descripcion) throw err(400, 'Escribí qué trabajo es.');
+  if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
+  return { descripcion, obra, monto: m };
+}
+router.post('/colocadores/especiales', authSueldosDoc, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const colId = toObjectId(b.colocadorId); if (!colId) throw err(400, 'Elegí el colocador.');
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const c = await db.collection('obras_colocadores').findOne({ _id: colId });
+      if (!c) throw err(404, 'Colocador no encontrado.');
+      const d = Object.assign(datosEspecial(b), { colocadorId: colId, colocadorNombre: c.nombre, estado: 'pendiente', fechaFin: null, orgId: c.sucursalSueldoId || req.orgId, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date(), updatedAt: new Date() });
+      if (b.terminada) { d.estado = 'terminada'; d.fechaFin = fechaDe(b.fechaFin); }
+      const r = await db.collection('sueldos_tareas_especiales').insertOne(d);
+      return Object.assign(d, { _id: r.insertedId });
+    });
+    res.json(doc);
+  } catch (e) { responder(res, e); }
+});
+async function cambiarEspecial(req, res, fn) {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const e = await db.collection('sueldos_tareas_especiales').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!e) throw err(404, 'Trabajo no encontrado.');
+      if (await liquidadaLa(db, id)) throw err(400, 'Este trabajo ya está en una liquidación: para tocarlo primero hay que deshacer esa liquidación (si no tiene pagos).');
+      return fn(db, e, id);
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+}
+router.put('/colocadores/especiales/:id', authSueldosDoc, (req, res) => cambiarEspecial(req, res, async (db, e, id) => {
+  await db.collection('sueldos_tareas_especiales').updateOne({ _id: id }, { $set: Object.assign(datosEspecial(req.body || {}), { updatedAt: new Date() }) }); return { ok: true };
+}));
+router.post('/colocadores/especiales/:id/terminar', authSueldosDoc, (req, res) => cambiarEspecial(req, res, async (db, e, id) => {
+  const fecha = fechaDe((req.body || {}).fecha);
+  await db.collection('sueldos_tareas_especiales').updateOne({ _id: id }, { $set: { estado: 'terminada', fechaFin: fecha, updatedAt: new Date() } }); return { ok: true };
+}));
+router.post('/colocadores/especiales/:id/reabrir', authSueldosDoc, (req, res) => cambiarEspecial(req, res, async (db, e, id) => {
+  await db.collection('sueldos_tareas_especiales').updateOne({ _id: id }, { $set: { estado: 'pendiente', fechaFin: null, updatedAt: new Date() } }); return { ok: true };
+}));
+router.delete('/colocadores/especiales/:id', authSueldosDoc, (req, res) => cambiarEspecial(req, res, async (db, e, id) => {
+  await db.collection('sueldos_tareas_especiales').deleteOne({ _id: id }); return { ok: true };
+}));
+
 router.get('/sucursales', authSueldosLectura, async (req, res) => {
   try {
     const db = await getDb();
