@@ -181,6 +181,7 @@
           </div>
         </div>
         <div class="err" id="tarjetasErr"></div>
+        <div id="planesViejos"></div>
         <div id="tarjetasBody" class="tp-lista"><p class="muted">Cargando...</p></div>
             </div>
     </div>
@@ -377,7 +378,11 @@ async function cargarPlanesTarjeta(){
   try{ listasPrecioPlanes = await fetch('/api/productos/listas-precio', {headers: headersAuth()}).then(r => r.ok ? r.json() : []).catch(() => []); }catch(e){ listasPrecioPlanes = []; }
   try{ planesTarjetaCache = await apiTarjetas('/tarjetas-planes?todos=1'); }
   catch(e){ body.innerHTML = '<p class="muted">' + escapeHtml(e.message) + '</p>'; return; }
-  planesTarjetaCache = planesTarjetaCache.filter(p => !/^Mercado Pago (Point|Link de pago)$/.test(p.tarjeta));
+  const viejos = planesTarjetaCache.filter(p => p.origen === 'mercadopago');
+  document.getElementById('planesViejos').innerHTML = viejos.length ? `<div class="card" style="border-color:var(--danger);background:var(--danger-soft);margin-bottom:12px"><b>Hay ${viejos.length} planes viejos que había traído Mercado Pago por tarjeta.</b>
+    <div class="muted" style="font-size:13px;margin:4px 0 8px">Ya no se usan: ahora se manejan con los cuadros de Point y Link de pago de arriba. Los cobros ya hechos no cambian.</div>
+    <button class="btn" onclick="quitarPlanesViejos()">Quitar los ${viejos.length} planes viejos</button></div>` : '';
+  planesTarjetaCache = planesTarjetaCache.filter(p => !/^Mercado Pago (Point|Link de pago)$/.test(p.tarjeta) && p.origen !== 'mercadopago');
   if (!planesTarjetaCache.length){ body.innerHTML = '<p class="muted">Todavía no hay otros planes de tarjeta.</p>'; return; }
   const hoy = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
   const grupos = {};
@@ -423,6 +428,12 @@ async function crearPlanTarjeta(){
     ['tpNombre', 'tpLeyenda', 'tpVigente'].forEach(id => document.getElementById(id).value = '');
     await cargarPlanesTarjeta();
   }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
+}
+async function quitarPlanesViejos(){
+  if (!confirm('Se borran los planes viejos que trajo Mercado Pago por tarjeta (de todas las sucursales). ¿Seguimos?')) return;
+  const r = await fetch(BASE + '/planes/importados', {method:'DELETE', headers: headersAuth()}); const d = await r.json();
+  if (!r.ok){ document.getElementById('tarjetasErr').textContent = d.error || 'No se pudo'; return; }
+  await cargarPlanesTarjeta();
 }
 async function guardarPlanTarjeta(id, activo){
   document.getElementById('tarjetasErr').textContent = '';
