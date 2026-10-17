@@ -190,6 +190,69 @@ router.post('/planes/importar', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Costos de cobrar con crédito en Mercado Pago (17/10/2026, pedido de Mato). Mercado Pago no los expone por API:
+// se cargan a mano desde "Costos y cuotas" del panel de MP, UNO POR CANAL (link de pago / Point), porque difieren.
+//   costo de un plan = comisión base del canal + costo de financiación de esa cantidad de cuotas.
+// Valores iniciales: los que informó Mato desde su panel. Link: comisión 5,99% + cuotas 2c 4,40 … 18c 26,10. Point: comisión 1,80% + cuotas 2c 4,00 … 18c 24,35.
+// ---------------------------------------------------------------------------
+const CANALES_COSTO = { link: 'Link de pago', point: 'Point' };
+const COSTOS_INICIALES = {
+  link: { base: 5.99, financiacion: [{ cuotas: 2, pct: 4.40 }, { cuotas: 3, pct: 6.20 }, { cuotas: 6, pct: 10.30 }, { cuotas: 9, pct: 15.30 }, { cuotas: 12, pct: 19.50 }, { cuotas: 18, pct: 26.10 }] },
+  point: { base: 1.80, financiacion: [{ cuotas: 2, pct: 4.00 }, { cuotas: 3, pct: 5.30 }, { cuotas: 6, pct: 9.20 }, { cuotas: 9, pct: 13.50 }, { cuotas: 12, pct: 17.00 }, { cuotas: 18, pct: 24.35 }] }
+};
+function leerCostosCanal(c, def) {
+  const base = Number(c && c.base); const fin = (c && Array.isArray(c.financiacion)) ? c.financiacion : def.financiacion;
+  return { base: Number.isFinite(base) && c && c.base !== undefined ? base : def.base,
+    financiacion: fin.map(f => ({ cuotas: Math.floor(Number(f.cuotas)), pct: Number(f.pct) })).filter(f => f.cuotas >= 2 && Number.isFinite(f.pct) && f.pct >= 0 && f.pct <= 100).sort((a, b) => a.cuotas - b.cuotas) };
+}
+router.get('/costos', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás.');
+    const cfg = (await cargarConfig(await getDb(), req.orgId)) || {};
+    const out = {};
+    for (const k of Object.keys(CANALES_COSTO)) out[k] = Object.assign({ nombre: CANALES_COSTO[k] }, leerCostosCanal(cfg.costos && cfg.costos[k], COSTOS_INICIALES[k]));
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/costos/:canal', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás.');
+    if (!CANALES_COSTO[req.params.canal]) throw err(400, 'Canal inválido.');
+    const b = req.body || {};
+    const base = Number(b.base);
+    if (!Number.isFinite(base) || base < 0 || base > 100) throw err(400, 'La comisión base tiene que estar entre 0 y 100.');
+    const val = leerCostosCanal({ base, financiacion: b.financiacion || [] }, COSTOS_INICIALES[req.params.canal]);
+    await (await getDb()).collection('mp_config').updateOne({ orgId: req.orgId }, { $set: { ['costos.' + req.params.canal]: val, updatedAt: new Date() }, $setOnInsert: { orgId: req.orgId, webhookToken: crypto.randomBytes(24).toString('hex'), createdAt: new Date() } }, { upsert: true });
+    res.json(val);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Aplica a los planes de crédito: costo % = base + financiación. Opcional: recargo % para que el cliente cubra ese costo.
+router.post('/costos/:canal/aplicar', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás.');
+    if (!CANALES_COSTO[req.params.canal]) throw err(400, 'Canal inválido.');
+    const db = await getDb();
+    const cfg = (await cargarConfig(db, req.orgId)) || {};
+    const c = leerCostosCanal(cfg.costos && cfg.costos[req.params.canal], COSTOS_INICIALES[req.params.canal]);
+    const cubrir = !!(req.body && req.body.cubrirConRecargo);
+    const planes = await db.collection('tarjetas_planes').find({ orgId: req.orgId }).toArray();
+    const r = { actualizados: 0, omitidos: [] };
+    for (const pl of planes) {
+      if (!/cr[eé]dito/i.test(pl.tarjeta || '') || /american|amex/i.test(pl.tarjeta || '')) continue;
+      const cuotas = Math.max(1, Number(pl.cuotas) || 1);
+      const f = cuotas === 1 ? { pct: 0 } : c.financiacion.find(x => x.cuotas === cuotas);
+      if (!f) { r.omitidos.push(`${pl.tarjeta} ${cuotas} cuotas (sin costo cargado para esa cantidad)`); continue; }
+      const costo = redondear(c.base + f.pct);
+      const set = { costoPorcentaje: costo, updatedAt: new Date() };
+      if (cubrir && cuotas > 1) set.recargoPorcentaje = redondear((1 / (1 - costo / 100) - 1) * 100);
+      await db.collection('tarjetas_planes').updateOne({ _id: pl._id }, { $set: set });
+      r.actualizados++;
+    }
+    res.json(r);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/terminales', auth, async (req, res) => {
   try {
     const db = await getDb();

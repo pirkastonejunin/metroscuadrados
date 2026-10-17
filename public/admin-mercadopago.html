@@ -159,6 +159,18 @@
         <h3 style="margin-top:0">Tarjetas y planes de cuotas</h3>
 
         <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes son de la sucursal elegida arriba. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
+        <div class="tp-nuevo" id="costosMP" style="border-style:solid">
+          <div class="tp-nuevo-tit">Costos de cobrar con crédito en Mercado Pago</div>
+          <p class="muted" style="margin:0 0 8px">Mercado Pago no informa estos costos por sistema: copialos de <b>Costos y cuotas</b> en tu panel de Mercado Pago. Son distintos para el <b>link de pago</b> y para el <b>Point</b>, así que se cargan por separado. Costo del plan = comisión base + costo de las cuotas.</p>
+          <div class="tabs" id="costoCanales" style="margin-bottom:10px"><button data-c="link" class="on">Link de pago</button><button data-c="point">Point</button></div>
+          <div class="tp-nuevo-grid" id="costoForm"></div>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn" onclick="guardarCostos()">Guardar costos</button>
+            <button class="btn secondary" onclick="aplicarCostos()">Aplicar a los planes de crédito</button>
+            <label style="display:flex;align-items:center;gap:6px;margin:0;font-weight:500"><input type="checkbox" id="costoCubrir" style="width:auto"> También ajustar el recargo para que el cliente cubra el costo</label>
+          </div>
+          <div class="err" id="costoErr"></div><div class="ok-msg" id="costoOk"></div>
+        </div>
         <div class="tp-nuevo">
           <div class="tp-nuevo-tit">Agregar un plan a mano</div>
           <div class="tp-nuevo-grid">
@@ -291,13 +303,46 @@ async function cargarCobros(){
 }
 async function verificar(id){ await fetch(BASE+'/cobros/'+id+'/verificar',{method:'POST',headers:headersAuthJson()}); cargarCobros(); }
 
+// ---- Costos de Mercado Pago por canal ----
+let COSTOS_MP = null, CANAL_COSTO = 'link';
+const CUOTAS_COSTO = [2, 3, 6, 9, 12, 18, 24];
+async function cargarCostosMP(){
+  const r = await fetch(BASE + '/costos', {headers: headersAuth()}); const d = await r.json();
+  if (!r.ok){ document.getElementById('costoErr').textContent = d.error || 'No se pudieron cargar los costos'; return; }
+  COSTOS_MP = d; pintarCostos();
+}
+function pintarCostos(){
+  const c = COSTOS_MP[CANAL_COSTO];
+  document.querySelectorAll('#costoCanales button').forEach(b => b.classList.toggle('on', b.dataset.c === CANAL_COSTO));
+  const fin = {}; (c.financiacion || []).forEach(f => fin[f.cuotas] = f.pct);
+  document.getElementById('costoForm').innerHTML = `<div><label>Comisión base crédito %</label><input id="cBase" type="number" min="0" max="100" step="0.01" value="${c.base}"></div>` +
+    CUOTAS_COSTO.map(n => `<div><label>${n} cuotas %</label><input class="cFin" data-n="${n}" type="number" min="0" max="100" step="0.01" value="${fin[n] !== undefined ? fin[n] : ''}" placeholder="—"></div>`).join('');
+}
+document.getElementById('costoCanales').addEventListener('click', e => { const b = e.target.closest('button'); if (b && COSTOS_MP){ CANAL_COSTO = b.dataset.c; pintarCostos(); } });
+function msgCosto(ok, t){ document.getElementById('costoErr').textContent = ok ? '' : t; document.getElementById('costoOk').textContent = ok ? t : ''; }
+async function guardarCostos(){
+  const financiacion = [...document.querySelectorAll('.cFin')].filter(i => i.value !== '').map(i => ({cuotas: Number(i.dataset.n), pct: Number(i.value)}));
+  const r = await fetch(BASE + '/costos/' + CANAL_COSTO, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({base: Number(document.getElementById('cBase').value) || 0, financiacion})});
+  const d = await r.json(); if (!r.ok) return msgCosto(false, d.error || 'No se pudo guardar');
+  COSTOS_MP[CANAL_COSTO] = Object.assign(COSTOS_MP[CANAL_COSTO], d); msgCosto(true, 'Costos guardados.');
+}
+async function aplicarCostos(){
+  const nombre = COSTOS_MP[CANAL_COSTO].nombre;
+  if (!confirm('Se va a pisar el Costo % de TODOS los planes de crédito con los costos de "' + nombre + '". ¿Seguimos?')) return;
+  await guardarCostos();
+  const r = await fetch(BASE + '/costos/' + CANAL_COSTO + '/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({cubrirConRecargo: document.getElementById('costoCubrir').checked})});
+  const d = await r.json(); if (!r.ok) return msgCosto(false, d.error || 'No se pudo aplicar');
+  msgCosto(true, d.actualizados + ' planes actualizados.' + (d.omitidos.length ? ' Sin cambios (falta cargar el costo de esa cantidad de cuotas): ' + d.omitidos.join('; ') + '.' : ''));
+  cargarPlanesTarjeta();
+}
+
 // Pestañas de Mercado Pago (17/10/2026): Conexión / Tarjetas y cuotas / Cobros
 let PLANES_CARGADOS = false;
 function mpTab(v){
   document.querySelectorAll('#mpTabs button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
   ['conexion','cuotas','cobros'].forEach(k => document.getElementById('v-' + k).classList.toggle('hidden', k !== v));
   try{ history.replaceState(null, '', '#' + v); }catch(e){}
-  if (v === 'cuotas' && !PLANES_CARGADOS){ PLANES_CARGADOS = true; cargarPlanesTarjeta(); }
+  if (v === 'cuotas' && !PLANES_CARGADOS){ PLANES_CARGADOS = true; cargarPlanesTarjeta(); cargarCostosMP(); }
   if (v === 'cobros') cargarCobros();
 }
 document.getElementById('mpTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) mpTab(b.dataset.v); });
