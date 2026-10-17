@@ -955,11 +955,16 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
         .project({ nombre: 1, sku: 1, tipoCosteo: 1, rendimientoPorPaquete: 1, unidadesPorPaquete: 1 }).sort({ nombre: 1 }).toArray();
       const docs = await db.collection('costos_produccion_diaria').find(Object.assign({ fecha: { $gte: fechas[0], $lte: hoy } }, filtroOrg(req)))
         .project({ fecha: 1, items: 1 }).toArray();
-      // Catálogo por SKU y existencias por producto del catálogo.
-      const skus = productos.map(p => p.sku).filter(Boolean);
-      const catalogo = skus.length ? await db.collection('productos_catalogo').find(Object.assign({ sku: { $in: skus }, activo: { $ne: false } }, filtroOrg(req)))
-        .project({ sku: 1, unidad: 1, cantidadMinima: 1 }).toArray() : [];
-      const catPorSku = new Map(catalogo.map(c => [c.sku, c]));
+      // Catálogo: se vincula por el enlace que deja la sincronización (costoProductoId) o por SKU (sin distinguir
+      // mayúsculas ni espacios, porque los SKU viejos pueden estar guardados con otro formato).
+      const normSku = v => String(v == null ? '' : v).trim().toUpperCase();
+      const skusUp = [...new Set(productos.map(p => normSku(p.sku)).filter(Boolean))];
+      const catalogo = productos.length ? await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req), {
+        $or: [{ costoProductoId: { $in: productos.map(p => p._id) } }].concat(skusUp.length ? [{ sku: { $in: skusUp } }] : [])
+      })).project({ sku: 1, unidad: 1, cantidadMinima: 1, costoProductoId: 1 }).toArray() : [];
+      const catPorSku = new Map(catalogo.map(c => [normSku(c.sku), c]));
+      const catPorCosto = new Map(catalogo.filter(c => c.costoProductoId).map(c => [String(c.costoProductoId), c]));
+      const catDe = p => catPorCosto.get(String(p._id)) || (p.sku ? catPorSku.get(normSku(p.sku)) : null) || null;
       const existencias = catalogo.length ? await db.collection('stock_actual').find({ productoId: { $in: catalogo.map(c => c._id) } }).toArray() : [];
       const stockPorProd = new Map();
       for (const e of existencias) {
@@ -1011,9 +1016,23 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
       const filas = productos.map(p => {
         const rinde = p.rendimientoPorPaquete || null;
         const unidad = rinde ? (p.tipoCosteo === 'm2' ? 'm2' : 'unidad') : 'paquete';
-        return fila(p, p.nombre, p.sku || null, unidad, rinde, porProd.get(String(p._id)) || new Array(fechas.length).fill(0), p.sku ? catPorSku.get(p.sku) : null);
+        return fila(p, p.nombre, p.sku || null, unidad, rinde, porProd.get(String(p._id)) || new Array(fechas.length).fill(0), catDe(p));
       });
-      for (const [k, v] of sinProducto) filas.push(Object.assign(fila(null, v.nombre, v.sku, v.unidad, null, porProd.get(k), v.sku ? catPorSku.get(v.sku) : null), { archivado: true }));
+      // Los que no se pudieron vincular: motivo y posibles candidatos del catálogo por nombre (solo lectura, para ayudar a corregir).
+      const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const sinVinc = filas.filter(f => !f.vinculado && f.productoId).slice(0, 12);
+      for (const f of sinVinc) {
+        f.motivo = f.sku ? 'sku_no_encontrado' : 'sin_sku';
+        const palabras = norm(f.nombre).split(' ').filter(w => w.length > 3).slice(0, 4);
+        if (!palabras.length) continue;
+        const posibles = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req), {
+          $or: palabras.map(w => ({ nombre: new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }))
+        })).project({ sku: 1, nombre: 1 }).limit(60).toArray();
+        const minimo = Math.max(1, Math.ceil(palabras.length / 2));
+        f.candidatos = posibles.map(c => ({ sku: c.sku, nombre: c.nombre, puntos: palabras.filter(w => norm(c.nombre).includes(w)).length }))
+          .filter(c => c.puntos >= minimo).sort((x, y) => y.puntos - x.puntos).slice(0, 3).map(c => ({ sku: c.sku, nombre: c.nombre }));
+      }
+      for (const [k, v] of sinProducto) filas.push(Object.assign(fila(null, v.nombre, v.sku, v.unidad, null, porProd.get(k), v.sku ? catPorSku.get(normSku(v.sku)) : null), { archivado: true }));
       const conFaltante = filas.filter(f => f.faltante > 0);
       return {
         hoy, dias: dias.map(d => ({ fecha: d.fecha, m2: redond2(d.m2), unidades: redond2(d.unidades), paquetes: redond2(d.paquetes), cargas: d.cargas })),
@@ -1022,7 +1041,7 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
           m2Hoy: redond2(dias[dias.length - 1].m2), unidadesHoy: redond2(dias[dias.length - 1].unidades),
           m2Periodo: redond2(dias.reduce((s, d) => s + d.m2, 0)), unidadesPeriodo: redond2(dias.reduce((s, d) => s + d.unidades, 0)),
           diasConProduccion: dias.filter(d => d.cargas > 0).length,
-          productosConFaltante: conFaltante.length, sinVincular: filas.filter(f => !f.vinculado).length
+          productosConFaltante: conFaltante.length, sinVincular: filas.filter(f => !f.vinculado && !f.archivado).length
         }
       };
     });

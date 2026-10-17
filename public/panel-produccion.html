@@ -302,15 +302,21 @@ function pintarProductos(){
     const d = v(a) - v(b);
     return d ? ORDEN.dir * d : String(a.nombre).localeCompare(String(b.nombre), 'es');
   });
-  const sinVinc = DATOS.productos.filter(f => !f.vinculado).length;
+  const sinVincLista = DATOS.productos.filter(f => !f.vinculado && !f.archivado);
   const av = document.getElementById('avisoVinculo');
-  if (sinVinc) { av.classList.remove('hidden'); av.innerHTML = `<b>${sinVinc} producto${sinVinc === 1 ? '' : 's'} sin vincular con Stock</b> (no tienen SKU, o ese SKU no está en el catálogo): se muestra su producción pero no su stock ni su faltante.`; }
-  else av.classList.add('hidden');
+  if (sinVincLista.length) {
+    const motivo = f => f.motivo === 'sin_sku' ? 'no tiene SKU cargado' : 'su SKU <b>' + esc(f.sku) + '</b> no está en el catálogo de Productos';
+    const cand = f => (f.candidatos && f.candidatos.length) ? '<br><span style="opacity:.85">¿Será ' + f.candidatos.map(c => '“' + esc(c.nombre) + '” (SKU <b>' + esc(c.sku) + '</b>)').join(' o ') + '?</span>' : '';
+    av.classList.remove('hidden');
+    av.innerHTML = `<b>${sinVincLista.length} producto${sinVincLista.length === 1 ? '' : 's'} sin vincular con Stock</b>: se muestra su producción pero no su stock ni su faltante.<ul style="margin:6px 0 4px 18px;padding:0">` +
+      sinVincLista.map(f => `<li style="margin-bottom:4px"><b>${esc(f.nombre)}</b>: ${motivo(f)}.${cand(f)}</li>`).join('') +
+      `</ul><span style="opacity:.85">Para vincularlo, cargá (o corregí) el SKU del producto en Costos de Producción con el mismo código que tiene en Productos.</span>`;
+  } else av.classList.add('hidden');
   const cel = (x, dec, u, extra) => x == null ? '<span class="cero">—</span>' : (x === 0 ? '<span class="cero">0</span>' : `<span class="${extra||''}">${num(x, dec)}</span> <span class="muted">${u||''}</span>`);
   document.getElementById('tbodyProductos').innerHTML = filas.map(f => {
     const uP = etq(f.unidad), uS = etq(f.unidadStock || f.unidad);
     return `<tr>
-      <td class="prod">${esc(f.nombre)}${f.archivado ? ' <span class="pill gris">ya no está en Costos</span>' : ''}<span class="sku">${esc(f.sku || 'sin SKU')}</span></td>
+      <td class="prod">${esc(f.nombre)}${f.archivado ? ' <span class="pill gris">ya no está en Costos</span>' : ''}<span class="sku">${esc(f.sku || 'sin SKU')}${!f.vinculado && !f.archivado ? ' · sin vincular' : ''}</span></td>
       <td class="num">${cel(f.hoy, 2, uP)}</td>
       <td class="num">${cel(f.periodo, 2, uP)}</td>
       <td class="num">${cel(f.stock, 2, uS)}</td>
