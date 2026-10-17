@@ -164,7 +164,12 @@
           <div style="width:150px"><label>Vigente hasta</label><input id="tpVigente" type="date"></div>
           <div><button class="btn" onclick="crearPlanTarjeta()">Agregar</button></div>
         </div>
+        <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn secondary" id="btnImportarMP" onclick="importarPlanesMP()">⟳ Traer planes de Mercado Pago</button>
+          <span class="muted" style="font-size:12px">Trae tarjetas, cuotas y recargo. No pisa el Costo % ni lo que cargaste; los planes nuevos quedan inactivos hasta que los revises.</span>
+        </div>
         <div class="err" id="tarjetasErr"></div>
+        <div id="tarjetasMPInfo" class="muted" style="margin-bottom:8px"></div>
         <table>
           <thead><tr><th>Tarjeta</th><th>Plan</th><th>Cuotas</th><th>Costo %</th><th>Recargo %</th><th>Leyenda</th><th>Vigente hasta</th><th>Listas de precio</th><th>Estado</th><th></th></tr></thead>
           <tbody id="tarjetasBody"><tr><td colspan="10" class="muted">Cargando...</td></tr></tbody>
@@ -703,6 +708,18 @@ async function crearPlanTarjeta(){
     ['tpNombre', 'tpLeyenda', 'tpVigente'].forEach(id => document.getElementById(id).value = '');
     await cargarPlanesTarjeta();
   }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
+}
+async function importarPlanesMP(){
+  const btn = document.getElementById('btnImportarMP'), info = document.getElementById('tarjetasMPInfo');
+  document.getElementById('tarjetasErr').textContent = ''; info.textContent = '';
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Consultando Mercado Pago…';
+  try{
+    const r = await fetch('/api/mercadopago/planes/importar', {method:'POST', headers: headersAuthJson(), body: '{}'}).then(async x => { const d = await x.json().catch(()=>({})); if (!x.ok) throw new Error(d.error || 'Error de red'); return d; });
+    info.innerHTML = `Listo: <b>${r.creados}</b> planes nuevos (inactivos, revisá el Costo % y activalos), <b>${r.actualizados}</b> actualizados, ${r.sinCambios} sin cambios.` +
+      (r.detalle && r.detalle.length ? '<br>' + r.detalle.map(escapeHtml).join('<br>') : '') + (r.avisos && r.avisos.length ? '<br><span class="err">' + r.avisos.map(escapeHtml).join('<br>') + '</span>' : '');
+    await cargarPlanesTarjeta();
+  }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
+  btn.disabled = false; btn.textContent = txt;
 }
 async function guardarPlanTarjeta(id, activo){
   document.getElementById('tarjetasErr').textContent = '';

@@ -143,6 +143,53 @@ router.post('/config/probar', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Planes de tarjeta desde Mercado Pago (17/10/2026, pedido de Mato): trae por cada tarjeta de crédito las cuotas que
+// ofrece MP y el interés (%) que paga el comprador, y los carga como planes (tarjetas_planes).
+//  - Se matchea por tarjeta + cantidad de cuotas: si el plan ya existe solo se actualiza el RECARGO %; el COSTO %
+//    (lo que descuenta MP al acreditar, que la API no informa) y todo lo demás que cargó Mato a mano no se toca.
+//  - Los planes nuevos se crean INACTIVOS, con costo 0, para que se revisen antes de ofrecerlos.
+// ---------------------------------------------------------------------------
+router.post('/planes/importar', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás para traer los planes.');
+    const db = await getDb();
+    const cfg = await cargarConfig(db, req.orgId);
+    const monto = Number(req.body && req.body.monto) > 0 ? Number(req.body.monto) : 100000;
+    const metodos = await mp(cfg, 'GET', '/v1/payment_methods');
+    const tarjetas = (Array.isArray(metodos) ? metodos : []).filter(m => m.payment_type_id === 'credit_card' && m.status !== 'deactive');
+    if (!tarjetas.length) throw err(400, 'Mercado Pago no informó tarjetas de crédito para esta cuenta.');
+    const col = db.collection('tarjetas_planes');
+    const resumen = { creados: 0, actualizados: 0, sinCambios: 0, tarjetas: 0, detalle: [], avisos: [] };
+    for (const m of tarjetas) {
+      let r;
+      try { r = await mp(cfg, 'GET', `/v1/payment_methods/installments?amount=${monto}&payment_method_id=${encodeURIComponent(m.id)}`); }
+      catch (e) { resumen.avisos.push(`${m.name || m.id}: ${e.message}`); continue; }
+      const entrada = Array.isArray(r) ? r[0] : r;
+      const costos = (entrada && entrada.payer_costs) || [];
+      if (!costos.length) continue;
+      resumen.tarjetas++;
+      const nombreTarjeta = (m.name || m.id) + ' crédito';
+      for (const c of costos) {
+        const cuotas = Math.max(1, Math.floor(Number(c.installments) || 1));
+        const recargo = redondear(Math.max(0, Number(c.installment_rate) || 0));
+        const existente = await col.findOne({ orgId: req.orgId, tarjeta: nombreTarjeta, cuotas });
+        if (existente) {
+          if (Number(existente.recargoPorcentaje) === recargo) { resumen.sinCambios++; continue; }
+          await col.updateOne({ _id: existente._id }, { $set: { recargoPorcentaje: recargo, mpSincronizadoAt: new Date(), updatedAt: new Date() } });
+          resumen.actualizados++;
+          resumen.detalle.push(`${nombreTarjeta} ${cuotas}c: recargo ${existente.recargoPorcentaje || 0}% → ${recargo}%`);
+        } else {
+          await col.insertOne({ orgId: req.orgId, tarjeta: nombreTarjeta, nombre: cuotas === 1 ? 'Contado' : `${cuotas} cuotas`, cuotas, costoPorcentaje: 0, recargoPorcentaje: recargo,
+            activo: false, leyenda: '', vigenteHasta: null, listasPrecioIds: [], origen: 'mercadopago', mpSincronizadoAt: new Date(), createdAt: new Date(), updatedAt: new Date() });
+          resumen.creados++;
+        }
+      }
+    }
+    res.json(resumen);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/terminales', auth, async (req, res) => {
   try {
     const db = await getDb();

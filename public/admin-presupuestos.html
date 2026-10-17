@@ -668,7 +668,7 @@ async function cargarPlanesTarjeta(pre, elegidos){
       <label class="plan-op ${sel.includes(String(pl._id))?'on':''}">
         <input type="checkbox" class="${pre}PlanChk" value="${pl._id}" ${sel.includes(String(pl._id))?'checked':''} onchange="this.parentNode.classList.toggle('on', this.checked);${fn}()">
         <span><span class="pn">${escapeHtml(pl.nombre)}</span><span class="pd">${pl.cuotas > 1 ? pl.cuotas + ' cuotas · ' : 'Un pago · '}${pl.recargoPorcentaje ? 'recargo ' + pl.recargoPorcentaje + '%' : 'sin recargo'}</span></span>
-      </label>`).join('') : '<span class="muted">No hay planes de tarjeta cargados (Tesorería → Tarjetas).</span>';
+      </label>`).join('') : '<span class="muted">No hay planes de tarjeta cargados (Configuración → Tarjetas y planes de cobro).</span>';
     if (pre === 'pe') actualizarTotalesEdicion(); else actualizarTotalesPresupuesto();
   }catch(e){ cont.textContent = 'No se pudieron cargar los planes: ' + e.message; }
 }
