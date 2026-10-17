@@ -110,6 +110,8 @@ app.use('/api/tablero', tableroRouter);
 app.use('/api/facturacion', require('./facturacion'));
 app.use('/api/informes', require('./informes'));
 app.use('/api/sueldos', require('./sueldos'));
+// Asistente IA del sistema + propuestas de mejora (17/10/2026, pedido de Mato).
+app.use('/api/asistente', require('./asistente'));
 
 // Fiscal (5/10/2026): conexión con ARCA, facturación electrónica, libros de IVA.
 const fiscalRouter = require('./fiscal');

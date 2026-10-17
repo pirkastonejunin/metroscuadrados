@@ -208,7 +208,8 @@
     { key: 'usuarios', href: '/admin-usuarios.html', modulo: 'usuarios', label: 'Configuración (usuarios, roles, notificaciones)', icon: ICONOS.usuarios },
     { key: 'bases', href: '/admin-config-bases.html', modulo: 'productos', label: 'Bases y catálogos', icon: ICONOS.bases },
     { key: 'integraciones', href: '/admin-integraciones.html', modulo: 'usuarios', label: 'Integraciones', icon: ICONOS.usuarios },
-    { key: 'correo', href: '/admin-correo.html', modulo: 'usuarios', label: 'Correo a clientes', icon: ICONOS.usuarios }
+    { key: 'correo', href: '/admin-correo.html', modulo: 'usuarios', label: 'Correo a clientes', icon: ICONOS.usuarios },
+    { key: 'propuestas', href: '/admin-propuestas.html', modulo: 'usuarios', label: 'Propuestas de mejora (asistente)', icon: ICONOS.usuarios }
   ];
 
   function tieneModulo(rol, claveCombinada) {
@@ -564,6 +565,7 @@
     opts = opts || {};
     inyectarEstilos();
     if (document.querySelector('.pn-sidebar')) return; // ya renderizado (evita duplicar si algo llama render 2 veces)
+    if (!document.getElementById('pnAsistenteJs')) { const sc = document.createElement('script'); sc.id = 'pnAsistenteJs'; sc.src = '/asistente.js'; sc.defer = true; document.head.appendChild(sc); } // asistente IA (17/10/2026)
 
     const orgs = me.organizaciones || [];
     if (me.puedeVerTodas) sucursalOperar(me);

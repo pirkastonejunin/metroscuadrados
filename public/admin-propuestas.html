@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Propuestas de mejora - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:var(--shadow);}
+  .kpi .v{font-size:22px;font-weight:800;margin-top:4px;}
+  .num{text-align:right;white-space:nowrap;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);z-index:500;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow-y:auto;}
+  .modal{background:var(--card);border-radius:14px;width:min(900px,100%);padding:18px 20px;position:relative;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .modal .close-x{position:absolute;top:10px;right:14px;cursor:pointer;font-size:18px;}
+  .fila-ch{display:grid;grid-template-columns:1fr 1fr 1.2fr 1.2fr 1fr 1fr 34px;gap:6px;margin-bottom:6px;align-items:end;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);}
+  .pill.ok{background:var(--ok-soft);color:var(--ok);} .pill.mal{background:var(--danger-soft);color:var(--danger);}
+  .sub td{background:var(--bg);}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .tabs button{background:var(--card);border:1px solid var(--border);color:var(--muted);padding:7px 14px;border-radius:99px;cursor:pointer;font:600 13px inherit;font-family:inherit;}
+  .tabs button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);}
+  .prop{border:1px solid var(--border);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:var(--card);}
+  .prop h3{margin:0 0 4px;font-size:15px;}
+  .prop .meta{font-size:12px;color:var(--muted);margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+  .prop .desc{white-space:pre-wrap;font-size:13.5px;margin-bottom:10px;}
+  .prop .acc{display:grid;grid-template-columns:170px 130px 1fr auto;gap:8px;align-items:end;}
+  .pill.alta{background:var(--danger-soft);color:var(--danger);} .pill.media{background:var(--info-soft);color:var(--info);}
+  .pill.nueva{background:var(--accent-soft);color:var(--accent);} .pill.hecha{background:var(--ok-soft);color:var(--ok);}
+  .conv{background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:8px;font-size:12.5px;display:none;}
+  .conv div{margin:3px 0;} .conv b{color:var(--muted);}
+  @media (max-width:760px){.prop .acc{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Propuestas de mejora</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Esta pantalla es solo para administradores.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><h1>Propuestas de mejora</h1></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <p class="muted" style="margin:0 0 12px">Las propuestas las dejan los usuarios desde el asistente (botón naranja abajo a la derecha). Cada una queda ligada a la pantalla desde la que se escribió.</p>
+    <div class="kpis" id="kpis"></div>
+    <div class="tabs"><button id="tabP" class="on" onclick="verTab('p')">Propuestas</button><button id="tabC" onclick="verTab('c')">Preguntas al asistente</button></div>
+    <div id="vistaP">
+      <div class="card"><div class="row">
+        <div style="width:180px"><label>Estado</label><select id="fEstado" onchange="pintarP()"><option value="">Todos</option><option value="nueva">Nuevas</option><option value="evaluando">Evaluando</option><option value="aprobada">Aprobadas</option><option value="hecha">Hechas</option><option value="descartada">Descartadas</option></select></div>
+        <div style="width:200px"><label>Módulo</label><select id="fModulo" onchange="pintarP()"><option value="">Todos</option></select></div>
+        <div style="width:150px"><label>Tipo</label><select id="fTipo" onchange="pintarP()"><option value="">Todos</option><option value="mejora">Mejoras</option><option value="error">Errores</option><option value="consulta">Consultas</option></select></div>
+      </div></div>
+      <div id="lista"></div>
+    </div>
+    <div id="vistaC" class="hidden"><div class="card"><div id="consultas" class="muted">Cargando…</div></div></div>
+  </main>
+</div>
+<div id="modalRoot"></div>
+<script>
+const BASE = '/api/asistente';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+let PROPS = [];
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function headersAuthJson(){ return headersAuth({'Content-Type':'application/json'}); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function login(){
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario: document.getElementById('loginUser').value, password: document.getElementById('loginPass').value})});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN); await iniciarApp();
+  }catch(e){ document.getElementById('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  if (orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas')) return;
+  const def = orgs.find(o => o.nombre === 'Piedra Negra');
+  ORG = orgs.length === 1 ? orgs[0]._id : (def ? def._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  if (ORG) localStorage.setItem('obras_org_activo', ORG);
+}
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    if (!(me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('usuarios')))) { document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'propuestas', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
+  await cargar();
+}
+const ESTADOS = [['nueva','Nueva'],['evaluando','Evaluando'],['aprobada','Aprobada'],['hecha','Hecha'],['descartada','Descartada']];
+const PLURAL = {nueva:'Nuevas',evaluando:'Evaluando',aprobada:'Aprobadas',hecha:'Hechas',descartada:'Descartadas'};
+function fecha(d){ return d ? new Date(d).toLocaleDateString('es-AR') : ''; }
+async function cargar(){
+  try{
+    const r = await fetch(BASE + '/propuestas', {headers: headersAuth()});
+    PROPS = await r.json(); if (!r.ok) throw new Error(PROPS.error || 'Error');
+  }catch(e){ document.getElementById('lista').innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; return; }
+  const mods = [...new Set(PROPS.map(p => p.modulo).filter(Boolean))].sort();
+  const sel = document.getElementById('fModulo'), cur = sel.value;
+  sel.innerHTML = '<option value="">Todos</option>' + mods.map(m => `<option ${m===cur?'selected':''}>${escapeHtml(m)}</option>`).join('');
+  document.getElementById('kpis').innerHTML = ESTADOS.map(([k,n]) => `<div class="kpi"><div class="muted">${PLURAL[k]}</div><div class="v">${PROPS.filter(p => p.estado === k).length}</div></div>`).join('');
+  pintarP();
+}
+function pintarP(){
+  const fe = document.getElementById('fEstado').value, fm = document.getElementById('fModulo').value, ft = document.getElementById('fTipo').value;
+  const l = PROPS.filter(p => (!fe || p.estado === fe) && (!fm || p.modulo === fm) && (!ft || p.tipo === ft));
+  document.getElementById('lista').innerHTML = l.length ? l.map(p => `
+    <div class="prop" id="p_${p._id}">
+      <h3>${escapeHtml(p.titulo)}</h3>
+      <div class="meta"><span class="pill ${escapeHtml(p.estado)}">${escapeHtml(p.estado)}</span><span class="pill">${escapeHtml(p.tipo)}</span><span class="pill ${escapeHtml(p.prioridad)}">prioridad ${escapeHtml(p.prioridad)}</span>
+        <span>${escapeHtml(p.modulo || 'General')} › ${escapeHtml(p.pantalla || '')}</span><span>· ${escapeHtml(p.usuarioNombre)}</span><span>· ${fecha(p.createdAt)}</span></div>
+      <div class="desc">${escapeHtml(p.descripcion)}</div>
+      <div class="acc">
+        <div><label>Estado</label><select id="e_${p._id}">${ESTADOS.map(([k,n]) => `<option value="${k}" ${p.estado===k?'selected':''}>${n}</option>`).join('')}</select></div>
+        <div><label>Prioridad</label><select id="pr_${p._id}">${['baja','media','alta'].map(k => `<option ${p.prioridad===k?'selected':''}>${k}</option>`).join('')}</select></div>
+        <div><label>Nota (la ve el usuario)</label><input id="n_${p._id}" value="${escapeHtml(p.nota||'')}"></div>
+        <div><button class="btn small" onclick="guardar('${p._id}')">Guardar</button></div>
+      </div>
+      ${(p.contexto||[]).length ? `<div style="margin-top:8px"><a href="#" class="muted" onclick="document.getElementById('c_${p._id}').style.display=document.getElementById('c_${p._id}').style.display==='block'?'none':'block';return false">Ver la conversación</a></div><div class="conv" id="c_${p._id}">${p.contexto.map(m => `<div><b>${m.role==='user'?'Usuario':'Asistente'}:</b> ${escapeHtml(m.content)}</div>`).join('')}</div>` : ''}
+    </div>`).join('') : '<div class="card muted">No hay propuestas con esos filtros.</div>';
+}
+async function guardar(id){
+  try{
+    const r = await fetch(BASE + '/propuestas/' + id, {method:'PATCH', headers: headersAuthJson(), body: JSON.stringify({estado: document.getElementById('e_'+id).value, prioridad: document.getElementById('pr_'+id).value, nota: document.getElementById('n_'+id).value})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    await cargar();
+  }catch(e){ alert(e.message); }
+}
+async function verTab(t){
+  document.getElementById('tabP').classList.toggle('on', t==='p'); document.getElementById('tabC').classList.toggle('on', t==='c');
+  document.getElementById('vistaP').classList.toggle('hidden', t!=='p'); document.getElementById('vistaC').classList.toggle('hidden', t!=='c');
+  if (t === 'c') {
+    try{
+      const r = await fetch(BASE + '/consultas', {headers: headersAuth()}); const l = await r.json(); if (!r.ok) throw new Error(l.error || 'Error');
+      document.getElementById('consultas').innerHTML = l.length ? '<table><thead><tr><th>Fecha</th><th>Usuario</th><th>Pantalla</th><th>Pregunta</th></tr></thead><tbody>' + l.map(c => `<tr><td>${fecha(c.createdAt)}</td><td>${escapeHtml(c.usuarioNombre)}</td><td>${escapeHtml(c.pantalla)}</td><td>${escapeHtml(c.pregunta)}${c.conPropuesta ? ' <span class="pill nueva">propuesta</span>' : ''}</td></tr>`).join('') + '</tbody></table>' : 'Todavía no hubo consultas.';
+    }catch(e){ document.getElementById('consultas').textContent = e.message; }
+  }
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+</script>
+</body>
+</html>
