@@ -44,13 +44,13 @@
       <h2>${nombreTipo()}</h2>
       <p class="muted">${esc(ctx.titulo || '')}${ctx.saldo != null && ctx.ventaId ? ' · Saldo pendiente: ' + money(ctx.saldo) : ''}</p>
       <label>Monto a cobrar</label><input id="mpcMonto" type="number" step="0.01" min="0.01" value="${monto}" oninput="MPCobro.planes()">
-      ${ctx.ventaId ? '<div id="mpcPlanBox"></div>' : ''}
+      <div id="mpcPlanBox"></div>
       ${ctx.tipo === 'point' ? `<label style="margin-top:8px">Terminal</label><select id="mpcTerm"><option value="">Usar la terminal por defecto</option>${terminales.map(t => `<option value="${esc(t.id)}">${esc(t.nombre || t.id)}${t.pdv ? '' : ' (no está en modo PDV)'}</option>`).join('')}</select>` : ''}
-      ${!ctx.ventaId ? '<p class="muted" style="margin-top:8px">Es un cobro a cuenta: queda como recibo en la cuenta corriente del cliente.</p>' : ''}
+      ${!ctx.ventaId ? '<p class="muted" style="margin-top:8px">Es un cobro a cuenta (seña): queda a favor del cliente en su cuenta corriente.</p>' : ''}
       <div class="err" id="mpcErr"></div>
       <div id="mpcEstado" class="muted" style="margin-top:8px"></div>
       <button class="btn" id="mpcGo" style="margin-top:10px" onclick="MPCobro.iniciar()">${ctx.tipo === 'point' ? 'Enviar a la terminal' : 'Generar link'}</button>`);
-    if (ctx.ventaId) cargarPlanes();
+    cargarPlanes();
   }
 
   // Planes de cuotas del canal: el cliente paga monto + recargo del plan (el costo lo absorbe el cliente si así está configurado).

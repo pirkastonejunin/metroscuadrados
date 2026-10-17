@@ -401,7 +401,7 @@ async function crearLink(req, res) {
     if (!cfg.bancoId) throw err(400, 'Falta elegir en qué banco de Tesorería entra la plata de Mercado Pago.');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
-    const plan = esCuenta ? null : await planParaCobro(db, req, req.body && req.body.planId, monto);
+    const plan = await planParaCobro(db, req, req.body && req.body.planId, monto);
     const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
@@ -436,7 +436,7 @@ async function crearPoint(req, res) {
     if (!terminalId) throw err(400, 'Elegí la terminal Point (o dejá una por defecto en la configuración).');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
-    const plan = esCuenta ? null : await planParaCobro(db, req, req.body && req.body.planId, monto);
+    const plan = await planParaCobro(db, req, req.body && req.body.planId, monto);
     const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
@@ -553,7 +553,9 @@ async function registrarCobroACuenta(db, cfg, cobro, info) {
   if (!cfg.bancoId) throw err(400, 'Falta elegir el banco de Tesorería para Mercado Pago.');
   const reqFalso = { orgId: cobro.orgId, usuario: { nombre: 'Mercado Pago' } };
   const clienteNombre = cobro.clienteNombre || [cliente.apellidoRazonSocial, cliente.nombre].filter(Boolean).join(' ');
-  const monto = redondear(info.monto || cobro.monto);
+  const monto = redondear(info.monto || cobro.monto);            // lo que entró al banco (con el recargo del plan, si hubo)
+  const aplicado = cobro.recargo > 0 ? Math.min(redondear(cobro.monto), monto) : monto;   // lo que queda a favor del cliente (la seña)
+  const recargoCobrado = cobro.recargo > 0 ? redondear(monto - aplicado) : 0;
   const fecha = new Date();
   const esTarjeta = /card/.test(info.metodo || '');
   const nota = `Mercado Pago ${cobro.tipo === 'point' ? 'Point' : 'link de pago'} · pago ${info.paymentId}`;
@@ -574,9 +576,10 @@ async function registrarCobroACuenta(db, cfg, cobro, info) {
     });
   }
   await registrarMovimientoCuentaCorriente(db, reqFalso, {
-    clienteId: cliente._id, clienteNombre, tipo: 'credito', monto, moneda: 'ARS',
+    clienteId: cliente._id, clienteNombre, tipo: 'credito', monto: aplicado, moneda: 'ARS',
     concepto: 'Cobro a cuenta', origen: 'cobro_cuenta', chequeId: null, observaciones: nota, fecha,
-    extra: { tipoValor: esTarjeta ? 'tarjeta' : 'cuenta', reciboTipo: 'movimiento', reciboId: mov._id }
+    extra: Object.assign({ tipoValor: esTarjeta ? 'tarjeta' : 'cuenta', reciboTipo: 'movimiento', reciboId: mov._id },
+      recargoCobrado > 0 ? { tarjetaPlanId: cobro.planId, tarjetaPlanNombre: cobro.planNombre, tarjetaCuotas: cobro.planCuotas, tarjetaRecargoPorcentaje: cobro.recargoPorcentaje, tarjetaRecargo: recargoCobrado, tarjetaTotalCobrado: monto } : {})
   });
 }
 
