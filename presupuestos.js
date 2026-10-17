@@ -126,6 +126,13 @@ async function conReintento(fn) {
 }
 
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
+// Lista de precios del presupuesto (17/10/2026): se guarda el id y el nombre; los precios de los ítems se cargan con esa lista.
+async function datosListaPrecio(db, orgId, listaId) {
+  const lid = listaId ? toObjectId(listaId) : null;
+  if (!lid) return { listaPrecioId: null, listaPrecioNombre: '' };
+  const l = await db.collection('productos_listas_precio').findOne({ _id: lid, orgId });
+  return l ? { listaPrecioId: l._id, listaPrecioNombre: l.nombre || '' } : { listaPrecioId: null, listaPrecioNombre: '' };
+}
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 function normalizarCantidadPositiva(v, etiqueta) {
@@ -464,6 +471,7 @@ router.post('/', authAdmin, async (req, res) => {
         total,
         planesTarjetaIds,
         planesTarjeta,
+        ...(await datosListaPrecio(db, req.orgId, body.listaPrecioId)),
         observaciones,
         estado: 'presupuestado',
         seguimiento: [{ fecha: ahora, estado: 'presupuestado', nota: '', usuarioNombre }],
@@ -540,6 +548,7 @@ router.put('/:id', authAdmin, async (req, res) => {
         set.moneda = moneda;
       }
 
+      if (body.listaPrecioId !== undefined) Object.assign(set, await datosListaPrecio(db, actual.orgId, body.listaPrecioId));
       if (body.planesTarjetaIds !== undefined) set.planesTarjetaIds = idsPlanesDeBody(body.planesTarjetaIds);
       if (body.planesTarjetaIds !== undefined || set.total !== undefined) {
         set.planesTarjeta = await calcularPlanesTarjeta(db, actual.orgId, set.total !== undefined ? set.total : actual.total, set.planesTarjetaIds || actual.planesTarjetaIds);

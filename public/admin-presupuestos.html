@@ -231,6 +231,33 @@ function resolverOrgActiva(me){
 let NOMBRE_USUARIO = '';
 let clientesCache = [];
 let productosCache = [];
+let listasPrecioCache = [];
+// Misma lógica que el precio de lista de Ventas: un precio puntual del producto manda; si no, costo + % de la lista.
+function precioResueltoLista(producto, lista){
+  if (!producto || !lista) return null;
+  if (lista.alcance === 'seleccion' && !(lista.productosIds || []).some(id => String(id) === String(producto._id))) return null;
+  const ov = (producto.preciosPorLista || []).find(x => String(x.listaId) === String(lista._id));
+  if (ov) return ov.precio;
+  if (lista.formula === 'cf_x_bulto') { if (producto.precio == null) return null; const b = producto.unidadesPorBulto > 0 ? producto.unidadesPorBulto : 1; return Math.round(producto.precio * b * 100) / 100; }
+  if (producto.costo == null) return null;
+  return Math.round(producto.costo * (1 + (lista.porcentaje || 0) / 100) * 100) / 100;
+}
+function opcionesListaPrecio(sel){
+  const activas = listasPrecioCache.filter(l => l.activa !== false);
+  const def = sel || (activas.find(l => l.predeterminada) || {})._id;
+  return activas.map(l => `<option value="${l._id}" ${String(l._id)===String(def)?'selected':''}>${escapeHtml(l.nombre)}</option>`).join('');
+}
+function listaElegida(pre){ const s = document.getElementById(pre + 'ListaPrecio'); return s ? (listasPrecioCache.find(l => String(l._id) === s.value) || null) : null; }
+function cambiarListaPrecio(pre){
+  const lista = listaElegida(pre);
+  document.querySelectorAll('#' + pre + 'ItemsBody .fila-item').forEach(fila => {
+    const id = fila.querySelector('.producto-id').value; if (!id) return;
+    const pr = productosCache.find(x => String(x._id) === id); if (!pr) return;
+    const v = precioResueltoLista(pr, lista);
+    fila.querySelector('.campo-precio input').value = v != null ? v : (pr.precio || 0);
+  });
+  (pre === 'pe' ? actualizarTotalesEdicion : actualizarTotalesPresupuesto)();
+}
 async function iniciarApp(){
   let me;
   try{
@@ -261,6 +288,7 @@ async function iniciarApp(){
   const clientes = await fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(r => r.json());
   clientesCache = Array.isArray(clientes) ? clientes : [];
   productosCache = [];
+  try { const rl = await fetch('/api/productos/listas-precio', {headers: headersAuth()}); listasPrecioCache = rl.ok ? await rl.json() : []; } catch (e) { listasPrecioCache = []; }
   const hoy = new Date();
   const hace30 = new Date(hoy.getTime() - 30*24*60*60*1000);
   document.getElementById('fHasta').value = hoy.toISOString().slice(0,10);
@@ -599,8 +627,12 @@ function elegirProductoItem(el){
   fila.querySelector('.producto-id').value = productoId;
   fila.querySelector('.producto-buscar').value = producto ? textoProducto(producto) : '';
   fila.querySelector('.producto-buscar-opciones').classList.add('hidden');
-  if (producto) fila.querySelector('.campo-precio input').value = producto.precio || 0;
-  actualizarTotalesPresupuesto();
+  if (producto) {
+    const pre = fila.closest('#peItemsBody') ? 'pe' : 'p';
+    const v = precioResueltoLista(producto, listaElegida(pre));
+    fila.querySelector('.campo-precio input').value = v != null ? v : (producto.precio || 0);
+  }
+  if (fila.closest('#peItemsBody')) actualizarTotalesEdicion(); else actualizarTotalesPresupuesto();
 }
 function juntarItemsPresupuesto(){
   const filas = document.querySelectorAll('#pItemsBody .fila-item');
@@ -699,8 +731,9 @@ function abrirNuevoPresupuesto(prefill){
         <div class="grid3" style="margin-top:10px">
           <div><label>Vendedor</label><input id="pVendedor" value="${escapeHtml(NOMBRE_USUARIO)}"></div>
           <div><label>Moneda</label><select id="pMoneda"><option value="ARS">Pesos (ARS)</option><option value="USD">Dólares (USD)</option></select></div>
-          <div style="align-self:flex-end"><button type="button" class="btn secondary small" style="width:100%" onclick="abrirImportarCotizador()">Importar del cotizador</button></div>
+          <div><label>Lista de precios</label><select id="pListaPrecio" onchange="cambiarListaPrecio('p')">${opcionesListaPrecio((prefill && prefill.listaPrecioId) || '')}</select></div>
         </div>
+        <div style="margin-top:8px"><button type="button" class="btn secondary small" onclick="abrirImportarCotizador()">Importar del cotizador</button></div>
 
         <div class="section-title" style="margin-top:14px;font-weight:700;font-size:13px">Ítems</div>
         <div id="pItemsBody"></div>
@@ -746,6 +779,7 @@ async function guardarNuevoPresupuesto(){
     vendedor: document.getElementById('pVendedor').value.trim(),
     fecha: document.getElementById('pFecha').value,
     moneda: document.getElementById('pMoneda').value,
+    listaPrecioId: (document.getElementById('pListaPrecio') || {}).value || null,
     items,
     descuentoPorcentaje: Number(document.getElementById('pDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('pDescuentoMonto').value) || 0,
@@ -789,9 +823,10 @@ function abrirEditarPresupuesto(id){
           </div>
           <div><label>Fecha</label><input id="peFecha" type="date" value="${new Date(p.fecha).toISOString().slice(0,10)}"></div>
         </div>
-        <div class="grid2" style="margin-top:10px">
+        <div class="grid3" style="margin-top:10px">
           <div><label>Vendedor</label><input id="peVendedor" value="${escapeHtml(p.vendedor||'')}"></div>
           <div><label>Moneda</label><select id="peMoneda"><option value="ARS" ${p.moneda==='ARS'?'selected':''}>Pesos (ARS)</option><option value="USD" ${p.moneda==='USD'?'selected':''}>Dólares (USD)</option></select></div>
+          <div><label>Lista de precios</label><select id="peListaPrecio" onchange="cambiarListaPrecio('pe')">${opcionesListaPrecio(p.listaPrecioId || '')}</select></div>
         </div>
 
         <div class="section-title" style="margin-top:14px;font-weight:700;font-size:13px">Ítems</div>
@@ -924,6 +959,7 @@ async function guardarEdicionPresupuesto(id){
     vendedor: document.getElementById('peVendedor').value.trim(),
     fecha: document.getElementById('peFecha').value,
     moneda: document.getElementById('peMoneda').value,
+    listaPrecioId: (document.getElementById('peListaPrecio') || {}).value || null,
     items,
     descuentoPorcentaje: Number(document.getElementById('peDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('peDescuentoMonto').value) || 0,
@@ -1089,7 +1125,8 @@ function convertirEnVenta(id){
     clienteId: p.clienteId,
     items: p.items,
     observaciones: p.observaciones,
-    moneda: p.moneda
+    moneda: p.moneda,
+    listaPrecioId: p.listaPrecioId || ''
   }));
   location.href = '/admin-ventas.html';
 }
