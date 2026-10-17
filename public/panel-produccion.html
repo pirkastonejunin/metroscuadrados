@@ -88,6 +88,12 @@
   td.celda-dia.hay{background:var(--accent-soft);font-weight:700;}
   th.celda-dia{text-align:center;padding:8px 4px;}
   th.hoy-col{color:var(--text);}
+  a.link-comp{color:var(--accent);font-weight:800;text-decoration:underline;cursor:pointer;}
+  .modal-fondo{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  .modal{background:var(--card);border-radius:14px;max-width:760px;width:100%;max-height:85vh;overflow:auto;padding:18px;box-shadow:0 20px 50px rgba(0,0,0,.35);}
+  .modal h3{margin:0 0 2px;font-size:16px;}
+  .modal .cab{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .modal a{color:var(--accent);}
 </style>
 </head>
 <body>
@@ -172,6 +178,8 @@
     </div>
   </main>
 </div>
+
+<div id="modalRoot"></div>
 
 <script>
 const BASE = '/api/costos';
@@ -320,12 +328,40 @@ function pintarProductos(){
       <td class="num">${cel(f.hoy, 2, uP)}</td>
       <td class="num">${cel(f.periodo, 2, uP)}</td>
       <td class="num">${cel(f.stock, 2, uS)}</td>
-      <td class="num">${cel(f.comprometido, 2, uS)}</td>
+      <td class="num">${f.comprometido > 0 && f.productoId ? `<a class="link-comp" title="Ver a quién le debemos" onclick="verComprometido('${f.productoId}')">${num(f.comprometido)}</a> <span class="muted">${uS}</span>` : cel(f.comprometido, 2, uS)}</td>
       <td class="num">${f.disponible == null ? '<span class="cero">—</span>' : `<span class="${f.disponible < 0 ? 'neg' : ''}">${num(f.disponible)}</span> <span class="muted">${uS}</span>`}</td>
       <td class="num">${f.faltante == null ? '<span class="cero">—</span>' : (f.faltante > 0 ? `<span class="pill falta">${num(f.faltante)} ${uS}</span>` : '<span class="pill ok">Cubierto</span>')}</td>
       <td class="num">${f.paquetesAFabricar ? `<b>${num(f.paquetesAFabricar, 0)}</b> <span class="muted">paq</span>` : (f.faltante > 0 ? '<span class="muted" title="El producto no tiene rendimiento por paquete cargado">sin rendimiento</span>' : '<span class="cero">—</span>')}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="8" class="muted">No hay productos para mostrar con estos filtros.</td></tr>`;
+}
+
+function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+function fechaCorta(iso){ return iso ? new Date(iso).toLocaleDateString('es-AR') : '—'; }
+async function verComprometido(productoId){
+  const f = DATOS.productos.find(x => String(x.productoId) === String(productoId));
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="modal-fondo" onclick="if(event.target===this)cerrarModal()"><div class="modal">
+    <div class="cab"><div><h3>Comprometido: ${esc(f ? f.nombre : '')}</h3><div class="muted">Ventas pendientes de entrega que reservan este producto</div></div><button class="btn secondary" onclick="cerrarModal()">Cerrar</button></div>
+    <div id="cmpCont" style="margin-top:12px"><p class="muted">Cargando...</p></div></div></div>`;
+  try{
+    const r = await fetch(BASE + '/produccion/comprometido?productoId=' + encodeURIComponent(productoId), {headers: headersAuth()});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo cargar');
+    const u = etq(d.unidad || (f && f.unidadStock) || '');
+    const cont = document.getElementById('cmpCont');
+    if (!d.ventas.length) { cont.innerHTML = '<p class="muted">No hay ventas pendientes que lo expliquen.</p>' + (d.comprometidoStock ? `<p class="muted">Stock tiene comprometido ${num(d.comprometidoStock)} ${u}: se puede recalcular desde Stock → Comprometido.</p>` : ''); return; }
+    const desfase = Math.abs(d.total - d.comprometidoStock) > 0.009;
+    cont.innerHTML = `<div class="scroll"><table><thead><tr><th>Cliente</th><th>Comprobante</th><th>Fecha</th><th>Sucursal</th><th class="num">Debemos</th></tr></thead><tbody>` +
+      d.ventas.map(v => `<tr>
+        <td class="prod">${v.clienteId ? `<a href="/admin-clientes.html?id=${v.clienteId}" target="_blank">${esc(v.clienteNombre)}</a>` : esc(v.clienteNombre)}</td>
+        <td><a href="/admin-ventas.html?abrir=${v.ventaId}" target="_blank" title="Abrir el comprobante">${esc(v.comprobante)}</a>${v.estado === 'parcialmente_entregada' ? ' <span class="pill gris">entrega parcial</span>' : ''}</td>
+        <td class="muted">${fechaCorta(v.fecha)}</td><td class="muted">${esc(v.sucursal)}</td>
+        <td class="num"><b>${num(v.cantidad)}</b> <span class="muted">${u}</span></td></tr>`).join('') +
+      `</tbody><tfoot><tr><td colspan="4"><b>Total · ${d.clientes} cliente${d.clientes === 1 ? '' : 's'}</b></td><td class="num"><b>${num(d.total)}</b> <span class="muted">${u}</span></td></tr></tfoot></table></div>` +
+      `<p class="muted" style="margin-top:10px">Stock físico: ${num(d.stock)} ${u}. ${d.total > d.stock ? `Faltan <b>${num(d.total - d.stock)} ${u}</b> para cubrir lo que se debe.` : 'Alcanza para cubrir lo que se debe.'}</p>` +
+      (desfase ? `<div class="aviso" style="margin-top:8px">La suma de estas ventas (${num(d.total)}) no coincide con el comprometido que figura en Stock (${num(d.comprometidoStock)}). En Stock → Comprometido hay un botón para recalcularlo.</div>` : '');
+  }catch(e){ document.getElementById('cmpCont').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 function pintarMatriz(){

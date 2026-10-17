@@ -1053,6 +1053,50 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Detalle del comprometido de un producto de producción (17/10/2026, pedido de Mato: "ver a quién le debemos"):
+// las ventas pendientes de entrega (o con entrega parcial) que lo reservan, con cliente, comprobante, fecha y la
+// cantidad que falta entregar. Incluye todas las sucursales y depósitos, igual que el comprometido del panel.
+// GET /produccion/comprometido?productoId=<id del producto de Costos>
+router.get('/produccion/comprometido', authProduccion, async (req, res) => {
+  try {
+    const productoId = toObjectId(req.query.productoId);
+    if (!productoId) throw err(400, 'Falta el producto');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prod = await db.collection('costos_productos').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
+      if (!prod) throw err(404, 'Producto no encontrado');
+      const sku = prod.sku ? String(prod.sku).trim().toUpperCase() : null;
+      const cat = await db.collection('productos_catalogo').findOne(Object.assign({ activo: { $ne: false } }, filtroOrg(req), {
+        $or: [{ costoProductoId: prod._id }].concat(sku ? [{ sku }] : [])
+      }));
+      if (!cat) return { producto: prod.nombre, vinculado: false, ventas: [], total: 0, comprometidoStock: null };
+      const ventas = await db.collection('ventas').find({
+        estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true },
+        tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] }, 'items.productoId': cat._id
+      }).sort({ fecha: 1 }).toArray();
+      const orgIds = [...new Set(ventas.map(v => String(v.orgId || '')).filter(Boolean))].map(toObjectId).filter(Boolean);
+      const orgs = orgIds.length ? await db.collection('organizaciones').find({ _id: { $in: orgIds } }).project({ nombre: 1 }).toArray() : [];
+      const nombreOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
+      const filas = [];
+      for (const v of ventas) {
+        let cantidad = 0;
+        for (const it of (v.items || [])) if (String(it.productoId) === String(cat._id)) cantidad += Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0));
+        if (cantidad <= 0) continue;
+        filas.push({
+          ventaId: v._id, clienteId: v.clienteId || null, clienteNombre: v.clienteNombre || 'Sin cliente',
+          comprobante: v.numeroOriginal || ((v.letra || (v.tipoComprobante === 'fiscal' ? 'F' : 'X')) + '-' + String(v.numero || '').padStart(5, '0')),
+          estado: v.estado, fecha: v.fecha, sucursal: nombreOrg.get(String(v.orgId || '')) || '', cantidad: redond2(cantidad)
+        });
+      }
+      const existencias = await db.collection('stock_actual').find({ productoId: cat._id }).toArray();
+      const comprometidoStock = redond2(existencias.reduce((a, e) => a + (Number(e.cantidadComprometida) || 0), 0));
+      const stock = redond2(existencias.filter(e => e.depositoId != null).reduce((a, e) => a + (Number(e.cantidad) || 0), 0));
+      return { producto: prod.nombre, vinculado: true, unidad: cat.unidad || null, ventas: filas, total: redond2(filas.reduce((a, f) => a + f.cantidad, 0)), clientes: new Set(filas.map(f => f.clienteNombre)).size, comprometidoStock, stock };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Ingresa a Stock los ítems de una carga de producción (un documento de costos_produccion_diaria)
 // en el depósito dado y la marca como ingresada. Los movimientos de Stock son un libro inmutable,
 // por eso cada carga se ingresa una sola vez.
