@@ -59,6 +59,7 @@
   .tp-nuevo-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;}
   .tp-nuevo-grid .btn{white-space:nowrap;}
   @media(max-width:900px){.tp-nuevo-grid{grid-template-columns:repeat(2,1fr);}.tp-nuevo-grid > div{grid-column:auto !important;}}
+  .tp-cab.cn,.tp-fila.cn{grid-template-columns:1.1fr 1.2fr 1.2fr 1.2fr .6fr;}
   .tp-grupo{border:1px solid var(--border);border-radius:12px;margin-bottom:14px;overflow:hidden;}
   .tp-grupo-tit{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg);font-weight:700;font-size:14px;border-bottom:1px solid var(--border);}
   .tp-grupo-tit small{font-weight:500;color:var(--muted);font-size:12px;}
@@ -158,21 +159,16 @@
       <div class="card">
         <h3 style="margin-top:0">Tarjetas y planes de cuotas</h3>
 
-        <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes y los costos son los mismos para todas las sucursales: lo que cargues o cambies acá se aplica a todas. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
-        <div class="tp-nuevo" id="costosMP" style="border-style:solid">
-          <div class="tp-nuevo-tit">Costos de cobrar con crédito en Mercado Pago</div>
-          <p class="muted" style="margin:0 0 8px">Mercado Pago no informa estos costos por sistema: copialos de <b>Costos y cuotas</b> en tu panel de Mercado Pago. Son distintos para el <b>link de pago</b> y para el <b>Point</b>, así que se cargan por separado. Los porcentajes de Mercado Pago son siempre <b>más IVA</b>: el Costo % del plan = (comisión base + costo de las cuotas) × (1 + IVA).</p>
-          <div class="tabs" id="costoCanales" style="margin-bottom:10px"><button data-c="link" class="on">Link de pago</button><button data-c="point">Point</button></div>
-          <div class="tp-nuevo-grid" id="costoForm"></div>
-          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <button class="btn" onclick="guardarCostos()">Guardar costos</button>
-            <button class="btn secondary" onclick="aplicarCostos()">Aplicar a los planes de crédito</button>
-            <label style="display:flex;align-items:center;gap:6px;margin:0;font-weight:500"><input type="checkbox" id="costoCubrir" style="width:auto"> También ajustar el recargo para que el cliente cubra el costo</label>
-          </div>
-          <div class="err" id="costoErr"></div><div class="ok-msg" id="costoOk"></div>
+        <p class="muted" style="margin-top:0">Abajo de los dos medios de Mercado Pago están las otras tarjetas (débito, American Express, Naranja Plan Z). <b>Costo %</b> es lo que te descuenta el procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes y los costos son los mismos para todas las sucursales.</p>
+        <div class="tp-nuevo" id="canalesMP" style="border-style:solid">
+          <div class="tp-nuevo-tit" style="font-size:15px">Cobros con Mercado Pago</div>
+          <p class="muted" style="margin:0 0 8px">Un solo cuadro por medio, sin importar la tarjeta: el costo depende de cuántas cuotas ofrecés. Cargá el costo de cada cuota como figura en <b>Costos y cuotas</b> de tu panel de Mercado Pago (los porcentajes de MP son siempre <b>más IVA</b>). Esto vale para todas las sucursales.</p>
+          <div class="tabs" id="canalTabs" style="margin-bottom:10px"><button data-c="point" class="on">Mercado Pago Point</button><button data-c="link">Mercado Pago Link de pago</button></div>
+          <div id="canalForm"></div>
+          <div class="err" id="canalErr"></div><div class="ok-msg" id="canalOk"></div>
         </div>
         <div class="tp-nuevo">
-          <div class="tp-nuevo-tit">Agregar un plan a mano</div>
+          <div class="tp-nuevo-tit">Otras tarjetas: agregar un plan a mano <span class="muted" style="font-weight:500">(débito, American Express, Naranja Plan Z, otros procesadores)</span></div>
           <div class="tp-nuevo-grid">
             <div><label>Tarjeta</label><input id="tpTarjeta" placeholder="Ej: Visa crédito"></div>
             <div><label>Plan</label><input id="tpNombre" placeholder="Ej: 3 cuotas"></div>
@@ -184,12 +180,7 @@
             <div style="align-self:end"><button class="btn" style="width:100%" onclick="crearPlanTarjeta()">Agregar plan</button></div>
           </div>
         </div>
-        <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <button class="btn secondary" id="btnImportarMP" onclick="importarPlanesMP()">⟳ Traer planes de Mercado Pago</button>
-          <span class="muted" style="font-size:12px">Trae tarjetas, cuotas y recargo. El recargo es el interés al comprador que informa Mercado Pago para cada cantidad de cuotas (calculado sobre $100.000); es una referencia, revisalo antes de ofrecerlo. No pisa el Costo % ni lo que cargaste; los planes nuevos quedan inactivos hasta que los revises.</span>
-        </div>
         <div class="err" id="tarjetasErr"></div>
-        <div id="tarjetasMPInfo" class="muted" style="margin-bottom:8px"></div>
         <div id="tarjetasBody" class="tp-lista"><p class="muted">Cargando...</p></div>
             </div>
     </div>
@@ -303,37 +294,57 @@ async function cargarCobros(){
 }
 async function verificar(id){ await fetch(BASE+'/cobros/'+id+'/verificar',{method:'POST',headers:headersAuthJson()}); cargarCobros(); }
 
-// ---- Costos de Mercado Pago por canal ----
-let COSTOS_MP = null, CANAL_COSTO = 'link';
-const CUOTAS_COSTO = [2, 3, 6, 9, 12, 18, 24];
-async function cargarCostosMP(){
-  const r = await fetch(BASE + '/costos', {headers: headersAuth()}); const d = await r.json();
-  if (!r.ok){ document.getElementById('costoErr').textContent = d.error || 'No se pudieron cargar los costos'; return; }
-  COSTOS_MP = d; pintarCostos();
+// ---- Mercado Pago Point / Link de pago: una tabla por medio ----
+let CANALES_MP = null, CANAL_ACT = 'point';
+async function cargarCanalesMP(){
+  const r = await fetch(BASE + '/canales', {headers: headersAuth()}); const d = await r.json();
+  if (!r.ok){ document.getElementById('canalErr').textContent = d.error || 'No se pudieron cargar'; return; }
+  CANALES_MP = d; pintarCanal();
 }
-function pintarCostos(){
-  const c = COSTOS_MP[CANAL_COSTO];
-  document.querySelectorAll('#costoCanales button').forEach(b => b.classList.toggle('on', b.dataset.c === CANAL_COSTO));
-  const fin = {}; (c.financiacion || []).forEach(f => fin[f.cuotas] = f.pct);
-  document.getElementById('costoForm').innerHTML = `<div><label>Comisión base crédito %</label><input id="cBase" type="number" min="0" max="100" step="0.01" value="${c.base}"></div><div><label>IVA sobre costos %</label><input id="cIva" type="number" min="0" max="100" step="0.01" value="${c.iva}"></div>` +
-    CUOTAS_COSTO.map(n => `<div><label>${n} cuotas %</label><input class="cFin" data-n="${n}" type="number" min="0" max="100" step="0.01" value="${fin[n] !== undefined ? fin[n] : ''}" placeholder="—"></div>`).join('');
+function pintarCanal(){
+  const c = CANALES_MP[CANAL_ACT];
+  document.querySelectorAll('#canalTabs button').forEach(b => b.classList.toggle('on', b.dataset.c === CANAL_ACT));
+  document.getElementById('canalForm').innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="width:210px"><label>Comisión base por cobro con crédito %</label><input id="cBase" type="number" min="0" max="100" step="0.01" value="${c.base}" oninput="recalcCanal()"></div>
+      <div style="width:130px"><label>IVA sobre costos %</label><input id="cIva" type="number" min="0" max="100" step="0.01" value="${c.iva}" oninput="recalcCanal()"></div>
+    </div>
+    <div class="tp-cab cn"><span>Cuotas</span><span>Costo de las cuotas %</span><span>Costo total (con IVA) %</span><span>Recargo al cliente %</span><span>Ofrecer</span></div>
+    ${c.filas.map(f => `<div class="tp-fila cn ${f.ofrecer ? '' : 'off'}" data-n="${f.cuotas}">
+      <b>${f.cuotas === 1 ? '1 pago (contado)' : f.cuotas + ' cuotas'}</b>
+      ${f.cuotas === 1 ? '<span class="muted">—</span>' : `<input class="cFin" type="number" min="0" max="100" step="0.01" value="${f.financiacion === null ? '' : f.financiacion}" placeholder="sin cargar" oninput="recalcCanal()">`}
+      <span class="cTot muted">—</span>
+      <input class="cRec" type="number" min="0" max="100" step="0.01" value="${f.recargo}">
+      <label style="display:flex;align-items:center;gap:6px;margin:0;font-weight:600"><input class="cOfr" type="checkbox" style="width:auto" ${f.ofrecer ? 'checked' : ''} onchange="this.closest('.tp-fila').classList.toggle('off', !this.checked)"> Sí</label>
+    </div>`).join('')}
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" onclick="guardarCanal()">Guardar</button>
+      <button class="btn secondary" onclick="sugerirRecargos()" title="Calcula el recargo para que, descontado el costo, te quede el precio original">Sugerir recargos (el cliente cubre el costo)</button>
+    </div>`;
+  recalcCanal();
 }
-document.getElementById('costoCanales').addEventListener('click', e => { const b = e.target.closest('button'); if (b && COSTOS_MP){ CANAL_COSTO = b.dataset.c; pintarCostos(); } });
-function msgCosto(ok, t){ document.getElementById('costoErr').textContent = ok ? '' : t; document.getElementById('costoOk').textContent = ok ? t : ''; }
-async function guardarCostos(){
-  const financiacion = [...document.querySelectorAll('.cFin')].filter(i => i.value !== '').map(i => ({cuotas: Number(i.dataset.n), pct: Number(i.value)}));
-  const r = await fetch(BASE + '/costos/' + CANAL_COSTO, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({base: Number(document.getElementById('cBase').value) || 0, iva: Number(document.getElementById('cIva').value), financiacion})});
-  const d = await r.json(); if (!r.ok) return msgCosto(false, d.error || 'No se pudo guardar');
-  COSTOS_MP[CANAL_COSTO] = Object.assign(COSTOS_MP[CANAL_COSTO], d); msgCosto(true, 'Costos guardados.');
+function totalesCanal(){
+  const base = Number(document.getElementById('cBase').value) || 0, iva = Number(document.getElementById('cIva').value) || 0;
+  return [...document.querySelectorAll('#canalForm .tp-fila')].map(row => {
+    const n = Number(row.dataset.n), finEl = row.querySelector('.cFin');
+    const fin = n === 1 ? 0 : (finEl && finEl.value !== '' ? Number(finEl.value) : null);
+    return {row, n, costo: fin === null ? null : Math.round((base + fin) * (1 + iva / 100) * 100) / 100};
+  });
 }
-async function aplicarCostos(){
-  const nombre = COSTOS_MP[CANAL_COSTO].nombre;
-  if (!confirm('Se va a pisar el Costo % de TODOS los planes de crédito con los costos de "' + nombre + '". ¿Seguimos?')) return;
-  await guardarCostos();
-  const r = await fetch(BASE + '/costos/' + CANAL_COSTO + '/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({cubrirConRecargo: document.getElementById('costoCubrir').checked})});
-  const d = await r.json(); if (!r.ok) return msgCosto(false, d.error || 'No se pudo aplicar');
-  msgCosto(true, d.actualizados + ' planes actualizados.' + (d.omitidos.length ? ' Sin cambios (falta cargar el costo de esa cantidad de cuotas): ' + d.omitidos.join('; ') + '.' : ''));
-  cargarPlanesTarjeta();
+function recalcCanal(){ totalesCanal().forEach(t => { t.row.querySelector('.cTot').textContent = t.costo === null ? '—' : t.costo.toFixed(2).replace('.', ',') + ' %'; }); }
+function sugerirRecargos(){
+  totalesCanal().forEach(t => { const rec = t.row.querySelector('.cRec'); if (t.costo === null || t.n === 1) return; rec.value = (Math.round((1 / (1 - t.costo / 100) - 1) * 10000) / 100); });
+  document.getElementById('canalOk').textContent = 'Recargos sugeridos cargados. Revisalos y apretá Guardar.'; document.getElementById('canalErr').textContent = '';
+}
+document.getElementById('canalTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b && CANALES_MP){ CANAL_ACT = b.dataset.c; pintarCanal(); } });
+async function guardarCanal(){
+  const filas = [...document.querySelectorAll('#canalForm .tp-fila')].map(row => { const n = Number(row.dataset.n), fin = row.querySelector('.cFin');
+    return {cuotas: n, financiacion: n === 1 ? 0 : (fin && fin.value !== '' ? Number(fin.value) : null), recargo: Number(row.querySelector('.cRec').value) || 0, ofrecer: row.querySelector('.cOfr').checked}; });
+  const r = await fetch(BASE + '/canales/' + CANAL_ACT, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({base: Number(document.getElementById('cBase').value) || 0, iva: Number(document.getElementById('cIva').value), filas})});
+  const d = await r.json();
+  if (!r.ok){ document.getElementById('canalOk').textContent = ''; document.getElementById('canalErr').textContent = d.error || 'No se pudo guardar'; return; }
+  document.getElementById('canalErr').textContent = ''; document.getElementById('canalOk').textContent = 'Guardado: los planes quedaron actualizados en ' + d.sucursales + ' sucursal(es).';
+  cargarCanalesMP(); cargarPlanesTarjeta();
 }
 
 // Pestañas de Mercado Pago (17/10/2026): Conexión / Tarjetas y cuotas / Cobros
@@ -342,7 +353,7 @@ function mpTab(v){
   document.querySelectorAll('#mpTabs button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
   ['conexion','cuotas','cobros'].forEach(k => document.getElementById('v-' + k).classList.toggle('hidden', k !== v));
   try{ history.replaceState(null, '', '#' + v); }catch(e){}
-  if (v === 'cuotas' && !PLANES_CARGADOS){ PLANES_CARGADOS = true; cargarPlanesTarjeta(); cargarCostosMP(); }
+  if (v === 'cuotas' && !PLANES_CARGADOS){ PLANES_CARGADOS = true; cargarPlanesTarjeta(); cargarCanalesMP(); }
   if (v === 'cobros') cargarCobros();
 }
 document.getElementById('mpTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) mpTab(b.dataset.v); });
@@ -366,7 +377,8 @@ async function cargarPlanesTarjeta(){
   try{ listasPrecioPlanes = await fetch('/api/productos/listas-precio', {headers: headersAuth()}).then(r => r.ok ? r.json() : []).catch(() => []); }catch(e){ listasPrecioPlanes = []; }
   try{ planesTarjetaCache = await apiTarjetas('/tarjetas-planes?todos=1'); }
   catch(e){ body.innerHTML = '<p class="muted">' + escapeHtml(e.message) + '</p>'; return; }
-  if (!planesTarjetaCache.length){ body.innerHTML = '<p class="muted">Todavía no hay planes de tarjeta. Agregá uno arriba o traelos de Mercado Pago.</p>'; return; }
+  planesTarjetaCache = planesTarjetaCache.filter(p => !/^Mercado Pago (Point|Link de pago)$/.test(p.tarjeta));
+  if (!planesTarjetaCache.length){ body.innerHTML = '<p class="muted">Todavía no hay otros planes de tarjeta.</p>'; return; }
   const hoy = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
   const grupos = {};
   planesTarjetaCache.forEach(p => { (grupos[p.tarjeta] = grupos[p.tarjeta] || []).push(p); });
@@ -411,18 +423,6 @@ async function crearPlanTarjeta(){
     ['tpNombre', 'tpLeyenda', 'tpVigente'].forEach(id => document.getElementById(id).value = '');
     await cargarPlanesTarjeta();
   }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
-}
-async function importarPlanesMP(){
-  const btn = document.getElementById('btnImportarMP'), info = document.getElementById('tarjetasMPInfo');
-  document.getElementById('tarjetasErr').textContent = ''; info.textContent = '';
-  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Consultando Mercado Pago…';
-  try{
-    const r = await fetch('/api/mercadopago/planes/importar', {method:'POST', headers: headersAuthJson(), body: '{}'}).then(async x => { const d = await x.json().catch(()=>({})); if (!x.ok) throw new Error(d.error || 'Error de red'); return d; });
-    info.innerHTML = `Listo: <b>${r.creados}</b> planes nuevos (inactivos, revisá el Costo % y activalos), <b>${r.actualizados}</b> actualizados, ${r.sinCambios} sin cambios.` +
-      (r.detalle && r.detalle.length ? '<br>' + r.detalle.map(escapeHtml).join('<br>') : '') + (r.avisos && r.avisos.length ? '<br><span class="err">' + r.avisos.map(escapeHtml).join('<br>') + '</span>' : '');
-    await cargarPlanesTarjeta();
-  }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
-  btn.disabled = false; btn.textContent = txt;
 }
 async function guardarPlanTarjeta(id, activo){
   document.getElementById('tarjetasErr').textContent = '';

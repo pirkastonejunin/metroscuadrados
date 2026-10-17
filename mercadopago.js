@@ -262,6 +262,69 @@ router.post('/costos/:canal/aplicar', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Dos "medios" en vez de un plan por cada tarjeta (pedido de Mato, 17/10/2026): Mercado Pago Point y Mercado Pago Link de
+// pago. El costo depende del canal y de la cantidad de cuotas (no de la tarjeta), así que cada canal es UNA tabla:
+// cuotas → costo de las cuotas, recargo al cliente y si se ofrece. Al guardar se generan/actualizan los planes
+// ("Mercado Pago Point — 3 cuotas", etc.) en TODAS las sucursales, que son los que se eligen al cobrar y en presupuestos.
+// ---------------------------------------------------------------------------
+const CANAL_TARJETA = { link: 'Mercado Pago Link de pago', point: 'Mercado Pago Point' };
+const FILAS_CUOTAS = [1, 2, 3, 6, 9, 12, 18, 24];
+router.get('/canales', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const orgs = await require('./tesoreria').orgsParaPlanes(db, req);
+    const cfg = (await db.collection('mp_costos').findOne({ _id: 'global' })) || {};
+    const out = {};
+    for (const k of Object.keys(CANAL_TARJETA)) {
+      const c = leerCostosCanal(cfg.costos && cfg.costos[k], COSTOS_INICIALES[k]);
+      const planes = await db.collection('tarjetas_planes').find({ orgId: req.orgId ? req.orgId : { $in: orgs }, tarjeta: CANAL_TARJETA[k] }).toArray();
+      const fin = {}; c.financiacion.forEach(f => fin[f.cuotas] = f.pct);
+      out[k] = { nombre: CANAL_TARJETA[k], base: c.base, iva: c.iva, filas: FILAS_CUOTAS.map(n => {
+        const pl = planes.find(x => Number(x.cuotas) === n);
+        return { cuotas: n, financiacion: n === 1 ? 0 : (fin[n] !== undefined ? fin[n] : null), recargo: pl ? Number(pl.recargoPorcentaje) || 0 : 0, ofrecer: !!(pl && pl.activo !== false) };
+      }) };
+    }
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/canales/:canal', auth, async (req, res) => {
+  try {
+    const canal = req.params.canal, tarjeta = CANAL_TARJETA[canal];
+    if (!tarjeta) throw err(400, 'Canal inválido.');
+    const b = req.body || {};
+    const num = (v, et, max) => { const n = Number(v); if (!Number.isFinite(n) || n < 0 || n > (max || 100)) throw err(400, `${et} tiene que estar entre 0 y ${max || 100}.`); return n; };
+    const base = num(b.base, 'La comisión base'), iva = num(b.iva === undefined ? 21 : b.iva, 'El IVA');
+    const filas = (Array.isArray(b.filas) ? b.filas : []).filter(f => FILAS_CUOTAS.includes(Number(f.cuotas)));
+    const financiacion = [];
+    const planes = [];
+    for (const f of filas) {
+      const cuotas = Number(f.cuotas);
+      const tieneFin = f.financiacion !== null && f.financiacion !== '' && f.financiacion !== undefined;
+      if (cuotas > 1 && tieneFin) financiacion.push({ cuotas, pct: num(f.financiacion, `El costo de ${cuotas} cuotas`) });
+      if (!f.ofrecer) { planes.push({ cuotas, ofrecer: false }); continue; }
+      if (cuotas > 1 && !tieneFin) throw err(400, `Para ofrecer ${cuotas} cuotas cargá su costo (el que figura en Costos y cuotas de Mercado Pago).`);
+      const fin = cuotas === 1 ? 0 : num(f.financiacion, `El costo de ${cuotas} cuotas`);
+      planes.push({ cuotas, ofrecer: true, costo: redondear((base + fin) * (1 + iva / 100)), recargo: num(f.recargo || 0, `El recargo de ${cuotas} cuotas`) });
+    }
+    const db = await getDb();
+    await db.collection('mp_costos').updateOne({ _id: 'global' }, { $set: { ['costos.' + canal]: { base, iva, financiacion: financiacion.sort((a, c) => a.cuotas - c.cuotas) }, updatedAt: new Date() } }, { upsert: true });
+    const orgs = await require('./tesoreria').orgsParaPlanes(db, req);
+    const col = db.collection('tarjetas_planes');
+    // Planes sueltos importados antes por tarjeta (sin revisar, inactivos): ya no hacen falta.
+    await col.deleteMany({ orgId: { $in: orgs }, origen: 'mercadopago', activo: false });
+    for (const orgId of orgs) {
+      for (const pl of planes) {
+        const nombre = pl.cuotas === 1 ? 'Contado' : `${pl.cuotas} cuotas`;
+        if (!pl.ofrecer) { await col.updateMany({ orgId, tarjeta, cuotas: pl.cuotas }, { $set: { activo: false, updatedAt: new Date() } }); continue; }
+        await col.updateOne({ orgId, tarjeta, cuotas: pl.cuotas }, { $set: { nombre, costoPorcentaje: pl.costo, recargoPorcentaje: pl.recargo, activo: true, updatedAt: new Date() },
+          $setOnInsert: { orgId, tarjeta, cuotas: pl.cuotas, leyenda: '', vigenteHasta: null, listasPrecioIds: [], origen: 'mercadopago-canal', createdAt: new Date() } }, { upsert: true });
+      }
+    }
+    res.json({ ok: true, sucursales: orgs.length });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/terminales', auth, async (req, res) => {
   try {
     const db = await getDb();
