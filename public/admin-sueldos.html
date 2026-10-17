@@ -132,6 +132,8 @@
     </div>
 
     <div class="vista hidden" id="v-col">
+      <div class="tabs" id="colTabs"><button data-s="m2" class="on">Por m² (obras)</button><button data-s="esp">Trabajos especiales</button></div>
+      <div id="col-m2">
       <div class="tb-filtros">
         <input type="month" id="cPeriodo" aria-label="Mes" onchange="cargarCol()">
         <input type="date" id="cHasta" aria-label="Liquidar hasta" title="Fecha hasta la que se liquida la semana (se liquidan las tareas terminadas hasta ese día)">
@@ -147,9 +149,21 @@
       </div>
       <div class="panel hidden" id="pCol"></div>
       <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Sucursal</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
-      <h3 style="margin:22px 0 6px">Trabajos especiales <span class="tb-info" title="Obras atípicas que se presupuestan una por una: cargás el trabajo con el monto acordado para el colocador. Podés pagarlo de a partes (anticipos, avance, saldo) hasta completar el monto. No pasa por Liquidar semana / Cerrar mes.">ⓘ</span></h3>
-      <div class="panel" id="pEsp"></div>
+      </div>
+      <div id="col-esp" class="hidden">
+        <div class="tb-filtros">
+          <button data-iconizado="1" class="btn" onclick="formEsp()">+ Nuevo trabajo especial</button>
+          <select id="espFiltro" aria-label="Mostrar" onchange="cargarEsp()"><option value="pend">Con saldo por pagar</option><option value="todos">Todos</option></select>
+          <span class="tb-info" title="Obras atípicas que se presupuestan una por una: cargás el trabajo con el monto acordado para el colocador. Podés pagarlo de a partes (anticipos, avance, saldo) hasta completar el monto. No pasa por Liquidar semana / Cerrar mes.">i</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi main"><div class="et">Monto acordado</div><div class="val" id="eAco">$ —</div></div>
+          <div class="kpi"><div class="et">Pagado</div><div class="val" id="ePag">—</div></div>
+          <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="eSal">—</div></div>
+        </div>
+      <div class="panel hidden" id="pEsp"></div>
       <div class="tabla"><table><thead><tr><th>Colocador</th><th>Obra / cliente</th><th>Trabajo</th><th class="n">Monto acordado</th><th class="n">Pagado</th><th class="n">Falta</th><th>Estado</th><th></th></tr></thead><tbody id="tEsp"></tbody></table></div>
+      </div>
     </div>
 
     <div class="vista hidden" id="v-emp">
@@ -427,57 +441,68 @@ async function cargarCol(){
 let ESP = [], COL_LISTA = [];
 async function cargarEsp(){
   try{ ESP = await api('GET', '/colocadores/especiales'); }catch(e){ return error(e); }
-  $('tEsp').innerHTML = ESP.length ? ESP.map(x => { const pag = x.totalPagado || 0, sal = Math.round((x.monto - pag) * 100) / 100;
+  const todos = $('espFiltro').value === 'todos';
+  const vis = ESP.filter(x => todos || x.liquidada ? true : (x.monto - (x.totalPagado || 0)) > 0.005);
+  const sum = (arr, g) => Math.round(arr.reduce((a, x) => a + g(x), 0) * 100) / 100;
+  const act = ESP.filter(x => !x.liquidada);
+  $('eAco').textContent = pesos(sum(act, x => x.monto)); $('ePag').textContent = pesos(sum(act, x => x.totalPagado || 0)); $('eSal').textContent = pesos(sum(act, x => x.monto - (x.totalPagado || 0)));
+  $('tEsp').innerHTML = vis.length ? vis.map(x => { const pag = x.totalPagado || 0, sal = Math.round((x.monto - pag) * 100) / 100;
     return '<tr><td>' + escapeHtml(x.colocadorNombre) + '</td><td>' + escapeHtml(x.obra || '') + '</td><td>' + escapeHtml(x.descripcion) + '</td><td class="n">' + pesos(x.monto) + '</td><td class="n">' + pesos(pag) + '</td><td class="n">' + pesos(sal) + '</td><td>' +
     (x.liquidada ? '<span class="chip ok">Liquidado (por liquidación)</span>' : (x.estado === 'terminada' ? '<span class="chip">Terminado ' + fmtF(x.fechaFin) + '</span> ' : '<span class="chip">En curso</span> ') + (sal <= 0.005 ? '<span class="chip ok">Pagado</span>' : pag > 0 ? '<span class="chip par">Pago parcial</span>' : '<span class="chip mal">Sin pagar</span>')) + '</td><td class="acc">' +
     (x.liquidada ? '' : (sal > 0.005 ? '<button class="btn" onclick="formPagoEsp(\'' + x._id + '\')">Pagar</button> ' : '') + ((x.pagos || []).length ? '<button class="btn secondary" onclick="verPagosEsp(\'' + x._id + '\')">Pagos</button> ' : '') +
-      (x.estado === 'terminada' ? '<button class="btn secondary" onclick="reabrirEsp(\'' + x._id + '\')">Reabrir</button> ' : '<button class="btn secondary" onclick="terminarEsp(\'' + x._id + '\')">Marcar terminado</button> ') + '<button class="btn secondary" onclick="formEsp(\'' + x._id + '\')">Editar</button> ' + (pag > 0 ? '' : '<button class="btn secondary" title="Borrar" onclick="borrarEsp(\'' + x._id + '\')">🗑</button>')) + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="vacio">Sin trabajos especiales.</td></tr>';
-  if (!$('pEsp').innerHTML) formEsp();
+      (x.estado === 'terminada' ? '<button class="btn secondary" onclick="reabrirEsp(\'' + x._id + '\')">Reabrir</button> ' : '<button class="btn secondary" onclick="terminarEsp(\'' + x._id + '\')">Marcar terminado</button> ') + '<button class="btn secondary" onclick="formEsp(\'' + x._id + '\')">Editar</button> ' + (pag > 0 ? '' : '<button class="btn secondary" title="Borrar" onclick="borrarEsp(\'' + x._id + '\')">🗑</button>')) + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="vacio">' + (ESP.length ? 'No hay trabajos con saldo por pagar.' : 'Todavía no cargaste trabajos especiales. Usá "+ Nuevo trabajo especial".') + '</td></tr>';
 }
 function formPagoEsp(id){
   const x = ESP.find(y => y._id === id), sal = Math.round((x.monto - (x.totalPagado || 0)) * 100) / 100;
   $('pEsp').innerHTML = '<h3>Pagar trabajo · ' + escapeHtml(x.colocadorNombre) + ' · ' + escapeHtml(x.obra || x.descripcion) + ' · falta pagar ' + pesos(sal) + '</h3><div class="form" data-id="' + id + '"><div><label>Monto</label><input type="number" min="0" step="any" id="epMonto" value="' + sal + '"></div>' +
     '<div><label>Sale de</label><select id="epCuenta">' + opcionesCuentas() + '</select></div><div><label>Fecha</label><input type="date" id="epFecha" value="' + hoyISO() + '"></div><div class="ancho"><label>Nota</label><input type="text" id="epNota" placeholder="Anticipo, avance, saldo final…"></div></div>' +
-    '<div class="acciones"><button data-iconizado="1" class="btn" onclick="pagarEsp()">Registrar pago</button><button data-iconizado="1" class="btn secondary" onclick="$(\'pEsp\').innerHTML=\'\';cargarEsp()">Cancelar</button><span class="muted">Podés pagar de a partes: el monto acordado se va descontando.</span></div>';
-  $('pEsp').scrollIntoView({behavior:'smooth', block:'nearest'});
+    '<div class="acciones"><button data-iconizado="1" class="btn" onclick="pagarEsp()">Registrar pago</button><button data-iconizado="1" class="btn secondary" onclick="cerrarPEsp()">Cancelar</button><span class="muted">Podés pagar de a partes: el monto acordado se va descontando.</span></div>';
+  $('pEsp').classList.remove('hidden'); $('pEsp').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 async function pagarEsp(){
   const id = document.querySelector('#pEsp .form').dataset.id;
-  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos', Object.assign({monto: n$('epMonto'), fecha: $('epFecha').value, nota: $('epNota').value}, cuentaElegida('epCuenta'))); exito('Pago registrado.'); $('pEsp').innerHTML = ''; await cargarEsp(); }catch(e){ error(e); }
+  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos', Object.assign({monto: n$('epMonto'), fecha: $('epFecha').value, nota: $('epNota').value}, cuentaElegida('epCuenta'))); exito('Pago registrado.'); cerrarPEsp(); await cargarEsp(); }catch(e){ error(e); }
 }
 function verPagosEsp(id){
   const x = ESP.find(y => y._id === id);
   $('pEsp').innerHTML = '<h3>Pagos · ' + escapeHtml(x.colocadorNombre) + ' · ' + escapeHtml(x.obra || x.descripcion) + '</h3><table style="width:100%"><thead><tr><th>Fecha</th><th class="n">Monto</th><th>Nota</th><th></th></tr></thead><tbody>' + (x.pagos || []).map((p, i) => '<tr' + (p.anulado ? ' style="opacity:.55;text-decoration:line-through"' : '') + '><td>' + fmtF(p.fecha) + '</td><td class="n">' + pesos(p.monto) + '</td><td>' + escapeHtml(p.nota || '') + (p.anulado ? ' <b style="color:#b91c1c;text-decoration:none;display:inline-block">ANULADO</b>' : '') + '</td><td class="acc">' + (p.anulado ? '' : '<button class="btn secondary" onclick="anularPagoEsp(\'' + id + '\',' + i + ')">Anular pago</button>') + '</td></tr>').join('') + '</tbody></table>' +
-    '<div class="acciones"><button data-iconizado="1" class="btn secondary" onclick="$(\'pEsp\').innerHTML=\'\';cargarEsp()">Cerrar</button></div>';
-  $('pEsp').scrollIntoView({behavior:'smooth', block:'nearest'});
+    '<div class="acciones"><button data-iconizado="1" class="btn secondary" onclick="cerrarPEsp()">Cerrar</button></div>';
+  $('pEsp').classList.remove('hidden'); $('pEsp').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 async function anularPagoEsp(id, idx){
   if (!confirm('¿Anular este pago? Se revierte la caja/banco y vuelve a quedar saldo por pagar. Queda registrado como anulado (no se borra).')) return;
   const motivo = prompt('Motivo de la anulación (opcional):', ''); if (motivo === null) return;
-  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos/' + idx + '/anular', {motivo}); exito('Pago anulado.'); $('pEsp').innerHTML = ''; await cargarEsp(); }catch(e){ error(e); }
+  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos/' + idx + '/anular', {motivo}); exito('Pago anulado.'); cerrarPEsp(); await cargarEsp(); }catch(e){ error(e); }
 }
+function cerrarPEsp(){ $('pEsp').innerHTML = ''; $('pEsp').classList.add('hidden'); }
 async function formEsp(id){
   if (!COL_LISTA.length) { try{ COL_LISTA = await api('GET', '/colocadores/lista'); }catch(e){ return error(e); } }
   const x = id ? ESP.find(y => y._id === id) : null;
-  $('pEsp').innerHTML = '<div class="form" data-id="' + (id || '') + '"><div><label>Colocador</label><select id="esCol"' + (x ? ' disabled' : '') + '>' + COL_LISTA.map(c => '<option value="' + c._id + '"' + (x && String(x.colocadorId) === c._id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></div>' +
+  $('pEsp').innerHTML = '<h3>' + (x ? 'Editar trabajo especial' : 'Nuevo trabajo especial') + '</h3><div class="form" data-id="' + (id || '') + '"><div><label>Colocador</label><select id="esCol"' + (x ? ' disabled' : '') + '>' + COL_LISTA.map(c => '<option value="' + c._id + '"' + (x && String(x.colocadorId) === c._id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></div>' +
     '<div><label>Obra / cliente</label><input type="text" id="esObra" placeholder="Ej: Casa Pérez" value="' + escapeHtml(x ? x.obra : '') + '"></div>' +
     '<div class="ancho"><label>Trabajo</label><input type="text" id="esDesc" placeholder="Ej: Revestimiento de fachada" value="' + escapeHtml(x ? x.descripcion : '') + '"></div>' +
     '<div><label>Monto acordado</label><input type="number" min="0" step="any" id="esMonto" value="' + (x ? x.monto : '') + '"></div>' +
-    (x ? '' : '<div><label><input type="checkbox" id="esTerm"> Ya está terminado</label><input type="date" id="esFin" value="' + hoyISO() + '"></div>') +
-    '</div><div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarEsp()">' + (x ? 'Guardar cambios' : 'Agregar trabajo') + '</button>' + (x ? '<button data-iconizado="1" class="btn secondary" onclick="formEsp()">Cancelar</button>' : '') + '</div>';
+    (x ? '' : '<div><label>Estado</label><select id="esEstado" onchange="$(\'esFinBox\').classList.toggle(\'hidden\', this.value !== \'terminada\')"><option value="pendiente">En curso</option><option value="terminada">Ya terminado</option></select></div><div id="esFinBox" class="hidden"><label>Fecha de fin</label><input type="date" id="esFin" value="' + hoyISO() + '"></div>') +
+    '</div><div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarEsp()">' + (x ? 'Guardar cambios' : 'Agregar trabajo') + '</button><button data-iconizado="1" class="btn secondary" onclick="cerrarPEsp()">Cancelar</button></div>';
+  $('pEsp').classList.remove('hidden'); $('pEsp').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 async function guardarEsp(){
   const id = document.querySelector('#pEsp .form').dataset.id;
   const b = {obra: $('esObra').value, descripcion: $('esDesc').value, monto: n$('esMonto')};
   try{
     if (id) await api('PUT', '/colocadores/especiales/' + id, b);
-    else await api('POST', '/colocadores/especiales', Object.assign(b, {colocadorId: $('esCol').value, terminada: $('esTerm').checked, fechaFin: $('esFin').value}));
-    exito('Trabajo guardado.'); $('pEsp').innerHTML = ''; await cargarCol();
+    else await api('POST', '/colocadores/especiales', Object.assign(b, {colocadorId: $('esCol').value, terminada: $('esEstado').value === 'terminada', fechaFin: $('esFin').value}));
+    exito('Trabajo guardado.'); cerrarPEsp(); await cargarCol();
   }catch(e){ error(e); }
 }
 async function terminarEsp(id){ const f = prompt('Fecha en que se terminó (AAAA-MM-DD):', hoyISO()); if (!f) return; try{ await api('POST', '/colocadores/especiales/' + id + '/terminar', {fecha: f}); await cargarCol(); }catch(e){ error(e); } }
 async function reabrirEsp(id){ try{ await api('POST', '/colocadores/especiales/' + id + '/reabrir', {}); await cargarCol(); }catch(e){ error(e); } }
 async function borrarEsp(id){ if (!confirm('¿Borrar este trabajo especial?')) return; try{ await api('DELETE', '/colocadores/especiales/' + id); await cargarCol(); }catch(e){ error(e); } }
+document.addEventListener('click', e => {
+  const b = e.target.closest('#colTabs button'); if (!b) return;
+  document.querySelectorAll('#colTabs button').forEach(x => x.classList.toggle('on', x === b));
+  $('col-m2').classList.toggle('hidden', b.dataset.s !== 'm2'); $('col-esp').classList.toggle('hidden', b.dataset.s !== 'esp');
+});
 function abrirCol(id){ COL_ABIERTO[id] = !COL_ABIERTO[id]; cargarCol(); }
 async function liquidarCol(tipo, colocadorId){
   if (tipo === 'final' && !confirm('Cerrar el mes liquida todo lo que falte liquidar de ' + $('cPeriodo').value + (colocadorId ? ' de este colocador' : ' de todos los colocadores') + '. ¿Seguimos?')) return;
