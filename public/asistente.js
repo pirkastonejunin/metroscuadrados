@@ -10,7 +10,7 @@
   const guardar = () => { try { sessionStorage.setItem('pn_asistente_msgs', JSON.stringify(mensajes.slice(-20))); } catch (e) {} };
 
   const css = `
-  #pnAsBtn{position:fixed;right:18px;bottom:18px;z-index:900;width:54px;height:54px;border-radius:50%;border:0;background:#ff5a36;color:#fff;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+  #pnAsBtn{position:fixed;right:18px;bottom:18px;z-index:900;width:54px;height:54px;border-radius:50%;border:0;background:#1f9d55;color:#fff;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;transition:transform .15s}
   #pnAsBtn:hover{transform:scale(1.06)} #pnAsBtn svg{width:26px;height:26px}
   #pnAsPanel{position:fixed;right:18px;bottom:84px;z-index:901;width:380px;max-width:calc(100vw - 24px);height:540px;max-height:calc(100vh - 110px);background:#fff;color:#1d1d1f;border:1px solid #d9d9de;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.28);display:none;flex-direction:column;overflow:hidden;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   #pnAsPanel.abierto{display:flex}
