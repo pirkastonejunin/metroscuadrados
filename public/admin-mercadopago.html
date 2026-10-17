@@ -155,6 +155,10 @@
     </div>
     </div>
     <div id="v-cuotas" class="hidden">
+      <div class="card hidden" id="avisoSucursal" style="border-color:var(--accent);background:var(--accent-soft)">
+        <b>Elegí una sucursal para trabajar con los costos y los planes.</b>
+        <div class="muted" style="font-size:13px;margin-top:4px">Ahora estás viendo "Todas". Los costos de Mercado Pago y los planes de tarjeta son de cada sucursal: elegí una en el selector <b>Sucursal</b> de arriba a la derecha y la pantalla se actualiza.</div>
+      </div>
       <div class="card">
         <h3 style="margin-top:0">Tarjetas y planes de cuotas</h3>
 
@@ -339,6 +343,7 @@ async function aplicarCostos(){
 // Pestañas de Mercado Pago (17/10/2026): Conexión / Tarjetas y cuotas / Cobros
 let PLANES_CARGADOS = false;
 function mpTab(v){
+  document.getElementById('avisoSucursal').classList.toggle('hidden', !(v === 'cuotas' && (!ORG || ORG === 'todas')));
   document.querySelectorAll('#mpTabs button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
   ['conexion','cuotas','cobros'].forEach(k => document.getElementById('v-' + k).classList.toggle('hidden', k !== v));
   try{ history.replaceState(null, '', '#' + v); }catch(e){}
