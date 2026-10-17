@@ -47,6 +47,34 @@
   .ok-msg{color:var(--ok);font-size:13px;margin:6px 0;}
   #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
   #loginScreen .card{width:300px;text-align:center;}
+  .btn.small{padding:6px 10px;font-size:12px;}
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.activo{background:var(--ok-soft);color:var(--ok);}
+  .pill.inactivo{background:var(--danger-soft);color:var(--danger);}
+  .tabs{display:inline-flex;background:var(--card);border-radius:999px;box-shadow:var(--shadow);padding:3px;gap:2px;border:1px solid var(--border);margin-bottom:14px;max-width:100%;overflow:auto;}
+  .tabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:700;padding:7px 18px;border-radius:999px;cursor:pointer;white-space:nowrap;}
+  .tabs button.on{background:var(--accent);color:var(--accent-ink);}
+  .tp-nuevo{border:1px dashed var(--border);border-radius:12px;padding:12px 14px;margin-bottom:12px;}
+  .tp-nuevo-tit{font-weight:700;font-size:13px;margin-bottom:8px;}
+  .tp-nuevo-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;}
+  .tp-nuevo-grid .btn{white-space:nowrap;}
+  @media(max-width:900px){.tp-nuevo-grid{grid-template-columns:repeat(2,1fr);}.tp-nuevo-grid > div{grid-column:auto !important;}}
+  .tp-grupo{border:1px solid var(--border);border-radius:12px;margin-bottom:14px;overflow:hidden;}
+  .tp-grupo-tit{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg);font-weight:700;font-size:14px;border-bottom:1px solid var(--border);}
+  .tp-grupo-tit small{font-weight:500;color:var(--muted);font-size:12px;}
+  .tp-cab,.tp-fila{display:grid;grid-template-columns:minmax(120px,1.6fr) 80px 100px 100px 90px 290px;gap:10px;align-items:center;padding:8px 14px;}
+  .tp-cab{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding-top:8px;padding-bottom:0;}
+  .tp-fila{border-top:1px solid var(--border);}
+  .tp-fila.off{background:rgba(0,0,0,.025);}
+  .tp-fila input{padding:6px 8px;font-size:13px;}
+  .tp-acc{display:flex;gap:6px;justify-content:flex-end;flex-wrap:nowrap;}
+  .tp-mas{grid-column:1/-1;display:none;gap:12px;flex-wrap:wrap;align-items:flex-end;background:var(--bg);border-radius:8px;padding:10px;}
+  .tp-mas.abierto{display:flex;}
+  .tp-mas > div{flex:1;min-width:170px;}
+  .tp-mas .listas{display:flex;gap:12px;flex-wrap:wrap;}
+  .tp-mas .listas label{display:flex;align-items:center;gap:5px;margin:0;font-weight:500;white-space:nowrap;}
+  .tp-mas .listas input{width:auto;}
+  @media(max-width:760px){.tp-cab{display:none;}.tp-fila{grid-template-columns:1fr 1fr;}.tp-acc{grid-column:1/-1;justify-content:flex-start;}}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -81,6 +109,8 @@
   <header><div class="brand"><h1>Mercado Pago</h1></div>
     <div style="display:flex;gap:8px;align-items:center"><span class="muted" id="topbarUser" style="font-size:12px;font-weight:600"></span><button onclick="logout()">Salir</button></div></header>
   <main>
+    <div class="tabs" id="mpTabs"><button data-v="conexion" class="on">Conexión</button><button data-v="cuotas">Tarjetas y cuotas</button><button data-v="cobros">Cobros</button></div>
+    <div id="v-conexion">
     <div class="card">
       <h3 style="margin-top:0">Conexión</h3>
       <p class="muted">Cobrá las ventas con link de pago o con la terminal Point. El cobro se registra solo en la venta, en Tesorería y en la cuenta corriente del cliente.</p>
@@ -119,9 +149,39 @@
       <p class="muted">Copiá esta dirección en el panel de Mercado Pago Developers → tu aplicación → Webhooks → Modo producción, y marcá los eventos “Pagos” y “Order (Mercado Pago Point)”. Así el sistema se entera apenas se acredita un pago.</p>
       <div style="display:flex;gap:8px"><input id="mpWebhook" readonly><button class="btn secondary" onclick="copiar('mpWebhook')">Copiar</button></div>
     </div>
+    </div>
+    <div id="v-cuotas" class="hidden">
+      <div class="card">
+        <h3 style="margin-top:0">Tarjetas y planes de cuotas</h3>
+
+        <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes son de la sucursal elegida arriba. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
+        <div class="tp-nuevo">
+          <div class="tp-nuevo-tit">Agregar un plan a mano</div>
+          <div class="tp-nuevo-grid">
+            <div><label>Tarjeta</label><input id="tpTarjeta" placeholder="Ej: Visa crédito"></div>
+            <div><label>Plan</label><input id="tpNombre" placeholder="Ej: 3 cuotas"></div>
+            <div><label>Cuotas</label><input id="tpCuotas" type="number" min="1" step="1" value="1"></div>
+            <div><label>Costo %</label><input id="tpCosto" type="number" min="0" max="100" step="0.01" value="0"></div>
+            <div><label>Recargo %</label><input id="tpRecargo" type="number" min="0" max="100" step="0.01" value="0"></div>
+            <div><label>Vigente hasta</label><input id="tpVigente" type="date"></div>
+            <div style="grid-column:1/-2"><label>Leyenda (se muestra al cobrar)</label><input id="tpLeyenda" placeholder="Ej: Promo Ahora 12 — hasta agotar stock"></div>
+            <div style="align-self:end"><button class="btn" style="width:100%" onclick="crearPlanTarjeta()">Agregar plan</button></div>
+          </div>
+        </div>
+        <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn secondary" id="btnImportarMP" onclick="importarPlanesMP()">⟳ Traer planes de Mercado Pago</button>
+          <span class="muted" style="font-size:12px">Trae tarjetas, cuotas y recargo. El recargo es el interés al comprador que informa Mercado Pago para cada cantidad de cuotas (calculado sobre $100.000); es una referencia, revisalo antes de ofrecerlo. No pisa el Costo % ni lo que cargaste; los planes nuevos quedan inactivos hasta que los revises.</span>
+        </div>
+        <div class="err" id="tarjetasErr"></div>
+        <div id="tarjetasMPInfo" class="muted" style="margin-bottom:8px"></div>
+        <div id="tarjetasBody" class="tp-lista"><p class="muted">Cargando...</p></div>
+            </div>
+    </div>
+    <div id="v-cobros" class="hidden">
     <div class="card">
       <h3 style="margin-top:0">Últimos cobros con Mercado Pago</h3>
       <table><thead><tr><th>Fecha</th><th>Venta</th><th>Tipo</th><th>Monto</th><th>Estado</th><th></th></tr></thead><tbody id="mpCobrosBody"><tr><td colspan="6" class="muted">Cargando...</td></tr></tbody></table>
+    </div>
     </div>
   </main>
 </div>
@@ -162,7 +222,7 @@ async function iniciarApp(){
   PiedraSidebar.render(me,'mercadopago',{ocultarOrg:true});
   document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden'); document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent=(me.usuario&&me.usuario.nombre)||'';
-  await cargarConfig(); cargarCobros();
+  await cargarConfig(); cargarCobros(); tabInicial();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -226,6 +286,103 @@ async function cargarCobros(){
   b.innerHTML=d.map(c=>`<tr><td>${new Date(c.createdAt).toLocaleString('es-AR')}</td><td>${escapeHtml((c.venta||"")+(c.cliente?" · "+c.cliente:"")||'')}</td><td>${c.tipo==='point'?'Point':'Link'}</td><td>${money(c.monto)}</td><td>${EST[c.estado]||c.estado}${c.error?'<div class="muted">'+escapeHtml(c.error)+'</div>':''}</td><td>${(c.estado==='pendiente'||c.estado==='error'||c.estado==='registrando')?`<button class="btn secondary" onclick="verificar('${c._id}')">Verificar</button>`:''}</td></tr>`).join('');
 }
 async function verificar(id){ await fetch(BASE+'/cobros/'+id+'/verificar',{method:'POST',headers:headersAuthJson()}); cargarCobros(); }
+
+// Pestañas de Mercado Pago (17/10/2026): Conexión / Tarjetas y cuotas / Cobros
+let PLANES_CARGADOS = false;
+function mpTab(v){
+  document.querySelectorAll('#mpTabs button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
+  ['conexion','cuotas','cobros'].forEach(k => document.getElementById('v-' + k).classList.toggle('hidden', k !== v));
+  try{ history.replaceState(null, '', '#' + v); }catch(e){}
+  if (v === 'cuotas' && !PLANES_CARGADOS){ PLANES_CARGADOS = true; cargarPlanesTarjeta(); }
+  if (v === 'cobros') cargarCobros();
+}
+document.getElementById('mpTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) mpTab(b.dataset.v); });
+function tabInicial(){ const h = (location.hash || '').replace('#', ''); if (['conexion','cuotas','cobros'].includes(h)) mpTab(h); }
+
+// -------------------------------------------------------------------
+// Tarjetas y planes de cobro (13/10/2026, pedido de Mato).
+// -------------------------------------------------------------------
+async function apiTarjetas(ruta, opts){
+  opts = opts || {};
+  const r = await fetch('/api/tesoreria' + ruta, { method: opts.method || 'GET', headers: opts.body ? headersAuthJson() : headersAuth(), body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'Error de red');
+  return data;
+}
+let planesTarjetaCache = [];
+let listasPrecioPlanes = [];
+function tpMas(id){ document.getElementById('tp_mas_' + id).classList.toggle('abierto'); }
+async function cargarPlanesTarjeta(){
+  const body = document.getElementById('tarjetasBody');
+  try{ listasPrecioPlanes = await fetch('/api/productos/listas-precio', {headers: headersAuth()}).then(r => r.ok ? r.json() : []).catch(() => []); }catch(e){ listasPrecioPlanes = []; }
+  try{ planesTarjetaCache = await apiTarjetas('/tarjetas-planes?todos=1'); }
+  catch(e){ body.innerHTML = '<p class="muted">' + escapeHtml(e.message) + '</p>'; return; }
+  if (!planesTarjetaCache.length){ body.innerHTML = '<p class="muted">Todavía no hay planes de tarjeta. Agregá uno arriba o traelos de Mercado Pago.</p>'; return; }
+  const hoy = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
+  const grupos = {};
+  planesTarjetaCache.forEach(p => { (grupos[p.tarjeta] = grupos[p.tarjeta] || []).push(p); });
+  body.innerHTML = Object.keys(grupos).sort().map(nombre => {
+    const lista = grupos[nombre].sort((a, b) => (a.cuotas || 1) - (b.cuotas || 1));
+    const activos = lista.filter(p => p.activo !== false).length;
+    return `<div class="tp-grupo">
+      <div class="tp-grupo-tit">💳 ${escapeHtml(nombre)} <small>${activos} de ${lista.length} planes activos</small></div>
+      <div class="tp-cab"><span>Plan</span><span>Cuotas</span><span>Costo %</span><span>Recargo %</span><span>Estado</span><span></span></div>
+      ${lista.map(p => {
+        const vencido = p.vigenteHasta && p.vigenteHasta < hoy;
+        const activo = p.activo !== false;
+        return `<div class="tp-fila ${activo ? '' : 'off'}">
+          <input type="hidden" id="tp_t_${p._id}" value="${escapeHtml(p.tarjeta)}">
+          <input id="tp_n_${p._id}" value="${escapeHtml(p.nombre)}">
+          <input id="tp_q_${p._id}" type="number" min="1" step="1" value="${p.cuotas || 1}">
+          <input id="tp_c_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.costoPorcentaje || 0}" title="Lo que te descuenta el procesador al acreditar">
+          <input id="tp_r_${p._id}" type="number" min="0" max="100" step="0.01" value="${p.recargoPorcentaje || 0}" title="Lo que se le suma al cliente">
+          <span>${activo ? '<span class="pill activo">Activo</span>' : '<span class="pill inactivo">Inactivo</span>'}${vencido ? '<div class="err" style="margin:2px 0 0;font-size:11px">Vencido</div>' : ''}</span>
+          <div class="tp-acc">
+            <button class="btn small" onclick="guardarPlanTarjeta('${p._id}', ${activo})">Guardar</button>
+            <button class="btn small secondary" onclick="guardarPlanTarjeta('${p._id}', ${!activo})">${activo ? 'Desactivar' : 'Activar'}</button>
+            <button class="btn small secondary" onclick="tpMas('${p._id}')" title="Leyenda, vigencia y listas de precio">⋯ Más</button>
+          </div>
+          <div class="tp-mas" id="tp_mas_${p._id}">
+            <div><label>Leyenda (se muestra al cobrar)</label><input id="tp_y_${p._id}" value="${escapeHtml(p.leyenda || '')}"></div>
+            <div style="max-width:170px"><label>Vigente hasta</label><input id="tp_h_${p._id}" type="date" value="${escapeHtml(p.vigenteHasta || '')}"></div>
+            <div style="flex:2"><label>Listas de precio donde se ofrece (vacío = todas)</label><div class="listas">${listasPrecioPlanes.map(l => `<label><input type="checkbox" class="tp_l_${p._id}" value="${l._id}" ${(p.listasPrecioIds || []).map(String).includes(String(l._id)) ? 'checked' : ''}> ${escapeHtml(l.nombre)}</label>`).join('') || '<span class="muted">—</span>'}</div></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+}
+async function crearPlanTarjeta(){
+  document.getElementById('tarjetasErr').textContent = '';
+  const body = { tarjeta: document.getElementById('tpTarjeta').value.trim(), nombre: document.getElementById('tpNombre').value.trim(), cuotas: Number(document.getElementById('tpCuotas').value) || 1,
+    costoPorcentaje: Number(document.getElementById('tpCosto').value) || 0, recargoPorcentaje: Number(document.getElementById('tpRecargo').value) || 0,
+    leyenda: document.getElementById('tpLeyenda').value.trim(), vigenteHasta: document.getElementById('tpVigente').value || '' };
+  try{
+    await apiTarjetas('/config/tarjetas-planes', {method:'POST', body});
+    ['tpNombre', 'tpLeyenda', 'tpVigente'].forEach(id => document.getElementById(id).value = '');
+    await cargarPlanesTarjeta();
+  }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
+}
+async function importarPlanesMP(){
+  const btn = document.getElementById('btnImportarMP'), info = document.getElementById('tarjetasMPInfo');
+  document.getElementById('tarjetasErr').textContent = ''; info.textContent = '';
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Consultando Mercado Pago…';
+  try{
+    const r = await fetch('/api/mercadopago/planes/importar', {method:'POST', headers: headersAuthJson(), body: '{}'}).then(async x => { const d = await x.json().catch(()=>({})); if (!x.ok) throw new Error(d.error || 'Error de red'); return d; });
+    info.innerHTML = `Listo: <b>${r.creados}</b> planes nuevos (inactivos, revisá el Costo % y activalos), <b>${r.actualizados}</b> actualizados, ${r.sinCambios} sin cambios.` +
+      (r.detalle && r.detalle.length ? '<br>' + r.detalle.map(escapeHtml).join('<br>') : '') + (r.avisos && r.avisos.length ? '<br><span class="err">' + r.avisos.map(escapeHtml).join('<br>') + '</span>' : '');
+    await cargarPlanesTarjeta();
+  }catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
+  btn.disabled = false; btn.textContent = txt;
+}
+async function guardarPlanTarjeta(id, activo){
+  document.getElementById('tarjetasErr').textContent = '';
+  const v = k => document.getElementById('tp_' + k + '_' + id).value;
+  const body = { tarjeta: v('t').trim(), nombre: v('n').trim(), cuotas: Number(v('q')) || 1, costoPorcentaje: Number(v('c')) || 0, recargoPorcentaje: Number(v('r')) || 0, activo, leyenda: v('y').trim(), vigenteHasta: v('h') || '', listasPrecioIds: Array.from(document.querySelectorAll('.tp_l_' + id)).filter(c => c.checked).map(c => c.value) };
+  try{ await apiTarjetas('/config/tarjetas-planes/' + id, {method:'PUT', body}); await cargarPlanesTarjeta(); }
+  catch(e){ document.getElementById('tarjetasErr').textContent = e.message; }
+}
+
 </script>
 </body>
 </html>
