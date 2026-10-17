@@ -155,14 +155,10 @@
     </div>
     </div>
     <div id="v-cuotas" class="hidden">
-      <div class="card hidden" id="avisoSucursal" style="border-color:var(--accent);background:var(--accent-soft)">
-        <b>Elegí una sucursal para trabajar con los costos y los planes.</b>
-        <div class="muted" style="font-size:13px;margin-top:4px">Ahora estás viendo "Todas". Los costos de Mercado Pago y los planes de tarjeta son de cada sucursal: elegí una en el selector <b>Sucursal</b> de arriba a la derecha y la pantalla se actualiza.</div>
-      </div>
       <div class="card">
         <h3 style="margin-top:0">Tarjetas y planes de cuotas</h3>
 
-        <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes son de la sucursal elegida arriba. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
+        <p class="muted" style="margin-top:0">Cada tarjeta con sus planes (contado, 3 cuotas, 6 cuotas…). <b>Costo %</b> es lo que te descuenta el banco/procesador al acreditar (con IVA incluido). <b>Recargo %</b> es lo que se le suma al cliente por financiarlo (0 si lo absorbés vos). Al cobrar con tarjeta elegís el plan: el costo va al Estado de resultados como costo financiero y el recargo como ingreso financiero. Los planes y los costos son los mismos para todas las sucursales: lo que cargues o cambies acá se aplica a todas. En <b>Listas de precio</b> tildás en cuáles se puede usar cada plan (sin tildar = todas). La <b>Leyenda</b> se muestra al elegir el plan en el cobro, y <b>Vigente hasta</b> es el último día en que se puede usar (después deja de ofrecerse).</p>
         <div class="tp-nuevo" id="costosMP" style="border-style:solid">
           <div class="tp-nuevo-tit">Costos de cobrar con crédito en Mercado Pago</div>
           <p class="muted" style="margin:0 0 8px">Mercado Pago no informa estos costos por sistema: copialos de <b>Costos y cuotas</b> en tu panel de Mercado Pago. Son distintos para el <b>link de pago</b> y para el <b>Point</b>, así que se cargan por separado. Los porcentajes de Mercado Pago son siempre <b>más IVA</b>: el Costo % del plan = (comisión base + costo de las cuotas) × (1 + IVA).</p>
@@ -343,7 +339,6 @@ async function aplicarCostos(){
 // Pestañas de Mercado Pago (17/10/2026): Conexión / Tarjetas y cuotas / Cobros
 let PLANES_CARGADOS = false;
 function mpTab(v){
-  document.getElementById('avisoSucursal').classList.toggle('hidden', !(v === 'cuotas' && (!ORG || ORG === 'todas')));
   document.querySelectorAll('#mpTabs button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
   ['conexion','cuotas','cobros'].forEach(k => document.getElementById('v-' + k).classList.toggle('hidden', k !== v));
   try{ history.replaceState(null, '', '#' + v); }catch(e){}

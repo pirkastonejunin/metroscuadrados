@@ -293,12 +293,27 @@ async function calcularPlanTarjeta(db, req, { planId, monto, aplicarRecargo, lis
 }
 router.calcularPlanTarjeta = calcularPlanTarjeta;
 
+
+// Los planes de tarjeta son IGUALES para todas las sucursales (pedido de Mato, 17/10/2026): cada sucursal conserva su copia
+// (así el cobro sigue leyendo los planes de su propia sucursal), pero el alta, edición y baja se aplican a todas las
+// sucursales a las que tiene acceso el usuario, emparejando por tarjeta + cuotas.
+async function orgsParaPlanes(db, req) {
+  let ids;
+  if (req.usuario && req.usuario.rol && req.usuario.rol.protegido) ids = (await db.collection('organizaciones').find({}, { projection: { _id: 1 } }).toArray()).map(o => o._id);
+  else ids = ((req.usuario && req.usuario.orgIds) || []).map(toObjectId).filter(Boolean);
+  if (req.orgId && !ids.some(i => String(i) === String(req.orgId))) ids.push(req.orgId);
+  return ids;
+}
+router.orgsParaPlanes = orgsParaPlanes;
+
 router.get('/tarjetas-planes', authUsuario, resolverOrg, async (req, res) => {
   try {
     const todos = req.query.todos === '1';
     const lista = await conReintento(async () => (await getDb()).collection('tarjetas_planes')
       .find(Object.assign({}, req.orgId ? { orgId: req.orgId } : {}, todos ? {} : { activo: { $ne: false } })).sort({ tarjeta: 1, cuotas: 1 }).toArray());
-    res.json(todos ? lista : lista.filter(p => !planVencido(p)));
+    let out = todos ? lista : lista.filter(p => !planVencido(p));
+    if (!req.orgId) { const vistos = new Set(); out = out.filter(p => { const k = [p.tarjeta, p.cuotas, p.nombre].join('|'); if (vistos.has(k)) return false; vistos.add(k); return true; }); }
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 function validarFechaPlan(v) {
@@ -326,10 +341,22 @@ function leerPlanTarjeta(b) {
 }
 router.post('/config/tarjetas-planes', authConfig, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás para cargar un plan.');
-    const doc = Object.assign(leerPlanTarjeta(req.body || {}), { orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
-    const r = await conReintento(async () => (await getDb()).collection('tarjetas_planes').insertOne(doc));
-    res.json(Object.assign(doc, { _id: r.insertedId }));
+    const base = leerPlanTarjeta(req.body || {});
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const orgs = await orgsParaPlanes(db, req);
+      if (!orgs.length) throw err(400, 'No hay sucursales para cargar el plan.');
+      let propio = null;
+      for (const orgId of orgs) {
+        const ya = await db.collection('tarjetas_planes').findOne({ orgId, tarjeta: base.tarjeta, cuotas: base.cuotas, nombre: base.nombre });
+        if (ya) { if (!propio || String(orgId) === String(req.orgId)) propio = ya; continue; }
+        const doc = Object.assign({}, base, { listasPrecioIds: String(orgId) === String(req.orgId) ? base.listasPrecioIds : [], orgId, createdAt: new Date(), updatedAt: new Date() });
+        const r = await db.collection('tarjetas_planes').insertOne(doc);
+        if (!propio || String(orgId) === String(req.orgId)) propio = Object.assign(doc, { _id: r.insertedId });
+      }
+      return propio;
+    });
+    res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 router.put('/config/tarjetas-planes/:id', authConfig, async (req, res) => {
@@ -337,8 +364,17 @@ router.put('/config/tarjetas-planes/:id', authConfig, async (req, res) => {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const set = Object.assign(leerPlanTarjeta(req.body || {}), { updatedAt: new Date() });
-    const r = await conReintento(async () => (await getDb()).collection('tarjetas_planes').updateOne(Object.assign({ _id: id }, req.orgId ? { orgId: req.orgId } : {}), { $set: set }));
-    if (!r.matchedCount) throw err(404, 'Plan no encontrado');
+    await conReintento(async () => {
+      const db = await getDb();
+      const col = db.collection('tarjetas_planes');
+      const actual = await col.findOne(Object.assign({ _id: id }, req.orgId ? { orgId: req.orgId } : {}));
+      if (!actual) throw err(404, 'Plan no encontrado');
+      // Las listas de precio son de cada sucursal: solo se tocan en la copia que se está editando.
+      await col.updateOne({ _id: id }, { $set: set });
+      const { listasPrecioIds, ...comun } = set;
+      const orgs = await orgsParaPlanes(db, req);
+      await col.updateMany({ _id: { $ne: id }, orgId: { $in: orgs }, tarjeta: actual.tarjeta, cuotas: actual.cuotas }, { $set: comun });
+    });
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -346,7 +382,14 @@ router.delete('/config/tarjetas-planes/:id', authConfig, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    await conReintento(async () => (await getDb()).collection('tarjetas_planes').updateOne(Object.assign({ _id: id }, req.orgId ? { orgId: req.orgId } : {}), { $set: { activo: false, updatedAt: new Date() } }));
+    await conReintento(async () => {
+      const db = await getDb();
+      const col = db.collection('tarjetas_planes');
+      const actual = await col.findOne(Object.assign({ _id: id }, req.orgId ? { orgId: req.orgId } : {}));
+      if (!actual) throw err(404, 'Plan no encontrado');
+      const orgs = await orgsParaPlanes(db, req);
+      await col.updateMany({ orgId: { $in: orgs }, tarjeta: actual.tarjeta, cuotas: actual.cuotas }, { $set: { activo: false, updatedAt: new Date() } });
+    });
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

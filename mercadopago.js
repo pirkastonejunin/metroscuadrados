@@ -152,9 +152,11 @@ router.post('/config/probar', auth, async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/planes/importar', auth, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás para traer los planes.');
     const db = await getDb();
-    const cfg = await cargarConfig(db, req.orgId);
+    const orgs = await require('./tesoreria').orgsParaPlanes(db, req);
+    // Una sola cuenta de Mercado Pago para todas las sucursales: se usa el token de la sucursal elegida o, si no tiene, el de cualquiera que lo tenga.
+    let cfg = req.orgId ? await cargarConfig(db, req.orgId) : null;
+    if (!cfg || !cfg.accessToken) cfg = await db.collection('mp_config').findOne({ orgId: { $in: orgs }, accessToken: { $exists: true, $ne: '' } });
     const monto = Number(req.body && req.body.monto) > 0 ? Number(req.body.monto) : 100000;
     const metodos = await mp(cfg, 'GET', '/v1/payment_methods');
     const tarjetas = (Array.isArray(metodos) ? metodos : []).filter(m => m.payment_type_id === 'credit_card' && m.status !== 'deactive');
@@ -173,17 +175,21 @@ router.post('/planes/importar', auth, async (req, res) => {
       for (const c of costos) {
         const cuotas = Math.max(1, Math.floor(Number(c.installments) || 1));
         const recargo = redondear(Math.max(0, Number(c.installment_rate) || 0));
-        const existente = await col.findOne({ orgId: req.orgId, tarjeta: nombreTarjeta, cuotas });
-        if (existente) {
-          if (Number(existente.recargoPorcentaje) === recargo) { resumen.sinCambios++; continue; }
-          await col.updateOne({ _id: existente._id }, { $set: { recargoPorcentaje: recargo, mpSincronizadoAt: new Date(), updatedAt: new Date() } });
-          resumen.actualizados++;
-          resumen.detalle.push(`${nombreTarjeta} ${cuotas}c: recargo ${existente.recargoPorcentaje || 0}% → ${recargo}%`);
-        } else {
-          await col.insertOne({ orgId: req.orgId, tarjeta: nombreTarjeta, nombre: cuotas === 1 ? 'Contado' : `${cuotas} cuotas`, cuotas, costoPorcentaje: 0, recargoPorcentaje: recargo,
-            activo: false, leyenda: '', vigenteHasta: null, listasPrecioIds: [], origen: 'mercadopago', mpSincronizadoAt: new Date(), createdAt: new Date(), updatedAt: new Date() });
-          resumen.creados++;
+        let hubo = null;
+        for (const orgId of orgs) {
+          const existente = await col.findOne({ orgId, tarjeta: nombreTarjeta, cuotas });
+          if (existente) {
+            if (Number(existente.recargoPorcentaje) === recargo) { hubo = hubo || 'sin'; continue; }
+            await col.updateOne({ _id: existente._id }, { $set: { recargoPorcentaje: recargo, mpSincronizadoAt: new Date(), updatedAt: new Date() } });
+            if (hubo !== 'act') resumen.detalle.push(`${nombreTarjeta} ${cuotas}c: recargo ${existente.recargoPorcentaje || 0}% → ${recargo}%`);
+            hubo = 'act';
+          } else {
+            await col.insertOne({ orgId, tarjeta: nombreTarjeta, nombre: cuotas === 1 ? 'Contado' : `${cuotas} cuotas`, cuotas, costoPorcentaje: 0, recargoPorcentaje: recargo,
+              activo: false, leyenda: '', vigenteHasta: null, listasPrecioIds: [], origen: 'mercadopago', mpSincronizadoAt: new Date(), createdAt: new Date(), updatedAt: new Date() });
+            if (hubo !== 'act') hubo = 'nuevo';
+          }
         }
+        if (hubo === 'nuevo') resumen.creados++; else if (hubo === 'act') resumen.actualizados++; else resumen.sinCambios++;
       }
     }
     res.json(resumen);
@@ -210,8 +216,7 @@ function leerCostosCanal(c, def) {
 }
 router.get('/costos', auth, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás.');
-    const cfg = (await cargarConfig(await getDb(), req.orgId)) || {};
+    const cfg = (await (await getDb()).collection('mp_costos').findOne({ _id: 'global' })) || {};
     const out = {};
     for (const k of Object.keys(CANALES_COSTO)) out[k] = Object.assign({ nombre: CANALES_COSTO[k] }, leerCostosCanal(cfg.costos && cfg.costos[k], COSTOS_INICIALES[k]));
     res.json(out);
@@ -219,38 +224,40 @@ router.get('/costos', auth, async (req, res) => {
 });
 router.put('/costos/:canal', auth, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás.');
     if (!CANALES_COSTO[req.params.canal]) throw err(400, 'Canal inválido.');
     const b = req.body || {};
     const base = Number(b.base);
     if (!Number.isFinite(base) || base < 0 || base > 100) throw err(400, 'La comisión base tiene que estar entre 0 y 100.');
     const val = leerCostosCanal({ base, iva: b.iva, financiacion: b.financiacion || [] }, COSTOS_INICIALES[req.params.canal]);
-    await (await getDb()).collection('mp_config').updateOne({ orgId: req.orgId }, { $set: { ['costos.' + req.params.canal]: val, updatedAt: new Date() }, $setOnInsert: { orgId: req.orgId, webhookToken: crypto.randomBytes(24).toString('hex'), createdAt: new Date() } }, { upsert: true });
+    await (await getDb()).collection('mp_costos').updateOne({ _id: 'global' }, { $set: { ['costos.' + req.params.canal]: val, updatedAt: new Date() } }, { upsert: true });
     res.json(val);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 // Aplica a los planes de crédito: costo % = base + financiación. Opcional: recargo % para que el cliente cubra ese costo.
 router.post('/costos/:canal/aplicar', auth, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás.');
     if (!CANALES_COSTO[req.params.canal]) throw err(400, 'Canal inválido.');
     const db = await getDb();
-    const cfg = (await cargarConfig(db, req.orgId)) || {};
+    const cfg = (await db.collection('mp_costos').findOne({ _id: 'global' })) || {};
     const c = leerCostosCanal(cfg.costos && cfg.costos[req.params.canal], COSTOS_INICIALES[req.params.canal]);
     const cubrir = !!(req.body && req.body.cubrirConRecargo);
-    const planes = await db.collection('tarjetas_planes').find({ orgId: req.orgId }).toArray();
+    const orgs = await require('./tesoreria').orgsParaPlanes(db, req);
+    const planes = await db.collection('tarjetas_planes').find({ orgId: { $in: orgs } }).toArray();
     const r = { actualizados: 0, omitidos: [] };
+    const omit = new Set();
     for (const pl of planes) {
       if (!/cr[eé]dito/i.test(pl.tarjeta || '') || /american|amex/i.test(pl.tarjeta || '')) continue;
       const cuotas = Math.max(1, Number(pl.cuotas) || 1);
       const f = cuotas === 1 ? { pct: 0 } : c.financiacion.find(x => x.cuotas === cuotas);
-      if (!f) { r.omitidos.push(`${pl.tarjeta} ${cuotas} cuotas (sin costo cargado para esa cantidad)`); continue; }
+      if (!f) { omit.add(`${pl.tarjeta} ${cuotas} cuotas (sin costo cargado para esa cantidad)`); continue; }
       const costo = redondear((c.base + f.pct) * (1 + c.iva / 100)); // los % de Mercado Pago son más IVA
       const set = { costoPorcentaje: costo, updatedAt: new Date() };
       if (cubrir && cuotas > 1) set.recargoPorcentaje = redondear((1 / (1 - costo / 100) - 1) * 100);
       await db.collection('tarjetas_planes').updateOne({ _id: pl._id }, { $set: set });
       r.actualizados++;
     }
+    r.omitidos = [...omit];
+    r.sucursales = orgs.length;
     res.json(r);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
