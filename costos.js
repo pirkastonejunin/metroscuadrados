@@ -1031,6 +1031,10 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
         const minimo = Math.max(1, Math.ceil(palabras.length / 2));
         f.candidatos = posibles.map(c => ({ sku: c.sku, nombre: c.nombre, puntos: palabras.filter(w => norm(c.nombre).includes(w)).length }))
           .filter(c => c.puntos >= minimo).sort((x, y) => y.puntos - x.puntos).slice(0, 3).map(c => ({ sku: c.sku, nombre: c.nombre }));
+        // Si el SKU sugerido ya lo usa OTRO producto de Costos (típico de un producto cargado dos veces), se avisa cuál.
+        const usados = f.candidatos.length ? await db.collection('costos_productos').find(Object.assign({ activo: { $ne: false }, _id: { $ne: f.productoId }, sku: { $in: f.candidatos.map(c => normSku(c.sku)) } }, filtroOrg(req)))
+          .project({ nombre: 1, sku: 1 }).toArray() : [];
+        for (const c of f.candidatos) { const u = usados.find(x => normSku(x.sku) === normSku(c.sku)); if (u) c.usadoPor = u.nombre; }
       }
       for (const [k, v] of sinProducto) filas.push(Object.assign(fila(null, v.nombre, v.sku, v.unidad, null, porProd.get(k), v.sku ? catPorSku.get(normSku(v.sku)) : null), { archivado: true }));
       const conFaltante = filas.filter(f => f.faltante > 0);

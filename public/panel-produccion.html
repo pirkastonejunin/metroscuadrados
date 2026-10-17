@@ -306,7 +306,7 @@ function pintarProductos(){
   const av = document.getElementById('avisoVinculo');
   if (sinVincLista.length) {
     const motivo = f => f.motivo === 'sin_sku' ? 'no tiene SKU cargado' : 'su SKU <b>' + esc(f.sku) + '</b> no está en el catálogo de Productos';
-    const cand = f => (f.candidatos && f.candidatos.length) ? '<br><span style="opacity:.85">¿Será ' + f.candidatos.map(c => '“' + esc(c.nombre) + '” (SKU <b>' + esc(c.sku) + '</b>)').join(' o ') + '?</span>' : '';
+    const cand = f => (f.candidatos && f.candidatos.length) ? '<br><span style="opacity:.85">¿Será ' + f.candidatos.map(c => '“' + esc(c.nombre) + '” (SKU <b>' + esc(c.sku) + '</b>' + (c.usadoPor ? ', ya lo usa “' + esc(c.usadoPor) + '” en Costos: puede ser un duplicado' : '') + ')').join(' o ') + '?</span>' : '';
     av.classList.remove('hidden');
     av.innerHTML = `<b>${sinVincLista.length} producto${sinVincLista.length === 1 ? '' : 's'} sin vincular con Stock</b>: se muestra su producción pero no su stock ni su faltante.<ul style="margin:6px 0 4px 18px;padding:0">` +
       sinVincLista.map(f => `<li style="margin-bottom:4px"><b>${esc(f.nombre)}</b>: ${motivo(f)}.${cand(f)}</li>`).join('') +
