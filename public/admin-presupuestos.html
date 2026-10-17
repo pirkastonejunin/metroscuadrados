@@ -705,7 +705,9 @@ function htmlTotalesTarjeta(pre, total){
   const ids = planesElegidos(pre);
   if (!ids.length || !PLANES_TARJETA || !(total > 0)) return '';
   const nf = n => (Math.round(n * 100) / 100).toLocaleString('es-AR', {maximumFractionDigits: 2});
-  return '<div class="tarjeta-tit">Pagando con tarjeta</div>' + ids.map(id => PLANES_TARJETA.find(x => String(x._id) === id)).filter(Boolean).map(pl => {
+  const sels = ids.map(id => PLANES_TARJETA.find(x => String(x._id) === id)).filter(Boolean);
+  const medios = [...new Set(sels.map(x => x.tarjeta).filter(Boolean))].join(' · ');
+  return '<div class="tarjeta-tit">Pagando con ' + escapeHtml(medios || 'tarjeta') + '</div>' + ids.map(id => PLANES_TARJETA.find(x => String(x._id) === id)).filter(Boolean).map(pl => {
     const tot = total + Math.round(total * pl.recargoPorcentaje) / 100;
     const que = pl.cuotas > 1 ? `${pl.cuotas} cuotas de ${money(tot / pl.cuotas)}` : 'Un pago';
     return `<div class="fila-total tarjeta"><span>${que}${pl.recargoPorcentaje ? ` <small style="display:inline">(+${nf(pl.recargoPorcentaje)}%)</small>` : ''}</span><span>${money(tot)}</span></div>`;
