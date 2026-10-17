@@ -146,13 +146,13 @@
         <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="cSal">—</div></div>
       </div>
       <div class="panel hidden" id="pCol"></div>
-      <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
+      <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Sucursal</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
     </div>
 
     <div class="vista hidden" id="v-emp">
       <div class="panel" id="pEmp"></div>
       <div class="tb-filtros"><label class="chk"><input type="checkbox" id="fBajas" onchange="cargarEmp()"> Ver también los dados de baja</label></div>
-      <div class="tabla"><table><thead><tr><th>Empleado</th><th>Sector</th><th class="n">Sueldo básico</th><th>Cobra</th><th>Ingreso</th><th></th></tr></thead><tbody id="tEmp"></tbody></table></div>
+      <div class="tabla"><table><thead><tr><th>Empleado</th><th>Sector</th><th class="n">Sueldo básico</th><th>Cobra</th><th>Ingreso</th><th>Sucursal</th><th></th></tr></thead><tbody id="tEmp"></tbody></table></div>
     </div>
 
     <div class="vista hidden" id="v-ade">
@@ -166,7 +166,7 @@
 const BASE = '/api/sueldos';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
-let VENDEDORES = [], USUARIOS = [], COM = null, EMPLEADOS = [], CUENTAS = {cajas:[], bancos:[]}, LIQ = null;
+let SUCURSALES = [], VENDEDORES = [], USUARIOS = [], COM = null, EMPLEADOS = [], CUENTAS = {cajas:[], bancos:[]}, LIQ = null;
 const SECTORES = {obra:'Obra', produccion:'Producción', administracion:'Administración', ventas:'Ventas', logistica:'Logística', otro:'Otros'};
 const FRECUENCIAS = {semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
 const COMISION_TIPO = {porcentaje:'Porcentaje de ventas', por_visita:'Por visita + ventas de mostrador'};
@@ -214,7 +214,7 @@ async function iniciarApp(){
   document.title = 'Sueldos - Piedra Negra';
   $('loginScreen').classList.add('hidden'); $('sinAccesoScreen').classList.add('hidden'); $('app').classList.remove('hidden');
   $('fPeriodo').value = hoyISO().slice(0, 7);
-  try{ CUENTAS = await api('GET', '/cuentas'); EMPLEADOS = await api('GET', '/empleados'); VENDEDORES = await api('GET', '/vendedores'); USUARIOS = await api('GET', '/usuarios'); }catch(e){ error(e); }
+  try{ SUCURSALES = await api('GET', '/sucursales'); CUENTAS = await api('GET', '/cuentas'); EMPLEADOS = await api('GET', '/empleados'); VENDEDORES = await api('GET', '/vendedores'); USUARIOS = await api('GET', '/usuarios'); }catch(e){ error(e); }
   await cargarLiq();
 }
 if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
@@ -412,12 +412,12 @@ async function cargarCol(){
   $('tCol').innerHTML = COL.colocadores.length ? COL.colocadores.map((f, i) => {
     const ab = !!COL_ABIERTO[f.colocadorId];
     const estado = f.cerrado && f.pendienteLiquidar <= 0 ? (f.saldo > 0 ? '<span class="chip par">Cerrado · debe ' + pesos(f.saldo) + '</span>' : '<span class="chip ok">Cerrado y pagado</span>') : f.saldo > 0 ? '<span class="chip par">Debe ' + pesos(f.saldo) + '</span>' : f.pendienteLiquidar > 0 ? '<span class="muted">sin liquidar</span>' : '<span class="chip ok">Al día</span>';
-    const det = ab ? '<tr class="sin"><td colspan="9" style="padding:0">' +
+    const det = ab ? '<tr class="sin"><td colspan="10" style="padding:0">' +
       (f.liquidaciones.length ? '<table style="width:100%"><thead><tr><th>Liquidación</th><th class="n">Tareas</th><th class="n">Total</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Pagos</th><th></th></tr></thead><tbody>' + f.liquidaciones.map(l => '<tr><td><b>' + escapeHtml(etiquetaLiq(l)) + '</b></td><td class="n">' + l.cantTareas + '</td><td class="n">' + pesos(l.total) + '</td><td class="n">' + pesos(l.totalPagado) + '</td><td class="n">' + pesos(l.saldo) + '</td><td><span class="chip ' + ESTADO[l.estado][1] + '">' + ESTADO[l.estado][0] + '</span></td><td class="muted">' + (l.pagos.map((p, k) => p.anulado ? '<s title="Pago anulado">' + fmtF(p.fecha) + ' ' + pesos(p.monto) + '</s>' : fmtF(p.fecha) + ' ' + pesos(p.monto) + ' <a href="#" title="Anular este pago" style="color:#b91c1c" onclick="event.stopPropagation();anularPagoLiq(\'' + l._id + '\',' + k + ',true);return false">anular</a>').join(' · ') || '—') + '</td><td class="acc">' + (l.saldo > 0 ? '<button class="btn" onclick="formPagoCol(\'' + l._id + '\')">Pagar</button> ' : '') + (!l.totalPagado ? '<button class="btn secondary" onclick="deshacerCol(\'' + l._id + '\')" title="Borra esta liquidación; sus tareas vuelven a quedar sin liquidar">Deshacer</button>' : '') + '</td></tr>').join('') + '</tbody></table>' : '') +
       '<table style="width:100%"><thead><tr><th>Obra</th><th>Trabajo</th><th>Terminada</th><th class="n">m²</th><th class="n">$/m²</th><th class="n">Monto</th><th>Liquidación</th></tr></thead><tbody>' + f.tareas.map(x => { const l = f.liquidaciones.find(y => y._id === x.liquidacionId); return '<tr><td>' + escapeHtml(x.obra) + '</td><td>' + escapeHtml(x.tipoTrabajo) + '</td><td>' + fmtF(x.fecha) + '</td><td class="n">' + m2f(x.m2) + '</td><td class="n">' + pesos(x.costoPorM2) + '</td><td class="n">' + pesos(x.monto) + '</td><td>' + (x.liquidada ? '<span class="chip ok">' + escapeHtml(l ? etiquetaLiq(l) : 'liquidada') + '</span>' : '<span class="chip mal">sin liquidar</span>') + '</td></tr>'; }).join('') + '</tbody></table></td></tr>' : '';
-    return '<tr class="clic" onclick="abrirCol(\'' + f.colocadorId + '\')"><td>' + (ab ? '▾ ' : '▸ ') + escapeHtml(f.nombre) + ' <span class="muted">' + f.tareas.length + ' tarea' + (f.tareas.length === 1 ? '' : 's') + '</span></td><td class="n">' + m2f(f.m2) + '</td><td class="n">' + pesos(f.devengado) + '</td><td class="n">' + pesos(f.pendienteLiquidar) + '</td><td class="n">' + pesos(f.liquidado) + '</td><td class="n">' + pesos(f.pagado) + '</td><td class="n">' + pesos(f.saldo) + '</td><td>' + estado + '</td><td class="acc" onclick="event.stopPropagation()">' +
+    return '<tr class="clic" onclick="abrirCol(\'' + f.colocadorId + '\')"><td>' + (ab ? '▾ ' : '▸ ') + escapeHtml(f.nombre) + ' <span class="muted">' + f.tareas.length + ' tarea' + (f.tareas.length === 1 ? '' : 's') + '</span></td><td class="n">' + m2f(f.m2) + '</td><td class="n">' + pesos(f.devengado) + '</td><td class="n">' + pesos(f.pendienteLiquidar) + '</td><td class="n">' + pesos(f.liquidado) + '</td><td class="n">' + pesos(f.pagado) + '</td><td class="n">' + pesos(f.saldo) + '</td><td>' + estado + '</td><td onclick="event.stopPropagation()">' + selSucursal('colocador', f.colocadorId, f.asignado ? f.sucursalId : '') + '</td><td class="acc" onclick="event.stopPropagation()">' +
       (f.pendienteLiquidar > 0 ? '<button class="btn secondary" onclick="liquidarCol(\'parcial\',\'' + f.colocadorId + '\')">Liquidar semana</button> <button class="btn secondary" onclick="liquidarCol(\'final\',\'' + f.colocadorId + '\')">Cerrar mes</button> ' : '') + (f.saldo > 0 ? '<button class="btn" onclick="formPagoCol(null,' + i + ')">Pagar</button>' : '') + '</td></tr>' + det;
-  }).join('') : '<tr><td colspan="9" class="vacio">No hay tareas terminadas por colocadores en este mes.</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="vacio">No hay tareas terminadas por colocadores en este mes.</td></tr>';
 }
 function abrirCol(id){ COL_ABIERTO[id] = !COL_ABIERTO[id]; cargarCol(); }
 async function liquidarCol(tipo, colocadorId){
@@ -449,10 +449,28 @@ async function pagarCol(){
 
 // ---------------- Empleados ----------------
 let EMP_ED = null;
+
+// Sucursal asignada a un empleado o colocador (para liquidar desde "Todas las sucursales" sin cambiar de organización).
+function selSucursal(tipo, id, actual, vacio){
+  return '<select title="Sucursal en la que se liquida y se paga" onchange="asignarSucursal(\'' + tipo + '\',\'' + id + '\',this)" data-prev="' + (actual || '') + '">' + (actual ? '' : '<option value="">' + (vacio || '— Sin asignar —') + '</option>') + SUCURSALES.map(x => '<option value="' + x._id + '"' + (x._id === String(actual || '') ? ' selected' : '') + '>' + escapeHtml(x.nombre) + '</option>').join('') + '</select>';
+}
+async function asignarSucursal(tipo, id, sel){
+  const nuevo = sel.value, prev = sel.dataset.prev || '';
+  if (!nuevo || nuevo === prev) return;
+  const nom = (SUCURSALES.find(x => x._id === nuevo) || {}).nombre || '';
+  const mover = confirm('Asignar a ' + nom + '.\n\n¿Mover también a esa sucursal lo ya registrado (liquidaciones, adelantos y los pagos de caja/banco)?\n\nAceptar = mover todo. Cancelar = solo asignarlo de ahora en adelante.');
+  try{
+    const r = await api('POST', '/mover-sucursal', {tipo, id, orgId: nuevo, moverHistorial: mover});
+    exito('Asignado a ' + nom + (mover ? ' · movidas ' + r.liquidaciones + ' liquidaciones, ' + (r.adelantos || 0) + ' adelantos y ' + r.movimientos + ' movimientos de caja.' : '.'));
+    EMPLEADOS = await api('GET', '/empleados');
+    if (tipo === 'empleado') { await cargarEmp(); await cargarLiq(); } else await cargarCol();
+  }catch(e){ error(e); sel.value = prev; }
+}
 function formEmp(e){
   EMP_ED = e || null; const v = Object.assign({frecuencia:'mensual', comisionPago:'fin_de_mes', comisionTipo:'porcentaje', montoVisita:0, pctMostrador:0}, e || {nombre:'', cuil:'', sector:'produccion', sueldoBasico:0, fechaIngreso:null, notas:''});
   $('pEmp').innerHTML = '<h3>' + (e ? 'Editar empleado' : 'Nuevo empleado') + '</h3><div class="form"><div class="ancho"><label>Nombre y apellido</label><input type="text" id="eNombre" value="' + escapeHtml(v.nombre) + '"></div>' +
     '<div><label>CUIL</label><input type="text" id="eCuil" value="' + escapeHtml(v.cuil) + '"></div>' +
+    (e ? '' : '<div><label>Sucursal</label><select id="eSuc"><option value="">' + (ORG && ORG !== 'todas' ? 'La que estoy mirando' : '— Elegí —') + '</option>' + SUCURSALES.map(x => '<option value="' + x._id + '">' + escapeHtml(x.nombre) + '</option>').join('') + '</select></div>') +
     '<div><label title="Producción: el costo ya está dentro del costo de los productos. El resto se muestra como gasto en el Estado de resultados.">Sector</label><select id="eSector">' + Object.keys(SECTORES).map(k => '<option value="' + k + '"' + (v.sector === k ? ' selected' : '') + '>' + SECTORES[k] + '</option>').join('') + '</select></div>' +
     '<div><label>Sueldo básico (referencia)</label><input type="number" min="0" step="any" id="eBasico" value="' + (v.sueldoBasico || 0) + '"></div><div><label>Ingreso</label><input type="date" id="eIngreso" value="' + isoF(v.fechaIngreso) + '"></div>' +
     '<div class="ancho"><label title="Porcentaje: comisión sobre las ventas de un vendedor. Por visita: cobra un monto por cada visita hecha, el doble por cada una vendida y un % de las ventas de mostrador; si eso no llega al sueldo básico, cobra el básico.">Tipo de comisión</label><select id="eComTipo" onchange="tipoComChange()">' + Object.keys(COMISION_TIPO).map(k => '<option value="' + k + '"' + (v.comisionTipo === k ? ' selected' : '') + '>' + COMISION_TIPO[k] + '</option>').join('') + '</select></div>' +
@@ -465,7 +483,7 @@ function formEmp(e){
   tipoComChange();
 }
 function tipoComChange(){ const pv = $('eComTipo').value === 'por_visita'; $('bPorc').classList.toggle('hidden', pv); $('bVisita').classList.toggle('hidden', !pv); }
-function datosEmp(){ return {comisionTipo: $('eComTipo').value, montoVisita: n$('eMontoVisita'), pctMostrador: n$('ePctMostrador'), usuarioId: $('eUsuario').value, nombre: $('eNombre').value, cuil: $('eCuil').value, sector: $('eSector').value, sueldoBasico: n$('eBasico'), fechaIngreso: $('eIngreso').value, vendedorId: $('eVend').value, notas: $('eNotas').value, frecuencia: $('eFrec').value, comisionPago: $('eComPago').value}; }
+function datosEmp(){ return {orgId: $('eSuc') ? $('eSuc').value : '', comisionTipo: $('eComTipo').value, montoVisita: n$('eMontoVisita'), pctMostrador: n$('ePctMostrador'), usuarioId: $('eUsuario').value, nombre: $('eNombre').value, cuil: $('eCuil').value, sector: $('eSector').value, sueldoBasico: n$('eBasico'), fechaIngreso: $('eIngreso').value, vendedorId: $('eVend').value, notas: $('eNotas').value, frecuencia: $('eFrec').value, comisionPago: $('eComPago').value}; }
 async function guardarEmp(){
   try{
     if (EMP_ED) await api('PUT', '/empleados/' + EMP_ED._id, datosEmp()); else await api('POST', '/empleados', datosEmp());
@@ -476,8 +494,8 @@ async function cargarEmp(){
   try{
     const lista = await api('GET', '/empleados' + ($('fBajas').checked ? '?todos=1' : ''));
     window.__EMP = lista;
-    $('tEmp').innerHTML = lista.map(e => '<tr' + (e.activo === false ? ' class="sin"' : '') + '><td>' + escapeHtml(e.nombre) + (e.activo === false ? ' <span class="chip">Baja</span>' : '') + '</td><td>' + escapeHtml(SECTORES[e.sector] || e.sector) + '</td><td class="n">' + pesos(e.sueldoBasico) + '</td><td>' + (FRECUENCIAS[e.frecuencia || 'mensual']) + (e.comisionTipo === 'por_visita' ? ' <span class="chip" title="Comisión por visita + ventas de mostrador">por visita</span>' : '') + ((e.vendedorId || e.comisionTipo === 'por_visita') && (e.frecuencia || 'mensual') !== 'mensual' ? ' <span class="chip" title="Cómo cobra las comisiones">' + (e.comisionPago === 'con_sueldo' ? 'comisión en cada pago' : 'comisión junta') + '</span>' : '') + '</td><td>' + fmtF(e.fechaIngreso) + '</td><td class="acc"><button data-iconizado="1" class="btn secondary" onclick="editarEmp(\'' + e._id + '\')">Editar</button> ' +
-      (e.activo === false ? '<button data-iconizado="1" class="btn" onclick="reactivarEmp(\'' + e._id + '\')">Reactivar</button>' : '<button data-iconizado="1" class="btn secondary" onclick="bajaEmp(\'' + e._id + '\')">Dar de baja</button>') + '</td></tr>').join('') || '<tr><td colspan="6" class="vacio">Todavía no hay empleados.</td></tr>';
+    $('tEmp').innerHTML = lista.map(e => '<tr' + (e.activo === false ? ' class="sin"' : '') + '><td>' + escapeHtml(e.nombre) + (e.activo === false ? ' <span class="chip">Baja</span>' : '') + '</td><td>' + escapeHtml(SECTORES[e.sector] || e.sector) + '</td><td class="n">' + pesos(e.sueldoBasico) + '</td><td>' + (FRECUENCIAS[e.frecuencia || 'mensual']) + (e.comisionTipo === 'por_visita' ? ' <span class="chip" title="Comisión por visita + ventas de mostrador">por visita</span>' : '') + ((e.vendedorId || e.comisionTipo === 'por_visita') && (e.frecuencia || 'mensual') !== 'mensual' ? ' <span class="chip" title="Cómo cobra las comisiones">' + (e.comisionPago === 'con_sueldo' ? 'comisión en cada pago' : 'comisión junta') + '</span>' : '') + '</td><td>' + fmtF(e.fechaIngreso) + '</td><td>' + selSucursal('empleado', e._id, e.orgId) + '</td><td class="acc"><button data-iconizado="1" class="btn secondary" onclick="editarEmp(\'' + e._id + '\')">Editar</button> ' +
+      (e.activo === false ? '<button data-iconizado="1" class="btn" onclick="reactivarEmp(\'' + e._id + '\')">Reactivar</button>' : '<button data-iconizado="1" class="btn secondary" onclick="bajaEmp(\'' + e._id + '\')">Dar de baja</button>') + '</td></tr>').join('') || '<tr><td colspan="7" class="vacio">Todavía no hay empleados.</td></tr>';
   }catch(e){ error(e); }
 }
 function editarEmp(id){ formEmp(window.__EMP.find(x => x._id === id)); $('pEmp').scrollIntoView({behavior:'smooth', block:'nearest'}); }

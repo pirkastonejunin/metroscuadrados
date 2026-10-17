@@ -90,8 +90,49 @@ const authSueldos = [authUsuario, resolverOrg, requiereModulo('sueldos'), (req, 
   next();
 }];
 
+// Operaciones sobre algo que ya tiene sucursal (un empleado, una liquidación, un colocador): si no hay una sucursal elegida ("Ver: todas"),
+// se toma la del propio empleado / liquidación / colocador. Así se puede liquidar y pagar desde una sola pantalla sin cambiar de organización.
+async function derivarOrg(req, res, next) {
+  try {
+    if (req.orgId) return next();
+    const db = await getDb(); const b = req.body || {};
+    let org = null;
+    const empId = toObjectId(b.empleadoId || req.query.empleadoId);
+    if (empId) { const e = await db.collection('empleados').findOne({ _id: empId }, { projection: { orgId: 1 } }); org = e && e.orgId; }
+    if (!org && b.colocadorId) org = await orgDeColocador(db, toObjectId(b.colocadorId));
+    const id = toObjectId(req.params && req.params.id);
+    if (!org && id) {
+      const p = req.path;
+      const col = p.startsWith('/colocadores/liquidaciones') ? 'sueldos_colocadores' : p.startsWith('/liquidaciones') ? 'sueldos_liquidaciones' : p.startsWith('/adelantos') ? 'sueldos_adelantos' : p.startsWith('/empleados') ? 'empleados' : null;
+      if (col) { const d = await db.collection(col).findOne({ _id: id }, { projection: { orgId: 1 } }); org = d && d.orgId; }
+    }
+    if (!org) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando (o asignale una sucursal al empleado).' });
+    req.orgId = org;
+    next();
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+}
+async function orgDeColocador(db, id) {
+  if (!id) return null;
+  const c = await db.collection('obras_colocadores').findOne({ _id: id }, { projection: { orgId: 1, sucursalSueldoId: 1 } });
+  return c ? (c.sucursalSueldoId || c.orgId || null) : null;
+}
+const authSueldosDoc = [authUsuario, resolverOrg, requiereModulo('sueldos'), derivarOrg];
+
 // Lecturas que pueden verse con "Ver: todas las sucursales" (sin sucursal elegida): filtroOrg devuelve {} y suma todas.
 const authSueldosLectura = [authUsuario, resolverOrg, requiereModulo('sueldos')];
+
+
+// Ejecuta fn una vez por sucursal cuando se mira "Todas" (cada una con su propia sucursal en req); con una sucursal elegida, solo esa.
+async function sucursalesConEmpleados(db) {
+  const ids = await db.collection('empleados').distinct('orgId', { activo: { $ne: false } });
+  return ids.filter(Boolean);
+}
+async function porOrganizacion(db, req, fn) {
+  if (req.orgId) return [await fn(req)];
+  const out = [];
+  for (const o of await sucursalesConEmpleados(db)) out.push(await fn(Object.assign({}, req, { orgId: o })));
+  return out;
+}
 
 const SECTORES = { obra: 'Obra', produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
 // Frecuencia de pago: el sueldo se liquida igual una vez por mes, pero se paga en cuotas.
@@ -142,7 +183,7 @@ function calcular(l) {
 // ---------------------------------------------------------------------------
 // Cuentas de Tesorería habilitadas (para elegir de dónde sale el pago)
 // ---------------------------------------------------------------------------
-router.get('/cuentas', authSueldos, async (req, res) => {
+router.get('/cuentas', authSueldosLectura, async (req, res) => {
   try {
     const out = await conReintento(async () => {
       const db = await getDb();
@@ -167,14 +208,14 @@ async function egresoDeCuenta(db, req, { cuentaTipo, cuentaId, monto: m, motivo,
 }
 
 // Usuarios del sistema (para vincular a la persona que carga visitas y ventas).
-router.get('/usuarios', authSueldos, async (req, res) => {
+router.get('/usuarios', authSueldosLectura, async (req, res) => {
   try {
     const lista = await conReintento(async () => (await getDb()).collection('usuarios').find(Object.assign({ activo: { $ne: false } }, req.orgId ? { $or: [{ orgIds: req.orgId }, { orgIds: { $exists: false } }] } : {})).project({ nombre: 1 }).sort({ nombre: 1 }).toArray());
     res.json(lista.map(u => ({ _id: String(u._id), nombre: u.nombre })));
   } catch (e) { responder(res, e); }
 });
 
-router.get('/vendedores', authSueldos, async (req, res) => {
+router.get('/vendedores', authSueldosLectura, async (req, res) => {
   try {
     const lista = await conReintento(async () => (await getDb()).collection('visitas_vendedores').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ nombre: 1, comisionPct: 1 }).sort({ nombre: 1 }).toArray());
     res.json(lista.map(v => ({ _id: String(v._id), nombre: v.nombre, comisionPct: v.comisionPct || 0 })));
@@ -206,7 +247,7 @@ function datosEmpleado(b) {
   if (!COMISION_PAGO[comisionPago]) throw err(400, 'Modo de pago de comisiones inválido.');
   return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas), frecuencia, comisionPago, comisionTipo, usuarioId: comisionTipo === 'por_visita' ? usuarioId : null, montoVisita, pctMostrador };
 }
-router.get('/empleados', authSueldos, async (req, res) => {
+router.get('/empleados', authSueldosLectura, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
     if (req.query.todos !== '1') match.activo = { $ne: false };
@@ -214,14 +255,16 @@ router.get('/empleados', authSueldos, async (req, res) => {
     res.json(lista);
   } catch (e) { responder(res, e); }
 });
-router.post('/empleados', authSueldos, async (req, res) => {
+router.post('/empleados', authSueldosLectura, async (req, res) => {
   try {
-    const doc = Object.assign(datosEmpleado(req.body || {}), { activo: true, orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
+    const orgId = toObjectId((req.body || {}).orgId) || req.orgId;
+    if (!orgId) throw err(400, 'Elegí la sucursal del empleado.');
+    const doc = Object.assign(datosEmpleado(req.body || {}), { activo: true, orgId, createdAt: new Date(), updatedAt: new Date() });
     const r = await conReintento(async () => (await getDb()).collection('empleados').insertOne(doc));
     res.json(Object.assign(doc, { _id: r.insertedId }));
   } catch (e) { responder(res, e); }
 });
-router.put('/empleados/:id', authSueldos, async (req, res) => {
+router.put('/empleados/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const set = Object.assign(datosEmpleado(req.body || {}), { updatedAt: new Date() });
@@ -231,7 +274,7 @@ router.put('/empleados/:id', authSueldos, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { responder(res, e); }
 });
-router.delete('/empleados/:id', authSueldos, async (req, res) => {
+router.delete('/empleados/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const r = await conReintento(async () => (await getDb()).collection('empleados').updateOne(Object.assign({ _id: id }, filtroOrg(req)), { $set: { activo: false, updatedAt: new Date() } }));
@@ -307,7 +350,7 @@ async function calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase)
   return { vinculado: true, tipo: 'por_visita', vendedor: usr ? usr.nombre : '', pct, base, monto: Math.max(0, r2(variable - basico)), variable, basico, montoVisita: M,
     visitas: hechas, visitasVendidas: vendidas, porVisitas, porMostrador, ventas, notasCredito: nc, avisos };
 }
-router.get('/comision', authSueldos, async (req, res) => {
+router.get('/comision', authSueldosDoc, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo);
     const empId = toObjectId(req.query.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
@@ -382,7 +425,7 @@ function resumir(liqs) {
   return s;
 }
 
-router.get('/liquidaciones', authSueldos, async (req, res) => {
+router.get('/liquidaciones', authSueldosLectura, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
     const out = await conReintento(async () => {
@@ -404,7 +447,7 @@ router.get('/liquidaciones', authSueldos, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
-router.post('/liquidaciones', authSueldos, async (req, res) => {
+router.post('/liquidaciones', authSueldosDoc, async (req, res) => {
   try {
     const b = req.body || {};
     const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
@@ -419,11 +462,13 @@ router.post('/liquidaciones', authSueldos, async (req, res) => {
 });
 
 // Copia el mes anterior para los empleados que todavía no tienen liquidación en este período.
-router.post('/liquidaciones/copiar', authSueldos, async (req, res) => {
+router.post('/liquidaciones/copiar', authSueldosLectura, async (req, res) => {
   try {
     const periodo = validarPeriodo((req.body || {}).periodo);
     const n = await conReintento(async () => {
-      const db = await getDb(); const org = filtroOrg(req);
+      const db = await getDb();
+      const porOrg = await porOrganizacion(db, req, async (req) => {
+      const org = filtroOrg(req);
       const [empleados, existentes] = await Promise.all([
         db.collection('empleados').find(Object.assign({ activo: { $ne: false } }, org)).toArray(),
         db.collection('sueldos_liquidaciones').find(Object.assign({ periodo }, org)).project({ empleadoId: 1 }).toArray()
@@ -444,12 +489,14 @@ router.post('/liquidaciones/copiar', authSueldos, async (req, res) => {
         creadas++;
       }
       return creadas;
+      });
+      return porOrg.reduce((x, y) => x + y, 0);
     });
     res.json({ creadas: n });
   } catch (e) { responder(res, e); }
 });
 
-router.delete('/liquidaciones/:id', authSueldos, async (req, res) => {
+router.delete('/liquidaciones/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     await conReintento(async () => {
@@ -556,18 +603,23 @@ async function armarPagos(db, req, periodo, fechaISO) {
   return filas;
 }
 
-router.get('/pagos-periodo', authSueldos, async (req, res) => {
+router.get('/pagos-periodo', authSueldosLectura, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
     const fecha = req.query.fecha || hoyAR();
-    const filas = await conReintento(async () => armarPagos(await getDb(), req, periodo, fecha));
+    const filas = await conReintento(async () => {
+      const db = await getDb();
+      const nombres = Object.fromEntries((await db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()).map(o => [String(o._id), o.nombre]));
+      const grupos = await porOrganizacion(db, req, async rq => (await armarPagos(db, rq, periodo, fecha)).map(f => Object.assign(f, { sucursal: nombres[String(rq.orgId)] || '' })));
+      return [].concat(...grupos).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    });
     filas.forEach(f => { delete f._interno; });
     res.json({ periodo, fecha, filas });
   } catch (e) { responder(res, e); }
 });
 
 // Paga a varios empleados juntos, desde la misma caja o banco. Cada uno es un egreso aparte.
-router.post('/pagar-lote', authSueldos, async (req, res) => {
+router.post('/pagar-lote', authSueldosLectura, async (req, res) => {
   try {
     const b = req.body || {};
     const periodo = validarPeriodo(b.periodo);
@@ -577,9 +629,18 @@ router.post('/pagar-lote', authSueldos, async (req, res) => {
     if (!items.length) throw err(400, 'No elegiste a nadie para pagar.');
     const out = await conReintento(async () => {
       const db = await getDb();
-      const filas = await armarPagos(db, req, periodo, fechaISO);
+      // Con "Todas las sucursales", cada empleado se paga en la sucursal que tiene asignada (los movimientos de caja quedan en esa sucursal).
+      const orgDe = new Map();
+      if (!req.orgId) (await db.collection('empleados').find({ _id: { $in: items.map(i => toObjectId(i.empleadoId)).filter(Boolean) } }).project({ orgId: 1 }).toArray()).forEach(e => orgDe.set(String(e._id), e.orgId));
+      const grupos = new Map();
+      for (const it of items) { const o = req.orgId || orgDe.get(String(it.empleadoId)) || null; const k = String(o); if (!grupos.has(k)) grupos.set(k, { org: o, items: [] }); grupos.get(k).items.push(it); }
+      const todos = [];
+      for (const g of grupos.values()) {
+      if (!g.org) { g.items.forEach(it => todos.push({ empleadoId: String(it.empleadoId), nombre: String(it.empleadoId), ok: false, error: 'El empleado no tiene sucursal asignada.' })); continue; }
+      const req2 = Object.assign({}, req, { orgId: g.org });
+      const filas = await armarPagos(db, req2, periodo, fechaISO);
       const resultados = [];
-      for (const it of items) {
+      for (const it of g.items) {
         const f = filas.find(x => x.empleadoId === String(it.empleadoId));
         const nombre = f ? f.nombre : String(it.empleadoId);
         try {
@@ -603,14 +664,16 @@ router.post('/pagar-lote', authSueldos, async (req, res) => {
             await col.updateOne({ _id: l._id }, { $set: { comisionHasta: f._interno.comHasta } });
           }
           l.frecuenciaPago = f.frecuencia;
-          await registrarPago(db, req, l, { monto: total, montoComision: com, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota: texto(b.nota) });
+          await registrarPago(db, req2, l, { monto: total, montoComision: com, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota: texto(b.nota) });
           resultados.push({ empleadoId: f.empleadoId, nombre, ok: true, monto: total });
         } catch (e) {
           if (!e.status) throw e;
           resultados.push({ empleadoId: String(it.empleadoId), nombre, ok: false, error: e.message });
         }
       }
-      return resultados;
+      todos.push(...resultados);
+      }
+      return todos;
     });
     res.json({ resultados: out, pagados: out.filter(r => r.ok).length, total: r2(out.filter(r => r.ok).reduce((s, r) => s + r.monto, 0)) });
   } catch (e) { responder(res, e); }
@@ -649,10 +712,10 @@ async function anularPagoLiquidacion(req, res, coleccion, origen, motivoDe, tota
     res.json(out);
   } catch (e) { responder(res, e); }
 }
-router.post('/liquidaciones/:id/pagos/:idx/anular', authSueldos, (req, res) => anularPagoLiquidacion(req, res, 'sueldos_liquidaciones', 'sueldo', l => null, l => l.neto));
-router.post('/colocadores/liquidaciones/:id/pagos/:idx/anular', authSueldos, (req, res) => anularPagoLiquidacion(req, res, 'sueldos_colocadores', 'sueldo_colocador', l => null, l => l.total));
+router.post('/liquidaciones/:id/pagos/:idx/anular', authSueldosDoc, (req, res) => anularPagoLiquidacion(req, res, 'sueldos_liquidaciones', 'sueldo', l => null, l => l.neto));
+router.post('/colocadores/liquidaciones/:id/pagos/:idx/anular', authSueldosDoc, (req, res) => anularPagoLiquidacion(req, res, 'sueldos_colocadores', 'sueldo_colocador', l => null, l => l.total));
 
-router.post('/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
+router.post('/liquidaciones/:id/pagos', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const b = req.body || {};
@@ -669,7 +732,7 @@ router.post('/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
-router.get('/liquidaciones/export', authSueldos, async (req, res) => {
+router.get('/liquidaciones/export', authSueldosLectura, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
     const liqs = await conReintento(async () => (await getDb()).collection('sueldos_liquidaciones').find(Object.assign({ periodo }, filtroOrg(req))).sort({ empleadoNombre: 1 }).toArray());
@@ -689,7 +752,7 @@ router.get('/liquidaciones/export', authSueldos, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Adelantos
 // ---------------------------------------------------------------------------
-router.get('/adelantos', authSueldos, async (req, res) => {
+router.get('/adelantos', authSueldosLectura, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
     if (req.query.estado) match.estado = String(req.query.estado);
@@ -698,7 +761,7 @@ router.get('/adelantos', authSueldos, async (req, res) => {
     res.json(lista);
   } catch (e) { responder(res, e); }
 });
-router.post('/adelantos', authSueldos, async (req, res) => {
+router.post('/adelantos', authSueldosDoc, async (req, res) => {
   try {
     const b = req.body || {};
     const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
@@ -717,7 +780,7 @@ router.post('/adelantos', authSueldos, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 // Anular un adelanto que todavía no se descontó: se devuelve la plata a la misma caja o banco.
-router.delete('/adelantos/:id', authSueldos, async (req, res) => {
+router.delete('/adelantos/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     await conReintento(async () => {
@@ -746,13 +809,13 @@ function rangoPeriodo(p) { return { d0: new Date(p + '-01T00:00:00.000-03:00'), 
 async function tareasTerminadasDelPeriodo(db, req, periodo) {
   const { d0, d1 } = rangoPeriodo(periodo);
   const filas = await db.collection('obras').aggregate([
-    { $match: Object.assign({ 'tareas.estado': 'terminada' }, filtroOrg(req)) }, { $unwind: '$tareas' },
+    { $match: { 'tareas.estado': 'terminada' } }, { $unwind: '$tareas' },
     { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
-    { $project: { numero: 1, cliente: '$cliente.nombre', t: '$tareas' } }
+    { $project: { numero: 1, orgId: 1, cliente: '$cliente.nombre', t: '$tareas' } }
   ]).toArray();
   return filas.map(f => {
     const m2 = Number(f.t.m2Presupuestados || 0), costo = Number(f.t.costoPorM2Aplicado || 0);
-    return { colocadorId: f.t.colocadorId, obraId: f._id, tareaId: f.t._id, obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', m2, costoPorM2: costo, monto: r2(m2 * costo), fecha: f.t.fechaFinReal };
+    return { colocadorId: f.t.colocadorId, obraOrgId: f.orgId || null, obraId: f._id, tareaId: f.t._id, obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', m2, costoPorM2: costo, monto: r2(m2 * costo), fecha: f.t.fechaFinReal };
   });
 }
 
@@ -760,12 +823,22 @@ function isoAR(d) { return new Date(new Date(d).getTime() - 3 * 3600e3).toISOStr
 
 async function armarColocadores(db, req, periodo) {
   const org = filtroOrg(req);
-  const tareas = await tareasTerminadasDelPeriodo(db, req, periodo);
+  const todasTareas = await tareasTerminadasDelPeriodo(db, req, periodo);
+  // Un colocador con sucursal asignada se liquida en esa sucursal (con todas sus tareas, sean de la obra que sean); sin asignar, en la sucursal de la obra.
+  const colsInfo = await db.collection('obras_colocadores').find({}).project({ nombre: 1, orgId: 1, sucursalSueldoId: 1 }).toArray();
+  const infoCol = new Map(colsInfo.map(c => [String(c._id), c]));
+  const orgSel = req.orgId ? String(req.orgId) : null;
+  const tareas = todasTareas.filter(t => {
+    const c = infoCol.get(String(t.colocadorId));
+    if (!orgSel) return true;
+    if (c && c.sucursalSueldoId) return String(c.sucursalSueldoId) === orgSel;
+    return String(t.obraOrgId) === orgSel;
+  });
   const liqs = await db.collection('sueldos_colocadores').find(Object.assign({ periodo }, org)).sort({ createdAt: 1 }).toArray();
   const ids = tareas.map(t => t.tareaId);
   // tarea -> liquidación que la incluye (puede ser de otro mes si la fecha de fin se movió)
   const liqDe = new Map();
-  if (ids.length) (await db.collection('sueldos_colocadores').find(Object.assign({ 'tareas.tareaId': { $in: ids } }, org)).project({ 'tareas.tareaId': 1 }).toArray()).forEach(l => (l.tareas || []).forEach(t => liqDe.set(String(t.tareaId), String(l._id))));
+  if (ids.length) (await db.collection('sueldos_colocadores').find({ 'tareas.tareaId': { $in: ids } }).project({ 'tareas.tareaId': 1 }).toArray()).forEach(l => (l.tareas || []).forEach(t => liqDe.set(String(t.tareaId), String(l._id))));
   const colIds = [...new Set([...tareas.map(t => String(t.colocadorId)), ...liqs.map(l => String(l.colocadorId))])];
   const cols = colIds.length ? await db.collection('obras_colocadores').find({ _id: { $in: colIds.map(toObjectId) } }).project({ nombre: 1 }).toArray() : [];
   const nombre = Object.fromEntries(cols.map(c => [String(c._id), c.nombre]));
@@ -773,7 +846,9 @@ async function armarColocadores(db, req, periodo) {
     const mias = tareas.filter(t => String(t.colocadorId) === cid).map(t => Object.assign({}, t, { liquidacionId: liqDe.get(String(t.tareaId)) || null, liquidada: liqDe.has(String(t.tareaId)) })).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
     const ls = liqs.filter(x => String(x.colocadorId) === cid).map(l => ({ _id: String(l._id), tipo: l.tipo || 'parcial', desde: l.desde || '', hasta: l.hasta || '', total: l.total, totalPagado: l.totalPagado || 0, saldo: r2(l.total - (l.totalPagado || 0)), estado: l.estado, pagos: l.pagos || [], cantTareas: (l.tareas || []).length }));
     return {
-      colocadorId: cid, nombre: nombre[cid] || (liqs.find(x => String(x.colocadorId) === cid) || {}).colocadorNombre || '(desconocido)',
+      colocadorId: cid, sucursalId: String(((infoCol.get(cid) || {}).sucursalSueldoId || (infoCol.get(cid) || {}).orgId || '')), asignado: !!(infoCol.get(cid) || {}).sucursalSueldoId,
+      orgLiq: String(((infoCol.get(cid) || {}).sucursalSueldoId) || orgSel || ((mias.find(t => t.obraOrgId) || {}).obraOrgId) || (infoCol.get(cid) || {}).orgId || ''),
+      nombre: nombre[cid] || (liqs.find(x => String(x.colocadorId) === cid) || {}).colocadorNombre || '(desconocido)',
       m2: r2(mias.reduce((s, t) => s + t.m2, 0)), devengado: r2(mias.reduce((s, t) => s + t.monto, 0)), pendienteLiquidar: r2(mias.filter(t => !t.liquidada).reduce((s, t) => s + t.monto, 0)),
       liquidado: r2(ls.reduce((s, l) => s + l.total, 0)), pagado: r2(ls.reduce((s, l) => s + l.totalPagado, 0)), saldo: r2(ls.reduce((s, l) => s + l.saldo, 0)),
       cerrado: ls.some(l => l.tipo === 'final'), tareas: mias, liquidaciones: ls
@@ -793,7 +868,7 @@ router.get('/colocadores', authSueldosLectura, async (req, res) => {
 // Liquidación parcial (semana): tareas terminadas del mes, todavía sin liquidar, hasta la fecha "hasta".
 // Liquidación final (cierre del mes): todo lo que quede sin liquidar del mes. Cada una es un registro propio
 // con sus pagos. Se puede hacer para un colocador o para todos.
-router.post('/colocadores/liquidar', authSueldos, async (req, res) => {
+router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
   try {
     const b = req.body || {};
     const periodo = validarPeriodo(b.periodo);
@@ -817,7 +892,9 @@ router.post('/colocadores/liquidar', authSueldos, async (req, res) => {
         if (!nuevas.length) continue;
         const docs = nuevas.map(t => ({ obraId: t.obraId, tareaId: t.tareaId, obra: t.obra, tipoTrabajo: t.tipoTrabajo, m2: t.m2, costoPorM2: t.costoPorM2, monto: t.monto, fecha: t.fecha }));
         const suma = r2(docs.reduce((s, t) => s + t.monto, 0));
-        await db.collection('sueldos_colocadores').insertOne({ colocadorId: toObjectId(f.colocadorId), colocadorNombre: f.nombre, periodo, tipo, desde: isoAR(nuevas[0].fecha), hasta: hastaISO, tareas: docs, total: suma, pagos: [], totalPagado: 0, estado: suma > 0 ? 'pendiente' : 'pagada', orgId: req.orgId, createdAt: new Date(), updatedAt: new Date() });
+        const orgLiq = toObjectId(f.orgLiq) || req.orgId;
+        if (!orgLiq) throw err(400, 'Asignale una sucursal a ' + f.nombre + ' (en la lista de colocadores) para poder liquidarlo.');
+        await db.collection('sueldos_colocadores').insertOne({ colocadorId: toObjectId(f.colocadorId), colocadorNombre: f.nombre, periodo, tipo, desde: isoAR(nuevas[0].fecha), hasta: hastaISO, tareas: docs, total: suma, pagos: [], totalPagado: 0, estado: suma > 0 ? 'pendiente' : 'pagada', orgId: orgLiq, createdAt: new Date(), updatedAt: new Date() });
         n++; tareasN += docs.length; total = r2(total + suma);
       }
       return { liquidados: n, tareas: tareasN, total };
@@ -826,7 +903,7 @@ router.post('/colocadores/liquidar', authSueldos, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
-router.post('/colocadores/liquidaciones/:id/pagos', authSueldos, async (req, res) => {
+router.post('/colocadores/liquidaciones/:id/pagos', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const b = req.body || {};
@@ -850,7 +927,7 @@ router.post('/colocadores/liquidaciones/:id/pagos', authSueldos, async (req, res
 });
 
 // Deshacer una liquidación sin pagos: las tareas vuelven a quedar pendientes de liquidar.
-router.delete('/colocadores/liquidaciones/:id', authSueldos, async (req, res) => {
+router.delete('/colocadores/liquidaciones/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     await conReintento(async () => {
@@ -861,6 +938,69 @@ router.delete('/colocadores/liquidaciones/:id', authSueldos, async (req, res) =>
       await db.collection('sueldos_colocadores').deleteOne({ _id: id });
     });
     res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
+// Sucursal de cada empleado y colocador (asignación y traslado del historial)
+// ---------------------------------------------------------------------------
+router.get('/sucursales', authSueldosLectura, async (req, res) => {
+  try {
+    const db = await getDb();
+    const protegido = req.usuario && req.usuario.rol && req.usuario.rol.protegido;
+    const q = protegido ? {} : { _id: { $in: ((req.usuario && req.usuario.orgIds) || []).map(toObjectId).filter(Boolean) } };
+    const lista = await conReintento(async () => db.collection('organizaciones').find(q).project({ nombre: 1 }).sort({ nombre: 1 }).toArray());
+    res.json(lista.map(o => ({ _id: String(o._id), nombre: o.nombre })));
+  } catch (e) { responder(res, e); }
+});
+function regexNombre(n) { return String(n || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// Asigna la sucursal de un empleado o colocador y, si se pide, mueve con él lo ya registrado: liquidaciones, adelantos y los movimientos de caja/banco de esos pagos.
+router.post('/mover-sucursal', authSueldosLectura, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const tipo = b.tipo === 'colocador' ? 'colocador' : 'empleado';
+    const id = toObjectId(b.id), nuevo = toObjectId(b.orgId);
+    if (!id || !nuevo) throw err(400, 'Faltan datos.');
+    const protegido = req.usuario && req.usuario.rol && req.usuario.rol.protegido;
+    if (!protegido && !((req.usuario && req.usuario.orgIds) || []).some(o => String(o) === String(nuevo))) throw err(403, 'No tenés acceso a esa sucursal.');
+    const mover = b.moverHistorial !== false;
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      if (!(await db.collection('organizaciones').findOne({ _id: nuevo }))) throw err(404, 'Sucursal no encontrada.');
+      const ahora = new Date();
+      let nombre, anteriores = new Set(), liqCol, r = { liquidaciones: 0, adelantos: 0, movimientos: 0 };
+      if (tipo === 'empleado') {
+        const e = await db.collection('empleados').findOne({ _id: id });
+        if (!e) throw err(404, 'Empleado no encontrado.');
+        nombre = e.nombre; liqCol = 'sueldos_liquidaciones'; if (e.orgId) anteriores.add(String(e.orgId));
+        await db.collection('empleados').updateOne({ _id: id }, { $set: { orgId: nuevo, updatedAt: ahora } });
+      } else {
+        const c = await db.collection('obras_colocadores').findOne({ _id: id });
+        if (!c) throw err(404, 'Colocador no encontrado.');
+        nombre = c.nombre; liqCol = 'sueldos_colocadores';
+        await db.collection('obras_colocadores').updateOne({ _id: id }, { $set: { sucursalSueldoId: nuevo, updatedAt: ahora } });
+      }
+      if (!mover) return r;
+      const campo = tipo === 'empleado' ? 'empleadoId' : 'colocadorId';
+      const liqs = await db.collection(liqCol).find({ [campo]: id }).project({ orgId: 1, pagos: 1 }).toArray();
+      liqs.forEach(l => l.orgId && anteriores.add(String(l.orgId)));
+      const movIds = [];
+      liqs.forEach(l => (l.pagos || []).forEach(p => p.movimientoId && movIds.push(p.movimientoId)));
+      r.liquidaciones = (await db.collection(liqCol).updateMany({ [campo]: id, orgId: { $ne: nuevo } }, { $set: { orgId: nuevo, updatedAt: ahora } })).modifiedCount;
+      const ors = [];
+      if (movIds.length) ors.push({ _id: { $in: movIds } }, { reversaDe: { $in: movIds } });
+      const n = regexNombre(nombre);
+      const orgsViejas = [...anteriores].map(toObjectId).filter(Boolean);
+      if (tipo === 'empleado') {
+        r.adelantos = (await db.collection('sueldos_adelantos').updateMany({ empleadoId: id, orgId: { $ne: nuevo } }, { $set: { orgId: nuevo } })).modifiedCount;
+        if (orgsViejas.length) ors.push({ orgId: { $in: orgsViejas }, origen: { $in: ['sueldo', 'sueldos', 'sueldo_adelanto', 'sueldo_adelanto_anulado', 'anulacion_pago'] }, motivo: { $regex: '^(Anulación — )?(Sueldo|Adelanto de sueldo|Anulación adelanto de sueldo) ' + n + '( |$)' } });
+      } else if (orgsViejas.length) {
+        ors.push({ orgId: { $in: orgsViejas }, origen: { $in: ['sueldo_colocador', 'anulacion_pago'] }, motivo: { $regex: '^(Anulación — )?Colocación ' + n + ' ' } });
+      }
+      if (ors.length) r.movimientos = (await db.collection('tesoreria_movimientos').updateMany({ $or: ors, orgId: { $ne: nuevo } }, { $set: { orgId: nuevo } })).modifiedCount;
+      return r;
+    });
+    res.json(out);
   } catch (e) { responder(res, e); }
 });
 
