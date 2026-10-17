@@ -113,9 +113,9 @@
         <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="kSal">—</div></div>
       </div>
       <div class="sectores" id="sectores"></div>
-      <div class="panel hidden" id="pLiq"></div>
-      <div class="panel hidden" id="pPago"></div>
-      <div class="tabla"><table><thead><tr><th>Empleado</th><th class="n" title="Sueldo + adicionales + comisiones + aguinaldo (pasá el mouse por cada importe para ver el detalle)">Bruto</th><th class="n" title="Cargas sociales a cargo de la empresa">Cargas</th><th class="n" title="Sueldo + adicionales + aguinaldo + cargas sociales">Costo empresa</th><th class="n">Descuentos</th><th class="n">Adelantos</th><th class="n">Neto</th><th class="n">Pagado</th><th>Estado</th><th></th></tr></thead><tbody id="tLiq"></tbody></table></div>
+      <div class="tabla"><table><thead><tr><th>Empleado</th><th class="n" title="Sueldo + adicionales + comisiones + aguinaldo - descuentos - adelantos descontados">Neto a pagar</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th></th></tr></thead><tbody id="tLiq"></tbody></table></div>
+      <div class="panel hidden" id="pLiq" style="margin-top:14px"></div>
+      <div class="panel hidden" id="pPago" style="margin-top:14px"></div>
     </div>
 
     <div class="vista hidden" id="v-pag">
@@ -147,8 +147,8 @@
         <div class="kpi"><div class="et">Pagado</div><div class="val" id="cPag">—</div></div>
         <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="cSal">—</div></div>
       </div>
-      <div class="panel hidden" id="pCol"></div>
       <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Sucursal</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
+      <div class="panel hidden" id="pCol" style="margin-top:14px"></div>
       </div>
       <div id="col-esp" class="hidden">
         <div class="tb-filtros">
@@ -183,7 +183,7 @@
 const BASE = '/api/sueldos';
 let TOKEN = localStorage.getItem('obras_admin_token') || '';
 let ORG = localStorage.getItem('obras_org_activo') || '';
-let SUCURSALES = [], VENDEDORES = [], USUARIOS = [], COM = null, EMPLEADOS = [], CUENTAS = {cajas:[], bancos:[]}, LIQ = null;
+let LIQ_ABIERTO = {}, SUCURSALES = [], VENDEDORES = [], USUARIOS = [], COM = null, EMPLEADOS = [], CUENTAS = {cajas:[], bancos:[]}, LIQ = null;
 const SECTORES = {obra:'Obra', produccion:'Producción', administracion:'Administración', ventas:'Ventas', logistica:'Logística', otro:'Otros'};
 const FRECUENCIAS = {semanal:'Semanal', quincenal:'Quincenal', mensual:'Mensual'};
 const COMISION_TIPO = {porcentaje:'Porcentaje de ventas', por_visita:'Por visita + ventas de mostrador'};
@@ -254,14 +254,16 @@ async function cargarLiq(){
   $('sectores').innerHTML = Object.keys(R.porSector).map(k => (SECTORES[k] || k) + ' <b>' + pesos(R.porSector[k]) + '</b>').join(' · ') || '';
   let h = LIQ.liquidaciones.map(l => {
     const [t, c] = ESTADO[l.estado] || [l.estado, ''];
-    return '<tr><td>' + escapeHtml(l.empleadoNombre) + ' <span class="chip">' + escapeHtml(SECTORES[l.sector] || l.sector) + '</span></td><td class="n" title="Sueldo ' + pesos(l.sueldo) + ' · Adicionales ' + pesos(l.adicionales) + ' · Comisiones ' + pesos(l.comisiones) + ' · Aguinaldo ' + pesos(l.aguinaldo) + '">' + pesos(l.bruto) + '</td><td class="n">' + pesos(l.cargasSociales) + '</td><td class="n"><b>' + pesos(l.costoEmpresa) + '</b></td><td class="n">' + pesos(l.descuentos) + '</td><td class="n">' + pesos(l.adelantosDescontados) + '</td><td class="n"><b>' + pesos(l.neto) + '</b></td><td class="n">' + pesos(l.totalPagado) + '</td><td><span class="chip ' + c + '">' + t + '</span></td><td class="acc">' +
+    const ab = !!LIQ_ABIERTO[l._id], falta = Math.max(0, Math.round((l.neto - (l.totalPagado || 0)) * 100) / 100);
+    const det = ab ? '<tr class="sin"><td colspan="6" style="padding:8px 16px;font-size:13px" class="muted">Sueldo <b>' + pesos(l.sueldo) + '</b> · Adicionales <b>' + pesos(l.adicionales) + '</b>' + (l.comisiones ? ' · Comisiones <b>' + pesos(l.comisiones) + '</b>' : '') + (l.aguinaldo ? ' · Aguinaldo <b>' + pesos(l.aguinaldo) + '</b>' : '') + ' &nbsp;|&nbsp; Bruto <b>' + pesos(l.bruto) + '</b> · Descuentos <b>' + pesos(l.descuentos) + '</b> · Adelantos descontados <b>' + pesos(l.adelantosDescontados) + '</b> &nbsp;|&nbsp; Cargas sociales <b>' + pesos(l.cargasSociales) + '</b> · Costo para la empresa <b>' + pesos(l.costoEmpresa) + '</b></td></tr>' : '';
+    return '<tr class="clic" onclick="LIQ_ABIERTO[\'' + l._id + '\'] = !LIQ_ABIERTO[\'' + l._id + '\']; cargarLiq()" title="Ver el detalle del cálculo"><td>' + (ab ? '▾ ' : '▸ ') + escapeHtml(l.empleadoNombre) + ' <span class="chip">' + escapeHtml(SECTORES[l.sector] || l.sector) + '</span></td><td class="n"><b>' + pesos(l.neto) + '</b></td><td class="n">' + pesos(l.totalPagado) + '</td><td class="n">' + pesos(falta) + '</td><td><span class="chip ' + c + '">' + t + '</span></td><td class="acc" onclick="event.stopPropagation()">' +
       (l.estado !== 'pagada' ? '<button data-iconizado="1" class="btn" onclick="formPago(\'' + l._id + '\')">Pagar</button> ' : '') +
       (l.totalPagado > 0 || (l.pagos || []).length ? '<button data-iconizado="1" class="btn secondary" onclick="verPagosLiq(\'' + l._id + '\')" title="Ver los pagos y anular alguno">Pagos</button> ' : '') +
       '<button data-iconizado="1" class="btn secondary" onclick="formLiq(\'' + l.empleadoId + '\')">Editar</button> ' +
-      (!(l.totalPagado > 0) ? '<button data-iconizado="1" class="btn secondary" onclick="borrarLiq(\'' + l._id + '\')" title="Borrar esta liquidación">✕</button>' : '') + '</td></tr>';
+      (!(l.totalPagado > 0) ? '<button data-iconizado="1" class="btn secondary" onclick="borrarLiq(\'' + l._id + '\')" title="Borrar esta liquidación">✕</button>' : '') + '</td></tr>' + det;
   }).join('');
-  h += LIQ.sinCargar.map(e => '<tr class="sin"><td>' + escapeHtml(e.nombre) + ' <span class="chip">' + escapeHtml(SECTORES[e.sector] || e.sector) + '</span></td><td colspan="8">Sin cargar este mes</td><td class="acc"><button data-iconizado="1" class="btn" onclick="formLiq(\'' + e._id + '\')">Cargar</button></td></tr>').join('');
-  $('tLiq').innerHTML = h || '<tr><td colspan="10" class="vacio">Todavía no hay empleados. Cargalos en la solapa Empleados.</td></tr>';
+  h += LIQ.sinCargar.map(e => '<tr class="sin"><td>' + escapeHtml(e.nombre) + ' <span class="chip">' + escapeHtml(SECTORES[e.sector] || e.sector) + '</span></td><td colspan="4">Sin cargar este mes</td><td class="acc"><button data-iconizado="1" class="btn" onclick="formLiq(\'' + e._id + '\')">Cargar</button></td></tr>').join('');
+  $('tLiq').innerHTML = h || '<tr><td colspan="6" class="vacio">Todavía no hay empleados. Cargalos en la solapa Empleados.</td></tr>';
 }
 function campo(id, etiqueta, valor, extra){ return '<div><label>' + etiqueta + '</label><input type="number" min="0" step="any" id="' + id + '" value="' + (valor || 0) + '" oninput="previewLiq()" ' + (extra || '') + '></div>'; }
 async function formLiq(empId){
@@ -324,7 +326,7 @@ function verPagosLiq(id){
   const l = LIQ.liquidaciones.find(x => x._id === id);
   $('pLiq').classList.add('hidden');
   $('pPago').innerHTML = '<h3>Pagos de ' + escapeHtml(l.empleadoNombre) + ' · ' + escapeHtml(l.periodo || '') + '</h3>' +
-    ((l.pagos || []).length ? '<table style="width:100%"><thead><tr><th>Fecha</th><th class="n">Monto</th><th>Nota</th><th></th></tr></thead><tbody>' + l.pagos.map((p, i) => '<tr' + (p.anulado ? ' style="opacity:.55;text-decoration:line-through"' : '') + '><td>' + fmtF(p.fecha) + '</td><td class="n">' + pesos(p.monto) + '</td><td>' + escapeHtml(p.nota || '') + (p.anulado ? ' <b style="color:#b91c1c;text-decoration:none;display:inline-block">ANULADO</b>' : '') + '</td><td class="acc">' + (p.anulado ? '' : '<button class="btn secondary" onclick="anularPagoLiq(\'' + id + '\',' + i + ',false)">Anular pago</button>') + '</td></tr>').join('') + '</tbody></table>' : '<p class="muted">Sin pagos.</p>') +
+    ((l.pagos || []).length ? '<div class="tabla"><table style="width:100%"><thead><tr><th>Fecha</th><th class="n">Monto</th><th>Nota</th><th></th></tr></thead><tbody>' + l.pagos.map((p, i) => '<tr' + (p.anulado ? ' style="opacity:.55;text-decoration:line-through"' : '') + '><td>' + fmtF(p.fecha) + '</td><td class="n">' + pesos(p.monto) + '</td><td>' + escapeHtml(p.nota || '') + (p.anulado ? ' <b style="color:#b91c1c;text-decoration:none;display:inline-block">ANULADO</b>' : '') + '</td><td class="acc">' + (p.anulado ? '' : '<a href="#" style="color:#b91c1c;font-weight:700" onclick="anularPagoLiq(\'' + id + '\',' + i + ',false);return false">Anular pago</a>') + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted">Sin pagos.</p>') +
     '<div class="acciones"><button data-iconizado="1" class="btn secondary" onclick="$(\'pPago\').classList.add(\'hidden\')">Cerrar</button><span class="muted">Anular un pago devuelve la plata a la caja o banco y la liquidación vuelve a quedar con saldo.</span></div>';
   $('pPago').classList.remove('hidden'); $('pPago').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -465,7 +467,7 @@ async function pagarEsp(){
 }
 function verPagosEsp(id){
   const x = ESP.find(y => y._id === id);
-  $('pEsp').innerHTML = '<h3>Pagos · ' + escapeHtml(x.colocadorNombre) + ' · ' + escapeHtml(x.obra || x.descripcion) + '</h3><table style="width:100%"><thead><tr><th>Fecha</th><th class="n">Monto</th><th>Nota</th><th></th></tr></thead><tbody>' + (x.pagos || []).map((p, i) => '<tr' + (p.anulado ? ' style="opacity:.55;text-decoration:line-through"' : '') + '><td>' + fmtF(p.fecha) + '</td><td class="n">' + pesos(p.monto) + '</td><td>' + escapeHtml(p.nota || '') + (p.anulado ? ' <b style="color:#b91c1c;text-decoration:none;display:inline-block">ANULADO</b>' : '') + '</td><td class="acc">' + (p.anulado ? '' : '<button class="btn secondary" onclick="anularPagoEsp(\'' + id + '\',' + i + ')">Anular pago</button>') + '</td></tr>').join('') + '</tbody></table>' +
+  $('pEsp').innerHTML = '<h3>Pagos · ' + escapeHtml(x.colocadorNombre) + ' · ' + escapeHtml(x.obra || x.descripcion) + '</h3><div class="tabla"><table style="width:100%"><thead><tr><th>Fecha</th><th class="n">Monto</th><th>Nota</th><th></th></tr></thead><tbody>' + (x.pagos || []).map((p, i) => '<tr' + (p.anulado ? ' style="opacity:.55;text-decoration:line-through"' : '') + '><td>' + fmtF(p.fecha) + '</td><td class="n">' + pesos(p.monto) + '</td><td>' + escapeHtml(p.nota || '') + (p.anulado ? ' <b style="color:#b91c1c;text-decoration:none;display:inline-block">ANULADO</b>' : '') + '</td><td class="acc">' + (p.anulado ? '' : '<a href="#" style="color:#b91c1c;font-weight:700" onclick="anularPagoEsp(\'' + id + '\',' + i + ');return false">Anular pago</a>') + '</td></tr>').join('') + '</tbody></table></div>' +
     '<div class="acciones"><button data-iconizado="1" class="btn secondary" onclick="cerrarPEsp()">Cerrar</button></div>';
   $('pEsp').classList.remove('hidden'); $('pEsp').scrollIntoView({behavior:'smooth', block:'nearest'});
 }
