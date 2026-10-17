@@ -379,7 +379,7 @@ router.get('/planes-tarjeta', authAdmin, async (req, res) => {
       .find(Object.assign({}, filtroOrg(req), { activo: { $ne: false } })).sort({ tarjeta: 1, cuotas: 1 }).toArray());
     const hoyAR = new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
     res.json(lista.filter(p => !p.vigenteHasta || hoyAR <= p.vigenteHasta)
-      .map(p => ({ _id: p._id, nombre: `${p.tarjeta} — ${p.nombre}`, cuotas: p.cuotas || 1, recargoPorcentaje: Number(p.recargoPorcentaje) || 0 })));
+      .map(p => ({ _id: p._id, tarjeta: p.tarjeta, nombre: `${p.tarjeta} — ${p.nombre}`, cuotas: p.cuotas || 1, recargoPorcentaje: Number(p.recargoPorcentaje) || 0 })));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
