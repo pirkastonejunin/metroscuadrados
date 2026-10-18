@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot de WhatsApp - Piedra Negra</title>
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{--bg:#f3f4f6;--card:#fff;--text:#171a1f;--muted:#6b7280;--border:#e5e7eb;--accent:#ff5a36;--in:#fff;--out:#dcf8c6;--bot:#e8e4ff;--danger:#c53030;--ok:#1f8a5f}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121316;--card:#1c1e22;--text:#f4f5f6;--muted:#9aa0a8;--border:#2c2f34;--accent:#ff7a56;--in:#26292e;--out:#1d3a2a;--bot:#2a2547}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1200px;margin:0 auto;padding:16px} h1{font-size:22px;margin:0 0 4px} .muted{color:var(--muted);font-size:13px}
+  .aviso{background:#fff7e0;color:#7a5b00;border-radius:10px;padding:8px 12px;margin:10px 0;font-size:13px} .err{color:var(--danger)}
+  .grid{display:grid;grid-template-columns:320px 1fr;gap:12px;margin-top:12px} @media(max-width:800px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .lista{max-height:70vh;overflow:auto} .it{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer} .it:hover,.it.sel{background:var(--bg)}
+  .it b{display:block} .pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;background:var(--bg);margin-left:4px}
+  .pill.bot{background:var(--bot)} .pill.humano{background:var(--out)} .pill.derivado,.pill.aceptado{background:#ffe7de;color:#8a2d12}
+  .hdr{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+  .msgs{padding:12px;max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:6px}
+  .m{max-width:75%;padding:7px 10px;border-radius:10px;font-size:14px;white-space:pre-wrap;background:var(--in);border:1px solid var(--border)} .m.out{align-self:flex-end;background:var(--out)} .m.bot{align-self:flex-end;background:var(--bot)}
+  .m small{display:block;color:var(--muted);font-size:10px;margin-top:2px}
+  button{border:0;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;background:var(--text);color:var(--bg)} button.sec{background:transparent;color:var(--text);border:1px solid var(--border)}
+  .env{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border)} .env input{flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:14px}
+  .datos{padding:8px 12px;font-size:13px;border-bottom:1px solid var(--border);background:var(--bg)}
+</style>
+</head>
+<body><div class="wrap">
+<h1>Bot de WhatsApp</h1>
+<div class="muted">Conversaciones que atiende el bot y cuáles pasaron a un asesor. Si un asesor escribe desde el celular, el bot deja de contestar en esa conversación.</div>
+<div id="estado"></div><div id="msg" class="err"></div>
+<div class="grid">
+  <div class="card"><div class="hdr"><select id="fEst" onchange="cargar()"><option value="">Todas</option><option value="bot">Con el bot</option><option value="derivado">Derivadas (esperan respuesta)</option><option value="aceptado">Aceptaron asesor</option><option value="humano">Con asesor</option><option value="pausado">Pausadas</option></select></div><div class="lista" id="lista"></div></div>
+  <div class="card" id="det"><div style="padding:24px" class="muted">Elegí una conversación.</div></div>
+</div></div>
+<script>
+let TOKEN = localStorage.getItem('obras_admin_token') || '', ORG = localStorage.getItem('obras_org_activo') || '', OP = localStorage.getItem('obras_org_operar') || '', SEL = null;
+function H(x){ const h = Object.assign({'x-admin-token':TOKEN}, x||{}); if (ORG) h['x-org-id'] = ORG; if (ORG==='todas' && OP) h['x-org-operar'] = OP; return h; }
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ETQ = {bot:'Bot',derivado:'Derivada',aceptado:'Aceptó asesor',humano:'Asesor',pausado:'Pausada'};
+async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d; }
+const hora = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'});
+async function init(){
+  if (!TOKEN){ document.getElementById('msg').textContent = 'Entrá primero al sistema con tu usuario.'; return; }
+  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'bot'); }catch(e){ document.getElementById('msg').textContent = e.message; return; }
+  await cargar(); setInterval(()=>{ cargar(); if (SEL) abrir(SEL, true); }, 15000);
+}
+async function cargar(){
+  try{ const q = document.getElementById('fEst').value; const d = await api('/api/bot/conversaciones' + (q?'?estado='+q:''), {headers:H()});
+    document.getElementById('estado').innerHTML = (d.botActivo ? '' : '<div class="aviso">El bot está APAGADO (BOT_ACTIVO=0 en Render): recibe mensajes pero no contesta.</div>') + (d.modoPrueba ? '<div class="aviso">Modo prueba: faltan WA_TOKEN / WA_PHONE_ID en Render, el bot no envía mensajes reales.</div>' : '');
+    document.getElementById('lista').innerHTML = d.items.map(c=>`<div class="it${SEL===c._id?' sel':''}" onclick="abrir('${c._id}')"><b>${esc(c.nombre||c.tel)}<span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span></b><span class="muted">${esc(c.resumen||c.tel)}</span><div class="muted">${hora(c.updatedAt)}</div></div>`).join('') || '<div style="padding:16px" class="muted">Todavía no hay conversaciones.</div>';
+  }catch(e){ document.getElementById('msg').textContent = e.message; }
+}
+async function abrir(id, silencioso){
+  SEL = id;
+  try{ const d = await api('/api/bot/conversaciones/'+id, {headers:H()}); const c = d.conversacion, dt = c.datos||{};
+    const keep = document.getElementById('txt') ? document.getElementById('txt').value : '';
+    document.getElementById('det').innerHTML = `<div class="hdr"><div><b>${esc(c.nombre||'')}</b> <span class="muted">+${esc(c.tel)}</span><span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span></div>
+      <div><button class="sec" onclick="est('${id}','humano')">Tomar yo</button> <button class="sec" onclick="est('${id}','bot')">Devolver al bot</button> <button class="sec" onclick="est('${id}','pausado')">Pausar</button></div></div>
+      <div class="datos">${c.resumen?esc(c.resumen)+'<br>':''}Producto: <b>${esc(dt.producto||'-')}</b> · Medidas: <b>${esc(dt.medidas||'-')}</b> · Estilo: <b>${esc(dt.estilo||'-')}</b></div>
+      <div class="msgs" id="ms">${d.mensajes.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+m.tipo+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('')}</div>
+      <div class="env"><input id="txt" placeholder="Escribir como asesor (el bot deja de contestar)" onkeydown="if(event.key==='Enter')enviar('${id}')"><button onclick="enviar('${id}')">Enviar</button></div>`;
+    document.getElementById('txt').value = keep; const ms = document.getElementById('ms'); if (!silencioso) ms.scrollTop = ms.scrollHeight;
+    if (!silencioso) cargar();
+  }catch(e){ document.getElementById('msg').textContent = e.message; }
+}
+async function est(id, e){ try{ await api(`/api/bot/conversaciones/${id}/estado`, {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({estado:e})}); await abrir(id); }catch(x){ document.getElementById('msg').textContent = x.message; } }
+async function enviar(id){ const t = document.getElementById('txt'); const v = t.value.trim(); if (!v) return; try{ await api(`/api/bot/conversaciones/${id}/enviar`, {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:v})}); t.value=''; await abrir(id); }catch(x){ document.getElementById('msg').textContent = x.message; } }
+init();
+</script></body></html>

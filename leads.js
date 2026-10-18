@@ -67,11 +67,14 @@ async function guardarLeads(db, orgId, leads, origen) {
   for (const l of leads) {
     if (!l.tel10) { sinTelefono++; continue; }
     const c = cli.get(l.tel10);
+    const ins = { orgId, estado: l.estadoOrigen && ESTADOS.includes(l.estadoOrigen) ? l.estadoOrigen : 'Nuevo', notas: '', createdAt: ahora, origen };
+    const campos = Object.assign({}, l); if (campos.creadoOrigen === undefined) { delete campos.creadoOrigen; ins.creadoOrigen = ahora; }
+    if (origen === 'bot') for (const k of ['nombre', 'resumen', 'campana', 'anuncio']) if (!campos[k]) delete campos[k]; // el bot no pisa con vacíos lo que ya se sabe
     ops.push({ updateOne: {
       filter: { orgId, tel10: l.tel10 },
       update: {
-        $set: Object.assign({}, l, { clienteId: c ? c._id : null, clienteNombre: nombreCli(c), updatedAt: ahora }),
-        $setOnInsert: { orgId, estado: l.estadoOrigen && ESTADOS.includes(l.estadoOrigen) ? l.estadoOrigen : 'Nuevo', notas: '', createdAt: ahora, origen }
+        $set: Object.assign(campos, { clienteId: c ? c._id : null, clienteNombre: nombreCli(c), updatedAt: ahora }),
+        $setOnInsert: ins
       }, upsert: true } });
   }
   for (let i = 0; i < ops.length; i += 500) {
@@ -239,5 +242,6 @@ router.patch('/:id', auth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.guardarLeads = guardarLeads;
 module.exports.parsearCSV = parsearCSV;
 module.exports.fechaAR = fechaAR;
