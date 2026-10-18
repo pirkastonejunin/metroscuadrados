@@ -14,14 +14,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereAlgunModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const leads = require('./leads');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 let mongoClient;
 async function getDb() { if (!mongoClient) { const c = new MongoClient(process.env.MONGODB_URI); await c.connect(); mongoClient = c; } return mongoClient.db(DB_NAME); }
-const auth = [authUsuario, resolverOrg, requiereModulo('visitas')];
+const auth = [authUsuario, resolverOrg, requiereAlgunModulo('crm', 'visitas')];
 const COL_C = 'wa_conversaciones', COL_M = 'wa_mensajes';
 const digitos = (s) => String(s || '').replace(/\D/g, '');
 const orgBot = () => { const v = process.env.BOT_ORG_ID || process.env.AZUITE_ORG_ID || ''; return /^[0-9a-f]{24}$/i.test(v) ? new ObjectId(v) : null; };

@@ -139,6 +139,7 @@ function normalizarTexto(v) { return v == null ? '' : String(v).trim(); }
 // ---------------------------------------------------------------------
 const MODULOS = [
   { key: 'visitas', label: 'Visitas', descripcion: 'Alta de visitas, presupuestos, confirmar obra, reportes de embudo.' },
+  { key: 'crm', label: 'CRM y Bot de WhatsApp', descripcion: 'Pantalla CRM (leads entrantes de WhatsApp, oportunidades y campañas) y el Bot de WhatsApp. Quien ya tiene Visitas también lo ve.' },
   { key: 'obras', label: 'Obras', descripcion: 'Asignar colocador, seguimiento de tareas, reportes de m² y pago.' },
   { key: 'costos', label: 'Costos de Producción', descripcion: 'Insumos con costo variable en el tiempo, recetas por producto (por unidad o por m²) y cálculo de costo de producción.' },
   { key: 'fabrica', label: 'Producción — Carga de fábrica', descripcion: 'Carga diaria de lo fabricado (productos y paquetes) para generar el ingreso de stock a Dux. Pensado para el personal de fábrica — no da acceso al resto de Costos de Producción.' },
@@ -304,6 +305,13 @@ function tieneModulo(usuario, moduloKey) {
   return !!(usuario && usuario.rol && (usuario.rol.protegido || (usuario.rol.modulos || []).includes(moduloKey)));
 }
 
+// Deja pasar a quien tenga CUALQUIERA de los módulos (p. ej. CRM: lo ve quien tiene 'crm' o el viejo 'visitas').
+function requiereAlgunModulo(...keys) {
+  return (req, res, next) => {
+    if (!keys.some(k => tieneModulo(req.usuario, k))) return res.status(403).json({ error: 'Tu usuario no tiene acceso a este módulo. Pedile a un administrador que te lo habilite.' });
+    next();
+  };
+}
 function requiereModulo(moduloKey) {
   return (req, res, next) => {
     if (!tieneModulo(req.usuario, moduloKey)) {
@@ -897,6 +905,7 @@ router.delete('/:id', authAdmin, async (req, res) => {
 module.exports = router;
 module.exports.authUsuario = authUsuario;
 module.exports.requiereModulo = requiereModulo;
+module.exports.requiereAlgunModulo = requiereAlgunModulo;
 module.exports.requiereVendedorPropio = requiereVendedorPropio;
 module.exports.tieneModulo = tieneModulo;
 module.exports.MODULOS = MODULOS;

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRM - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+  :root{--bg:#f3f4f6;--card:#fff;--text:#171a1f;--muted:#6b7280;--border:#e5e7eb;--accent:#ff5a36;--accent-soft:#ffe7de;--violet:#7c3aed;--danger:#c53030;--ok:#1f8a5f;--ok-soft:#e1f5ea;--warn-soft:#fff4d6;--shadow:0 1px 2px rgba(17,20,24,.04),0 10px 24px -14px rgba(17,20,24,.18)}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121316;--card:#1c1e22;--text:#f4f5f6;--muted:#9aa0a8;--border:#2c2f34;--accent:#ff7a56;--accent-soft:#3a241f;--ok-soft:#173328;--warn-soft:#3a2f14;--shadow:none}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:18px}
+  .hero{background:linear-gradient(120deg,#6d28d9 0%,#7c3aed 45%,#3b82f6 100%);color:#fff;border-radius:18px;padding:20px 22px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;box-shadow:var(--shadow)}
+  .hero h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.02em} .hero p{margin:4px 0 0;opacity:.95;font-size:13.5px;max-width:600px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)} .kpi b{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em} .kpi span{font-size:12px;color:var(--muted);font-weight:600} .kpi i{font-style:normal;float:right;font-size:20px}
+  .tabs{display:inline-flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:4px;margin-bottom:14px;flex-wrap:wrap;box-shadow:var(--shadow)}
+  .tabs button{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:9px;font:700 13px "Manrope",sans-serif;cursor:pointer} .tabs button.on{background:var(--violet);color:#fff}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow);margin-bottom:14px}
+  .hdr{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between} .hdr b{font-size:14px;font-weight:800}
+  .pad{padding:14px} .muted{color:var(--muted);font-size:12.5px} .err{color:var(--danger);font-size:13px;margin:6px 0;font-weight:600}
+  .filtros{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border);align-items:center}
+  input[type=text],input[type=date],input[type=datetime-local],input[type=file],select,textarea{padding:9px 11px;border:1px solid var(--border);border-radius:10px;font:500 13.5px "Manrope",sans-serif;background:var(--bg);color:var(--text);width:100%} .filtros input[type=text]{flex:1;min-width:180px;width:auto} .filtros select{width:auto}
+  .row{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border)} .row:hover{background:var(--bg)}
+  .av{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px}
+  .row b{font-size:14px} .row .res{font-size:13px;margin-top:2px} .row .meta{font-size:12px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .acc{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .tag{display:inline-block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:600}
+  .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;background:var(--bg);color:var(--muted)}
+  .pill.cli,.pill.convertida{background:var(--ok-soft);color:var(--ok)} .pill.ads,.pill.activa{background:var(--accent-soft);color:#c2410c} .pill.venc{background:#fde2e2;color:var(--danger)} .pill.op{background:#ede9fe;color:#6d28d9}
+  button.b{border:0;border-radius:10px;padding:9px 14px;font:700 13px "Manrope",sans-serif;cursor:pointer;background:var(--violet);color:#fff} button.b.sec{background:var(--card);color:var(--text);border:1px solid var(--border)} button.b.mini{padding:6px 11px;font-size:12px} button.b.del{background:var(--card);color:var(--danger);border:1px solid var(--border)} .hero button.b{background:rgba(255,255,255,.22);backdrop-filter:blur(6px)}
+  .camp{display:grid;grid-template-columns:minmax(0,1.7fr) repeat(4,minmax(54px,.6fr)) minmax(90px,1fr);gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px} .camp.h{font-size:11.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em} .camp .n{text-align:right;font-weight:700} .camp .nom{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+  .money{color:var(--ok);font-weight:800}
+  .mes{display:flex;align-items:flex-end;gap:10px;height:150px;padding:14px} .mes div{flex:1;text-align:center;font-size:11px;color:var(--muted);font-weight:700} .mes .col{background:#ede9fe;border-radius:8px 8px 0 0;position:relative;margin-bottom:4px} .mes .col i{display:block;position:absolute;left:0;right:0;bottom:0;background:var(--violet);border-radius:8px 8px 0 0} .mes b{display:block;color:var(--text);font-size:12px}
+  .vacio{padding:34px 16px;text-align:center;color:var(--muted)} .vacio span{font-size:34px;display:block;margin-bottom:6px}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:50;overflow:auto} .modal.on{display:flex} .modal .card{max-width:640px;width:100%;margin:auto}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px} .g2 .full{grid-column:1/-1} @media(max-width:700px){.g2{grid-template-columns:1fr}.camp{grid-template-columns:minmax(0,1fr) repeat(3,50px)}.camp .hide{display:none}}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px;font-weight:700}
+  .hidden{display:none!important} details.imp summary{cursor:pointer;font-weight:800;font-size:14px;padding:14px;list-style:none} details.imp summary::-webkit-details-marker{display:none}
+</style>
+</head>
+<body><div class="wrap">
+<div class="hero"><div><h1>CRM</h1><p>Todo el recorrido del cliente: lo que entra por WhatsApp y anuncios, lo que decidís seguir, y cuánto termina comprando cada campaña.</p></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="b" onclick="nuevaOp()">+ Nueva oportunidad</button><button class="b" onclick="sync(false)">↻ Sincronizar Azuite</button></div></div>
+<div id="msg" class="err"></div><div id="azRes" class="muted"></div>
+<div class="kpis" id="kpis"></div>
+<div class="tabs" id="tabs"><button data-t="e" class="on">📥 Entrantes</button><button data-t="o">🎯 Oportunidades</button><button data-t="c">📣 Campañas</button></div>
+
+<div id="v-e">
+  <div class="card"><div class="filtros">
+    <input type="text" id="q" placeholder="🔎 Buscar nombre, teléfono, tema…" oninput="deb(cargarE)">
+    <select id="fEstado" onchange="cargarE()"><option value="">Todos los estados</option></select>
+    <select id="fFuente" onchange="cargarE()"><option value="">Toda fuente</option><option>Meta Ads</option><option>Directo</option><option>Referral</option></select>
+    <select id="fCamp" onchange="cargarE()"><option value="">Toda campaña</option></select>
+    <select id="fCli" onchange="cargarE()"><option value="">Clientes y no</option><option value="si">Ya son clientes</option><option value="no">Todavía no son clientes</option></select>
+    <span class="muted" id="cantE"></span></div><div id="listaE"></div></div>
+  <details class="card imp" id="imp"><summary>⚙️ Importar CSV y conexión con Azuite</summary>
+    <div class="pad" style="border-top:1px solid var(--border)">
+      <b>Importar CSV de Azuite</b> <span class="muted">(Bandeja → exportar). Se puede repetir: actualiza por teléfono y no pisa estado ni notas.</span><br><br>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="file" id="arch" accept=".csv" style="width:auto"><button class="b" onclick="importar()">Importar</button><span id="impRes" class="muted"></span></div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+      <b>Conexión con Azuite (API)</b> <span class="muted">Necesita AZUITE_API_KEY en Render.</span><br><br>
+      <button class="b sec" onclick="probar()">Probar conexión</button> <button class="b" onclick="sync(false)">Sincronizar nuevos</button> <button class="b sec" onclick="sync(true)">Traer todo el histórico</button>
+      <div class="muted" id="orgId" style="margin-top:10px"></div></div></details>
+</div>
+
+<div id="v-o" class="hidden"><div class="card"><div class="filtros">
+  <input type="text" id="oQ" placeholder="🔎 Buscar cliente, teléfono o email" oninput="deb(cargarO)">
+  <select id="oVend" onchange="cargarO()"><option value="">Todos los vendedores</option></select>
+  <select id="oEst" onchange="cargarO()"><option value="activa">Activas</option><option value="convertida">Convertidas</option><option value="descartada">Descartadas</option><option value="">Todas</option></select>
+  <span class="muted" id="cantO"></span></div><div id="listaO"></div></div></div>
+
+<div id="v-c" class="hidden">
+  <div class="card"><div class="hdr"><b>📣 Qué rinde cada campaña</b><span class="muted">compras hechas por el cliente DESPUÉS de escribir</span></div>
+    <div class="camp h"><div>Campaña / anuncio</div><div class="n">Leads</div><div class="n">Clientes</div><div class="n hide">Compraron</div><div class="n hide">Conv.</div><div class="n">Vendido</div></div><div id="tCamp"></div></div>
+  <div class="card"><div class="hdr"><b>📅 Leads por mes</b><span class="muted">la parte oscura son los que ya son clientes</span></div><div class="mes" id="tMes"></div></div>
+</div>
+</div>
+
+<div class="modal" id="modal"><div class="card"><div class="hdr"><b id="mTit"></b><button class="b sec mini" onclick="cerrar()">Cerrar</button></div><div class="pad" id="mBody"></div></div></div>
+
+<script>
+let TOKEN = localStorage.getItem('obras_admin_token') || '', ORG = localStorage.getItem('obras_org_activo') || '', OP = localStorage.getItem('obras_org_operar') || '';
+let VEND = [], CFG = {usaVisitas:false}, OPS = [], OPA = null;
+const ESTADOS = ['Nuevo','Contactado','Calificado','Cerrado','Perdido'];
+const TIPOS = { rellamar:'Rellamar', recontactar:'Recontactar', enviar_info:'Enviar información', otro:'Otro' };
+const EST_OP = { activa:'Activa', convertida:'Convertida', descartada:'Descartada' };
+const COL = ['#ff5a36','#7c3aed','#0ea5e9','#16a34a','#d97706','#db2777','#0d9488'];
+const color = s => COL[[...String(s)].reduce((a,c)=>a+c.charCodeAt(0),0)%COL.length];
+const J = {'Content-Type':'application/json'};
+function H(x){ const h = Object.assign({'x-admin-token':TOKEN}, x||{}); if (ORG) h['x-org-id'] = ORG; if (ORG==='todas' && OP) h['x-org-operar'] = OP; return h; }
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ini = n => (String(n||'#').trim()[0]||'#').toUpperCase();
+const $ = id => document.getElementById(id);
+const money = (n, m) => (m==='USD'?'US$ ':'$ ') + Number(n||0).toLocaleString('es-AR');
+function err(e){ $('msg').textContent = e && e.message || e || ''; }
+async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status + (d.error ? '' : ' (' + (raw.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,120) || 'sin detalle') + ')'))); return d; }
+let tm; function deb(f){ clearTimeout(tm); tm = setTimeout(f, 300); }
+function tab(t){ ['e','o','c'].forEach(x=>$('v-'+x).classList.toggle('hidden', x!==t)); document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===t)); err(''); if (t==='o') cargarO(); if (t==='c') cargarC(); }
+$('tabs').onclick = e => { if (e.target.dataset.t) tab(e.target.dataset.t); };
+function cerrar(){ $('modal').classList.remove('on'); }
+function modal(tit, html){ $('mTit').textContent = tit; $('mBody').innerHTML = html; $('modal').classList.add('on'); }
+
+async function init(){
+  if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
+  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'crm'); }catch(e){ err(e); return; }
+  try{ CFG = await api('/api/crm/config', {headers:H()}); VEND = (await api('/api/crm/vendedores', {headers:H()})).filter(v=>v.activo!==false); }catch(e){ /* sin sucursal elegida */ }
+  $('fEstado').innerHTML += ESTADOS.map(e=>`<option>${e}</option>`).join('');
+  $('oVend').innerHTML += VEND.map(v=>`<option value="${v._id}">${esc(v.nombre)}</option>`).join('');
+  $('orgId').innerHTML = /^[0-9a-f]{24}$/i.test(ORG) ? 'Id de la sucursal elegida arriba (para <b>AZUITE_ORG_ID</b>): <b style="user-select:all">'+ORG+'</b>' : 'Elegí una sucursal en la barra de arriba (no "todas") para ver su id.';
+  await kpis(); await cargarE();
+  const ab = new URLSearchParams(location.search).get('abrir'); if (ab){ history.replaceState(null,'',location.pathname); tab('o'); abrirOp(ab.replace(/^crm-/,'')); }
+}
+async function kpis(){
+  try{ const [r, ops] = await Promise.all([api('/api/leads/resumen',{headers:H()}), api('/api/crm?estado=activa',{headers:H()})]);
+    const hoy = new Date(); hoy.setHours(0,0,0,0); const venc = ops.filter(o=>o.proximaAccion && new Date(o.proximaAccion.fecha) < hoy).length;
+    const nuevos = (r.porEstado.find(x=>x.nombre==='Nuevo')||{leads:0}).leads;
+    $('kpis').innerHTML = [['📥','Leads entrantes',r.total],['🆕','Sin atender',nuevos],['🎯','Oportunidades activas',ops.length],['⏰','Con acción vencida',venc],['📈','Ya son clientes', r.total? Math.round(r.conCliente*100/r.total)+'%':'-']].map(([i,a,b])=>`<div class="kpi"><i>${i}</i><b>${b}</b><span>${a}</span></div>`).join('');
+    const sel = $('fCamp'), cur = sel.value; sel.innerHTML = '<option value="">Toda campaña</option>' + r.porCampana.map(x=>`<option>${esc(x.nombre)}</option>`).join(''); sel.value = cur;
+  }catch(e){ err(e); }
+}
+
+// ---- Entrantes ----
+async function cargarE(){
+  const p = new URLSearchParams({limit:300}); [['q','q'],['estado','fEstado'],['fuente','fFuente'],['campana','fCamp'],['cliente','fCli']].forEach(([k,id])=>{ const v = $(id).value; if (v) p.set(k,v); });
+  try{ const d = await api('/api/leads?'+p, {headers:H()});
+    $('cantE').textContent = d.total + ' leads' + (d.total>d.items.length?` (mostrando ${d.items.length})`:'');
+    $('listaE').innerHTML = d.items.map(l=>`<div class="row"><div class="av" style="background:${color(l.nombre||l.telefono)}">${esc(ini(l.nombre))}</div>
+      <div style="min-width:0"><b>${esc(l.nombre||'+'+l.telefono)}</b> <span class="muted">+${esc(l.telefono)}</span><div class="res">${esc(l.resumen||'Sin resumen')}</div>
+        <div class="meta"><span>${l.creadoOrigen? new Date(l.creadoOrigen).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'}):''}</span>
+          <span class="pill ${l.fuente==='Meta Ads'?'ads':''}">${l.fuente==='Meta Ads'?'📣 '+esc(l.campana||'Meta Ads'):esc(l.fuente||'Directo')}</span>
+          ${l.clienteId?`<span class="pill cli">✔ Cliente: ${esc(l.clienteNombre||'')}</span>`:''}${l.oportunidadId?'<span class="pill op">🎯 En oportunidades</span>':''}${(l.etiquetasOrigen||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div>
+      <div class="acc"><select style="width:auto" onchange="estadoL('${l._id}',this.value)">${ESTADOS.map(e=>`<option${e===l.estado?' selected':''}>${e}</option>`).join('')}</select>${l.oportunidadId?'':`<button class="b mini" onclick="aOportunidad('${l._id}','${esc(l.nombre||l.telefono).replace(/'/g,'')}')">🎯 Pasar a oportunidad</button>`}</div></div>`).join('') || '<div class="vacio"><span>📭</span>No hay leads con esos filtros.</div>';
+  }catch(e){ err(e); }
+}
+async function estadoL(id, v){ try{ await api('/api/leads/'+id, {method:'PATCH', headers:H(J), body:JSON.stringify({estado:v})}); kpis(); }catch(e){ err(e); } }
+function selVend(id, sel){ return `<select id="${id}"><option value="">Sin asignar</option>${VEND.map(v=>`<option value="${v._id}" ${String(sel||'')===v._id?'selected':''}>${esc(v.nombre)}</option>`).join('')}</select>`; }
+function formPA(pa, pre){ pa = pa||{}; const f = pa.fecha ? new Date(pa.fecha).toISOString().slice(0,10) : ''; return `<div class="g2"><div><label>Próxima acción (fecha)</label><input type="date" id="${pre}F" value="${f}"></div><div><label>Tipo</label><select id="${pre}T">${Object.entries(TIPOS).map(([k,l])=>`<option value="${k}" ${pa.tipo===k?'selected':''}>${l}</option>`).join('')}</select></div><div class="full"><label>Nota (opcional)</label><input type="text" id="${pre}N" value="${esc(pa.nota||'')}"></div></div>`; }
+function leerPA(pre){ const f = $(pre+'F').value; return f ? {fecha:f, tipo:$(pre+'T').value, nota:$(pre+'N').value.trim()} : null; }
+function aOportunidad(id, nombre){
+  modal('🎯 Pasar a oportunidad — ' + nombre, `<p class="muted" style="margin-top:0">Se crea la oportunidad con el nombre, teléfono, campaña de origen y el resumen del bot. Después podés seguirla desde la solapa Oportunidades.</p>
+    <div class="g2"><div class="full"><label>Vendedor</label>${selVend('aoV')}</div></div><div style="margin-top:10px">${formPA(null,'ao')}</div><div class="err" id="aoErr"></div>
+    <div style="margin-top:12px"><button class="b" onclick="guardarAO('${id}')">Crear oportunidad</button></div>`);
+}
+async function guardarAO(id){ try{ const d = await api(`/api/leads/${id}/oportunidad`, {method:'POST', headers:H(J), body:JSON.stringify({vendedorId:$('aoV').value, proximaAccion:leerPA('ao')})}); cerrar(); await cargarE(); kpis(); err(''); $('azRes').textContent = 'Oportunidad #' + d.numero + ' creada.'; }catch(e){ $('aoErr').textContent = e.message; } }
+
+// ---- Oportunidades ----
+async function cargarO(){
+  const p = new URLSearchParams(); if ($('oQ').value) p.set('q',$('oQ').value); if ($('oVend').value) p.set('vendedorId',$('oVend').value); if ($('oEst').value) p.set('estado',$('oEst').value);
+  try{ OPS = await api('/api/crm?'+p, {headers:H()}); const hoy = new Date(); hoy.setHours(0,0,0,0);
+    OPS.sort((a,b)=>(a.proximaAccion?new Date(a.proximaAccion.fecha).getTime():Infinity)-(b.proximaAccion?new Date(b.proximaAccion.fecha).getTime():Infinity));
+    $('cantO').textContent = OPS.length + ' oportunidades';
+    $('listaO').innerHTML = OPS.map(o=>{ const pa = o.proximaAccion, venc = pa && new Date(pa.fecha) < hoy && o.estado==='activa';
+      return `<div class="row"><div class="av" style="background:${color(o.cliente.nombre)}">${esc(ini(o.cliente.nombre))}</div>
+      <div style="min-width:0"><b>${esc(o.cliente.nombre)}</b> <span class="muted">#${o.numero} · ${esc(o.cliente.telefono||o.cliente.email||'')}</span>${o.notas?`<div class="res">${esc(String(o.notas).split('\n')[0]).slice(0,140)}</div>`:''}
+        <div class="meta"><span class="pill ${o.estado}">${EST_OP[o.estado]||o.estado}</span>${o.origen?`<span class="pill ads">${esc(o.origen)}</span>`:''}<span>👤 ${esc(o.vendedorNombre||'Sin vendedor')}</span>${pa?`<span class="pill ${venc?'venc':''}">${venc?'⚠ ':'📅 '}${new Date(pa.fecha).toLocaleDateString('es-AR')} · ${TIPOS[pa.tipo]||pa.tipo}</span>`:'<span>Sin próxima acción</span>'}</div></div>
+      <div class="acc"><button class="b sec mini" onclick="abrirOp('${o._id}')">Ver</button></div></div>`; }).join('') || '<div class="vacio"><span>🎯</span>No hay oportunidades con ese filtro.</div>';
+  }catch(e){ err(e); }
+}
+function nuevaOp(){
+  modal('Nueva oportunidad', `<div class="g2"><div><label>Cliente</label><input type="text" id="nC"></div><div><label>Teléfono</label><input type="text" id="nT"></div><div><label>Email</label><input type="text" id="nE"></div><div><label>Vendedor</label>${selVend('nV')}</div><div class="full"><label>¿Cómo llegó?</label><input type="text" id="nO" placeholder="Showroom, recomendación, Instagram…"></div><div class="full"><label>Notas</label><textarea id="nNo" rows="3"></textarea></div></div><div style="margin-top:10px">${formPA(null,'n')}</div><div class="err" id="nErr"></div><div style="margin-top:12px"><button class="b" onclick="guardarNueva()">Crear</button></div>`);
+}
+async function guardarNueva(){ try{ await api('/api/crm', {method:'POST', headers:H(J), body:JSON.stringify({cliente:{nombre:$('nC').value.trim(), telefono:$('nT').value.trim(), email:$('nE').value.trim()}, vendedorId:$('nV').value, origen:$('nO').value.trim(), notas:$('nNo').value.trim(), proximaAccion:leerPA('n')})}); cerrar(); tab('o'); kpis(); }catch(e){ $('nErr').textContent = e.message; } }
+async function abrirOp(id){ try{ OPA = await api('/api/crm/'+id, {headers:H()}); detalleOp(OPA); }catch(e){ err(e); } }
+function detalleOp(o){
+  const acc = o.estado==='activa' ? `${CFG.usaVisitas?'<button class="b" onclick="asignarVisita()">📍 Asignar visita</button>':''}<button class="b del" onclick="descartar(\'${o._id}\')">Descartar</button>`
+    : o.estado==='descartada' ? `<button class="b sec" onclick="reactivar('${o._id}')">Reactivar</button><span class="muted">Motivo: ${esc(o.motivoDescarte||'—')}</span>`
+    : `<span class="muted">Convertida en visita${o.visitaId?` — <a href="/admin-visitas.html?abrir=visita-${o.visitaId}">ver la visita</a>`:''}</span>`;
+  modal(`Oportunidad #${o.numero} · ${EST_OP[o.estado]||o.estado}`, `<div class="g2"><div><label>Cliente</label><input type="text" id="dC" value="${esc(o.cliente.nombre)}"></div><div><label>Teléfono</label><input type="text" id="dT" value="${esc(o.cliente.telefono||'')}"></div><div><label>Email</label><input type="text" id="dE" value="${esc(o.cliente.email||'')}"></div><div><label>Vendedor</label>${selVend('dV', o.vendedorId)}</div>
+    ${CFG.usaVisitas?`<div class="full"><label>Domicilio</label><input type="text" id="dD" value="${esc(o.cliente.direccion||'')}"></div><div><label>Localidad</label><input type="text" id="dL" value="${esc(o.cliente.localidad||'')}"></div>`:''}
+    <div class="${CFG.usaVisitas?'':'full'}"><label>¿Cómo llegó?</label><input type="text" id="dO" value="${esc(o.origen||'')}"></div><div class="full"><label>Notas</label><textarea id="dN" rows="4">${esc(o.notas||'')}</textarea></div></div>
+    <div style="margin-top:10px">${formPA(o.proximaAccion,'d')}</div><div class="err" id="dErr"></div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="b" onclick="guardarOp('${o._id}')">Guardar cambios</button>${acc}</div>`);
+}
+async function guardarOp(id){ try{ const c = {nombre:$('dC').value.trim(), telefono:$('dT').value.trim(), email:$('dE').value.trim()}; if ($('dD')){ c.direccion = $('dD').value.trim(); c.localidad = $('dL').value.trim(); } else { c.direccion = OPA.cliente.direccion||''; c.localidad = OPA.cliente.localidad||''; }
+  await api('/api/crm/'+id, {method:'PUT', headers:H(J), body:JSON.stringify({cliente:c, vendedorId:$('dV').value, origen:$('dO').value.trim(), notas:$('dN').value.trim(), proximaAccion:leerPA('d')})}); cerrar(); cargarO(); kpis(); }catch(e){ $('dErr').textContent = e.message; } }
+async function descartar(id){ const m = prompt('¿Por qué se descarta? (opcional)'); if (m===null) return; try{ await api(`/api/crm/${id}/descartar`, {method:'POST', headers:H(J), body:JSON.stringify({motivo:m})}); cerrar(); cargarO(); kpis(); }catch(e){ $('dErr').textContent = e.message; } }
+async function reactivar(id){ try{ await api(`/api/crm/${id}/reactivar`, {method:'POST', headers:H(J), body:'{}'}); cerrar(); cargarO(); kpis(); }catch(e){ $('dErr').textContent = e.message; } }
+function asignarVisita(){ const o = OPA;
+  modal('📍 Asignar visita — ' + o.cliente.nombre, `<p class="muted" style="margin-top:0">Crea una visita nueva con estos datos y marca la oportunidad como convertida.</p><div class="g2"><div class="full"><label>Domicilio</label><input type="text" id="avD" value="${esc(o.cliente.direccion||'')}"></div><div><label>Localidad</label><input type="text" id="avL" value="${esc(o.cliente.localidad||'')}"></div><div><label>Vendedor</label>${selVend('avV', o.vendedorId).replace('Sin asignar','Elegir…')}</div><div class="full"><label>Fecha y hora</label><input type="datetime-local" id="avF"></div><div class="full"><label>Notas para el vendedor</label><textarea id="avN" rows="3">${esc(o.notas||'')}</textarea></div></div><div class="err" id="avErr"></div><div style="margin-top:12px"><button class="b" onclick="crearVisita('${o._id}')">Crear visita</button></div>`); }
+async function crearVisita(id){ try{ const v = await api(`/api/crm/${id}/asignar-visita`, {method:'POST', headers:H(J), body:JSON.stringify({direccion:$('avD').value.trim(), localidad:$('avL').value.trim(), vendedorId:$('avV').value, fechaHora:$('avF').value, notasEmpleada:$('avN').value.trim()})});
+  modal('¡Visita #' + v.numero + ' creada!', `<p class="muted">La oportunidad quedó marcada como convertida.</p><a class="b" style="text-decoration:none;display:inline-block" href="/admin-visitas.html?abrir=visita-${v._id}">Ver la visita</a>`); cargarO(); kpis(); }catch(e){ $('avErr').textContent = e.message; } }
+
+// ---- Campañas ----
+const mesNom = m => { const [y,mm] = m.split('-'); return ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+mm-1]+' '+y.slice(2); };
+async function cargarC(){
+  try{ const [c, r] = await Promise.all([api('/api/leads/campanas',{headers:H()}), api('/api/leads/resumen',{headers:H()})]);
+    const fila = x => `<div class="camp"><div class="nom" title="${esc(x.nombre)}">${esc(x.nombre)}</div><div class="n">${x.leads}</div><div class="n">${x.clientes}</div><div class="n hide">${x.compraron}</div><div class="n hide">${x.leads?(x.compraron*100/x.leads).toFixed(1):0}%</div><div class="n money">${x.montoARS||x.montoUSD?(x.montoARS?money(x.montoARS):'')+(x.montoUSD?'<div>'+money(x.montoUSD,'USD')+'</div>':''):'<span class="muted">—</span>'}</div></div>`;
+    $('tCamp').innerHTML = c.items.map(fila).join('') + (c.items.length? '<div class="camp" style="font-weight:800;background:var(--bg)"><div>Total</div><div class="n">'+c.total.leads+'</div><div class="n">'+c.total.clientes+'</div><div class="n hide">'+c.total.compraron+'</div><div class="n hide">'+(c.total.leads?(c.total.compraron*100/c.total.leads).toFixed(1):0)+'%</div><div class="n money">'+money(c.total.montoARS)+(c.total.montoUSD?'<div>'+money(c.total.montoUSD,'USD')+'</div>':'')+'</div></div>' : '<div class="vacio"><span>📭</span>Todavía no hay leads.</div>');
+    const mm = Math.max(1, ...r.porMes.map(x=>x.leads));
+    $('tMes').innerHTML = r.porMes.map(x=>`<div><b>${x.leads}</b><div class="col" style="height:${Math.max(6,x.leads*100/mm)}px"><i style="height:${x.leads?x.clientes*100/x.leads:0}%"></i></div>${mesNom(x.nombre)}</div>`).join('');
+  }catch(e){ err(e); }
+}
+
+// ---- Importar / Azuite ----
+async function importar(){ const f = $('arch').files[0], out = $('impRes'); if (!f){ out.textContent = 'Elegí el archivo.'; return; } out.textContent = 'Importando…';
+  try{ const csv = await f.text(); const d = await api('/api/leads/importar', {method:'POST', headers:H(J), body:JSON.stringify({csv})}); out.textContent = `Listo: ${d.nuevos} nuevos, ${d.actualizados} actualizados${d.sinTelefono?`, ${d.sinTelefono} sin teléfono`:''}.`; kpis(); cargarE(); }catch(e){ out.textContent = ''; err(e); } }
+async function probar(){ const o = $('azRes'); o.textContent = 'Probando…'; try{ const d = await api('/api/leads/azuite/probar', {headers:H()}); o.textContent = 'Conectado. ' + (d.hayLeads ? 'Campos: ' + d.campos.join(', ') : 'Sin leads todavía.'); }catch(e){ o.textContent = ''; err(e); } }
+async function sync(completo){ const o = $('azRes'); o.textContent = 'Iniciando…'; err('');
+  try{ await api('/api/leads/azuite/sincronizar', {method:'POST', headers:H(J), body:JSON.stringify({completo})});
+    for(;;){ await new Promise(r=>setTimeout(r,2000)); const d = await api('/api/leads/azuite/estado', {headers:H()});
+      if (d.estado==='corriendo'){ o.textContent = `Sincronizando… ${d.vistos||0} leídos, ${d.nuevos||0} nuevos`; continue; }
+      if (d.estado==='error') throw new Error(d.error);
+      o.textContent = `Listo: ${d.vistos||0} leídos, ${d.nuevos||0} nuevos, ${d.actualizados||0} actualizados.`; kpis(); cargarE(); break; }
+  }catch(e){ o.textContent = ''; err(e); } }
+init();
+</script></body></html>

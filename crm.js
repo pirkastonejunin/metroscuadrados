@@ -33,7 +33,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
+const { authUsuario, requiereModulo, requiereAlgunModulo, resolverOrg, filtroOrg, backfillOrgId } = require('./usuarios');
 const { crearVisita } = require('./visitas');
 
 const router = express.Router();
@@ -96,10 +96,35 @@ async function siguienteNumeroOportunidad() {
   });
 }
 
+
+// Alta de una oportunidad (la usan la pantalla CRM y "Pasar a oportunidad" desde un lead de WhatsApp).
+async function insertarOportunidad(db, d) {
+  const numero = await siguienteNumeroOportunidad();
+  const doc = {
+    numero,
+    orgId: d.orgId,
+    cliente: d.cliente,
+    origen: (d.origen || '').trim(),
+    vendedorId: d.vendedorId || null,
+    vendedorNombre: d.vendedorNombre || '',
+    notas: d.notas || '',
+    proximaAccion: d.proximaAccion || null,
+    estado: 'activa',
+    visitaId: null,
+    motivoDescarte: '',
+    leadId: d.leadId || null,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+  const r = await db.collection('oportunidades').insertOne(doc);
+  doc._id = r.insertedId;
+  return doc;
+}
+
 // Se reusa el módulo 'visitas' existente en vez de sumar una clave de
 // módulo nueva — decisión tomada con Mato: el CRM lo ve el mismo equipo
 // que ya carga visitas.
-const authAdmin = [authUsuario, resolverOrg, requiereModulo('visitas')];
+const authAdmin = [authUsuario, resolverOrg, requiereAlgunModulo('crm', 'visitas')]; // el módulo 'crm' es el nuevo; 'visitas' sigue dando acceso
 
 function normalizarProximaAccion(pa) {
   if (!pa || !pa.fecha) return null;
@@ -157,6 +182,22 @@ router.get('/', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Configuración de la pantalla CRM: ¿esta sucursal trabaja con visitas? (si tiene visitas cargadas) — decide si se ofrece "Asignar visita".
+router.get('/config', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const usaVisitas = (await db.collection('visitas').countDocuments(Object.assign({}, filtroOrg(req)), { limit: 1 })) > 0;
+    res.json({ usaVisitas, sucursal: req.orgId ? String(req.orgId) : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.get('/vendedores', authAdmin, async (req, res) => { // lista simple para elegir vendedor (no exige el módulo Visitas)
+  try {
+    const db = await getDb();
+    const v = await db.collection('visitas_vendedores').find(filtroOrg(req)).project({ nombre: 1, activo: 1 }).sort({ nombre: 1 }).toArray();
+    res.json(v);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.get('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -191,24 +232,7 @@ router.post('/', authAdmin, async (req, res) => {
         if (!vendedor) throw err(400, 'Vendedor no encontrado');
         vendedorNombre = vendedor.nombre;
       }
-      const numero = await siguienteNumeroOportunidad();
-      const doc = {
-        numero,
-        orgId: req.orgId,
-        cliente: clienteNorm,
-        origen: (origen || '').trim(),
-        vendedorId: vId,
-        vendedorNombre,
-        notas: notas || '',
-        proximaAccion: proximaAccionNorm,
-        estado: 'activa',
-        visitaId: null,
-        motivoDescarte: '',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      const r = await db.collection('oportunidades').insertOne(doc);
-      doc._id = r.insertedId;
+      const doc = await insertarOportunidad(db, { orgId: req.orgId, cliente: clienteNorm, origen, vendedorId: vId, vendedorNombre, notas, proximaAccion: proximaAccionNorm, leadId: null });
       return doc;
     });
     res.json(resultado);
@@ -352,4 +376,7 @@ router.post('/:id/asignar-visita', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+
+
 module.exports = router;
+module.exports.insertarOportunidad = insertarOportunidad;

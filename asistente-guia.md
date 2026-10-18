@@ -95,10 +95,13 @@ En Configuración: usuarios, roles (cada rol habilita módulos), notificaciones,
 - Si no aparece un plan de cuotas al cobrar, hay que revisar que esté marcado como "Ofrecer" en Mercado Pago y tarjetas, en la tabla del canal que corresponda.
 - Para cualquier problema que la guía no resuelva, el asistente deja registrada la consulta para el administrador.
 
-## Leads de WhatsApp
-Menú → "Leads de WhatsApp". Muestra los contactos que llegaron por WhatsApp (Meta Ads o directos) con su campaña/anuncio, el resumen de lo que consultaron y el estado (Nuevo, Contactado, Calificado, Cerrado, Perdido). Si el teléfono coincide con un cliente cargado, aparece como "Ya es cliente". Arriba hay el resumen por campaña y por mes, con el porcentaje que terminó siendo cliente. Se carga con "Importar CSV" usando el archivo exportado de la bandeja de Azuite; se puede repetir y no pisa el estado ni las notas que se hayan cambiado acá. Hay que elegir una sucursal para importar.
-En la misma pantalla hay "Conexión con Azuite (API)": "Probar conexión", "Sincronizar nuevos" y "Traer todo el histórico". Requiere que en Render esté cargada la variable AZUITE_API_KEY (la key de solo lectura de Azuite). Si además se carga AZUITE_ORG_ID (id de la sucursal), se sincroniza solo cada 2 minutos.
-Para recibir los leads al instante, en Azuite → Integraciones → "Conectar tu sistema (webhook)" se pone la URL https://metroscuadrados.onrender.com/api/leads/azuite/webhook. El secret que muestra Azuite va en Render como AZUITE_WEBHOOK_SECRET (junto con AZUITE_ORG_ID). Los leads que traen solo email y no teléfono no se guardan.
+## CRM (leads, oportunidades y campañas)
+Menú → "CRM" (reemplaza a "Leads de WhatsApp" y a la pestaña CRM del Panel de Visitas). Requiere el módulo "CRM y Bot de WhatsApp" (quien ya tiene Visitas también entra). Cada sucursal ve sus propios datos.
+Tiene tres pestañas:
+- Entrantes: contactos que llegaron por WhatsApp (Meta Ads o directos) con campaña/anuncio, resumen de la consulta y estado (Nuevo, Contactado, Calificado, Cerrado, Perdido). Si el teléfono coincide con un cliente cargado aparece "Ya es cliente". Con "Pasar a oportunidad" se lo sigue de cerca.
+- Oportunidades: seguimiento con vendedor, próxima acción y fecha, notas; se puede dar de alta una a mano con "+ Nueva oportunidad", descartarla o convertirla. "Asignar visita" aparece solo en sucursales que trabajan con visitas (ej. Pirka); en Piedra Negra no se muestra.
+- Campañas: cuántos leads trajo cada campaña/anuncio, cuántos ya son clientes, cuántos compraron y cuánto vendieron (solo compras hechas después de escribir), más leads por mes.
+Importar CSV de Azuite y sincronizar con Azuite siguen en esta pantalla (se puede repetir sin pisar estados ni notas). Hay que elegir una sucursal para importar.
 
 ## Bot de WhatsApp
 Menú → "Bot de WhatsApp". Es el asistente propio que atiende los mensajes de WhatsApp: pregunta (máximo 3 preguntas) qué producto necesita, medidas y estilo, y lo deriva a un asesor; no cotiza. Cuando el cliente acepta al asesor, el bot ya no escribe (solo avisa el horario si vuelve a escribir, como mucho cada 6 horas). Si un asesor escribe desde el celular o desde esta pantalla, el bot deja de contestar en esa conversación ("Tomar yo"); con "Devolver al bot" vuelve a atender. Cada conversación alimenta la pantalla de Leads. El texto de instrucciones del bot está en el archivo bot-prompt.md. Para apagarlo sin desconectarlo: BOT_ACTIVO=0 en Render.

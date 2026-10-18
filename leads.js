@@ -6,13 +6,14 @@
 // ---------------------------------------------------------------------------
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereAlgunModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const crm = require('./crm');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 let mongoClient;
 async function getDb() { if (!mongoClient) { const c = new MongoClient(process.env.MONGODB_URI); await c.connect(); mongoClient = c; } return mongoClient.db(DB_NAME); }
-const auth = [authUsuario, resolverOrg, requiereModulo('visitas')];
+const auth = [authUsuario, resolverOrg, requiereAlgunModulo('crm', 'visitas')];
 const COL = 'leads_whatsapp';
 const ESTADOS = ['Nuevo', 'Contactado', 'Calificado', 'Cerrado', 'Perdido'];
 
@@ -224,6 +225,46 @@ router.get('/resumen', auth, async (req, res) => {
     ]);
     const n = (a) => a.map(x => ({ nombre: x._id || '(sin campaña)', leads: x.leads, clientes: x.clientes }));
     res.json({ total, conCliente: porEstado.reduce((s, x) => s + x.clientes, 0), porCampana: n(porCampana), porEstado: n(porEstado), porFuente: n(porFuente), porMes: n(porMes) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Ventas por campaña: por cada campaña/anuncio, cuántos leads, cuántos ya son clientes y cuánto compraron DESPUÉS de escribir
+// (ventas del cliente, no anuladas, con fecha posterior al primer contacto del lead).
+router.get('/campanas', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const f = filtroOrg(req);
+    const filas = await db.collection(COL).aggregate([
+      { $match: f },
+      { $lookup: { from: 'ventas', let: { cid: '$clienteId', desde: '$creadoOrigen', org: '$orgId' },
+          pipeline: [{ $match: { $expr: { $and: [{ $eq: ['$clienteId', '$$cid'] }, { $eq: ['$orgId', '$$org'] }, { $gte: ['$fecha', '$$desde'] }, { $ne: ['$estado', 'anulada'] }] } } }, { $project: { total: 1, moneda: 1 } }], as: 'v' } },
+      { $addFields: { v: { $cond: [{ $eq: [{ $ifNull: ['$clienteId', null] }, null] }, [], '$v'] } } },
+      { $group: { _id: '$campana', leads: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } },
+          compraron: { $sum: { $cond: [{ $gt: [{ $size: '$v' }, 0] }, 1, 0] } }, ventas: { $sum: { $size: '$v' } },
+          montoARS: { $sum: { $reduce: { input: '$v', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.moneda', 'USD'] }, 0, { $ifNull: ['$$this.total', 0] }] }] } } } },
+          montoUSD: { $sum: { $reduce: { input: '$v', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.moneda', 'USD'] }, { $ifNull: ['$$this.total', 0] }, 0] }] } } } } } },
+      { $sort: { montoARS: -1, leads: -1 } }
+    ]).toArray();
+    const items = filas.map(x => ({ nombre: x._id || '(sin campaña)', leads: x.leads, clientes: x.clientes, compraron: x.compraron, ventas: x.ventas, montoARS: Math.round(x.montoARS), montoUSD: Math.round(x.montoUSD) }));
+    const tot = items.reduce((a, x) => ({ leads: a.leads + x.leads, clientes: a.clientes + x.clientes, compraron: a.compraron + x.compraron, ventas: a.ventas + x.ventas, montoARS: a.montoARS + x.montoARS, montoUSD: a.montoUSD + x.montoUSD }), { leads: 0, clientes: 0, compraron: 0, ventas: 0, montoARS: 0, montoUSD: 0 });
+    res.json({ items, total: tot });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// "Pasar a oportunidad": crea la oportunidad del CRM con los datos del lead (nombre, teléfono, campaña de origen y resumen del bot).
+router.post('/:id/oportunidad', auth, async (req, res) => {
+  try {
+    if (!/^[0-9a-f]{24}$/i.test(req.params.id)) return res.status(400).json({ error: 'Id inválido.' });
+    const db = await getDb(); const l = await db.collection(COL).findOne(Object.assign({ _id: new ObjectId(req.params.id) }, filtroOrg(req)));
+    if (!l) return res.status(404).json({ error: 'No encontrado.' });
+    if (l.oportunidadId) { const o = await db.collection('oportunidades').findOne({ _id: l.oportunidadId }); if (o && o.estado === 'activa') return res.status(409).json({ error: 'Este lead ya tiene una oportunidad activa (#' + o.numero + ').' }); }
+    const b = req.body || {}; let vId = null, vNombre = '';
+    if (b.vendedorId && /^[0-9a-f]{24}$/i.test(b.vendedorId)) { const v = await db.collection('visitas_vendedores').findOne({ _id: new ObjectId(b.vendedorId) }); if (v) { vId = v._id; vNombre = v.nombre; } }
+    let pa = null; if (b.proximaAccion && b.proximaAccion.fecha) { const fch = new Date(String(b.proximaAccion.fecha) + 'T00:00:00-03:00'); if (!isNaN(fch)) pa = { fecha: fch, tipo: ['rellamar', 'recontactar', 'enviar_info', 'otro'].includes(b.proximaAccion.tipo) ? b.proximaAccion.tipo : 'otro', nota: b.proximaAccion.nota || '' }; }
+    const notas = [l.resumen, (l.etiquetasOrigen || []).length ? 'Temas: ' + l.etiquetasOrigen.join(', ') : ''].filter(Boolean).join('\n');
+    const o = await crm.insertarOportunidad(db, { orgId: l.orgId, cliente: { nombre: l.nombre || ('+' + l.telefono), telefono: l.telefono, email: l.email || '', direccion: '', localidad: '' },
+      origen: 'WhatsApp' + (l.campana ? ' · ' + l.campana : l.fuente ? ' · ' + l.fuente : ''), vendedorId: vId, vendedorNombre: vNombre, notas, proximaAccion: pa, leadId: l._id });
+    await db.collection(COL).updateOne({ _id: l._id }, { $set: { oportunidadId: o._id, estado: ['Nuevo', 'Contactado'].includes(l.estado) ? 'Calificado' : l.estado, updatedAt: new Date() } });
+    res.json({ ok: true, oportunidadId: o._id, numero: o.numero });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
