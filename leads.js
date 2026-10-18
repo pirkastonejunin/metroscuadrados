@@ -162,9 +162,9 @@ router.post('/azuite/sincronizar', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 router.get('/azuite/estado', auth, (req, res) => res.json(trabajos.get(String(req.orgId)) || { estado: 'nada' }));
-// Sincronización automática cada 30 min, solo si están AZUITE_API_KEY y AZUITE_ORG_ID (id de la sucursal que recibe los leads).
+// Sincronización automática cada 2 min (AZUITE_SYNC_MIN para cambiarlo), solo si están AZUITE_API_KEY y AZUITE_ORG_ID (id de la sucursal que recibe los leads).
 if (process.env.AZUITE_API_KEY && process.env.AZUITE_ORG_ID && /^[0-9a-f]{24}$/i.test(process.env.AZUITE_ORG_ID)) {
-  setInterval(async () => { try { await sincronizarAzuite(await getDb(), new ObjectId(process.env.AZUITE_ORG_ID)); } catch (e) { console.error('[leads] sync Azuite:', e.message); } }, 30 * 60 * 1000).unref();
+  setInterval(async () => { try { await sincronizarAzuite(await getDb(), new ObjectId(process.env.AZUITE_ORG_ID)); } catch (e) { console.error('[leads] sync Azuite:', e.message); } }, Math.max(1, parseInt(process.env.AZUITE_SYNC_MIN) || 2) * 60 * 1000).unref();
 }
 
 function armarFiltro(req) {
