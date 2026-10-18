@@ -51,8 +51,15 @@ const ESQUEMA = {
   },
   required: ['respuesta', 'derivar', 'aceptoAsesor']
 };
-function promptSistema() {
-  let base = ''; try { base = fs.readFileSync(path.join(__dirname, 'bot-prompt.md'), 'utf8'); } catch (e) { base = 'Sos el asistente virtual de Piedra Negra.'; }
+function promptArchivo() { try { return fs.readFileSync(path.join(__dirname, 'bot-prompt.md'), 'utf8'); } catch (e) { return 'Sos el asistente virtual de Piedra Negra.'; } }
+let cachePrompt = { t: 0, v: null };
+async function promptBase() { // el texto editado desde la pantalla (base de datos) manda sobre el del archivo
+  if (Date.now() - cachePrompt.t < 30000) return cachePrompt.v || promptArchivo();
+  try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'prompt' }); cachePrompt = { t: Date.now(), v: d && d.texto ? d.texto : null }; } catch (e) { cachePrompt = { t: Date.now(), v: null }; }
+  return cachePrompt.v || promptArchivo();
+}
+async function promptSistema(base) {
+  if (base == null) base = await promptBase();
   const a = ahoraAR();
   return base + '\n\nContexto actual: hoy es ' + DIAS[a.getUTCDay()] + ' ' + a.toISOString().slice(11, 16) + ' hs (Argentina). La atención humana está ' + (abierto() ? 'ABIERTA ahora.' : 'CERRADA ahora (un asesor responderá en el próximo horario de atención).') +
     '\nRespondé SIEMPRE con el JSON pedido. En "respuesta" va únicamente el mensaje para el cliente.';
@@ -66,9 +73,9 @@ function jsonDe(t) {
   try { return JSON.parse(l); } catch (e) { const i = l.indexOf('{'), j = l.lastIndexOf('}'); if (i >= 0 && j > i) { try { return JSON.parse(l.slice(i, j + 1)); } catch (e2) { /* nada */ } } return null; }
 }
 // historial: [{role:'user'|'model', text, media?:{mime,data(base64)}}]
-async function llamarIA(historial) {
+async function llamarIA(historial, promptBaseTexto) {
   const prov = String(process.env.BOT_PROVEEDOR || '').toLowerCase() || (process.env.GEMINI_API_KEY ? 'gemini' : 'anthropic');
-  const sistema = promptSistema();
+  const sistema = await promptSistema(promptBaseTexto);
   if (prov === 'gemini') {
     const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('Falta GEMINI_API_KEY');
     const modelo = process.env.BOT_MODELO || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
@@ -253,6 +260,28 @@ router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un ases
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'text', texto, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// ---- prueba del bot sin WhatsApp: corre el mismo motor de IA sobre una conversación simulada (no guarda nada ni envía mensajes) ----
+const soloAdmin = (req, res, next) => (req.usuario && req.usuario.rol && req.usuario.rol.protegido) ? next() : res.status(403).json({ error: 'Solo el rol Administrador puede cambiar las instrucciones del bot.' });
+router.post('/simular', auth, async (req, res) => {
+  try {
+    const b = req.body || {}; const ms = Array.isArray(b.mensajes) ? b.mensajes.slice(-30) : [];
+    if (!ms.length || ms[ms.length - 1].role !== 'user') return res.status(400).json({ error: 'Falta el mensaje del cliente.' });
+    const hist = ms.map(m => ({ role: m.role === 'model' ? 'model' : 'user', text: String(m.text || '').slice(0, 4000), media: m.media && m.media.data && /^(image|audio)\//.test(m.media.mime || '') && String(m.media.data).length < 12e6 ? { mime: m.media.mime, data: m.media.data } : undefined }));
+    if (hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
+    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined);
+    if (!r) return res.status(502).json({ error: 'La IA no devolvió una respuesta válida. Probá de nuevo.' });
+    res.json({ respuesta: r.respuesta || '', derivar: !!r.derivar, aceptoAsesor: !!r.aceptoAsesor, producto: r.producto || '', medidas: r.medidas || '', estilo: r.estilo || '', resumen: r.resumen || '', etiquetas: r.etiquetas || [], transcripcion: r.transcripcion || '' });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+router.get('/prompt', auth, async (req, res) => {
+  try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'prompt' }); res.json({ texto: d && d.texto ? d.texto : promptArchivo(), personalizado: !!(d && d.texto), original: promptArchivo() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.put('/prompt', auth, soloAdmin, async (req, res) => { // guarda las instrucciones editadas ('' = volver al texto original del sistema)
+  try { const t = String((req.body && req.body.texto) || '').trim().slice(0, 20000); const col = (await getDb()).collection('bot_config');
+    if (!t) await col.deleteOne({ _id: 'prompt' }); else await col.updateOne({ _id: 'prompt' }, { $set: { texto: t, actualizado: new Date(), por: req.usuario.usuario || req.usuario.nombre || '' } }, { upsert: true });
+    cachePrompt = { t: 0, v: null }; res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 (async () => { try { const db = await getDb(); await db.collection(COL_M).createIndex({ waId: 1 }, { unique: true, sparse: true }); await db.collection(COL_C).createIndex({ orgId: 1, tel10: 1 }, { unique: true }); await db.collection(COL_M).createIndex({ convId: 1, at: 1 }); } catch (e) { /* sin base al arrancar */ } })();

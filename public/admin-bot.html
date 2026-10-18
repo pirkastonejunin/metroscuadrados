@@ -29,7 +29,17 @@
 <h1>Bot de WhatsApp</h1>
 <div class="muted">Conversaciones que atiende el bot y cuáles pasaron a un asesor. Si un asesor escribe desde el celular, el bot deja de contestar en esa conversación.</div>
 <div id="estado"></div><div id="msg" class="err"></div>
-<div class="grid">
+<div style="margin:10px 0"><button id="tabC" onclick="tab('c')">Conversaciones</button> <button id="tabP" class="sec" onclick="tab('p')">Probar el bot</button></div>
+<div id="vistaP" style="display:none"><div class="grid" style="grid-template-columns:1fr 1fr">
+  <div class="card"><div class="hdr"><b>Probar sin WhatsApp</b><button class="sec" onclick="reiniciarSim()">Empezar de nuevo</button></div>
+    <div class="muted" style="padding:8px 12px">Escribí como si fueras el cliente. Usa la misma IA y las mismas instrucciones, pero no manda nada ni guarda la conversación.</div>
+    <div class="msgs" id="simMs"></div><div id="simInfo" class="datos" style="display:none"></div>
+    <div class="env"><input id="simTxt" placeholder="Mensaje del cliente…" onkeydown="if(event.key==='Enter')simEnviar()"><input type="file" id="simImg" accept="image/*,audio/*" style="max-width:110px"><button onclick="simEnviar()">Enviar</button></div></div>
+  <div class="card"><div class="hdr"><b>Instrucciones del bot</b><span><button class="sec" onclick="volverOriginal()">Volver al original</button> <button onclick="guardarPrompt()">Guardar</button></span></div>
+    <div class="muted" style="padding:8px 12px" id="promptEst"></div>
+    <textarea id="prompt" style="width:100%;height:60vh;border:0;border-top:1px solid var(--border);padding:12px;font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--card);color:var(--text);resize:vertical"></textarea></div>
+</div></div>
+<div class="grid" id="vistaC">
   <div class="card"><div class="hdr"><select id="fEst" onchange="cargar()"><option value="">Todas</option><option value="bot">Con el bot</option><option value="derivado">Derivadas (esperan respuesta)</option><option value="aceptado">Aceptaron asesor</option><option value="humano">Con asesor</option><option value="pausado">Pausadas</option></select></div><div class="lista" id="lista"></div></div>
   <div class="card" id="det"><div style="padding:24px" class="muted">Elegí una conversación.</div></div>
 </div></div>
@@ -66,5 +76,23 @@ async function abrir(id, silencioso){
 }
 async function est(id, e){ try{ await api(`/api/bot/conversaciones/${id}/estado`, {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({estado:e})}); await abrir(id); }catch(x){ document.getElementById('msg').textContent = x.message; } }
 async function enviar(id){ const t = document.getElementById('txt'); const v = t.value.trim(); if (!v) return; try{ await api(`/api/bot/conversaciones/${id}/enviar`, {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:v})}); t.value=''; await abrir(id); }catch(x){ document.getElementById('msg').textContent = x.message; } }
+let SIM = [], PROMPT_ORIG = '';
+function tab(t){ document.getElementById('vistaC').style.display = t==='c'?'':'none'; document.getElementById('vistaP').style.display = t==='p'?'':'none'; document.getElementById('tabC').className = t==='c'?'':'sec'; document.getElementById('tabP').className = t==='p'?'':'sec'; if (t==='p' && !document.getElementById('prompt').value) cargarPrompt(); }
+async function cargarPrompt(){ try{ const d = await api('/api/bot/prompt', {headers:H()}); document.getElementById('prompt').value = d.texto; PROMPT_ORIG = d.original; document.getElementById('promptEst').textContent = d.personalizado ? 'Usando instrucciones editadas desde esta pantalla.' : 'Usando las instrucciones originales del sistema. Podés editarlas y probar: lo que cambies acá se usa en la prueba aunque no guardes.'; }catch(e){ document.getElementById('msg').textContent = e.message; } }
+async function guardarPrompt(){ try{ await api('/api/bot/prompt', {method:'PUT', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:document.getElementById('prompt').value})}); document.getElementById('promptEst').textContent = 'Guardado: el bot real ya usa estas instrucciones (puede tardar hasta 30 segundos).'; document.getElementById('msg').textContent=''; }catch(e){ document.getElementById('msg').textContent = e.message; } }
+async function volverOriginal(){ if (!confirm('¿Volver a las instrucciones originales del sistema?')) return; try{ await api('/api/bot/prompt', {method:'PUT', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:''})}); document.getElementById('prompt').value=''; await cargarPrompt(); }catch(e){ document.getElementById('msg').textContent = e.message; } }
+function pintarSim(){ const ms = document.getElementById('simMs'); ms.innerHTML = SIM.map(m=>`<div class="m ${m.role==='model'?'bot':''}">${esc(m.text||'')}${m.media?'<small>(adjunto: '+esc(m.media.mime)+')</small>':''}</div>`).join(''); ms.scrollTop = ms.scrollHeight; }
+function reiniciarSim(){ SIM = []; pintarSim(); document.getElementById('simInfo').style.display='none'; }
+function leerArchivo(f){ return new Promise(ok=>{ const r = new FileReader(); r.onload = ()=>ok({mime:f.type, data:String(r.result).split(',')[1]}); r.readAsDataURL(f); }); }
+async function simEnviar(){
+  const t = document.getElementById('simTxt'), f = document.getElementById('simImg').files[0]; const txt = t.value.trim(); if (!txt && !f) return;
+  const m = {role:'user', text:txt}; if (f) m.media = await leerArchivo(f);
+  SIM.push(m); t.value=''; document.getElementById('simImg').value=''; pintarSim();
+  const info = document.getElementById('simInfo'); info.style.display=''; info.textContent = 'Pensando…'; document.getElementById('msg').textContent='';
+  try{ const d = await api('/api/bot/simular', {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({mensajes:SIM.map(x=>({role:x.role,text:x.text,media:x.media})), prompt:document.getElementById('prompt').value})});
+    if (d.respuesta) SIM.push({role:'model', text:d.respuesta}); pintarSim();
+    info.innerHTML = `Deriva: <b>${d.derivar?'sí':'no'}</b> · Aceptó asesor: <b>${d.aceptoAsesor?'sí':'no'}</b> · Producto: <b>${esc(d.producto||'-')}</b> · Medidas: <b>${esc(d.medidas||'-')}</b> · Estilo: <b>${esc(d.estilo||'-')}</b>${d.transcripcion?'<br>Audio: '+esc(d.transcripcion):''}${d.respuesta?'':'<br><i>El bot no escribiría nada.</i>'}`;
+  }catch(e){ info.style.display='none'; document.getElementById('msg').textContent = e.message; SIM.pop(); pintarSim(); }
+}
 init();
 </script></body></html>
