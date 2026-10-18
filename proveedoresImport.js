@@ -97,6 +97,19 @@ function matriz(wb, hoja) {
   if (!nombre) throw err(400, 'El archivo no tiene esa hoja.');
   return XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, raw: true, defval: '' });
 }
+// Letra de columna de Excel (A, B, ... AA) <-> índice
+function letraDeIdx(i) { let n = i + 1, s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; }
+function idxDeLetra(l) { let n = 0; for (const c of String(l).toUpperCase()) n = n * 26 + (c.charCodeAt(0) - 64); return n - 1; }
+// Resuelve el valor de la regla a un índice de columna. Acepta "C · Precio lista", "C - Precio", "C" o solo el título.
+function resolverColumna(enc, valor) {
+  const t = String(valor || '').trim();
+  if (!t) return -1;
+  const porTitulo = enc.findIndex(h => h && norm(h) === norm(t));
+  if (porTitulo >= 0) return porTitulo;
+  const m = t.match(/^([A-Za-z]{1,3})\s*(?:[·\-–:|]\s*(.*))?$/);
+  if (m) { const i = idxDeLetra(m[1]); if (i >= 0 && i < 300) return i; }
+  return -1;
+}
 function filasDeArchivo(base64, regla) {
   const wb = leerLibro(base64);
   const m = matriz(wb, regla.hoja);
@@ -106,7 +119,7 @@ function filasDeArchivo(base64, regla) {
   for (const k of ['codigo', 'precio', 'stock', 'nombre']) {
     const t = regla.columnas && regla.columnas[k];
     if (!t) continue;
-    const i = enc.findIndex(h => norm(h) === norm(t));
+    const i = resolverColumna(enc, t);
     if (i < 0 && (k === 'codigo' || k === 'precio')) throw err(400, `No encuentro la columna "${t}" en la fila ${fe + 1} del archivo. Revisá la regla de importación.`);
     if (i < 0 && k === 'stock' && regla.stock && regla.stock.activo) throw err(400, `No encuentro la columna de stock "${t}" en el archivo.`);
     if (i >= 0) idx[k] = i;
@@ -230,10 +243,12 @@ router.post('/:id/encabezados', authAdmin, async (req, res) => {
         if ((m[i] || []).filter(c => typeof c === 'string' && c.trim()).length >= 3) { fe = i + 1; break; }
       }
     }
-    const enc = (m[fe - 1] || []).map(h => String(h == null ? '' : h).trim()).filter(Boolean);
-    const buscar = (...pat) => enc.find(h => pat.some(p => norm(h).includes(p))) || '';
+    const encTodo = (m[fe - 1] || []).map(h => String(h == null ? '' : h).trim());
+    const columnas = encTodo.map((t, i) => ({ letra: letraDeIdx(i), texto: t, etiqueta: letraDeIdx(i) + ' · ' + (t || '(vacía)') })).filter(c => c.texto);
+    const enc = columnas.map(c => c.etiqueta);
+    const buscar = (...pat) => (columnas.find(c => pat.some(p => norm(c.texto).includes(p))) || {}).etiqueta || '';
     res.json({
-      hojas: wb.SheetNames, filaEncabezado: fe, encabezados: enc,
+      hojas: wb.SheetNames, filaEncabezado: fe, encabezados: enc, columnas,
       sugeridas: {
         codigo: buscar('codigo', 'cod.', 'cod ', 'sku', 'articulo', 'item'),
         precio: buscar('precio lista', 'precio', 'lista', 'costo', 'importe'),
@@ -746,4 +761,4 @@ router.get('/:id/historial', authAdmin, async (req, res) => {
 });
 
 module.exports = router;
-module.exports._interno = { parseNumero, aplicarMargen };
+module.exports._interno = { parseNumero, aplicarMargen, filasDeArchivo, resolverColumna, letraDeIdx };

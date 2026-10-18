@@ -48,10 +48,10 @@
           '<div style="width:90px"><label>Hoja Nº</label><input type="number" min="1" id="pimpHoja" value="' + r.hoja + '"></div>' +
           '<div style="width:140px"><label>Fila de los títulos</label><input type="number" min="1" id="pimpFila" value="' + r.filaEncabezado + '"></div></div>' +
           '<div id="pimpMuestra" class="muted" style="font-size:12px;margin:6px 0"></div>' +
-          '<datalist id="pimpCols">' + (estado.headers || []).map(function (h) { return '<option value="' + E(h) + '">'; }).join('') + '</datalist>' +
+          '<div class="muted" style="font-size:12px;margin:2px 0 6px">Podés escribir la letra de la columna del Excel (ej: <b>C</b>) o elegirla de la lista (ej: <b>C · Precio lista</b>). Con la letra no importa si hay celdas combinadas tapando el título.</div>' + '<datalist id="pimpCols">' + (estado.headers || []).map(function (h) { return '<option value="' + E(h) + '">'; }).join('') + '</datalist>' +
           '<div class="row" style="margin-top:8px">' +
-            '<div style="flex:1;min-width:150px"><label>Columna del código *</label><input id="pimpCCodigo" list="pimpCols" value="' + E(r.columnas.codigo || '') + '"></div>' +
-            '<div style="flex:1;min-width:150px"><label>Columna del precio *</label><input id="pimpCPrecio" list="pimpCols" value="' + E(r.columnas.precio || '') + '"></div>' +
+            '<div style="flex:1;min-width:150px"><label>Columna del código * (letra o título)</label><input id="pimpCCodigo" list="pimpCols" value="' + E(r.columnas.codigo || '') + '"></div>' +
+            '<div style="flex:1;min-width:150px"><label>Columna del precio * (letra o título)</label><input id="pimpCPrecio" list="pimpCols" value="' + E(r.columnas.precio || '') + '"></div>' +
             '<div style="flex:1;min-width:150px"><label>Columna de stock (si manda)</label><input id="pimpCStock" list="pimpCols" value="' + E(r.columnas.stock || '') + '"></div>' +
             '<div style="flex:1;min-width:150px"><label>Columna de descripción (opcional)</label><input id="pimpCNombre" list="pimpCols" value="' + E(r.columnas.nombre || '') + '"></div></div>' +
           '<div class="row" style="margin-top:8px">' +
