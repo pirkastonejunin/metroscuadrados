@@ -32,7 +32,7 @@
 <div class="card" id="imp"><b>Importar CSV de Azuite</b> <span class="muted">(Bandeja → exportar). Se puede repetir: actualiza por teléfono y no pisa el estado ni las notas que cargues acá.</span><br><br>
   <input type="file" id="arch" accept=".csv"> <button onclick="importar()">Importar</button> <span id="impRes" class="muted"></span></div>
 <div class="card"><b>Conexión con Azuite (API)</b> <span class="muted">Trae los leads nuevos solos. Necesita la variable AZUITE_API_KEY en Render.</span><br><br>
-  <button class="sec" onclick="probar()">Probar conexión</button> <button onclick="sync(false)">Sincronizar nuevos</button> <button class="sec" onclick="sync(true)">Traer todo el histórico</button> <span id="azRes" class="muted"></span></div>
+  <button class="sec" onclick="probar()">Probar conexión</button> <button onclick="sync(false)">Sincronizar nuevos</button> <button class="sec" onclick="sync(true)">Traer todo el histórico</button> <span id="azRes" class="muted"></span><div class="muted" id="orgId" style="margin-top:8px"></div></div>
 <div class="kpis" id="kpis"></div>
 <div class="card scroll"><b>Por campaña / anuncio</b><table id="tCamp"></table></div>
 <div class="card scroll"><b>Por mes</b><table id="tMes"></table></div>
@@ -93,5 +93,6 @@ async function importar(){
 }
 async function probar(){ const o = document.getElementById('azRes'); o.textContent = 'Probando…'; try{ const d = await api('/api/leads/azuite/probar', {headers:H()}); o.textContent = 'Conectado. ' + (d.hayLeads ? 'Campos: ' + d.campos.join(', ') : 'Sin leads todavía.'); }catch(e){ o.textContent = ''; document.getElementById('msg').textContent = e.message; } }
 async function sync(completo){ const o = document.getElementById('azRes'); o.textContent = 'Sincronizando…'; document.getElementById('msg').textContent = ''; try{ const d = await api('/api/leads/azuite/sincronizar', {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({completo})}); o.textContent = `Listo: ${d.vistos} leídos, ${d.nuevos} nuevos, ${d.actualizados} actualizados.`; await resumen(); await cargar(); }catch(e){ o.textContent = ''; document.getElementById('msg').textContent = e.message; } }
+document.getElementById('orgId').innerHTML = /^[0-9a-f]{24}$/i.test(ORG) ? 'Id de la sucursal elegida arriba (para <b>AZUITE_ORG_ID</b>): <b style="user-select:all">'+ORG+'</b>' : 'Elegí una sucursal en la barra de arriba (no "todas") para ver su id.';
 init();
 </script></body></html>
