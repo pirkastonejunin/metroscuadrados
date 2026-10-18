@@ -99,6 +99,7 @@
   // Ícono propio y color por pantalla.
   const ESTILO_ITEM = {
     costos: ['#d97706'], fabrica: ['#ea580c'], 'panel-produccion': ['#ea580c', 'grafico'],
+    leads: ['#16a34a'],
     visitas: ['#7c3aed'], 'mis-visitas': ['#8b5cf6'], calendario: ['#0ea5e9'], obras: ['#b45309'], 'mis-obras': ['#a16207'],
     clientes: ['#2563eb'], ventas: ['#16a34a'], cobranza: ['#0d9488', 'recibo'], cotizador: ['#9333ea'], remitos: ['#0891b2'], presupuestos: ['#c026d3'],
     productos: ['#ea580c'], stock: ['#65a30d'], tiendanube: ['#0284c7', 'etiqueta'],
@@ -133,6 +134,7 @@
     // Comercial, es mover una línea.
     { nombre: 'CRM', items: [
       { key: 'visitas', href: '/admin-visitas.html', modulo: 'visitas', label: 'Panel de Visitas', icon: ICONOS.visitas },
+      { key: 'leads', href: '/admin-leads.html', modulo: 'visitas', label: 'Leads de WhatsApp', icon: ICONOS.visitas },
       { key: 'mis-visitas', href: '/vendedor.html', requiereVendedor: true, label: 'Mis visitas', icon: ICONOS.misVisitas },
       { key: 'calendario', href: '/calendario.html', modulo: 'visitas,obras', label: 'Calendario', icon: ICONOS.calendario },
       { key: 'obras', href: '/admin-obras.html', modulo: 'obras', label: 'Panel de Obras', icon: ICONOS.obras },

@@ -43,6 +43,7 @@ app.use('/api/usuarios', usuariosRouter);
 
 const crmRouter = require('./crm');
 app.use('/api/crm', crmRouter);
+app.use('/api/leads', require('./leads'));
 
 const costosRouter = require('./costos');
 app.use('/api/costos', costosRouter);

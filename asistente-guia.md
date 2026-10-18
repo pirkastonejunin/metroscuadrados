@@ -94,3 +94,6 @@ En Configuración: usuarios, roles (cada rol habilita módulos), notificaciones,
 - Si un cobro de Mercado Pago queda en "registrando" o con error, se puede verificar desde la lista de cobros.
 - Si no aparece un plan de cuotas al cobrar, hay que revisar que esté marcado como "Ofrecer" en Mercado Pago y tarjetas, en la tabla del canal que corresponda.
 - Para cualquier problema que la guía no resuelva, el asistente deja registrada la consulta para el administrador.
+
+## Leads de WhatsApp
+Menú → "Leads de WhatsApp". Muestra los contactos que llegaron por WhatsApp (Meta Ads o directos) con su campaña/anuncio, el resumen de lo que consultaron y el estado (Nuevo, Contactado, Calificado, Cerrado, Perdido). Si el teléfono coincide con un cliente cargado, aparece como "Ya es cliente". Arriba hay el resumen por campaña y por mes, con el porcentaje que terminó siendo cliente. Se carga con "Importar CSV" usando el archivo exportado de la bandeja de Azuite; se puede repetir y no pisa el estado ni las notas que se hayan cambiado acá. Hay que elegir una sucursal para importar.
