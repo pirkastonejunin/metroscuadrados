@@ -4,95 +4,184 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bot de WhatsApp - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="/nav-sidebar.js"></script>
 <style>
-  :root{--bg:#f3f4f6;--card:#fff;--text:#171a1f;--muted:#6b7280;--border:#e5e7eb;--accent:#ff5a36;--in:#fff;--out:#dcf8c6;--bot:#e8e4ff;--danger:#c53030;--ok:#1f8a5f}
-  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121316;--card:#1c1e22;--text:#f4f5f6;--muted:#9aa0a8;--border:#2c2f34;--accent:#ff7a56;--in:#26292e;--out:#1d3a2a;--bot:#2a2547}}
-  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,"Segoe UI",Roboto,sans-serif}
-  .wrap{max-width:1200px;margin:0 auto;padding:16px} h1{font-size:22px;margin:0 0 4px} .muted{color:var(--muted);font-size:13px}
-  .aviso{background:#fff7e0;color:#7a5b00;border-radius:10px;padding:8px 12px;margin:10px 0;font-size:13px} .err{color:var(--danger)}
-  .grid{display:grid;grid-template-columns:320px 1fr;gap:12px;margin-top:12px} @media(max-width:800px){.grid{grid-template-columns:1fr}}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
-  .lista{max-height:70vh;overflow:auto} .it{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer} .it:hover,.it.sel{background:var(--bg)}
-  .it b{display:block} .pill{display:inline-block;border-radius:999px;padding:1px 8px;font-size:11px;background:var(--bg);margin-left:4px}
-  .pill.bot{background:var(--bot)} .pill.humano{background:var(--out)} .pill.derivado,.pill.aceptado{background:#ffe7de;color:#8a2d12}
-  .hdr{padding:12px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
-  .msgs{padding:12px;max-height:55vh;overflow:auto;display:flex;flex-direction:column;gap:6px}
-  .m{max-width:75%;padding:7px 10px;border-radius:10px;font-size:14px;white-space:pre-wrap;background:var(--in);border:1px solid var(--border)} .m.out{align-self:flex-end;background:var(--out)} .m.bot{align-self:flex-end;background:var(--bot)}
-  .m small{display:block;color:var(--muted);font-size:10px;margin-top:2px}
-  button{border:0;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;background:var(--text);color:var(--bg)} button.sec{background:transparent;color:var(--text);border:1px solid var(--border)}
-  .env{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border)} .env input{flex:1;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:14px}
-  .datos{padding:8px 12px;font-size:13px;border-bottom:1px solid var(--border);background:var(--bg)}
+  :root{--bg:#f3f4f6;--card:#fff;--text:#171a1f;--muted:#6b7280;--border:#e5e7eb;--accent:#ff5a36;--accent-soft:#ffe7de;--in:#fff;--out:#d9fdd3;--bot:#ece7ff;--chat:#efeae2;--danger:#c53030;--ok:#1f8a5f;--ok-soft:#e1f5ea;--warn-soft:#fff4d6;--shadow:0 1px 2px rgba(17,20,24,.04),0 10px 24px -14px rgba(17,20,24,.18)}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121316;--card:#1c1e22;--text:#f4f5f6;--muted:#9aa0a8;--border:#2c2f34;--accent:#ff7a56;--accent-soft:#3a241f;--in:#2a2d33;--out:#1d3a2a;--bot:#2a2547;--chat:#17191c;--ok-soft:#173328;--warn-soft:#3a2f14;--shadow:none}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:18px}
+  .hero{background:linear-gradient(120deg,#ff5a36 0%,#ff8a4c 55%,#ffb347 100%);color:#fff;border-radius:18px;padding:20px 22px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;box-shadow:var(--shadow)}
+  .hero h1{margin:0;font-size:24px;font-weight:800;letter-spacing:-.02em} .hero p{margin:4px 0 0;opacity:.92;font-size:13.5px;max-width:560px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap} .chip{background:rgba(255,255,255,.2);backdrop-filter:blur(6px);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#7CFFB2;display:inline-block} .dot.off{background:#ffd0c4}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow)} .kpi b{display:block;font-size:26px;font-weight:800;letter-spacing:-.02em} .kpi span{font-size:12px;color:var(--muted);font-weight:600}
+  .kpi i{font-style:normal;float:right;font-size:20px}
+  .tabs{display:inline-flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:4px;margin-bottom:14px;flex-wrap:wrap;box-shadow:var(--shadow)}
+  .tabs button{border:0;background:transparent;color:var(--muted);padding:8px 14px;border-radius:9px;font:700 13px "Manrope",sans-serif;cursor:pointer} .tabs button.on{background:var(--accent);color:#fff}
+  .aviso{background:var(--warn-soft);color:#7a5b00;border-radius:12px;padding:9px 13px;margin:0 0 10px;font-size:13px;font-weight:600} .err{color:var(--danger);font-size:13px;margin:6px 0;font-weight:600} .ok{color:var(--ok);font-size:13px;font-weight:600}
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:14px} @media(max-width:860px){.grid,.g2{grid-template-columns:1fr!important}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:var(--shadow)}
+  .hdr{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between} .hdr b{font-size:14px;font-weight:800}
+  .muted{color:var(--muted);font-size:12.5px} .pad{padding:14px}
+  .lista{max-height:68vh;overflow:auto} .it{padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;gap:11px;align-items:center} .it:hover,.it.sel{background:var(--bg)}
+  .av{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:15px;flex:none}
+  .it .t{flex:1;min-width:0} .it b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .it .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;background:var(--bg);color:var(--muted)}
+  .pill.bot{background:var(--bot);color:#5b3fd1} .pill.humano{background:var(--ok-soft);color:var(--ok)} .pill.derivado,.pill.aceptado{background:var(--accent-soft);color:#c2410c} .pill.pausado{background:var(--bg)}
+  .chat{background:var(--chat)} .msgs{padding:14px;max-height:52vh;min-height:220px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+  .m{max-width:76%;padding:8px 11px;border-radius:12px;font-size:14px;line-height:1.4;white-space:pre-wrap;background:var(--in);box-shadow:0 1px 1px rgba(0,0,0,.08)} .m.out{align-self:flex-end;background:var(--out)} .m.bot{align-self:flex-end;background:var(--bot)}
+  .m small{display:block;color:var(--muted);font-size:10px;margin-top:3px;font-weight:600}
+  button.b{border:0;border-radius:10px;padding:9px 14px;font:700 13px "Manrope",sans-serif;cursor:pointer;background:var(--accent);color:#fff} button.b.sec{background:var(--card);color:var(--text);border:1px solid var(--border)} button.b.mini{padding:5px 10px;font-size:12px} button.b.del{background:var(--card);color:var(--danger);border:1px solid var(--border)}
+  .env{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--card)}
+  input[type=text],input[type=url],textarea,select{padding:9px 11px;border:1px solid var(--border);border-radius:10px;font:500 14px "Manrope",sans-serif;background:var(--bg);color:var(--text);width:100%} .env input{flex:1}
+  .datos{padding:9px 14px;font-size:13px;border-bottom:1px solid var(--border);background:var(--card)} .datos b{font-weight:800}
+  .g2{display:grid;grid-template-columns:1fr 1fr;gap:14px} .g3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:14px}
+  .add{padding:16px} .add h3{margin:0 0 4px;font-size:15px;font-weight:800} .add .ic{font-size:26px;margin-bottom:6px;display:block}
+  .drop{border:2px dashed var(--border);border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer} .drop.on{border-color:var(--accent);background:var(--accent-soft)}
+  .fuente{display:flex;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--border)} .fuente .ic{font-size:22px} .fuente .t{flex:1;min-width:0} .fuente b{display:block;font-size:14px} .fuente .acc{display:flex;gap:6px;flex-wrap:wrap}
+  .sw{position:relative;width:38px;height:22px;flex:none} .sw input{opacity:0;width:0;height:0} .sw span{position:absolute;inset:0;background:var(--border);border-radius:99px;transition:.2s;cursor:pointer} .sw span:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s} .sw input:checked+span{background:var(--ok)} .sw input:checked+span:before{transform:translateX(16px)}
+  .vacio{padding:34px 16px;text-align:center;color:var(--muted)} .vacio span{font-size:34px;display:block;margin-bottom:6px}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:50} .modal.on{display:flex} .modal .card{max-width:760px;width:100%}
+  .hidden{display:none!important}
 </style>
 </head>
 <body><div class="wrap">
-<h1>Bot de WhatsApp</h1>
-<div class="muted">Conversaciones que atiende el bot y cuáles pasaron a un asesor. Si un asesor escribe desde el celular, el bot deja de contestar en esa conversación.</div>
-<div id="estado"></div><div id="msg" class="err"></div>
-<div style="margin:10px 0"><button id="tabC" onclick="tab('c')">Conversaciones</button> <button id="tabP" class="sec" onclick="tab('p')">Probar el bot</button></div>
-<div id="vistaP" style="display:none"><div class="grid" style="grid-template-columns:1fr 1fr">
-  <div class="card"><div class="hdr"><b>Probar sin WhatsApp</b><button class="sec" onclick="reiniciarSim()">Empezar de nuevo</button></div>
-    <div class="muted" style="padding:8px 12px">Escribí como si fueras el cliente. Usa la misma IA y las mismas instrucciones, pero no manda nada ni guarda la conversación.</div>
-    <div class="msgs" id="simMs"></div><div id="simInfo" class="datos" style="display:none"></div>
-    <div class="env"><input id="simTxt" placeholder="Mensaje del cliente…" onkeydown="if(event.key==='Enter')simEnviar()"><input type="file" id="simImg" accept="image/*,audio/*" style="max-width:110px"><button onclick="simEnviar()">Enviar</button></div></div>
-  <div class="card"><div class="hdr"><b>Instrucciones del bot</b><span><button class="sec" onclick="volverOriginal()">Volver al original</button> <button onclick="guardarPrompt()">Guardar</button></span></div>
-    <div class="muted" style="padding:8px 12px" id="promptEst"></div>
-    <textarea id="prompt" style="width:100%;height:60vh;border:0;border-top:1px solid var(--border);padding:12px;font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--card);color:var(--text);resize:vertical"></textarea></div>
-</div></div>
-<div class="grid" id="vistaC">
-  <div class="card"><div class="hdr"><select id="fEst" onchange="cargar()"><option value="">Todas</option><option value="bot">Con el bot</option><option value="derivado">Derivadas (esperan respuesta)</option><option value="aceptado">Aceptaron asesor</option><option value="humano">Con asesor</option><option value="pausado">Pausadas</option></select></div><div class="lista" id="lista"></div></div>
-  <div class="card" id="det"><div style="padding:24px" class="muted">Elegí una conversación.</div></div>
-</div></div>
+<div class="hero"><div><h1>Bot de WhatsApp</h1><p>El asistente que recibe las consultas, califica al cliente y lo pasa a un asesor. Probalo, enseñale con tu catálogo y mirá cómo atiende.</p></div>
+  <div class="chips" id="chips"></div></div>
+<div id="estado" style="margin-top:12px"></div><div id="msg" class="err"></div>
+<div class="kpis" id="kpis"></div>
+<div class="tabs" id="tabs"><button data-t="c" class="on">💬 Conversaciones</button><button data-t="p">🧪 Probar el bot</button><button data-t="k">📚 Conocimiento</button><button data-t="i">📝 Instrucciones</button></div>
+
+<!-- Conversaciones -->
+<div id="v-c" class="grid">
+  <div class="card"><div class="hdr"><select id="fEst" onchange="cargar()" style="max-width:100%"><option value="">Todas las conversaciones</option><option value="bot">Con el bot</option><option value="derivado">Derivadas (esperan respuesta)</option><option value="aceptado">Aceptaron asesor</option><option value="humano">Con asesor</option><option value="pausado">Pausadas</option></select></div><div class="lista" id="lista"></div></div>
+  <div class="card" id="det"><div class="vacio"><span>💬</span>Elegí una conversación para verla.</div></div>
+</div>
+
+<!-- Probar -->
+<div id="v-p" class="g2 hidden">
+  <div class="card chat"><div class="hdr" style="background:var(--card)"><b>🧪 Probar sin WhatsApp</b><button class="b sec mini" onclick="reiniciarSim()">Empezar de nuevo</button></div>
+    <div class="muted pad" style="background:var(--card)">Escribí como si fueras el cliente. Usa la misma IA, las instrucciones y el conocimiento cargados, pero no manda nada ni guarda la conversación.</div>
+    <div class="msgs" id="simMs"><div class="vacio"><span>👋</span>Escribí el primer mensaje del cliente.</div></div><div id="simInfo" class="datos hidden"></div>
+    <div class="env"><input type="text" id="simTxt" placeholder="Mensaje del cliente…" onkeydown="if(event.key==='Enter')simEnviar()"><label class="b sec" style="display:grid;place-items:center;margin:0;cursor:pointer" title="Adjuntar foto o audio">📎<input type="file" id="simImg" accept="image/*,audio/*" class="hidden" onchange="document.getElementById('simTxt').placeholder='Adjunto: '+this.files[0].name"></label><button class="b" onclick="simEnviar()">Enviar</button></div></div>
+  <div class="card"><div class="hdr"><b>Qué sabe el bot ahora</b></div><div class="pad muted" id="simResumen">Cargando…</div></div>
+</div>
+
+<!-- Conocimiento -->
+<div id="v-k" class="hidden">
+  <div class="g3">
+    <div class="card add"><span class="ic">🌐</span><h3>Página web</h3><div class="muted" style="margin-bottom:10px">El bot lee el texto de la página. Se puede actualizar cuando cambie.</div><input type="url" id="kUrl" placeholder="https://www.piedranegra.com.ar"><div style="margin-top:8px;display:flex;gap:8px"><button class="b" onclick="kUrl()">Agregar</button><button class="b sec" onclick="document.getElementById('kUrl').value='https://www.piedranegra.com.ar'">Usar piedranegra.com.ar</button></div></div>
+    <div class="card add"><span class="ic">📄</span><h3>Archivo</h3><div class="muted" style="margin-bottom:10px">PDF (catálogos), Excel, CSV, texto o imagen. Hasta 15 MB.</div><div class="drop" id="drop" onclick="document.getElementById('kFile').click()">Arrastrá un archivo acá o tocá para elegirlo</div><input type="file" id="kFile" class="hidden" accept=".pdf,.xlsx,.xls,.csv,.txt,.md,.png,.jpg,.jpeg,.webp" onchange="kArchivo(this.files[0])"></div>
+    <div class="card add"><span class="ic">✍️</span><h3>Texto</h3><div class="muted" style="margin-bottom:10px">Preguntas frecuentes, condiciones, zonas de envío, lo que quieras que sepa.</div><input type="text" id="kTit" placeholder="Título (ej: Envíos y zonas)" style="margin-bottom:8px"><textarea id="kTxt" rows="3" placeholder="Escribí o pegá el texto…"></textarea><div style="margin-top:8px"><button class="b" onclick="kTexto()">Agregar</button></div></div>
+  </div>
+  <div class="card" style="margin-bottom:14px"><div class="fuente" style="border:0"><span class="ic">🛒</span><div class="t"><b>Productos del sistema</b><span class="muted" id="catInfo">El bot conoce qué productos vendés (nombres, rubros y marcas), sin precios ni stock.</span></div><label class="sw"><input type="checkbox" id="catSw" onchange="kCat()"><span></span></label></div></div>
+  <div class="card"><div class="hdr"><b>Fuentes cargadas</b><span class="muted" id="kCuenta"></span></div><div id="kLista"></div></div>
+  <div class="muted" style="margin-top:10px">Solo el rol Administrador puede agregar o quitar fuentes. Los cambios los usa el bot enseguida (puede tardar hasta un minuto).</div>
+</div>
+
+<!-- Instrucciones -->
+<div id="v-i" class="hidden"><div class="card"><div class="hdr"><b>📝 Instrucciones del bot</b><span><button class="b sec mini" onclick="volverOriginal()">Volver al original</button> <button class="b mini" onclick="guardarPrompt()">Guardar</button></span></div>
+  <div class="muted pad" id="promptEst"></div><textarea id="prompt" style="border:0;border-top:1px solid var(--border);border-radius:0;height:62vh;font:13px/1.55 ui-monospace,Menlo,monospace;resize:vertical"></textarea></div></div>
+</div>
+
+<div class="modal" id="modal"><div class="card"><div class="hdr"><b id="mTit"></b><button class="b sec mini" onclick="cerrar()">Cerrar</button></div><div class="pad"><input type="text" id="mNom" style="margin-bottom:8px"><textarea id="mTxt" rows="16"></textarea><div style="margin-top:10px"><button class="b" onclick="mGuardar()">Guardar cambios</button></div></div></div></div>
+
 <script>
-let TOKEN = localStorage.getItem('obras_admin_token') || '', ORG = localStorage.getItem('obras_org_activo') || '', OP = localStorage.getItem('obras_org_operar') || '', SEL = null;
+let TOKEN = localStorage.getItem('obras_admin_token') || '', ORG = localStorage.getItem('obras_org_activo') || '', OP = localStorage.getItem('obras_org_operar') || '', SEL = null, ITEMS = [];
 function H(x){ const h = Object.assign({'x-admin-token':TOKEN}, x||{}); if (ORG) h['x-org-id'] = ORG; if (ORG==='todas' && OP) h['x-org-operar'] = OP; return h; }
+const J = {'Content-Type':'application/json'};
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const ETQ = {bot:'Bot',derivado:'Derivada',aceptado:'Aceptó asesor',humano:'Asesor',pausado:'Pausada'};
+const ETQ = {bot:'Con el bot',derivado:'Derivada',aceptado:'Aceptó asesor',humano:'Con asesor',pausado:'Pausada'};
+const COL = ['#ff5a36','#7c3aed','#0ea5e9','#16a34a','#d97706','#db2777','#0d9488'];
+const color = s => COL[[...String(s)].reduce((a,c)=>a+c.charCodeAt(0),0)%COL.length];
+const ini = c => (String(c.nombre||'#').trim()[0]||'#').toUpperCase();
+function err(e){ document.getElementById('msg').textContent = e && e.message || e || ''; }
 async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d; }
 const hora = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'});
+function tab(t){ ['c','p','k','i'].forEach(x=>document.getElementById('v-'+x).classList.toggle('hidden', x!==t)); document.getElementById('v-c').style.display = t==='c'?'':'none'; document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===t));
+  if (t==='i' && !document.getElementById('prompt').value) cargarPrompt(); if (t==='k') cargarK(); if (t==='p') simResumen(); err(''); }
+document.getElementById('tabs').onclick = e => { if (e.target.dataset.t) tab(e.target.dataset.t); };
 async function init(){
-  if (!TOKEN){ document.getElementById('msg').textContent = 'Entrá primero al sistema con tu usuario.'; return; }
-  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'bot'); }catch(e){ document.getElementById('msg').textContent = e.message; return; }
-  await cargar(); setInterval(()=>{ cargar(); if (SEL) abrir(SEL, true); }, 15000);
+  if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
+  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'bot'); }catch(e){ err(e); return; }
+  await cargar(); setInterval(()=>{ if (!document.getElementById('v-c').classList.contains('hidden')) { cargar(); if (SEL) abrir(SEL, true); } }, 15000);
 }
 async function cargar(){
-  try{ const q = document.getElementById('fEst').value; const d = await api('/api/bot/conversaciones' + (q?'?estado='+q:''), {headers:H()});
-    document.getElementById('estado').innerHTML = (d.botActivo ? '' : '<div class="aviso">El bot está APAGADO (BOT_ACTIVO=0 en Render): recibe mensajes pero no contesta.</div>') + (d.modoPrueba ? '<div class="aviso">Modo prueba: faltan WA_TOKEN / WA_PHONE_ID en Render, el bot no envía mensajes reales.</div>' : '');
-    document.getElementById('lista').innerHTML = d.items.map(c=>`<div class="it${SEL===c._id?' sel':''}" onclick="abrir('${c._id}')"><b>${esc(c.nombre||c.tel)}<span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span></b><span class="muted">${esc(c.resumen||c.tel)}</span><div class="muted">${hora(c.updatedAt)}</div></div>`).join('') || '<div style="padding:16px" class="muted">Todavía no hay conversaciones.</div>';
-  }catch(e){ document.getElementById('msg').textContent = e.message; }
+  try{ const q = document.getElementById('fEst').value; const d = await api('/api/bot/conversaciones' + (q?'?estado='+q:''), {headers:H()}); ITEMS = d.items;
+    document.getElementById('chips').innerHTML = `<span class="chip"><i class="dot ${d.botActivo?'':'off'}"></i>${d.botActivo?'Bot encendido':'Bot apagado'}</span><span class="chip">${d.modoPrueba?'🧪 Modo prueba':'📲 Conectado a WhatsApp'}</span>`;
+    document.getElementById('estado').innerHTML = (d.botActivo ? '' : '<div class="aviso">El bot está APAGADO (BOT_ACTIVO=0 en Render): recibe mensajes pero no contesta.</div>') + (d.modoPrueba ? '<div class="aviso">Todavía no está conectado a WhatsApp (faltan WA_TOKEN / WA_PHONE_ID en Render): no envía mensajes reales. Mientras tanto podés probarlo en la solapa "Probar el bot".</div>' : '');
+    const n = e => d.items.filter(c=>c.estado===e).length;
+    if (!q) document.getElementById('kpis').innerHTML = [['💬','Conversaciones',d.items.length],['🤖','Con el bot',n('bot')],['⏳','Esperan asesor',n('derivado')+n('aceptado')],['🙋','Con asesor',n('humano')]].map(([i,t,v])=>`<div class="kpi"><i>${i}</i><b>${v}</b><span>${t}</span></div>`).join('');
+    document.getElementById('lista').innerHTML = d.items.map(c=>`<div class="it${SEL===c._id?' sel':''}" onclick="abrir('${c._id}')"><div class="av" style="background:${color(c.nombre||c.tel)}">${esc(ini(c))}</div><div class="t"><b>${esc(c.nombre||'+'+c.tel)}</b><div class="s">${esc(c.resumen||'+'+c.tel)}</div><div style="margin-top:3px"><span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span> <span class="muted">${hora(c.updatedAt)}</span></div></div></div>`).join('') || '<div class="vacio"><span>📭</span>Todavía no hay conversaciones.</div>';
+  }catch(e){ err(e); }
 }
 async function abrir(id, silencioso){
   SEL = id;
   try{ const d = await api('/api/bot/conversaciones/'+id, {headers:H()}); const c = d.conversacion, dt = c.datos||{};
     const keep = document.getElementById('txt') ? document.getElementById('txt').value : '';
-    document.getElementById('det').innerHTML = `<div class="hdr"><div><b>${esc(c.nombre||'')}</b> <span class="muted">+${esc(c.tel)}</span><span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span></div>
-      <div><button class="sec" onclick="est('${id}','humano')">Tomar yo</button> <button class="sec" onclick="est('${id}','bot')">Devolver al bot</button> <button class="sec" onclick="est('${id}','pausado')">Pausar</button></div></div>
-      <div class="datos">${c.resumen?esc(c.resumen)+'<br>':''}Producto: <b>${esc(dt.producto||'-')}</b> · Medidas: <b>${esc(dt.medidas||'-')}</b> · Estilo: <b>${esc(dt.estilo||'-')}</b></div>
-      <div class="msgs" id="ms">${d.mensajes.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+m.tipo+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('')}</div>
-      <div class="env"><input id="txt" placeholder="Escribir como asesor (el bot deja de contestar)" onkeydown="if(event.key==='Enter')enviar('${id}')"><button onclick="enviar('${id}')">Enviar</button></div>`;
-    document.getElementById('txt').value = keep; const ms = document.getElementById('ms'); if (!silencioso) ms.scrollTop = ms.scrollHeight;
-    if (!silencioso) cargar();
-  }catch(e){ document.getElementById('msg').textContent = e.message; }
+    document.getElementById('det').innerHTML = `<div class="hdr"><div style="display:flex;gap:10px;align-items:center"><div class="av" style="background:${color(c.nombre||c.tel)}">${esc(ini(c))}</div><div><b>${esc(c.nombre||'')}</b><div class="muted">+${esc(c.tel)} · <span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span></div></div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="b sec mini" onclick="est('${id}','humano')">🙋 Tomar yo</button><button class="b sec mini" onclick="est('${id}','bot')">🤖 Devolver al bot</button><button class="b sec mini" onclick="est('${id}','pausado')">⏸ Pausar</button></div></div>
+      <div class="datos">${c.resumen?'<div style="margin-bottom:4px"><b>'+esc(c.resumen)+'</b></div>':''}Producto: <b>${esc(dt.producto||'-')}</b> · Medidas: <b>${esc(dt.medidas||'-')}</b> · Estilo: <b>${esc(dt.estilo||'-')}</b>${c.referral&&c.referral.headline?' · Anuncio: <b>'+esc(c.referral.headline)+'</b>':''}</div>
+      <div class="chat"><div class="msgs" id="ms">${d.mensajes.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+m.tipo+']'))}<small>${m.origen==='bot'?'🤖 Bot':m.origen==='asesor'?'🙋 Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('')}</div></div>
+      <div class="env"><input type="text" id="txt" placeholder="Escribir como asesor (el bot deja de contestar)" onkeydown="if(event.key==='Enter')enviar('${id}')"><button class="b" onclick="enviar('${id}')">Enviar</button></div>`;
+    document.getElementById('txt').value = keep; const ms = document.getElementById('ms'); if (!silencioso) ms.scrollTop = ms.scrollHeight; if (!silencioso) cargar();
+  }catch(e){ err(e); }
 }
-async function est(id, e){ try{ await api(`/api/bot/conversaciones/${id}/estado`, {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({estado:e})}); await abrir(id); }catch(x){ document.getElementById('msg').textContent = x.message; } }
-async function enviar(id){ const t = document.getElementById('txt'); const v = t.value.trim(); if (!v) return; try{ await api(`/api/bot/conversaciones/${id}/enviar`, {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:v})}); t.value=''; await abrir(id); }catch(x){ document.getElementById('msg').textContent = x.message; } }
-let SIM = [], PROMPT_ORIG = '';
-function tab(t){ document.getElementById('vistaC').style.display = t==='c'?'':'none'; document.getElementById('vistaP').style.display = t==='p'?'':'none'; document.getElementById('tabC').className = t==='c'?'':'sec'; document.getElementById('tabP').className = t==='p'?'':'sec'; if (t==='p' && !document.getElementById('prompt').value) cargarPrompt(); }
-async function cargarPrompt(){ try{ const d = await api('/api/bot/prompt', {headers:H()}); document.getElementById('prompt').value = d.texto; PROMPT_ORIG = d.original; document.getElementById('promptEst').textContent = d.personalizado ? 'Usando instrucciones editadas desde esta pantalla.' : 'Usando las instrucciones originales del sistema. Podés editarlas y probar: lo que cambies acá se usa en la prueba aunque no guardes.'; }catch(e){ document.getElementById('msg').textContent = e.message; } }
-async function guardarPrompt(){ try{ await api('/api/bot/prompt', {method:'PUT', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:document.getElementById('prompt').value})}); document.getElementById('promptEst').textContent = 'Guardado: el bot real ya usa estas instrucciones (puede tardar hasta 30 segundos).'; document.getElementById('msg').textContent=''; }catch(e){ document.getElementById('msg').textContent = e.message; } }
-async function volverOriginal(){ if (!confirm('¿Volver a las instrucciones originales del sistema?')) return; try{ await api('/api/bot/prompt', {method:'PUT', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({texto:''})}); document.getElementById('prompt').value=''; await cargarPrompt(); }catch(e){ document.getElementById('msg').textContent = e.message; } }
-function pintarSim(){ const ms = document.getElementById('simMs'); ms.innerHTML = SIM.map(m=>`<div class="m ${m.role==='model'?'bot':''}">${esc(m.text||'')}${m.media?'<small>(adjunto: '+esc(m.media.mime)+')</small>':''}</div>`).join(''); ms.scrollTop = ms.scrollHeight; }
-function reiniciarSim(){ SIM = []; pintarSim(); document.getElementById('simInfo').style.display='none'; }
+async function est(id, e){ try{ await api(`/api/bot/conversaciones/${id}/estado`, {method:'POST', headers:H(J), body:JSON.stringify({estado:e})}); await abrir(id); }catch(x){ err(x); } }
+async function enviar(id){ const t = document.getElementById('txt'); const v = t.value.trim(); if (!v) return; try{ await api(`/api/bot/conversaciones/${id}/enviar`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})}); t.value=''; await abrir(id); }catch(x){ err(x); } }
+
+// ---- Probar ----
+let SIM = [];
+function pintarSim(){ const ms = document.getElementById('simMs'); ms.innerHTML = SIM.length ? SIM.map(m=>`<div class="m ${m.role==='model'?'bot':'out'}">${esc(m.text||'')}${m.media?'<small>📎 '+esc(m.media.mime)+'</small>':''}</div>`).join('') : '<div class="vacio"><span>👋</span>Escribí el primer mensaje del cliente.</div>'; ms.scrollTop = ms.scrollHeight; }
+function reiniciarSim(){ SIM = []; pintarSim(); document.getElementById('simInfo').classList.add('hidden'); }
 function leerArchivo(f){ return new Promise(ok=>{ const r = new FileReader(); r.onload = ()=>ok({mime:f.type, data:String(r.result).split(',')[1]}); r.readAsDataURL(f); }); }
+async function simResumen(){ try{ const d = await api('/api/bot/conocimiento', {headers:H()}); const a = d.fuentes.filter(f=>f.activo!==false); document.getElementById('simResumen').innerHTML = `<p style="margin-top:0">📝 Instrucciones del bot<br>${a.length?'📚 <b>'+a.length+'</b> fuente(s) de conocimiento':'📚 Sin fuentes de conocimiento (solo las instrucciones)'}${d.incluirCatalogo?'<br>🛒 Productos del sistema: '+d.productosEnSistema:''}</p>${a.map(f=>'<div>• '+esc(f.titulo)+'</div>').join('')}<p>Agregá catálogos y páginas en la solapa <b>Conocimiento</b> y volvé a probar.</p>`; }catch(e){ document.getElementById('simResumen').textContent = e.message; } }
 async function simEnviar(){
-  const t = document.getElementById('simTxt'), f = document.getElementById('simImg').files[0]; const txt = t.value.trim(); if (!txt && !f) return;
+  const t = document.getElementById('simTxt'), fi = document.getElementById('simImg'), f = fi.files[0]; const txt = t.value.trim(); if (!txt && !f) return;
   const m = {role:'user', text:txt}; if (f) m.media = await leerArchivo(f);
-  SIM.push(m); t.value=''; document.getElementById('simImg').value=''; pintarSim();
-  const info = document.getElementById('simInfo'); info.style.display=''; info.textContent = 'Pensando…'; document.getElementById('msg').textContent='';
-  try{ const d = await api('/api/bot/simular', {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({mensajes:SIM.map(x=>({role:x.role,text:x.text,media:x.media})), prompt:document.getElementById('prompt').value})});
+  SIM.push(m); t.value=''; t.placeholder='Mensaje del cliente…'; fi.value=''; pintarSim();
+  const info = document.getElementById('simInfo'); info.classList.remove('hidden'); info.textContent = '🤔 Pensando…'; err('');
+  try{ if (!document.getElementById('prompt').value) await cargarPrompt();
+    const d = await api('/api/bot/simular', {method:'POST', headers:H(J), body:JSON.stringify({mensajes:SIM.map(x=>({role:x.role,text:x.text,media:x.media})), prompt:document.getElementById('prompt').value})});
     if (d.respuesta) SIM.push({role:'model', text:d.respuesta}); pintarSim();
-    info.innerHTML = `Deriva: <b>${d.derivar?'sí':'no'}</b> · Aceptó asesor: <b>${d.aceptoAsesor?'sí':'no'}</b> · Producto: <b>${esc(d.producto||'-')}</b> · Medidas: <b>${esc(d.medidas||'-')}</b> · Estilo: <b>${esc(d.estilo||'-')}</b>${d.transcripcion?'<br>Audio: '+esc(d.transcripcion):''}${d.respuesta?'':'<br><i>El bot no escribiría nada.</i>'}`;
-  }catch(e){ info.style.display='none'; document.getElementById('msg').textContent = e.message; SIM.pop(); pintarSim(); }
+    info.innerHTML = `Deriva: <b>${d.derivar?'sí':'no'}</b> · Aceptó asesor: <b>${d.aceptoAsesor?'sí':'no'}</b> · Producto: <b>${esc(d.producto||'-')}</b> · Medidas: <b>${esc(d.medidas||'-')}</b> · Estilo: <b>${esc(d.estilo||'-')}</b>${d.transcripcion?'<br>🎤 '+esc(d.transcripcion):''}${d.respuesta?'':'<br><i>El bot no escribiría nada.</i>'}`;
+  }catch(e){ info.classList.add('hidden'); err(e); SIM.pop(); pintarSim(); }
 }
+
+// ---- Instrucciones ----
+async function cargarPrompt(){ try{ const d = await api('/api/bot/prompt', {headers:H()}); document.getElementById('prompt').value = d.texto; document.getElementById('promptEst').textContent = d.personalizado ? 'Usando instrucciones editadas desde esta pantalla.' : 'Usando las instrucciones originales del sistema. Lo que cambies se usa en "Probar el bot" aunque no guardes.'; }catch(e){ err(e); } }
+async function guardarPrompt(){ try{ await api('/api/bot/prompt', {method:'PUT', headers:H(J), body:JSON.stringify({texto:document.getElementById('prompt').value})}); document.getElementById('promptEst').textContent = 'Guardado: el bot real ya usa estas instrucciones (puede tardar hasta 30 segundos).'; err(''); }catch(e){ err(e); } }
+async function volverOriginal(){ if (!confirm('¿Volver a las instrucciones originales del sistema?')) return; try{ await api('/api/bot/prompt', {method:'PUT', headers:H(J), body:JSON.stringify({texto:''})}); document.getElementById('prompt').value=''; await cargarPrompt(); }catch(e){ err(e); } }
+
+// ---- Conocimiento ----
+const ICO = {url:'🌐', archivo:'📄', texto:'✍️'};
+let FUENTES = [];
+async function cargarK(){ try{ const d = await api('/api/bot/conocimiento', {headers:H()}); FUENTES = d.fuentes; if (d.sinSucursal){ err('Elegí una sucursal en la barra de arriba (no "todas") para ver el conocimiento.'); }
+  document.getElementById('catSw').checked = d.incluirCatalogo; document.getElementById('catInfo').textContent = `El bot conoce qué productos vendés (${d.productosEnSistema||0} en el sistema: nombres, rubros y marcas), sin precios ni stock.`;
+  document.getElementById('kCuenta').textContent = d.fuentes.length ? d.fuentes.length + ' fuente(s)' : '';
+  document.getElementById('kLista').innerHTML = d.fuentes.map(f=>`<div class="fuente"><span class="ic">${ICO[f.tipo]||'📄'}</span><div class="t"><b>${esc(f.titulo)}</b><span class="muted">${f.tipo==='url'?esc(f.url)+' · ':f.archivo?esc(f.archivo)+' · ':''}${(f.chars||0).toLocaleString('es-AR')} caracteres${f.recortado?' (recortado)':''} · ${hora(f.actualizado||f.createdAt)}</span></div>
+    <div class="acc">${f.tipo==='url'?`<button class="b sec mini" onclick="kAct('${f._id}')">↻ Actualizar</button>`:''}<button class="b sec mini" onclick="kVer('${f._id}')">Ver / editar</button><button class="b del mini" onclick="kDel('${f._id}')">Quitar</button></div>
+    <label class="sw" title="Usar en el bot"><input type="checkbox" ${f.activo!==false?'checked':''} onchange="kOnOff('${f._id}',this.checked)"><span></span></label></div>`).join('') || '<div class="vacio"><span>📚</span>Todavía no cargaste nada. Empezá con la página web o el catálogo en PDF.</div>';
+  }catch(e){ err(e); } }
+async function kPost(url, body, ok){ err(''); try{ const d = await api(url, {method:'POST', headers:H(J), body:JSON.stringify(body)}); await cargarK(); return d; }catch(e){ err(e); } }
+async function kUrl(){ const u = document.getElementById('kUrl').value.trim(); if (!u) return; document.getElementById('kUrl').value=''; err('Leyendo la página…'); const d = await kPost('/api/bot/conocimiento/url', {url:u}); if (d) err(''); }
+async function kTexto(){ const t = document.getElementById('kTxt').value.trim(); if (!t) return; const d = await kPost('/api/bot/conocimiento/texto', {titulo:document.getElementById('kTit').value||'Texto', contenido:t}); if (d){ document.getElementById('kTxt').value=''; document.getElementById('kTit').value=''; } }
+async function kArchivo(f){ if (!f) return; if (f.size > 15*1024*1024){ err('El archivo supera los 15 MB.'); return; } err('Leyendo el archivo… (un PDF puede tardar un minuto)'); const a = await leerArchivo(f); document.getElementById('kFile').value=''; const d = await kPost('/api/bot/conocimiento/archivo', {nombre:f.name, mime:f.type, data:a.data}); if (d) err(''); }
+async function kAct(id){ err('Actualizando…'); try{ await api(`/api/bot/conocimiento/${id}/actualizar`, {method:'POST', headers:H(J), body:'{}'}); err(''); await cargarK(); }catch(e){ err(e); } }
+async function kOnOff(id, v){ try{ await api('/api/bot/conocimiento/'+id, {method:'PATCH', headers:H(J), body:JSON.stringify({activo:v})}); }catch(e){ err(e); cargarK(); } }
+async function kDel(id){ if (!confirm('¿Quitar esta fuente del bot?')) return; try{ await api('/api/bot/conocimiento/'+id, {method:'DELETE', headers:H()}); await cargarK(); }catch(e){ err(e); } }
+async function kCat(){ try{ await api('/api/bot/conocimiento-config', {method:'PUT', headers:H(J), body:JSON.stringify({incluirCatalogo:document.getElementById('catSw').checked})}); }catch(e){ err(e); cargarK(); } }
+let MID = null;
+async function kVer(id){ try{ const f = await api('/api/bot/conocimiento/'+id, {headers:H()}); MID = id; document.getElementById('mTit').textContent = (ICO[f.tipo]||'')+' '+f.titulo; document.getElementById('mNom').value = f.titulo; document.getElementById('mTxt').value = f.contenido; document.getElementById('modal').classList.add('on'); }catch(e){ err(e); } }
+function cerrar(){ document.getElementById('modal').classList.remove('on'); }
+async function mGuardar(){ try{ await api('/api/bot/conocimiento/'+MID, {method:'PATCH', headers:H(J), body:JSON.stringify({titulo:document.getElementById('mNom').value, contenido:document.getElementById('mTxt').value})}); cerrar(); await cargarK(); }catch(e){ err(e); } }
+const drop = document.getElementById('drop');
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.add('on'); }));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{ e.preventDefault(); drop.classList.remove('on'); }));
+drop.addEventListener('drop', e=>{ if (e.dataTransfer.files[0]) kArchivo(e.dataTransfer.files[0]); });
 init();
 </script></body></html>

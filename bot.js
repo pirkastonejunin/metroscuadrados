@@ -58,8 +58,30 @@ async function promptBase() { // el texto editado desde la pantalla (base de dat
   try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'prompt' }); cachePrompt = { t: Date.now(), v: d && d.texto ? d.texto : null }; } catch (e) { cachePrompt = { t: Date.now(), v: null }; }
   return cachePrompt.v || promptArchivo();
 }
-async function promptSistema(base) {
+// ---- base de conocimiento: textos, páginas web, archivos (PDF, Excel, CSV, texto, imágenes) y, si se activa, los productos del sistema (sin precios ni stock) ----
+const cacheCon = new Map();
+async function catalogoTexto(db, orgId) {
+  const ps = await db.collection('productos_catalogo').find({ orgId, activo: { $ne: false } }).project({ nombre: 1, rubro: 1, subrubro: 1, marca: 1, unidad: 1, descripcion: 1 }).limit(3000).toArray();
+  const porRubro = new Map(); for (const p of ps) { const k = [p.rubro, p.subrubro].filter(Boolean).join(' / ') || 'Otros'; if (!porRubro.has(k)) porRubro.set(k, []); porRubro.get(k).push(p); }
+  let out = ''; for (const [k, l] of [...porRubro].sort((a, b) => a[0].localeCompare(b[0]))) out += '\n## ' + k + '\n' + l.map(p => '- ' + p.nombre + (p.marca ? ' (' + p.marca + ')' : '') + (p.unidad ? ' — se vende por ' + p.unidad : '') + (p.descripcion ? ': ' + String(p.descripcion).slice(0, 200) : '')).join('\n');
+  return out.slice(0, 60000);
+}
+async function conocimientoTexto(orgId) {
+  if (!orgId) return '';
+  const k = String(orgId), c = cacheCon.get(k); if (c && Date.now() - c.t < 60000) return c.v;
+  let v = '';
+  try {
+    const db = await getDb(); const cfg = await db.collection('bot_config').findOne({ _id: 'conocimiento:' + k });
+    const fuentes = await db.collection('bot_conocimiento').find({ orgId, activo: { $ne: false } }).sort({ createdAt: 1 }).toArray();
+    let total = 0;
+    for (const f of fuentes) { const t = String(f.contenido || '').slice(0, 60000); if (!t || total + t.length > 200000) continue; total += t.length; v += '\n### ' + (f.titulo || f.tipo) + '\n' + t + '\n'; }
+    if (cfg && cfg.incluirCatalogo) { const t = await catalogoTexto(db, orgId); if (t) v += '\n### Productos que vende Piedra Negra (catálogo del sistema; sin precios ni stock)\n' + t + '\n'; }
+  } catch (e) { /* sin conocimiento extra */ }
+  cacheCon.set(k, { t: Date.now(), v }); return v;
+}
+async function promptSistema(base, orgId) {
   if (base == null) base = await promptBase();
+  const con = await conocimientoTexto(orgId); if (con) base += '\n\nBase de conocimiento (usala para responder con precisión; si algo no está acá ni en las instrucciones, no lo inventes ni lo afirmes; los precios y el stock los da un asesor):\n' + con;
   const a = ahoraAR();
   return base + '\n\nContexto actual: hoy es ' + DIAS[a.getUTCDay()] + ' ' + a.toISOString().slice(11, 16) + ' hs (Argentina). La atención humana está ' + (abierto() ? 'ABIERTA ahora.' : 'CERRADA ahora (un asesor responderá en el próximo horario de atención).') +
     '\nRespondé SIEMPRE con el JSON pedido. En "respuesta" va únicamente el mensaje para el cliente.';
@@ -73,9 +95,9 @@ function jsonDe(t) {
   try { return JSON.parse(l); } catch (e) { const i = l.indexOf('{'), j = l.lastIndexOf('}'); if (i >= 0 && j > i) { try { return JSON.parse(l.slice(i, j + 1)); } catch (e2) { /* nada */ } } return null; }
 }
 // historial: [{role:'user'|'model', text, media?:{mime,data(base64)}}]
-async function llamarIA(historial, promptBaseTexto) {
+async function llamarIA(historial, promptBaseTexto, orgId) {
   const prov = String(process.env.BOT_PROVEEDOR || '').toLowerCase() || (process.env.GEMINI_API_KEY ? 'gemini' : 'anthropic');
-  const sistema = await promptSistema(promptBaseTexto);
+  const sistema = await promptSistema(promptBaseTexto, orgId);
   if (prov === 'gemini') {
     const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('Falta GEMINI_API_KEY');
     const modelo = process.env.BOT_MODELO || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
@@ -172,7 +194,7 @@ async function responder(orgId, convId) {
       if (hist.length && hist[hist.length - 1].role === role) { hist[hist.length - 1].text += '\n' + item.text; if (item.media) hist[hist.length - 1].media = item.media; } else hist.push(item);
     }
     if (hist[0] && hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
-    const r = await llamarIA(hist);
+    const r = await llamarIA(hist, undefined, conv.orgId);
     if (!r) throw new Error('La IA no devolvió un JSON válido');
     await db.collection(COL_M).updateOne({ _id: ultimoIn._id }, { $set: Object.assign({ respondido: true }, r.transcripcion ? { texto: '🎤 ' + r.transcripcion } : {}) });
     // el estado pudo cambiar mientras pensaba la IA (un asesor tomó la conversación): no pisarlo ni escribir
@@ -270,7 +292,7 @@ router.post('/simular', auth, async (req, res) => {
     if (!ms.length || ms[ms.length - 1].role !== 'user') return res.status(400).json({ error: 'Falta el mensaje del cliente.' });
     const hist = ms.map(m => ({ role: m.role === 'model' ? 'model' : 'user', text: String(m.text || '').slice(0, 4000), media: m.media && m.media.data && /^(image|audio)\//.test(m.media.mime || '') && String(m.media.data).length < 12e6 ? { mime: m.media.mime, data: m.media.data } : undefined }));
     if (hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
-    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined);
+    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined, req.orgId || req.orgOperar || orgBot());
     if (!r) return res.status(502).json({ error: 'La IA no devolvió una respuesta válida. Probá de nuevo.' });
     res.json({ respuesta: r.respuesta || '', derivar: !!r.derivar, aceptoAsesor: !!r.aceptoAsesor, producto: r.producto || '', medidas: r.medidas || '', estilo: r.estilo || '', resumen: r.resumen || '', etiquetas: r.etiquetas || [], transcripcion: r.transcripcion || '' });
   } catch (e) { res.status(502).json({ error: e.message }); }
@@ -283,6 +305,81 @@ router.put('/prompt', auth, soloAdmin, async (req, res) => { // guarda las instr
     if (!t) await col.deleteOne({ _id: 'prompt' }); else await col.updateOne({ _id: 'prompt' }, { $set: { texto: t, actualizado: new Date(), por: req.usuario.usuario || req.usuario.nombre || '' } }, { upsert: true });
     cachePrompt = { t: 0, v: null }; res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ---- gestión de la base de conocimiento (solo Administrador puede modificarla) ----
+const dns = require('dns').promises, net = require('net');
+function ipPrivada(ip) { return /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1|fc|fd|fe80)/i.test(ip); }
+async function urlSegura(u) {
+  let x; try { x = new URL(u); } catch (e) { throw new Error('La dirección no es válida.'); }
+  if (!/^https?:$/.test(x.protocol)) throw new Error('Solo se aceptan direcciones http o https.');
+  if (process.env.BOT_PERMITIR_LOCAL === '1') return x;
+  const host = x.hostname.replace(/^\[|\]$/g, ''); const ips = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true }).catch(() => [])).map(r => r.address);
+  if (!ips.length || ips.some(ipPrivada)) throw new Error('Esa dirección no se puede leer desde el servidor.');
+  return x;
+}
+function htmlATexto(h) {
+  const ent = { '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&aacute;': 'á', '&eacute;': 'é', '&iacute;': 'í', '&oacute;': 'ó', '&uacute;': 'ú', '&ntilde;': 'ñ' };
+  return String(h).replace(/<(script|style|noscript|svg|nav|footer)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|li|h[1-6]|tr|section)>/gi, '\n').replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, m => ent[m.toLowerCase()] || ' ').replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+async function leerURL(u) {
+  const x = await urlSegura(u);
+  const r = await pedir(x.href, { headers: { 'user-agent': 'Mozilla/5.0 (compatible; PiedraNegraBot/1.0)', accept: 'text/html,text/plain' }, redirect: 'follow' }, 20000);
+  if (!r.ok) throw new Error('La página respondió ' + r.status + '.');
+  const ct = String(r.headers.get('content-type') || ''); const raw = await r.text();
+  const t = /html/i.test(ct) || /<html|<body/i.test(raw.slice(0, 2000)) ? htmlATexto(raw) : raw;
+  if (t.length < 50) throw new Error('No se pudo leer texto de esa página (puede cargarse con JavaScript).');
+  const titulo = (raw.match(/<title[^>]*>([^<]{1,120})/i) || [])[1];
+  return { texto: t.slice(0, 60000), titulo: titulo ? htmlATexto(titulo) : x.hostname };
+}
+async function extraerConIA(mime, data) {
+  const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('Para leer PDF o imágenes hace falta GEMINI_API_KEY.');
+  const modelo = process.env.BOT_MODELO || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+  const r = await pedir((process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta') + '/models/' + encodeURIComponent(modelo) + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Transcribí en texto plano todo el contenido útil de este documento (productos, medidas, colores, usos, características, condiciones). Mantené las tablas como líneas "producto | dato | dato". No resumas ni inventes nada.' }, { inlineData: { mimeType: mime, data } }] }], generationConfig: { temperature: 0 } }) }, 120000);
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error('IA ' + r.status + ': ' + ((d.error && d.error.message) || ''));
+  const c = (d.candidates || [])[0]; return c && c.content && c.content.parts ? c.content.parts.map(x => x.text || '').join('') : '';
+}
+async function textoDeArchivo(nombre, mime, b64) {
+  const buf = Buffer.from(b64, 'base64'); if (buf.length > 15 * 1024 * 1024) throw new Error('El archivo supera los 15 MB.');
+  const ext = (String(nombre).split('.').pop() || '').toLowerCase(); mime = mime || '';
+  if (['txt', 'md', 'csv', 'json', 'html'].includes(ext) || /^text\//.test(mime)) { const t = buf.toString('utf8'); return ext === 'html' ? htmlATexto(t) : t; }
+  if (['xlsx', 'xls', 'ods'].includes(ext)) { const XLSX = require('xlsx'); const wb = XLSX.read(buf, { type: 'buffer' }); return wb.SheetNames.map(n => '## Hoja: ' + n + '\n' + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n\n'); }
+  if (ext === 'pdf' || mime === 'application/pdf') return extraerConIA('application/pdf', b64);
+  if (/^image\//.test(mime) || ['png', 'jpg', 'jpeg', 'webp'].includes(ext)) return extraerConIA(mime || 'image/' + (ext === 'jpg' ? 'jpeg' : ext), b64);
+  throw new Error('Formato no soportado. Subí PDF, Excel, CSV, texto o imagen.');
+}
+const orgCon = (req) => req.orgId || req.orgOperar || null;
+const sinOrg = (res) => res.status(400).json({ error: 'Elegí una sucursal en la barra de arriba (no "todas").' });
+async function nuevaFuente(req, res, datos) {
+  const orgId = orgCon(req); if (!orgId) return sinOrg(res);
+  const texto = String(datos.contenido || '').trim(); if (!texto) return res.status(400).json({ error: 'No se pudo obtener texto de esa fuente.' });
+  const db = await getDb(); const ahora = new Date();
+  const r = await db.collection('bot_conocimiento').insertOne({ orgId, tipo: datos.tipo, titulo: String(datos.titulo || 'Sin título').slice(0, 120), url: datos.url || '', archivo: datos.archivo || '', contenido: texto.slice(0, 60000), chars: Math.min(texto.length, 60000), recortado: texto.length > 60000, activo: true, createdAt: ahora, actualizado: ahora });
+  cacheCon.delete(String(orgId)); res.json({ ok: true, id: r.insertedId, chars: Math.min(texto.length, 60000), recortado: texto.length > 60000 });
+}
+router.get('/conocimiento', auth, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return res.json({ fuentes: [], incluirCatalogo: false, sinSucursal: true });
+    const db = await getDb(); const fuentes = await db.collection('bot_conocimiento').find({ orgId }).project({ contenido: 0 }).sort({ createdAt: 1 }).toArray();
+    const cfg = await db.collection('bot_config').findOne({ _id: 'conocimiento:' + orgId }); const nProd = await db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false } });
+    res.json({ fuentes, incluirCatalogo: !!(cfg && cfg.incluirCatalogo), productosEnSistema: nProd }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/conocimiento/texto', auth, soloAdmin, async (req, res) => { try { await nuevaFuente(req, res, { tipo: 'texto', titulo: req.body.titulo, contenido: req.body.contenido }); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/conocimiento/url', auth, soloAdmin, async (req, res) => { try { const u = await leerURL(String((req.body && req.body.url) || '').trim()); await nuevaFuente(req, res, { tipo: 'url', titulo: req.body.titulo || u.titulo, url: req.body.url.trim(), contenido: u.texto }); } catch (e) { res.status(400).json({ error: e.message }); } });
+router.post('/conocimiento/archivo', auth, soloAdmin, async (req, res) => { try { const b = req.body || {}; if (!b.data) return res.status(400).json({ error: 'Falta el archivo.' }); const t = await textoDeArchivo(b.nombre || 'archivo', b.mime, b.data); await nuevaFuente(req, res, { tipo: 'archivo', titulo: b.titulo || b.nombre, archivo: b.nombre, contenido: t }); } catch (e) { res.status(400).json({ error: e.message }); } });
+async function fuenteDeReq(db, req) { const orgId = orgCon(req); if (!orgId || !/^[0-9a-f]{24}$/i.test(req.params.id)) return null; return db.collection('bot_conocimiento').findOne({ _id: new ObjectId(req.params.id), orgId }); }
+router.get('/conocimiento/:id', auth, async (req, res) => { try { const f = await fuenteDeReq(await getDb(), req); if (!f) return res.status(404).json({ error: 'No encontrada.' }); res.json(f); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.post('/conocimiento/:id/actualizar', auth, soloAdmin, async (req, res) => { // vuelve a leer una página web
+  try { const db = await getDb(); const f = await fuenteDeReq(db, req); if (!f || f.tipo !== 'url') return res.status(404).json({ error: 'No es una página web.' });
+    const u = await leerURL(f.url); await db.collection('bot_conocimiento').updateOne({ _id: f._id }, { $set: { contenido: u.texto, chars: u.texto.length, actualizado: new Date() } }); cacheCon.delete(String(f.orgId)); res.json({ ok: true, chars: u.texto.length }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+router.patch('/conocimiento/:id', auth, soloAdmin, async (req, res) => {
+  try { const db = await getDb(); const f = await fuenteDeReq(db, req); if (!f) return res.status(404).json({ error: 'No encontrada.' }); const set = { actualizado: new Date() }, b = req.body || {};
+    if (b.activo !== undefined) set.activo = !!b.activo; if (typeof b.titulo === 'string') set.titulo = b.titulo.slice(0, 120); if (typeof b.contenido === 'string') { set.contenido = b.contenido.slice(0, 60000); set.chars = set.contenido.length; }
+    await db.collection('bot_conocimiento').updateOne({ _id: f._id }, { $set: set }); cacheCon.delete(String(f.orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.delete('/conocimiento/:id', auth, soloAdmin, async (req, res) => { try { const db = await getDb(); const f = await fuenteDeReq(db, req); if (!f) return res.status(404).json({ error: 'No encontrada.' }); await db.collection('bot_conocimiento').deleteOne({ _id: f._id }); cacheCon.delete(String(f.orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+router.put('/conocimiento-config', auth, soloAdmin, async (req, res) => { try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); await (await getDb()).collection('bot_config').updateOne({ _id: 'conocimiento:' + orgId }, { $set: { incluirCatalogo: !!(req.body && req.body.incluirCatalogo) } }, { upsert: true }); cacheCon.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 (async () => { try { const db = await getDb(); await db.collection(COL_M).createIndex({ waId: 1 }, { unique: true, sparse: true }); await db.collection(COL_C).createIndex({ orgId: 1, tel10: 1 }, { unique: true }); await db.collection(COL_M).createIndex({ convId: 1, at: 1 }); } catch (e) { /* sin base al arrancar */ } })();
 
