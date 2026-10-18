@@ -152,6 +152,8 @@ function filasDeArchivo(base64, regla) {
     const f = m[r];
     const codigo = String(f[idx.codigo] == null ? '' : f[idx.codigo]).trim();
     if (!codigo) continue;
+    // fila de título de sección (celda combinada código+descripción, sin precio): no es un producto
+    if (idx.nombre != null && f[idx.nombre] === f[idx.codigo] && parseNumero(f[idx.precio]) == null) continue;
     filas.push({
       fila: r + 1, codigo,
       nombre: idx.nombre != null ? String(f[idx.nombre] == null ? '' : f[idx.nombre]).trim() : '',
