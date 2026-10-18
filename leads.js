@@ -54,13 +54,32 @@ function filaALead(h, f) {
   };
 }
 
-async function clientesPorTel(db, req) {
-  const cs = await db.collection('clientes').find(Object.assign({}, filtroOrg(req))).project({ telefono: 1, celular: 1, apellidoRazonSocial: 1, nombre: 1 }).toArray();
-  const mapa = new Map();
-  for (const c of cs) for (const t of [c.telefono, c.celular]) { const k = claveTel(t); if (k && !mapa.has(k)) mapa.set(k, c); }
-  return mapa;
-}
 const nombreCli = (c) => c ? (c.apellidoRazonSocial || c.nombre || '') : '';
+
+// Guarda una lista de leads ya normalizados (ver filaALead) en la sucursal. Devuelve { nuevos, actualizados, sinTelefono }.
+async function guardarLeads(db, orgId, leads, origen) {
+  const col = db.collection(COL);
+  await col.createIndex({ orgId: 1, tel10: 1 }, { unique: true }).catch(() => {});
+  const cs = await db.collection('clientes').find({ orgId }).project({ telefono: 1, celular: 1, apellidoRazonSocial: 1, nombre: 1 }).toArray();
+  const cli = new Map();
+  for (const c of cs) for (const t of [c.telefono, c.celular]) { const k = claveTel(t); if (k && !cli.has(k)) cli.set(k, c); }
+  const ahora = new Date(); const ops = []; let sinTelefono = 0, nuevos = 0, actualizados = 0;
+  for (const l of leads) {
+    if (!l.tel10) { sinTelefono++; continue; }
+    const c = cli.get(l.tel10);
+    ops.push({ updateOne: {
+      filter: { orgId, tel10: l.tel10 },
+      update: {
+        $set: Object.assign({}, l, { clienteId: c ? c._id : null, clienteNombre: nombreCli(c), updatedAt: ahora }),
+        $setOnInsert: { orgId, estado: l.estadoOrigen && ESTADOS.includes(l.estadoOrigen) ? l.estadoOrigen : 'Nuevo', notas: '', createdAt: ahora, origen }
+      }, upsert: true } });
+  }
+  for (let i = 0; i < ops.length; i += 500) {
+    const r = await col.bulkWrite(ops.slice(i, i + 500), { ordered: false });
+    nuevos += r.upsertedCount; actualizados += r.matchedCount;
+  }
+  return { nuevos, actualizados, sinTelefono };
+}
 
 router.post('/importar', auth, async (req, res) => {
   try {
@@ -69,29 +88,73 @@ router.post('/importar', auth, async (req, res) => {
     if (filas.length < 2) return res.status(400).json({ error: 'El archivo no tiene filas.' });
     const h = filas[0].map(x => x.trim());
     if (!h.includes('Teléfono')) return res.status(400).json({ error: 'No parece el CSV de la bandeja de Azuite (falta la columna Teléfono).' });
-    const db = await getDb(); const col = db.collection(COL);
-    await col.createIndex({ orgId: 1, tel10: 1 }, { unique: true }).catch(() => {});
-    const cli = await clientesPorTel(db, req); const ahora = new Date();
-    let nuevos = 0, actualizados = 0, sinTel = 0;
-    const ops = [];
-    for (const f of filas.slice(1)) {
-      const l = filaALead(h, f);
-      if (!l.tel10) { sinTel++; continue; }
-      const c = cli.get(l.tel10);
-      ops.push({ updateOne: {
-        filter: { orgId: req.orgId, tel10: l.tel10 },
-        update: {
-          $set: Object.assign({}, l, { clienteId: c ? c._id : null, clienteNombre: nombreCli(c), updatedAt: ahora }),
-          $setOnInsert: { orgId: req.orgId, estado: l.estadoOrigen && ESTADOS.includes(l.estadoOrigen) ? l.estadoOrigen : 'Nuevo', notas: '', createdAt: ahora, origen: 'azuite' }
-        }, upsert: true } });
-    }
-    for (let i = 0; i < ops.length; i += 500) {
-      const r = await col.bulkWrite(ops.slice(i, i + 500), { ordered: false });
-      nuevos += r.upsertedCount; actualizados += r.matchedCount;
-    }
-    res.json({ ok: true, filas: filas.length - 1, nuevos, actualizados, sinTelefono: sinTel });
+    const db = await getDb();
+    const r = await guardarLeads(db, req.orgId, filas.slice(1).map(f => filaALead(h, f)), 'azuite');
+    res.json(Object.assign({ ok: true, filas: filas.length - 1 }, r));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+
+// --- API de leads de Azuite (solo lectura). La key va en la variable de entorno AZUITE_API_KEY (nunca en el código ni en el chat). ---
+const AZ_BASE = process.env.AZUITE_API_URL || 'https://brkvidblothecotntcim.supabase.co/functions/v1/public-api/v1';
+async function azGet(ruta, params) {
+  const key = process.env.AZUITE_API_KEY;
+  if (!key) throw Object.assign(new Error('Falta cargar AZUITE_API_KEY en Render (Environment).'), { status: 400 });
+  const u = new URL(AZ_BASE + ruta); Object.entries(params || {}).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, v); });
+  const r = await fetch(u, { headers: { Authorization: 'Bearer ' + key, Accept: 'application/json' } });
+  if (r.status === 429) { await new Promise(ok => setTimeout(ok, 5000)); return azGet(ruta, params); }
+  const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt.slice(0, 300) }; }
+  if (!r.ok) throw Object.assign(new Error('Azuite respondió ' + r.status + ': ' + (d.error && (d.error.message || d.error) || d.message || d.raw || '')), { status: 502 });
+  return d;
+}
+const aLista = (d) => Array.isArray(d) ? d : (d && (d.data || d.leads || d.items || d.results)) || [];
+const siguiente = (d) => d && (d.next_cursor || d.nextCursor || (d.pagination && (d.pagination.next_cursor || d.pagination.nextCursor)) || (d.meta && d.meta.next_cursor)) || null;
+const txt = (v) => (v == null ? '' : typeof v === 'object' ? String(v.name || v.nombre || v.title || v.campaign || '') : String(v));
+// Un lead de la API de Azuite -> el formato interno. Los nombres de campos se leen de forma tolerante.
+function leadDeApi(x) {
+  const utm = x.utm || {}, ad = x.ad || {};
+  const tel = digitos(x.phone || x.telefono);
+  return {
+    telefono: tel, tel10: claveTel(tel), nombre: txt(x.name || x.nombre), email: txt(x.email), canal: txt(x.channel) || 'WhatsApp',
+    estadoOrigen: txt(x.status), etiquetasOrigen: Array.isArray(x.tags) ? x.tags.map(txt).filter(Boolean) : [],
+    fuente: txt(x.source || x.fuente) || (utm.source || ad.id || ad.name ? 'Meta Ads' : 'Directo'),
+    utmSource: txt(utm.source || utm.utm_source), utmMedium: txt(utm.medium || utm.utm_medium),
+    campana: txt(utm.campaign || utm.utm_campaign || ad.campaign || ad.name || ad.headline),
+    anuncio: txt(ad.name || ad.headline || ad.id), azuiteId: txt(x.id),
+    resumen: txt(x.summary || x.resumen), notasOrigen: txt(x.notes), creadoOrigen: x.created_at ? new Date(x.created_at) : null
+  };
+}
+async function sincronizarAzuite(db, orgId, { desde, maxPaginas, completo } = {}) {
+  let cursor = null, pag = 0, vistos = 0, acum = { nuevos: 0, actualizados: 0, sinTelefono: 0 };
+  if (!desde && !completo) { const ult = await db.collection(COL).find({ orgId, origen: 'azuite' }).sort({ creadoOrigen: -1 }).limit(1).project({ creadoOrigen: 1 }).toArray(); if (ult[0] && ult[0].creadoOrigen) desde = new Date(ult[0].creadoOrigen.getTime() - 86400000).toISOString(); }
+  do {
+    const d = await azGet('/leads', { limit: 200, order: 'asc', cursor, created_from: desde });
+    const lista = aLista(d); vistos += lista.length;
+    const r = await guardarLeads(db, orgId, lista.map(leadDeApi), 'azuite');
+    acum.nuevos += r.nuevos; acum.actualizados += r.actualizados; acum.sinTelefono += r.sinTelefono;
+    cursor = lista.length ? siguiente(d) : null; pag++;
+    if (cursor) await new Promise(ok => setTimeout(ok, 600)); // 120 pedidos/min
+  } while (cursor && pag < (maxPaginas || 100));
+  return Object.assign({ vistos, paginas: pag, desde: desde || null }, acum);
+}
+
+// Prueba de conexión: trae 1 lead y muestra los nombres de campos que devuelve la API (no guarda nada).
+router.get('/azuite/probar', auth, async (req, res) => {
+  try {
+    const d = await azGet('/leads', { limit: 1, order: 'desc' }); const l = aLista(d);
+    res.json({ ok: true, claves: d && !Array.isArray(d) ? Object.keys(d) : ['(lista)'], campos: l[0] ? Object.keys(l[0]) : [], hayLeads: l.length > 0 });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/azuite/sincronizar', auth, async (req, res) => {
+  try {
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí una sucursal para sincronizar los leads.' });
+    const db = await getDb();
+    res.json(Object.assign({ ok: true }, await sincronizarAzuite(db, req.orgId, { completo: !!(req.body && req.body.completo), maxPaginas: 100 })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Sincronización automática cada 30 min, solo si están AZUITE_API_KEY y AZUITE_ORG_ID (id de la sucursal que recibe los leads).
+if (process.env.AZUITE_API_KEY && process.env.AZUITE_ORG_ID && /^[0-9a-f]{24}$/i.test(process.env.AZUITE_ORG_ID)) {
+  setInterval(async () => { try { await sincronizarAzuite(await getDb(), new ObjectId(process.env.AZUITE_ORG_ID)); } catch (e) { console.error('[leads] sync Azuite:', e.message); } }, 30 * 60 * 1000).unref();
+}
 
 function armarFiltro(req) {
   const q = req.query, m = Object.assign({}, filtroOrg(req));
