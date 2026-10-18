@@ -95,7 +95,28 @@ function leerLibro(base64) {
 function matriz(wb, hoja) {
   const nombre = wb.SheetNames[Math.max(0, (Number(hoja) || 1) - 1)];
   if (!nombre) throw err(400, 'El archivo no tiene esa hoja.');
-  return XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, raw: true, defval: '' });
+  const ws = wb.Sheets[nombre];
+  const m = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', blankrows: true });
+  // Celdas combinadas: Excel guarda el valor solo en la celda de arriba a la izquierda; se replica en todo el rango
+  // para que la columna no quede "tapada" (títulos combinados, códigos o precios combinados hacia abajo).
+  const merges = ws['!merges'] || [];
+  if (merges.length && ws['!ref']) {
+    const o = XLSX.utils.decode_range(ws['!ref']);
+    for (const g of merges) {
+      const r0 = g.s.r - o.s.r, c0 = g.s.c - o.s.c;
+      if (r0 < 0 || c0 < 0 || !m[r0]) continue;
+      const v = m[r0][c0];
+      if (v === '' || v == null) continue;
+      for (let r = r0; r <= g.e.r - o.s.r && r < m.length; r++) {
+        for (let c = c0; c <= g.e.c - o.s.c; c++) {
+          if (!m[r]) continue;
+          while (m[r].length <= c) m[r].push('');
+          if (m[r][c] === '' || m[r][c] == null) m[r][c] = v;
+        }
+      }
+    }
+  }
+  return m;
 }
 // Letra de columna de Excel (A, B, ... AA) <-> índice
 function letraDeIdx(i) { let n = i + 1, s = ''; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; }
