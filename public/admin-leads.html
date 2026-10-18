@@ -54,7 +54,7 @@ const ESTADOS = ['Nuevo','Contactado','Calificado','Cerrado','Perdido'];
 function H(x){ const h = Object.assign({'x-admin-token':TOKEN}, x||{}); if (ORG) h['x-org-id'] = ORG; if (ORG==='todas' && OP) h['x-org-operar'] = OP; return h; }
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let t; function debounce(){ clearTimeout(t); t = setTimeout(cargar, 300); }
-async function api(url, opt){ const r = await fetch(url, opt); const d = await r.json().catch(()=>({})); if (!r.ok) throw new Error(d.error || 'Error'); return d; }
+async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status + (d.error ? '' : ' (' + (raw.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,120) || 'sin detalle') + ')'))); return d; }
 async function init(){
   if (!TOKEN){ document.getElementById('msg').textContent = 'Entrá primero al sistema con tu usuario.'; return; }
   try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'leads'); }catch(e){ document.getElementById('msg').textContent = e.message; return; }
@@ -92,7 +92,13 @@ async function importar(){
   }catch(e){ out.textContent = ''; document.getElementById('msg').textContent = e.message; }
 }
 async function probar(){ const o = document.getElementById('azRes'); o.textContent = 'Probando…'; try{ const d = await api('/api/leads/azuite/probar', {headers:H()}); o.textContent = 'Conectado. ' + (d.hayLeads ? 'Campos: ' + d.campos.join(', ') : 'Sin leads todavía.'); }catch(e){ o.textContent = ''; document.getElementById('msg').textContent = e.message; } }
-async function sync(completo){ const o = document.getElementById('azRes'); o.textContent = 'Sincronizando…'; document.getElementById('msg').textContent = ''; try{ const d = await api('/api/leads/azuite/sincronizar', {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({completo})}); o.textContent = `Listo: ${d.vistos} leídos, ${d.nuevos} nuevos, ${d.actualizados} actualizados.`; await resumen(); await cargar(); }catch(e){ o.textContent = ''; document.getElementById('msg').textContent = e.message; } }
+async function sync(completo){ const o = document.getElementById('azRes'); o.textContent = 'Iniciando…'; document.getElementById('msg').textContent = '';
+  try{ await api('/api/leads/azuite/sincronizar', {method:'POST', headers:H({'Content-Type':'application/json'}), body:JSON.stringify({completo})});
+    for(;;){ await new Promise(r=>setTimeout(r,2000)); const d = await api('/api/leads/azuite/estado', {headers:H()});
+      if (d.estado==='corriendo'){ o.textContent = `Sincronizando… ${d.vistos||0} leídos, ${d.nuevos||0} nuevos`; continue; }
+      if (d.estado==='error') throw new Error(d.error);
+      o.textContent = `Listo: ${d.vistos||0} leídos, ${d.nuevos||0} nuevos, ${d.actualizados||0} actualizados.`; await resumen(); await cargar(); break; }
+  }catch(e){ o.textContent = ''; document.getElementById('msg').textContent = e.message; } }
 document.getElementById('orgId').innerHTML = /^[0-9a-f]{24}$/i.test(ORG) ? 'Id de la sucursal elegida arriba (para <b>AZUITE_ORG_ID</b>): <b style="user-select:all">'+ORG+'</b>' : 'Elegí una sucursal en la barra de arriba (no "todas") para ver su id.';
 init();
 </script></body></html>

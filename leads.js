@@ -123,15 +123,16 @@ function leadDeApi(x) {
     resumen: txt(x.summary || x.resumen), notasOrigen: txt(x.notes), creadoOrigen: x.created_at ? new Date(x.created_at) : null
   };
 }
-async function sincronizarAzuite(db, orgId, { desde, maxPaginas, completo } = {}) {
-  let cursor = null, pag = 0, vistos = 0, acum = { nuevos: 0, actualizados: 0, sinTelefono: 0 };
+async function sincronizarAzuite(db, orgId, { desde, maxPaginas, completo, progreso } = {}) {
+  const usados = new Set(); let cursor = null, pag = 0, vistos = 0, acum = { nuevos: 0, actualizados: 0, sinTelefono: 0 };
   if (!desde && !completo) { const ult = await db.collection(COL).find({ orgId, origen: 'azuite' }).sort({ creadoOrigen: -1 }).limit(1).project({ creadoOrigen: 1 }).toArray(); if (ult[0] && ult[0].creadoOrigen) desde = new Date(ult[0].creadoOrigen.getTime() - 86400000).toISOString(); }
   do {
     const d = await azGet('/leads', { limit: 200, order: 'asc', cursor, created_from: desde });
     const lista = aLista(d); vistos += lista.length;
     const r = await guardarLeads(db, orgId, lista.map(leadDeApi), 'azuite');
     acum.nuevos += r.nuevos; acum.actualizados += r.actualizados; acum.sinTelefono += r.sinTelefono;
-    cursor = lista.length ? siguiente(d) : null; pag++;
+    const sig = lista.length ? siguiente(d) : null; cursor = sig && !usados.has(String(sig)) ? sig : null; if (sig) usados.add(String(sig)); pag++;
+    if (progreso) progreso({ vistos, paginas: pag, nuevos: acum.nuevos, actualizados: acum.actualizados });
     if (cursor) await new Promise(ok => setTimeout(ok, 600)); // 120 pedidos/min
   } while (cursor && pag < (maxPaginas || 100));
   return Object.assign({ vistos, paginas: pag, desde: desde || null }, acum);
@@ -144,13 +145,23 @@ router.get('/azuite/probar', auth, async (req, res) => {
     res.json({ ok: true, claves: d && !Array.isArray(d) ? Object.keys(d) : ['(lista)'], campos: l[0] ? Object.keys(l[0]) : [], hayLeads: l.length > 0 });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// La sincronización corre en segundo plano (el histórico puede tardar más que el límite de espera de Render); la pantalla consulta /azuite/estado.
+const trabajos = new Map(); // orgId -> { estado, ... }
 router.post('/azuite/sincronizar', auth, async (req, res) => {
   try {
     if (!req.orgId) return res.status(400).json({ error: 'Elegí una sucursal para sincronizar los leads.' });
+    if (!process.env.AZUITE_API_KEY) return res.status(400).json({ error: 'Falta cargar AZUITE_API_KEY en Render (Environment).' });
+    const k = String(req.orgId); const t = trabajos.get(k);
+    if (t && t.estado === 'corriendo') return res.json({ ok: true, yaCorriendo: true });
+    const job = { estado: 'corriendo', inicio: new Date(), vistos: 0, paginas: 0, nuevos: 0, actualizados: 0 }; trabajos.set(k, job);
     const db = await getDb();
-    res.json(Object.assign({ ok: true }, await sincronizarAzuite(db, req.orgId, { completo: !!(req.body && req.body.completo), maxPaginas: 100 })));
+    sincronizarAzuite(db, req.orgId, { completo: !!(req.body && req.body.completo), maxPaginas: 100, progreso: (p) => Object.assign(job, p) })
+      .then(r => Object.assign(job, r, { estado: 'listo', fin: new Date() }))
+      .catch(e => Object.assign(job, { estado: 'error', error: e.message, fin: new Date() }));
+    res.json({ ok: true, iniciado: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+router.get('/azuite/estado', auth, (req, res) => res.json(trabajos.get(String(req.orgId)) || { estado: 'nada' }));
 // Sincronización automática cada 30 min, solo si están AZUITE_API_KEY y AZUITE_ORG_ID (id de la sucursal que recibe los leads).
 if (process.env.AZUITE_API_KEY && process.env.AZUITE_ORG_ID && /^[0-9a-f]{24}$/i.test(process.env.AZUITE_ORG_ID)) {
   setInterval(async () => { try { await sincronizarAzuite(await getDb(), new ObjectId(process.env.AZUITE_ORG_ID)); } catch (e) { console.error('[leads] sync Azuite:', e.message); } }, 30 * 60 * 1000).unref();
