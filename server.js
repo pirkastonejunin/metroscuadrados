@@ -23,7 +23,7 @@ app.use((req, res, next) => { compartido.listo.then(() => next(), () => next());
 // export real de Dux (catálogo completo, ~20.000 productos) ya pesa
 // ~14mb en base64 — 15mb dejaba casi sin margen para catálogos así de
 // grandes.
-app.use(express.json({ limit: '30mb' }));
+app.use(express.json({ limit: '30mb', verify: (req, res, buf) => { if (req.url && req.url.startsWith('/api/leads/azuite/webhook')) req.rawBody = buf; } })); // rawBody: el webhook de Azuite se firma sobre el cuerpo crudo
 app.use(express.static(path.join(__dirname, 'public')));
 
 const cotizadorRouter = require('./cotizador');

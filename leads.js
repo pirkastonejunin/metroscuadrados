@@ -114,8 +114,8 @@ function leadDeApi(x) {
   const utm = x.utm || {}, ad = x.ad || {};
   const tel = digitos(x.phone || x.telefono);
   return {
-    telefono: tel, tel10: claveTel(tel), nombre: txt(x.name || x.nombre), email: txt(x.email), canal: txt(x.channel) || 'WhatsApp',
-    estadoOrigen: txt(x.status), etiquetasOrigen: Array.isArray(x.tags) ? x.tags.map(txt).filter(Boolean) : [],
+    telefono: tel, tel10: claveTel(tel), nombre: txt(x.name || x.nombre), email: txt(x.email), canal: (x.channel && typeof x.channel === 'object' ? txt(x.channel.type || x.channel.name) : txt(x.channel)) || 'WhatsApp',
+    estadoOrigen: txt(x.status), etiquetasOrigen: (Array.isArray(x.labels) ? x.labels : Array.isArray(x.tags) ? x.tags : []).map(txt).filter(Boolean),
     fuente: txt(x.source || x.fuente) || (utm.source || ad.id || ad.name ? 'Meta Ads' : 'Directo'),
     utmSource: txt(utm.source || utm.utm_source), utmMedium: txt(utm.medium || utm.utm_medium),
     campana: txt(utm.campaign || utm.utm_campaign || ad.campaign || ad.name || ad.headline),
@@ -137,6 +137,30 @@ async function sincronizarAzuite(db, orgId, { desde, maxPaginas, completo, progr
   } while (cursor && pag < (maxPaginas || 100));
   return Object.assign({ vistos, paginas: pag, desde: desde || null }, acum);
 }
+
+// Webhook de Azuite/Vulcano: POST firmado (header X-Vulcano-Signature: "t=<unix>,v1=<hex>", HMAC-SHA256 de "t.cuerpoCrudo" con el secret).
+// Variables: AZUITE_WEBHOOK_SECRET (el secret que muestra Azuite al activar) y AZUITE_ORG_ID (sucursal que recibe los leads).
+// Es idempotente: un aviso repetido solo actualiza el mismo lead (se cruza por teléfono). Sin AZUITE_WEBHOOK_SECRET responde 503 para que Azuite reintente.
+const crypto = require('crypto');
+function firmaValida(raw, header, secret) {
+  try {
+    const p = Object.fromEntries(String(header || '').split(',').map(x => x.trim().split('=')));
+    if (!p.t || !p.v1 || Math.abs(Date.now() / 1000 - Number(p.t)) > 300) return false;
+    const esperado = crypto.createHmac('sha256', secret).update(p.t + '.' + raw.toString('utf8')).digest('hex');
+    return esperado.length === p.v1.length && crypto.timingSafeEqual(Buffer.from(esperado), Buffer.from(p.v1));
+  } catch (e) { return false; }
+}
+router.post('/azuite/webhook', async (req, res) => {
+  try {
+    const secret = process.env.AZUITE_WEBHOOK_SECRET, org = process.env.AZUITE_ORG_ID;
+    if (!secret || !/^[0-9a-f]{24}$/i.test(org || '')) return res.status(503).json({ error: 'Webhook sin configurar' });
+    if (!req.rawBody || !firmaValida(req.rawBody, req.headers['x-vulcano-signature'], secret)) return res.status(401).json({ error: 'Firma inválida' });
+    const ev = req.body || {}; const x = ev.data && ev.data.lead;
+    if (ev.type !== 'lead.created' || !x) return res.json({ ok: true, ignorado: true });
+    const r = await guardarLeads(await getDb(), new ObjectId(org), [leadDeApi(x)], 'azuite');
+    res.json({ ok: true, nuevos: r.nuevos, actualizados: r.actualizados, sinTelefono: r.sinTelefono });
+  } catch (e) { console.error('[leads] webhook:', e.message); res.status(500).json({ error: 'Error interno' }); }
+});
 
 // Prueba de conexión: trae 1 lead y muestra los nombres de campos que devuelve la API (no guarda nada).
 router.get('/azuite/probar', auth, async (req, res) => {
