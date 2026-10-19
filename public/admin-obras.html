@@ -653,13 +653,21 @@ async function cargarRentabilidadObra(id){
         <table style="width:100%;font-size:13px">
           <tr><td>Presupuestado / vendido</td><td style="text-align:right">${d.sinPresupuesto?'<span class="muted">sin monto cargado</span>':$m(d.ingreso)}</td></tr>
           <tr><td>− Facturas de compra <span class="muted">(total con IVA, ${d.facturas.length})</span></td><td style="text-align:right">${$m(d.materiales)}</td></tr>
-          <tr><td>− Mano de obra colocador</td><td style="text-align:right">${$m(d.manoObra)}</td></tr>
+          <tr><td>− Mano de obra <span class="muted">(por m² + trabajos especiales)</span></td><td style="text-align:right">${$m(d.manoObra)}</td></tr>
           <tr style="font-weight:800;border-top:1px solid var(--border)"><td>Resultado</td><td style="text-align:right;color:${color}">${$m(d.resultado)}${d.margenPct!=null?' · '+d.margenPct.toLocaleString('es-AR')+'%':''}</td></tr>
         </table>
         ${d.resultadoEsperado!=null?'<div class="muted" style="font-size:12px;margin-top:4px">Resultado esperado según el presupuesto de materiales: '+$m(d.resultadoEsperado)+'</div>':''}
         ${d.tareasSinColocador?'<div class="muted" style="font-size:12px;margin-top:6px">'+d.tareasSinColocador+' producto(s) sin colocador: su mano de obra todavía no se cuenta.</div>':''}
         <div style="margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:13px">Materiales: presupuestado vs real</strong><button class="btn small secondary" onclick="editarPresupuestoMateriales('${id}')">${d.materialesDetalle.some(f=>f.estado!=='fueraPresupuesto')?'Editar':'Cargar'} presupuesto de materiales</button></div>
           ${tablaMateriales(d)}</div>
+        <div style="margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><strong style="font-size:13px">Mano de obra: presupuestado vs real</strong><button class="btn small secondary" onclick="editarPresupuestoManoObra('${id}', ${d.presupuestoManoObra||0})">${d.presupuestoManoObra>0?'Editar':'Cargar'} presupuesto</button></div>
+          <table style="width:100%;font-size:12.5px;margin-top:6px">
+            <tr><td>Presupuestado</td><td style="text-align:right">${d.presupuestoManoObra>0?$m(d.presupuestoManoObra):'<span class="muted">sin cargar</span>'}</td></tr>
+            <tr><td>Real <span class="muted">(colocación por m² ${$m(d.manoObraM2)} + trabajos especiales ${$m(d.manoObraEspeciales)})</span></td><td style="text-align:right">${$m(d.manoObra)}</td></tr>
+            ${d.desvioManoObra!=null?`<tr style="font-weight:800;border-top:1px solid var(--border)"><td>Diferencia</td><td style="text-align:right;color:${d.desvioManoObra>0?'var(--danger,#dc2626)':'var(--ok,#15803d)'}">${d.desvioManoObra>0?'+':''}${$m(d.desvioManoObra)}${d.desvioManoObraPct!=null?' ('+(d.desvioManoObraPct>0?'+':'')+d.desvioManoObraPct.toLocaleString('es-AR')+'%)':''}</td></tr>`:''}
+          </table>
+          ${d.especialesDetalle.length?'<details style="margin-top:4px"><summary style="cursor:pointer;font-weight:600;font-size:12.5px">Trabajos especiales imputados</summary><table style="width:100%;font-size:12.5px;margin-top:4px">'+d.especialesDetalle.map(e=>`<tr><td>${escapeHtmlO(e.descripcion)} <span class="muted">${escapeHtmlO(e.colocador)}</span></td><td style="text-align:right">${$m(e.monto)} <span class="muted">(pagado ${$m(e.pagado)})</span></td></tr>`).join('')+'</table></details>':''}
+          <div class="muted" style="font-size:11.5px;margin-top:3px">Los trabajos especiales se cargan en Sueldos → Colocadores → Trabajos especiales, eligiendo la obra.</div></div>
         ${filasF?'<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600;font-size:13px">Facturas imputadas</summary><table style="width:100%;font-size:12.5px;margin-top:4px">'+filasF+'</table></details>':''}
         ${filasM?'<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:600;font-size:13px">Detalle de mano de obra</summary><table style="width:100%;font-size:12.5px;margin-top:4px">'+filasM+'</table></details>':''}
         <div style="margin-top:10px"><a class="btn small secondary" style="text-decoration:none;display:inline-block" href="/admin-compras.html?nuevaCompraObra=${id}">+ Cargar factura de compra a esta obra</a></div>
@@ -763,6 +771,19 @@ async function quitarFacturaDeObra(compraId, obraId){
     if (!r.ok) throw new Error(d.error || 'No se pudo quitar (¿tenés acceso al módulo Compras?)');
     cargarRentabilidadObra(obraId);
   } catch (e) { alert(e.message); }
+}
+function editarPresupuestoManoObra(obraId, actual){
+  modal(`
+    <span class="close-x" onclick="abrirObra('${obraId}')">✕</span>
+    <h2>Presupuesto de mano de obra</h2>
+    <div class="muted">Total que calculás gastar en mano de obra en esta obra (colocación por m² + trabajos especiales). Dejalo en 0 para quitarlo.</div>
+    <div style="margin-top:10px"><label>Monto total $</label><input id="pmoMonto" type="number" min="0" step="0.01" value="${actual||''}"></div>
+    <div class="err" id="pmoErr"></div>
+    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="guardarPresupuestoManoObra('${obraId}')">Guardar</button><button class="btn secondary" onclick="abrirObra('${obraId}')">Volver a la obra</button></div>`);
+}
+async function guardarPresupuestoManoObra(obraId){
+  try { await api('/' + obraId + '/presupuesto-mano-obra', {method:'PUT', body:{monto: Number(document.getElementById('pmoMonto').value) || 0}}); abrirObra(obraId); }
+  catch (e) { document.getElementById('pmoErr').textContent = e.message; }
 }
 function escapeHtmlO(t){ return String(t==null?'':t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 

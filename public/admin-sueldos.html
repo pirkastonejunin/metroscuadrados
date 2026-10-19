@@ -477,10 +477,13 @@ async function anularPagoEsp(id, idx){
   try{ await api('POST', '/colocadores/especiales/' + id + '/pagos/' + idx + '/anular', {motivo}); exito('Pago anulado.'); cerrarPEsp(); await cargarEsp(); }catch(e){ error(e); }
 }
 function cerrarPEsp(){ $('pEsp').innerHTML = ''; $('pEsp').classList.add('hidden'); }
+let OBRAS_LISTA = [];
 async function formEsp(id){
+  try{ if (!OBRAS_LISTA.length) OBRAS_LISTA = await api('GET', '/colocadores/obras-lista'); }catch(e){ OBRAS_LISTA = []; }
   if (!COL_LISTA.length) { try{ COL_LISTA = await api('GET', '/colocadores/lista'); }catch(e){ return error(e); } }
   const x = id ? ESP.find(y => y._id === id) : null;
   $('pEsp').innerHTML = '<h3>' + (x ? 'Editar trabajo especial' : 'Nuevo trabajo especial') + '</h3><div class="form" data-id="' + (id || '') + '"><div><label>Colocador</label><select id="esCol"' + (x ? ' disabled' : '') + '>' + COL_LISTA.map(c => '<option value="' + c._id + '"' + (x && String(x.colocadorId) === c._id ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></div>' +
+    '<div><label>Obra del sistema (para ver su rentabilidad)</label><select id="esObraId"><option value="">— Ninguna —</option>' + OBRAS_LISTA.map(o => '<option value="' + o._id + '"' + (x && String(x.obraId || '') === o._id ? ' selected' : '') + '>Obra #' + o.numero + ' — ' + escapeHtml(o.cliente) + '</option>').join('') + '</select></div>' +
     '<div><label>Obra / cliente</label><input type="text" id="esObra" placeholder="Ej: Casa Pérez" value="' + escapeHtml(x ? x.obra : '') + '"></div>' +
     '<div class="ancho"><label>Trabajo</label><input type="text" id="esDesc" placeholder="Ej: Revestimiento de fachada" value="' + escapeHtml(x ? x.descripcion : '') + '"></div>' +
     '<div><label>Monto acordado</label><input type="number" min="0" step="any" id="esMonto" value="' + (x ? x.monto : '') + '"></div>' +
@@ -490,7 +493,7 @@ async function formEsp(id){
 }
 async function guardarEsp(){
   const id = document.querySelector('#pEsp .form').dataset.id;
-  const b = {obra: $('esObra').value, descripcion: $('esDesc').value, monto: n$('esMonto')};
+  const b = {obra: $('esObra').value, obraId: $('esObraId').value || null, descripcion: $('esDesc').value, monto: n$('esMonto')};
   try{
     if (id) await api('PUT', '/colocadores/especiales/' + id, b);
     else await api('POST', '/colocadores/especiales', Object.assign(b, {colocadorId: $('esCol').value, terminada: $('esEstado').value === 'terminada', fechaFin: $('esFin').value}));

@@ -961,6 +961,22 @@ router.get('/colocadores/lista', authSueldosLectura, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 async function liquidadaLa(db, tareaId) { return !!(await db.collection('sueldos_colocadores').findOne({ 'tareas.tareaId': tareaId }, { projection: { _id: 1 } })); }
+// Obras del sistema a las que se puede imputar un trabajo especial (para ver la rentabilidad de cada obra).
+router.get('/colocadores/obras-lista', authSueldosLectura, async (req, res) => {
+  try {
+    const l = await conReintento(async () => (await getDb()).collection('obras').find(Object.assign({ estado: { $ne: 'cancelada' } }, filtroOrg(req)))
+      .project({ numero: 1, 'cliente.nombre': 1, 'cliente.direccion': 1 }).sort({ numero: -1 }).limit(500).toArray());
+    res.json(l.map(o => ({ _id: String(o._id), numero: o.numero, cliente: (o.cliente && o.cliente.nombre) || '', direccion: (o.cliente && o.cliente.direccion) || '' })));
+  } catch (e) { responder(res, e); }
+});
+// Datos de la obra a guardar en el trabajo especial (obraId null = sin obra del sistema).
+async function datosObraEspecial(db, req, obraIdRaw) {
+  if (!obraIdRaw) return { obraId: null, obraNumero: null, obraTexto: '' };
+  const oid = toObjectId(obraIdRaw); if (!oid) throw err(400, 'obraId inválido');
+  const o = await db.collection('obras').findOne(Object.assign({ _id: oid }, filtroOrg(req)), { projection: { numero: 1, 'cliente.nombre': 1 } });
+  if (!o) throw err(400, 'La obra no existe (o no pertenece a esta sucursal).');
+  return { obraId: oid, obraNumero: o.numero, obraTexto: '#' + o.numero + ' ' + ((o.cliente && o.cliente.nombre) || '') };
+}
 router.get('/colocadores/especiales', authSueldosLectura, async (req, res) => {
   try {
     const lista = await conReintento(async () => {
@@ -988,7 +1004,9 @@ router.post('/colocadores/especiales', authSueldosDoc, async (req, res) => {
       const db = await getDb();
       const c = await db.collection('obras_colocadores').findOne({ _id: colId });
       if (!c) throw err(404, 'Colocador no encontrado.');
-      const d = Object.assign(datosEspecial(b), { colocadorId: colId, colocadorNombre: c.nombre, estado: 'pendiente', fechaFin: null, pagos: [], totalPagado: 0, estadoPago: 'pendiente', orgId: c.sucursalSueldoId || req.orgId, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date(), updatedAt: new Date() });
+      const ob = await datosObraEspecial(db, req, b.obraId);
+      const d = Object.assign(datosEspecial(b), { obraId: ob.obraId, obraNumero: ob.obraNumero, colocadorId: colId, colocadorNombre: c.nombre, estado: 'pendiente', fechaFin: null, pagos: [], totalPagado: 0, estadoPago: 'pendiente', orgId: c.sucursalSueldoId || req.orgId, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date(), updatedAt: new Date() });
+      if (ob.obraId && !d.obra) d.obra = ob.obraTexto;
       if (b.terminada) { d.estado = 'terminada'; d.fechaFin = fechaDe(b.fechaFin); }
       const r = await db.collection('sueldos_tareas_especiales').insertOne(d);
       return Object.assign(d, { _id: r.insertedId });
@@ -1035,6 +1053,11 @@ router.post('/colocadores/especiales/:id/pagos/:idx/anular', authSueldosDoc, (re
 
 router.put('/colocadores/especiales/:id', authSueldosDoc, (req, res) => cambiarEspecial(req, res, async (db, e, id) => {
   const d = datosEspecial(req.body || {});
+  if ((req.body || {}).obraId !== undefined) {
+    const ob = await datosObraEspecial(db, req, req.body.obraId);
+    d.obraId = ob.obraId; d.obraNumero = ob.obraNumero;
+    if (ob.obraId && !d.obra) d.obra = ob.obraTexto;
+  }
   if (d.monto + 0.005 < (e.totalPagado || 0)) throw err(400, 'El monto no puede quedar por debajo de lo ya pagado (' + r2(e.totalPagado) + '). Anulá algún pago primero.');
   await db.collection('sueldos_tareas_especiales').updateOne({ _id: id }, { $set: Object.assign(d, { estadoPago: estadoPago({ neto: d.monto, totalPagado: e.totalPagado || 0 }), updatedAt: new Date() }) }); return { ok: true };
 }));

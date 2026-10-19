@@ -566,6 +566,23 @@ router.get('/materiales/buscar', authAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Presupuesto de mano de obra de la obra: un solo total (se compara contra lo cargado en Sueldos → trabajos especiales
+// y la colocación por m²). monto 0 / vacío = sin presupuesto.
+router.put('/:id/presupuesto-mano-obra', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const monto = Number((req.body || {}).monto) || 0;
+    if (monto < 0) return res.status(400).json({ error: 'El monto no puede ser negativo' });
+    const r = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('obras').updateOne(Object.assign({ _id: id }, filtroOrg(req)), { $set: { presupuestoManoObra: Math.round(monto * 100) / 100, updatedAt: new Date() } });
+    });
+    if (!r.matchedCount) return res.status(404).json({ error: 'Obra no encontrada' });
+    res.json({ ok: true, monto });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Presupuesto de materiales de la obra (lista de productos con cantidad y costo unitario estimado), para compararlo
 // después contra las facturas de compra imputadas a la obra (ver /:id/rentabilidad).
 router.put('/:id/presupuesto-materiales', authAdmin, async (req, res) => {
@@ -668,7 +685,13 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
         tipoTrabajo: t.tipoTrabajo, m2: Number(t.m2Presupuestados) || 0, costoPorM2: Number(t.costoPorM2Aplicado) || 0,
         subtotal: r2((Number(t.m2Presupuestados) || 0) * (Number(t.costoPorM2Aplicado) || 0))
       }));
-      const manoObra = r2(manoObraDet.reduce((a, t) => a + t.subtotal, 0));
+      const manoObraM2 = r2(manoObraDet.reduce((a, t) => a + t.subtotal, 0));
+      // Trabajos especiales cargados en Sueldos e imputados a esta obra (monto acordado; se muestra además lo ya pagado).
+      const especiales = await db.collection('sueldos_tareas_especiales').find({ obraId: id }).sort({ createdAt: 1 }).toArray();
+      const especialesDet = especiales.map(e => ({ _id: e._id, descripcion: e.descripcion, colocador: e.colocadorNombre || '', monto: r2(e.monto), pagado: r2(e.totalPagado), estado: e.estado }));
+      const manoObraEspeciales = r2(especialesDet.reduce((a, e) => a + e.monto, 0));
+      const manoObra = r2(manoObraM2 + manoObraEspeciales);
+      const presupuestoManoObra = r2(obra.presupuestoManoObra);
       const ingreso = r2(obra.precioVentaCliente);
       const costo = r2(materiales + manoObra);
       const resultado = r2(ingreso - costo);
@@ -681,7 +704,10 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
         materialesPresupuestado: matPresupuestado, materialesItemsReales: matItemsReal,
         desvioMateriales: filasMat.length ? r2(matItemsReal - matPresupuestado) : null,
         desvioMaterialesPct: matPresupuestado > 0 ? r2((matItemsReal - matPresupuestado) / matPresupuestado * 100) : null,
-        resultadoEsperado: filasMat.length && ingreso > 0 ? r2(ingreso - matPresupuestado - manoObra) : null,
+        manoObraM2, manoObraEspeciales, especialesDetalle: especialesDet, presupuestoManoObra,
+        desvioManoObra: presupuestoManoObra > 0 ? r2(manoObra - presupuestoManoObra) : null,
+        desvioManoObraPct: presupuestoManoObra > 0 ? r2((manoObra - presupuestoManoObra) / presupuestoManoObra * 100) : null,
+        resultadoEsperado: (filasMat.length || presupuestoManoObra > 0) && ingreso > 0 ? r2(ingreso - (filasMat.length ? matPresupuestado : materiales) - (presupuestoManoObra > 0 ? presupuestoManoObra : manoObra)) : null,
         sinPresupuesto: !(ingreso > 0), tareasSinColocador: (obra.tareas || []).filter(t => !t.colocadorId).length
       };
     });
