@@ -51,6 +51,16 @@ button{cursor:pointer}
 .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .barra select,.barra input[type=search]{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;font-size:12.5px;font-weight:600}
 
+/* embudo */
+.embudo{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;flex:none}
+.fz{--cc:var(--mute);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:9px 12px;text-align:left;box-shadow:var(--shadow);position:relative;display:flex;flex-direction:column;gap:1px}
+.fz:hover{border-color:var(--mute)}.fz.on{border-color:var(--cc);box-shadow:0 0 0 3px color-mix(in srgb,var(--cc) 18%,transparent)}
+.fz .t{font-size:11.5px;font-weight:700;color:var(--mute);display:flex;gap:5px;align-items:center}
+.fz .c{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.15}
+.fz .d{font-size:11.5px;color:var(--mute);font-weight:600;display:flex;justify-content:space-between;gap:6px}
+.fz .bar{height:4px;border-radius:4px;background:var(--panel2);margin-top:5px;overflow:hidden}.fz .bar i{display:block;height:100%;background:var(--cc);border-radius:4px}
+.fz[data-k=nuevo]{--cc:var(--cold)}.fz[data-k=conversando]{--cc:var(--warm)}.fz[data-k=presupuesto]{--cc:var(--violet)}.fz[data-k=cerrando]{--cc:var(--accent)}.fz[data-k=ganada]{--cc:var(--ok)}
+@media (max-width:760px){.embudo{grid-auto-flow:column;grid-auto-columns:150px;grid-template-columns:none;overflow-x:auto}}
 /* tablero */
 .tablero{flex:1;min-height:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(250px,1fr);gap:12px;overflow-x:auto;padding-bottom:2px}
 .colu{--cc:var(--mute);background:var(--panel2);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;min-height:0;min-width:0;transition:background .15s}
@@ -180,6 +190,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
     <label class="tip"><input type="checkbox" id="fCer"> Mostrar cerradas</label>
     <span class="sp"></span><span class="tip" id="cant"></span><button class="chip" id="soloHoy">Solo Hoy</button><button class="btn sm" id="ej" hidden>Quitar ejemplos</button><a class="btn sm" href="/crm.html">Vista clásica</a>
   </div>
+  <div class="embudo" id="embudo"></div>
   <div class="tablero" id="tab"></div>
   <div class="tabla" id="v-lista" hidden><table><thead><tr><th>Cliente</th><th>Producto</th><th>Temp.</th><th>Etapa</th><th>Columna</th><th>Asesor</th><th>Aviso</th><th class="n">Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
   <iframe id="bot" title="Bot de WhatsApp" hidden></iframe>
@@ -216,13 +227,13 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], dragId = null, pend = null, decOpen = false;
+let ETF = '', ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
 const cur = () => ITEMS.find(l=>l.id===sel);
 const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
 function filtradas(){
   const t=$('fTemp').value, p=$('fProd').value, q=$('q').value.trim().toLowerCase(), h=$('soloHoy').classList.contains('on');
-  return ITEMS.filter(l=>(F==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)) && (!h||l.columna==='hoy'));
+  return ITEMS.filter(l=>(F==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)) && (!h||l.columna==='hoy') && (!ETF||l.etapa===ETF));
 }
 const orden = l => (l.sinDec?-5:0) + (l.esperaCliente?0:50) + (l.prox&&l.prox.dias<=0?10:20) + ({caliente:0,tibio:3,frio:6}[l.temperatura]) - Math.min(9,(l.esperaMin||0)/1000);
 function aviso(l){
@@ -250,6 +261,7 @@ function pintar(){
     const vacio = e.k==='hoy' ? '<div class="vacioc"><big>✅</big>Hoy está vacío.<br>No queda nada por resolver.</div>' : '<div class="vacioc">Nada acá</div>';
     return `<section class="colu" data-e="${e.k}"><div class="ch"><span class="ico">${e.i}</span><h2>${e.n}</h2><span class="n">${c.length}</span><span class="v">${tot?money(tot):''}</span></div><div class="ch-sub">${e.sub}</div><div class="cards">${c.map(tarjeta).join('')||vacio}</div></section>`;
   }).join('');
+  pintarEmbudo();
   const a = ITEMS.filter(l=>!l.cierre), h = a.filter(l=>l.columna==='hoy').length, ve = a.filter(l=>l.columna==='hoy'&&l.prox&&l.prox.dias<0).length, sd = a.filter(l=>l.sinDec).length;
   $('resumen').innerHTML = `<div class="stat ${h?'al':'okk'}"><b>${h}</b><span>${h?'por resolver hoy':'Hoy al día'}</span></div>${ve?`<div class="stat al"><b>${ve}</b><span>vencidas</span></div>`:''}${sd?`<div class="stat al"><b>${sd}</b><span>sin decidir</span></div>`:''}<div class="stat"><b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b><span>en presupuestos</span></div>`;
   $('cant').textContent = ''; $('ej').hidden = !ITEMS.some(i=>i.demo);
@@ -257,8 +269,22 @@ function pintar(){
   enlazar();
   if (VISTA==='lista') pintarLista();
 }
+function pintarEmbudo(){
+  const base = ITEMS.filter(l=>(F==='todas'||mio(l))), ab = base.filter(l=>!l.cierre);
+  const mes = new Date(Date.now()-3*3600000).toISOString().slice(0,7);
+  const delMes = base.filter(l=>l.cierre && l.cierre.at && new Date(new Date(l.cierre.at).getTime()-3*3600000).toISOString().slice(0,7)===mes);
+  const gan = delMes.filter(l=>l.cierre.estado==='ganada'), per = delMes.filter(l=>l.cierre.estado!=='ganada');
+  const tot = ab.length + gan.length || 1;
+  const pasos = [['nuevo','🆕','Nuevos'],['conversando','💬','En conversación'],['presupuesto','📄','Presupuesto enviado'],['cerrando','🤝','Por cerrar']];
+  const sv = a => a.reduce((x,l)=>x+(l.valor||0),0);
+  let h = pasos.map(([k,i,n])=>{ const c = ab.filter(l=>l.etapa===k); return `<button class="fz ${ETF===k?'on':''}" data-k="${k}"><span class="t">${i} ${n}</span><span class="c">${c.length}</span><span class="d"><span>${c.length?money(sv(c)):'—'}</span><span>${Math.round(c.length/tot*100)}%</span></span><span class="bar"><i style="width:${Math.round(c.length/tot*100)}%"></i></span></button>`; }).join('');
+  const cv = gan.length+per.length ? Math.round(gan.length/(gan.length+per.length)*100)+'% de cierres' : 'este mes';
+  h += `<div class="fz" data-k="ganada"><span class="t">🏆 Ganadas del mes</span><span class="c">${gan.length}</span><span class="d"><span>${gan.length?money(sv(gan)):'—'}</span><span>${per.length?per.length+' perdidas · ':''}${cv}</span></span><span class="bar"><i style="width:${Math.round(gan.length/tot*100)}%"></i></span></div>`;
+  $('embudo').innerHTML = h;
+  $('embudo').querySelectorAll('button.fz').forEach(b=>b.onclick=()=>{ ETF = ETF===b.dataset.k ? '' : b.dataset.k; pintar(); });
+}
 function pintarLista(){
-  const rows = filtradas().sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
+  const rows = filtradas().filter(l=>!l.cierre||$('fCer').checked).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
   $('cant').textContent = rows.length + ' de ' + ITEMS.length;
   const CN = Object.fromEntries(COLS.map(c=>[c.k,c.n]));
   $('tBody').innerHTML = rows.map(l=>{ const [t,c]=aviso(l); return `<tr class="f" data-id="${esc(l.id)}"><td><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td><span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span></td><td>${esc(l.cierre?l.cierre.estado:ETN[l.etapa]||l.etapa)}</td><td>${esc(CN[l.columna]||'')}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="tag ${c}">${esc(t)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="9" class="vacio">Nada con esos filtros.</td></tr>';
@@ -266,7 +292,7 @@ function pintarLista(){
 
 async function cargar(opts){
   try{
-    const d = await api('/api/mesa' + ($('fCer').checked ? '?cerradas=1' : ''), {headers:H()});
+    const d = await api('/api/mesa?cerradas=1', {headers:H()});
     const antes = cur(); ITEMS = d.items; YO = d.yo; MOTIVOS = d.motivosPerdida;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
     pintar();
@@ -420,7 +446,7 @@ document.querySelectorAll('.zona').forEach(z=>{
 /* ---- vistas y filtros ---- */
 function setV(v){
   VISTA = v; document.querySelectorAll('#vistas button').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
-  $('tab').hidden = v!=='tablero'; $('cierres').hidden = v!=='tablero'; $('v-lista').hidden = v!=='lista'; $('barra').hidden = v==='bot'; $('bot').hidden = v!=='bot';
+  $('tab').hidden = v!=='tablero'; $('embudo').hidden = v==='bot'; $('cierres').hidden = v!=='tablero'; $('v-lista').hidden = v!=='lista'; $('barra').hidden = v==='bot'; $('bot').hidden = v!=='bot';
   if (v==='bot' && !$('bot').src) $('bot').src = '/admin-bot.html?embed=1';
   if (v==='lista') pintarLista();
 }
@@ -428,7 +454,7 @@ $('vistas').onclick = e => { const b = e.target.closest('button'); if (b) setV(b
 document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ F=b.dataset.f; document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b)); pintar(); });
 $('soloHoy').onclick = () => { $('soloHoy').classList.toggle('on'); pintar(); };
 ['fTemp','fProd','q'].forEach(i=>$(i).addEventListener('input', pintar));
-$('fCer').addEventListener('change', () => cargar());
+$('fCer').addEventListener('change', pintar);
 $('tBody').onclick = e => { const tr = e.target.closest('tr.f'); if (tr){ setV('tablero'); abrir(tr.dataset.id); } };
 async function ejemplos(alta){ if (!alta && !confirm('¿Quitar las conversaciones de ejemplo y las oportunidades creadas desde ellas?')) return; try{ await api('/api/bot/conversaciones/ejemplos', {method: alta?'POST':'DELETE', headers:H(J), body:'{}'}); sel=null; cierre(); await cargar(); }catch(e){ err(e); } }
 $('ej').onclick = () => ejemplos(false);
