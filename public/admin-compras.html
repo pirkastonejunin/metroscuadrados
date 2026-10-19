@@ -709,7 +709,7 @@ async function cargarCompras(){
     <tr>
       <td><strong>${nroImportado(c)}</strong></td>
       <td class="muted">${fechaCorta(c.fecha)}</td>
-      <td>${linkProveedor(c.proveedorId, c.proveedorNombre)}${c.obraId ? `<div class="muted" style="font-size:11px">🏗 Obra #${c.obraNumero} · ${escapeHtml(c.obraCliente||'')}</div>` : ''}</td>
+      <td>${linkProveedor(c.proveedorId, c.proveedorNombre)}${(c.obraId && c.estado !== 'anulada') ? `<div class="muted" style="font-size:11px">🏗 Obra #${c.obraNumero} · ${escapeHtml(c.obraCliente||'')}</div>` : ''}</td>
       <td>${money(c.total)}</td>
       <td class="muted">${money(c.totalPagado)}</td>
       <td>${c.saldoPendiente > 0 ? money(c.saldoPendiente) : '<span class="muted">—</span>'}</td>

@@ -615,8 +615,9 @@ router.post('/:id/obra', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const r = await conReintento(async () => {
       const db = await getDb();
-      const c = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)), { projection: { _id: 1 } });
+      const c = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)), { projection: { _id: 1, estado: 1 } });
       if (!c) throw err(404, 'Compra no encontrada');
+      if (c.estado === 'anulada') throw err(400, 'Una compra anulada no se puede imputar a una obra.');
       const datos = await datosObraParaCompra(db, req, (req.body || {}).obraId);
       await db.collection('compras').updateOne({ _id: id }, { $set: Object.assign({ updatedAt: new Date() }, datos) });
       return datos;
@@ -1385,7 +1386,9 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       await db.collection('compras').updateOne(
         { _id: id },
-        { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
+        { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora,
+          // una factura anulada deja de estar imputada a la obra (queda anotado de cuál venía)
+          obraId: null, obraNumero: null, obraCliente: null, obraAnteriorNumero: compra.obraNumero || null } }
       );
       return db.collection('compras').findOne({ _id: id });
     });
