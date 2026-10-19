@@ -153,6 +153,18 @@ router.post('/analisis-ia', auth, async (req, res) => {
     res.json({ resumen: String(j.resumen).slice(0, 1200), observaciones: l(j.observaciones), recomendaciones: l(j.recomendaciones), alertas: l(j.alertas), modelo: r.modelo, costoUsd: r.costoUsd, at: new Date() });
   } catch (e) { res.status(e.status || 502).json({ error: e.message }); }
 });
+// Lo que se gastó en Meta Ads por mes (se carga a mano desde el Resumen; después se puede traer solo de la cuenta publicitaria).
+router.put('/gasto-ads', auth, async (req, res) => {
+  try {
+    const mes = String((req.body && req.body.mes) || ''); if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return res.status(400).json({ error: 'Mes inválido.' });
+    const monto = Number(req.body && req.body.monto); if (!isFinite(monto) || monto < 0 || monto > 1e10) return res.status(400).json({ error: 'Monto inválido.' });
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando.' });
+    const db = await getDb(); const q = { orgId: req.orgId, mes, campana: '' };
+    if (!monto) await db.collection('meta_ads_gasto').deleteOne(q);
+    else await db.collection('meta_ads_gasto').updateOne(q, { $set: { monto, usuario: quien(req).nombre, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Evolución mensual (últimos 12 meses): leads que llegaron y presupuestos hechos (cantidad y monto, aprobados aparte).
 router.get('/evolucion', auth, async (req, res) => {
   try {
@@ -162,11 +174,12 @@ router.get('/evolucion', auth, async (req, res) => {
     const desde = new Date(meses[0] + '-01T03:00:00Z');
     const mes = c => ({ $dateToString: { format: '%Y-%m', date: c, timezone: tz } });
     const [ld, pr] = await Promise.all([
-      db.collection('leads_whatsapp').aggregate([{ $match: Object.assign({}, f, { creadoOrigen: { $gte: desde } }) }, { $group: { _id: mes('$creadoOrigen'), n: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }]).toArray(),
+      db.collection('leads_whatsapp').aggregate([{ $match: Object.assign({}, f, { creadoOrigen: { $gte: desde } }) }, { $group: { _id: mes('$creadoOrigen'), n: { $sum: 1 }, meta: { $sum: { $cond: [{ $eq: ['$fuente', 'Meta Ads'] }, 1, 0] } }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }]).toArray(),
       db.collection('presupuestos').aggregate([{ $match: Object.assign({}, f, { fecha: { $gte: desde }, estado: { $ne: 'rechazado' } }) }, { $group: { _id: mes('$fecha'), n: { $sum: 1 }, monto: { $sum: { $cond: [{ $eq: ['$moneda', 'USD'] }, 0, { $ifNull: ['$total', 0] }] } }, aprobados: { $sum: { $cond: [{ $eq: ['$estado', 'aprobado'] }, 1, 0] } }, montoAprobado: { $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'aprobado'] }, { $ne: ['$moneda', 'USD'] }] }, { $ifNull: ['$total', 0] }, 0] } } } }]).toArray()
     ]);
+    const gs = await db.collection('meta_ads_gasto').find(Object.assign({}, f, { mes: { $in: meses } })).toArray(); const G = new Map(); gs.forEach(g => G.set(g.mes, (G.get(g.mes) || 0) + (Number(g.monto) || 0)));
     const L = new Map(ld.map(x => [x._id, x])), P = new Map(pr.map(x => [x._id, x]));
-    res.json({ meses: meses.map(m => ({ mes: m, leads: (L.get(m) || {}).n || 0, clientes: (L.get(m) || {}).clientes || 0, presupuestos: (P.get(m) || {}).n || 0, monto: Math.round((P.get(m) || {}).monto || 0), aprobados: (P.get(m) || {}).aprobados || 0, montoAprobado: Math.round((P.get(m) || {}).montoAprobado || 0) })) });
+    res.json({ meses: meses.map(m => ({ mes: m, leads: (L.get(m) || {}).n || 0, leadsMeta: (L.get(m) || {}).meta || 0, gastoAds: Math.round(G.get(m) || 0), clientes: (L.get(m) || {}).clientes || 0, presupuestos: (P.get(m) || {}).n || 0, monto: Math.round((P.get(m) || {}).monto || 0), aprobados: (P.get(m) || {}).aprobados || 0, montoAprobado: Math.round((P.get(m) || {}).montoAprobado || 0) })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.get('/', auth, async (req, res) => {

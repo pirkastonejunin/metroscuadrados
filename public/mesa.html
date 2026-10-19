@@ -60,6 +60,7 @@ button{cursor:pointer}
 .k.bad b{color:var(--bad)}.k.ok b{color:var(--ok)}
 .rg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 .bx{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.gads{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px}.gads label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--mute);font-weight:700}.gads input{border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:4px 7px;font-size:12.5px;font-weight:600;width:100%}
 .ia{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),var(--panel) 60%)}.ia ul.l li{margin-bottom:3px}
 .bx h3 .wx{float:right;border:0;background:transparent;color:var(--mute);font-size:12px;padding:0 4px;border-radius:6px;opacity:0;transition:opacity .15s}.bx:hover h3 .wx{opacity:1}@media (hover:none){.bx h3 .wx{opacity:.7}}.wx:hover{background:var(--panel2);color:var(--ink)}
 .bx h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:800}
@@ -340,7 +341,7 @@ function pintarResumen(){
     productosAbiertas: grp(ab, l=>l.producto).slice(0,10).map(r=>({producto:r.k,cantidad:r.n})), campanas: camp.slice(0,15).map(r=>({campana:r.k,leads:r.leads,yaSonClientes:r.clientes,compraron:r.compraron,vendidoARS:r.montoARS,abiertasCRM:r.ab,ganadas:r.g,perdidas:r.p})),
     vendedores: ases.map(r=>({vendedor:r.a,abiertas:r.ab,enHoy:r.hoy,sinDecidir:r.sd,ganadas:r.g,perdidas:r.p,montoGanado:r.vg})),
     consultas: RESL ? { total: RESL.total, porCanal: (RESL.porCanal||[]).map(x=>({canal:x.nombre,leads:x.leads})), porFuente: (RESL.porFuente||[]).map(x=>({fuente:x.nombre,leads:x.leads})), porDia: (RESL.porDia||[]).map(x=>[x.nombre,x.leads]) } : null,
-    evolucionMensual: (EVO||[]).map(m=>({mes:m.mes,consultas:m.leads,presupuestos:m.presupuestos,montoPresupuestado:m.monto,aprobados:m.aprobados,montoAprobado:m.montoAprobado})) };
+    evolucionMensual: (EVO||[]).map(m=>({mes:m.mes,consultas:m.leads,consultasMetaAds:m.leadsMeta,inversionMetaAdsARS:m.gastoAds,presupuestos:m.presupuestos,montoPresupuestado:m.monto,aprobados:m.aprobados,montoAprobado:m.montoAprobado})) };
   const urg = ab.filter(l=>l.convId && (l.esperaCliente||l.sinDec||l.recordar||(l.prox&&l.prox.dias<0))).sort((a,b)=>orden(a)-orden(b)).slice(0,8);
   $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span><span class="sp"></span><button class="btn sm pri" id="rai">🤖 Analizar con IA</button><button class="btn sm" id="rpers">⚙ Elegir reportes</button></div>${AIR?bloqueIA():''}<div class="bx" id="rpanel" hidden style="padding:10px 14px"></div>
    <div class="kp" data-w="kpis" data-t="Números clave">
@@ -358,6 +359,17 @@ function pintarResumen(){
    ${(()=>{ if (!EVO) return ''; const g = graficoMeses(EVO); const lg = (c,t)=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:10px;border-radius:3px;background:${c};display:inline-block"></i>${t}</span>`;
      return `<div class="rg"><div class="bx" data-w="evo" data-t="Evolución mensual: consultas y presupuestos"><h3>Evolución mensual: consultas y presupuestos (cantidad)</h3><div class="tip" style="margin:-4px 0 6px">${lg('var(--accent)','Consultas (leads)')}${lg('var(--violet)','Presupuestos hechos')}</div>${g.cant}</div>
       <div class="bx" data-w="evom" data-t="Evolución mensual: monto presupuestado"><h3>Evolución mensual: monto presupuestado</h3><div class="tip" style="margin:-4px 0 6px">${lg('rgba(109,79,216,.35)','Presupuestado')}${lg('var(--ok)','Aprobado')}</div>${g.monto}</div></div>`; })()}
+   ${(()=>{ if (!EVO) return ''; const ms = EVO; const tg = ms.reduce((s,m)=>s+m.gastoAds,0), tl = ms.reduce((s,m)=>s+m.leadsMeta,0); const cur = ms[ms.length-1], prev = ms[ms.length-2];
+     const cpl = m => m.leadsMeta && m.gastoAds ? Math.round(m.gastoAds/m.leadsMeta) : 0;
+     return `<div class="rg"><div class="bx" data-w="ads" data-t="Meta Ads: consultas e inversión" style="grid-column:1/-1"><h3>Meta Ads: consultas e inversión por mes</h3>
+      <div class="kp" style="margin:0 0 10px"><div class="k"><span>Invertido este mes</span><b>${money(cur.gastoAds)}</b><small>${prev&&prev.gastoAds?'mes anterior '+money(prev.gastoAds):'cargalo abajo'}</small></div>
+       <div class="k"><span>Consultas de Meta Ads (este mes)</span><b>${cur.leadsMeta}</b><small>${prev?'mes anterior '+prev.leadsMeta:''}</small></div>
+       <div class="k"><span>Costo por consulta (este mes)</span><b>${cpl(cur)?money(cpl(cur)):'—'}</b><small>${prev&&cpl(prev)?'mes anterior '+money(cpl(prev)):''}</small></div>
+       <div class="k"><span>Últimos 12 meses</span><b>${money(tg)}</b><small>${tl} consultas${tl&&tg?' · '+money(Math.round(tg/tl))+' c/u':''}</small></div></div>
+      ${graficoAds(ms)}
+      <div class="tip" style="margin:8px 0 4px">Cargá lo gastado en Meta Ads cada mes (en pesos, lo que figura en la cuenta publicitaria). Se guarda al salir del casillero.</div>
+      <div class="gads">${ms.map(m=>`<label><span>${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1]} ${m.mes.slice(2,4)}</span><input type="number" min="0" step="1" data-mes="${m.mes}" value="${m.gastoAds||''}" placeholder="0"></label>`).join('')}</div>
+      <div class="err" id="gadsErr"></div></div></div>`; })()}
    <div class="rg">
     <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
     <div class="bx" data-w="temp" data-t="Temperatura"><h3>Temperatura</h3>${bars(tmp)}</div>
@@ -369,6 +381,7 @@ function pintarResumen(){
     <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
     <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
    </div>`;
+  v_gads();
   aplicarOcultos();
   $('rai').onclick = analizarIA; const xa = $('aix'); if (xa) xa.onclick = () => { AIR = null; pintarResumen(); };
   $('rper').value = per;
@@ -388,7 +401,11 @@ async function analizarIA(){
   try{ AIR = await post('/api/mesa/analisis-ia', {datos:SNAP}); }catch(e){ AIR = {error:e.message}; }
   pintarResumen();
 }
-const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['evo','Evolución mensual: consultas y presupuestos'],['evom','Evolución mensual: monto presupuestado'],['atencion','Lo que pide atención ahora']];
+function v_gads(){
+  document.querySelectorAll('.gads input').forEach(i=>i.onchange = async () => { const e = $('gadsErr'); if (e) e.textContent='';
+    try{ await api('/api/mesa/gasto-ads', {method:'PUT', headers:H(J), body:JSON.stringify({mes:i.dataset.mes, monto:Number(i.value)||0})}); const m = (EVO||[]).find(x=>x.mes===i.dataset.mes); if (m) m.gastoAds = Number(i.value)||0; toast('Guardado'); pintarResumen(); }catch(x){ if (e) e.textContent = x.message; } });
+}
+const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['evo','Evolución mensual: consultas y presupuestos'],['ads','Meta Ads: consultas e inversión'],['evom','Evolución mensual: monto presupuestado'],['atencion','Lo que pide atención ahora']];
 let OCULTOS = (()=>{ try{ return JSON.parse(localStorage.getItem('crm_res_ocultos')||'[]'); }catch(e){ return []; } })();
 let PANEL = false;
 function guardarOcultos(){ try{ localStorage.setItem('crm_res_ocultos', JSON.stringify(OCULTOS)); }catch(e){} }
@@ -574,6 +591,15 @@ function graficoMeses(ms){
   const tM = [0,mxm/2,mxm].map(v=>`<text x="${pl-5}" y="${Hh-pb-hm(v)+3}" font-size="9.5" text-anchor="end" fill="var(--mute)">${k(Math.round(v))}</text><line x1="${pl}" x2="${W}" y1="${Hh-pb-hm(v)}" y2="${Hh-pb-hm(v)}" stroke="var(--line)"/>`).join('');
   return {cant:`<svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Consultas y presupuestos por mes" style="display:block">${ticks}${bars}</svg>`, monto:`<svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Monto presupuestado por mes" style="display:block">${tM}${barsM}</svg>`};
 }
+function graficoAds(ms){
+  const W = 720, Hh = 150, pl = 46, pr = 46, pb = 18, g = (W-pl-pr)/ms.length, mxg = Math.max(1,...ms.map(m=>m.gastoAds)); const cpl = ms.map(m=>m.leadsMeta&&m.gastoAds?m.gastoAds/m.leadsMeta:null); const mxc = Math.max(1,...cpl.map(v=>v||0));
+  const nm = m => ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1], k = v => v>=1e6 ? (v/1e6).toFixed(1).replace('.',',')+' M' : v>=1e3 ? Math.round(v/1e3)+' mil' : String(Math.round(v));
+  const yg = v => Hh-pb-Math.round(v/mxg*(Hh-pb-10)), yc = v => Hh-pb-Math.round(v/mxc*(Hh-pb-10));
+  const bars = ms.map((m,i)=>{ const x = pl+i*g; return `<g><title>${nm(m)} ${m.mes.slice(0,4)}: ${money(m.gastoAds)} invertidos · ${m.leadsMeta} consultas de Meta Ads${cpl[i]?' · '+money(Math.round(cpl[i]))+' por consulta':''}</title><rect x="${x+g*0.18}" y="${yg(m.gastoAds)}" width="${g*0.64}" height="${Math.max(m.gastoAds?2:0,Hh-pb-yg(m.gastoAds))}" rx="2" fill="var(--cold)" opacity=".8"/></g><text x="${x+g/2}" y="${Hh-4}" font-size="9.5" text-anchor="middle" fill="var(--mute)">${nm(m)}</text>`; }).join('');
+  const pts = cpl.map((v,i)=>v==null?null:[pl+i*g+g/2, yc(v)]).filter(Boolean); const line = pts.length>1 ? `<polyline points="${pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2"/>` : ''; const dots = pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="var(--accent)"/>`).join('');
+  const tg = [0,mxg/2,mxg].map(v=>`<text x="${pl-5}" y="${yg(v)+3}" font-size="9.5" text-anchor="end" fill="var(--cold)">${k(v)}</text><line x1="${pl}" x2="${W-pr}" y1="${yg(v)}" y2="${yg(v)}" stroke="var(--line)"/>`).join(''); const tc = [0,mxc/2,mxc].map(v=>`<text x="${W-pr+5}" y="${yc(v)+3}" font-size="9.5" fill="var(--accent)">${k(v)}</text>`).join('');
+  return `<div class="tip" style="margin:0 0 4px"><span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:10px;border-radius:3px;background:var(--cold);display:inline-block"></i>Inversión (eje izquierdo)</span><span style="display:inline-flex;align-items:center;gap:5px"><i style="width:14px;height:3px;background:var(--accent);display:inline-block"></i>Costo por consulta (eje derecho)</span></div><svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Inversión en Meta Ads y costo por consulta por mes" style="display:block">${tg}${tc}${bars}${line}${dots}</svg>`;
+}
 function graficoDias(res, per){
   const mapa = new Map((res.porDia||[]).map(x=>[x.nombre,x])); const dias = []; const ini = desdeStr(per);
   for (let d = new Date(ini+'T12:00:00Z'); diaAR(d.getTime()+3*3600000) <= diaAR(Date.now()); d = new Date(d.getTime()+864e5)){ const k = d.toISOString().slice(0,10); const e = mapa.get(k); dias.push({k, n:e?e.leads:0, c:e?e.clientes:0}); }
@@ -659,7 +685,7 @@ document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hi
   try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'crm'); }catch(e){ err(e); return; }
   await cargar();
   if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);
-  setInterval(() => { if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
+  setInterval(() => { if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
 })();
 </script>
 </body>
