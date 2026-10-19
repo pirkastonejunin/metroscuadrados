@@ -347,6 +347,9 @@ function pintarResumen(){
      const bl = (arr,c)=>bars((arr||[]).map(x=>({k:x.nombre,n:x.leads,v:0})),c);
      return `<div class="rg"><div class="bx" data-w="fecha" data-t="Consultas por fecha" style="grid-column:1/-1"><h3>Consultas por fecha${per==='todo'?' (últimos 90 días)':''}</h3><div class="tip" style="margin:-4px 0 6px"><b style="color:var(--ink);font-size:15px">${g.tot}</b> consultas · promedio ${g.prom} por día · máximo ${g.mx} en un día</div>${g.svg}</div>
       <div class="bx" data-w="canal" data-t="Por canal"><h3>Por canal</h3>${bl(RESL.porCanal,'var(--cold)')}</div><div class="bx" data-w="fuente" data-t="Por fuente"><h3>Por fuente</h3>${bl(RESL.porFuente,'var(--violet)')}</div></div>`; })()}
+   ${(()=>{ if (!EVO) return ''; const g = graficoMeses(EVO); const lg = (c,t)=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:10px;border-radius:3px;background:${c};display:inline-block"></i>${t}</span>`;
+     return `<div class="rg"><div class="bx" data-w="evo" data-t="Evolución mensual: consultas y presupuestos"><h3>Evolución mensual: consultas y presupuestos (cantidad)</h3><div class="tip" style="margin:-4px 0 6px">${lg('var(--accent)','Consultas (leads)')}${lg('var(--violet)','Presupuestos hechos')}</div>${g.cant}</div>
+      <div class="bx" data-w="evom" data-t="Evolución mensual: monto presupuestado"><h3>Evolución mensual: monto presupuestado</h3><div class="tip" style="margin:-4px 0 6px">${lg('rgba(109,79,216,.35)','Presupuestado')}${lg('var(--ok)','Aprobado')}</div>${g.monto}</div></div>`; })()}
    <div class="rg">
     <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
     <div class="bx" data-w="temp" data-t="Temperatura"><h3>Temperatura</h3>${bars(tmp)}</div>
@@ -363,7 +366,7 @@ function pintarResumen(){
   $('rper').onchange = cargarCamps;
   $('v-res').querySelectorAll('.aten button').forEach(b=>b.onclick=()=>{ setV('tablero'); abrir(b.dataset.id); });
 }
-const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['atencion','Lo que pide atención ahora']];
+const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['evo','Evolución mensual: consultas y presupuestos'],['evom','Evolución mensual: monto presupuestado'],['atencion','Lo que pide atención ahora']];
 let OCULTOS = (()=>{ try{ return JSON.parse(localStorage.getItem('crm_res_ocultos')||'[]'); }catch(e){ return []; } })();
 let PANEL = false;
 function guardarOcultos(){ try{ localStorage.setItem('crm_res_ocultos', JSON.stringify(OCULTOS)); }catch(e){} }
@@ -527,14 +530,27 @@ function pintarFicha(l){
 
 /* ---- ventana emergente (presupuestos) ---- */
 let POP = null, ADJ = null, CAMPS = null;
-let RESL = null;
+let RESL = null, EVO = null;
 const diaAR = ms => new Date(ms-3*3600000).toISOString().slice(0,10);
 function desdeStr(per){ return per==='7' ? diaAR(Date.now()-6*864e5) : per==='30' ? diaAR(Date.now()-29*864e5) : per==='mes' ? diaAR(Date.now()).slice(0,8)+'01' : diaAR(Date.now()-89*864e5); }
 async function cargarCamps(){
   const per = $('rper') ? $('rper').value : 'mes';
   try{ CAMPS = (await api('/api/leads/campanas', {headers:H()})).items; }catch(e){ CAMPS = CAMPS||[]; }
   try{ RESL = await api('/api/leads/resumen?desde='+desdeStr(per), {headers:H()}); RESL.per = per; }catch(e){ RESL = RESL||null; }
+  try{ EVO = (await api('/api/mesa/evolucion', {headers:H()})).meses; }catch(e){ EVO = EVO||null; }
   if (VISTA==='resumen') pintarResumen();
+}
+function graficoMeses(ms){
+  const W = 720, Hh = 150, pl = 40, pb = 18, g = (W-pl)/ms.length, mx = Math.max(1,...ms.map(m=>Math.max(m.leads,m.presupuestos)));
+  const nm = m => ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1];
+  const hh = v => Math.round(v/mx*(Hh-pb-10)), y = v => Hh-pb-hh(v);
+  const bars = ms.map((m,i)=>{ const x = pl+i*g, w = g*0.36; return `<g><title>${nm(m)} ${m.mes.slice(0,4)}: ${m.leads} consultas · ${m.presupuestos} presupuestos (${money(m.monto)})${m.aprobados?` · ${m.aprobados} aprobados`:''}</title><rect x="${x+g*0.1}" y="${y(m.leads)}" width="${w}" height="${Math.max(m.leads?2:0,hh(m.leads))}" rx="2" fill="var(--accent)"/><rect x="${x+g*0.1+w+2}" y="${y(m.presupuestos)}" width="${w}" height="${Math.max(m.presupuestos?2:0,hh(m.presupuestos))}" rx="2" fill="var(--violet)"/></g><text x="${x+g/2}" y="${Hh-4}" font-size="9.5" text-anchor="middle" fill="var(--mute)">${nm(m)}</text>`; }).join('');
+  const ticks = [0,Math.ceil(mx/2),mx].filter((v,i,a)=>a.indexOf(v)===i).map(v=>`<text x="${pl-5}" y="${y(v)+3}" font-size="9.5" text-anchor="end" fill="var(--mute)">${v}</text><line x1="${pl}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>`).join('');
+  const mxm = Math.max(1,...ms.map(m=>m.monto)), hm = v => Math.round(v/mxm*(Hh-pb-10));
+  const barsM = ms.map((m,i)=>{ const x = pl+i*g; return `<g><title>${nm(m)} ${m.mes.slice(0,4)}: ${money(m.monto)} presupuestado${m.montoAprobado?` · ${money(m.montoAprobado)} aprobado`:''}</title><rect x="${x+g*0.18}" y="${Hh-pb-hm(m.monto)}" width="${g*0.64}" height="${Math.max(m.monto?2:0,hm(m.monto))}" rx="2" fill="var(--violet)" opacity=".35"/><rect x="${x+g*0.18}" y="${Hh-pb-hm(m.montoAprobado)}" width="${g*0.64}" height="${Math.max(m.montoAprobado?2:0,hm(m.montoAprobado))}" rx="2" fill="var(--ok)"/></g><text x="${x+g/2}" y="${Hh-4}" font-size="9.5" text-anchor="middle" fill="var(--mute)">${nm(m)}</text>`; }).join('');
+  const k = v => v>=1e6 ? (v/1e6).toFixed(1).replace('.',',')+' M' : v>=1e3 ? Math.round(v/1e3)+' mil' : String(v);
+  const tM = [0,mxm/2,mxm].map(v=>`<text x="${pl-5}" y="${Hh-pb-hm(v)+3}" font-size="9.5" text-anchor="end" fill="var(--mute)">${k(Math.round(v))}</text><line x1="${pl}" x2="${W}" y1="${Hh-pb-hm(v)}" y2="${Hh-pb-hm(v)}" stroke="var(--line)"/>`).join('');
+  return {cant:`<svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Consultas y presupuestos por mes" style="display:block">${ticks}${bars}</svg>`, monto:`<svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Monto presupuestado por mes" style="display:block">${tM}${barsM}</svg>`};
 }
 function graficoDias(res, per){
   const mapa = new Map((res.porDia||[]).map(x=>[x.nombre,x])); const dias = []; const ini = desdeStr(per);

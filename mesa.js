@@ -133,6 +133,22 @@ async function armar(db, req, { cerradas }) {
   return items;
 }
 
+// Evolución mensual (últimos 12 meses): leads que llegaron y presupuestos hechos (cantidad y monto, aprobados aparte).
+router.get('/evolucion', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const f = filtroOrg(req); const tz = 'America/Argentina/Buenos_Aires';
+    const hoy = new Date(Date.now() - 3 * 3600000); const meses = [];
+    for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i, 1)); meses.push(d.toISOString().slice(0, 7)); }
+    const desde = new Date(meses[0] + '-01T03:00:00Z');
+    const mes = c => ({ $dateToString: { format: '%Y-%m', date: c, timezone: tz } });
+    const [ld, pr] = await Promise.all([
+      db.collection('leads_whatsapp').aggregate([{ $match: Object.assign({}, f, { creadoOrigen: { $gte: desde } }) }, { $group: { _id: mes('$creadoOrigen'), n: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }]).toArray(),
+      db.collection('presupuestos').aggregate([{ $match: Object.assign({}, f, { fecha: { $gte: desde }, estado: { $ne: 'rechazado' } }) }, { $group: { _id: mes('$fecha'), n: { $sum: 1 }, monto: { $sum: { $cond: [{ $eq: ['$moneda', 'USD'] }, 0, { $ifNull: ['$total', 0] }] } }, aprobados: { $sum: { $cond: [{ $eq: ['$estado', 'aprobado'] }, 1, 0] } }, montoAprobado: { $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'aprobado'] }, { $ne: ['$moneda', 'USD'] }] }, { $ifNull: ['$total', 0] }, 0] } } } }]).toArray()
+    ]);
+    const L = new Map(ld.map(x => [x._id, x])), P = new Map(pr.map(x => [x._id, x]));
+    res.json({ meses: meses.map(m => ({ mes: m, leads: (L.get(m) || {}).n || 0, clientes: (L.get(m) || {}).clientes || 0, presupuestos: (P.get(m) || {}).n || 0, monto: Math.round((P.get(m) || {}).monto || 0), aprobados: (P.get(m) || {}).aprobados || 0, montoAprobado: Math.round((P.get(m) || {}).montoAprobado || 0) })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.get('/', auth, async (req, res) => {
   try {
     const db = await getDb(); const items = await armar(db, req, { cerradas: req.query.cerradas === '1' });
