@@ -60,6 +60,7 @@ button{cursor:pointer}
 .k.bad b{color:var(--bad)}.k.ok b{color:var(--ok)}
 .rg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 .bx{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.bx h3 .wx{float:right;border:0;background:transparent;color:var(--mute);font-size:12px;padding:0 4px;border-radius:6px;opacity:0;transition:opacity .15s}.bx:hover h3 .wx{opacity:1}@media (hover:none){.bx h3 .wx{opacity:.7}}.wx:hover{background:var(--panel2);color:var(--ink)}
 .bx h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:800}
 .br{display:grid;grid-template-columns:minmax(80px,1.1fr) 3fr auto;gap:8px;align-items:center;padding:3px 0;font-size:12.5px}
 .br .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
@@ -333,8 +334,8 @@ function pintarResumen(){
     if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else e.p++; } });
   const camp = [...cm.values()].sort((a,b)=>(b.montoARS-a.montoARS)||(b.leads-a.leads)||(b.ab-a.ab));
   const urg = ab.filter(l=>l.convId && (l.esperaCliente||l.sinDec||l.recordar||(l.prox&&l.prox.dias<0))).sort((a,b)=>orden(a)-orden(b)).slice(0,8);
-  $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span></div>
-   <div class="kp">
+  $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span><span class="sp"></span><button class="btn sm" id="rpers">⚙ Elegir reportes</button></div><div class="bx" id="rpanel" hidden style="padding:10px 14px"></div>
+   <div class="kp" data-w="kpis" data-t="Números clave">
     <div class="k"><span>Oportunidades abiertas</span><b>${ab.length}</b><small>${money(sv(ab))} en juego</small></div>
     <div class="k ${hoy.length?'bad':'ok'}"><span>Por resolver hoy</span><b>${hoy.length}</b><small>${venc.length?venc.length+' vencidas':'al día'}</small></div>
     <div class="k ${sd.length?'bad':''}"><span>Sin decidir</span><b>${sd.length}</b><small>${sinResp.length} sin respuesta del cliente</small></div>
@@ -344,22 +345,40 @@ function pintarResumen(){
    </div>
    ${(()=>{ if (!RESL) return '<div class="bx"><h3>Consultas por fecha</h3><div class="tip">Cargando…</div></div>'; const g = graficoDias(RESL, per);
      const bl = (arr,c)=>bars((arr||[]).map(x=>({k:x.nombre,n:x.leads,v:0})),c);
-     return `<div class="rg"><div class="bx" style="grid-column:1/-1"><h3>Consultas por fecha${per==='todo'?' (últimos 90 días)':''}</h3><div class="tip" style="margin:-4px 0 6px"><b style="color:var(--ink);font-size:15px">${g.tot}</b> consultas · promedio ${g.prom} por día · máximo ${g.mx} en un día</div>${g.svg}</div>
-      <div class="bx"><h3>Por canal</h3>${bl(RESL.porCanal,'var(--cold)')}</div><div class="bx"><h3>Por fuente</h3>${bl(RESL.porFuente,'var(--violet)')}</div></div>`; })()}
+     return `<div class="rg"><div class="bx" data-w="fecha" data-t="Consultas por fecha" style="grid-column:1/-1"><h3>Consultas por fecha${per==='todo'?' (últimos 90 días)':''}</h3><div class="tip" style="margin:-4px 0 6px"><b style="color:var(--ink);font-size:15px">${g.tot}</b> consultas · promedio ${g.prom} por día · máximo ${g.mx} en un día</div>${g.svg}</div>
+      <div class="bx" data-w="canal" data-t="Por canal"><h3>Por canal</h3>${bl(RESL.porCanal,'var(--cold)')}</div><div class="bx" data-w="fuente" data-t="Por fuente"><h3>Por fuente</h3>${bl(RESL.porFuente,'var(--violet)')}</div></div>`; })()}
    <div class="rg">
-    <div class="bx"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
-    <div class="bx"><h3>Temperatura</h3>${bars(tmp)}</div>
-    <div class="bx"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
-    <div class="bx"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
+    <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
+    <div class="bx" data-w="temp" data-t="Temperatura"><h3>Temperatura</h3>${bars(tmp)}</div>
+    <div class="bx" data-w="perdidas" data-t="Por qué perdemos"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
+    <div class="bx" data-w="productos" data-t="Productos más consultados"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
    </div>
-   <div class="rg"><div class="bx" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="9" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
+   <div class="rg"><div class="bx" data-w="campanas" data-t="Campañas de Meta Ads" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="9" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
    <div class="rg">
-    <div class="bx" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
-    <div class="bx" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
+    <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
+    <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
    </div>`;
+  aplicarOcultos();
   $('rper').value = per;
   $('rper').onchange = cargarCamps;
   $('v-res').querySelectorAll('.aten button').forEach(b=>b.onclick=()=>{ setV('tablero'); abrir(b.dataset.id); });
+}
+const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['atencion','Lo que pide atención ahora']];
+let OCULTOS = (()=>{ try{ return JSON.parse(localStorage.getItem('crm_res_ocultos')||'[]'); }catch(e){ return []; } })();
+let PANEL = false;
+function guardarOcultos(){ try{ localStorage.setItem('crm_res_ocultos', JSON.stringify(OCULTOS)); }catch(e){} }
+function aplicarOcultos(){
+  const v = $('v-res');
+  v.querySelectorAll('[data-w]').forEach(el=>{
+    const w = el.dataset.w; el.style.display = OCULTOS.includes(w) ? 'none' : '';
+    const h = el.querySelector('h3'); if (h && !h.querySelector('.wx')){ const b = document.createElement('button'); b.className='wx'; b.title='Quitar este reporte'; b.textContent='✕'; b.onclick = () => { if(!OCULTOS.includes(w)) OCULTOS.push(w); guardarOcultos(); aplicarOcultos(); }; h.appendChild(b); }
+  });
+  // las filas de grilla que quedan vacías no ocupan lugar
+  v.querySelectorAll('.rg').forEach(g=>{ g.style.display = [...g.children].every(c=>c.style.display==='none') ? 'none' : ''; });
+  const p = $('rpanel'); p.hidden = !PANEL;
+  p.innerHTML = '<div class="tip" style="margin-bottom:6px">Tildá los reportes que querés ver. Se guarda en este navegador.</div><div style="display:flex;flex-wrap:wrap;gap:6px 16px">' + WNOM.map(([k,n])=>`<label style="font-weight:600;display:flex;gap:5px;align-items:center"><input type="checkbox" data-k="${k}" ${OCULTOS.includes(k)?'':'checked'}>${n}</label>`).join('') + '</div>';
+  p.querySelectorAll('input').forEach(i=>i.onchange = () => { OCULTOS = OCULTOS.filter(x=>x!==i.dataset.k); if (!i.checked) OCULTOS.push(i.dataset.k); guardarOcultos(); aplicarOcultos(); });
+  $('rpers').onclick = () => { PANEL = !PANEL; aplicarOcultos(); };
 }
 function pintarLista(){
   const rows = filtradas().filter(l=>!l.cierre||$('fCer').checked).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
