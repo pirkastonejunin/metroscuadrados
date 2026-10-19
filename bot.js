@@ -136,6 +136,18 @@ async function enviarTexto(tel, texto) {
   if (!r.ok) throw new Error('WhatsApp ' + r.status + ': ' + ((d.error && d.error.message) || ''));
   return { id: d.messages && d.messages[0] && d.messages[0].id };
 }
+// Manda un archivo (PDF) por WhatsApp: primero lo sube como media y después lo envía como documento.
+async function enviarDocumento(tel, buffer, nombreArchivo, texto) {
+  if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return { id: 'prueba-' + crypto.randomBytes(6).toString('hex'), prueba: true };
+  const h = { Authorization: 'Bearer ' + process.env.WA_TOKEN };
+  const fd = new FormData(); fd.append('messaging_product', 'whatsapp'); fd.append('type', 'application/pdf'); fd.append('file', new Blob([buffer], { type: 'application/pdf' }), nombreArchivo);
+  const up = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '/media', { method: 'POST', headers: h, body: fd }, 60000);
+  const ud = await up.json().catch(() => ({})); if (!up.ok || !ud.id) throw new Error('WhatsApp no aceptó el archivo: ' + ((ud.error && ud.error.message) || up.status));
+  const r = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '/messages', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, h),
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: tel, type: 'document', document: { id: ud.id, filename: nombreArchivo, caption: String(texto || '').slice(0, 1000) } }) });
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error('WhatsApp ' + r.status + ': ' + ((d.error && d.error.message) || ''));
+  return { id: d.messages && d.messages[0] && d.messages[0].id };
+}
 async function bajarMedia(mediaId) {
   if (!process.env.WA_TOKEN || !mediaId) return null;
   try {
@@ -360,6 +372,20 @@ router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un ases
     const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarTexto(c.tel, texto); // los ejemplos nunca se mandan por WhatsApp
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'text', texto, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+router.post('/conversaciones/:id/enviar-presupuesto', auth, async (req, res) => { // manda el PDF del presupuesto (con un texto de acompañamiento)
+  try {
+    const texto = String((req.body && req.body.texto) || '').trim().slice(0, 1000);
+    const pid = (() => { try { return new ObjectId(String(req.body && req.body.presupuestoId)); } catch (e) { return null; } })(); if (!pid) return res.status(400).json({ error: 'Falta el presupuesto.' });
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    const p = await db.collection('presupuestos').findOne({ _id: pid, orgId: c.orgId }); if (!p) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
+    const [org, cliente] = await Promise.all([db.collection('organizaciones').findOne({ _id: p.orgId }), p.clienteId ? db.collection('clientes').findOne({ _id: p.clienteId }) : null]);
+    const pdf = await require('./presupuestoPdf').generar(p, org, cliente); const nombre = 'Presupuesto-' + String(p.numero).padStart(5, '0') + '.pdf';
+    const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarDocumento(c.tel, pdf, nombre, texto);
+    await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'document', texto: '📎 ' + nombre + (texto ? '\n' + texto : ''), at: new Date(), prueba: !!env.prueba });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba, bytes: pdf.length });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 

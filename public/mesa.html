@@ -167,6 +167,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
 .notas textarea{width:100%;resize:vertical;min-height:54px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel2)}
 .hist{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:2px}
 .vacio{padding:34px 18px;color:var(--mute);text-align:center;font-weight:600}
+.adj{padding:6px 16px;background:var(--violet-soft);color:var(--violet);font-weight:700;font-size:12.5px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;flex:none}
 .pop{position:fixed;inset:0;background:rgba(10,12,16,.55);z-index:10001;display:grid;place-items:center;padding:3vh 3vw}
 .pop-in{background:var(--panel);border-radius:16px;width:min(1100px,100%);height:100%;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .pop-h{display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);flex:none}.pop-in iframe{flex:1;border:0;width:100%;background:var(--bg)}
@@ -385,7 +386,7 @@ function pintarCaj(l, o){
     const sugBar = (l.esperaCliente||l.recordar) && sug ? `<div class="sug"><div class="tx"><span class="lb">${l.recordar?'Recordatorio sugerido':'Sugerencia de la IA'}</span>${esc(sug)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
       : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '');
     izq = `${hdr}<div class="msgs" id="msgs">${msgs||'<div class="vacio">Sin mensajes.</div>'}</div>${sugBar}
-      ${decOpen?decBar(l):`<div class="comp"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
+      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}<div class="comp"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
   } else if (l.leadId){
     izq = `${hdr}<div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
   } else {
@@ -404,9 +405,10 @@ function pintarCaj(l, o){
   if ($('rap')) $('rap').onchange = e => { const r={Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value=(tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
   if ($('env')){
     const enviar = async () => { const v = tx.value.trim(); if (!v) return; $('env').disabled = true;
-      try{ await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
+      try{ if (ADJ&&ADJ.conv===l.id){ await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
     $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
   }
+  if ($('adjx')) $('adjx').onclick = () => { ADJ=null; pintarCaj(l,{keep:true}); };
   if ($('dq')) $('dq').onclick = () => { pend=null; decOpen=true; pintarCaj(l,{keep:true}); };
   if (decOpen) ligarDec(l);
   if ($('aop')) $('aop').onclick = async () => { try{ const f=new Date(Date.now()-3*3600000).toISOString().slice(0,10); await post(`/api/leads/${l.leadId}/oportunidad`, {vendedorId:'', proximaAccion:{fecha:f, tipo:'recontactar', nota:'Primer contacto'}}); toast('Oportunidad creada'); await cargar({forzar:true}); }catch(e){ err(e); } };
@@ -419,7 +421,7 @@ function pintarFicha(l){
    ${l.convId?`<div class="sec"><h3>Etapa</h3><div class="etapas">${ETAPAS.map(e=>`<button class="${l.etapa===e.k?'on':''}" data-e="${e.k}">${e.n}</button>`).join('')}</div></div>
    <div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:6px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>`:''}
    ${l.resumen?`<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>`:''}
-   <div class="sec"><h3>Presupuesto</h3>${p?`<div class="valor">${money(p.total)}</div><div class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</div><div style="margin-top:9px"><button class="btn pri sm" data-pop="/admin-presupuestos.html?embed=1&abrir=${esc(p.id)}">Ver y editar</button></div>`:`<p class="tip">Todavía no hay presupuesto.</p><button class="btn pri sm" style="margin-top:7px" id="hacerP">Hacer presupuesto</button>`}</div>
+   <div class="sec"><h3>Presupuesto</h3>${p?`<div class="valor">${money(p.total)}</div><div class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</div><div style="margin-top:9px"><button class="btn pri sm" data-pop="/admin-presupuestos.html?embed=1&abrir=${esc(p.id)}">Ver y editar</button>${l.convId?` <button class="btn sm" id="adjP">Enviar PDF</button>`:''}</div>`:`<p class="tip">Todavía no hay presupuesto.</p><button class="btn pri sm" style="margin-top:7px" id="hacerP">Hacer presupuesto</button>`}</div>
    <details class="mas"><summary>Más datos</summary>
      ${l.falta.length?`<div class="sec"><h3>Falta preguntarle</h3><ul class="l">${l.falta.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></div>`:''}
      <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl>${l.opId?`<div style="margin-top:9px"><a class="btn sm" href="/crm.html?abrir=crm-${esc(l.opId)}">Editar datos o asignar visita</a></div>`:''}</div>
@@ -427,6 +429,7 @@ function pintarFicha(l){
      ${l.historial.length?`<div class="sec"><h3>Historial</h3><div class="hist">${l.historial.slice().reverse().map(h=>`<span>${esc(h.txt)} · ${hora(h.at)}</span>`).join('')}</div></div>`:''}
    </details>`;
   c.querySelectorAll('[data-pop]').forEach(b=>b.onclick=()=>popup(b.dataset.pop));
+  if ($('adjP')) $('adjP').onclick = () => { ADJ={id:l.presupuesto.id, numero:l.presupuesto.numero, conv:l.id}; pintarCaj(l,{keep:true}); const t=$('txt'); if(t){ if(!t.value) t.value='Te paso el presupuesto Nº '+String(l.presupuesto.numero).padStart(5,'0')+' (total '+money(l.presupuesto.total)+', precios finales con IVA). Cualquier duda me avisás.'; t.focus(); } };
   if ($('hacerP')) $('hacerP').onclick = () => popup('/admin-presupuestos.html?embed=1&nuevo=1&nombre='+encodeURIComponent(l.nombre)+'&tel='+encodeURIComponent(l.tel)+(l.convId?'&convId='+encodeURIComponent(l.convId):''), 'Nuevo presupuesto para '+l.nombre);
   c.querySelectorAll('.temp button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}); await cargar({forzar:true}); }catch(e){ err(e); } });
   c.querySelectorAll('.etapas button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/etapa`, {etapa:b.dataset.e}); await cargar({forzar:true}); }catch(e){ err(e); } });
@@ -434,7 +437,7 @@ function pintarFicha(l){
 }
 
 /* ---- ventana emergente (presupuestos) ---- */
-let POP = null;
+let POP = null, ADJ = null;
 function textoPresupuesto(p){
   const m = n => (p.moneda==='USD'?'US$ ':'$ ') + Math.round(n||0).toLocaleString('es-AR');
   const it = (p.items||[]).map(i=>'• '+i.cantidad+' x '+i.nombre+' — '+m(i.precioUnitario*i.cantidad)).join('\n');
@@ -444,7 +447,7 @@ window.addEventListener('message', async e => {
   if (e.origin !== location.origin || !e.data || e.data.tipo !== 'presupuesto-guardado') return;
   if (POP){ POP.remove(); POP = null; }
   await cargar({forzar:true});
-  const tx = $('txt'); if (tx){ tx.value = textoPresupuesto(e.data); tx.focus(); toast('Presupuesto guardado. Revisá el mensaje y enviáselo al cliente'); }
+  const cl = cur(); const tx = $('txt'); if (tx && cl){ ADJ = {id:e.data.id, numero:e.data.numero, conv:cl.id}; tx.value = textoPresupuesto(e.data); pintarCaj(cl,{keep:true}); $('txt').value = textoPresupuesto(e.data); $('txt').focus(); toast('Presupuesto guardado. Revisá el mensaje y enviá el PDF al cliente'); }
   else toast('Presupuesto guardado');
 });
 function popup(url, titulo){
