@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mesa de ventas - Piedra Negra</title>
+<title>CRM - Piedra Negra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -116,6 +116,18 @@ ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
 .cierre{padding:24px 14px;text-align:center}
 .toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-weight:600;z-index:20}
 .toast[hidden]{display:none}
+.vistas{display:flex;gap:4px}
+.vistas button{border:0;background:transparent;padding:6px 12px;border-radius:8px;font-weight:600;color:var(--mute)}
+.vistas button.on{background:var(--accent);color:var(--accent-ink)}
+.tabla{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.tabla table{width:100%;border-collapse:collapse;font-size:13px}
+.tabla th{position:sticky;top:0;background:var(--panel2);text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tabla td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tabla tr.f{cursor:pointer}.tabla tr.f:hover{background:var(--panel2)}
+.tabla td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
+.barra{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.barra input,.barra select{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:5px 8px}
+iframe#bot{flex:1;min-height:0;width:100%;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .nav{display:none}
 @media (max-width:1100px){
   .main{grid-template-columns:minmax(0,1fr)}
@@ -132,7 +144,8 @@ ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
 <body>
 <div class="app" id="app" data-p="cola">
   <header class="top">
-    <div class="brand">Mesa de ventas<small id="quien">Piedra Negra</small></div>
+    <div class="brand">CRM<small id="quien">Piedra Negra</small></div>
+    <div class="vistas" id="vistas"><button data-v="trabajar" class="on">Trabajar</button><button data-v="todas">Todas</button><button data-v="bot">Bot de WhatsApp</button></div>
     <div class="resumen" id="resumen"></div>
   </header>
   <div class="err" id="msg"></div>
@@ -155,6 +168,11 @@ ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
     <section class="col" id="c2" aria-label="Conversación"></section>
     <section class="col" id="c3" aria-label="Ficha de venta"></section>
   </div>
+  <div id="v-todas" hidden style="flex:1;min-height:0;display:none;flex-direction:column;gap:8px">
+    <div class="barra"><input id="tQ" type="search" placeholder="Buscar nombre, teléfono o producto"><select id="tTemp"><option value="">Toda temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select><select id="tProd"><option value="">Todo producto</option></select><select id="tEst"><option value="">Todo estado</option><option value="nuevo">Nuevo</option><option value="seguimiento">En seguimiento</option><option value="borrador">Borrador de presupuesto</option><option value="presupuesto">Presupuesto enviado</option></select><select id="tVend"><option value="todas">Toda la sucursal</option><option value="mias">Mías y sin asignar</option></select><label class="tip"><input type="checkbox" id="tCer"> Mostrar cerradas</label><span class="sp"></span><span class="tip" id="tCant"></span><button class="btn sm" id="tEj" hidden onclick="ejemplos(false)">Quitar ejemplos</button><a class="btn sm" href="/crm.html">Vista clásica del CRM</a></div>
+    <div class="tabla"><table><thead><tr><th>Cliente</th><th>Producto</th><th>Temp.</th><th>Estado</th><th>Asesor</th><th>Próxima acción</th><th>Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
+  </div>
+  <iframe id="bot" title="Bot de WhatsApp" hidden style="display:none"></iframe>
 </div>
 <div class="toast" id="toast" hidden></div>
 
@@ -199,7 +217,7 @@ function pintarCola(){
   $('lista').innerHTML = items.map(l=>{ const [mt,mc]=motivo(l);
     return `<div class="item ${l.id===sel?'sel':''}" data-id="${esc(l.id)}" tabindex="0"><span class="dot ${l.temperatura}" title="${l.temperatura}"></span><span class="nom">${esc(l.nombre)}</span><span class="chip ${mc}">${esc(mt)}</span>
       <span class="sub">${l.producto?esc(l.producto)+' · ':''}${esc(l.ultimo?l.ultimo.texto:(l.resumen||'Sin mensajes guardados'))}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}</div>`; }).join('')
-    || `<div class="vacio">${ITEMS.length?'Todo al día 👌<br>No queda nada en esta lista.':'Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.'}</div>`;
+    || `<div class="vacio">${ITEMS.length?'Todo al día 👌<br>No queda nada en esta lista.':'Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" onclick="ejemplos(true)">Cargar conversaciones de ejemplo</button>'}</div>`;
   return items;
 }
 function pintarResumen(){
@@ -210,13 +228,14 @@ const cur = () => ITEMS.find(l=>l.id===sel);
 
 async function cargar(opts){
   try{
-    const d = await api('/api/mesa' + ($('fCer').checked ? '?cerradas=1' : ''), {headers:H()});
+    const d = await api('/api/mesa' + (($('fCer').checked||$('tCer').checked) ? '?cerradas=1' : ''), {headers:H()});
     const antes = cur(); ITEMS = d.items; YO = d.yo; MOTIVOS = d.motivosPerdida;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre || '');
     const ps = $('fProd'), v = ps.value; ps.innerHTML = '<option value="">Todo producto</option>' + d.productos.map(p=>`<option>${esc(p)}</option>`).join(''); ps.value = v;
-    pintarResumen(); const lista = pintarCola(); err('');
+    pintarResumen(); const lista = pintarCola(); if (VISTA==='todas') pintarTabla(); err('');
     const l = cur();
     if (opts && opts.inicial && !l && lista.length) return elegir(lista[0].id, false);
+    if (!l){ pintarChat(null); pintarFicha(null); }
     if (l){ const cambio = !antes || (antes.ultimo && l.ultimo && String(antes.ultimo.at)!==String(l.ultimo.at)) || antes.cierre!==l.cierre && !!antes.cierre!==!!l.cierre; if (cambio || (opts && opts.forzar)) await abrir(l); else pintarFicha(l); }
   }catch(e){ err(e); }
 }
@@ -230,6 +249,8 @@ async function abrir(l){
 function pintarChat(l){
   const c = $('c2'); const keep = $('txt') ? $('txt').value : '';
   if (!l){ c.innerHTML = '<div class="vacio">Elegí a alguien de la lista.</div>'; return; }
+  if (!l.convId && l.leadId){ c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}</div></div></div><div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
+    $('aop').onclick = async () => { try{ const f = new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); await api(`/api/leads/${l.leadId}/oportunidad`, {method:'POST', headers:H(J), body:JSON.stringify({vendedorId:'', proximaAccion:{fecha:f, tipo:'recontactar', nota:'Primer contacto'}})}); toast('Oportunidad creada'); await cargar({forzar:true}); }catch(e){ err(e); } }; return; }
   if (!l.convId){ c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}</div></div></div><div class="vacio">Esta oportunidad no tiene la conversación guardada en el sistema (viene de Azuite o se cargó a mano).<br>Cuando escriba por el WhatsApp nuevo la vas a ver acá.</div>
     <div class="acciones"><button class="btn" id="seg">⏰ Seguimiento</button></div><div id="slot"></div>`; $('seg').onclick = () => slotSeg(l); return; }
   if (l.cierre){ c.innerHTML = `<div class="cierre"><h2>${esc(l.nombre)}</h2><p>Cerrada como <b>${esc(l.cierre.estado)}</b>${l.cierre.motivo?': '+esc(l.cierre.motivo):''}.</p><button class="btn" id="reabrir">Reabrir</button></div>`; $('reabrir').onclick = () => accion(`/api/mesa/${l.convId}/reabrir`, {}, 'Reabierta'); return; }
@@ -278,7 +299,7 @@ function pintarFicha(l){
    <div class="sec"><h3>Presupuesto</h3>${p ? `<div class="tot2"><span class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</span><b>${money(p.total)}</b></div><div style="margin-top:8px"><a class="btn pri sm" href="/admin-presupuestos.html?abrir=${esc(p.id)}">Ver y editar</a></div>` : `<p class="tip">Todavía no hay presupuesto.</p><a class="btn sm" style="margin-top:6px" href="/admin-presupuestos.html">Ir a Presupuestos</a>`}</div>
    <details class="mas"><summary>Más datos</summary>
      ${l.falta.length ? `<div class="sec"><h3>Falta preguntarle</h3><ul class="l">${l.falta.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
-     <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl></div>
+     <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl>${l.opId?`<div style="margin-top:8px"><a class="btn sm" href="/crm.html?abrir=crm-${esc(l.opId)}">Editar datos o asignar visita</a></div>`:''}</div>
      ${l.convId ? `<div class="sec notas"><h3>Notas internas</h3><textarea id="nota" placeholder="Solo las ve el equipo">${esc(keepN!=null?keepN:l.notas)}</textarea></div>` : ''}
      ${l.historial.length ? `<div class="sec"><h3>Historial</h3><div class="hist">${l.historial.slice().reverse().map(h=>`<span>${esc(h.txt)} · ${hora(h.at)}</span>`).join('')}</div></div>` : ''}
    </details></div>`;
@@ -286,12 +307,35 @@ function pintarFicha(l){
   if ($('nota')){ let t; $('nota').oninput = e => { clearTimeout(t); const v=e.target.value; t=setTimeout(()=>api(`/api/mesa/${l.convId}/nota`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})}).catch(()=>{}), 700); }; }
 }
 
+async function ejemplos(alta){ if (!alta && !confirm('¿Quitar las conversaciones de ejemplo y las oportunidades creadas desde ellas?')) return; try{ await api('/api/bot/conversaciones/ejemplos', {method: alta?'POST':'DELETE', headers:H(J), body:'{}'}); sel=null; await cargar({inicial:true}); if (VISTA==='todas') pintarTabla(); }catch(e){ err(e); } }
+let VISTA = 'trabajar';
+function pintarTabla(){
+  const q=$('tQ').value.trim().toLowerCase(), t=$('tTemp').value, p=$('tProd').value, e=$('tEst').value, v=$('tVend').value;
+  const ps=$('tProd'), pv=ps.value; ps.innerHTML = '<option value="">Todo producto</option>' + [...new Set(ITEMS.map(i=>i.producto).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); ps.value = pv;
+  const rows = ITEMS.filter(l=>(v==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!e||l.etapa===e) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q))).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
+  $('tEj').hidden = !ITEMS.some(i=>i.demo);
+  $('tCant').textContent = rows.length + ' de ' + ITEMS.length;
+  const ET = {nuevo:'Nuevo', seguimiento:'En seguimiento', borrador:'Borrador', presupuesto:'Presupuesto enviado'};
+  $('tBody').innerHTML = rows.map(l=>{ const [mt,mc]=motivo(l); return `<tr class="f" data-id="${esc(l.id)}"><td><span class="dot ${l.temperatura}" style="margin:0 8px 0 0;vertical-align:middle"></span><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td>${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</td><td>${l.cierre?esc(l.cierre.estado):ET[l.etapa]||l.etapa}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="chip ${mc}">${esc(mt)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="vacio">Nada con esos filtros.</td></tr>';
+}
+function setV(v){
+  VISTA = v; document.querySelectorAll('#vistas button').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
+  document.querySelector('.main').style.display = v==='trabajar' ? '' : 'none'; $('nav').style.display = v==='trabajar' ? '' : 'none';
+  $('v-todas').style.display = v==='todas' ? 'flex' : 'none'; $('v-todas').hidden = v!=='todas';
+  const f = $('bot'); f.style.display = v==='bot' ? 'block' : 'none'; f.hidden = v!=='bot';
+  if (v==='bot' && !f.src) f.src = '/admin-bot.html?embed=1';
+  if (v==='todas') pintarTabla();
+}
 function setP(p){ $('app').dataset.p = p; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.p===p)); }
 $('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b){ cola = b.dataset.k; pintarCola(); } };
 $('lista').onclick = e => { const it = e.target.closest('.item'); if (it) elegir(it.dataset.id); };
 $('lista').onkeydown = e => { if (e.key==='Enter'){ const it = e.target.closest('.item'); if (it) elegir(it.dataset.id); } };
 ['q','fTemp','fProd','fEst','fVend'].forEach(i => $(i).addEventListener('input', pintarCola));
 $('fCer').addEventListener('change', () => cargar());
+$('vistas').onclick = e => { const b = e.target.closest('button'); if (b) setV(b.dataset.v); };
+['tQ','tTemp','tProd','tEst','tVend'].forEach(i => $(i).addEventListener('input', pintarTabla));
+$('tCer').addEventListener('change', () => cargar());
+$('tBody').onclick = e => { const tr = e.target.closest('tr.f'); if (tr){ cola = 'todos'; setV('trabajar'); elegir(tr.dataset.id); } };
 $('nav').onclick = e => { const b = e.target.closest('button'); if (b) setP(b.dataset.p); };
 document.addEventListener('keydown', e => { if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; if (e.key==='j' || e.key==='k'){ const lista = pintarCola(); const i = lista.findIndex(l=>l.id===sel); const n = lista[Math.max(0, Math.min(lista.length-1, i+(e.key==='j'?1:-1)))]; if (n) elegir(n.id, false); } });
 (async function init(){

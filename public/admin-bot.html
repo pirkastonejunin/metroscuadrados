@@ -47,6 +47,7 @@
   .vacio{padding:34px 16px;text-align:center;color:var(--muted)} .vacio span{font-size:34px;display:block;margin-bottom:6px}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:50} .modal.on{display:flex} .modal .card{max-width:760px;width:100%}
   .hidden{display:none!important}
+  body.embed .hero,body.embed #tabs button[data-t=c],body.embed #v-c{display:none!important} body.embed .wrap{padding:8px 4px;max-width:none}
 </style>
 </head>
 <body><div class="wrap">
@@ -112,7 +113,9 @@ function tab(t){ ['c','p','k','i'].forEach(x=>document.getElementById('v-'+x).cl
 document.getElementById('tabs').onclick = e => { if (e.target.dataset.t) tab(e.target.dataset.t); };
 async function init(){
   if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
-  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'bot'); }catch(e){ err(e); return; }
+  const EMB = new URLSearchParams(location.search).get('embed')==='1'; if (EMB) document.body.classList.add('embed');
+  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar && !EMB) PiedraSidebar.render(me, 'bot'); }catch(e){ err(e); return; }
+  if (EMB){ tab('p'); return; }
   await cargar(); { const q = new URLSearchParams(location.search).get('conv'); if (/^[0-9a-f]{24}$/i.test(q||'')) abrir(q); }
   setInterval(()=>{ if (!document.getElementById('v-c').classList.contains('hidden')) { cargar(); if (SEL) abrir(SEL, true); } }, 15000);
 }

@@ -103,8 +103,13 @@ Tiene tres pestañas:
 - Campañas: cuántos leads trajo cada campaña/anuncio, cuántos ya son clientes, cuántos compraron y cuánto vendieron (solo compras hechas después de escribir), más leads por mes.
 Importar CSV de Azuite y sincronizar con Azuite siguen en esta pantalla (se puede repetir sin pisar estados ni notas). Hay que elegir una sucursal para importar.
 
-## Mesa de ventas
-Menú → CRM → "Mesa de ventas". Es la pantalla de trabajo del vendedor: una lista a la izquierda, el chat de WhatsApp en el centro y la ficha de venta a la derecha.
+## CRM (pantalla única: Trabajar · Todas · Bot de WhatsApp)
+Menú → "CRM". Reemplaza a las pantallas separadas de CRM (Entrantes y Oportunidades), Mesa de ventas y Bot de WhatsApp. Arriba hay tres vistas:
+- **Trabajar**: la pantalla del vendedor, con la lista a la izquierda, el chat de WhatsApp en el centro y la ficha de venta a la derecha (detalle abajo).
+- **Todas**: tabla con todas las oportunidades y contactos (filtros por temperatura, producto, estado y asesor; "Mostrar cerradas"). Al tocar una fila se abre en Trabajar. Los contactos que llegaron de Azuite o de un anuncio y todavía no son oportunidad aparecen acá como "Nuevo", con el botón "Pasar a oportunidad". "Vista clásica del CRM" abre la pantalla anterior mientras dure la transición.
+- **Bot de WhatsApp**: probar el bot, conocimiento (incluye los interruptores de vendedor con datos reales y de oportunidades automáticas) e instrucciones. Quitar o cargar conversaciones de ejemplo se hace desde Trabajar (lista vacía) y Todas.
+
+### Trabajar
 - **Responder**: clientes que escribieron y esperan respuesta (los más viejos primero). **Seguimientos**: los que vencen hoy, están vencidos o no tienen próxima acción. **Todos**: todo lo abierto. "Filtrar" muestra temperatura, producto, estado y "mías / toda la sucursal".
 - En el chat: "Usar" copia la sugerencia de la IA a la caja (siempre la editás vos antes de enviar), "Analizar" pide el análisis, "Tomar" te asigna la conversación. Al responder una conversación sin seguimiento, el sistema programa uno a 2 días.
 - **Seguimiento**: hoy, mañana, 2 días o 1 semana (usa la oportunidad del CRM; la campanita avisa al vencer). **Cerrar**: ganada, o perdida con motivo (precio, sin stock, eligió otro proveedor, sin respuesta, postergó la obra, otro). Perdida descarta la oportunidad; ganada limpia el seguimiento. Se pueden ver y reabrir desde "Mostrar cerradas".

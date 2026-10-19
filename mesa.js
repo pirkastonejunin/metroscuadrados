@@ -76,6 +76,18 @@ async function armar(db, req, { cerradas }) {
       etapa: 'seguimiento', fuente: o.origen || '', notas: '', historial: [], cierre: null, actualizado: o.updatedAt || o.createdAt
     });
   }
+  // leads sueltos (llegaron de Azuite o de un anuncio y todavía no son oportunidad ni tienen conversación): para no perder ninguno al unificar pantallas
+  const leadsSueltos = await db.collection('leads_whatsapp').find(Object.assign({}, org, { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).sort({ creadoOrigen: -1 }).limit(300).toArray();
+  for (const l of leadsSueltos) {
+    if (!l.tel10 || vistos.has(l.tel10) || opPorTel.has(l.tel10) || l.oportunidadId) continue;
+    vistos.add(l.tel10);
+    items.push({
+      id: 'lead:' + l._id, convId: null, opId: null, leadId: String(l._id), opNumero: null, nombre: l.nombre || ('+' + l.telefono), tel: digitos(l.telefono), estadoConv: null, demo: false,
+      asesorId: null, asesorNombre: '', sinAsignar: true, temperatura: 'tibio', temperaturaOrigen: 'sin analizar', productos: [], producto: '', valor: 0, ultimo: null, esperaCliente: false, esperaMin: 0, sinLeer: 0,
+      prox: null, paso: '', resumen: l.resumen || '', falta: [], sugerida: '', analizadoAt: null, presupuesto: null, etapa: 'nuevo', fuente: l.fuente === 'Meta Ads' ? 'Meta Ads · ' + (l.campana || '') : (l.fuente || 'Directo'),
+      notas: '', historial: [], cierre: null, actualizado: l.creadoOrigen || l.createdAt
+    });
+  }
   return items;
 }
 
