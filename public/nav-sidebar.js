@@ -134,6 +134,7 @@
     // Comercial, es mover una línea.
     { nombre: 'CRM', items: [
       { key: 'crm', href: '/crm.html', modulo: 'crm,visitas', label: 'CRM', icon: ICONOS.visitas },
+      { key: 'mesa', href: '/mesa.html', modulo: 'crm,visitas', label: 'Mesa de ventas', icon: ICONOS.visitas },
       { key: 'bot', href: '/admin-bot.html', modulo: 'crm,visitas', label: 'Bot de WhatsApp', icon: ICONOS.visitas },
       { key: 'visitas', href: '/admin-visitas.html', modulo: 'visitas', label: 'Panel de Visitas', icon: ICONOS.visitas },
       { key: 'mis-visitas', href: '/vendedor.html', requiereVendedor: true, label: 'Mis visitas', icon: ICONOS.misVisitas },

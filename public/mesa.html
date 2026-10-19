@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesa de ventas - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<style>
+:root{
+  --bg:#eceae6; --panel:#f8f7f4; --panel2:#f1efeb; --line:#dcd8d1; --ink:#1d2327; --mute:#68707a;
+  --accent:#0f6b63; --accent-ink:#ffffff; --accent-soft:#d8ebe8;
+  --hot:#c2410c; --hot-soft:#fde6d8; --warm:#a16207; --warm-soft:#f8ecc6; --cold:#1d5fa8; --cold-soft:#dbe9f8;
+  --ok:#15803d; --ok-soft:#d9f0e0; --bad:#b42318; --bad-soft:#fbdedb;
+  --in:#ffffff; --out:#d6efe9; --bot:#e6e3f6;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14181b; --panel:#1b2024; --panel2:#222930; --line:#2f373e; --ink:#e7eaec; --mute:#98a2ab;
+  --accent:#3fb5a8; --accent-ink:#06201d; --accent-soft:#17403c;
+  --hot:#fb923c; --hot-soft:#432212; --warm:#facc15; --warm-soft:#3d3210; --cold:#7cb4f0; --cold-soft:#16324f;
+  --ok:#4ade80; --ok-soft:#173a25; --bad:#f87171; --bad-soft:#431a17;
+  --in:#262e35; --out:#17403c; --bot:#2c2a48; color-scheme:dark}}
+*{box-sizing:border-box}
+html{height:100%}
+body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.4;padding:10px 14px;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.app{height:100%;display:flex;flex-direction:column;gap:10px;min-height:0}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:15px;white-space:nowrap}
+.brand small{display:block;font-weight:500;font-size:11px;color:var(--mute)}
+.resumen{flex:1;text-align:right;color:var(--mute);font-size:13px}
+.resumen b{color:var(--ink);font-family:var(--mono);font-weight:500}
+.resumen .al{color:var(--bad)}
+.err{color:var(--bad);font-size:12.5px}
+.main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr) minmax(280px,330px);gap:10px}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.colhead{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;flex:none}
+.scroll{overflow:auto;min-height:0;flex:1}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.tab{border:1px solid var(--line);background:transparent;border-radius:99px;padding:3px 9px;font-size:12px;display:flex;gap:6px;align-items:center;color:var(--mute)}
+.tab b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+.tab.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tab.on b{color:var(--accent-ink)}
+.tab.urg:not(.on) b{color:var(--bad)}
+.btnf{margin-left:auto;border:1px solid var(--line);background:transparent;border-radius:99px;padding:3px 10px;font-size:12px;color:var(--mute)}
+.btnf.on{color:var(--ink);background:var(--panel2)}
+.filtros{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.filtros[hidden]{display:none}
+.filtros input,.filtros select{width:100%;border:1px solid var(--line);background:var(--panel2);border-radius:7px;padding:5px 8px;min-width:0}
+.filtros input{grid-column:1/-1}
+.item{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;position:relative}
+.item:hover{background:var(--panel2)}
+.item.sel{background:var(--accent-soft)}
+.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;grid-row:1/3;display:inline-block}
+.dot.caliente{background:var(--hot)}.dot.tibio{background:var(--warm)}.dot.frio{background:var(--cold)}
+.item .nom{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.item .sub{grid-column:2/4;color:var(--mute);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.unread{position:absolute;right:12px;top:32px;background:var(--bad);color:#fff;border-radius:99px;font-size:10.5px;min-width:17px;height:17px;display:grid;place-items:center;font-family:var(--mono)}
+.chip{font-size:11px;border-radius:5px;padding:1px 6px;background:var(--panel2);color:var(--mute);border:1px solid var(--line);white-space:nowrap}
+.chip.warm{background:var(--warm-soft);color:var(--warm);border-color:transparent}
+.chip.cold{background:var(--cold-soft);color:var(--cold);border-color:transparent}
+.chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.vacio{padding:30px 16px;color:var(--mute);text-align:center}
+.chathead{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex:none}
+.chathead h2{margin:0;font-size:15px;font-weight:700}
+.chathead .meta{color:var(--mute);font-size:12px}
+.sp{flex:1}
+.msgs{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--panel2)}
+.m{max-width:78%;padding:7px 10px;border-radius:10px;background:var(--in);white-space:pre-wrap;box-shadow:0 1px 0 rgba(0,0,0,.05);overflow-wrap:anywhere}
+.m.out{align-self:flex-end;background:var(--out)}
+.m.bot{align-self:flex-end;background:var(--bot)}
+.m small{display:block;font-size:10.5px;color:var(--mute);margin-top:2px;font-family:var(--mono)}
+.sug{padding:10px 14px;border-top:1px solid var(--line);background:var(--accent-soft);display:flex;gap:10px;align-items:flex-start;flex:none}
+.sug .tx{flex:1;min-width:0;font-size:13px}
+.sug .lb{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:700;display:block;margin-bottom:2px}
+.compose{padding:10px 14px;border-top:1px solid var(--line);flex:none}
+.compose .row{display:flex;gap:8px}
+.compose textarea{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);height:54px}
+.compose select{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:4px 6px;max-width:130px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;font-weight:600;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
+.btn:hover{background:var(--panel2)}
+.btn:disabled{opacity:.55;cursor:default}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.btn.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.btn.sm{padding:3px 9px;font-size:12px}
+.acciones{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line);flex:none;align-items:center}
+.inline{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel2);flex:none}
+.inline select,.inline input{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:4px 8px}
+.sec{padding:13px 14px;border-bottom:1px solid var(--line)}
+.sec h3{margin:0 0 6px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:700}
+.sec p{margin:0}
+.temp{display:flex;gap:5px}
+.temp button{flex:1;border:1px solid var(--line);background:transparent;border-radius:7px;padding:4px 0;font-size:12.5px;color:var(--mute)}
+.temp button.on.caliente{background:var(--hot-soft);color:var(--hot);border-color:var(--hot)}
+.temp button.on.tibio{background:var(--warm-soft);color:var(--warm);border-color:var(--warm)}
+.temp button.on.frio{background:var(--cold-soft);color:var(--cold);border-color:var(--cold)}
+.tip{color:var(--mute);font-size:11.5px}
+.paso{background:var(--accent-soft);border-radius:8px;padding:8px 10px;font-weight:600;font-size:15px;line-height:1.35}
+.tot2{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.tot2 b{font-family:var(--mono);font-size:17px;font-weight:500}
+details.mas summary{padding:11px 14px;cursor:pointer;color:var(--mute);font-weight:600;list-style:none}
+details.mas summary::before{content:"+ "}details.mas[open] summary::before{content:"– "}
+ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}
+ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0}
+.kv dt{color:var(--mute)}.kv dd{margin:0;text-align:right}
+.notas textarea{width:100%;resize:vertical;min-height:50px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--panel)}
+.hist{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:2px}
+.cierre{padding:24px 14px;text-align:center}
+.toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-weight:600;z-index:20}
+.toast[hidden]{display:none}
+.nav{display:none}
+@media (max-width:1100px){
+  .main{grid-template-columns:minmax(0,1fr)}
+  .main .col{display:none}
+  .app[data-p="cola"] #c1,.app[data-p="chat"] #c2,.app[data-p="ficha"] #c3{display:flex}
+  .nav{display:flex;gap:6px}
+  .nav button{flex:1;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 0;font-weight:600;color:var(--mute)}
+  .nav button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .resumen{text-align:left}
+  .m{max-width:90%}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app" data-p="cola">
+  <header class="top">
+    <div class="brand">Mesa de ventas<small id="quien">Piedra Negra</small></div>
+    <div class="resumen" id="resumen"></div>
+  </header>
+  <div class="err" id="msg"></div>
+  <div class="nav" id="nav"><button data-p="cola" class="on">Lista</button><button data-p="chat">Chat</button><button data-p="ficha">Ficha</button></div>
+  <div class="main">
+    <section class="col" id="c1" aria-label="Lista de trabajo">
+      <div class="colhead">
+        <div class="tabs" id="tabs"></div>
+        <div class="filtros" id="filtros" hidden>
+          <input id="q" type="search" placeholder="Buscar nombre, teléfono o producto">
+          <select id="fTemp" aria-label="Temperatura"><option value="">Toda temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select>
+          <select id="fProd" aria-label="Producto"><option value="">Todo producto</option></select>
+          <select id="fEst" aria-label="Estado"><option value="">Todo estado</option><option value="nuevo">Nuevo</option><option value="seguimiento">En seguimiento</option><option value="borrador">Borrador de presupuesto</option><option value="presupuesto">Presupuesto enviado</option></select>
+          <select id="fVend" aria-label="De quién"><option value="mias">Mías y sin asignar</option><option value="todas">Toda la sucursal</option></select>
+          <label class="tip" style="grid-column:1/-1"><input type="checkbox" id="fCer" style="width:auto"> Mostrar cerradas</label>
+        </div>
+      </div>
+      <div class="scroll" id="lista"></div>
+    </section>
+    <section class="col" id="c2" aria-label="Conversación"></section>
+    <section class="col" id="c3" aria-label="Ficha de venta"></section>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+let TOKEN = localStorage.getItem('obras_admin_token') || '', ORG = localStorage.getItem('obras_org_activo') || '', OP = localStorage.getItem('obras_org_operar') || '';
+function H(x){ const h = Object.assign({'x-admin-token':TOKEN}, x||{}); if (ORG) h['x-org-id'] = ORG; if (ORG==='todas' && OP) h['x-org-operar'] = OP; return h; }
+const J = {'Content-Type':'application/json'};
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d; }
+const money = n => '$ ' + Math.round(n||0).toLocaleString('es-AR');
+const mins = m => m<1 ? 'recién' : m<60 ? m+' min' : m<1440 ? Math.floor(m/60)+' h' : Math.floor(m/1440)+' d';
+const hora = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'});
+function err(e){ $('msg').textContent = e && e.message || e || ''; }
+let tt; function toast(t){ const e=$('toast'); e.textContent=t; e.hidden=false; clearTimeout(tt); tt=setTimeout(()=>e.hidden=true,2400); }
+
+let ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], cola = 'esperan', sel = null, MSGS = [], busy = false;
+const colas = {
+  esperan:{n:'Responder', f:l=>l.esperaCliente, urg:1},
+  hoy:{n:'Seguimientos', f:l=>!l.esperaCliente && (l.prox ? l.prox.dias<=0 : l.etapa!=='nuevo')},
+  todos:{n:'Todos', f:l=>true}
+};
+const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
+function filtradas(){
+  const q=$('q').value.trim().toLowerCase(), t=$('fTemp').value, p=$('fProd').value, e=$('fEst').value, v=$('fVend').value;
+  return ITEMS.filter(l=>(v==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!e||l.etapa===e) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)));
+}
+const orden = l => (l.cierre?500:0) + (l.esperaCliente?0:100) + (l.prox && l.prox.dias<=0 ? 10 : 20) + ({caliente:0,tibio:3,frio:6}[l.temperatura]) - Math.min(9, (l.esperaMin||0)/1000);
+function motivo(l){
+  if (l.cierre) return [l.cierre.estado==='ganada'?'Ganada':'Perdida: '+(l.cierre.motivo||''), l.cierre.estado==='ganada'?'':'bad'];
+  if (l.esperaCliente) return ['Esperando '+mins(l.esperaMin), l.esperaMin>240?'bad':'warm'];
+  if (!l.prox) return [l.etapa==='nuevo'?'Nuevo':'Sin próxima acción', l.etapa==='nuevo'?'cold':'bad'];
+  if (l.prox.dias<0) return ['Vencido hace '+(-l.prox.dias)+' d','bad'];
+  if (l.prox.dias===0) return ['Hoy','warm'];
+  return [l.prox.dias===1?'Mañana':'En '+l.prox.dias+' d',''];
+}
+function pintarCola(){
+  const base = filtradas();
+  $('tabs').innerHTML = Object.entries(colas).map(([k,c])=>{ const n=base.filter(c.f).length; return `<button class="tab ${k===cola?'on':''} ${c.urg&&n?'urg':''}" data-k="${k}">${c.n} <b>${n}</b></button>`; }).join('') + `<button class="btnf ${$('filtros').hidden?'':'on'}" id="bf">Filtrar</button>`;
+  $('bf').onclick = () => { $('filtros').hidden = !$('filtros').hidden; pintarCola(); };
+  const items = base.filter(colas[cola].f).sort((a,b)=>orden(a)-orden(b));
+  $('lista').innerHTML = items.map(l=>{ const [mt,mc]=motivo(l);
+    return `<div class="item ${l.id===sel?'sel':''}" data-id="${esc(l.id)}" tabindex="0"><span class="dot ${l.temperatura}" title="${l.temperatura}"></span><span class="nom">${esc(l.nombre)}</span><span class="chip ${mc}">${esc(mt)}</span>
+      <span class="sub">${l.producto?esc(l.producto)+' · ':''}${esc(l.ultimo?l.ultimo.texto:(l.resumen||'Sin mensajes guardados'))}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}</div>`; }).join('')
+    || `<div class="vacio">${ITEMS.length?'Todo al día 👌<br>No queda nada en esta lista.':'Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.'}</div>`;
+  return items;
+}
+function pintarResumen(){
+  const a = ITEMS.filter(l=>!l.cierre), r = a.filter(l=>l.esperaCliente).length, v = a.filter(l=>!l.esperaCliente && l.prox && l.prox.dias<=0).length, s = a.filter(l=>!l.prox && l.etapa!=='nuevo' && !l.esperaCliente).length;
+  $('resumen').innerHTML = `<b class="${r?'al':''}">${r}</b> para responder · <b>${v}</b> seguimientos${s?` · <b class="al">${s}</b> sin próxima acción`:''} · <b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b> en presupuestos`;
+}
+const cur = () => ITEMS.find(l=>l.id===sel);
+
+async function cargar(opts){
+  try{
+    const d = await api('/api/mesa' + ($('fCer').checked ? '?cerradas=1' : ''), {headers:H()});
+    const antes = cur(); ITEMS = d.items; YO = d.yo; MOTIVOS = d.motivosPerdida;
+    $('quien').textContent = 'Piedra Negra · ' + (YO.nombre || '');
+    const ps = $('fProd'), v = ps.value; ps.innerHTML = '<option value="">Todo producto</option>' + d.productos.map(p=>`<option>${esc(p)}</option>`).join(''); ps.value = v;
+    pintarResumen(); const lista = pintarCola(); err('');
+    const l = cur();
+    if (opts && opts.inicial && !l && lista.length) return elegir(lista[0].id, false);
+    if (l){ const cambio = !antes || (antes.ultimo && l.ultimo && String(antes.ultimo.at)!==String(l.ultimo.at)) || antes.cierre!==l.cierre && !!antes.cierre!==!!l.cierre; if (cambio || (opts && opts.forzar)) await abrir(l); else pintarFicha(l); }
+  }catch(e){ err(e); }
+}
+async function elegir(id, mover){ sel = id; const l = cur(); pintarCola(); if (l) await abrir(l); if (mover!==false) setP('chat'); const it = document.querySelector('.item.sel'); if (it) it.scrollIntoView({block:'nearest'}); }
+async function abrir(l){
+  MSGS = [];
+  if (l.convId){ try{ const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()}); MSGS = d.mensajes; }catch(e){ err(e); } }
+  pintarChat(l); pintarFicha(l);
+}
+
+function pintarChat(l){
+  const c = $('c2'); const keep = $('txt') ? $('txt').value : '';
+  if (!l){ c.innerHTML = '<div class="vacio">Elegí a alguien de la lista.</div>'; return; }
+  if (!l.convId){ c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}</div></div></div><div class="vacio">Esta oportunidad no tiene la conversación guardada en el sistema (viene de Azuite o se cargó a mano).<br>Cuando escriba por el WhatsApp nuevo la vas a ver acá.</div>
+    <div class="acciones"><button class="btn" id="seg">⏰ Seguimiento</button></div><div id="slot"></div>`; $('seg').onclick = () => slotSeg(l); return; }
+  if (l.cierre){ c.innerHTML = `<div class="cierre"><h2>${esc(l.nombre)}</h2><p>Cerrada como <b>${esc(l.cierre.estado)}</b>${l.cierre.motivo?': '+esc(l.cierre.motivo):''}.</p><button class="btn" id="reabrir">Reabrir</button></div>`; $('reabrir').onclick = () => accion(`/api/mesa/${l.convId}/reabrir`, {}, 'Reabierta'); return; }
+  const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('');
+  c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${mio(l)&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':(l.asesorNombre?`<span class="chip">${esc(l.asesorNombre)}</span>`:'')}</div>
+    <div class="msgs" id="msgs">${msgs || '<div class="vacio">Sin mensajes.</div>'}</div>
+    ${l.sugerida && l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>${esc(l.sugerida)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
+      : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '')}
+    <div class="compose"><div class="row"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:6px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div></div>
+    <div class="acciones"><button class="btn" id="seg">⏰ Seguimiento</button><span class="sp"></span><button class="btn" id="cer">Cerrar…</button></div><div id="slot"></div>`;
+  const ms = $('msgs'); ms.scrollTop = ms.scrollHeight; const tx = $('txt'); tx.value = keep;
+  if ($('usar')) $('usar').onclick = () => { tx.value = l.sugerida; tx.focus(); };
+  if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await api(`/api/bot/conversaciones/${l.convId}/asistente`, {method:'POST', headers:H(J), body:'{}'}); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };
+  if ($('tomar')) $('tomar').onclick = () => accion(`/api/mesa/${l.convId}/tomar`, {}, 'Es tuya');
+  $('rap').onchange = e => { const r = {Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value = (tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
+  const enviar = async () => { const v = tx.value.trim(); if (!v || busy) return; busy = true; $('env').disabled = true;
+    try{ await api(`/api/bot/conversaciones/${l.convId}/enviar`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})});
+      if (!l.prox){ try{ await api(`/api/bot/conversaciones/${l.convId}/seguimiento`, {method:'POST', headers:H(J), body:JSON.stringify({dias:2, nota:'Retomar la conversación de WhatsApp'})}); toast('Enviado. Seguimiento en 2 días.'); }catch(e){ toast('Enviado'); } } else toast('Enviado');
+      tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled = false; } busy = false; };
+  $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
+  $('seg').onclick = () => slotSeg(l);
+  $('cer').onclick = () => slot(`<button class="btn ok sm" id="g">✅ Ganada${l.valor?' · '+money(l.valor):''}</button><select id="mo" aria-label="Motivo de la pérdida">${MOTIVOS.map(m=>`<option>${esc(m)}</option>`).join('')}</select><button class="btn bad sm" id="ok">Perdida</button><button class="btn sm" id="x">Cancelar</button>`,
+    () => accion(`/api/mesa/${l.convId}/cerrar`, {estado:'perdida', motivo:$('mo').value}, 'Cerrada como perdida'));
+  if ($('g')) $('g').onclick = () => accion(`/api/mesa/${l.convId}/cerrar`, {estado:'ganada'}, '¡Venta cerrada!');
+}
+function slot(html, fn){ const s=$('slot'); s.innerHTML = `<div class="inline">${html}</div>`; if ($('ok')) $('ok').onclick = fn; $('x').onclick = () => { s.innerHTML=''; }; if ($('g')) $('g').onclick = null; }
+function slotSeg(l){
+  slot(`<span>Volver a contactar</span><select id="sd" aria-label="Cuándo"><option value="0">hoy</option><option value="1" selected>mañana</option><option value="2">en 2 días</option><option value="7">en 1 semana</option></select><button class="btn pri sm" id="ok">Listo</button><button class="btn sm" id="x">Cancelar</button>`, async () => {
+    const d = +$('sd').value;
+    try{ if (l.convId) await api(`/api/bot/conversaciones/${l.convId}/seguimiento`, {method:'POST', headers:H(J), body:JSON.stringify({dias:d, nota:'Retomar la conversación de WhatsApp'})});
+      else { const f = new Date(Date.now() - 3*3600*1000 + d*86400000).toISOString().slice(0,10); await api('/api/crm/'+l.opId, {method:'PUT', headers:H(J), body:JSON.stringify({proximaAccion:{fecha:f, tipo:'recontactar', nota:'Retomar'}})}); }
+      toast('Seguimiento programado'); await cargar({forzar:true}); }catch(e){ err(e); } });
+}
+async function accion(url, body, ok){ try{ await api(url, {method:'POST', headers:H(J), body:JSON.stringify(body||{})}); if (ok) toast(ok); await cargar({forzar:true}); }catch(e){ err(e); } }
+
+function pintarFicha(l){
+  const c = $('c3');
+  if (!l || l.cierre){ c.innerHTML = '<div class="vacio">Acá ves qué hacer con este cliente.</div>'; return; }
+  const keepN = $('nota') ? $('nota').value : null;
+  const p = l.presupuesto;
+  c.innerHTML = `<div class="scroll">
+   <div class="sec"><h3>Qué hacer ahora</h3>${l.paso ? `<div class="paso">${esc(l.paso)}</div>` : `<p class="tip">Todavía no hay un análisis de la IA.${l.convId?' Tocá "Analizar" en el chat para obtener el próximo paso.':''}</p>`}
+     <div class="tip" style="margin-top:6px">${l.prox ? 'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):'') : '<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
+   ${l.resumen ? `<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>` : ''}
+   ${l.convId ? `<div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:5px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>` : ''}
+   <div class="sec"><h3>Presupuesto</h3>${p ? `<div class="tot2"><span class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</span><b>${money(p.total)}</b></div><div style="margin-top:8px"><a class="btn pri sm" href="/admin-presupuestos.html?abrir=${esc(p.id)}">Ver y editar</a></div>` : `<p class="tip">Todavía no hay presupuesto.</p><a class="btn sm" style="margin-top:6px" href="/admin-presupuestos.html">Ir a Presupuestos</a>`}</div>
+   <details class="mas"><summary>Más datos</summary>
+     ${l.falta.length ? `<div class="sec"><h3>Falta preguntarle</h3><ul class="l">${l.falta.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
+     <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl></div>
+     ${l.convId ? `<div class="sec notas"><h3>Notas internas</h3><textarea id="nota" placeholder="Solo las ve el equipo">${esc(keepN!=null?keepN:l.notas)}</textarea></div>` : ''}
+     ${l.historial.length ? `<div class="sec"><h3>Historial</h3><div class="hist">${l.historial.slice().reverse().map(h=>`<span>${esc(h.txt)} · ${hora(h.at)}</span>`).join('')}</div></div>` : ''}
+   </details></div>`;
+  c.querySelectorAll('.temp button').forEach(b => b.onclick = () => accion(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}, 'Listo'));
+  if ($('nota')){ let t; $('nota').oninput = e => { clearTimeout(t); const v=e.target.value; t=setTimeout(()=>api(`/api/mesa/${l.convId}/nota`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})}).catch(()=>{}), 700); }; }
+}
+
+function setP(p){ $('app').dataset.p = p; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.p===p)); }
+$('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b){ cola = b.dataset.k; pintarCola(); } };
+$('lista').onclick = e => { const it = e.target.closest('.item'); if (it) elegir(it.dataset.id); };
+$('lista').onkeydown = e => { if (e.key==='Enter'){ const it = e.target.closest('.item'); if (it) elegir(it.dataset.id); } };
+['q','fTemp','fProd','fEst','fVend'].forEach(i => $(i).addEventListener('input', pintarCola));
+$('fCer').addEventListener('change', () => cargar());
+$('nav').onclick = e => { const b = e.target.closest('button'); if (b) setP(b.dataset.p); };
+document.addEventListener('keydown', e => { if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; if (e.key==='j' || e.key==='k'){ const lista = pintarCola(); const i = lista.findIndex(l=>l.id===sel); const n = lista[Math.max(0, Math.min(lista.length-1, i+(e.key==='j'?1:-1)))]; if (n) elegir(n.id, false); } });
+(async function init(){
+  if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
+  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'mesa'); }catch(e){ err(e); return; }
+  await cargar({inicial:true}); setP(window.innerWidth<=1100?'cola':'chat');
+  setInterval(() => { if (!document.hidden && !busy && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
+})();
+</script>
+</body>
+</html>

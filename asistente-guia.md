@@ -103,6 +103,14 @@ Tiene tres pestañas:
 - Campañas: cuántos leads trajo cada campaña/anuncio, cuántos ya son clientes, cuántos compraron y cuánto vendieron (solo compras hechas después de escribir), más leads por mes.
 Importar CSV de Azuite y sincronizar con Azuite siguen en esta pantalla (se puede repetir sin pisar estados ni notas). Hay que elegir una sucursal para importar.
 
+## Mesa de ventas
+Menú → CRM → "Mesa de ventas". Es la pantalla de trabajo del vendedor: una lista a la izquierda, el chat de WhatsApp en el centro y la ficha de venta a la derecha.
+- **Responder**: clientes que escribieron y esperan respuesta (los más viejos primero). **Seguimientos**: los que vencen hoy, están vencidos o no tienen próxima acción. **Todos**: todo lo abierto. "Filtrar" muestra temperatura, producto, estado y "mías / toda la sucursal".
+- En el chat: "Usar" copia la sugerencia de la IA a la caja (siempre la editás vos antes de enviar), "Analizar" pide el análisis, "Tomar" te asigna la conversación. Al responder una conversación sin seguimiento, el sistema programa uno a 2 días.
+- **Seguimiento**: hoy, mañana, 2 días o 1 semana (usa la oportunidad del CRM; la campanita avisa al vencer). **Cerrar**: ganada, o perdida con motivo (precio, sin stock, eligió otro proveedor, sin respuesta, postergó la obra, otro). Perdida descarta la oportunidad; ganada limpia el seguimiento. Se pueden ver y reabrir desde "Mostrar cerradas".
+- Ficha: qué hacer ahora, interés, temperatura (la propone la IA; si la cambiás, la IA no la pisa), presupuesto (abre Presupuestos) y "Más datos" (qué falta preguntar, notas internas, historial).
+- Atajos: J y K pasan al siguiente o anterior; Ctrl+Enter envía. Las oportunidades que vienen de Azuite aparecen sin chat (solo el resumen).
+
 ## Bot de WhatsApp
 Menú → "Bot de WhatsApp". Es el asistente propio que atiende los mensajes de WhatsApp: pregunta (máximo 3 preguntas) qué producto necesita, medidas y estilo, y lo deriva a un asesor; no cotiza. Cuando el cliente acepta al asesor, el bot ya no escribe (solo avisa el horario si vuelve a escribir, como mucho cada 6 horas). Si un asesor escribe desde el celular o desde esta pantalla, el bot deja de contestar en esa conversación ("Tomar yo"); con "Devolver al bot" vuelve a atender. Cada conversación alimenta la pantalla de Leads. El texto de instrucciones del bot está en el archivo bot-prompt.md. Para apagarlo sin desconectarlo: BOT_ACTIVO=0 en Render.
 En la pantalla del bot, la solapa "Probar el bot" permite chatear como si fueras un cliente (con texto, foto o audio) para ver cómo responde la IA, sin WhatsApp y sin guardar nada. Ahí mismo se pueden editar y guardar las instrucciones del bot (solo Administrador); "Volver al original" restaura el texto del sistema.

@@ -45,6 +45,7 @@ const crmRouter = require('./crm');
 app.use('/api/crm', crmRouter);
 app.use('/api/leads', require('./leads'));
 app.use('/api/bot', require('./bot'));
+app.use('/api/mesa', require('./mesa'));
 
 const costosRouter = require('./costos');
 app.use('/api/costos', costosRouter);
