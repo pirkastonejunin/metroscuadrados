@@ -607,7 +607,7 @@ router.get('/:id', authAdmin, async (req, res) => {
 });
 
 // Rentabilidad de la obra: lo presupuestado/vendido menos lo que costó (facturas de compra imputadas a la obra
-// + mano de obra de colocadores). Las compras se toman sin IVA (el IVA de compras es crédito fiscal) y en pesos.
+// + mano de obra de colocadores). Las facturas cuentan por su total con IVA, en pesos; la tabla de materiales por producto va sin IVA.
 router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -629,7 +629,8 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
           conIva: r2(total * cot), sinIva: r2((total - iva) * cot), sinCotizacion: c.moneda === 'USD' && !cot
         };
       });
-      const materiales = r2(facturas.reduce((a, f) => a + f.sinIva, 0));
+      const materiales = r2(facturas.reduce((a, f) => a + f.conIva, 0)); // total de las facturas, IVA incluido
+      const materialesSinIva = r2(facturas.reduce((a, f) => a + f.sinIva, 0));
       // Presupuesto de materiales vs lo realmente comprado (ítems de las facturas imputadas, sin IVA, en pesos).
       const normN = t => String(t || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
       const pres = (obra.presupuestoMateriales || []).map(b => ({ b, cantReal: 0, totalReal: 0 }));
@@ -673,7 +674,7 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
       const resultado = r2(ingreso - costo);
       return {
         obra: { _id: obra._id, numero: obra.numero, cliente: (obra.cliente && obra.cliente.nombre) || '', estado: obra.estado },
-        ingreso, materiales, manoObra, costo, resultado,
+        ingreso, materiales, materialesSinIva, manoObra, costo, resultado,
         margenPct: ingreso > 0 ? r2(resultado / ingreso * 100) : null,
         facturas, manoObraDetalle: manoObraDet,
         materialesDetalle: filasMat.concat(filasFuera),

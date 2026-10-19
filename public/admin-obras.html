@@ -645,14 +645,14 @@ async function cargarRentabilidadObra(id){
   try {
     const d = await api('/'+id+'/rentabilidad');
     const color = d.resultado >= 0 ? 'var(--ok,#15803d)' : 'var(--danger,#dc2626)';
-    const filasF = d.facturas.map(f => `<tr><td>${f.fecha?new Date(f.fecha).toLocaleDateString('es-AR'):''}</td><td>Compra #${f.numero} · ${escapeHtmlO(f.proveedor)}${f.comprobante?' <span class="muted">'+escapeHtmlO(f.comprobante)+'</span>':''}</td><td style="text-align:right">${$m(f.sinIva)}${f.moneda==='USD'?' <span class="muted">(USD '+f.totalOriginal+')</span>':''}${f.sinCotizacion?' ⚠':''}</td><td style="text-align:right"><button class="btn small secondary" title="Quitar esta factura de la obra" onclick="quitarFacturaDeObra('${f._id}','${id}')">Quitar</button></td></tr>`).join('');
+    const filasF = d.facturas.map(f => `<tr><td>${f.fecha?new Date(f.fecha).toLocaleDateString('es-AR'):''}</td><td>Compra #${f.numero} · ${escapeHtmlO(f.proveedor)}${f.comprobante?' <span class="muted">'+escapeHtmlO(f.comprobante)+'</span>':''}</td><td style="text-align:right">${$m(f.conIva)}${f.moneda==='USD'?' <span class="muted">(USD '+f.totalOriginal+')</span>':''}${f.sinCotizacion?' ⚠':''}</td><td style="text-align:right"><button class="btn small secondary" title="Quitar esta factura de la obra" onclick="quitarFacturaDeObra('${f._id}','${id}')">Quitar</button></td></tr>`).join('');
     const filasM = d.manoObraDetalle.map(t => `<tr><td>${escapeHtmlO(t.tipoTrabajo)} <span class="muted">${t.m2} m² × ${$m(t.costoPorM2)}</span></td><td style="text-align:right">${$m(t.subtotal)}</td></tr>`).join('');
     cont.innerHTML = `
       <div class="tarea-box">
         <h3 style="margin:0 0 8px;font-size:14px">Rentabilidad de la obra</h3>
         <table style="width:100%;font-size:13px">
           <tr><td>Presupuestado / vendido</td><td style="text-align:right">${d.sinPresupuesto?'<span class="muted">sin monto cargado</span>':$m(d.ingreso)}</td></tr>
-          <tr><td>− Facturas de compra <span class="muted">(sin IVA, ${d.facturas.length})</span></td><td style="text-align:right">${$m(d.materiales)}</td></tr>
+          <tr><td>− Facturas de compra <span class="muted">(total con IVA, ${d.facturas.length})</span></td><td style="text-align:right">${$m(d.materiales)}</td></tr>
           <tr><td>− Mano de obra colocador</td><td style="text-align:right">${$m(d.manoObra)}</td></tr>
           <tr style="font-weight:800;border-top:1px solid var(--border)"><td>Resultado</td><td style="text-align:right;color:${color}">${$m(d.resultado)}${d.margenPct!=null?' · '+d.margenPct.toLocaleString('es-AR')+'%':''}</td></tr>
         </table>
@@ -675,7 +675,7 @@ function tablaMateriales(d){
   const dv = d.desvioMateriales;
   return `<div style="overflow-x:auto"><table style="width:100%;font-size:12.5px;margin-top:6px"><thead><tr style="text-align:right"><th style="text-align:left">Producto</th><th>Cant. pres.</th><th>Cant. real</th><th>$ pres.</th><th>$ real</th><th>Diferencia</th></tr></thead><tbody>${rows}</tbody>
     <tfoot><tr style="font-weight:800;border-top:1px solid var(--border)"><td>Total</td><td></td><td></td><td style="text-align:right">${$m(d.materialesPresupuestado)}</td><td style="text-align:right">${$m(d.materialesItemsReales)}</td><td style="text-align:right;${dv>0?'color:var(--danger,#dc2626)':'color:var(--ok,#15803d)'}">${dv>0?'+':''}${$m(dv)}${d.desvioMaterialesPct!=null?' ('+(d.desvioMaterialesPct>0?'+':'')+d.desvioMaterialesPct.toLocaleString('es-AR')+'%)':''}</td></tr></tfoot></table></div>
-    <div class="muted" style="font-size:11.5px;margin-top:3px">Valores sin IVA. Rojo = se gastó más de lo presupuestado; verde = menos.</div>`;
+    <div class="muted" style="font-size:11.5px;margin-top:3px">Esta tabla va sin IVA (el costo del catálogo y de lo que presupuestás es sin IVA). Rojo = se gastó más de lo presupuestado; verde = menos.</div>`;
 }
 
 let _pmItems = [], _pmObraId = null;
