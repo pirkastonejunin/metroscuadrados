@@ -545,8 +545,10 @@ async function iniciarApp(){
     if (sel) { elegirProveedor('pcProveedor', pagoProveedorId); cargarComprasPendientesPagoCuenta(); }
   }
   // Desde el menú ⚙ de la cuenta corriente del proveedor: nueva compra / nueva orden de compra con el proveedor ya elegido.
-  const nuevaCompraId = qp.get('nuevaCompra'), nuevaOrdenId = qp.get('nuevaOrden');
-  if (nuevaCompraId) {
+  const nuevaCompraId = qp.get('nuevaCompra'), nuevaOrdenId = qp.get('nuevaOrden'), nuevaCompraObra = qp.get('nuevaCompraObra');
+  if (nuevaCompraObra) {
+    abrirNuevaCompra(nuevaCompraObra);
+  } else if (nuevaCompraId) {
     abrirNuevaCompra();
     const sel = document.getElementById('ncProveedor');
     if (sel) { elegirProveedor('ncProveedor', nuevaCompraId); if (typeof actualizarCondicionPago === 'function') actualizarCondicionPago(); }
@@ -707,7 +709,7 @@ async function cargarCompras(){
     <tr>
       <td><strong>${nroImportado(c)}</strong></td>
       <td class="muted">${fechaCorta(c.fecha)}</td>
-      <td>${linkProveedor(c.proveedorId, c.proveedorNombre)}</td>
+      <td>${linkProveedor(c.proveedorId, c.proveedorNombre)}${c.obraId ? `<div class="muted" style="font-size:11px">🏗 Obra #${c.obraNumero} · ${escapeHtml(c.obraCliente||'')}</div>` : ''}</td>
       <td>${money(c.total)}</td>
       <td class="muted">${money(c.totalPagado)}</td>
       <td>${c.saldoPendiente > 0 ? money(c.saldoPendiente) : '<span class="muted">—</span>'}</td>
@@ -731,7 +733,21 @@ function opcionesDepositosCompra(seleccionado){
   ).join('');
 }
 
-function abrirNuevaCompra(){
+let obrasListaCache = null;
+async function llenarSelectObras(selId, elegida){
+  const sel = document.getElementById(selId); if (!sel) return;
+  try {
+    if (!obrasListaCache) { const r = await fetch(BASE + '/obras-lista', {headers: headersAuth()}); obrasListaCache = r.ok ? await r.json() : []; }
+  } catch (e) { obrasListaCache = []; }
+  sel.innerHTML = '<option value="">— Sin obra (compra general) —</option>' + obrasListaCache.map(o =>
+    `<option value="${o._id}">Obra #${o.numero} — ${escapeHtml(o.cliente)}${o.direccion ? ' · ' + escapeHtml(o.direccion) : ''}</option>`).join('');
+  if (elegida) sel.value = elegida;
+}
+function abrirNuevaCompra(obraId){
+  setTimeout(() => llenarSelectObras('ncObra', typeof obraId === 'string' ? obraId : ''), 0);
+  return abrirNuevaCompraBase();
+}
+function abrirNuevaCompraBase(){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg">
       <div class="modal wide">
@@ -768,6 +784,7 @@ function abrirNuevaCompra(){
           <div><label>Descuento ($)</label><input id="ncDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesCompra()"></div>
         </div>
         ${ImpuestosUI.bloqueHtml('impNC', { extras: true, onChange: 'actualizarTotalesCompra', ayudaRetenciones: 'Retenciones que te practicó el proveedor (impuesto a tu favor). Se registran pero no cambian el total ni el saldo.' })}
+        <div style="margin-top:10px"><label>Imputar a una obra (opcional)</label><select id="ncObra"><option value="">— Sin obra (compra general) —</option></select><div class="muted" style="font-size:12px;margin-top:3px">Si la factura es para una obra puntual, elegila acá: después la ves en la rentabilidad de esa obra.</div></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="ncObservaciones"></textarea></div>
 
         <div class="totales-box" id="ncTotales"></div>
@@ -1140,6 +1157,7 @@ async function guardarNuevaCompra(){
     descuentoPorcentaje: Number(document.getElementById('ncDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('ncDescuentoMonto').value) || 0,
     observaciones: document.getElementById('ncObservaciones').value.trim(),
+    obraId: document.getElementById('ncObra').value || null,
     tipoComprobante: document.getElementById('ncTipoComprobante').value,
     puntoVenta: document.getElementById('ncPuntoVenta').value.trim(),
     comprobanteNumero: document.getElementById('ncComprobanteNumero').value.trim()
@@ -1167,9 +1185,20 @@ async function guardarNuevaCompra(){
 // -------------------------------------------------------------------
 // Detalle de una compra — recibir / anular / registrar pago
 // -------------------------------------------------------------------
+async function guardarObraDeCompra(id){
+  const err = document.getElementById('dtObraErr'); err.textContent = '';
+  try {
+    const r = await fetch(BASE + '/' + id + '/obra', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({obraId: document.getElementById('dtObra').value || null})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'No se pudo guardar');
+    err.style.color = 'var(--ok,#15803d)'; err.textContent = d.obraId ? 'Imputada a la obra #' + d.obraNumero : 'Sin obra';
+    cargarCompras();
+  } catch (e) { err.style.color = ''; err.textContent = e.message; }
+}
 function verDetalle(id){
   const c = comprasCache.find(x => x._id === id);
   if (!c) return;
+  setTimeout(() => llenarSelectObras('dtObra', c.obraId || ''), 0);
   const filasItems = c.items.map(it => `
     <tr>
       <td>${escapeHtml(it.sku||'')}</td>
@@ -1211,6 +1240,9 @@ function verDetalle(id){
         </div>
 
         ${ImpuestosUI.detalleHtml(c, money)}
+        <div style="margin-top:10px"><label>Imputada a obra</label>
+          <div class="row" style="gap:8px;align-items:center"><select id="dtObra" style="flex:1"><option value="">— Sin obra —</option></select><button class="btn small secondary" onclick="guardarObraDeCompra('${c._id}')">Guardar</button></div>
+          <div class="err" id="dtObraErr"></div></div>
         ${c.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(c.observaciones)}</p>` : ''}
 
         <div class="section-title">Pagos</div>

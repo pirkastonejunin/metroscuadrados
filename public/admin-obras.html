@@ -628,6 +628,7 @@ async function abrirObra(id){
     <div style="margin-top:10px"><label>Agregar fotos a la obra</label>
       <div class="row" style="gap:8px;align-items:center"><input type="file" accept="image/*" multiple id="inputFotosAdmin" style="flex:1"><button class="btn small secondary" onclick="subirFotosAdmin('${o._id}')">Subir fotos</button></div>
       <div class="err" id="fotoAdminErr"></div></div>
+    <div id="rentabObra" style="margin:14px 0"><div class="muted">Calculando rentabilidad…</div></div>
     <div style="margin:14px 0">${tareasHtml}</div>
     <div class="row">
       <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('')}</select>
@@ -635,7 +636,34 @@ async function abrirObra(id){
       <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar producto</button>
     </div>
   `);
+  cargarRentabilidadObra(o._id);
 }
+
+const $m = n => '$ ' + (Number(n)||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+async function cargarRentabilidadObra(id){
+  const cont = document.getElementById('rentabObra'); if (!cont) return;
+  try {
+    const d = await api('/'+id+'/rentabilidad');
+    const color = d.resultado >= 0 ? 'var(--ok,#15803d)' : 'var(--danger,#dc2626)';
+    const filasF = d.facturas.map(f => `<tr><td>${f.fecha?new Date(f.fecha).toLocaleDateString('es-AR'):''}</td><td>${escapeHtmlO(f.proveedor)}${f.comprobante?' <span class="muted">'+escapeHtmlO(f.comprobante)+'</span>':''}</td><td style="text-align:right">${$m(f.sinIva)}${f.moneda==='USD'?' <span class="muted">(USD '+f.totalOriginal+')</span>':''}${f.sinCotizacion?' ⚠':''}</td></tr>`).join('');
+    const filasM = d.manoObraDetalle.map(t => `<tr><td>${escapeHtmlO(t.tipoTrabajo)} <span class="muted">${t.m2} m² × ${$m(t.costoPorM2)}</span></td><td style="text-align:right">${$m(t.subtotal)}</td></tr>`).join('');
+    cont.innerHTML = `
+      <div class="tarea-box">
+        <h3 style="margin:0 0 8px;font-size:14px">Rentabilidad de la obra</h3>
+        <table style="width:100%;font-size:13px">
+          <tr><td>Presupuestado / vendido</td><td style="text-align:right">${d.sinPresupuesto?'<span class="muted">sin monto cargado</span>':$m(d.ingreso)}</td></tr>
+          <tr><td>− Facturas de compra <span class="muted">(sin IVA, ${d.facturas.length})</span></td><td style="text-align:right">${$m(d.materiales)}</td></tr>
+          <tr><td>− Mano de obra colocador</td><td style="text-align:right">${$m(d.manoObra)}</td></tr>
+          <tr style="font-weight:800;border-top:1px solid var(--border)"><td>Resultado</td><td style="text-align:right;color:${color}">${$m(d.resultado)}${d.margenPct!=null?' · '+d.margenPct.toLocaleString('es-AR')+'%':''}</td></tr>
+        </table>
+        ${d.tareasSinColocador?'<div class="muted" style="font-size:12px;margin-top:6px">'+d.tareasSinColocador+' producto(s) sin colocador: su mano de obra todavía no se cuenta.</div>':''}
+        ${filasF?'<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600;font-size:13px">Facturas imputadas</summary><table style="width:100%;font-size:12.5px;margin-top:4px">'+filasF+'</table></details>':''}
+        ${filasM?'<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:600;font-size:13px">Detalle de mano de obra</summary><table style="width:100%;font-size:12.5px;margin-top:4px">'+filasM+'</table></details>':''}
+        <div style="margin-top:10px"><a class="btn small secondary" style="text-decoration:none;display:inline-block" href="/admin-compras.html?nuevaCompraObra=${id}">+ Cargar factura de compra a esta obra</a></div>
+      </div>`;
+  } catch (e) { cont.innerHTML = '<div class="muted">No se pudo calcular la rentabilidad: ' + escapeHtmlO(e.message||'') + '</div>'; }
+}
+function escapeHtmlO(t){ return String(t==null?'':t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function guardarDatosObra(obraId){
   const nombre = document.getElementById('eObCliente').value.trim();

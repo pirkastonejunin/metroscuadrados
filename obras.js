@@ -562,6 +562,51 @@ router.get('/:id', authAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Rentabilidad de la obra: lo presupuestado/vendido menos lo que costó (facturas de compra imputadas a la obra
+// + mano de obra de colocadores). Las compras se toman sin IVA (el IVA de compras es crédito fiscal) y en pesos.
+router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!obra) return null;
+      const compras = await db.collection('compras').find(Object.assign({ obraId: id, estado: { $ne: 'anulada' } }, filtroOrg(req)))
+        .sort({ fecha: -1 }).toArray();
+      const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
+      const facturas = compras.map(c => {
+        const cot = c.moneda === 'USD' ? (Number(c.cotizacionDolar) || 0) : 1;
+        const total = Number(c.total) || 0, iva = Number(c.importeIva) || 0;
+        return {
+          _id: c._id, numero: c.numero, fecha: c.fecha, proveedor: c.proveedorNombre || '',
+          comprobante: c.comprobanteNumero ? `${c.puntoVenta || ''}-${c.comprobanteNumero}` : '',
+          moneda: c.moneda || 'ARS', totalOriginal: r2(total),
+          conIva: r2(total * cot), sinIva: r2((total - iva) * cot), sinCotizacion: c.moneda === 'USD' && !cot
+        };
+      });
+      const materiales = r2(facturas.reduce((a, f) => a + f.sinIva, 0));
+      const manoObraDet = (obra.tareas || []).filter(t => t.colocadorId && t.costoPorM2Aplicado != null).map(t => ({
+        tipoTrabajo: t.tipoTrabajo, m2: Number(t.m2Presupuestados) || 0, costoPorM2: Number(t.costoPorM2Aplicado) || 0,
+        subtotal: r2((Number(t.m2Presupuestados) || 0) * (Number(t.costoPorM2Aplicado) || 0))
+      }));
+      const manoObra = r2(manoObraDet.reduce((a, t) => a + t.subtotal, 0));
+      const ingreso = r2(obra.precioVentaCliente);
+      const costo = r2(materiales + manoObra);
+      const resultado = r2(ingreso - costo);
+      return {
+        obra: { _id: obra._id, numero: obra.numero, cliente: (obra.cliente && obra.cliente.nombre) || '', estado: obra.estado },
+        ingreso, materiales, manoObra, costo, resultado,
+        margenPct: ingreso > 0 ? r2(resultado / ingreso * 100) : null,
+        facturas, manoObraDetalle: manoObraDet,
+        sinPresupuesto: !(ingreso > 0), tareasSinColocador: (obra.tareas || []).filter(t => !t.colocadorId).length
+      };
+    });
+    if (!out) return res.status(404).json({ error: 'Obra no encontrada' });
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Crear obra (al vender). tareas: [{tipoTrabajo, m2Presupuestados}]
 router.post('/', authAdmin, async (req, res) => {
   try {

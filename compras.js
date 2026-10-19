@@ -586,6 +586,45 @@ async function filtroOrgConCompartidos(db, req) {
   return ids.length ? { $or: [base, { proveedorId: { $in: ids } }] } : base;
 }
 
+// Obras de la sucursal para imputarles facturas (solo lo mínimo para el selector).
+router.get('/obras-lista', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('obras').find(Object.assign({ estado: { $ne: 'cancelada' } }, filtroOrg(req)),
+        { projection: { numero: 1, estado: 1, 'cliente.nombre': 1, 'cliente.direccion': 1, precioVentaCliente: 1 } }).sort({ numero: -1 }).limit(500).toArray();
+    });
+    res.json(lista.map(o => ({ _id: o._id, numero: o.numero, estado: o.estado, cliente: (o.cliente && o.cliente.nombre) || '', direccion: (o.cliente && o.cliente.direccion) || '' })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Datos de la obra a guardar dentro de la compra (id + número y cliente, para listar sin cruzar colecciones).
+async function datosObraParaCompra(db, req, obraIdRaw) {
+  if (!obraIdRaw) return { obraId: null, obraNumero: null, obraCliente: null };
+  const oid = toObjectId(obraIdRaw);
+  if (!oid) throw err(400, 'obraId inválido');
+  const obra = await db.collection('obras').findOne(Object.assign({ _id: oid }, filtroOrg(req)), { projection: { numero: 1, 'cliente.nombre': 1 } });
+  if (!obra) throw err(400, 'La obra no existe (o no pertenece a esta sucursal).');
+  return { obraId: oid, obraNumero: obra.numero, obraCliente: (obra.cliente && obra.cliente.nombre) || '' };
+}
+
+// Imputar (o desimputar con obraId: null) una factura de compra a una obra.
+router.post('/:id/obra', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const r = await conReintento(async () => {
+      const db = await getDb();
+      const c = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)), { projection: { _id: 1 } });
+      if (!c) throw err(404, 'Compra no encontrada');
+      const datos = await datosObraParaCompra(db, req, (req.body || {}).obraId);
+      await db.collection('compras').updateOne({ _id: id }, { $set: Object.assign({ updatedAt: new Date() }, datos) });
+      return datos;
+    });
+    res.json({ ok: true, obraId: r.obraId, obraNumero: r.obraNumero, obraCliente: r.obraCliente });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const match = {};
@@ -598,6 +637,13 @@ router.get('/', authAdmin, async (req, res) => {
       if (!ESTADOS_VALIDOS.includes(req.query.estado)) throw err(400, 'Estado inválido');
       match.estado = req.query.estado;
     }
+    // Imputación a obras: ?obraId=<id> (las de esa obra), ?conObra=1 (solo imputadas), ?sinObra=1 (sin imputar)
+    if (req.query.obraId) {
+      const oid = toObjectId(req.query.obraId);
+      if (!oid) throw err(400, 'obraId inválido');
+      match.obraId = oid;
+    } else if (req.query.conObra === '1') match.obraId = { $ne: null, $exists: true };
+    else if (req.query.sinObra === '1') match.obraId = null;
     if (req.query.desde || req.query.hasta) {
       match.fecha = {};
       if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
@@ -1199,6 +1245,7 @@ router.post('/', authAdmin, async (req, res) => {
       }, filtroOrg(req)));
       if (dupe) throw err(400, `Ya hay una compra cargada con ese comprobante (${TIPO_COMPROBANTE_LABEL[comprobante.tipoComprobante]} ${comprobante.puntoVenta}-${comprobante.comprobanteNumero}) para este proveedor — es la compra #${dupe.numero}.`);
       const cotizacionDolar = await resolverCotizacion(db, req, moneda, body.cotizacionDolar ? normalizarMontoNoNegativo(body.cotizacionDolar, 'La cotización del dólar') : null, true);
+      const datosObra = await datosObraParaCompra(db, req, body.obraId);
       const { items, subtotal } = await normalizarItems(db, req, body.items);
       const fiscalItems = calcularComprobanteDesdeItems(items);
       // 5/10/2026: el total guardado incluye el IVA de los ítems (antes
@@ -1252,6 +1299,7 @@ router.post('/', authAdmin, async (req, res) => {
         anuladaPor: null,
         anuladaMotivo: null,
         usuarioNombre,
+        obraId: datosObra.obraId, obraNumero: datosObra.obraNumero, obraCliente: datosObra.obraCliente, // imputación a obra (opcional)
         orgId: req.orgId,
         createdAt: ahora,
         updatedAt: ahora
