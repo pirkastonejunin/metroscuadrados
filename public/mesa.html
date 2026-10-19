@@ -334,11 +334,12 @@ function pintarResumen(){
   const cm = new Map((CAMPS||[]).map(x=>[x.nombre,{k:x.nombre,leads:x.leads,clientes:x.clientes,compraron:x.compraron,montoARS:x.montoARS,montoUSD:x.montoUSD,ab:0,g:0,p:0,vj:0}]));
   base.forEach(l=>{ const k = l.campana||'(sin campaña)'; if (!cm.has(k)) cm.set(k,{k,leads:0,clientes:0,compraron:0,montoARS:0,montoUSD:0,ab:0,g:0,p:0,vj:0}); const e = cm.get(k);
     if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else e.p++; } });
+  const nrm = x => String(x||'').toLowerCase().replace(/\s+/g,' ').trim(); const invm = new Map((EVOX.camp||[]).map(c=>[nrm(c.campana), c.monto])); cm.forEach(e=>{ e.inv = invm.get(nrm(e.k))||0; });
   const camp = [...cm.values()].sort((a,b)=>(b.montoARS-a.montoARS)||(b.leads-a.leads)||(b.ab-a.ab));
   SNAP = { periodo: ({mes:'este mes','7':'últimos 7 días','30':'últimos 30 días',todo:'todo el historial'})[per], alcance: F==='todas'?'toda la sucursal':'mis oportunidades y sin asignar',
     abiertas: ab.length, montoEnJuego: sv(ab), porResolverHoy: hoy.length, vencidas: venc.length, sinDecidir: sd.length, sinRespuestaDelCliente: sinResp.length, ganadas: gan.length, montoGanado: sv(gan), perdidas: perd.length, montoPerdido: sv(perd),
     porEtapa: etp.map(e=>({etapa:e.k,cantidad:e.n,monto:e.v})), temperatura: tmp.map(e=>({temp:e.k,cantidad:e.n,monto:e.v})), motivosDePerdida: grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({motivo:r.k,cantidad:r.n})),
-    productosAbiertas: grp(ab, l=>l.producto).slice(0,10).map(r=>({producto:r.k,cantidad:r.n})), campanas: camp.slice(0,15).map(r=>({campana:r.k,leads:r.leads,yaSonClientes:r.clientes,compraron:r.compraron,vendidoARS:r.montoARS,abiertasCRM:r.ab,ganadas:r.g,perdidas:r.p})),
+    productosAbiertas: grp(ab, l=>l.producto).slice(0,10).map(r=>({producto:r.k,cantidad:r.n})), campanas: camp.slice(0,15).map(r=>({campana:r.k,leads:r.leads,yaSonClientes:r.clientes,compraron:r.compraron,vendidoARS:r.montoARS,invertidoMetaARS:r.inv,abiertasCRM:r.ab,ganadas:r.g,perdidas:r.p})),
     vendedores: ases.map(r=>({vendedor:r.a,abiertas:r.ab,enHoy:r.hoy,sinDecidir:r.sd,ganadas:r.g,perdidas:r.p,montoGanado:r.vg})),
     consultas: RESL ? { total: RESL.total, porCanal: (RESL.porCanal||[]).map(x=>({canal:x.nombre,leads:x.leads})), porFuente: (RESL.porFuente||[]).map(x=>({fuente:x.nombre,leads:x.leads})), porDia: (RESL.porDia||[]).map(x=>[x.nombre,x.leads]) } : null,
     evolucionMensual: (EVO||[]).map(m=>({mes:m.mes,consultas:m.leads,consultasMetaAds:m.leadsMeta,inversionMetaAdsARS:m.gastoAds,presupuestos:m.presupuestos,montoPresupuestado:m.monto,aprobados:m.aprobados,montoAprobado:m.montoAprobado})) };
@@ -367,8 +368,8 @@ function pintarResumen(){
        <div class="k"><span>Costo por consulta (este mes)</span><b>${cpl(cur)?money(cpl(cur)):'—'}</b><small>${prev&&cpl(prev)?'mes anterior '+money(cpl(prev)):''}</small></div>
        <div class="k"><span>Últimos 12 meses</span><b>${money(tg)}</b><small>${tl} consultas${tl&&tg?' · '+money(Math.round(tg/tl))+' c/u':''}</small></div></div>
       ${graficoAds(ms)}
-      <div class="tip" style="margin:8px 0 4px">Cargá lo gastado en Meta Ads cada mes (en pesos, lo que figura en la cuenta publicitaria). Se guarda al salir del casillero.</div>
-      <div class="gads">${ms.map(m=>`<label><span>${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1]} ${m.mes.slice(2,4)}</span><input type="number" min="0" step="1" data-mes="${m.mes}" value="${m.gastoAds||''}" placeholder="0"></label>`).join('')}</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 4px">${ADSCON?'<button class="btn sm pri" id="adsSync">⬇ Traer de Meta Ads</button><span class="tip">Trae lo invertido por campaña y por mes de la cuenta publicitaria. Los meses traídos de Meta no se editan a mano.</span>':'<span class="tip">Cargá lo gastado en Meta Ads cada mes (en pesos, como figura en la cuenta publicitaria). Para que se traiga solo, falta conectar la cuenta publicitaria (ver la guía del asistente).</span>'}</div>
+      <div class="gads">${ms.map(m=>`<label><span>${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1]} ${m.mes.slice(2,4)}</span><input type="number" min="0" step="1" data-mes="${m.mes}" value="${m.gastoAds||''}" placeholder="0" ${EVOX.meta&&EVOX.meta.includes(m.mes)?'disabled title="Viene de Meta Ads"':''}></label>`).join('')}</div>
       <div class="err" id="gadsErr"></div></div></div>`; })()}
    <div class="rg">
     <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
@@ -376,7 +377,7 @@ function pintarResumen(){
     <div class="bx" data-w="perdidas" data-t="Por qué perdemos"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
     <div class="bx" data-w="productos" data-t="Productos más consultados"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
    </div>
-   <div class="rg"><div class="bx" data-w="campanas" data-t="Campañas de Meta Ads" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="9" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
+   <div class="rg"><div class="bx" data-w="campanas" data-t="Campañas de Meta Ads" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Invertido</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${r.inv?money(r.inv):'—'}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="10" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
    <div class="rg">
     <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
     <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
@@ -402,6 +403,8 @@ async function analizarIA(){
   pintarResumen();
 }
 function v_gads(){
+  const sb = $('adsSync'); if (sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Trayendo…'; const e = $('gadsErr'); if (e) e.textContent = '';
+    try{ const r = await post('/api/mesa/gasto-ads/sincronizar'); toast('Listo: '+r.campanasMes+' registros de campañas'); await cargarCamps(); }catch(x){ if (e) e.textContent = x.message; sb.disabled = false; sb.textContent = '⬇ Traer de Meta Ads'; } };
   document.querySelectorAll('.gads input').forEach(i=>i.onchange = async () => { const e = $('gadsErr'); if (e) e.textContent='';
     try{ await api('/api/mesa/gasto-ads', {method:'PUT', headers:H(J), body:JSON.stringify({mes:i.dataset.mes, monto:Number(i.value)||0})}); const m = (EVO||[]).find(x=>x.mes===i.dataset.mes); if (m) m.gastoAds = Number(i.value)||0; toast('Guardado'); pintarResumen(); }catch(x){ if (e) e.textContent = x.message; } });
 }
@@ -569,14 +572,15 @@ function pintarFicha(l){
 
 /* ---- ventana emergente (presupuestos) ---- */
 let POP = null, ADJ = null, CAMPS = null;
-let RESL = null, EVO = null, SNAP = null, AIR = null;
+let RESL = null, EVO = null, SNAP = null, AIR = null, EVOX = {}, ADSCON = null;
 const diaAR = ms => new Date(ms-3*3600000).toISOString().slice(0,10);
 function desdeStr(per){ return per==='7' ? diaAR(Date.now()-6*864e5) : per==='30' ? diaAR(Date.now()-29*864e5) : per==='mes' ? diaAR(Date.now()).slice(0,8)+'01' : diaAR(Date.now()-89*864e5); }
 async function cargarCamps(){
   const per = $('rper') ? $('rper').value : 'mes';
   try{ CAMPS = (await api('/api/leads/campanas', {headers:H()})).items; }catch(e){ CAMPS = CAMPS||[]; }
   try{ RESL = await api('/api/leads/resumen?desde='+desdeStr(per), {headers:H()}); RESL.per = per; }catch(e){ RESL = RESL||null; }
-  try{ EVO = (await api('/api/mesa/evolucion', {headers:H()})).meses; }catch(e){ EVO = EVO||null; }
+  try{ const ev = await api('/api/mesa/evolucion', {headers:H()}); EVO = ev.meses; EVOX = {camp: ev.gastoPorCampana||[], meta: ev.mesesDeMeta||[]}; }catch(e){ EVO = EVO||null; }
+  try{ ADSCON = (await api('/api/mesa/gasto-ads/estado', {headers:H()})).conectado; }catch(e){}
   if (VISTA==='resumen') pintarResumen();
 }
 function graficoMeses(ms){

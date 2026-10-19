@@ -153,15 +153,46 @@ router.post('/analisis-ia', auth, async (req, res) => {
     res.json({ resumen: String(j.resumen).slice(0, 1200), observaciones: l(j.observaciones), recomendaciones: l(j.recomendaciones), alertas: l(j.alertas), modelo: r.modelo, costoUsd: r.costoUsd, at: new Date() });
   } catch (e) { res.status(e.status || 502).json({ error: e.message }); }
 });
+// ---- Meta Ads: trae lo invertido por campaña y por mes desde la cuenta publicitaria (Marketing API, solo lectura) ----
+// Variables en Render: META_ADS_TOKEN (token de un usuario del sistema con permiso ads_read) y META_AD_ACCOUNT_ID (el número de la cuenta publicitaria).
+async function traerGastoMeta(db, orgId, meses) {
+  const tk = process.env.META_ADS_TOKEN, cuenta = String(process.env.META_AD_ACCOUNT_ID || '').replace(/^act_/, '').replace(/\D/g, '');
+  if (!tk || !cuenta) { const e = new Error('Falta conectar Meta Ads: cargá META_ADS_TOKEN y META_AD_ACCOUNT_ID en Render.'); e.status = 400; throw e; }
+  const base = process.env.WA_GRAPH_BASE || ('https://graph.facebook.com/' + (process.env.WA_GRAPH_VERSION || 'v23.0'));
+  const desde = meses[0] + '-01', hasta = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+  let url = base + '/act_' + cuenta + '/insights?level=campaign&fields=campaign_name,spend&time_increment=monthly&limit=500&time_range=' + encodeURIComponent(JSON.stringify({ since: desde, until: hasta })) + '&access_token=' + encodeURIComponent(tk);
+  const filas = []; let paginas = 0;
+  while (url && paginas++ < 20) {
+    const r = await fetch(url, { signal: AbortSignal.timeout(30000) }); const d = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error('Meta respondió: ' + ((d.error && d.error.message) || r.status)); e.status = 502; throw e; }
+    filas.push(...(d.data || [])); url = d.paging && d.paging.next || null;
+  }
+  const col = db.collection('meta_ads_gasto'); const ahora = new Date(); const vistos = new Set();
+  for (const f of filas) {
+    const mes = String(f.date_start || '').slice(0, 7); const monto = Number(f.spend) || 0; if (!/^\d{4}-\d{2}$/.test(mes)) continue;
+    const campana = String(f.campaign_name || '').slice(0, 200); vistos.add(mes + '|' + campana);
+    await col.updateOne({ orgId, mes, campana, origen: 'meta' }, { $set: { monto, updatedAt: ahora }, $setOnInsert: { createdAt: ahora } }, { upsert: true });
+  }
+  return { campanasMes: filas.length, meses: [...new Set([...vistos].map(x => x.split('|')[0]))].length };
+}
+router.post('/gasto-ads/sincronizar', auth, async (req, res) => {
+  try {
+    if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando.' });
+    const hoy = new Date(Date.now() - 3 * 3600000); const meses = [];
+    for (let i = 11; i >= 0; i--) meses.push(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
+    res.json(Object.assign({ ok: true }, await traerGastoMeta(await getDb(), req.orgId, meses)));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.get('/gasto-ads/estado', auth, (req, res) => res.json({ conectado: !!(process.env.META_ADS_TOKEN && process.env.META_AD_ACCOUNT_ID) }));
 // Lo que se gastó en Meta Ads por mes (se carga a mano desde el Resumen; después se puede traer solo de la cuenta publicitaria).
 router.put('/gasto-ads', auth, async (req, res) => {
   try {
     const mes = String((req.body && req.body.mes) || ''); if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return res.status(400).json({ error: 'Mes inválido.' });
     const monto = Number(req.body && req.body.monto); if (!isFinite(monto) || monto < 0 || monto > 1e10) return res.status(400).json({ error: 'Monto inválido.' });
     if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando.' });
-    const db = await getDb(); const q = { orgId: req.orgId, mes, campana: '' };
+    const db = await getDb(); const q = { orgId: req.orgId, mes, campana: '', origen: { $ne: 'meta' } };
     if (!monto) await db.collection('meta_ads_gasto').deleteOne(q);
-    else await db.collection('meta_ads_gasto').updateOne(q, { $set: { monto, usuario: quien(req).nombre, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    else await db.collection('meta_ads_gasto').updateOne(q, { $set: { monto, origen: 'manual', usuario: quien(req).nombre, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -177,9 +208,11 @@ router.get('/evolucion', auth, async (req, res) => {
       db.collection('leads_whatsapp').aggregate([{ $match: Object.assign({}, f, { creadoOrigen: { $gte: desde } }) }, { $group: { _id: mes('$creadoOrigen'), n: { $sum: 1 }, meta: { $sum: { $cond: [{ $eq: ['$fuente', 'Meta Ads'] }, 1, 0] } }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }]).toArray(),
       db.collection('presupuestos').aggregate([{ $match: Object.assign({}, f, { fecha: { $gte: desde }, estado: { $ne: 'rechazado' } }) }, { $group: { _id: mes('$fecha'), n: { $sum: 1 }, monto: { $sum: { $cond: [{ $eq: ['$moneda', 'USD'] }, 0, { $ifNull: ['$total', 0] }] } }, aprobados: { $sum: { $cond: [{ $eq: ['$estado', 'aprobado'] }, 1, 0] } }, montoAprobado: { $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'aprobado'] }, { $ne: ['$moneda', 'USD'] }] }, { $ifNull: ['$total', 0] }, 0] } } } }]).toArray()
     ]);
-    const gs = await db.collection('meta_ads_gasto').find(Object.assign({}, f, { mes: { $in: meses } })).toArray(); const G = new Map(); gs.forEach(g => G.set(g.mes, (G.get(g.mes) || 0) + (Number(g.monto) || 0)));
+    const gs = await db.collection('meta_ads_gasto').find(Object.assign({}, f, { mes: { $in: meses } })).toArray(); const G = new Map(); const mesesMeta = new Set(gs.filter(g => g.origen === 'meta').map(g => g.mes)); const GC = new Map();
+    // si el mes se trajo de Meta, vale eso; si no, lo cargado a mano
+    gs.forEach(g => { if (mesesMeta.has(g.mes) ? g.origen === 'meta' : g.origen !== 'meta') { G.set(g.mes, (G.get(g.mes) || 0) + (Number(g.monto) || 0)); if (g.origen === 'meta' && g.campana) GC.set(g.campana, (GC.get(g.campana) || 0) + (Number(g.monto) || 0)); } });
     const L = new Map(ld.map(x => [x._id, x])), P = new Map(pr.map(x => [x._id, x]));
-    res.json({ meses: meses.map(m => ({ mes: m, leads: (L.get(m) || {}).n || 0, leadsMeta: (L.get(m) || {}).meta || 0, gastoAds: Math.round(G.get(m) || 0), clientes: (L.get(m) || {}).clientes || 0, presupuestos: (P.get(m) || {}).n || 0, monto: Math.round((P.get(m) || {}).monto || 0), aprobados: (P.get(m) || {}).aprobados || 0, montoAprobado: Math.round((P.get(m) || {}).montoAprobado || 0) })) });
+    res.json({ gastoPorCampana: [...GC.entries()].map(([campana, monto]) => ({ campana, monto: Math.round(monto) })), mesesDeMeta: [...mesesMeta], meses: meses.map(m => ({ mes: m, leads: (L.get(m) || {}).n || 0, leadsMeta: (L.get(m) || {}).meta || 0, gastoAds: Math.round(G.get(m) || 0), clientes: (L.get(m) || {}).clientes || 0, presupuestos: (P.get(m) || {}).n || 0, monto: Math.round((P.get(m) || {}).monto || 0), aprobados: (P.get(m) || {}).aprobados || 0, montoAprobado: Math.round((P.get(m) || {}).montoAprobado || 0) })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.get('/', auth, async (req, res) => {
