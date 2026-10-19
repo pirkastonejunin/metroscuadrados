@@ -155,9 +155,43 @@ async function calcularMaterial(db, orgId, args, modo) {
   return o;
 }
 
+// Borrador de presupuesto (Fase 2): el modelo propone productos y cantidades (en la unidad de venta); acá se validan contra el catálogo y,
+// si hay una conversación real (ctx.convId), se guardan en ella para que, al derivar, se cree la oportunidad y el presupuesto en borrador.
+async function armarBorrador(db, orgId, args, modo, ctx) {
+  const crudos = Array.isArray(args && args.items) ? args.items.slice(0, 15) : [];
+  if (!crudos.length) return { error: 'Indicá al menos un producto con su cantidad.' };
+  const lista = await listaConsumidorFinal(db, orgId), inc = await ivaIncluido(db, orgId, lista), ivaDef = await ivaDefecto(db, orgId);
+  const cotDoc = await db.collection('config_general').findOne({ orgId, clave: 'cotizacionDolar' }); const cot = cotDoc ? cotDoc.valor : null;
+  const items = [], problemas = []; let total = 0, completo = true;
+  for (const it of crudos) {
+    let id; try { id = new ObjectId(String(it && it.productoId)); } catch (e) { problemas.push('productoId inválido (usá el id de buscar_productos)'); continue; }
+    const cant = Number(it.cantidad);
+    if (!(cant > 0) || cant > 100000) { problemas.push('cantidad inválida'); continue; }
+    const p = await db.collection('productos_catalogo').findOne({ _id: id, orgId, activo: { $ne: false } });
+    if (!p) { problemas.push('producto inexistente en esta sucursal'); continue; }
+    const precio = precioFinalDe(p, lista, inc, ivaDef, cot);
+    if (precio == null) completo = false; else total += precio * cant;
+    items.push({ productoId: p._id, nombre: p.nombre, unidad: p.unidad || 'unidad', cantidad: round2(cant), precioFinal: precio });
+  }
+  if (!items.length) return { error: 'No se pudo armar el borrador: ' + problemas.join('; ') };
+  const borrador = { items, totalFinal: completo ? round2(total) : null, at: new Date() };
+  if (ctx && ctx.convId) {
+    const previa = await db.collection('wa_conversaciones').findOne({ _id: ctx.convId }, { projection: { borrador: 1 } });
+    if (previa && previa.borrador && previa.borrador.presupuestoId) { borrador.presupuestoId = previa.borrador.presupuestoId; borrador.presupuestoNumero = previa.borrador.presupuestoNumero; borrador.cambiado = true; }
+    await db.collection('wa_conversaciones').updateOne({ _id: ctx.convId }, { $set: { borrador } });
+  }
+  const conPrecio = modo === 'precio';
+  return {
+    ok: true, guardado: !!(ctx && ctx.convId), problemas: problemas.length ? problemas : undefined,
+    items: items.map(i => Object.assign({ producto: i.nombre, cantidad: i.cantidad, unidad: i.unidad }, conPrecio && i.precioFinal != null ? { precioFinalConIva: i.precioFinal, subtotalConIva: round2(i.precioFinal * i.cantidad) } : {})),
+    totalFinalConIva: conPrecio && completo ? round2(total) : undefined,
+    nota: 'Es un borrador interno: un asesor lo revisa y se lo envía. Decile al cliente que un asesor le confirma el presupuesto' + (conPrecio ? ' y podés mencionar el total estimado con IVA.' : ' (no menciones totales en dinero).')
+  };
+}
+
 // Declaración para el modelo + ejecución. orgId: sucursal de la conversación.
-function herramientas(db, orgId, modo) {
-  return [
+function herramientas(db, orgId, modo, ctx) {
+  const lista = [
     {
       name: 'buscar_productos',
       description: 'Busca productos reales del catálogo de la sucursal y devuelve precio final con IVA y disponibilidad (disponible/consultar). Usala SIEMPRE antes de nombrar un producto, precio o disponibilidad.',
@@ -171,6 +205,13 @@ function herramientas(db, orgId, modo) {
       ejecutar: (a) => calcularMaterial(db, orgId, a, modo)
     }
   ];
+  if (ctx && ctx.borrador) lista.push({
+    name: 'armar_borrador_presupuesto',
+    description: 'Guarda un borrador de presupuesto con los productos y cantidades que el cliente quiere (cantidad en la unidad de venta del producto: m2 para pisos/revestimientos usando m2QueSeCompran de calcular_material, bolsas, unidades). Usala cuando el cliente pida un presupuesto o confirme qué quiere llevar. Un asesor lo revisa antes de enviarlo.',
+    parameters: { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: { productoId: { type: 'string' }, cantidad: { type: 'number' } }, required: ['productoId', 'cantidad'] } } }, required: ['items'] },
+    ejecutar: (a) => armarBorrador(db, orgId, a, modo, ctx)
+  });
+  return lista;
 }
 
 const REGLAS_BASE = `
@@ -188,6 +229,7 @@ const REGLAS_MODO = {
   link: '\n- NO des precios ni totales en dinero. Para cada producto compartí su "enlaceTienda" (link a la tienda online) para que el cliente vea ahí el precio y pueda comprar. Si un producto no tiene enlace, decile que un asesor le confirma el precio. Copiá los enlaces tal cual, sin modificarlos.',
   link_o_precio: '\n- Preferí compartir el "enlaceTienda" (link a la tienda online) en vez de dar el precio. Solo si un producto NO tiene enlace, dá su precio final con IVA tal como lo devuelve la herramienta. Copiá los enlaces tal cual, sin modificarlos.'
 };
-const reglasPrompt = (modo) => REGLAS_BASE + (REGLAS_MODO[modo] || REGLAS_MODO.precio);
+const REGLAS_BORRADOR = '\n- Si el cliente pide un presupuesto o decide qué llevar, usá "armar_borrador_presupuesto" con los productos y cantidades acordados (después de calcular_material si es por m2) y avisale que un asesor lo revisa y se lo envía. Nunca lo presentes como definitivo ni prometas descuentos. Cuando el cliente ya quiere avanzar o pidió presupuesto, poné "derivar": true para que un asesor lo tome.';
+const reglasPrompt = (modo, conBorrador) => REGLAS_BASE + (REGLAS_MODO[modo] || REGLAS_MODO.precio) + (conBorrador ? REGLAS_BORRADOR : '');
 
-module.exports = { herramientas, buscarProductos, calcularMaterial, reglasPrompt, MODOS, _interno: { tokensDe, patronDeToken, precioFinalDe, esM2, usarBuscadorLinks: (f) => { buscadorLinks = f; cacheLinks.clear(); } } };
+module.exports = { herramientas, buscarProductos, calcularMaterial, armarBorrador, reglasPrompt, MODOS, _interno: { tokensDe, patronDeToken, precioFinalDe, esM2, usarBuscadorLinks: (f) => { buscadorLinks = f; cacheLinks.clear(); } } };

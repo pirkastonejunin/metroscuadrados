@@ -98,11 +98,11 @@ function jsonDe(t) {
 // historial: [{role:'user'|'model', text, media?:{mime,data(base64)}}]
 // Vendedor con datos reales (Fase 1): por sucursal, apagado por defecto. Guardado en bot_config 'vendedor:<orgId>'.
 const cacheVend = new Map();
-async function vendedorCfg(orgId) { // { activo, modoPrecio: 'precio' | 'link' | 'link_o_precio' }
-  if (!orgId) return { activo: false, modoPrecio: 'precio' };
+async function vendedorCfg(orgId) { // { activo, modoPrecio: 'precio' | 'link' | 'link_o_precio', oportunidades }
+  if (!orgId) return { activo: false, modoPrecio: 'precio', oportunidades: false };
   const k = String(orgId), c = cacheVend.get(k); if (c && Date.now() - c.t < 30000) return c.v;
-  let v = { activo: false, modoPrecio: 'precio' };
-  try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'vendedor:' + k }); if (d) v = { activo: !!d.activo, modoPrecio: ['precio', 'link', 'link_o_precio'].includes(d.modoPrecio) ? d.modoPrecio : 'precio' }; } catch (e) { /* apagado */ }
+  let v = { activo: false, modoPrecio: 'precio', oportunidades: false };
+  try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'vendedor:' + k }); if (d) v = { activo: !!d.activo, modoPrecio: ['precio', 'link', 'link_o_precio'].includes(d.modoPrecio) ? d.modoPrecio : 'precio', oportunidades: !!d.oportunidades }; } catch (e) { /* apagado */ }
   cacheVend.set(k, { t: Date.now(), v }); return v;
 }
 const vendedorActivo = async (orgId) => (await vendedorCfg(orgId)).activo;
@@ -112,7 +112,11 @@ async function llamarIA(historial, promptBaseTexto, orgId, opciones) {
   let sistema = await promptSistema(promptBaseTexto, orgId);
   const conDatos = orgId && (o.conDatos === undefined ? await vendedorActivo(orgId) : !!o.conDatos);
   let herramientas;
-  if (conDatos) { const vt = require('./vendedorTools'); const modo = (await vendedorCfg(orgId)).modoPrecio; herramientas = vt.herramientas(await getDb(), orgId, modo); sistema += vt.reglasPrompt(modo); }
+  if (conDatos) {
+    const vt = require('./vendedorTools'), cfgV = await vendedorCfg(orgId), modo = cfgV.modoPrecio;
+    const conBorrador = o.borrador === undefined ? !!cfgV.oportunidades : !!o.borrador; // simulador/lote: borrador de prueba, no se guarda
+    herramientas = vt.herramientas(await getDb(), orgId, modo, conBorrador ? { borrador: true, convId: o.convId || null } : null); sistema += vt.reglasPrompt(modo, conBorrador);
+  }
   const r = await ia.generar({
     uso: conDatos ? 'bot-datos' : 'bot', orgId: orgId || null, sistema, mensajes: historial, esquema: ESQUEMA, temperatura: 0.4, maxTokens: 800, timeoutMs: conDatos ? 60000 : 45000,
     proveedor: o.proveedor || process.env.BOT_PROVEEDOR, modelo: o.modelo || process.env.BOT_MODELO || undefined, modelos: { anthropic: 'claude-haiku-4-5-20251001' },
@@ -192,7 +196,7 @@ async function responder(orgId, convId) {
     }
     if (hist[0] && hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
     let r;
-    try { r = await llamarIA(hist, undefined, conv.orgId); }
+    try { r = await llamarIA(hist, undefined, conv.orgId, { convId }); }
     catch (e) {
       if (!e.tope) throw e;
       // tope mensual de IA alcanzado: el bot no puede responder; se avisa al cliente y queda para un asesor
@@ -215,6 +219,12 @@ async function responder(orgId, convId) {
     if (set.estado === 'aceptado') set.avisoAt = new Date();
     await db.collection(COL_C).updateOne({ _id: convId }, { $set: set });
     await actualizarLead(db, Object.assign({}, conv, set), (r.etiquetas || []));
+    // Fase 2: si el bot derivó a un cliente con interés concreto, se crea la oportunidad (y el borrador de presupuesto si corresponde)
+    if ((r.derivar || r.aceptoAsesor) && (await vendedorCfg(conv.orgId)).oportunidades) {
+      try { const fresca = await db.collection(COL_C).findOne({ _id: convId }); const res2 = await require('./vendedorOportunidades').oportunidadDeConversacion(db, fresca, r);
+        if (res2 && res2.creada) console.log('[bot] oportunidad #' + res2.numero + ' creada desde la conversación ' + k + (res2.presupuestoNumero ? ' con borrador de presupuesto #' + res2.presupuestoNumero : '')); }
+      catch (e) { console.error('[bot] oportunidad:', e.message); }
+    }
   } finally { ocupadas.delete(k); }
 }
 
@@ -300,7 +310,7 @@ router.post('/simular', auth, async (req, res) => {
     const hist = ms.map(m => ({ role: m.role === 'model' ? 'model' : 'user', text: String(m.text || '').slice(0, 4000), media: m.media && m.media.data && /^(image|audio)\//.test(m.media.mime || '') && String(m.media.data).length < 12e6 ? { mime: m.media.mime, data: m.media.data } : undefined }));
     if (hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
     const orgSim = req.orgId || req.orgOperar || orgBot();
-    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined, orgSim, { conDatos: typeof b.conDatos === 'boolean' ? b.conDatos : undefined });
+    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined, orgSim, { conDatos: typeof b.conDatos === 'boolean' ? b.conDatos : undefined, borrador: true });
     if (!r) return res.status(502).json({ error: 'La IA no devolvió una respuesta válida. Probá de nuevo.' });
     res.json({ respuesta: r.respuesta || '', derivar: !!r.derivar, aceptoAsesor: !!r.aceptoAsesor, producto: r.producto || '', medidas: r.medidas || '', estilo: r.estilo || '', resumen: r.resumen || '', etiquetas: r.etiquetas || [], transcripcion: r.transcripcion || '', pasos: (r._pasos || []).map(p => ({ herramienta: p.herramienta, argumentos: p.argumentos, resultado: p.resultado })) });
   } catch (e) { res.status(502).json({ error: e.message }); }
@@ -406,7 +416,7 @@ router.post('/probar-lote', auth, soloAdmin, async (req, res) => {
         try {
           for (const m of c.mensajes) {
             hist.push({ role: 'user', text: m });
-            const r = await llamarIA(hist.slice(), undefined, orgId, { conDatos: true, proveedor: job.proveedor, modelo: job.modelo });
+            const r = await llamarIA(hist.slice(), undefined, orgId, { conDatos: true, borrador: true, proveedor: job.proveedor, modelo: job.modelo });
             if (!r) throw new Error('La IA no devolvió un JSON válido');
             const meta = r._meta || {}; job.costoUsd += meta.costoUsd || 0; job.usado = { proveedor: meta.proveedor, modelo: meta.modelo };
             turnos.push({ cliente: m, bot: r.respuesta || '', derivar: !!r.derivar, herramientas: (r._pasos || []).map(p => p.herramienta + ' ' + JSON.stringify(p.argumentos)) });
@@ -428,11 +438,11 @@ router.get('/vendedor-config', auth, async (req, res) => {
     const db = await getDb(); const d = await db.collection('bot_config').findOne({ _id: 'vendedor:' + orgId });
     const [conPrecio, total] = await Promise.all([db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false }, precio: { $gt: 0 } }), db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false } })]);
     const vinc = await db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false }, skuTiendanube: { $nin: [null, ''] } });
-    res.json({ activo: !!(d && d.activo), modoPrecio: (await vendedorCfg(orgId)).modoPrecio, productosConPrecio: conPrecio, productosTotal: total, productosConLink: vinc }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ activo: !!(d && d.activo), modoPrecio: (await vendedorCfg(orgId)).modoPrecio, oportunidades: !!(d && d.oportunidades), productosConPrecio: conPrecio, productosTotal: total, productosConLink: vinc }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.put('/vendedor-config', auth, soloAdmin, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return sinOrg(res);
-    await (await getDb()).collection('bot_config').updateOne({ _id: 'vendedor:' + orgId }, { $set: Object.assign({ updatedAt: new Date() }, req.body && req.body.activo !== undefined ? { activo: !!req.body.activo } : {}, req.body && ['precio', 'link', 'link_o_precio'].includes(req.body.modoPrecio) ? { modoPrecio: req.body.modoPrecio } : {}) }, { upsert: true }); cacheVend.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'vendedor:' + orgId }, { $set: Object.assign({ updatedAt: new Date() }, req.body && req.body.activo !== undefined ? { activo: !!req.body.activo } : {}, req.body && ['precio', 'link', 'link_o_precio'].includes(req.body.modoPrecio) ? { modoPrecio: req.body.modoPrecio } : {}, req.body && req.body.oportunidades !== undefined ? { oportunidades: !!req.body.oportunidades } : {}) }, { upsert: true }); cacheVend.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.put('/conocimiento-config', auth, soloAdmin, async (req, res) => { try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); await (await getDb()).collection('bot_config').updateOne({ _id: 'conocimiento:' + orgId }, { $set: { incluirCatalogo: !!(req.body && req.body.incluirCatalogo) } }, { upsert: true }); cacheCon.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 

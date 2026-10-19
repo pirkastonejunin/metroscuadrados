@@ -848,6 +848,39 @@ async function sincronizarDesdeVisita(db, { visita, clienteId, clienteNombre, it
 }
 router.sincronizarDesdeVisita = sincronizarDesdeVisita;
 
+// Borrador generado por el bot de WhatsApp (Fase 2 del vendedor digital, 19/10/2026): presupuesto en estado "presupuestado" a nombre de un cliente
+// que ya existe, con los precios de la lista de precios cargada en el catálogo. No compromete stock ni cuenta. Lo revisa y lo envía un asesor.
+async function crearBorradorDesdeBot(db, { orgId, clienteId, items, observaciones, convId }) {
+  const cliente = await db.collection('clientes').findOne({ _id: clienteId });
+  if (!cliente) throw err(400, 'El cliente no existe.');
+  const { items: itemsOk, subtotal } = await normalizarItemsPresupuesto(db, { orgId }, items);
+  const numero = await proximoNumeroPresupuesto(db, orgId);
+  const ahora = new Date();
+  const doc = {
+    numero, clienteId, clienteNombre: nombreCompletoCliente(cliente) || cliente.apellidoRazonSocial || cliente.nombre || '', vendedor: '', fecha: ahora, moneda: 'ARS', cotizacionDolar: null,
+    items: itemsOk, descuentoPorcentaje: 0, descuentoMonto: 0, subtotal, total: subtotal, planesTarjetaIds: [], planesTarjeta: [], listaPrecioId: null, listaPrecioNombre: '',
+    observaciones: normalizarTexto(observaciones), estado: 'presupuestado',
+    seguimiento: [{ fecha: ahora, estado: 'presupuestado', nota: 'Borrador generado por el bot de WhatsApp: revisar antes de enviar', usuarioNombre: 'Bot de WhatsApp' }],
+    proximoContactoFecha: null, googleEventId: null, googleCalendarId: null, origenCotizador: null, origenVisita: null, origenBot: { convId: convId || null },
+    convertidoEnVentaId: null, convertidoEnVentaNumero: null, usuarioId: null, usuarioNombre: 'Bot de WhatsApp', orgId, createdAt: ahora, updatedAt: ahora
+  };
+  const r = await db.collection('presupuestos').insertOne(doc);
+  doc._id = r.insertedId;
+  return doc;
+}
+// Si el cliente cambia el pedido en el chat y nadie tocó todavía el borrador, se actualiza el mismo presupuesto (no se crea otro).
+async function actualizarBorradorDesdeBot(db, presupuestoId, items) {
+  const p = await db.collection('presupuestos').findOne({ _id: presupuestoId });
+  if (!p || p.estado !== 'presupuestado' || p.convertidoEnVentaId || (p.seguimiento || []).length > 1 || !p.origenBot) return false;
+  const { items: itemsOk, subtotal } = await normalizarItemsPresupuesto(db, { orgId: p.orgId }, items);
+  const ahora = new Date();
+  await db.collection('presupuestos').updateOne({ _id: presupuestoId }, { $set: { items: itemsOk, subtotal, total: subtotal, updatedAt: ahora } });
+  return true;
+}
+router.crearBorradorDesdeBot = crearBorradorDesdeBot;
+router.actualizarBorradorDesdeBot = actualizarBorradorDesdeBot;
+
+
 // Sincroniza con el panel de Presupuestos el presupuesto de UNA visita, sea manual o armado con el cotizador (15/10/2026, pedido de
 // Mato: "los presupuestos de visitas me deberían salir también en el panel de presupuestos"). Crea o actualiza el presupuesto enlazado
 // y deja el vínculo en la visita. Devuelve null si la visita no tiene nada para presupuestar.
