@@ -815,7 +815,7 @@ async function tareasTerminadasDelPeriodo(db, req, periodo) {
   const { d0, d1 } = rangoPeriodo(periodo);
   const filas = await db.collection('obras').aggregate([
     { $match: { 'tareas.estado': 'terminada' } }, { $unwind: '$tareas' },
-    { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
+    { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.sinCostoM2': { $ne: true }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
     { $project: { numero: 1, orgId: 1, cliente: '$cliente.nombre', t: '$tareas' } }
   ]).toArray();
   return filas.map(f => {

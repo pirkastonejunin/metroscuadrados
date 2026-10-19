@@ -167,6 +167,14 @@ const ESTADOS_OBRA_NO_EN_CURSO = ['terminada', 'cancelada'];
 const MAX_FOTOS_OBRA = 20; // combinadas: fotos "antes" (vendedor) + "después" (colocador)
 
 // Busca el costo por m2 vigente de un colocador para un tipo de trabajo dado
+// Tipos de trabajo "a medida": no tienen costo por m². Su costo sale de los Trabajos especiales (Sueldos), imputados a la obra.
+// Son "Otros"/"Otro" o los que tengan la marca `especial` en obras_tipos_trabajo.
+async function esTipoEspecial(db, nombre) {
+  const n = String(nombre || '').trim().toLowerCase();
+  if (n === 'otros' || n === 'otro') return true;
+  const t = await db.collection('obras_tipos_trabajo').findOne({ nombre }, { projection: { especial: 1 } });
+  return !!(t && t.especial);
+}
 function costoVigente(colocador, tipoTrabajo) {
   const c = (colocador.costos || []).find(x => x.tipoTrabajo === tipoTrabajo);
   return c ? c.costoPorM2 : null;
@@ -504,6 +512,7 @@ router.put('/tipos-trabajo/:id', authAdmin, async (req, res) => {
     const set = {};
     if (nombre !== undefined) set.nombre = nombre;
     if (activo !== undefined) set.activo = activo;
+    if ((req.body || {}).especial !== undefined) set.especial = !!req.body.especial; // tipo a medida (sin costo por m²)
     await conReintento(async () => {
       const db = await getDb();
       await db.collection('obras_tipos_trabajo').updateOne({ _id: id }, { $set: set });
@@ -681,7 +690,7 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
         totalReal: r2(f.totalReal), difTotal: r2(f.totalReal), difPct: null, estado: 'fueraPresupuesto' }));
       const matPresupuestado = r2(filasMat.reduce((a, f) => a + f.totalPres, 0));
       const matItemsReal = r2(filasMat.concat(filasFuera).reduce((a, f) => a + f.totalReal, 0));
-      const manoObraDet = (obra.tareas || []).filter(t => t.colocadorId && t.costoPorM2Aplicado != null).map(t => ({
+      const manoObraDet = (obra.tareas || []).filter(t => t.colocadorId && t.costoPorM2Aplicado != null && !t.sinCostoM2).map(t => ({
         tipoTrabajo: t.tipoTrabajo, m2: Number(t.m2Presupuestados) || 0, costoPorM2: Number(t.costoPorM2Aplicado) || 0,
         subtotal: r2((Number(t.m2Presupuestados) || 0) * (Number(t.costoPorM2Aplicado) || 0))
       }));
@@ -899,12 +908,14 @@ router.put('/:obraId/tareas/:tareaId', authAdmin, async (req, res) => {
           const cId = toObjectId(colocadorId);
           const colocador = await db.collection('obras_colocadores').findOne({ _id: cId });
           if (!colocador) throw Object.assign(new Error('Colocador no encontrado'), { status: 400 });
-          const costo = costoVigente(colocador, tarea.tipoTrabajo);
+          const especial = await esTipoEspecial(db, tarea.tipoTrabajo);
+          const costo = especial ? 0 : costoVigente(colocador, tarea.tipoTrabajo);
           if (costo === null) {
             throw Object.assign(new Error(`${colocador.nombre} no tiene definido un costo por m² para "${tarea.tipoTrabajo}". Cargalo primero en la ficha del colocador.`), { status: 400 });
           }
           tarea.colocadorId = cId;
           tarea.costoPorM2Aplicado = costo;
+          if (especial) tarea.sinCostoM2 = true; else delete tarea.sinCostoM2; // a medida: el costo va por Trabajos especiales
         }
       }
       if (m2Presupuestados !== undefined) tarea.m2Presupuestados = Number(m2Presupuestados) || 0;
