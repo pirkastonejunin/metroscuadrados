@@ -13,167 +13,180 @@
   --bg:#f3f4f6; --panel:#ffffff; --panel2:#f6f7f9; --line:#e5e7eb; --ink:#171a1f; --mute:#6b7280; --chat:#efeae2;
   --accent:#ff5a36; --accent-ink:#ffffff; --accent-soft:#ffe7de;
   --hot:#d92d20; --hot-soft:#fde4e1; --warm:#b45309; --warm-soft:#fff4d6; --cold:#1d5fa8; --cold-soft:#dbe9f8;
-  --ok:#1f8a5f; --ok-soft:#e1f5ea; --bad:#c53030; --bad-soft:#fbe3e3;
-  --in:#ffffff; --out:#d9fdd3; --bot:#ece7ff;
-  --sans:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif; --mono:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --ok:#1f8a5f; --ok-soft:#e1f5ea; --bad:#c53030; --bad-soft:#fbe3e3; --violet:#6d4fd8; --violet-soft:#ece7ff;
+  --in:#ffffff; --out:#d9fdd3; --bot:#ece7ff; --shadow:0 1px 2px rgba(17,20,24,.05),0 8px 20px -12px rgba(17,20,24,.18);
+  --sans:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#121316; --panel:#1c1e22; --panel2:#23262b; --line:#2c2f34; --ink:#f4f5f6; --mute:#9aa0a8; --chat:#17191c;
+  --bg:#121316; --panel:#1c1e22; --panel2:#202328; --line:#2c2f34; --ink:#f4f5f6; --mute:#9aa0a8; --chat:#17191c;
   --accent:#ff7a56; --accent-ink:#1a0f0b; --accent-soft:#3a241f;
   --hot:#f87171; --hot-soft:#3d1f1f; --warm:#fbbf24; --warm-soft:#3a2f14; --cold:#7cb4f0; --cold-soft:#16324f;
-  --ok:#4ade80; --ok-soft:#173328; --bad:#f87171; --bad-soft:#3d1f1f;
-  --in:#2a2d33; --out:#1d3a2a; --bot:#2a2547; color-scheme:dark}}
+  --ok:#4ade80; --ok-soft:#173328; --bad:#f87171; --bad-soft:#3d1f1f; --violet:#a78bfa; --violet-soft:#2a2547;
+  --in:#2a2d33; --out:#1d3a2a; --bot:#2a2547; --shadow:none; color-scheme:dark}}
 *{box-sizing:border-box}
 html{height:100%}
-body{margin:0;height:100%;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.4;font-weight:500;padding:10px 14px;overflow:hidden}
+body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13.5px;font-weight:500;line-height:1.4;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;padding:12px 16px;overflow:hidden}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.app{height:100%;display:flex;flex-direction:column;gap:10px;min-height:0}
-.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.brand{font-weight:800;font-size:17px;letter-spacing:-.01em;white-space:nowrap}
-.brand small{display:block;font-weight:500;font-size:11px;color:var(--mute)}
-.resumen{flex:1;text-align:right;color:var(--mute);font-size:13px}
-.resumen b{color:var(--ink);font-family:var(--mono);font-weight:500}
-.resumen .al{color:var(--bad)}
-.err{color:var(--bad);font-size:12.5px}
-.main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr) minmax(280px,330px);gap:10px}
-.col{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(17,20,24,.04),0 10px 24px -14px rgba(17,20,24,.18);min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
-.colhead{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;flex:none}
-.scroll{overflow:auto;min-height:0;flex:1}
-.tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
-.tab{border:1px solid var(--line);background:transparent;border-radius:99px;padding:3px 9px;font-size:12px;display:flex;gap:6px;align-items:center;color:var(--mute)}
-.tab b{font-family:var(--mono);font-weight:500;color:var(--ink)}
-.tab.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.tab.on b{color:var(--accent-ink)}
-.tab.urg:not(.on) b{color:var(--bad)}
-.btnf{margin-left:auto;border:1px solid var(--line);background:transparent;border-radius:99px;padding:3px 10px;font-size:12px;color:var(--mute)}
-.btnf.on{color:var(--ink);background:var(--panel2)}
-.filtros{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.filtros[hidden]{display:none}
-.filtros input,.filtros select{width:100%;border:1px solid var(--line);background:var(--panel2);border-radius:7px;padding:5px 8px;min-width:0}
-.filtros input{grid-column:1/-1}
-.item{display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer;position:relative}
-.item:hover{background:var(--panel2)}
-.item.sel{background:var(--accent-soft)}
-.dot{width:9px;height:9px;border-radius:50%;margin-top:5px;grid-row:1/3;display:inline-block}
-.dot.caliente{background:var(--hot)}.dot.tibio{background:var(--warm)}.dot.frio{background:var(--cold)}
-.item .nom{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.item .sub{grid-column:2/4;color:var(--mute);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.unread{position:absolute;right:12px;top:32px;background:var(--bad);color:#fff;border-radius:99px;font-size:10.5px;min-width:17px;height:17px;display:grid;place-items:center;font-family:var(--mono)}
-.chip{font-size:11px;border-radius:5px;padding:1px 6px;background:var(--panel2);color:var(--mute);border:1px solid var(--line);white-space:nowrap}
-.chip.warm{background:var(--warm-soft);color:var(--warm);border-color:transparent}
-.chip.cold{background:var(--cold-soft);color:var(--cold);border-color:transparent}
-.chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
-.vacio{padding:30px 16px;color:var(--mute);text-align:center}
-.chathead{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex:none}
-.chathead h2{margin:0;font-size:15px;font-weight:700}
-.chathead .meta{color:var(--mute);font-size:12px}
+[hidden]{display:none!important}
+.app{height:100%;display:flex;flex-direction:column;gap:12px;min-height:0}
 .sp{flex:1}
-.msgs{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--chat)}
-.m{max-width:78%;padding:7px 10px;border-radius:10px;background:var(--in);white-space:pre-wrap;box-shadow:0 1px 0 rgba(0,0,0,.05);overflow-wrap:anywhere}
-.m.out{align-self:flex-end;background:var(--out)}
-.m.bot{align-self:flex-end;background:var(--bot)}
-.m small{display:block;font-size:10.5px;color:var(--mute);margin-top:2px;font-family:var(--mono)}
-.sug{padding:10px 14px;border-top:1px solid var(--line);background:var(--accent-soft);display:flex;gap:10px;align-items:flex-start;flex:none}
-.sug .tx{flex:1;min-width:0;font-size:13px}
-.sug .lb{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:700;display:block;margin-bottom:2px}
-.compose{padding:10px 14px;border-top:1px solid var(--line);flex:none}
-.compose .row{display:flex;gap:8px}
-.compose textarea{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);height:54px}
-.compose select{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:4px 6px;max-width:130px}
-.btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px 12px;font-weight:700;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
-.btn:hover{background:var(--panel2)}
-.btn:disabled{opacity:.55;cursor:default}
-.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.btn.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
-.btn.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
-.btn.sm{padding:3px 9px;font-size:12px}
-.acciones{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-top:1px solid var(--line);flex:none;align-items:center}
-.inline{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel2);flex:none}
-.inline select,.inline input{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:4px 8px}
-.sec{padding:13px 14px;border-bottom:1px solid var(--line)}
-.sec h3{margin:0 0 6px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:700}
+.err{color:var(--bad);font-size:12.5px}.err:empty{display:none}
+
+/* barra superior */
+.top{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{font-weight:800;font-size:19px;letter-spacing:-.02em;line-height:1.1}
+.brand small{display:block;font-size:11.5px;font-weight:600;color:var(--mute);letter-spacing:0;margin-top:2px}
+.seg{display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:3px}
+.seg button{border:0;background:transparent;padding:6px 14px;border-radius:9px;font-weight:700;color:var(--mute);font-size:13px}
+.seg button.on{background:var(--ink);color:var(--bg)}
+.resumen{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;flex:1;min-width:0}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:5px 12px;display:flex;align-items:baseline;gap:7px;box-shadow:var(--shadow)}
+.stat b{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.stat span{font-size:11.5px;color:var(--mute);font-weight:600}
+.stat.al b{color:var(--bad)}.stat.okk b{color:var(--ok)}
+.barra{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;font-size:12.5px;font-weight:700;color:var(--mute)}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.barra select,.barra input[type=search]{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:5px 12px;font-size:12.5px;font-weight:600}
+
+/* tablero */
+.tablero{flex:1;min-height:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(250px,1fr);gap:12px;overflow-x:auto;padding-bottom:2px}
+.colu{--cc:var(--mute);background:var(--panel2);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;min-height:0;min-width:0;transition:background .15s}
+.colu[data-e=hoy]{--cc:var(--accent);background:var(--accent-soft);border-color:var(--accent)}
+.colu[data-e=esperando]{--cc:var(--cold)}.colu[data-e=seguimiento]{--cc:var(--warm)}.colu[data-e=presupuesto]{--cc:var(--violet)}.colu[data-e=cerrando]{--cc:var(--ok)}
+.colu.over{outline:2px dashed var(--cc);outline-offset:-4px}
+.ch{padding:12px 14px 4px;display:flex;align-items:center;gap:8px;flex:none}
+.ch .ico{font-size:16px;line-height:1;flex:none}
+.ch h2{margin:0;font-size:13.5px;font-weight:800;letter-spacing:-.005em}
+.ch .n{background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:0 8px;font-size:11.5px;font-weight:800;color:var(--ink);min-width:22px;text-align:center}
+.ch .v{margin-left:auto;font-size:11.5px;color:var(--mute);font-weight:700}
+.ch-sub{padding:0 14px 8px;font-size:11.5px;color:var(--mute);font-weight:600;flex:none;min-height:30px}
+.cards{flex:1;min-height:0;overflow:auto;padding:2px 10px 10px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 12px;cursor:grab;display:flex;flex-direction:column;gap:8px;box-shadow:var(--shadow);text-align:left;width:100%;transition:transform .12s,border-color .12s}
+.card:hover{border-color:var(--mute);transform:translateY(-1px)}
+.card.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.card.drag{opacity:.4}
+.r1{display:flex;align-items:center;gap:9px}
+.av{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;color:#fff;flex:none}
+.who{flex:1;min-width:0;display:flex;flex-direction:column}
+.who b{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px}
+.who span{font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.val{font-weight:800;font-size:12.5px;white-space:nowrap;align-self:flex-start}
+.ult{margin:0;font-size:12.5px;color:var(--ink);opacity:.85;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.r3{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.tag{font-size:11px;font-weight:800;border-radius:7px;padding:2px 8px;background:var(--panel2);color:var(--mute);white-space:nowrap}
+.tag.bad{background:var(--bad-soft);color:var(--bad)}.tag.warm{background:var(--warm-soft);color:var(--warm)}.tag.cold{background:var(--cold-soft);color:var(--cold)}.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.tmp{font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px;color:var(--mute)}
+.tmp::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.tmp.caliente{color:var(--hot)}.tmp.tibio{color:var(--warm)}.tmp.frio{color:var(--cold)}
+.unread{background:var(--bad);color:#fff;border-radius:99px;font-size:10.5px;min-width:18px;height:18px;display:grid;place-items:center;padding:0 5px;font-weight:800}
+.mini{margin-left:auto;font-size:11px;color:var(--mute);font-weight:700;white-space:nowrap}
+.vacioc{color:var(--mute);text-align:center;padding:22px 10px;font-size:12.5px;font-weight:600}
+.vacioc big{display:block;font-size:26px;margin-bottom:4px}
+.cierres{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:none}
+.zona{border:2px dashed var(--line);border-radius:14px;padding:8px;text-align:center;font-weight:700;color:var(--mute);font-size:12.5px}
+.zona.ok.over{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
+.zona.bad.over{border-color:var(--bad);background:var(--bad-soft);color:var(--bad)}
+
+/* lista */
+.tabla{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.tabla table{width:100%;border-collapse:collapse;font-size:13px}
+.tabla th{position:sticky;top:0;background:var(--panel2);text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tabla td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tabla tr.f{cursor:pointer}.tabla tr.f:hover{background:var(--panel2)}
+.tabla td.n{text-align:right;white-space:nowrap;font-weight:700}
+.tip{color:var(--mute);font-size:11.5px;font-weight:600}
+iframe#bot{flex:1;min-height:0;width:100%;border:1px solid var(--line);border-radius:16px;background:var(--bg)}
+
+/* cajón */
+.vel{position:fixed;inset:0;background:rgba(10,12,16,.4);z-index:30;animation:fi .15s}
+.caj{position:fixed;top:0;right:0;bottom:0;width:min(1020px,100%);background:var(--bg);z-index:31;display:grid;grid-template-columns:minmax(0,1fr) 310px;box-shadow:-14px 0 40px rgba(0,0,0,.22);animation:sl .18s ease-out}
+@keyframes fi{from{opacity:0}to{opacity:1}}@keyframes sl{from{transform:translateX(24px);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.vel,.caj{animation:none}.card{transition:none}}
+.cp{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--panel)}
+.cp.fi{border-left:1px solid var(--line);overflow:auto;display:block;background:var(--panel)}
+.chead{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:11px;flex:none}
+.chead .av{width:36px;height:36px;font-size:13px}
+.chead h2{margin:0;font-size:15.5px;font-weight:800;letter-spacing:-.01em}.chead .sb{color:var(--mute);font-size:12px;font-weight:600}
+.x{border:0;background:transparent;border-radius:8px;padding:5px 10px;font-weight:700;color:var(--mute);font-size:13px}.x:hover{background:var(--panel2);color:var(--ink)}
+.msgs{flex:1;min-height:0;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:6px;background:var(--chat)}
+.m{max-width:78%;padding:7px 11px;border-radius:12px;background:var(--in);white-space:pre-wrap;box-shadow:0 1px 1px rgba(0,0,0,.06);overflow-wrap:anywhere}
+.m.out{align-self:flex-end;background:var(--out)}.m.bot{align-self:flex-end;background:var(--bot)}
+.m small{display:block;font-size:10.5px;color:var(--mute);margin-top:2px;font-weight:600}
+.sug{padding:10px 16px;border-top:1px solid var(--line);background:var(--accent-soft);display:flex;gap:12px;align-items:center;flex:none}
+.sug .tx{flex:1;min-width:0;font-weight:600}.sug .lb{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:800;display:block;margin-bottom:2px}
+.comp{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end;flex:none}
+.comp textarea{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:14px;padding:9px 13px;background:var(--panel2);height:48px}
+.comp select{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px;max-width:112px;font-size:12px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:6px 12px;font-weight:700;font-size:12.5px;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
+.btn:hover{background:var(--panel2)}.btn:disabled{opacity:.55;cursor:default}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}.btn.pri:hover{filter:brightness(1.06)}
+.btn.sm{padding:3px 10px;font-size:12px}
+.ghost{border:0;background:transparent;color:var(--mute);font-weight:700;font-size:12.5px;padding:5px 8px;border-radius:7px}.ghost:hover{background:var(--panel2);color:var(--ink)}
+.acc{display:flex;gap:6px;padding:4px 12px 8px;flex:none}
+.dec{padding:12px 16px 14px;border-top:1px solid var(--line);background:var(--panel2);display:flex;flex-direction:column;gap:9px;flex:none}
+.dh{display:flex;align-items:center;gap:8px}.dh .q{font-weight:800;font-size:14px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pl{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:6px 13px;font-weight:700;font-size:12.5px;white-space:nowrap}
+.pl:hover{border-color:var(--mute)}.pl.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.pl.ok{color:var(--ok)}.pl.bad{color:var(--bad)}
+.sub{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.sub:empty{display:none}
+.sub .pl{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.sub input[type=date]{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:4px 11px}
+.later{background:none;border:0;color:var(--mute);font-weight:700;font-size:12px;cursor:pointer;padding:2px 4px}.later:hover{color:var(--ink);text-decoration:underline}
+.sec{padding:14px 16px;border-bottom:1px solid var(--line)}
+.sec h3{margin:0 0 7px;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:800}
 .sec p{margin:0}
+.paso{background:var(--accent-soft);border-radius:11px;padding:10px 12px;font-weight:700;font-size:14px;line-height:1.35}
 .temp{display:flex;gap:5px}
-.temp button{flex:1;border:1px solid var(--line);background:transparent;border-radius:7px;padding:4px 0;font-size:12.5px;color:var(--mute)}
+.temp button{flex:1;border:1px solid var(--line);background:transparent;border-radius:8px;padding:5px 0;font-size:12.5px;color:var(--mute);font-weight:700}
 .temp button.on.caliente{background:var(--hot-soft);color:var(--hot);border-color:var(--hot)}
 .temp button.on.tibio{background:var(--warm-soft);color:var(--warm);border-color:var(--warm)}
 .temp button.on.frio{background:var(--cold-soft);color:var(--cold);border-color:var(--cold)}
-.tip{color:var(--mute);font-size:11.5px}
-.paso{background:var(--accent-soft);border-radius:8px;padding:8px 10px;font-weight:600;font-size:15px;line-height:1.35}
-.tot2{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.tot2 b{font-family:var(--mono);font-size:17px;font-weight:500}
-details.mas summary{padding:11px 14px;cursor:pointer;color:var(--mute);font-weight:600;list-style:none}
+.etapas{display:flex;flex-wrap:wrap;gap:5px}
+.etapas button{border:1px solid var(--line);background:transparent;border-radius:99px;padding:3px 10px;font-size:12px;color:var(--mute);font-weight:700}
+.etapas button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.valor{font-size:22px;font-weight:800;letter-spacing:-.01em}
+details.mas summary{padding:13px 16px;cursor:pointer;color:var(--mute);font-weight:700;list-style:none}
 details.mas summary::before{content:"+ "}details.mas[open] summary::before{content:"– "}
-ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}
-ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0}
-.kv dt{color:var(--mute)}.kv dd{margin:0;text-align:right}
-.notas textarea{width:100%;resize:vertical;min-height:50px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--panel)}
+ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0}.kv dt{color:var(--mute)}.kv dd{margin:0;text-align:right;font-weight:600}
+.notas textarea{width:100%;resize:vertical;min-height:54px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel2)}
 .hist{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:2px}
-.cierre{padding:24px 14px;text-align:center}
-.toast{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-weight:600;z-index:20}
-.toast[hidden]{display:none}
-.vistas{display:flex;gap:4px}
-.vistas button{border:0;background:transparent;padding:6px 12px;border-radius:8px;font-weight:600;color:var(--mute)}
-.vistas button.on{background:var(--accent);color:var(--accent-ink)}
-.tabla{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px}
-.tabla table{width:100%;border-collapse:collapse;font-size:13px}
-.tabla th{position:sticky;top:0;background:var(--panel2);text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-.tabla td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
-.tabla tr.f{cursor:pointer}.tabla tr.f:hover{background:var(--panel2)}
-.tabla td.n{font-family:var(--mono);text-align:right;white-space:nowrap}
-.barra{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.barra input,.barra select{border:1px solid var(--line);background:var(--panel);border-radius:7px;padding:5px 8px}
-iframe#bot{flex:1;min-height:0;width:100%;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
-.nav{display:none}
-@media (max-width:1100px){
-  .main{grid-template-columns:minmax(0,1fr)}
-  .main .col{display:none}
-  .app[data-p="cola"] #c1,.app[data-p="chat"] #c2,.app[data-p="ficha"] #c3{display:flex}
-  .nav{display:flex;gap:6px}
-  .nav button{flex:1;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:7px 0;font-weight:600;color:var(--mute)}
-  .nav button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-  .resumen{text-align:left}
-  .m{max-width:90%}
+.vacio{padding:34px 18px;color:var(--mute);text-align:center;font-weight:600}
+.toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:10px;font-weight:700;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+@media (max-width:1100px){body{padding:10px 12px}}
+@media (max-width:760px){
+  .caj{grid-template-columns:1fr;overflow:auto}.cp.fi{border-left:0;border-top:1px solid var(--line);order:2}
+  .cp:first-child{min-height:88vh}.resumen{justify-content:flex-start}.m{max-width:90%}
 }
 </style>
 </head>
 <body>
-<div class="app" id="app" data-p="cola">
+<div class="app">
   <header class="top">
     <div class="brand">CRM<small id="quien">Piedra Negra</small></div>
-    <div class="vistas" id="vistas"><button data-v="trabajar" class="on">Trabajar</button><button data-v="todas">Todas</button><button data-v="bot">Bot de WhatsApp</button></div>
+    <div class="seg" id="vistas"><button data-v="tablero" class="on">Tablero</button><button data-v="lista">Lista</button><button data-v="bot">Bot de WhatsApp</button></div>
     <div class="resumen" id="resumen"></div>
   </header>
   <div class="err" id="msg"></div>
-  <div class="nav" id="nav"><button data-p="cola" class="on">Lista</button><button data-p="chat">Chat</button><button data-p="ficha">Ficha</button></div>
-  <div class="main">
-    <section class="col" id="c1" aria-label="Lista de trabajo">
-      <div class="colhead">
-        <div class="tabs" id="tabs"></div>
-        <div class="filtros" id="filtros" hidden>
-          <input id="q" type="search" placeholder="Buscar nombre, teléfono o producto">
-          <select id="fTemp" aria-label="Temperatura"><option value="">Toda temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select>
-          <select id="fProd" aria-label="Producto"><option value="">Todo producto</option></select>
-          <select id="fEst" aria-label="Estado"><option value="">Todo estado</option><option value="nuevo">Nuevo</option><option value="seguimiento">En seguimiento</option><option value="borrador">Borrador de presupuesto</option><option value="presupuesto">Presupuesto enviado</option></select>
-          <select id="fVend" aria-label="De quién"><option value="mias">Mías y sin asignar</option><option value="todas">Toda la sucursal</option></select>
-          <label class="tip" style="grid-column:1/-1"><input type="checkbox" id="fCer" style="width:auto"> Mostrar cerradas</label>
-        </div>
-      </div>
-      <div class="scroll" id="lista"></div>
-    </section>
-    <section class="col" id="c2" aria-label="Conversación"></section>
-    <section class="col" id="c3" aria-label="Ficha de venta"></section>
+  <div class="barra" id="barra">
+    <button class="chip on" data-f="mias">Mías y sin asignar</button><button class="chip" data-f="todas">Toda la sucursal</button>
+    <select id="fTemp" aria-label="Temperatura"><option value="">Toda temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select>
+    <select id="fProd" aria-label="Producto"><option value="">Todo producto</option></select>
+    <input id="q" type="search" placeholder="Buscar" aria-label="Buscar" style="max-width:160px">
+    <label class="tip"><input type="checkbox" id="fCer"> Mostrar cerradas</label>
+    <span class="sp"></span><span class="tip" id="cant"></span><button class="chip" id="soloHoy">Solo Hoy</button><button class="btn sm" id="ej" hidden>Quitar ejemplos</button><a class="btn sm" href="/crm.html">Vista clásica</a>
   </div>
-  <div id="v-todas" hidden style="flex:1;min-height:0;display:none;flex-direction:column;gap:8px">
-    <div class="barra"><input id="tQ" type="search" placeholder="Buscar nombre, teléfono o producto"><select id="tTemp"><option value="">Toda temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select><select id="tProd"><option value="">Todo producto</option></select><select id="tEst"><option value="">Todo estado</option><option value="nuevo">Nuevo</option><option value="seguimiento">En seguimiento</option><option value="borrador">Borrador de presupuesto</option><option value="presupuesto">Presupuesto enviado</option></select><select id="tVend"><option value="todas">Toda la sucursal</option><option value="mias">Mías y sin asignar</option></select><label class="tip"><input type="checkbox" id="tCer"> Mostrar cerradas</label><span class="sp"></span><span class="tip" id="tCant"></span><button class="btn sm" id="tEj" hidden onclick="ejemplos(false)">Quitar ejemplos</button><a class="btn sm" href="/crm.html">Vista clásica del CRM</a></div>
-    <div class="tabla"><table><thead><tr><th>Cliente</th><th>Producto</th><th>Temp.</th><th>Estado</th><th>Asesor</th><th>Próxima acción</th><th>Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
-  </div>
-  <iframe id="bot" title="Bot de WhatsApp" hidden style="display:none"></iframe>
+  <div class="tablero" id="tab"></div>
+  <div class="tabla" id="v-lista" hidden><table><thead><tr><th>Cliente</th><th>Producto</th><th>Temp.</th><th>Etapa</th><th>Columna</th><th>Asesor</th><th>Aviso</th><th class="n">Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
+  <iframe id="bot" title="Bot de WhatsApp" hidden></iframe>
+  <div class="cierres" id="cierres"><div class="zona ok" data-z="ganada">✅ Soltá acá para marcar como ganada</div><div class="zona bad" data-z="perdida">❌ Soltá acá para marcar como perdida</div></div>
 </div>
+<div class="vel" id="vel" hidden></div>
+<aside class="caj" id="caj" hidden></aside>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -183,166 +196,249 @@ const J = {'Content-Type':'application/json'};
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d; }
+const post = (url, body) => api(url, {method:'POST', headers:H(J), body:JSON.stringify(body||{})});
 const money = n => '$ ' + Math.round(n||0).toLocaleString('es-AR');
 const mins = m => m<1 ? 'recién' : m<60 ? m+' min' : m<1440 ? Math.floor(m/60)+' h' : Math.floor(m/1440)+' d';
 const hora = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'});
+const hhmm = d => new Date(d).toLocaleTimeString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',hour:'2-digit',minute:'2-digit'});
 function err(e){ $('msg').textContent = e && e.message || e || ''; }
-let tt; function toast(t){ const e=$('toast'); e.textContent=t; e.hidden=false; clearTimeout(tt); tt=setTimeout(()=>e.hidden=true,2400); }
+let tt; function toast(t){ const e=$('toast'); e.textContent=t; e.hidden=false; clearTimeout(tt); tt=setTimeout(()=>e.hidden=true,2600); }
+const COLORES = ['#ff5a36','#7c3aed','#0ea5e9','#16a34a','#d97706','#db2777','#0d9488'];
+const colorDe = s => COLORES[[...String(s)].reduce((a,c)=>a+c.charCodeAt(0),0)%COLORES.length];
+const iniciales = n => (String(n||'?').replace(/\(.*?\)/g,'').trim().split(/\s+/).slice(0,2).map(x=>x[0]||'').join('')||'?').toUpperCase();
+const COLS = [
+  {k:'hoy', i:'📥', n:'Hoy', sub:'Lo que requiere una acción hoy. Objetivo: terminar el día vacía'},
+  {k:'esperando', i:'⏳', n:'Esperando respuesta', sub:'Vencen hoy a las 20 hs. Si no contesta, vuelven a Hoy para recordarle'},
+  {k:'seguimiento', i:'⏰', n:'Seguimiento', sub:'Con fecha. Ese día pasan a Hoy'},
+  {k:'presupuesto', i:'📄', n:'Presupuesto enviado', sub:'Esperando la decisión del cliente'},
+  {k:'cerrando', i:'🤝', n:'Por cerrar', sub:'Ya decidió, falta confirmar'}
+];
+const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
+const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], cola = 'esperan', sel = null, MSGS = [], busy = false;
-const colas = {
-  esperan:{n:'Responder', f:l=>l.esperaCliente, urg:1},
-  hoy:{n:'Seguimientos', f:l=>!l.esperaCliente && (l.prox ? l.prox.dias<=0 : l.etapa!=='nuevo')},
-  todos:{n:'Todos', f:l=>true}
-};
+let ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], dragId = null, pend = null, decOpen = false;
+const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
+const cur = () => ITEMS.find(l=>l.id===sel);
 const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
 function filtradas(){
-  const q=$('q').value.trim().toLowerCase(), t=$('fTemp').value, p=$('fProd').value, e=$('fEst').value, v=$('fVend').value;
-  return ITEMS.filter(l=>(v==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!e||l.etapa===e) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)));
+  const t=$('fTemp').value, p=$('fProd').value, q=$('q').value.trim().toLowerCase(), h=$('soloHoy').classList.contains('on');
+  return ITEMS.filter(l=>(F==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)) && (!h||l.columna==='hoy'));
 }
-const orden = l => (l.cierre?500:0) + (l.esperaCliente?0:100) + (l.prox && l.prox.dias<=0 ? 10 : 20) + ({caliente:0,tibio:3,frio:6}[l.temperatura]) - Math.min(9, (l.esperaMin||0)/1000);
-function motivo(l){
-  if (l.cierre) return [l.cierre.estado==='ganada'?'Ganada':'Perdida: '+(l.cierre.motivo||''), l.cierre.estado==='ganada'?'':'bad'];
-  if (l.esperaCliente) return ['Esperando '+mins(l.esperaMin), l.esperaMin>240?'bad':'warm'];
-  if (!l.prox) return [l.etapa==='nuevo'?'Nuevo':'Sin próxima acción', l.etapa==='nuevo'?'cold':'bad'];
+const orden = l => (l.sinDec?-5:0) + (l.esperaCliente?0:50) + (l.prox&&l.prox.dias<=0?10:20) + ({caliente:0,tibio:3,frio:6}[l.temperatura]) - Math.min(9,(l.esperaMin||0)/1000);
+function aviso(l){
+  if (l.cierre) return [l.cierre.estado==='ganada'?'Ganada':'Perdida: '+(l.cierre.motivo||''), l.cierre.estado==='ganada'?'ok':'bad'];
+  if (l.sinDec) return ['Falta decidir','bad'];
+  if (l.esperaCliente) return ['Espera '+mins(l.esperaMin), l.esperaMin>240?'bad':'warm'];
+  if (l.recordar) return l.recs>=3 ? [l.recs+' recordatorios: ¿cerrar?','bad'] : ['Sin respuesta: recordale','warm'];
+  if (l.columna==='esperando') return ['Vence hoy '+hhmm(l.esperandoVence||new Date()),'cold'];
+  if (!l.prox) return l.etapa==='nuevo' ? ['Nuevo','cold'] : ['Sin próxima acción','bad'];
   if (l.prox.dias<0) return ['Vencido hace '+(-l.prox.dias)+' d','bad'];
   if (l.prox.dias===0) return ['Hoy','warm'];
   return [l.prox.dias===1?'Mañana':'En '+l.prox.dias+' d',''];
 }
-function pintarCola(){
-  const base = filtradas();
-  $('tabs').innerHTML = Object.entries(colas).map(([k,c])=>{ const n=base.filter(c.f).length; return `<button class="tab ${k===cola?'on':''} ${c.urg&&n?'urg':''}" data-k="${k}">${c.n} <b>${n}</b></button>`; }).join('') + `<button class="btnf ${$('filtros').hidden?'':'on'}" id="bf">Filtrar</button>`;
-  $('bf').onclick = () => { $('filtros').hidden = !$('filtros').hidden; pintarCola(); };
-  const items = base.filter(colas[cola].f).sort((a,b)=>orden(a)-orden(b));
-  $('lista').innerHTML = items.map(l=>{ const [mt,mc]=motivo(l);
-    return `<div class="item ${l.id===sel?'sel':''}" data-id="${esc(l.id)}" tabindex="0"><span class="dot ${l.temperatura}" title="${l.temperatura}"></span><span class="nom">${esc(l.nombre)}</span><span class="chip ${mc}">${esc(mt)}</span>
-      <span class="sub">${l.producto?esc(l.producto)+' · ':''}${esc(l.ultimo?l.ultimo.texto:(l.resumen||'Sin mensajes guardados'))}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}</div>`; }).join('')
-    || `<div class="vacio">${ITEMS.length?'Todo al día 👌<br>No queda nada en esta lista.':'Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" onclick="ejemplos(true)">Cargar conversaciones de ejemplo</button>'}</div>`;
-  return items;
+function tarjeta(l){
+  const [t,c] = aviso(l);
+  return `<div class="card ${l.id===sel?'sel':''}" draggable="${l.convId?'true':'false'}" data-id="${esc(l.id)}" tabindex="0">
+    <div class="r1"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div class="who"><b>${esc(l.nombre)}</b><span>${esc(l.producto||'Sin producto definido')}</span></div>${l.valor?`<span class="val">${money(l.valor)}</span>`:''}</div>
+    ${l.ultimo||l.resumen?`<p class="ult">${esc(l.ultimo?l.ultimo.texto:l.resumen)}</p>`:''}
+    <div class="r3"><span class="tag ${c}">${esc(t)}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}<span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span><span class="mini">${esc(l.asesorNombre||'Sin asignar')}</span></div></div>`;
 }
-function pintarResumen(){
-  const a = ITEMS.filter(l=>!l.cierre), r = a.filter(l=>l.esperaCliente).length, v = a.filter(l=>!l.esperaCliente && l.prox && l.prox.dias<=0).length, s = a.filter(l=>!l.prox && l.etapa!=='nuevo' && !l.esperaCliente).length;
-  $('resumen').innerHTML = `<b class="${r?'al':''}">${r}</b> para responder · <b>${v}</b> seguimientos${s?` · <b class="al">${s}</b> sin próxima acción`:''} · <b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b> en presupuestos`;
+function pintar(){
+  const L = filtradas().filter(l=>!l.cierre || $('fCer').checked);
+  $('tab').innerHTML = COLS.map(e=>{
+    const c = L.filter(l=>l.columna===e.k && !l.cierre).sort((a,b)=>orden(a)-orden(b)); const tot = c.reduce((s,l)=>s+(l.valor||0),0);
+    const vacio = e.k==='hoy' ? '<div class="vacioc"><big>✅</big>Hoy está vacío.<br>No queda nada por resolver.</div>' : '<div class="vacioc">Nada acá</div>';
+    return `<section class="colu" data-e="${e.k}"><div class="ch"><span class="ico">${e.i}</span><h2>${e.n}</h2><span class="n">${c.length}</span><span class="v">${tot?money(tot):''}</span></div><div class="ch-sub">${e.sub}</div><div class="cards">${c.map(tarjeta).join('')||vacio}</div></section>`;
+  }).join('');
+  const a = ITEMS.filter(l=>!l.cierre), h = a.filter(l=>l.columna==='hoy').length, ve = a.filter(l=>l.columna==='hoy'&&l.prox&&l.prox.dias<0).length, sd = a.filter(l=>l.sinDec).length;
+  $('resumen').innerHTML = `<div class="stat ${h?'al':'okk'}"><b>${h}</b><span>${h?'por resolver hoy':'Hoy al día'}</span></div>${ve?`<div class="stat al"><b>${ve}</b><span>vencidas</span></div>`:''}${sd?`<div class="stat al"><b>${sd}</b><span>sin decidir</span></div>`:''}<div class="stat"><b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b><span>en presupuestos</span></div>`;
+  $('cant').textContent = ''; $('ej').hidden = !ITEMS.some(i=>i.demo);
+  const ps=$('fProd'), pv=ps.value; ps.innerHTML = '<option value="">Todo producto</option>' + [...new Set(ITEMS.map(i=>i.producto).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); ps.value = pv;
+  enlazar();
+  if (VISTA==='lista') pintarLista();
 }
-const cur = () => ITEMS.find(l=>l.id===sel);
+function pintarLista(){
+  const rows = filtradas().sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
+  $('cant').textContent = rows.length + ' de ' + ITEMS.length;
+  const CN = Object.fromEntries(COLS.map(c=>[c.k,c.n]));
+  $('tBody').innerHTML = rows.map(l=>{ const [t,c]=aviso(l); return `<tr class="f" data-id="${esc(l.id)}"><td><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td><span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span></td><td>${esc(l.cierre?l.cierre.estado:ETN[l.etapa]||l.etapa)}</td><td>${esc(CN[l.columna]||'')}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="tag ${c}">${esc(t)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="9" class="vacio">Nada con esos filtros.</td></tr>';
+}
 
 async function cargar(opts){
   try{
-    const d = await api('/api/mesa' + (($('fCer').checked||$('tCer').checked) ? '?cerradas=1' : ''), {headers:H()});
+    const d = await api('/api/mesa' + ($('fCer').checked ? '?cerradas=1' : ''), {headers:H()});
     const antes = cur(); ITEMS = d.items; YO = d.yo; MOTIVOS = d.motivosPerdida;
-    $('quien').textContent = 'Piedra Negra · ' + (YO.nombre || '');
-    const ps = $('fProd'), v = ps.value; ps.innerHTML = '<option value="">Todo producto</option>' + d.productos.map(p=>`<option>${esc(p)}</option>`).join(''); ps.value = v;
-    pintarResumen(); const lista = pintarCola(); if (VISTA==='todas') pintarTabla(); err('');
+    $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
+    pintar();
     const l = cur();
-    if (opts && opts.inicial && !l && lista.length) return elegir(lista[0].id, false);
-    if (!l){ pintarChat(null); pintarFicha(null); }
-    if (l){ const cambio = !antes || (antes.ultimo && l.ultimo && String(antes.ultimo.at)!==String(l.ultimo.at)) || antes.cierre!==l.cierre && !!antes.cierre!==!!l.cierre; if (cambio || (opts && opts.forzar)) await abrir(l); else pintarFicha(l); }
+    if (!$('caj').hidden && l){
+      const cambio = !antes || (antes.ultimo&&l.ultimo&&String(antes.ultimo.at)!==String(l.ultimo.at));
+      if ((opts&&opts.forzar) || cambio) await abrirCaj(l, {keep:true}); else pintarFicha(l);
+    }
   }catch(e){ err(e); }
 }
-async function elegir(id, mover){ sel = id; const l = cur(); pintarCola(); if (l) await abrir(l); if (mover!==false) setP('chat'); const it = document.querySelector('.item.sel'); if (it) it.scrollIntoView({block:'nearest'}); }
-async function abrir(l){
-  MSGS = [];
-  if (l.convId){ try{ const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()}); MSGS = d.mensajes; }catch(e){ err(e); } }
-  pintarChat(l); pintarFicha(l);
-}
 
-function pintarChat(l){
-  const c = $('c2'); const keep = $('txt') ? $('txt').value : '';
-  if (!l){ c.innerHTML = '<div class="vacio">Elegí a alguien de la lista.</div>'; return; }
-  if (!l.convId && l.leadId){ c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}</div></div></div><div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
-    $('aop').onclick = async () => { try{ const f = new Date(Date.now() - 3*3600*1000).toISOString().slice(0,10); await api(`/api/leads/${l.leadId}/oportunidad`, {method:'POST', headers:H(J), body:JSON.stringify({vendedorId:'', proximaAccion:{fecha:f, tipo:'recontactar', nota:'Primer contacto'}})}); toast('Oportunidad creada'); await cargar({forzar:true}); }catch(e){ err(e); } }; return; }
-  if (!l.convId){ c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}</div></div></div><div class="vacio">Esta oportunidad no tiene la conversación guardada en el sistema (viene de Azuite o se cargó a mano).<br>Cuando escriba por el WhatsApp nuevo la vas a ver acá.</div>
-    <div class="acciones"><button class="btn" id="seg">⏰ Seguimiento</button></div><div id="slot"></div>`; $('seg').onclick = () => slotSeg(l); return; }
-  if (l.cierre){ c.innerHTML = `<div class="cierre"><h2>${esc(l.nombre)}</h2><p>Cerrada como <b>${esc(l.cierre.estado)}</b>${l.cierre.motivo?': '+esc(l.cierre.motivo):''}.</p><button class="btn" id="reabrir">Reabrir</button></div>`; $('reabrir').onclick = () => accion(`/api/mesa/${l.convId}/reabrir`, {}, 'Reabierta'); return; }
-  const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('');
-  c.innerHTML = `<div class="chathead"><span class="dot ${l.temperatura}" style="margin:0"></span><div><h2>${esc(l.nombre)}</h2><div class="meta mono">+${esc(l.tel)}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${mio(l)&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':(l.asesorNombre?`<span class="chip">${esc(l.asesorNombre)}</span>`:'')}</div>
-    <div class="msgs" id="msgs">${msgs || '<div class="vacio">Sin mensajes.</div>'}</div>
-    ${l.sugerida && l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>${esc(l.sugerida)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
-      : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '')}
-    <div class="compose"><div class="row"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:6px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div></div>
-    <div class="acciones"><button class="btn" id="seg">⏰ Seguimiento</button><span class="sp"></span><button class="btn" id="cer">Cerrar…</button></div><div id="slot"></div>`;
-  const ms = $('msgs'); ms.scrollTop = ms.scrollHeight; const tx = $('txt'); tx.value = keep;
-  if ($('usar')) $('usar').onclick = () => { tx.value = l.sugerida; tx.focus(); };
-  if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await api(`/api/bot/conversaciones/${l.convId}/asistente`, {method:'POST', headers:H(J), body:'{}'}); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };
-  if ($('tomar')) $('tomar').onclick = () => accion(`/api/mesa/${l.convId}/tomar`, {}, 'Es tuya');
-  $('rap').onchange = e => { const r = {Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value = (tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
-  const enviar = async () => { const v = tx.value.trim(); if (!v || busy) return; busy = true; $('env').disabled = true;
-    try{ await api(`/api/bot/conversaciones/${l.convId}/enviar`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})});
-      if (!l.prox){ try{ await api(`/api/bot/conversaciones/${l.convId}/seguimiento`, {method:'POST', headers:H(J), body:JSON.stringify({dias:2, nota:'Retomar la conversación de WhatsApp'})}); toast('Enviado. Seguimiento en 2 días.'); }catch(e){ toast('Enviado'); } } else toast('Enviado');
-      tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled = false; } busy = false; };
-  $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
-  $('seg').onclick = () => slotSeg(l);
-  $('cer').onclick = () => slot(`<button class="btn ok sm" id="g">✅ Ganada${l.valor?' · '+money(l.valor):''}</button><select id="mo" aria-label="Motivo de la pérdida">${MOTIVOS.map(m=>`<option>${esc(m)}</option>`).join('')}</select><button class="btn bad sm" id="ok">Perdida</button><button class="btn sm" id="x">Cancelar</button>`,
-    () => accion(`/api/mesa/${l.convId}/cerrar`, {estado:'perdida', motivo:$('mo').value}, 'Cerrada como perdida'));
-  if ($('g')) $('g').onclick = () => accion(`/api/mesa/${l.convId}/cerrar`, {estado:'ganada'}, '¡Venta cerrada!');
+/* ---- cajón ---- */
+async function abrirCaj(l, o){
+  if (l.convId){ try{ MSGS = (await api('/api/bot/conversaciones/'+l.convId, {headers:H()})).mensajes; }catch(e){ err(e); MSGS=[]; } } else MSGS = [];
+  pintarCaj(l, o);
 }
-function slot(html, fn){ const s=$('slot'); s.innerHTML = `<div class="inline">${html}</div>`; if ($('ok')) $('ok').onclick = fn; $('x').onclick = () => { s.innerHTML=''; }; if ($('g')) $('g').onclick = null; }
-function slotSeg(l){
-  slot(`<span>Volver a contactar</span><select id="sd" aria-label="Cuándo"><option value="0">hoy</option><option value="1" selected>mañana</option><option value="2">en 2 días</option><option value="7">en 1 semana</option></select><button class="btn pri sm" id="ok">Listo</button><button class="btn sm" id="x">Cancelar</button>`, async () => {
-    const d = +$('sd').value;
-    try{ if (l.convId) await api(`/api/bot/conversaciones/${l.convId}/seguimiento`, {method:'POST', headers:H(J), body:JSON.stringify({dias:d, nota:'Retomar la conversación de WhatsApp'})});
-      else { const f = new Date(Date.now() - 3*3600*1000 + d*86400000).toISOString().slice(0,10); await api('/api/crm/'+l.opId, {method:'PUT', headers:H(J), body:JSON.stringify({proximaAccion:{fecha:f, tipo:'recontactar', nota:'Retomar'}})}); }
-      toast('Seguimiento programado'); await cargar({forzar:true}); }catch(e){ err(e); } });
+function abrir(id){
+  const c = cur();
+  if (c && c.id!==id && !$('caj').hidden && TOC.has(c.id)) return pedirDecision(()=>{ sel=id; pintar(); const l=cur(); if(l) abrirCaj(l); });
+  sel = id; decOpen = false; pend = null; pintar(); const l = cur(); if (l) abrirCaj(l);
 }
-async function accion(url, body, ok){ try{ await api(url, {method:'POST', headers:H(J), body:JSON.stringify(body||{})}); if (ok) toast(ok); await cargar({forzar:true}); }catch(e){ err(e); } }
-
+function cierre(){ sel=null; decOpen=false; pend=null; $('caj').hidden=true; $('vel').hidden=true; pintar(); }
+function pedirDecision(destino){ pend = destino; decOpen = true; const l=cur(); if (l) pintarCaj(l, {keep:true}); }
+function cerrarCaj(){ const c = cur(); if (c && TOC.has(c.id) && c.convId) return pedirDecision(cierre); cierre(); }
+function pasoDe(l){
+  if (l.recordar) return l.recs>=3 ? 'Ya van '+l.recs+' recordatorios sin respuesta. Mandá uno último o cerrala como perdida (sin respuesta).' : 'No contestó. Mandale un recordatorio amable: la pelota sigue de su lado.';
+  return l.paso;
+}
+function sugDe(l){
+  if (l.recordar) return 'Hola '+String(l.nombre).split(' ')[0]+', ¿pudiste ver lo que te pasé? Quedo atento a tu respuesta por si necesitás algo más.';
+  return l.sugerida;
+}
+function decBar(l){
+  return `<div class="dec" id="dec"><div class="dh"><span class="q">${pend?'Antes de salir: ':''}¿Qué sigue con ${esc(String(l.nombre).split(' ')[0])}?</span><span class="sp"></span><button class="later" data-d="keep">Volver al chat</button></div>
+   <div class="pills"><button class="pl" data-d="esperar">⏳ Espero al cliente hoy</button><button class="pl" data-d="seg">⏰ Seguimiento</button><button class="pl" data-d="pos">📅 Posponer</button><button class="pl ok" data-d="ganada">✅ Ganada</button><button class="pl bad" data-d="x">❌ Perdida</button></div>
+   <div class="sub" id="decSub"></div>${pend?'<div><button class="later" data-d="later">Decidir después</button></div>':''}</div>`;
+}
+function ligarDec(l){
+  const marcar = b => document.querySelectorAll('#dec .pills .pl').forEach(x=>x.classList.toggle('on',x===b));
+  const sub = $('decSub');
+  const sb = () => document.querySelectorAll('#decSub [data-d]').forEach(b=>b.onclick=()=>decidir(l,b.dataset.d,b));
+  document.querySelectorAll('#dec [data-d]').forEach(b=>b.onclick=()=>{
+    const k = b.dataset.d;
+    if (k==='seg'){ marcar(b); sub.innerHTML='<button class="pl" data-d="s:1">Mañana</button><button class="pl" data-d="s:2">En 2 días</button><button class="pl" data-d="s:7">En 1 semana</button>'; sb(); }
+    else if (k==='pos'){ marcar(b); const f=new Date(Date.now()-3*3600000+3*86400000).toISOString().slice(0,10); sub.innerHTML=`<input type="date" id="pf" value="${f}" aria-label="Fecha"><button class="pl" data-d="p">Listo</button>`; sb(); }
+    else if (k==='x'){ marcar(b); sub.innerHTML='<span class="tip">Motivo:</span>'+MOTIVOS.map(m=>`<button class="pl" data-d="x:${esc(m)}">${esc(m)}</button>`).join(''); sb(); }
+    else decidir(l,k,b);
+  });
+  if (decOpen === 'perdida'){ const b=document.querySelector('#dec [data-d=x]'); if (b) b.click(); decOpen = true; }
+}
+async function decidir(l, k, btn){
+  if (k==='keep'){ decOpen=false; pend=null; return pintarCaj(l,{keep:true}); }
+  try{
+    if (k==='later'){ await post(`/api/mesa/${l.convId}/sin-decidir`); toast('Quedó marcada "Falta decidir"'); }
+    else {
+      let body;
+      if (k==='esperar') body = {tipo:'esperar'};
+      else if (k.startsWith('s:')) body = {tipo:'seguimiento', dias:+k.slice(2)};
+      else if (k==='p') body = {tipo:'posponer', fecha:$('pf').value};
+      else if (k==='ganada') body = {tipo:'ganada'};
+      else body = {tipo:'perdida', motivo:k.split(':')[1]||''};
+      if (btn) btn.disabled = true;
+      await post(`/api/mesa/${l.convId}/decidir`, body);
+      toast({esperar:'Esperando respuesta. Si no contesta hoy, vuelve a Hoy para recordarle.',seguimiento:'Seguimiento programado',posponer:'Pospuesta',ganada:'¡Venta cerrada!',perdida:'Marcada como perdida'}[body.tipo]);
+    }
+    TOC.delete(l.id); decOpen = false;
+    const f = pend; pend = null;
+    await cargar();
+    if (f) f(); else siguiente(l);
+  }catch(e){ err(e); if (btn) btn.disabled=false; }
+}
+function siguiente(l){
+  const L = filtradas().filter(x=>x.id!==l.id && x.columna==='hoy' && x.convId).sort((a,b)=>orden(a)-orden(b));
+  if (L.length){ sel = L[0].id; pintar(); abrirCaj(L[0]); } else { cierre(); toast('Hoy está al día 👌'); }
+}
+function pintarCaj(l, o){
+  const c = $('caj'); const keep = $('txt') ? $('txt').value : '';
+  const hdr = `<div class="chead"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div><h2>${esc(l.nombre)}</h2><div class="sb">+${esc(l.tel)}${l.producto?' · '+esc(l.producto):''}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${l.convId&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':''}<button class="x" id="cx">Cerrar</button></div>`;
+  let izq;
+  if (l.convId){
+    const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('');
+    const sug = sugDe(l);
+    const sugBar = (l.esperaCliente||l.recordar) && sug ? `<div class="sug"><div class="tx"><span class="lb">${l.recordar?'Recordatorio sugerido':'Sugerencia de la IA'}</span>${esc(sug)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
+      : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '');
+    izq = `${hdr}<div class="msgs" id="msgs">${msgs||'<div class="vacio">Sin mensajes.</div>'}</div>${sugBar}
+      ${decOpen?decBar(l):`<div class="comp"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
+  } else if (l.leadId){
+    izq = `${hdr}<div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
+  } else {
+    izq = `${hdr}<div class="vacio">Esta oportunidad no tiene la conversación guardada en el sistema (viene de Azuite o se cargó a mano).<br>Cuando escriba por el WhatsApp nuevo la vas a ver acá.<br><br><span class="tip">Volver a contactar:</span><br><div class="pills" style="justify-content:center;margin-top:6px"><button class="pl" data-sg="1">Mañana</button><button class="pl" data-sg="2">En 2 días</button><button class="pl" data-sg="7">En 1 semana</button></div></div>`;
+  }
+  c.innerHTML = `<div class="cp">${izq}</div><div class="cp fi" id="ficha"></div>`;
+  c.hidden = false; $('vel').hidden = false;
+  pintarFicha(l);
+  const ms = $('msgs'); if (ms) ms.scrollTop = ms.scrollHeight;
+  $('cx').onclick = cerrarCaj; $('vel').onclick = cerrarCaj;
+  const tx = $('txt'); if (tx){ tx.value = keep; if (!(o&&o.keep)) tx.focus(); }
+  if ($('tomar')) $('tomar').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/tomar`); toast('Es tuya'); await cargar({forzar:true}); }catch(e){ err(e); } };
+  if ($('usar')) $('usar').onclick = () => { tx.value = sugDe(l); tx.focus(); };
+  if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await post(`/api/bot/conversaciones/${l.convId}/asistente`); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };
+  if ($('rap')) $('rap').onchange = e => { const r={Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value=(tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
+  if ($('env')){
+    const enviar = async () => { const v = tx.value.trim(); if (!v) return; $('env').disabled = true;
+      try{ await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
+    $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
+  }
+  if ($('dq')) $('dq').onclick = () => { pend=null; decOpen=true; pintarCaj(l,{keep:true}); };
+  if (decOpen) ligarDec(l);
+  if ($('aop')) $('aop').onclick = async () => { try{ const f=new Date(Date.now()-3*3600000).toISOString().slice(0,10); await post(`/api/leads/${l.leadId}/oportunidad`, {vendedorId:'', proximaAccion:{fecha:f, tipo:'recontactar', nota:'Primer contacto'}}); toast('Oportunidad creada'); await cargar({forzar:true}); }catch(e){ err(e); } };
+  document.querySelectorAll('[data-sg]').forEach(b=>b.onclick=async()=>{ try{ const f=new Date(Date.now()-3*3600000+(+b.dataset.sg)*86400000).toISOString().slice(0,10); await api('/api/crm/'+l.opId, {method:'PUT', headers:H(J), body:JSON.stringify({proximaAccion:{fecha:f, tipo:'recontactar', nota:'Retomar'}})}); toast('Seguimiento programado'); cierre(); await cargar(); }catch(e){ err(e); } });
+}
 function pintarFicha(l){
-  const c = $('c3');
-  if (!l || l.cierre){ c.innerHTML = '<div class="vacio">Acá ves qué hacer con este cliente.</div>'; return; }
-  const keepN = $('nota') ? $('nota').value : null;
-  const p = l.presupuesto;
-  c.innerHTML = `<div class="scroll">
-   <div class="sec"><h3>Qué hacer ahora</h3>${l.paso ? `<div class="paso">${esc(l.paso)}</div>` : `<p class="tip">Todavía no hay un análisis de la IA.${l.convId?' Tocá "Analizar" en el chat para obtener el próximo paso.':''}</p>`}
-     <div class="tip" style="margin-top:6px">${l.prox ? 'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):'') : '<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
-   ${l.resumen ? `<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>` : ''}
-   ${l.convId ? `<div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:5px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>` : ''}
-   <div class="sec"><h3>Presupuesto</h3>${p ? `<div class="tot2"><span class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</span><b>${money(p.total)}</b></div><div style="margin-top:8px"><a class="btn pri sm" href="/admin-presupuestos.html?abrir=${esc(p.id)}">Ver y editar</a></div>` : `<p class="tip">Todavía no hay presupuesto.</p><a class="btn sm" style="margin-top:6px" href="/admin-presupuestos.html">Ir a Presupuestos</a>`}</div>
+  const c = $('ficha'); if (!c || !l) return; const keepN = $('nota') ? $('nota').value : null; const p = l.presupuesto; const paso = pasoDe(l);
+  c.innerHTML = `<div class="sec"><h3>Qué hacer ahora</h3>${paso?`<div class="paso">${esc(paso)}</div>`:`<p class="tip">Todavía no hay un análisis de la IA.${l.convId?' Tocá "Analizar" en el chat para obtener el próximo paso.':''}</p>`}
+     <div class="tip" style="margin-top:7px">${l.columna==='esperando'?'Esperando respuesta del cliente hasta las 20 hs':l.prox?'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):''):'<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
+   ${l.convId?`<div class="sec"><h3>Etapa</h3><div class="etapas">${ETAPAS.map(e=>`<button class="${l.etapa===e.k?'on':''}" data-e="${e.k}">${e.n}</button>`).join('')}</div></div>
+   <div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:6px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>`:''}
+   ${l.resumen?`<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>`:''}
+   <div class="sec"><h3>Presupuesto</h3>${p?`<div class="valor">${money(p.total)}</div><div class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</div><div style="margin-top:9px"><a class="btn pri sm" href="/admin-presupuestos.html?abrir=${esc(p.id)}">Ver y editar</a></div>`:`<p class="tip">Todavía no hay presupuesto.</p><a class="btn sm" style="margin-top:7px" href="/admin-presupuestos.html">Ir a Presupuestos</a>`}</div>
    <details class="mas"><summary>Más datos</summary>
-     ${l.falta.length ? `<div class="sec"><h3>Falta preguntarle</h3><ul class="l">${l.falta.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></div>` : ''}
-     <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl>${l.opId?`<div style="margin-top:8px"><a class="btn sm" href="/crm.html?abrir=crm-${esc(l.opId)}">Editar datos o asignar visita</a></div>`:''}</div>
-     ${l.convId ? `<div class="sec notas"><h3>Notas internas</h3><textarea id="nota" placeholder="Solo las ve el equipo">${esc(keepN!=null?keepN:l.notas)}</textarea></div>` : ''}
-     ${l.historial.length ? `<div class="sec"><h3>Historial</h3><div class="hist">${l.historial.slice().reverse().map(h=>`<span>${esc(h.txt)} · ${hora(h.at)}</span>`).join('')}</div></div>` : ''}
-   </details></div>`;
-  c.querySelectorAll('.temp button').forEach(b => b.onclick = () => accion(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}, 'Listo'));
-  if ($('nota')){ let t; $('nota').oninput = e => { clearTimeout(t); const v=e.target.value; t=setTimeout(()=>api(`/api/mesa/${l.convId}/nota`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})}).catch(()=>{}), 700); }; }
+     ${l.falta.length?`<div class="sec"><h3>Falta preguntarle</h3><ul class="l">${l.falta.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></div>`:''}
+     <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl>${l.opId?`<div style="margin-top:9px"><a class="btn sm" href="/crm.html?abrir=crm-${esc(l.opId)}">Editar datos o asignar visita</a></div>`:''}</div>
+     ${l.convId?`<div class="sec notas"><h3>Notas internas</h3><textarea id="nota" placeholder="Solo las ve el equipo">${esc(keepN!=null?keepN:l.notas)}</textarea></div>`:''}
+     ${l.historial.length?`<div class="sec"><h3>Historial</h3><div class="hist">${l.historial.slice().reverse().map(h=>`<span>${esc(h.txt)} · ${hora(h.at)}</span>`).join('')}</div></div>`:''}
+   </details>`;
+  c.querySelectorAll('.temp button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}); await cargar({forzar:true}); }catch(e){ err(e); } });
+  c.querySelectorAll('.etapas button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/etapa`, {etapa:b.dataset.e}); await cargar({forzar:true}); }catch(e){ err(e); } });
+  if ($('nota')){ let t; $('nota').oninput = e => { clearTimeout(t); const v=e.target.value; t=setTimeout(()=>post(`/api/mesa/${l.convId}/nota`, {texto:v}).catch(()=>{}), 700); }; }
 }
 
-async function ejemplos(alta){ if (!alta && !confirm('¿Quitar las conversaciones de ejemplo y las oportunidades creadas desde ellas?')) return; try{ await api('/api/bot/conversaciones/ejemplos', {method: alta?'POST':'DELETE', headers:H(J), body:'{}'}); sel=null; await cargar({inicial:true}); if (VISTA==='todas') pintarTabla(); }catch(e){ err(e); } }
-let VISTA = 'trabajar';
-function pintarTabla(){
-  const q=$('tQ').value.trim().toLowerCase(), t=$('tTemp').value, p=$('tProd').value, e=$('tEst').value, v=$('tVend').value;
-  const ps=$('tProd'), pv=ps.value; ps.innerHTML = '<option value="">Todo producto</option>' + [...new Set(ITEMS.map(i=>i.producto).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); ps.value = pv;
-  const rows = ITEMS.filter(l=>(v==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!e||l.etapa===e) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q))).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
-  $('tEj').hidden = !ITEMS.some(i=>i.demo);
-  $('tCant').textContent = rows.length + ' de ' + ITEMS.length;
-  const ET = {nuevo:'Nuevo', seguimiento:'En seguimiento', borrador:'Borrador', presupuesto:'Presupuesto enviado'};
-  $('tBody').innerHTML = rows.map(l=>{ const [mt,mc]=motivo(l); return `<tr class="f" data-id="${esc(l.id)}"><td><span class="dot ${l.temperatura}" style="margin:0 8px 0 0;vertical-align:middle"></span><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td>${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</td><td>${l.cierre?esc(l.cierre.estado):ET[l.etapa]||l.etapa}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="chip ${mc}">${esc(mt)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="vacio">Nada con esos filtros.</td></tr>';
+/* ---- arrastrar ---- */
+function enlazar(){
+  document.querySelectorAll('.card').forEach(c=>{
+    c.onclick = () => abrir(c.dataset.id); c.onkeydown = e => { if (e.key==='Enter') abrir(c.dataset.id); };
+    c.ondragstart = e => { dragId = c.dataset.id; c.classList.add('drag'); e.dataTransfer.effectAllowed='move'; try{ e.dataTransfer.setData('text/plain', dragId); }catch(x){} };
+    c.ondragend = () => { c.classList.remove('drag'); dragId = null; document.querySelectorAll('.over').forEach(x=>x.classList.remove('over')); };
+  });
+  document.querySelectorAll('.colu').forEach(col=>{
+    col.ondragover = e => { e.preventDefault(); col.classList.add('over'); }; col.ondragleave = () => col.classList.remove('over');
+    col.ondrop = async e => { e.preventDefault(); col.classList.remove('over'); const l = ITEMS.find(x=>x.id===dragId); if (!l||!l.convId||l.columna===col.dataset.e) return;
+      try{ await post(`/api/mesa/${l.convId}/mover`, {columna:col.dataset.e}); toast(l.nombre+' → '+COLS.find(x=>x.k===col.dataset.e).n); await cargar(); }catch(x){ err(x); } };
+  });
 }
+document.querySelectorAll('.zona').forEach(z=>{
+  z.ondragover = e => { e.preventDefault(); z.classList.add('over'); }; z.ondragleave = () => z.classList.remove('over');
+  z.ondrop = async e => { e.preventDefault(); z.classList.remove('over'); const l = ITEMS.find(x=>x.id===dragId); if (!l||!l.convId) return;
+    if (z.dataset.z==='ganada'){ try{ await post(`/api/mesa/${l.convId}/decidir`, {tipo:'ganada'}); toast('¡Venta cerrada!'); await cargar(); }catch(x){ err(x); } }
+    else { sel = l.id; pend = null; decOpen = 'perdida'; pintar(); await abrirCaj(l); } };
+});
+
+/* ---- vistas y filtros ---- */
 function setV(v){
   VISTA = v; document.querySelectorAll('#vistas button').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
-  document.querySelector('.main').style.display = v==='trabajar' ? '' : 'none'; $('nav').style.display = v==='trabajar' ? '' : 'none';
-  $('v-todas').style.display = v==='todas' ? 'flex' : 'none'; $('v-todas').hidden = v!=='todas';
-  const f = $('bot'); f.style.display = v==='bot' ? 'block' : 'none'; f.hidden = v!=='bot';
-  if (v==='bot' && !f.src) f.src = '/admin-bot.html?embed=1';
-  if (v==='todas') pintarTabla();
+  $('tab').hidden = v!=='tablero'; $('cierres').hidden = v!=='tablero'; $('v-lista').hidden = v!=='lista'; $('barra').hidden = v==='bot'; $('bot').hidden = v!=='bot';
+  if (v==='bot' && !$('bot').src) $('bot').src = '/admin-bot.html?embed=1';
+  if (v==='lista') pintarLista();
 }
-function setP(p){ $('app').dataset.p = p; document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on', b.dataset.p===p)); }
-$('tabs').onclick = e => { const b = e.target.closest('.tab'); if (b){ cola = b.dataset.k; pintarCola(); } };
-$('lista').onclick = e => { const it = e.target.closest('.item'); if (it) elegir(it.dataset.id); };
-$('lista').onkeydown = e => { if (e.key==='Enter'){ const it = e.target.closest('.item'); if (it) elegir(it.dataset.id); } };
-['q','fTemp','fProd','fEst','fVend'].forEach(i => $(i).addEventListener('input', pintarCola));
-$('fCer').addEventListener('change', () => cargar());
 $('vistas').onclick = e => { const b = e.target.closest('button'); if (b) setV(b.dataset.v); };
-['tQ','tTemp','tProd','tEst','tVend'].forEach(i => $(i).addEventListener('input', pintarTabla));
-$('tCer').addEventListener('change', () => cargar());
-$('tBody').onclick = e => { const tr = e.target.closest('tr.f'); if (tr){ cola = 'todos'; setV('trabajar'); elegir(tr.dataset.id); } };
-$('nav').onclick = e => { const b = e.target.closest('button'); if (b) setP(b.dataset.p); };
-document.addEventListener('keydown', e => { if (/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return; if (e.key==='j' || e.key==='k'){ const lista = pintarCola(); const i = lista.findIndex(l=>l.id===sel); const n = lista[Math.max(0, Math.min(lista.length-1, i+(e.key==='j'?1:-1)))]; if (n) elegir(n.id, false); } });
+document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ F=b.dataset.f; document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b)); pintar(); });
+$('soloHoy').onclick = () => { $('soloHoy').classList.toggle('on'); pintar(); };
+['fTemp','fProd','q'].forEach(i=>$(i).addEventListener('input', pintar));
+$('fCer').addEventListener('change', () => cargar());
+$('tBody').onclick = e => { const tr = e.target.closest('tr.f'); if (tr){ setV('tablero'); abrir(tr.dataset.id); } };
+async function ejemplos(alta){ if (!alta && !confirm('¿Quitar las conversaciones de ejemplo y las oportunidades creadas desde ellas?')) return; try{ await api('/api/bot/conversaciones/ejemplos', {method: alta?'POST':'DELETE', headers:H(J), body:'{}'}); sel=null; cierre(); await cargar(); }catch(e){ err(e); } }
+$('ej').onclick = () => ejemplos(false);
+document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hidden) cerrarCaj(); });
 (async function init(){
   if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
-  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'mesa'); }catch(e){ err(e); return; }
-  await cargar({inicial:true}); setP(window.innerWidth<=1100?'cola':'chat');
-  setInterval(() => { if (!document.hidden && !busy && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
+  try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'crm'); }catch(e){ err(e); return; }
+  await cargar();
+  if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);
+  setInterval(() => { if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
 })();
 </script>
 </body>

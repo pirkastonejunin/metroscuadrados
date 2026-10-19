@@ -512,3 +512,4 @@ router.put('/conocimiento-config', auth, soloAdmin, async (req, res) => { try { 
 module.exports = router;
 module.exports.abierto = abierto;
 module.exports.procesarEvento = procesarEvento;
+module.exports.actualizarLead = actualizarLead;

@@ -22,15 +22,35 @@ function hoyAR(ahora) { // medianoche de hoy en Argentina (UTC-3), como Date en 
 }
 const diasHasta = (fecha, ahora) => Math.round((hoyAR(new Date(fecha)).getTime() - hoyAR(ahora).getTime()) / 86400000);
 
-function etapaDe(c, op, pres) {
+// Hora de cierre del día de trabajo (Argentina): lo que quedó "esperando respuesta" y no contestó vuelve a Hoy para recordarle.
+const HORA_CIERRE = 20;
+function venceEsperando(ahora) { const t = hoyAR(ahora).getTime() + HORA_CIERRE * 3600000; return new Date(t > ahora.getTime() ? t : t + 86400000); }
+
+function etapaDe(c, m, pres) {
+  if (m.etapa && ['nuevo', 'conversando', 'presupuesto', 'cerrando'].includes(m.etapa)) return m.etapa;
   if (pres && pres.estado === 'presupuestado' && !pres.convertidoEnVentaId && ((pres.seguimiento || []).length > 1 || !pres.origenBot)) return 'presupuesto';
-  if (pres && pres.estado === 'presupuestado') return 'borrador';
-  return op || c.estado === 'aceptado' || c.estado === 'humano' ? 'seguimiento' : 'nuevo';
+  return c.estado === 'derivado' || c.estado === 'bot' ? 'nuevo' : 'conversando';
+}
+// Columna del tablero. "Hoy" junta todo lo que pide una acción hoy; el resto espera una fecha o al cliente.
+function columnaDe({ esp, m, prox, etapa }) {
+  if (esp || m.recordar || m.sinDec) return 'hoy';
+  if (m.esperando) return 'esperando';
+  if (!prox || prox.dias <= 0) return 'hoy';
+  if (etapa === 'presupuesto' || etapa === 'cerrando') return etapa;
+  return 'seguimiento';
 }
 
 async function armar(db, req, { cerradas }) {
   const ahora = new Date(); const org = filtroOrg(req);
   const convs = await db.collection(COL_C).find(Object.assign({}, org, { estado: { $ne: 'bot' } })).sort({ updatedAt: -1 }).limit(400).toArray();
+  for (const c of convs) { // lo que esperaba respuesta y no la tuvo antes del cierre del día vuelve a Hoy, con un recordatorio más
+    const m = c.mesa || {};
+    if (m.esperando && new Date(m.esperando.venceAt) <= ahora) {
+      const recs = (m.recs || 0) + 1;
+      await db.collection(COL_C).updateOne({ _id: c._id, 'mesa.esperando': { $exists: true } }, { $unset: { 'mesa.esperando': '' }, $set: { 'mesa.recordar': true, 'mesa.recs': recs }, $push: { 'mesa.historial': { at: ahora, txt: 'Sin respuesta: recordatorio ' + recs, usuario: 'Sistema' } } });
+      c.mesa = Object.assign({}, m, { recordar: true, recs }); delete c.mesa.esperando;
+    }
+  }
   const ids = convs.map(c => c._id);
   const ult = ids.length ? await db.collection(COL_M).aggregate([
     { $match: { convId: { $in: ids } } }, { $sort: { at: 1 } },
@@ -50,7 +70,9 @@ async function armar(db, req, { cerradas }) {
     const ultimo = u ? { texto: u.ult.texto || ('[' + (u.ult.tipo || 'archivo') + ']'), dir: u.ult.dir, origen: u.ult.origen, at: u.ult.at } : null;
     const esperaCliente = !!(ultimo && ultimo.dir === 'in' && !cerrada);
     const sinLeer = u ? (u.ins || []).filter(t => !u.lastOut || t > u.lastOut).length : 0;
-    const prox = op && op.proximaAccion && op.proximaAccion.fecha ? { fecha: op.proximaAccion.fecha, nota: op.proximaAccion.nota || '', dias: diasHasta(op.proximaAccion.fecha, ahora) } : null;
+    const pf = op && op.proximaAccion && op.proximaAccion.fecha ? op.proximaAccion : (m.prox && m.prox.fecha ? m.prox : null);
+    const prox = pf ? { fecha: pf.fecha, nota: pf.nota || '', dias: diasHasta(pf.fecha, ahora) } : null;
+    const etapa = etapaDe(c, m, pres);
     const productos = a && a.productos && a.productos.length ? a.productos : (c.datos && c.datos.producto ? [c.datos.producto] : []);
     items.push({
       id: String(c._id), convId: String(c._id), opId: op ? String(op._id) : null, opNumero: op ? op.numero : null, nombre: c.nombre || (op && op.cliente && op.cliente.nombre) || ('+' + c.tel), tel: c.tel,
@@ -61,7 +83,7 @@ async function armar(db, req, { cerradas }) {
       ultimo, esperaCliente, esperaMin: esperaCliente ? Math.max(0, Math.round((ahora - new Date(ultimo.at)) / 60000)) : 0, sinLeer: esperaCliente ? sinLeer : 0,
       prox, paso: a ? a.proximoPaso : '', resumen: (a && a.resumen) || c.resumen || '', falta: (a && a.datosFaltantes) || [], sugerida: a ? a.respuestaSugerida : '', analizadoAt: a ? a.at : null,
       presupuesto: pres ? { id: String(pres._id), numero: pres.numero, total: Number(pres.total) || 0, items: (pres.items || []).length, estado: pres.estado, borrador: !!(pres.origenBot && (pres.seguimiento || []).length <= 1) } : null,
-      etapa: etapaDe(c, op, pres), fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
+      etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
       notas: m.notas || '', historial: (m.historial || []).slice(-30), cierre: m.cierre || null, actualizado: (ultimo && ultimo.at) || c.updatedAt
     });
   }
@@ -73,7 +95,7 @@ async function armar(db, req, { cerradas }) {
       id: 'op:' + o._id, convId: null, opId: String(o._id), opNumero: o.numero, nombre: o.cliente.nombre || ('+' + digitos(o.cliente.telefono)), tel: digitos(o.cliente.telefono), estadoConv: null, demo: false,
       asesorId: null, asesorNombre: o.vendedorNombre || '', sinAsignar: !o.vendedorId, temperatura: 'tibio', temperaturaOrigen: 'sin analizar', productos: [], producto: '', valor: 0,
       ultimo: null, esperaCliente: false, esperaMin: 0, sinLeer: 0, prox, paso: '', resumen: o.notas || '', falta: [], sugerida: '', analizadoAt: null, presupuesto: null,
-      etapa: 'seguimiento', fuente: o.origen || '', notas: '', historial: [], cierre: null, actualizado: o.updatedAt || o.createdAt
+      etapa: 'conversando', columna: prox && prox.dias > 0 ? 'seguimiento' : 'hoy', recordar: false, recs: 0, sinDec: false, esperandoVence: null, fuente: o.origen || '', notas: '', historial: [], cierre: null, actualizado: o.updatedAt || o.createdAt
     });
   }
   // leads sueltos (llegaron de Azuite o de un anuncio y todavía no son oportunidad ni tienen conversación): para no perder ninguno al unificar pantallas
@@ -84,7 +106,7 @@ async function armar(db, req, { cerradas }) {
     items.push({
       id: 'lead:' + l._id, convId: null, opId: null, leadId: String(l._id), opNumero: null, nombre: l.nombre || ('+' + l.telefono), tel: digitos(l.telefono), estadoConv: null, demo: false,
       asesorId: null, asesorNombre: '', sinAsignar: true, temperatura: 'tibio', temperaturaOrigen: 'sin analizar', productos: [], producto: '', valor: 0, ultimo: null, esperaCliente: false, esperaMin: 0, sinLeer: 0,
-      prox: null, paso: '', resumen: l.resumen || '', falta: [], sugerida: '', analizadoAt: null, presupuesto: null, etapa: 'nuevo', fuente: l.fuente === 'Meta Ads' ? 'Meta Ads · ' + (l.campana || '') : (l.fuente || 'Directo'),
+      prox: null, paso: '', resumen: l.resumen || '', falta: [], sugerida: '', analizadoAt: null, presupuesto: null, etapa: 'nuevo', columna: 'hoy', recordar: false, recs: 0, sinDec: false, esperandoVence: null, fuente: l.fuente === 'Meta Ads' ? 'Meta Ads · ' + (l.campana || '') : (l.fuente || 'Directo'),
       notas: '', historial: [], cierre: null, actualizado: l.creadoOrigen || l.createdAt
     });
   }
@@ -148,6 +170,85 @@ router.post('/:id/reabrir', auth, async (req, res) => {
     const cierre = c.mesa && c.mesa.cierre;
     if (cierre && cierre.estado === 'perdida' && cierre.opId) await db.collection('oportunidades').updateOne({ _id: cierre.opId, estado: 'descartada' }, { $set: { estado: 'activa', motivoDescarte: '', updatedAt: new Date() } });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $unset: { 'mesa.cierre': '' }, $push: { 'mesa.historial': reg(req, 'Reabierta') } });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- decisiones del vendedor (tablero) ----
+// Fija la próxima acción en la oportunidad del CRM (la crea sin vendedor si hace falta) para que la campanita avise; si no se puede, queda en la conversación.
+async function fijarProx(db, req, c, dias, nota) {
+  try {
+    await require('./bot').actualizarLead(db, c, []);
+    await require('./vendedorAsistente').programarSeguimiento(db, c, { dias, nota, resumen: c.asistente && c.asistente.resumen, usuarioNombre: quien(req).nombre });
+    return { $unset: { 'mesa.prox': '' } };
+  } catch (e) {
+    const fecha = new Date(hoyAR().getTime() + Math.max(0, dias) * 86400000);
+    return { $set: { 'mesa.prox': { fecha, nota, tipo: 'seguimiento' } } };
+  }
+}
+async function cerrarConv(db, req, c, estado, motivo) {
+  const ahora = new Date(); const q = quien(req);
+  const op = await db.collection('oportunidades').findOne(Object.assign({ estado: 'activa' }, filtroOrg(req), { 'cliente.telefono': { $regex: c.tel10 + '$' } }));
+  if (op) await db.collection('oportunidades').updateOne({ _id: op._id }, { $set: estado === 'ganada' ? { proximaAccion: null, updatedAt: ahora } : { estado: 'descartada', motivoDescarte: 'Perdida: ' + motivo, proximaAccion: null, updatedAt: ahora } });
+  return { $set: { 'mesa.cierre': { estado, motivo, at: ahora, usuario: q.nombre, opId: op ? op._id : null }, 'mesa.recs': 0 }, $unset: { 'mesa.esperando': '', 'mesa.recordar': '', 'mesa.sinDec': '', 'mesa.prox': '' } };
+}
+// Al salir de una conversación el vendedor decide qué sigue: esperar al cliente (vence hoy a las 20 hs y vuelve a Hoy para recordarle),
+// seguimiento (1, 2 o 7 días), posponer (fecha) o cerrar (ganada / perdida con motivo).
+router.post('/:id/decidir', auth, async (req, res) => {
+  try {
+    const b = req.body || {}; const tipo = b.tipo; const ahora = new Date();
+    if (!['esperar', 'seguimiento', 'posponer', 'ganada', 'perdida'].includes(tipo)) return res.status(400).json({ error: 'Decisión inválida.' });
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    const ult = await db.collection(COL_M).find({ convId: c._id }).sort({ at: -1 }).limit(1).toArray();
+    const clienteRespondio = ult.length && ult[0].dir === 'in';
+    const update = { $set: {}, $unset: { 'mesa.recordar': '', 'mesa.sinDec': '' }, $push: { 'mesa.historial': null } };
+    let txt = '';
+    if (tipo === 'esperar') {
+      update.$set['mesa.esperando'] = { desde: ahora, venceAt: venceEsperando(ahora) }; if (clienteRespondio) update.$set['mesa.recs'] = 0; txt = 'Esperando respuesta del cliente';
+    } else if (tipo === 'seguimiento' || tipo === 'posponer') {
+      let dias;
+      if (tipo === 'seguimiento') dias = [1, 2, 7].includes(Number(b.dias)) ? Number(b.dias) : 1;
+      else { const f = new Date(String(b.fecha || '') + 'T12:00:00-03:00'); if (isNaN(f)) return res.status(400).json({ error: 'Elegí una fecha.' }); dias = Math.min(60, Math.max(1, diasHasta(f, ahora))); }
+      const p = await fijarProx(db, req, c, dias, tipo === 'posponer' ? 'Retomar (pospuesta)' : 'Retomar con el cliente');
+      Object.assign(update.$set, p.$set || {}); Object.assign(update.$unset, p.$unset || {}, { 'mesa.esperando': '' }); update.$set['mesa.recs'] = 0;
+      txt = (tipo === 'posponer' ? 'Pospuesta ' : 'Seguimiento ') + 'en ' + dias + ' día(s)';
+    } else {
+      const motivo = String(b.motivo || '').slice(0, 120); if (tipo === 'perdida' && !motivo) return res.status(400).json({ error: 'Indicá el motivo de la pérdida.' });
+      const p = await cerrarConv(db, req, c, tipo, motivo); Object.assign(update.$set, p.$set); Object.assign(update.$unset, p.$unset); txt = tipo === 'ganada' ? 'Venta ganada' : 'Perdida: ' + motivo;
+    }
+    update.$push['mesa.historial'] = reg(req, txt);
+    if (!Object.keys(update.$set).length) delete update.$set;
+    await db.collection(COL_C).updateOne({ _id: c._id }, update);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/:id/sin-decidir', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { 'mesa.sinDec': true }, $push: { 'mesa.historial': reg(req, 'Quedó sin decidir') } });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/:id/etapa', auth, async (req, res) => {
+  try {
+    const e = req.body && req.body.etapa; if (!['nuevo', 'conversando', 'presupuesto', 'cerrando'].includes(e)) return res.status(400).json({ error: 'Etapa inválida.' });
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { 'mesa.etapa': e }, $push: { 'mesa.historial': reg(req, 'Etapa: ' + e) } });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Arrastrar una tarjeta a otra columna.
+router.post('/:id/mover', auth, async (req, res) => {
+  try {
+    const col = req.body && req.body.columna; if (!['hoy', 'esperando', 'seguimiento', 'presupuesto', 'cerrando'].includes(col)) return res.status(400).json({ error: 'Columna inválida.' });
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    const ahora = new Date(); const u = { $set: {}, $unset: { 'mesa.esperando': '', 'mesa.recordar': '', 'mesa.sinDec': '' }, $push: { 'mesa.historial': reg(req, 'Movida a ' + col) } };
+    if (col === 'esperando') { u.$set['mesa.esperando'] = { desde: ahora, venceAt: venceEsperando(ahora) }; delete u.$unset['mesa.esperando']; }
+    else if (col === 'hoy') Object.assign(u.$set, (await fijarProx(db, req, c, 0, 'Traída a hoy')).$set || {});
+    else if (col === 'seguimiento') { const p = await fijarProx(db, req, c, 1, 'Retomar'); Object.assign(u.$set, p.$set || {}); Object.assign(u.$unset, p.$unset || {}); if (!c.mesa || !c.mesa.etapa || c.mesa.etapa === 'nuevo') u.$set['mesa.etapa'] = 'conversando'; }
+    else { u.$set['mesa.etapa'] = col; const p = await fijarProx(db, req, c, 2, 'Retomar'); Object.assign(u.$set, p.$set || {}); Object.assign(u.$unset, p.$unset || {}); }
+    if (!Object.keys(u.$set).length) delete u.$set;
+    await db.collection(COL_C).updateOne({ _id: c._id }, u);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
