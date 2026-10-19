@@ -6,40 +6,40 @@
 <title>CRM - Piedra Negra</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="/nav-sidebar.js"></script>
 <style>
 :root{
-  --bg:#eceae6; --panel:#f8f7f4; --panel2:#f1efeb; --line:#dcd8d1; --ink:#1d2327; --mute:#68707a;
-  --accent:#0f6b63; --accent-ink:#ffffff; --accent-soft:#d8ebe8;
-  --hot:#c2410c; --hot-soft:#fde6d8; --warm:#a16207; --warm-soft:#f8ecc6; --cold:#1d5fa8; --cold-soft:#dbe9f8;
-  --ok:#15803d; --ok-soft:#d9f0e0; --bad:#b42318; --bad-soft:#fbdedb;
-  --in:#ffffff; --out:#d6efe9; --bot:#e6e3f6;
-  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --bg:#f3f4f6; --panel:#ffffff; --panel2:#f6f7f9; --line:#e5e7eb; --ink:#171a1f; --mute:#6b7280; --chat:#efeae2;
+  --accent:#ff5a36; --accent-ink:#ffffff; --accent-soft:#ffe7de;
+  --hot:#d92d20; --hot-soft:#fde4e1; --warm:#b45309; --warm-soft:#fff4d6; --cold:#1d5fa8; --cold-soft:#dbe9f8;
+  --ok:#1f8a5f; --ok-soft:#e1f5ea; --bad:#c53030; --bad-soft:#fbe3e3;
+  --in:#ffffff; --out:#d9fdd3; --bot:#ece7ff;
+  --sans:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif; --mono:"Manrope",-apple-system,"Segoe UI",Roboto,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#14181b; --panel:#1b2024; --panel2:#222930; --line:#2f373e; --ink:#e7eaec; --mute:#98a2ab;
-  --accent:#3fb5a8; --accent-ink:#06201d; --accent-soft:#17403c;
-  --hot:#fb923c; --hot-soft:#432212; --warm:#facc15; --warm-soft:#3d3210; --cold:#7cb4f0; --cold-soft:#16324f;
-  --ok:#4ade80; --ok-soft:#173a25; --bad:#f87171; --bad-soft:#431a17;
-  --in:#262e35; --out:#17403c; --bot:#2c2a48; color-scheme:dark}}
+  --bg:#121316; --panel:#1c1e22; --panel2:#23262b; --line:#2c2f34; --ink:#f4f5f6; --mute:#9aa0a8; --chat:#17191c;
+  --accent:#ff7a56; --accent-ink:#1a0f0b; --accent-soft:#3a241f;
+  --hot:#f87171; --hot-soft:#3d1f1f; --warm:#fbbf24; --warm-soft:#3a2f14; --cold:#7cb4f0; --cold-soft:#16324f;
+  --ok:#4ade80; --ok-soft:#173328; --bad:#f87171; --bad-soft:#3d1f1f;
+  --in:#2a2d33; --out:#1d3a2a; --bot:#2a2547; color-scheme:dark}}
 *{box-sizing:border-box}
 html{height:100%}
-body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.4;padding:10px 14px;overflow:hidden}
+body{margin:0;height:100%;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13.5px;line-height:1.4;font-weight:500;padding:10px 14px;overflow:hidden}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .app{height:100%;display:flex;flex-direction:column;gap:10px;min-height:0}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.brand{font-weight:700;font-size:15px;white-space:nowrap}
+.brand{font-weight:800;font-size:17px;letter-spacing:-.01em;white-space:nowrap}
 .brand small{display:block;font-weight:500;font-size:11px;color:var(--mute)}
 .resumen{flex:1;text-align:right;color:var(--mute);font-size:13px}
 .resumen b{color:var(--ink);font-family:var(--mono);font-weight:500}
 .resumen .al{color:var(--bad)}
 .err{color:var(--bad);font-size:12.5px}
 .main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(260px,320px) minmax(0,1fr) minmax(280px,330px);gap:10px}
-.col{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.col{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 2px rgba(17,20,24,.04),0 10px 24px -14px rgba(17,20,24,.18);min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden}
 .colhead{padding:10px 12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;flex:none}
 .scroll{overflow:auto;min-height:0;flex:1}
 .tabs{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
@@ -71,7 +71,7 @@ button{cursor:pointer}
 .chathead h2{margin:0;font-size:15px;font-weight:700}
 .chathead .meta{color:var(--mute);font-size:12px}
 .sp{flex:1}
-.msgs{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--panel2)}
+.msgs{flex:1;min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:6px;background:var(--chat)}
 .m{max-width:78%;padding:7px 10px;border-radius:10px;background:var(--in);white-space:pre-wrap;box-shadow:0 1px 0 rgba(0,0,0,.05);overflow-wrap:anywhere}
 .m.out{align-self:flex-end;background:var(--out)}
 .m.bot{align-self:flex-end;background:var(--bot)}
@@ -83,7 +83,7 @@ button{cursor:pointer}
 .compose .row{display:flex;gap:8px}
 .compose textarea{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel);height:54px}
 .compose select{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:4px 6px;max-width:130px}
-.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;font-weight:600;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px 12px;font-weight:700;white-space:nowrap;text-decoration:none;color:var(--ink);display:inline-block}
 .btn:hover{background:var(--panel2)}
 .btn:disabled{opacity:.55;cursor:default}
 .btn.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
@@ -119,7 +119,7 @@ ul.l li{display:flex;gap:7px}ul.l li::before{content:"–";color:var(--mute)}
 .vistas{display:flex;gap:4px}
 .vistas button{border:0;background:transparent;padding:6px 12px;border-radius:8px;font-weight:600;color:var(--mute)}
 .vistas button.on{background:var(--accent);color:var(--accent-ink)}
-.tabla{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.tabla{flex:1;min-height:0;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px}
 .tabla table{width:100%;border-collapse:collapse;font-size:13px}
 .tabla th{position:sticky;top:0;background:var(--panel2);text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
 .tabla td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
