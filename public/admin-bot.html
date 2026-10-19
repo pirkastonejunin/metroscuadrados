@@ -127,14 +127,39 @@ async function cargar(){
 async function abrir(id, silencioso){
   SEL = id;
   try{ const d = await api('/api/bot/conversaciones/'+id, {headers:H()}); const c = d.conversacion, dt = c.datos||{};
-    const keep = document.getElementById('txt') ? document.getElementById('txt').value : '';
+    const keep = document.getElementById('txt') ? document.getElementById('txt').value : ''; const kr = document.getElementById('asResp') ? {v:document.getElementById('asResp').value, at:document.getElementById('asResp').dataset.at} : null;
     document.getElementById('det').innerHTML = `<div class="hdr"><div style="display:flex;gap:10px;align-items:center"><div class="av" style="background:${color(c.nombre||c.tel)}">${esc(ini(c))}</div><div><b>${esc(c.nombre||'')}</b><div class="muted">+${esc(c.tel)} · <span class="pill ${c.estado}">${ETQ[c.estado]||c.estado}</span></div></div></div>
       <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="b sec mini" onclick="est('${id}','humano')">🙋 Tomar yo</button><button class="b sec mini" onclick="est('${id}','bot')">🤖 Devolver al bot</button><button class="b sec mini" onclick="est('${id}','pausado')">⏸ Pausar</button></div></div>
       <div class="datos">${c.resumen?'<div style="margin-bottom:4px"><b>'+esc(c.resumen)+'</b></div>':''}Producto: <b>${esc(dt.producto||'-')}</b> · Medidas: <b>${esc(dt.medidas||'-')}</b> · Estilo: <b>${esc(dt.estilo||'-')}</b>${c.referral&&c.referral.headline?' · Anuncio: <b>'+esc(c.referral.headline)+'</b>':''}</div>
+      ${panelAsistente(id, c.asistente)}
       <div class="chat"><div class="msgs" id="ms">${d.mensajes.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+m.tipo+']'))}<small>${m.origen==='bot'?'🤖 Bot':m.origen==='asesor'?'🙋 Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('')}</div></div>
       <div class="env"><input type="text" id="txt" placeholder="Escribir como asesor (el bot deja de contestar)" onkeydown="if(event.key==='Enter')enviar('${id}')"><button class="b" onclick="enviar('${id}')">Enviar</button></div>`;
-    document.getElementById('txt').value = keep; const ms = document.getElementById('ms'); if (!silencioso) ms.scrollTop = ms.scrollHeight; if (!silencioso) cargar();
+    document.getElementById('txt').value = keep; { const ar = document.getElementById('asResp'); if (kr && ar && ar.dataset.at === kr.at) ar.value = kr.v; } const ms = document.getElementById('ms'); if (!silencioso) ms.scrollTop = ms.scrollHeight; if (!silencioso) cargar();
   }catch(e){ err(e); }
+}
+const ETQ_INT = {comprar_ahora:'Quiere comprar ya', cotizando:'Está cotizando', consulta:'Consulta', postventa:'Postventa', reclamo:'Reclamo', otro:'Otro'};
+const ETQ_TEMP = {caliente:'🔥 Caliente', tibio:'🌤 Tibio', frio:'❄️ Frío'};
+function panelAsistente(id, a){
+  const btn = `<button class="b sec mini" id="asBtn" onclick="asistente('${id}')">${a?'🔄 Volver a analizar':'🤖 Analizar con IA'}</button>`;
+  if (!a) return `<div class="datos" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${btn}<span class="muted">Resumen, próximo paso y una respuesta sugerida para esta conversación.</span></div>`;
+  const li = (t, arr) => arr && arr.length ? `<div><span class="muted">${t}:</span> ${arr.map(esc).join(' · ')}</div>` : '';
+  return `<div class="datos" id="asPanel"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px"><b>🤖 Asistente</b><span class="pill">${esc(ETQ_TEMP[a.temperatura]||a.temperatura)}</span><span class="pill">${esc(ETQ_INT[a.intencion]||a.intencion)}</span>${btn}<span class="muted">${esc(hora(a.at))}</span></div>
+    <div style="margin-bottom:4px">${esc(a.resumen)}</div>${li('Productos', a.productos)}${li('Falta pedirle', a.datosFaltantes)}
+    <div style="margin:4px 0"><span class="muted">Próximo paso:</span> <b>${esc(a.proximoPaso)}</b></div>
+    ${(a.alertas||[]).length?'<div style="color:#b45309">⚠️ '+a.alertas.map(esc).join(' · ')+'</div>':''}
+    <div style="margin-top:6px"><span class="muted">Respuesta sugerida (editala antes de enviar):</span><textarea id="asResp" data-at="${esc(a.at)}" rows="4" style="width:100%;margin-top:4px">${esc(a.respuestaSugerida)}</textarea>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px"><button class="b mini" onclick="usarSugerida()">✍️ Usar en la respuesta</button>
+    <button class="b sec mini" onclick="seguimiento('${id}', ${a.seguimientoDias==null?2:a.seguimientoDias})">⏰ Programar seguimiento${a.seguimientoDias!=null?' ('+(a.seguimientoDias===0?'hoy':'en '+a.seguimientoDias+' día'+(a.seguimientoDias===1?'':'s'))+')':''}</button></div></div></div>`;
+}
+async function asistente(id){
+  const b = document.getElementById('asBtn'); if (b){ b.disabled = true; b.textContent = '🤔 Analizando…'; } err('');
+  try{ await api(`/api/bot/conversaciones/${id}/asistente`, {method:'POST', headers:H(J), body:'{}'}); await abrir(id, true); }catch(e){ err(e); await abrir(id, true); }
+}
+function usarSugerida(){ const t = document.getElementById('txt'), s = document.getElementById('asResp'); if (t && s){ t.value = s.value; t.focus(); } }
+async function seguimiento(id, dias){
+  const txt = prompt('¿En cuántos días hay que volver a contactarlo? (0 = hoy)', String(dias)); if (txt === null) return; const n = parseInt(txt, 10); if (!(n >= 0 && n <= 60)) return err('Poné un número de días entre 0 y 60.');
+  try{ const r = await api(`/api/bot/conversaciones/${id}/seguimiento`, {method:'POST', headers:H(J), body:JSON.stringify({dias:n, nota:(document.getElementById('asPanel')?'Seguimiento: ':'')+'retomar la conversación de WhatsApp'})});
+    alert(`Listo: seguimiento programado en la oportunidad #${r.numero} (${r.creada?'se creó en el CRM, sin vendedor asignado':'ya existía'}) para el ${new Date(r.fecha).toLocaleDateString('es-AR')}.`); }catch(e){ err(e); }
 }
 async function est(id, e){ try{ await api(`/api/bot/conversaciones/${id}/estado`, {method:'POST', headers:H(J), body:JSON.stringify({estado:e})}); await abrir(id); }catch(x){ err(x); } }
 async function enviar(id){ const t = document.getElementById('txt'); const v = t.value.trim(); if (!v) return; try{ await api(`/api/bot/conversaciones/${id}/enviar`, {method:'POST', headers:H(J), body:JSON.stringify({texto:v})}); t.value=''; await abrir(id); }catch(x){ err(x); } }

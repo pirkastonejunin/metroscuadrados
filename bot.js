@@ -292,6 +292,28 @@ router.post('/conversaciones/:id/estado', auth, async (req, res) => {
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: est, updatedAt: new Date() } }); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ---- Fase 3: asistente del vendedor (el asesor lo pide con un botón; nunca envía nada solo) ----
+router.post('/conversaciones/:id/asistente', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    const mensajes = await db.collection(COL_M).find({ convId: c._id }).sort({ at: -1 }).limit(40).toArray(); mensajes.reverse();
+    if (!mensajes.length) return res.status(400).json({ error: 'La conversación todavía no tiene mensajes.' });
+    const a = ahoraAR(); const cfgV = await vendedorCfg(c.orgId);
+    const r = await require('./vendedorAsistente').analizar({ db, orgId: c.orgId, conv: c, mensajes, conocimiento: await conocimientoTexto(c.orgId), modo: cfgV.modoPrecio,
+      ahora: 'hoy es ' + DIAS[a.getUTCDay()] + ' ' + a.toISOString().slice(0, 10) + ' ' + a.toISOString().slice(11, 16) + ' hs (Argentina); la atención humana está ' + (abierto() ? 'ABIERTA' : 'CERRADA') });
+    const asistente = Object.assign({}, r, { at: new Date(), usuario: (req.usuario && req.usuario.nombre) || '', mensajesAnalizados: mensajes.length });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { asistente } });
+    res.json(asistente);
+  } catch (e) { res.status(e.tope ? 429 : (e.status && e.status < 600 ? e.status : 502)).json({ error: e.tope ? 'Se alcanzó el tope mensual de gasto en IA. Avisale al administrador.' : e.message }); }
+});
+router.post('/conversaciones/:id/seguimiento', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    await actualizarLead(db, c, []); // asegura que exista el lead de esta conversación
+    const r = await require('./vendedorAsistente').programarSeguimiento(db, c, { dias: req.body && req.body.dias, nota: req.body && req.body.nota, resumen: c.asistente && c.asistente.resumen, usuarioNombre: (req.usuario && req.usuario.nombre) || '' });
+    res.json(r);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un asesor escribe desde el sistema: el bot queda afuera
   try { const texto = String((req.body && req.body.texto) || '').trim().slice(0, 4000); if (!texto) return res.status(400).json({ error: 'Escribí un mensaje.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
