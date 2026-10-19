@@ -96,6 +96,7 @@ async function derivarOrg(req, res, next) {
   try {
     const db = await getDb(); const b = req.body || {};
     let org = null;
+    req.orgVista = req.orgId; // sucursal que se estaba mirando (antes de pasar a la propia del colocador/empleado)
     const empId = toObjectId(b.empleadoId || req.query.empleadoId);
     if (empId) { const e = await db.collection('empleados').findOne({ _id: empId }, { projection: { orgId: 1 } }); org = e && e.orgId; }
     if (!org && b.colocadorId) org = await orgDeColocador(db, toObjectId(b.colocadorId));
@@ -973,7 +974,11 @@ router.get('/colocadores/obras-lista', authSueldosLectura, async (req, res) => {
 async function datosObraEspecial(db, req, obraIdRaw) {
   if (!obraIdRaw) return { obraId: null, obraNumero: null, obraTexto: '' };
   const oid = toObjectId(obraIdRaw); if (!oid) throw err(400, 'obraId inválido');
-  const o = await db.collection('obras').findOne(Object.assign({ _id: oid }, filtroOrg(req)), { projection: { numero: 1, 'cliente.nombre': 1 } });
+  // La obra se busca en la sucursal que se está mirando (no en la del colocador, a la que pasa req.orgId para liquidar): pueden ser distintas.
+  const u = req.usuario || {};
+  const orgObra = req.orgVista !== undefined ? req.orgVista : req.orgId;
+  const filtro = orgObra ? { orgId: orgObra } : ((u.rol && u.rol.protegido) ? {} : { orgId: { $in: u.orgIds || [] } });
+  const o = await db.collection('obras').findOne(Object.assign({ _id: oid }, filtro), { projection: { numero: 1, 'cliente.nombre': 1 } });
   if (!o) throw err(400, 'La obra no existe (o no pertenece a esta sucursal).');
   return { obraId: oid, obraNumero: o.numero, obraTexto: '#' + o.numero + ' ' + ((o.cliente && o.cliente.nombre) || '') };
 }
