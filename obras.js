@@ -549,6 +549,50 @@ router.get('/', authAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Búsqueda de productos del catálogo para armar el presupuesto de materiales de una obra.
+router.get('/materiales/buscar', authAdmin, async (req, res) => {
+  try {
+    const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+    if (!palabras.length) return res.json([]);
+    const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req), {
+      $and: palabras.map(p => { const re = new RegExp(esc(p), 'i'); return { $or: [{ sku: re }, { nombre: re }] }; })
+    });
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('productos_catalogo').find(match, { projection: { sku: 1, nombre: 1, costo: 1, moneda: 1, unidad: 1 } }).sort({ nombre: 1 }).limit(15).toArray();
+    });
+    res.json(lista);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Presupuesto de materiales de la obra (lista de productos con cantidad y costo unitario estimado), para compararlo
+// después contra las facturas de compra imputadas a la obra (ver /:id/rentabilidad).
+router.put('/:id/presupuesto-materiales', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const crudo = Array.isArray((req.body || {}).items) ? req.body.items : null;
+    if (!crudo) return res.status(400).json({ error: 'Falta la lista de materiales' });
+    if (crudo.length > 500) return res.status(400).json({ error: 'Máximo 500 líneas' });
+    const items = [];
+    for (const it of crudo) {
+      const nombre = String(it.nombre || '').trim().slice(0, 200);
+      const cantidad = Number(it.cantidad), costoUnitario = Number(it.costoUnitario) || 0;
+      if (!nombre) return res.status(400).json({ error: 'Hay una línea sin nombre de producto' });
+      if (!(cantidad > 0)) return res.status(400).json({ error: `La cantidad de "${nombre}" tiene que ser mayor a 0` });
+      if (costoUnitario < 0) return res.status(400).json({ error: `El costo de "${nombre}" no puede ser negativo` });
+      items.push({ productoId: it.productoId ? toObjectId(it.productoId) : null, sku: String(it.sku || '').trim().slice(0, 60) || null, nombre, cantidad, costoUnitario });
+    }
+    const r = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('obras').updateOne(Object.assign({ _id: id }, filtroOrg(req)), { $set: { presupuestoMateriales: items, updatedAt: new Date() } });
+    });
+    if (!r.matchedCount) return res.status(404).json({ error: 'Obra no encontrada' });
+    res.json({ ok: true, items: items.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.get('/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
@@ -586,6 +630,39 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
         };
       });
       const materiales = r2(facturas.reduce((a, f) => a + f.sinIva, 0));
+      // Presupuesto de materiales vs lo realmente comprado (ítems de las facturas imputadas, sin IVA, en pesos).
+      const normN = t => String(t || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
+      const pres = (obra.presupuestoMateriales || []).map(b => ({ b, cantReal: 0, totalReal: 0 }));
+      const idxPorClave = new Map();
+      pres.forEach((p, i) => {
+        [p.b.productoId && 'id:' + p.b.productoId, p.b.sku && 'sku:' + normN(p.b.sku), 'n:' + normN(p.b.nombre)].filter(Boolean).forEach(k => { if (!idxPorClave.has(k)) idxPorClave.set(k, i); });
+      });
+      const fuera = new Map();
+      for (const c of compras) {
+        const cot = c.moneda === 'USD' ? (Number(c.cotizacionDolar) || 0) : 1;
+        const sub = Number(c.subtotal) || 0;
+        const factorDesc = sub > 0 ? Math.max(0, (sub * (1 - (Number(c.descuentoPorcentaje) || 0) / 100) - (Number(c.descuentoMonto) || 0)) / sub) : 1;
+        for (const it of (c.items || [])) {
+          const neto = (Number(it.subtotal) || 0) * cot * factorDesc, cant = Number(it.cantidad) || 0;
+          const k = [it.productoId && 'id:' + it.productoId, it.sku && 'sku:' + normN(it.sku), 'n:' + normN(it.nombre)].filter(Boolean).find(x => idxPorClave.has(x));
+          if (k !== undefined) { const p = pres[idxPorClave.get(k)]; p.cantReal += cant; p.totalReal += neto; }
+          else {
+            const kf = it.productoId ? 'id:' + it.productoId : 'n:' + normN(it.nombre);
+            const f = fuera.get(kf) || { nombre: it.nombre, sku: it.sku || '', cantReal: 0, totalReal: 0 };
+            f.cantReal += cant; f.totalReal += neto; fuera.set(kf, f);
+          }
+        }
+      }
+      const filasMat = pres.map(p => {
+        const totalPres = r2(p.b.cantidad * p.b.costoUnitario), totalReal = r2(p.totalReal);
+        return { nombre: p.b.nombre, sku: p.b.sku || '', cantPres: p.b.cantidad, costoUnitPres: p.b.costoUnitario, totalPres,
+          cantReal: Math.round(p.cantReal * 1000) / 1000, totalReal, difTotal: r2(totalReal - totalPres),
+          difPct: totalPres > 0 ? r2((totalReal - totalPres) / totalPres * 100) : null, estado: p.cantReal > 0 ? 'comprado' : 'sinComprar' };
+      });
+      const filasFuera = [...fuera.values()].map(f => ({ nombre: f.nombre, sku: f.sku, cantPres: 0, costoUnitPres: 0, totalPres: 0, cantReal: Math.round(f.cantReal * 1000) / 1000,
+        totalReal: r2(f.totalReal), difTotal: r2(f.totalReal), difPct: null, estado: 'fueraPresupuesto' }));
+      const matPresupuestado = r2(filasMat.reduce((a, f) => a + f.totalPres, 0));
+      const matItemsReal = r2(filasMat.concat(filasFuera).reduce((a, f) => a + f.totalReal, 0));
       const manoObraDet = (obra.tareas || []).filter(t => t.colocadorId && t.costoPorM2Aplicado != null).map(t => ({
         tipoTrabajo: t.tipoTrabajo, m2: Number(t.m2Presupuestados) || 0, costoPorM2: Number(t.costoPorM2Aplicado) || 0,
         subtotal: r2((Number(t.m2Presupuestados) || 0) * (Number(t.costoPorM2Aplicado) || 0))
@@ -599,6 +676,11 @@ router.get('/:id/rentabilidad', authAdmin, async (req, res) => {
         ingreso, materiales, manoObra, costo, resultado,
         margenPct: ingreso > 0 ? r2(resultado / ingreso * 100) : null,
         facturas, manoObraDetalle: manoObraDet,
+        materialesDetalle: filasMat.concat(filasFuera),
+        materialesPresupuestado: matPresupuestado, materialesItemsReales: matItemsReal,
+        desvioMateriales: filasMat.length ? r2(matItemsReal - matPresupuestado) : null,
+        desvioMaterialesPct: matPresupuestado > 0 ? r2((matItemsReal - matPresupuestado) / matPresupuestado * 100) : null,
+        resultadoEsperado: filasMat.length && ingreso > 0 ? r2(ingreso - matPresupuestado - manoObra) : null,
         sinPresupuesto: !(ingreso > 0), tareasSinColocador: (obra.tareas || []).filter(t => !t.colocadorId).length
       };
     });
