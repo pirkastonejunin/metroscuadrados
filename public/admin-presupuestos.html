@@ -326,7 +326,7 @@ function avisarPadre(p){
 async function abrirDesdeContacto(){
   if (QS.get('nuevo') !== '1') return;
   try{
-    const r = await fetch(BASE + '/desde-contacto?nombre=' + encodeURIComponent(QS.get('nombre')||'') + '&telefono=' + encodeURIComponent(QS.get('tel')||''), {headers: headersAuth()});
+    const r = await fetch(BASE + '/desde-contacto?nombre=' + encodeURIComponent(QS.get('nombre')||'') + '&telefono=' + encodeURIComponent(QS.get('tel')||'') + '&convId=' + encodeURIComponent(CONV_ID), {headers: headersAuth()});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo preparar el presupuesto');
     if (d.creado){ const cl = await fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(x => x.json()); clientesCache = Array.isArray(cl) ? cl : clientesCache; }
     abrirNuevoPresupuesto(d.prefill);

@@ -380,9 +380,17 @@ router.get('/desde-visita/:visitaId', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Si el usuario ve "todas las sucursales" y no eligió una, la sucursal de la conversación manda (el presupuesto se arma desde ese chat).
+async function orgDeConversacion(req, convId) {
+  if (req.orgId || !convId) return;
+  const id = toObjectId(convId); if (!id) return;
+  const c = await (await getDb()).collection('wa_conversaciones').findOne({ _id: id }, { projection: { orgId: 1 } });
+  if (c && c.orgId) req.orgId = c.orgId;
+}
 // Cliente para un presupuesto armado desde un contacto del CRM (WhatsApp): usa el cliente existente o lo crea con nombre y teléfono.
 router.get('/desde-contacto', authAdmin, async (req, res) => {
   try {
+    await orgDeConversacion(req, req.query.convId);
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const nombre = String(req.query.nombre || '').replace(/\(ejemplo\)/i, '').trim() || ('Cliente ' + String(req.query.telefono || '').slice(-4));
     const db = await getDb(); const { clienteParaVisita } = require('./clienteVinculo');
@@ -418,8 +426,9 @@ router.get('/:id', authAdmin, async (req, res) => {
 // -----------------------------------------------------------------------
 router.post('/', authAdmin, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar un presupuesto.');
     const body = req.body || {};
+    await orgDeConversacion(req, body.convId);
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando antes de cargar un presupuesto.');
     const clienteId = toObjectId(body.clienteId);
     if (!clienteId) throw err(400, 'Elegí un cliente');
     const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
