@@ -298,6 +298,7 @@ async function iniciarApp(){
   await cargarPresupuestos();
   await abrirDesdeVisita();
   await abrirPresupuestoPorParametro();
+  await abrirDesdeContacto();
 }
 // Venimos del botón "Cargar presupuesto a mano" de una visita (vendedor.html?...): se abre directo el presupuesto
 // comercial de esa visita (el que ya tiene, o uno nuevo con el cliente y los datos de la visita ya cargados).
@@ -314,6 +315,23 @@ async function abrirPresupuestoPorParametro(){
   }catch(e){}
 }
 let VISITA_PENDIENTE = null;
+const QS = new URLSearchParams(location.search), CONV_ID = QS.get('convId') || '';
+// Dentro de la ventana del CRM: al guardar se avisa a la pantalla de arriba para que cierre la ventana y adjunte el presupuesto al chat.
+function avisarPadre(p){
+  if (!document.body.classList.contains('embed') || window.parent === window) return false;
+  window.parent.postMessage({ tipo: 'presupuesto-guardado', id: String(p._id), numero: p.numero, total: p.total, moneda: p.moneda, descuento: p.descuentoPorcentaje || 0,
+    items: (p.items || []).map(i => ({ nombre: i.nombre, cantidad: i.cantidad, precioUnitario: i.precioUnitario })) }, location.origin);
+  return true;
+}
+async function abrirDesdeContacto(){
+  if (QS.get('nuevo') !== '1') return;
+  try{
+    const r = await fetch(BASE + '/desde-contacto?nombre=' + encodeURIComponent(QS.get('nombre')||'') + '&telefono=' + encodeURIComponent(QS.get('tel')||''), {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo preparar el presupuesto');
+    if (d.creado){ const cl = await fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(x => x.json()); clientesCache = Array.isArray(cl) ? cl : clientesCache; }
+    abrirNuevoPresupuesto(d.prefill);
+  }catch(e){ alert(e.message); }
+}
 async function abrirDesdeVisita(){
   const vid = new URLSearchParams(location.search).get('visita');
   if (!vid) return;
@@ -792,6 +810,7 @@ async function guardarNuevoPresupuesto(){
     planesTarjetaIds: planesElegidos('p')
   };
   if (origenCotizadorPendiente) body.origenCotizador = origenCotizadorPendiente;
+  if (CONV_ID) body.convId = CONV_ID;
   if (VISITA_PENDIENTE) body.origenVisita = { visitaId: VISITA_PENDIENTE.visitaId };
   const btn = document.getElementById('pGuardarBtn');
   if (btn.disabled) return;
@@ -803,6 +822,7 @@ async function guardarNuevoPresupuesto(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
     if (VISITA_PENDIENTE){ location.href = '/vendedor.html'; return; }
+    if (avisarPadre(data)) return;
     cerrarModal();
     origenCotizadorPendiente = null;
     await cargarPresupuestos();
@@ -976,6 +996,7 @@ async function guardarEdicionPresupuesto(id){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error al guardar');
     if (VISITA_PENDIENTE){ location.href = '/vendedor.html'; return; }
+    if (avisarPadre(data)) return;
     cerrarModal();
     await cargarPresupuestos();
   }catch(e){ errEl.textContent = e.message; }

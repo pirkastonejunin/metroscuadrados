@@ -93,7 +93,7 @@ async function armar(db, req, { cerradas }) {
       productos, producto: productos[0] || '', valor: pres ? Number(pres.total) || 0 : 0,
       ultimo, esperaCliente, esperaMin: esperaCliente ? Math.max(0, Math.round((ahora - new Date(ultimo.at)) / 60000)) : 0, sinLeer: esperaCliente ? sinLeer : 0,
       prox, paso: a ? a.proximoPaso : '', resumen: (a && a.resumen) || c.resumen || '', falta: (a && a.datosFaltantes) || [], sugerida: a ? a.respuestaSugerida : '', analizadoAt: a ? a.at : null,
-      presupuesto: pres ? { id: String(pres._id), numero: pres.numero, total: Number(pres.total) || 0, items: (pres.items || []).length, estado: pres.estado, borrador: !!(pres.origenBot && (pres.seguimiento || []).length <= 1) } : null,
+      presupuesto: pres ? { id: String(pres._id), numero: pres.numero, total: Number(pres.total) || 0, items: (pres.items || []).length, estado: pres.estado, borrador: !!(pres.origenBot && pres.usuarioNombre === 'Bot de WhatsApp' && (pres.seguimiento || []).length <= 1) } : null,
       etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
       notas: m.notas || '', historial: (m.historial || []).slice(-30), cierre: m.cierre || null, actualizado: (ultimo && ultimo.at) || c.updatedAt
     });

@@ -49,7 +49,7 @@ async function buscarClienteUnico(db, orgId, datos) {
 async function clienteParaVisita(db, orgId, datos) {
   datos = datos || {};
   const n = norm(datos.nombre), t = digitos(datos.telefono);
-  if (!n) { const e = new Error('La visita no tiene nombre de cliente.'); e.status = 400; throw e; }
+  if (!n) { const e = new Error('Falta el nombre del cliente.'); e.status = 400; throw e; }
   const todos = await clientesActivos(db, orgId);
   const porNombre = todos.filter(c => nombresDe(c).includes(n));
   if (porNombre.length) {
@@ -64,7 +64,7 @@ async function clienteParaVisita(db, orgId, datos) {
   const r = await db.collection('clientes').insertOne({
     apellidoRazonSocial: String(datos.nombre).trim(), categoriaFiscal: 'consumidor_final', telefono: String(datos.telefono || '').trim(),
     domicilio: String(datos.direccion || '').trim(), localidad: String(datos.localidad || '').trim(),
-    origenCliente: 'Visita', activo: true, orgId, createdAt: ahora, updatedAt: ahora
+    origenCliente: datos.origen || 'Visita', activo: true, orgId, createdAt: ahora, updatedAt: ahora
   });
   return { clienteId: r.insertedId, creado: true, ambiguo: false };
 }

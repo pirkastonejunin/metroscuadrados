@@ -380,6 +380,16 @@ router.get('/desde-visita/:visitaId', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Cliente para un presupuesto armado desde un contacto del CRM (WhatsApp): usa el cliente existente o lo crea con nombre y teléfono.
+router.get('/desde-contacto', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const nombre = String(req.query.nombre || '').replace(/\(ejemplo\)/i, '').trim() || ('Cliente ' + String(req.query.telefono || '').slice(-4));
+    const db = await getDb(); const { clienteParaVisita } = require('./clienteVinculo');
+    const cli = await clienteParaVisita(db, req.orgId, { nombre, telefono: req.query.telefono, origen: 'WhatsApp' });
+    res.json({ prefill: { clienteId: String(cli.clienteId), items: [], observaciones: '' }, creado: !!cli.creado });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.get('/planes-tarjeta', authAdmin, async (req, res) => {
   try {
     const lista = await conReintento(async () => (await getDb()).collection('tarjetas_planes')
@@ -480,6 +490,7 @@ router.post('/', authAdmin, async (req, res) => {
         googleCalendarId: null,
         origenCotizador,
         origenVisita,
+        origenBot: body.convId && toObjectId(body.convId) ? { convId: toObjectId(body.convId) } : null,
         convertidoEnVentaId: null,
         convertidoEnVentaNumero: null,
         usuarioId: req.usuario && req.usuario._id ? req.usuario._id : null,
@@ -871,7 +882,7 @@ async function crearBorradorDesdeBot(db, { orgId, clienteId, items, observacione
 // Si el cliente cambia el pedido en el chat y nadie tocó todavía el borrador, se actualiza el mismo presupuesto (no se crea otro).
 async function actualizarBorradorDesdeBot(db, presupuestoId, items) {
   const p = await db.collection('presupuestos').findOne({ _id: presupuestoId });
-  if (!p || p.estado !== 'presupuestado' || p.convertidoEnVentaId || (p.seguimiento || []).length > 1 || !p.origenBot) return false;
+  if (!p || p.estado !== 'presupuestado' || p.convertidoEnVentaId || (p.seguimiento || []).length > 1 || !p.origenBot || p.usuarioNombre !== 'Bot de WhatsApp') return false;
   const { items: itemsOk, subtotal } = await normalizarItemsPresupuesto(db, { orgId: p.orgId }, items);
   const ahora = new Date();
   await db.collection('presupuestos').updateOne({ _id: presupuestoId }, { $set: { items: itemsOk, subtotal, total: subtotal, updatedAt: ahora } });
