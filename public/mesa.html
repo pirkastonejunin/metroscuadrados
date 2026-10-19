@@ -167,6 +167,9 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
 .notas textarea{width:100%;resize:vertical;min-height:54px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel2)}
 .hist{font-size:12px;color:var(--mute);display:flex;flex-direction:column;gap:2px}
 .vacio{padding:34px 18px;color:var(--mute);text-align:center;font-weight:600}
+.pop{position:fixed;inset:0;background:rgba(10,12,16,.55);z-index:50;display:grid;place-items:center;padding:3vh 3vw}
+.pop-in{background:var(--panel);border-radius:16px;width:min(1100px,100%);height:100%;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.pop-h{display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);flex:none}.pop-in iframe{flex:1;border:0;width:100%;background:var(--bg)}
 .toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:10px;font-weight:700;z-index:40;box-shadow:0 8px 24px rgba(0,0,0,.25)}
 @media (max-width:1100px){body{padding:10px 12px}}
 @media (max-width:760px){
@@ -416,18 +419,28 @@ function pintarFicha(l){
    ${l.convId?`<div class="sec"><h3>Etapa</h3><div class="etapas">${ETAPAS.map(e=>`<button class="${l.etapa===e.k?'on':''}" data-e="${e.k}">${e.n}</button>`).join('')}</div></div>
    <div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:6px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>`:''}
    ${l.resumen?`<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>`:''}
-   <div class="sec"><h3>Presupuesto</h3>${p?`<div class="valor">${money(p.total)}</div><div class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</div><div style="margin-top:9px"><a class="btn pri sm" href="/admin-presupuestos.html?abrir=${esc(p.id)}">Ver y editar</a></div>`:`<p class="tip">Todavía no hay presupuesto.</p><a class="btn sm" style="margin-top:7px" href="/admin-presupuestos.html">Ir a Presupuestos</a>`}</div>
+   <div class="sec"><h3>Presupuesto</h3>${p?`<div class="valor">${money(p.total)}</div><div class="tip">#${p.numero} · ${p.items} producto${p.items===1?'':'s'}${p.borrador?' · borrador del bot':''}</div><div style="margin-top:9px"><button class="btn pri sm" data-pop="/admin-presupuestos.html?embed=1&abrir=${esc(p.id)}">Ver y editar</button></div>`:`<p class="tip">Todavía no hay presupuesto.</p><button class="btn sm" style="margin-top:7px" data-pop="/admin-presupuestos.html?embed=1">Abrir Presupuestos</button>`}</div>
    <details class="mas"><summary>Más datos</summary>
      ${l.falta.length?`<div class="sec"><h3>Falta preguntarle</h3><ul class="l">${l.falta.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></div>`:''}
      <div class="sec"><h3>Cliente</h3><dl class="kv"><dt>Producto</dt><dd>${esc(l.producto||'—')}</dd><dt>Llegó por</dt><dd>${esc(l.fuente||'—')}</dd><dt>Asesor</dt><dd>${esc(l.asesorNombre||'Sin asignar')}</dd>${l.opNumero?`<dt>Oportunidad</dt><dd>#${l.opNumero}</dd>`:''}</dl>${l.opId?`<div style="margin-top:9px"><a class="btn sm" href="/crm.html?abrir=crm-${esc(l.opId)}">Editar datos o asignar visita</a></div>`:''}</div>
      ${l.convId?`<div class="sec notas"><h3>Notas internas</h3><textarea id="nota" placeholder="Solo las ve el equipo">${esc(keepN!=null?keepN:l.notas)}</textarea></div>`:''}
      ${l.historial.length?`<div class="sec"><h3>Historial</h3><div class="hist">${l.historial.slice().reverse().map(h=>`<span>${esc(h.txt)} · ${hora(h.at)}</span>`).join('')}</div></div>`:''}
    </details>`;
+  c.querySelectorAll('[data-pop]').forEach(b=>b.onclick=()=>popup(b.dataset.pop));
   c.querySelectorAll('.temp button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}); await cargar({forzar:true}); }catch(e){ err(e); } });
   c.querySelectorAll('.etapas button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/etapa`, {etapa:b.dataset.e}); await cargar({forzar:true}); }catch(e){ err(e); } });
   if ($('nota')){ let t; $('nota').oninput = e => { clearTimeout(t); const v=e.target.value; t=setTimeout(()=>post(`/api/mesa/${l.convId}/nota`, {texto:v}).catch(()=>{}), 700); }; }
 }
 
+/* ---- ventana emergente (presupuestos) ---- */
+function popup(url){
+  const w = document.createElement('div'); w.className = 'pop'; w.innerHTML = '<div class="pop-in"><div class="pop-h"><b>Presupuesto</b><span class="sp"></span><button class="x" id="popx">Cerrar ✕</button></div><iframe title="Presupuesto"></iframe></div>';
+  document.body.appendChild(w); w.querySelector('iframe').src = url;
+  const cerrar = () => { w.remove(); document.removeEventListener('keydown', esc2); cargar({forzar:true}); };
+  const esc2 = e => { if (e.key==='Escape'){ e.stopPropagation(); cerrar(); } };
+  document.addEventListener('keydown', esc2, true);
+  w.onclick = e => { if (e.target===w) cerrar(); }; w.querySelector('#popx').onclick = cerrar;
+}
 /* ---- arrastrar ---- */
 function enlazar(){
   document.querySelectorAll('.card').forEach(c=>{

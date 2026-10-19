@@ -79,7 +79,7 @@ async function armar(db, req, { cerradas }) {
     const u = porConv.get(String(c._id)); const op = opPorTel.get(c.tel10) || null; const pres = presPorConv.get(String(c._id)) || null; const a = c.asistente || null;
     vistos.add(c.tel10);
     const ultimo = u ? { texto: u.ult.texto || ('[' + (u.ult.tipo || 'archivo') + ']'), dir: u.ult.dir, origen: u.ult.origen, at: u.ult.at } : null;
-    const esperaCliente = !!(ultimo && ultimo.dir === 'in' && !cerrada);
+    const esperaCliente = !!(ultimo && ultimo.dir === 'in' && !cerrada && !(m.atendidoAt && new Date(ultimo.at) <= new Date(m.atendidoAt)));
     const sinLeer = u ? (u.ins || []).filter(t => !u.lastOut || t > u.lastOut).length : 0;
     const pf = op && op.proximaAccion && op.proximaAccion.fecha ? op.proximaAccion : (m.prox && m.prox.fecha ? m.prox : null);
     const prox = pf ? { fecha: pf.fecha, nota: pf.nota || '', dias: diasHasta(pf.fecha, ahora) } : null;
@@ -214,6 +214,7 @@ router.post('/:id/decidir', auth, async (req, res) => {
     const clienteRespondio = ult.length && ult[0].dir === 'in';
     const update = { $set: {}, $unset: { 'mesa.recordar': '', 'mesa.sinDec': '' }, $push: { 'mesa.historial': null } };
     let txt = '';
+    if (tipo !== 'ganada' && tipo !== 'perdida') update.$set['mesa.atendidoAt'] = ahora;
     if (tipo === 'esperar') {
       update.$set['mesa.esperando'] = { desde: ahora, venceAt: venceEsperando(ahora) }; if (clienteRespondio) update.$set['mesa.recs'] = 0; txt = 'Esperando respuesta del cliente';
     } else if (tipo === 'seguimiento' || tipo === 'posponer') {
@@ -254,6 +255,7 @@ router.post('/:id/mover', auth, async (req, res) => {
     const col = req.body && req.body.columna; if (!['hoy', 'esperando', 'seguimiento', 'presupuesto', 'cerrando'].includes(col)) return res.status(400).json({ error: 'Columna inválida.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const ahora = new Date(); const u = { $set: {}, $unset: { 'mesa.esperando': '', 'mesa.recordar': '', 'mesa.sinDec': '' }, $push: { 'mesa.historial': reg(req, 'Movida a ' + col) } };
+    if (col === 'hoy') u.$unset['mesa.atendidoAt'] = ''; else u.$set['mesa.atendidoAt'] = ahora;
     if (col === 'esperando') { u.$set['mesa.esperando'] = { desde: ahora, venceAt: venceEsperando(ahora) }; delete u.$unset['mesa.esperando']; }
     else if (col === 'hoy') Object.assign(u.$set, (await fijarProx(db, req, c, 0, 'Traída a hoy')).$set || {});
     else if (col === 'seguimiento') { const p = await fijarProx(db, req, c, 1, 'Retomar'); Object.assign(u.$set, p.$set || {}); Object.assign(u.$unset, p.$unset || {}); if (!c.mesa || !c.mesa.etapa || c.mesa.etapa === 'nuevo') u.$set['mesa.etapa'] = 'conversando'; }

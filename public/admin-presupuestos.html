@@ -11,6 +11,7 @@
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
 <style>
+body.embed>header{display:none!important}body.embed{padding-top:8px!important}
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
     --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
@@ -279,7 +280,8 @@ async function iniciarApp(){
     return;
   }
   resolverOrgActiva(me);
-  if (!MODO_VISITA) PiedraSidebar.render(me, 'presupuestos', { ocultarOrg: true });
+  const EMB = new URLSearchParams(location.search).get('embed')==='1'; if (EMB) document.body.classList.add('embed');
+  if (!MODO_VISITA && !EMB) PiedraSidebar.render(me, 'presupuestos', { ocultarOrg: true });
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('sinAccesoScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
