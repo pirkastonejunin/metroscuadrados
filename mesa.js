@@ -24,7 +24,8 @@ const diasHasta = (fecha, ahora) => Math.round((hoyAR(new Date(fecha)).getTime()
 
 // Hora de cierre del día de trabajo (Argentina): lo que quedó "esperando respuesta" y no contestó vuelve a Hoy para recordarle.
 const HORA_CIERRE = 15;
-function venceEsperando(ahora) { const t = hoyAR(ahora).getTime() + HORA_CIERRE * 3600000; return new Date(t > ahora.getTime() ? t : t + 86400000); }
+// Antes de las 15 hs vence hoy a las 15; si se marca después, vence a la medianoche (vuelve a Hoy al día siguiente).
+function venceEsperando(ahora) { const t = hoyAR(ahora).getTime() + HORA_CIERRE * 3600000; return new Date(t > ahora.getTime() ? t : hoyAR(ahora).getTime() + 86400000); }
 
 function etapaDe(c, m, pres) {
   if (m.etapa && ['nuevo', 'conversando', 'presupuesto', 'cerrando'].includes(m.etapa)) return m.etapa;

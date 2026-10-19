@@ -242,7 +242,7 @@ function aviso(l){
   if (l.sinDec) return ['Falta decidir','bad'];
   if (l.esperaCliente) return ['Espera '+mins(l.esperaMin), l.esperaMin>240?'bad':'warm'];
   if (l.recordar) return l.recs>=3 ? [l.recs+' recordatorios: ¿cerrar?','bad'] : ['Sin respuesta: recordale','warm'];
-  if (l.columna==='esperando') return ['Vence hoy '+hhmm(l.esperandoVence||new Date()),'cold'];
+  if (l.columna==='esperando') return [l.esperandoVence&&hhmm(l.esperandoVence)==='00:00'?'Vuelve a Hoy mañana':'Vence hoy '+hhmm(l.esperandoVence||new Date()),'cold'];
   if (!l.prox) return l.etapa==='nuevo' ? ['Nuevo','cold'] : ['Sin próxima acción','bad'];
   if (l.prox.dias<0) return ['Vencido hace '+(-l.prox.dias)+' d','bad'];
   if (l.prox.dias===0) return ['Hoy','warm'];
@@ -411,7 +411,7 @@ function pintarCaj(l, o){
 function pintarFicha(l){
   const c = $('ficha'); if (!c || !l) return; const keepN = $('nota') ? $('nota').value : null; const p = l.presupuesto; const paso = pasoDe(l);
   c.innerHTML = `<div class="sec"><h3>Qué hacer ahora</h3>${paso?`<div class="paso">${esc(paso)}</div>`:`<p class="tip">Todavía no hay un análisis de la IA.${l.convId?' Tocá "Analizar" en el chat para obtener el próximo paso.':''}</p>`}
-     <div class="tip" style="margin-top:7px">${l.columna==='esperando'?'Esperando respuesta del cliente hasta las 15 hs':l.prox?'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):''):'<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
+     <div class="tip" style="margin-top:7px">${l.columna==='esperando'?(l.esperandoVence&&hhmm(l.esperandoVence)==='00:00'?'Esperando respuesta: vuelve a Hoy mañana':'Esperando respuesta del cliente hasta las 15 hs'):l.prox?'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):''):'<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
    ${l.convId?`<div class="sec"><h3>Etapa</h3><div class="etapas">${ETAPAS.map(e=>`<button class="${l.etapa===e.k?'on':''}" data-e="${e.k}">${e.n}</button>`).join('')}</div></div>
    <div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:6px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>`:''}
    ${l.resumen?`<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>`:''}
