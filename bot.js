@@ -24,6 +24,7 @@ let mongoClient;
 async function getDb() { if (!mongoClient) { const c = new MongoClient(process.env.MONGODB_URI); await c.connect(); mongoClient = c; } return mongoClient.db(DB_NAME); }
 const auth = [authUsuario, resolverOrg, requiereAlgunModulo('crm', 'visitas')];
 const COL_C = 'wa_conversaciones', COL_M = 'wa_mensajes';
+const soloAdmin = (req, res, next) => (req.usuario && req.usuario.rol && req.usuario.rol.protegido) ? next() : res.status(403).json({ error: 'Solo el rol Administrador puede cambiar las instrucciones del bot.' });
 const digitos = (s) => String(s || '').replace(/\D/g, '');
 const orgBot = () => { const v = process.env.BOT_ORG_ID || process.env.AZUITE_ORG_ID || ''; return /^[0-9a-f]{24}$/i.test(v) ? new ObjectId(v) : null; };
 const graph = () => process.env.WA_GRAPH_BASE || ('https://graph.facebook.com/' + (process.env.WA_GRAPH_VERSION || 'v23.0'));
@@ -314,17 +315,47 @@ router.post('/conversaciones/:id/seguimiento', auth, async (req, res) => {
     res.json(r);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// ---- conversaciones de EJEMPLO para probar el asistente sin WhatsApp conectado (marcadas demo; se pueden quitar) ----
+const EJEMPLOS = [
+  { tel: '5491100000001', nombre: 'Luis (ejemplo)', estado: 'derivado', datos: { producto: 'Porcelanato gris 60x60', medidas: '30 m2', estilo: 'cemento' }, resumen: 'Quiere 30 m2 de porcelanato gris 60x60 para el living.', min: [
+    ['in', 'Hola, buenas tardes. Cuánto sale el porcelanato gris 60x60?'], ['bot', 'Hola Luis! Tenemos varias opciones de porcelanato gris 60x60. ¿Para qué ambiente lo necesitás y cuántos m2 son?'],
+    ['in', 'Para el living y el pasillo, unos 30 m2. Lo quiero tipo cemento, mate'], ['bot', 'Genial. Te paso con un asesor que te arma el presupuesto. ¿Querés que te contacte hoy?'], ['in', 'Sí por favor, y si me pueden decir si hacen envío a Chacabuco']] },
+  { tel: '5491100000002', nombre: 'Marta (ejemplo)', estado: 'humano', datos: { producto: 'Cerámica baño', medidas: '', estilo: '' }, resumen: 'Preguntó precios de cerámica para el baño y no volvió a responder.', min: [
+    ['in', 'Hola, precio de la ceramica para baño?'], ['bot', 'Hola! ¿Qué medidas tiene el baño y qué estilo buscás (blanco, símil mármol, color)?'], ['in', 'Son como 6 m2, algo claro'],
+    ['asesor', 'Marta, te paso dos opciones claras que tenemos en stock. ¿Te las mando por acá?'], ['in', 'Dale, mandame y lo hablo con mi marido']] },
+  { tel: '5491100000003', nombre: 'Carlos (ejemplo)', estado: 'humano', datos: { producto: 'Porcelanato', medidas: '', estilo: '' }, resumen: 'Reclama por una caja de porcelanato rota en su última compra.', min: [
+    ['in', 'Buenas, compré porcelanato la semana pasada y me llegó una caja rota'], ['bot', 'Lamento lo ocurrido, Carlos. Te pasamos con un asesor para resolverlo.'], ['asesor', 'Hola Carlos, soy del equipo de Piedra Negra. ¿Me pasás una foto de la caja y el número de compra?'],
+    ['in', 'Acá va la foto. La compra fue a nombre de Carlos Ruiz, el martes'], ['in', 'Necesito que me la cambien porque ya empiezan a colocar el viernes']] }
+];
+router.post('/conversaciones/ejemplos', auth, soloAdmin, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const db = await getDb(); let n = 0;
+    for (const e of EJEMPLOS) {
+      const tel10 = e.tel.slice(-10); if (await db.collection(COL_C).findOne({ orgId, tel10 })) continue;
+      const ahora = Date.now(); const r = await db.collection(COL_C).insertOne({ orgId, tel: e.tel, tel10, nombre: e.nombre, estado: e.estado, datos: e.datos, resumen: e.resumen, demo: true, createdAt: new Date(ahora), updatedAt: new Date(ahora) });
+      const docs = e.min.map((m, i) => ({ convId: r.insertedId, orgId, waId: 'demo-' + e.tel + '-' + i, dir: m[0] === 'in' ? 'in' : 'out', origen: m[0] === 'in' ? 'cliente' : m[0], tipo: 'text', texto: m[1], at: new Date(ahora - (e.min.length - i) * 4 * 60000), respondido: true, prueba: true }));
+      await db.collection(COL_M).insertMany(docs); n++;
+    }
+    res.json({ ok: true, creadas: n }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.delete('/conversaciones/ejemplos', auth, soloAdmin, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const db = await getDb();
+    const convs = await db.collection(COL_C).find({ orgId, demo: true }).project({ tel10: 1 }).toArray(); const ids = convs.map(c => c._id), tels = convs.map(c => c.tel10);
+    const leadsDemo = tels.length ? await db.collection('leads_whatsapp').find({ orgId, tel10: { $in: tels } }).project({ _id: 1 }).toArray() : [];
+    const lids = leadsDemo.map(l => l._id);
+    if (lids.length) { await db.collection('oportunidades').deleteMany({ orgId, leadId: { $in: lids }, estado: 'activa' }); await db.collection('leads_whatsapp').deleteMany({ _id: { $in: lids } }); }
+    await db.collection(COL_M).deleteMany({ convId: { $in: ids } }); await db.collection(COL_C).deleteMany({ _id: { $in: ids } });
+    res.json({ ok: true, quitadas: ids.length }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un asesor escribe desde el sistema: el bot queda afuera
   try { const texto = String((req.body && req.body.texto) || '').trim().slice(0, 4000); if (!texto) return res.status(400).json({ error: 'Escribí un mensaje.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
-    const env = await enviarTexto(c.tel, texto);
+    const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarTexto(c.tel, texto); // los ejemplos nunca se mandan por WhatsApp
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'text', texto, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 // ---- prueba del bot sin WhatsApp: corre el mismo motor de IA sobre una conversación simulada (no guarda nada ni envía mensajes) ----
-const soloAdmin = (req, res, next) => (req.usuario && req.usuario.rol && req.usuario.rol.protegido) ? next() : res.status(403).json({ error: 'Solo el rol Administrador puede cambiar las instrucciones del bot.' });
 router.post('/simular', auth, async (req, res) => {
   try {
     const b = req.body || {}; const ms = Array.isArray(b.mensajes) ? b.mensajes.slice(-30) : [];
