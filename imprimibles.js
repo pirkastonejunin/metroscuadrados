@@ -263,15 +263,12 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
     // comparte con el selector nativo del navegador/celular; si no se
     // puede compartir un archivo (la mayoría de los navegadores de
     // escritorio), lo descarga.
-    async function compartirDocumento(){
+    // Genera el PDF (mismo diseño que se ve en pantalla). Lo usa "Compartir" y también el CRM para mandarlo por WhatsApp.
+    async function generarPdfBlob(){
       const controles = document.querySelector('.no-imprimir');
-      const estado = document.getElementById('compartirEstado');
       if (controles) controles.style.display = 'none';
       try{
-        if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
-          if (estado) estado.textContent = 'No se pudo cargar el generador de PDF.';
-          return;
-        }
+        if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') throw new Error('No se pudo cargar el generador de PDF.');
         const canvas = await html2canvas(document.body, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -290,8 +287,14 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
           pdf.addImage(imgData, 'JPEG', 0, posicion, imgWidth, imgHeight);
           alturaRestante -= pageHeight;
         }
-        const nombreArchivo = (document.title || 'documento').replace(/[^a-z0-9]+/gi, '_').toLowerCase() + '.pdf';
-        const blob = pdf.output('blob');
+        return { blob: pdf.output('blob'), nombreArchivo: (document.title || 'documento').replace(/[^a-z0-9]+/gi, '_').toLowerCase() + '.pdf' };
+      } finally { if (controles) controles.style.display = ''; }
+    }
+    window.generarPdfBlob = generarPdfBlob;
+    async function compartirDocumento(){
+      const estado = document.getElementById('compartirEstado');
+      try{
+        const { blob, nombreArchivo } = await generarPdfBlob();
         const archivo = new File([blob], nombreArchivo, { type: 'application/pdf' });
         if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
           await navigator.share({ files: [archivo], title: document.title });
@@ -306,8 +309,6 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
       }catch(e){
         if (e && e.name === 'AbortError') { /* el usuario cerró el selector de compartir — no es un error */ }
         else if (estado) estado.textContent = 'No se pudo compartir: ' + (e && e.message ? e.message : e);
-      }finally{
-        if (controles) controles.style.display = '';
       }
     }
     window.compartirDocumento = compartirDocumento;

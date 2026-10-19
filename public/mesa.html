@@ -405,7 +405,7 @@ function pintarCaj(l, o){
   if ($('rap')) $('rap').onchange = e => { const r={Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value=(tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
   if ($('env')){
     const enviar = async () => { const v = tx.value.trim(); if (!v) return; $('env').disabled = true;
-      try{ if (ADJ&&ADJ.conv===l.id){ await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
+      try{ if (ADJ&&ADJ.conv===l.id){ $('env').textContent='Armando PDF…'; let pdfBase64=''; try{ pdfBase64 = await pdfPresupuesto(ADJ.id); }catch(x){ console.warn('PDF en el navegador falló, se usa el del servidor', x); } await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id, pdfBase64}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
     $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
   }
   if ($('adjx')) $('adjx').onclick = () => { ADJ=null; pintarCaj(l,{keep:true}); };
@@ -438,6 +438,20 @@ function pintarFicha(l){
 
 /* ---- ventana emergente (presupuestos) ---- */
 let POP = null, ADJ = null;
+// PDF con el mismo diseño del botón Imprimir: se abre esa página en un marco oculto y se genera ahí.
+async function pdfPresupuesto(id){
+  const r = await fetch('/api/presupuestos/'+id+'/imprimir', {headers:H()}); if (!r.ok) throw new Error('No se pudo abrir el presupuesto');
+  const html = await r.text(); const f = document.createElement('iframe');
+  f.style.cssText = 'position:fixed;left:-10000px;top:0;width:820px;height:1200px;border:0;visibility:hidden'; f.srcdoc = html; document.body.appendChild(f);
+  try{
+    await new Promise((ok,ko)=>{ f.onload = ok; setTimeout(()=>ko(new Error('Tardó demasiado')), 15000); });
+    for (let i=0;i<60 && !(f.contentWindow.html2canvas && f.contentWindow.jspdf && f.contentWindow.generarPdfBlob); i++) await new Promise(x=>setTimeout(x,150));
+    if (!f.contentWindow.generarPdfBlob || !f.contentWindow.html2canvas) throw new Error('No cargó el generador de PDF');
+    await new Promise(x=>setTimeout(x,300));
+    const { blob } = await f.contentWindow.generarPdfBlob();
+    return await new Promise((ok,ko)=>{ const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1]); fr.onerror = ko; fr.readAsDataURL(blob); });
+  } finally { f.remove(); }
+}
 function textoPresupuesto(p){
   const m = n => (p.moneda==='USD'?'US$ ':'$ ') + Math.round(n||0).toLocaleString('es-AR');
   const it = (p.items||[]).map(i=>'• '+i.cantidad+' x '+i.nombre+' — '+m(i.precioUnitario*i.cantidad)).join('\n');

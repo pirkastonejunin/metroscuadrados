@@ -382,7 +382,8 @@ router.post('/conversaciones/:id/enviar-presupuesto', auth, async (req, res) => 
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const p = await db.collection('presupuestos').findOne({ _id: pid, orgId: c.orgId }); if (!p) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
     const [org, cliente] = await Promise.all([db.collection('organizaciones').findOne({ _id: p.orgId }), p.clienteId ? db.collection('clientes').findOne({ _id: p.clienteId }) : null]);
-    const pdf = await require('./presupuestoPdf').generar(p, org, cliente); const nombre = 'Presupuesto-' + String(p.numero).padStart(5, '0') + '.pdf';
+    const b64 = String((req.body && req.body.pdfBase64) || '').replace(/^data:[^,]*,/, ''); // el navegador manda el PDF con el mismo diseño de Imprimir; si no, uno simple del servidor
+    const pdf = /^[A-Za-z0-9+/=\s]+$/.test(b64) && b64.length > 400 ? Buffer.from(b64, 'base64') : await require('./presupuestoPdf').generar(p, org, cliente); const nombre = 'Presupuesto-' + String(p.numero).padStart(5, '0') + '.pdf';
     const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarDocumento(c.tel, pdf, nombre, texto);
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'document', texto: '📎 ' + nombre + (texto ? '\n' + texto : ''), at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba, bytes: pdf.length });
