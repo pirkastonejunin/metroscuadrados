@@ -262,6 +262,21 @@ async function generar(op) {
   throw ultimo || err(503, 'La IA no está configurada.', { sinClave: true });
 }
 
+// ---- modelos que realmente tiene la cuenta (Gemini): evita adivinar nombres ----
+router.get('/modelos', authUsuario, async (req, res) => {
+  try {
+    if (!(req.usuario && req.usuario.rol && req.usuario.rol.protegido)) return res.status(403).json({ error: 'Solo un administrador puede ver los modelos.' });
+    const out = { gemini: [], actual: { gemini: process.env.BOT_MODELO || process.env.GEMINI_MODEL || 'gemini-3.8-flash' } };
+    if (process.env.GEMINI_API_KEY) {
+      const r = await pedir((process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta') + '/models?pageSize=200', { headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY } }, 15000);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: 'Google respondió ' + r.status + ': ' + ((d.error && d.error.message) || '') });
+      out.gemini = (d.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/i.test(m.name)).map(m => String(m.name).replace(/^models\//, '')).sort();
+    }
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // ---- resumen para el administrador ----
 router.get('/uso', authUsuario, async (req, res) => {
   try {
