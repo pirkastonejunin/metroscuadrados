@@ -220,7 +220,7 @@ const colorDe = s => COLORES[[...String(s)].reduce((a,c)=>a+c.charCodeAt(0),0)%C
 const iniciales = n => (String(n||'?').replace(/\(.*?\)/g,'').trim().split(/\s+/).slice(0,2).map(x=>x[0]||'').join('')||'?').toUpperCase();
 const COLS = [
   {k:'hoy', i:'📥', n:'Hoy', sub:'Lo que requiere una acción hoy. Objetivo: terminar el día vacía'},
-  {k:'esperando', i:'⏳', n:'Esperando respuesta', sub:'Vencen hoy a las 20 hs. Si no contesta, vuelven a Hoy para recordarle'},
+  {k:'esperando', i:'⏳', n:'Esperando respuesta', sub:'Vencen hoy a las 15 hs. Si no contesta, vuelven a Hoy para recordarle'},
   {k:'seguimiento', i:'⏰', n:'Seguimiento', sub:'Con fecha. Ese día pasan a Hoy'},
   {k:'presupuesto', i:'📄', n:'Presupuesto enviado', sub:'Esperando la decisión del cliente'},
   {k:'cerrando', i:'🤝', n:'Por cerrar', sub:'Ya decidió, falta confirmar'}
@@ -411,7 +411,7 @@ function pintarCaj(l, o){
 function pintarFicha(l){
   const c = $('ficha'); if (!c || !l) return; const keepN = $('nota') ? $('nota').value : null; const p = l.presupuesto; const paso = pasoDe(l);
   c.innerHTML = `<div class="sec"><h3>Qué hacer ahora</h3>${paso?`<div class="paso">${esc(paso)}</div>`:`<p class="tip">Todavía no hay un análisis de la IA.${l.convId?' Tocá "Analizar" en el chat para obtener el próximo paso.':''}</p>`}
-     <div class="tip" style="margin-top:7px">${l.columna==='esperando'?'Esperando respuesta del cliente hasta las 20 hs':l.prox?'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):''):'<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
+     <div class="tip" style="margin-top:7px">${l.columna==='esperando'?'Esperando respuesta del cliente hasta las 15 hs':l.prox?'Seguimiento: '+(l.prox.dias<0?'vencido hace '+(-l.prox.dias)+' d':l.prox.dias===0?'hoy':l.prox.dias===1?'mañana':'en '+l.prox.dias+' d')+(l.prox.nota?' · '+esc(l.prox.nota):''):'<span style="color:var(--bad)">Sin próxima acción cargada</span>'}</div></div>
    ${l.convId?`<div class="sec"><h3>Etapa</h3><div class="etapas">${ETAPAS.map(e=>`<button class="${l.etapa===e.k?'on':''}" data-e="${e.k}">${e.n}</button>`).join('')}</div></div>
    <div class="sec"><h3>Temperatura</h3><div class="temp">${['caliente','tibio','frio'].map(t=>`<button class="${t} ${l.temperatura===t?'on':''}" data-t="${t}">${t==='caliente'?'Caliente':t==='tibio'?'Tibio':'Frío'}</button>`).join('')}</div><div class="tip" style="margin-top:6px">${l.temperaturaOrigen==='ia'?'La propuso la IA. Si la cambiás, no la pisa.':l.temperaturaOrigen==='manual'?'La elegiste vos.':'Sin analizar todavía.'}</div></div>`:''}
    ${l.resumen?`<div class="sec"><h3>Interés</h3><p>${esc(l.resumen)}</p></div>`:''}

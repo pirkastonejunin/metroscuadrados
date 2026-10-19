@@ -23,7 +23,7 @@ function hoyAR(ahora) { // medianoche de hoy en Argentina (UTC-3), como Date en 
 const diasHasta = (fecha, ahora) => Math.round((hoyAR(new Date(fecha)).getTime() - hoyAR(ahora).getTime()) / 86400000);
 
 // Hora de cierre del día de trabajo (Argentina): lo que quedó "esperando respuesta" y no contestó vuelve a Hoy para recordarle.
-const HORA_CIERRE = 20;
+const HORA_CIERRE = 15;
 function venceEsperando(ahora) { const t = hoyAR(ahora).getTime() + HORA_CIERRE * 3600000; return new Date(t > ahora.getTime() ? t : t + 86400000); }
 
 function etapaDe(c, m, pres) {
@@ -192,7 +192,7 @@ async function cerrarConv(db, req, c, estado, motivo) {
   if (op) await db.collection('oportunidades').updateOne({ _id: op._id }, { $set: estado === 'ganada' ? { proximaAccion: null, updatedAt: ahora } : { estado: 'descartada', motivoDescarte: 'Perdida: ' + motivo, proximaAccion: null, updatedAt: ahora } });
   return { $set: { 'mesa.cierre': { estado, motivo, at: ahora, usuario: q.nombre, opId: op ? op._id : null }, 'mesa.recs': 0 }, $unset: { 'mesa.esperando': '', 'mesa.recordar': '', 'mesa.sinDec': '', 'mesa.prox': '' } };
 }
-// Al salir de una conversación el vendedor decide qué sigue: esperar al cliente (vence hoy a las 20 hs y vuelve a Hoy para recordarle),
+// Al salir de una conversación el vendedor decide qué sigue: esperar al cliente (vence hoy a las 15 hs y vuelve a Hoy para recordarle),
 // seguimiento (1, 2 o 7 días), posponer (fecha) o cerrar (ganada / perdida con motivo).
 router.post('/:id/decidir', auth, async (req, res) => {
   try {
