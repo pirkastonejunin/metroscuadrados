@@ -617,7 +617,7 @@ router.post('/:id/obra', authAdmin, async (req, res) => {
       const db = await getDb();
       const c = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)), { projection: { _id: 1, estado: 1 } });
       if (!c) throw err(404, 'Compra no encontrada');
-      if (c.estado === 'anulada') throw err(400, 'Una compra anulada no se puede imputar a una obra.');
+      if (c.estado === 'anulada' && (req.body || {}).obraId) throw err(400, 'Una compra anulada no se puede imputar a una obra.');
       const datos = await datosObraParaCompra(db, req, (req.body || {}).obraId);
       await db.collection('compras').updateOne({ _id: id }, { $set: Object.assign({ updatedAt: new Date() }, datos) });
       return datos;
@@ -655,6 +655,11 @@ router.get('/', authAdmin, async (req, res) => {
       const db = await getDb();
       // ?sucursal=1: solo las compras de la sucursal (sin las de otras sucursales de un proveedor compartido) — lo usa el pago, que se hace en UNA sucursal.
       Object.assign(match, req.query.sucursal === '1' ? filtroOrg(req) : await filtroOrgConCompartidos(db, req));
+      // limpieza única por proceso: las facturas anuladas antes de este arreglo seguían imputadas a su obra
+      if (!global.__comprasAnuladasDesimputadas) {
+        global.__comprasAnuladasDesimputadas = true;
+        await db.collection('compras').updateMany({ estado: 'anulada', obraId: { $ne: null, $exists: true } }, [{ $set: { obraAnteriorNumero: '$obraNumero', obraId: null, obraNumero: null, obraCliente: null } }]);
+      }
       return db.collection('compras').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
     });
     res.json(lista);
