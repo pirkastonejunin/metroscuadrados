@@ -392,10 +392,26 @@ router.get('/desde-contacto', authAdmin, async (req, res) => {
   try {
     await orgDeConversacion(req, req.query.convId);
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
-    const nombre = String(req.query.nombre || '').replace(/\(ejemplo\)/i, '').trim() || ('Cliente ' + String(req.query.telefono || '').slice(-4));
-    const db = await getDb(); const { clienteParaVisita } = require('./clienteVinculo');
-    const cli = await clienteParaVisita(db, req.orgId, { nombre, telefono: req.query.telefono, origen: 'WhatsApp' });
-    res.json({ prefill: { clienteId: String(cli.clienteId), items: [], observaciones: '' }, creado: !!cli.creado });
+    const db = await getDb(); const { clientesActivos, digitos } = require('./clienteVinculo');
+    const t = digitos(req.query.telefono).slice(-10);
+    const todos = await clientesActivos(db, req.orgId);
+    // Se busca SOLO por teléfono: por nombre solo hay muchos homónimos (40 Martas).
+    const hay = t.length >= 8 ? todos.filter(c => [c.telefono, c.celular].some(x => digitos(x).slice(-10) === t)) : [];
+    if (hay.length === 1) return res.json({ prefill: { clienteId: String(hay[0]._id), items: [], observaciones: '' } });
+    if (hay.length > 1) return res.json({ prefill: { clienteId: '', items: [], observaciones: '' }, varios: true });
+    res.json({ nuevo: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Cliente nuevo desde un contacto del CRM: exige nombre y apellido completos.
+router.post('/desde-contacto', authAdmin, async (req, res) => {
+  try {
+    const body = req.body || {}; await orgDeConversacion(req, body.convId);
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const nombre = normalizarTexto(body.nombre);
+    if (nombre.split(/\s+/).filter(Boolean).length < 2) throw err(400, 'Escribí el nombre y apellido completos del cliente.');
+    const ahora = new Date();
+    const r = await (await getDb()).collection('clientes').insertOne({ apellidoRazonSocial: nombre, categoriaFiscal: 'consumidor_final', telefono: normalizarTexto(body.telefono), domicilio: '', localidad: '', origenCliente: 'WhatsApp', activo: true, orgId: req.orgId, createdAt: ahora, updatedAt: ahora });
+    res.json({ prefill: { clienteId: String(r.insertedId), items: [], observaciones: '' } });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 router.get('/planes-tarjeta', authAdmin, async (req, res) => {

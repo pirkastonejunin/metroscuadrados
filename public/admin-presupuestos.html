@@ -326,11 +326,31 @@ function avisarPadre(p){
 async function abrirDesdeContacto(){
   if (QS.get('nuevo') !== '1') return;
   try{
-    const r = await fetch(BASE + '/desde-contacto?nombre=' + encodeURIComponent(QS.get('nombre')||'') + '&telefono=' + encodeURIComponent(QS.get('tel')||'') + '&convId=' + encodeURIComponent(CONV_ID), {headers: headersAuth()});
+    const r = await fetch(BASE + '/desde-contacto?telefono=' + encodeURIComponent(QS.get('tel')||'') + '&convId=' + encodeURIComponent(CONV_ID), {headers: headersAuth()});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo preparar el presupuesto');
-    if (d.creado){ const cl = await fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(x => x.json()); clientesCache = Array.isArray(cl) ? cl : clientesCache; }
+    if (d.nuevo) return pedirNombreCompleto();
     abrirNuevoPresupuesto(d.prefill);
   }catch(e){ alert(e.message); }
+}
+// Cliente que todavía no existe: se pide el nombre completo (hay muchos homónimos) antes de armar el presupuesto.
+function pedirNombreCompleto(){
+  const sug = String(QS.get('nombre')||'').replace(/\(ejemplo\)/i,'').trim();
+  document.getElementById('modalRoot').innerHTML = `<div class="modal-bg"><div class="modal"><h2>Cliente nuevo</h2>
+    <p class="muted" style="margin-top:-8px">No hay ningún cliente con el teléfono ${escapeHtml(QS.get('tel')||'')}. Cargalo con nombre y apellido completos para no confundirlo con otro.</p>
+    <label>Nombre y apellido *</label><input id="ncNombre" value="${escapeHtml(sug)}" placeholder="Ej: Marta Gómez" autocomplete="off">
+    <div class="err" id="ncErr"></div><button class="btn" id="ncBtn" style="margin-top:10px;width:100%" onclick="crearClienteContacto()">Continuar</button></div></div>`;
+  const i = document.getElementById('ncNombre'); i.focus(); i.onkeydown = e => { if (e.key==='Enter') crearClienteContacto(); };
+}
+async function crearClienteContacto(){
+  const nombre = document.getElementById('ncNombre').value.trim(), err = document.getElementById('ncErr'), btn = document.getElementById('ncBtn'); err.textContent = '';
+  if (nombre.split(/\s+/).filter(Boolean).length < 2){ err.textContent = 'Escribí el nombre y apellido completos.'; return; }
+  btn.disabled = true;
+  try{
+    const r = await fetch(BASE + '/desde-contacto', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, telefono: QS.get('tel')||'', convId: CONV_ID})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo crear el cliente');
+    const cl = await fetch(BASE_VENTAS + '/clientes', {headers: headersAuth()}).then(x => x.json()); clientesCache = Array.isArray(cl) ? cl : clientesCache;
+    abrirNuevoPresupuesto(d.prefill);
+  }catch(e){ err.textContent = e.message; btn.disabled = false; }
 }
 async function abrirDesdeVisita(){
   const vid = new URLSearchParams(location.search).get('visita');
