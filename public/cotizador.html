@@ -340,6 +340,7 @@
         </div>
       </div>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
+      <label class="check" id="lblAplicarMinimo" title="Cobra la mano de obra por m² como mínimo sobre los m² mínimos cotizables de la tarifa, aunque la obra tenga menos"><input type="checkbox" id="aplicarMinimo" checked> Aplicar mínimo cotizable</label>
       <div class="actions">
         <button class="secondary" id="btnVolverTipoObra">← Volver</button>
         <button class="primary" id="btnContinuarProductos">Elegir productos →</button>
@@ -874,6 +875,7 @@ $('#btnContinuarDatos').addEventListener('click', () => {
     $('#campoPrecioM2Generico').classList.toggle('hidden', !gen);
     $('#precioM2Generico').value = '';
     document.getElementById('manoObra').closest('label').classList.toggle('hidden', gen);
+    $('#lblAplicarMinimo').classList.toggle('hidden', gen);
     if (gen) document.getElementById('manoObra').checked = false;
   } else {
     $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
@@ -955,7 +957,8 @@ function leerObra(){
     const obra = {
       categoria: categoria,
       superficies: leerSuperficies(),
-      manoObra: $('#manoObra').checked
+      manoObra: $('#manoObra').checked,
+      aplicarMinimo: $('#aplicarMinimo').checked
     };
     const desperdicio = parseFloat($('#desperdicioPctSuperficies').value) || 0;
     // Nombres de campo distintos por categoría (igual que ya hacía Piedra),
@@ -973,6 +976,7 @@ function leerObra(){
     cantidadPuertas: parseInt($('#cantidadPuertas').value, 10) || 0,
     requiereNivelacion: $('#requiereNivelacion').checked,
     manoObra: $('#manoObra').checked,
+    aplicarMinimo: $('#aplicarMinimo').checked,
     desperdicioPctPiso: parseFloat($('#desperdicioPctPiso').value) || 0
   };
 }
@@ -2299,6 +2303,7 @@ $('#btnNueva').addEventListener('click', () => {
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
   $('#requiereNivelacion').checked=false;
   $('#manoObra').checked=false;
+  $('#aplicarMinimo').checked=true;
   $('#desperdicioPctSuperficies').value=0;
   resetSuperficies();
   mostrarMsg(null);
@@ -2380,6 +2385,7 @@ async function editarCotizacionHistorial(){
   $('#desperdicioPctPiso').value = (doc.obra && doc.obra.desperdicioPctPiso != null) ? doc.obra.desperdicioPctPiso : 0;
   $('#requiereNivelacion').checked = !!(doc.obra && doc.obra.requiereNivelacion);
   $('#manoObra').checked = !!(doc.obra && doc.obra.manoObra);
+  $('#aplicarMinimo').checked = !(doc.obra && doc.obra.aplicarMinimo === false);
 
   cotizacionActual = JSON.parse(JSON.stringify(doc));
   cotizacionActual.obra = doc.obra || {};

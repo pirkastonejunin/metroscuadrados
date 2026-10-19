@@ -530,7 +530,7 @@ function calcularItemsPiso({ obra, productos, tarifas: t }) {
 
   // La mano de obra ligada a m2 (piso y nivelación) se cobra como mínimo
   // sobre minimoM2Cotizable, aunque la obra real tenga menos metros.
-  const minimoM2 = Number(t.minimoM2Cotizable) || 0;
+  const minimoM2 = obra.aplicarMinimo === false ? 0 : (Number(t.minimoM2Cotizable) || 0); // tilde "Aplicar mínimo cotizable" (por defecto sí)
   const m2CotizableManoObra = m2Pisos > 0 ? Math.max(m2Pisos, minimoM2) : 0;
 
   if (m2Pisos > 0) {
@@ -632,7 +632,7 @@ function calcularItemsPiedra({ obra, productos, tarifas: t }) {
   // sobre 11m2), no sobre los m2 "limpios" de la obra.
   const factorDesperdicioPiedra = 1 + desperdicioPctPiedra / 100;
   const m2PiedraConDesperdicio = m2Piedra * factorDesperdicioPiedra;
-  const minimoM2 = Number(t.minimoM2Cotizable) || 0;
+  const minimoM2 = obra.aplicarMinimo === false ? 0 : (Number(t.minimoM2Cotizable) || 0); // tilde "Aplicar mínimo cotizable" (por defecto sí)
   const m2CotizableManoObra = m2Piedra > 0 ? Math.max(m2PiedraConDesperdicio, minimoM2) : 0;
 
   if (m2Piedra > 0) {
@@ -685,7 +685,7 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
   // Cada superficie se mide en módulos de 0,60 m (la placa es de 0,60 x 0,60): m² = módulos de largo x módulos de alto x 0,36.
   const m2Placas = Math.round(superficies.reduce((s, x) => s + m2PlacasDeSuperficie(x), 0) * 10000) / 10000 || 0;
 
-  const minimoM2 = Number(t.minimoM2Cotizable) || 0;
+  const minimoM2 = obra.aplicarMinimo === false ? 0 : (Number(t.minimoM2Cotizable) || 0); // tilde "Aplicar mínimo cotizable" (por defecto sí)
   const m2CotizableManoObra = m2Placas > 0 ? Math.max(m2Placas, minimoM2) : 0;
 
   // Cotizador genérico de placas (sin productos del catálogo): un precio por m² total (llave en mano, el de la cotización o el
