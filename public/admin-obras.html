@@ -645,7 +645,7 @@ async function cargarRentabilidadObra(id){
   try {
     const d = await api('/'+id+'/rentabilidad');
     const color = d.resultado >= 0 ? 'var(--ok,#15803d)' : 'var(--danger,#dc2626)';
-    const filasF = d.facturas.map(f => `<tr><td>${f.fecha?new Date(f.fecha).toLocaleDateString('es-AR'):''}</td><td>${escapeHtmlO(f.proveedor)}${f.comprobante?' <span class="muted">'+escapeHtmlO(f.comprobante)+'</span>':''}</td><td style="text-align:right">${$m(f.sinIva)}${f.moneda==='USD'?' <span class="muted">(USD '+f.totalOriginal+')</span>':''}${f.sinCotizacion?' ⚠':''}</td></tr>`).join('');
+    const filasF = d.facturas.map(f => `<tr><td>${f.fecha?new Date(f.fecha).toLocaleDateString('es-AR'):''}</td><td>Compra #${f.numero} · ${escapeHtmlO(f.proveedor)}${f.comprobante?' <span class="muted">'+escapeHtmlO(f.comprobante)+'</span>':''}</td><td style="text-align:right">${$m(f.sinIva)}${f.moneda==='USD'?' <span class="muted">(USD '+f.totalOriginal+')</span>':''}${f.sinCotizacion?' ⚠':''}</td><td style="text-align:right"><button class="btn small secondary" title="Quitar esta factura de la obra" onclick="quitarFacturaDeObra('${f._id}','${id}')">Quitar</button></td></tr>`).join('');
     const filasM = d.manoObraDetalle.map(t => `<tr><td>${escapeHtmlO(t.tipoTrabajo)} <span class="muted">${t.m2} m² × ${$m(t.costoPorM2)}</span></td><td style="text-align:right">${$m(t.subtotal)}</td></tr>`).join('');
     cont.innerHTML = `
       <div class="tarea-box">
@@ -754,6 +754,15 @@ async function pmGuardar(){
     await api('/' + _pmObraId + '/presupuesto-materiales', {method:'PUT', body: {items: _pmItems.map(x => ({productoId: x.productoId, sku: x.sku, nombre: x.nombre, cantidad: Number(x.cantidad), costoUnitario: Number(x.costoUnitario)||0}))}});
     abrirObra(_pmObraId);
   } catch (e) { err.textContent = e.message; }
+}
+async function quitarFacturaDeObra(compraId, obraId){
+  if (!confirm('¿Quitar esta factura de la obra? La factura no se anula, solo deja de contar acá.')) return;
+  try {
+    const r = await fetch('/api/compras/' + compraId + '/obra', {method:'POST', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({obraId: null})});
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error || 'No se pudo quitar (¿tenés acceso al módulo Compras?)');
+    cargarRentabilidadObra(obraId);
+  } catch (e) { alert(e.message); }
 }
 function escapeHtmlO(t){ return String(t==null?'':t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
