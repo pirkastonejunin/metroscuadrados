@@ -96,13 +96,27 @@ function jsonDe(t) {
   try { return JSON.parse(l); } catch (e) { const i = l.indexOf('{'), j = l.lastIndexOf('}'); if (i >= 0 && j > i) { try { return JSON.parse(l.slice(i, j + 1)); } catch (e2) { /* nada */ } } return null; }
 }
 // historial: [{role:'user'|'model', text, media?:{mime,data(base64)}}]
-async function llamarIA(historial, promptBaseTexto, orgId) {
-  const sistema = await promptSistema(promptBaseTexto, orgId);
+// Vendedor con datos reales (Fase 1): por sucursal, apagado por defecto. Guardado en bot_config 'vendedor:<orgId>'.
+const cacheVend = new Map();
+async function vendedorActivo(orgId) {
+  if (!orgId) return false;
+  const k = String(orgId), c = cacheVend.get(k); if (c && Date.now() - c.t < 30000) return c.v;
+  let v = false; try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'vendedor:' + k }); v = !!(d && d.activo); } catch (e) { /* apagado */ }
+  cacheVend.set(k, { t: Date.now(), v }); return v;
+}
+// opciones.conDatos: true/false fuerza (simulador); undefined = lo que diga la sucursal. Devuelve el JSON del bot (+ _pasos con las consultas hechas al sistema).
+async function llamarIA(historial, promptBaseTexto, orgId, opciones) {
+  const o = opciones || {};
+  let sistema = await promptSistema(promptBaseTexto, orgId);
+  const conDatos = orgId && (o.conDatos === undefined ? await vendedorActivo(orgId) : !!o.conDatos);
+  let herramientas;
+  if (conDatos) { const vt = require('./vendedorTools'); herramientas = vt.herramientas(await getDb(), orgId); sistema += vt.REGLAS_PROMPT; }
   const r = await ia.generar({
-    uso: 'bot', orgId: orgId || null, sistema, mensajes: historial, esquema: ESQUEMA, temperatura: 0.4, maxTokens: 800, timeoutMs: 45000,
-    proveedor: process.env.BOT_PROVEEDOR, modelo: process.env.BOT_MODELO || undefined, modelos: { anthropic: 'claude-haiku-4-5-20251001' },
-    notaJson: 'El JSON debe tener: respuesta, derivar, aceptoAsesor, producto, medidas, estilo, resumen, etiquetas.'
+    uso: conDatos ? 'bot-datos' : 'bot', orgId: orgId || null, sistema, mensajes: historial, esquema: ESQUEMA, temperatura: 0.4, maxTokens: 800, timeoutMs: conDatos ? 60000 : 45000,
+    proveedor: o.proveedor || process.env.BOT_PROVEEDOR, modelo: o.modelo || process.env.BOT_MODELO || undefined, modelos: { anthropic: 'claude-haiku-4-5-20251001' },
+    notaJson: 'El JSON debe tener: respuesta, derivar, aceptoAsesor, producto, medidas, estilo, resumen, etiquetas.', herramientas, maxPasos: 5
   });
+  if (r.json) { Object.defineProperty(r.json, '_pasos', { value: r.pasos || [], enumerable: false }); Object.defineProperty(r.json, '_meta', { value: { proveedor: r.proveedor, modelo: r.modelo, costoUsd: r.costoUsd, tokensIn: r.tokensIn, tokensOut: r.tokensOut }, enumerable: false }); }
   return r.json;
 }
 
@@ -175,7 +189,17 @@ async function responder(orgId, convId) {
       if (hist.length && hist[hist.length - 1].role === role) { hist[hist.length - 1].text += '\n' + item.text; if (item.media) hist[hist.length - 1].media = item.media; } else hist.push(item);
     }
     if (hist[0] && hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
-    const r = await llamarIA(hist, undefined, conv.orgId);
+    let r;
+    try { r = await llamarIA(hist, undefined, conv.orgId); }
+    catch (e) {
+      if (!e.tope) throw e;
+      // tope mensual de IA alcanzado: el bot no puede responder; se avisa al cliente y queda para un asesor
+      await db.collection(COL_M).updateOne({ _id: ultimoIn._id }, { $set: { respondido: true } });
+      const aviso = 'Gracias por escribirnos. Un asesor te va a responder a la brevedad' + (abierto() ? '.' : ' dentro del horario comercial.');
+      const env = await enviarTexto(conv.tel, aviso); await guardarMensaje(db, conv, { waId: env.id, dir: 'out', origen: 'bot', tipo: 'text', texto: aviso, at: new Date(), prueba: !!env.prueba });
+      await db.collection(COL_C).updateOne({ _id: convId }, { $set: { estado: 'aceptado', avisoAt: new Date(), updatedAt: new Date(), resumen: (conv.resumen || '') + ' [El bot no respondió: tope mensual de IA alcanzado]' } });
+      return;
+    }
     if (!r) throw new Error('La IA no devolvió un JSON válido');
     await db.collection(COL_M).updateOne({ _id: ultimoIn._id }, { $set: Object.assign({ respondido: true }, r.transcripcion ? { texto: '🎤 ' + r.transcripcion } : {}) });
     // el estado pudo cambiar mientras pensaba la IA (un asesor tomó la conversación): no pisarlo ni escribir
@@ -273,9 +297,10 @@ router.post('/simular', auth, async (req, res) => {
     if (!ms.length || ms[ms.length - 1].role !== 'user') return res.status(400).json({ error: 'Falta el mensaje del cliente.' });
     const hist = ms.map(m => ({ role: m.role === 'model' ? 'model' : 'user', text: String(m.text || '').slice(0, 4000), media: m.media && m.media.data && /^(image|audio)\//.test(m.media.mime || '') && String(m.media.data).length < 12e6 ? { mime: m.media.mime, data: m.media.data } : undefined }));
     if (hist[0].role === 'model') hist.unshift({ role: 'user', text: '(inicio de la conversación)' });
-    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined, req.orgId || req.orgOperar || orgBot());
+    const orgSim = req.orgId || req.orgOperar || orgBot();
+    const r = await llamarIA(hist, typeof b.prompt === 'string' && b.prompt.trim() ? b.prompt : undefined, orgSim, { conDatos: typeof b.conDatos === 'boolean' ? b.conDatos : undefined });
     if (!r) return res.status(502).json({ error: 'La IA no devolvió una respuesta válida. Probá de nuevo.' });
-    res.json({ respuesta: r.respuesta || '', derivar: !!r.derivar, aceptoAsesor: !!r.aceptoAsesor, producto: r.producto || '', medidas: r.medidas || '', estilo: r.estilo || '', resumen: r.resumen || '', etiquetas: r.etiquetas || [], transcripcion: r.transcripcion || '' });
+    res.json({ respuesta: r.respuesta || '', derivar: !!r.derivar, aceptoAsesor: !!r.aceptoAsesor, producto: r.producto || '', medidas: r.medidas || '', estilo: r.estilo || '', resumen: r.resumen || '', etiquetas: r.etiquetas || [], transcripcion: r.transcripcion || '', pasos: (r._pasos || []).map(p => ({ herramienta: p.herramienta, argumentos: p.argumentos, resultado: p.resultado })) });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 router.get('/prompt', auth, async (req, res) => {
@@ -360,6 +385,52 @@ router.patch('/conocimiento/:id', auth, soloAdmin, async (req, res) => {
     await db.collection('bot_conocimiento').updateOne({ _id: f._id }, { $set: set }); cacheCon.delete(String(f.orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.delete('/conocimiento/:id', auth, soloAdmin, async (req, res) => { try { const db = await getDb(); const f = await fuenteDeReq(db, req); if (!f) return res.status(404).json({ error: 'No encontrada.' }); await db.collection('bot_conocimiento').deleteOne({ _id: f._id }); cacheCon.delete(String(f.orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+
+// ---- prueba por lote: corre las consultas de pruebas/consultas-bot.json por el mismo motor (con datos reales) y deja el resultado para revisar ----
+const lotes = new Map();
+router.post('/probar-lote', auth, soloAdmin, async (req, res) => {
+  try {
+    const orgId = orgCon(req); if (!orgId) return sinOrg(res);
+    let casos; try { casos = JSON.parse(fs.readFileSync(path.join(__dirname, 'pruebas', 'consultas-bot.json'), 'utf8')).consultas; } catch (e) { return res.status(500).json({ error: 'No se pudo leer pruebas/consultas-bot.json' }); }
+    const b = req.body || {}; const ids = Array.isArray(b.ids) && b.ids.length ? new Set(b.ids.map(Number)) : null;
+    casos = casos.filter(c => !ids || ids.has(c.id));
+    const id = crypto.randomBytes(6).toString('hex');
+    const job = { id, estado: 'corriendo', total: casos.length, hechas: 0, resultados: [], costoUsd: 0, inicio: new Date(), proveedor: String(b.proveedor || '').toLowerCase() || undefined, modelo: String(b.modelo || '').trim() || undefined };
+    lotes.set(id, job); if (lotes.size > 10) lotes.delete(lotes.keys().next().value);
+    (async () => {
+      const cola = casos.slice();
+      const worker = async () => { for (let c = cola.shift(); c; c = cola.shift()) {
+        const hist = [], turnos = [];
+        try {
+          for (const m of c.mensajes) {
+            hist.push({ role: 'user', text: m });
+            const r = await llamarIA(hist.slice(), undefined, orgId, { conDatos: true, proveedor: job.proveedor, modelo: job.modelo });
+            if (!r) throw new Error('La IA no devolvió un JSON válido');
+            const meta = r._meta || {}; job.costoUsd += meta.costoUsd || 0; job.usado = { proveedor: meta.proveedor, modelo: meta.modelo };
+            turnos.push({ cliente: m, bot: r.respuesta || '', derivar: !!r.derivar, herramientas: (r._pasos || []).map(p => p.herramienta + ' ' + JSON.stringify(p.argumentos)) });
+            hist.push({ role: 'model', text: r.respuesta || '' });
+          }
+          job.resultados.push({ id: c.id, categoria: c.categoria, esperado: c.esperado, turnos });
+        } catch (e) { job.resultados.push({ id: c.id, categoria: c.categoria, esperado: c.esperado, turnos, error: e.message }); if (e.tope) { cola.length = 0; } }
+        job.hechas++;
+      } };
+      await Promise.all([worker(), worker(), worker()]);
+      job.resultados.sort((a, b2) => a.id - b2.id); job.estado = 'listo'; job.fin = new Date();
+    })().catch(e => { job.estado = 'error'; job.error = e.message; });
+    res.json({ id, total: casos.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.get('/probar-lote/:id', auth, soloAdmin, (req, res) => { const j = lotes.get(req.params.id); if (!j) return res.status(404).json({ error: 'No existe esa corrida (se pierde si el servidor se reinicia).' }); res.json(j); });
+router.get('/vendedor-config', auth, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return res.json({ activo: false, sinSucursal: true });
+    const db = await getDb(); const d = await db.collection('bot_config').findOne({ _id: 'vendedor:' + orgId });
+    const [conPrecio, total] = await Promise.all([db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false }, precio: { $gt: 0 } }), db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false } })]);
+    res.json({ activo: !!(d && d.activo), productosConPrecio: conPrecio, productosTotal: total }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.put('/vendedor-config', auth, soloAdmin, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res);
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'vendedor:' + orgId }, { $set: { activo: !!(req.body && req.body.activo), updatedAt: new Date() } }, { upsert: true }); cacheVend.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.put('/conocimiento-config', auth, soloAdmin, async (req, res) => { try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); await (await getDb()).collection('bot_config').updateOne({ _id: 'conocimiento:' + orgId }, { $set: { incluirCatalogo: !!(req.body && req.body.incluirCatalogo) } }, { upsert: true }); cacheCon.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 (async () => { try { const db = await getDb(); await db.collection(COL_M).createIndex({ waId: 1 }, { unique: true, sparse: true }); await db.collection(COL_C).createIndex({ orgId: 1, tel10: 1 }, { unique: true }); await db.collection(COL_M).createIndex({ convId: 1, at: 1 }); } catch (e) { /* sin base al arrancar */ } })();

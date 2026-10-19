@@ -130,6 +130,84 @@ async function viaOpenai(op, modelo, key) {
 }
 const VIAS = { gemini: viaGemini, anthropic: viaAnthropic, openai: viaOpenai };
 
+// ---- bucle de herramientas (function calling) ----
+// op.herramientas: [{ name, description, parameters (JSON schema), ejecutar: async (args) => objeto }]. Cada proveedor tiene su formato;
+// el bucle es el mismo: el modelo pide herramientas, las ejecutamos, le devolvemos los resultados, hasta que responde con texto.
+const ADAPTADORES = {
+  gemini: {
+    init(op) { return { contents: op.mensajes.map(m => ({ role: m.role === 'model' ? 'model' : 'user', parts: [{ text: m.text || '(sin texto)' }].concat(m.media ? [{ inlineData: { mimeType: m.media.mime, data: m.media.data } }] : []) })) }; },
+    async llamar(op, modelo, key, st, conTools) {
+      const base = process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta';
+      const body = { systemInstruction: { parts: [{ text: op.sistema }] }, contents: st.contents, generationConfig: { temperature: op.temperatura == null ? 0.4 : op.temperatura } };
+      if (conTools) body.tools = [{ functionDeclarations: op.herramientas.map(h => ({ name: h.name, description: h.description, parameters: h.parameters })) }];
+      const r = await pedir(base + '/models/' + encodeURIComponent(modelo) + ':generateContent', { method: 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify(body) }, op.timeoutMs);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw falloHttp(r, d);
+      const c = (d.candidates || [])[0], u = d.usageMetadata || {}, partes = (c && c.content && c.content.parts) || [];
+      if (c && c.content) st.contents.push(c.content); // se devuelve tal cual (incluye las firmas de razonamiento de Gemini)
+      return { texto: partes.map(x => x.text || '').join(''), llamadas: partes.filter(x => x.functionCall).map((x, i) => ({ id: x.functionCall.id || ('c' + i), name: x.functionCall.name, args: x.functionCall.args || {} })), tin: u.promptTokenCount || 0, tout: (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0) };
+    },
+    resultados(st, llamadas, res) { st.contents.push({ role: 'user', parts: llamadas.map((l, i) => ({ functionResponse: { name: l.name, id: l.id, response: { resultado: res[i] } } })) }); }
+  },
+  anthropic: {
+    init(op) { return { messages: op.mensajes.map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.media && /^image\//.test(m.media.mime) ? [{ type: 'image', source: { type: 'base64', media_type: m.media.mime, data: m.media.data } }, { type: 'text', text: m.text || '(foto)' }] : (m.text || '(sin texto)') })) }; },
+    async llamar(op, modelo, key, st, conTools) {
+      const body = { model: modelo, max_tokens: op.maxTokens || 1000, temperature: op.temperatura == null ? 0.4 : op.temperatura, system: op.sistema, messages: st.messages };
+      if (conTools) body.tools = op.herramientas.map(h => ({ name: h.name, description: h.description, input_schema: h.parameters }));
+      const r = await pedir('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify(body) }, op.timeoutMs);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw falloHttp(r, d);
+      const u = d.usage || {}, bl = d.content || [];
+      st.messages.push({ role: 'assistant', content: bl });
+      return { texto: bl.filter(b => b.type === 'text').map(b => b.text).join(''), llamadas: bl.filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input || {} })), tin: u.input_tokens || 0, tout: u.output_tokens || 0 };
+    },
+    resultados(st, llamadas, res) { st.messages.push({ role: 'user', content: llamadas.map((l, i) => ({ type: 'tool_result', tool_use_id: l.id, content: JSON.stringify(res[i]) })) }); }
+  },
+  openai: {
+    init(op) { return { messages: [{ role: 'system', content: op.sistema }].concat(op.mensajes.map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.media && /^image\//.test(m.media.mime) ? [{ type: 'image_url', image_url: { url: 'data:' + m.media.mime + ';base64,' + m.media.data } }, { type: 'text', text: m.text || '(foto)' }] : (m.text || '(sin texto)') }))) }; },
+    async llamar(op, modelo, key, st, conTools) {
+      if (!modelo) throw err(503, 'Para usar OpenAI hay que indicar el modelo en IA_MODELO (o IA_MODELO_OPENAI).', { sinClave: true });
+      const body = { model: modelo, temperature: op.temperatura == null ? 0.4 : op.temperatura, max_completion_tokens: op.maxTokens || 1000, messages: st.messages };
+      if (conTools) body.tools = op.herramientas.map(h => ({ type: 'function', function: { name: h.name, description: h.description, parameters: h.parameters } }));
+      const r = await pedir((process.env.OPENAI_BASE || 'https://api.openai.com/v1') + '/chat/completions', { method: 'POST', headers: { authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify(body) }, op.timeoutMs);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw falloHttp(r, d);
+      const u = d.usage || {}, m = ((d.choices || [])[0] || {}).message || {};
+      st.messages.push(m);
+      return { texto: String(m.content || ''), llamadas: (m.tool_calls || []).map(t => { let a = {}; try { a = JSON.parse(t.function.arguments || '{}'); } catch (e) { /* args inválidos */ } return { id: t.id, name: t.function.name, args: a }; }), tin: u.prompt_tokens || 0, tout: u.completion_tokens || 0 };
+    },
+    resultados(st, llamadas, res) { llamadas.forEach((l, i) => st.messages.push({ role: 'tool', tool_call_id: l.id, content: JSON.stringify(res[i]) })); }
+  }
+};
+async function viaHerramientas(prov, op, modelo, key) {
+  const ad = ADAPTADORES[prov], st = ad.init(op), maxPasos = Math.min(Math.max(op.maxPasos || 5, 1), 8);
+  let tin = 0, tout = 0, texto = '';
+  const pasos = [];
+  for (let paso = 0; paso <= maxPasos; paso++) {
+    const r = await ad.llamar(op, modelo, key, st, paso < maxPasos); // el último intento va sin herramientas: obliga a responder
+    tin += r.tin; tout += r.tout; texto = r.texto;
+    if (!r.llamadas.length || paso >= maxPasos) break;
+    const res = [];
+    for (const l of r.llamadas) {
+      const h = op.herramientas.find(x => x.name === l.name); let out;
+      try { out = h ? await h.ejecutar(l.args) : { error: 'Herramienta desconocida.' }; } catch (e) { out = { error: 'La herramienta falló: ' + String(e.message || e).slice(0, 200) }; }
+      pasos.push({ herramienta: l.name, argumentos: l.args, resultado: out }); res.push(out);
+    }
+    ad.resultados(st, r.llamadas, res);
+  }
+  return { texto, tin, tout, pasos };
+}
+// Con herramientas el modelo no fuerza el JSON: se pide por instrucción y, si no vino bien formado, se repara con una llamada corta sin herramientas.
+async function conHerramientas(prov, op, modelo, key) {
+  const sistema = op.sistema + (op.esquema ? '\n\nCuando termines de consultar herramientas, tu respuesta FINAL debe ser únicamente un objeto JSON con este esquema (sin texto afuera, sin bloques de código): ' + JSON.stringify(op.esquema) : '');
+  const r = await viaHerramientas(prov, Object.assign({}, op, { sistema }), modelo, key);
+  if (op.esquema && !jsonDe(r.texto)) {
+    const rep = await VIAS[prov](Object.assign({}, op, { mensajes: [{ role: 'user', text: 'Texto a convertir en el JSON pedido (conservá el contenido):\n' + r.texto }] }), modelo, key);
+    r.tin += rep.tin; r.tout += rep.tout; r.texto = rep.texto;
+  }
+  return r;
+}
+
 function jsonDe(t) {
   const l = String(t || '').replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
   try { return JSON.parse(l); } catch (e) { const i = l.indexOf('{'), j = l.lastIndexOf('}'); if (i >= 0 && j > i) { try { return JSON.parse(l.slice(i, j + 1)); } catch (e2) { /* nada */ } } return null; }
@@ -170,10 +248,10 @@ async function generar(op) {
     const prov = orden[i], modelo = modeloDe(prov, op, i === 0), t0 = Date.now();
     if (!tieneClave(prov)) { ultimo = err(503, 'Falta la variable ' + CLAVES[prov] + ' en el servidor.', { sinClave: true }); continue; }
     try {
-      const r = await VIAS[prov](op, modelo, process.env[CLAVES[prov]]);
+      const r = (op.herramientas && op.herramientas.length) ? await conHerramientas(prov, op, modelo, process.env[CLAVES[prov]]) : await VIAS[prov](op, modelo, process.env[CLAVES[prov]]);
       const costo = costoUsd(modelo, r.tin, r.tout);
-      registrar({ uso: op.uso || 'otro', orgId: op.orgId || null, proveedor: prov, modelo, tokensIn: r.tin, tokensOut: r.tout, costoUsd: costo, ms: Date.now() - t0, ok: true, respaldo: i > 0 });
-      return { texto: r.texto, json: op.esquema ? jsonDe(r.texto) : null, proveedor: prov, modelo, tokensIn: r.tin, tokensOut: r.tout, costoUsd: costo };
+      registrar({ uso: op.uso || 'otro', orgId: op.orgId || null, proveedor: prov, modelo, tokensIn: r.tin, tokensOut: r.tout, costoUsd: costo, ms: Date.now() - t0, ok: true, respaldo: i > 0, herramientas: (r.pasos || []).length || undefined });
+      return { texto: r.texto, json: op.esquema ? jsonDe(r.texto) : null, proveedor: prov, modelo, tokensIn: r.tin, tokensOut: r.tout, costoUsd: costo, pasos: r.pasos || [] };
     } catch (e) {
       ultimo = e;
       registrar({ uso: op.uso || 'otro', orgId: op.orgId || null, proveedor: prov, modelo, tokensIn: 0, tokensOut: 0, costoUsd: 0, ms: Date.now() - t0, ok: false, error: String(e.message || '').slice(0, 300), respaldo: i > 0 });
