@@ -64,7 +64,17 @@ async function armar(db, req, { cerradas }) {
   const presPorConv = new Map(); for (const p of press) { const k = String(p.origenBot.convId); if (!presPorConv.has(k)) presPorConv.set(k, p); }
   const items = []; const vistos = new Set();
   for (const c of convs) {
-    const m = c.mesa || {}; const cerrada = !!m.cierre;
+    let m = c.mesa || {}; let cerrada = !!m.cierre;
+    // Si el cliente vuelve a escribir después de cerrada (ganada o perdida), se reabre sola y vuelve a Hoy.
+    if (cerrada) { const uu = porConv.get(String(c._id)); const cat = m.cierre.at && new Date(m.cierre.at);
+      if (uu && uu.ult && uu.ult.dir === 'in' && cat && new Date(uu.ult.at) > cat) {
+        try {
+          const ci = m.cierre;
+          const r = await db.collection(COL_C).updateOne({ _id: c._id, 'mesa.cierre': { $exists: true } }, { $unset: { 'mesa.cierre': '' }, $push: { 'mesa.historial': { at: ahora, txt: 'Reabierta: el cliente volvió a escribir', usuario: 'Sistema' } } });
+          if (r.modifiedCount && ci.estado === 'perdida' && ci.opId) await db.collection('oportunidades').updateOne({ _id: ci.opId, estado: 'descartada' }, { $set: { estado: 'activa', motivoDescarte: '', updatedAt: ahora } });
+          m = Object.assign({}, m, { cierre: null }); cerrada = false;
+        } catch (e) { /* si falla queda cerrada */ }
+      } }
     if (cerrada && !cerradas) { vistos.add(c.tel10); continue; }
     const u = porConv.get(String(c._id)); const op = opPorTel.get(c.tel10) || null; const pres = presPorConv.get(String(c._id)) || null; const a = c.asistente || null;
     vistos.add(c.tel10);

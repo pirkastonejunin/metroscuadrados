@@ -374,7 +374,7 @@ function siguiente(l){
 }
 function pintarCaj(l, o){
   const c = $('caj'); const keep = $('txt') ? $('txt').value : '';
-  const hdr = `<div class="chead"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div><h2>${esc(l.nombre)}</h2><div class="sb">+${esc(l.tel)}${l.producto?' · '+esc(l.producto):''}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${l.convId&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':''}<button class="x" id="cx">Cerrar</button></div>`;
+  const hdr = `<div class="chead"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div><h2>${esc(l.nombre)}</h2><div class="sb">+${esc(l.tel)}${l.producto?' · '+esc(l.producto):''}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${l.convId&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':''}${l.convId&&l.cierre?'<button class="btn sm pri" id="reab">Reabrir</button>':''}<button class="x" id="cx">Cerrar</button></div>`;
   let izq;
   if (l.convId){
     const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('');
@@ -395,6 +395,7 @@ function pintarCaj(l, o){
   $('cx').onclick = cerrarCaj; $('vel').onclick = cerrarCaj;
   const tx = $('txt'); if (tx){ tx.value = keep; if (!(o&&o.keep)) tx.focus(); }
   if ($('tomar')) $('tomar').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/tomar`); toast('Es tuya'); await cargar({forzar:true}); }catch(e){ err(e); } };
+  if ($('reab')) $('reab').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/reabrir`); toast('Reabierta'); await cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('usar')) $('usar').onclick = () => { tx.value = sugDe(l); tx.focus(); };
   if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await post(`/api/bot/conversaciones/${l.convId}/asistente`); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };
   if ($('rap')) $('rap').onchange = e => { const r={Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value=(tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
