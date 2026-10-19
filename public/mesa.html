@@ -51,6 +51,24 @@ button{cursor:pointer}
 .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .barra select,.barra input[type=search]{border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 9px;font-size:12px;font-weight:600;max-width:128px}.barra .chip{padding:3px 10px;font-size:12px}.barra{gap:5px;flex-wrap:nowrap;overflow-x:auto}.barra>*{flex:none}.barra .tip{font-size:11.5px}
 
+/* resumen */
+.res{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:6px}
+.rh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.rh h2{margin:0;font-size:15px;font-weight:800}
+.kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.k{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow)}
+.k span{font-size:11.5px;color:var(--mute);font-weight:700;display:block}.k b{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.2}.k small{display:block;font-size:11.5px;color:var(--mute);font-weight:600}
+.k.bad b{color:var(--bad)}.k.ok b{color:var(--ok)}
+.rg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.bx{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.bx h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:800}
+.br{display:grid;grid-template-columns:minmax(80px,1.1fr) 3fr auto;gap:8px;align-items:center;padding:3px 0;font-size:12.5px}
+.br .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:700}
+.br .tr{height:8px;background:var(--panel2);border-radius:8px;overflow:hidden}.br .tr i{display:block;height:100%;border-radius:8px;background:var(--cc,var(--accent));transition:width .6s}
+.br .vl{font-weight:800;white-space:nowrap}.br .vl small{color:var(--mute);font-weight:600;margin-left:5px}
+.rt{width:100%;border-collapse:collapse;font-size:12.5px}.rt th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);text-align:right;padding:4px 8px;font-weight:800}.rt th:first-child,.rt td:first-child{text-align:left}
+.rt td{padding:6px 8px;border-top:1px solid var(--line);text-align:right;font-weight:600}.rt td:first-child{font-weight:800}.rt td.bad{color:var(--bad);font-weight:800}
+.aten{display:flex;flex-direction:column;gap:2px}.aten button{width:100%;display:flex;align-items:center;gap:8px;border:0;background:transparent;text-align:left;padding:5px 6px;border-radius:8px;font-size:12.5px}.aten button:hover{background:var(--panel2)}
+.aten b{font-weight:800}.aten span{color:var(--mute);margin-left:auto;white-space:nowrap}
 /* embudo */
 .embudo{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;flex:none}
 .fz{--cc:var(--mute);background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:6px 10px;transition:transform .15s,box-shadow .15s,border-color .15s;cursor:pointer;text-align:left;box-shadow:var(--shadow);position:relative;display:flex;flex-direction:column;gap:1px}
@@ -183,7 +201,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
 <div class="app">
   <header class="top">
     <div class="brand">CRM<small id="quien">Piedra Negra</small></div>
-    <div class="seg" id="vistas"><button data-v="tablero" class="on">Tablero</button><button data-v="lista">Lista</button><button data-v="bot">Bot de WhatsApp</button></div>
+    <div class="seg" id="vistas"><button data-v="tablero" class="on">Tablero</button><button data-v="lista">Lista</button><button data-v="resumen">Resumen</button><button data-v="bot">Bot de WhatsApp</button></div>
     <div class="resumen" id="resumen"></div>
   </header>
   <div class="err" id="msg"></div>
@@ -198,6 +216,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
   <div class="embudo" id="embudo"></div>
   <div class="tablero" id="tab"></div>
   <div class="tabla" id="v-lista" hidden><table><thead><tr><th>Cliente</th><th>Producto</th><th>Temp.</th><th>Etapa</th><th>Columna</th><th>Asesor</th><th>Aviso</th><th class="n">Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
+  <div class="res" id="v-res" hidden></div>
   <iframe id="bot" title="Bot de WhatsApp" hidden></iframe>
   <div class="cierres" id="cierres"><div class="zona ok" data-z="ganada">✅ Soltá acá para marcar como ganada</div><div class="zona bad" data-z="perdida">❌ Soltá acá para marcar como perdida</div></div>
 </div>
@@ -273,6 +292,7 @@ function pintar(){
   const ps=$('fProd'), pv=ps.value; ps.innerHTML = '<option value="">Producto</option>' + [...new Set(ITEMS.map(i=>i.producto).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); ps.value = pv;
   enlazar();
   if (VISTA==='lista') pintarLista();
+  if (VISTA==='resumen') pintarResumen();
 }
 function pintarEmbudo(){
   const base = ITEMS.filter(l=>(F==='todas'||mio(l))), ab = base.filter(l=>!l.cierre);
@@ -290,6 +310,44 @@ function pintarEmbudo(){
   $('embudo').querySelectorAll('.fz').forEach(f=>{ const k=f.dataset.k, n=+f.dataset.n; PREV[k]=n; const c=f.querySelector('.c');
     if (prev[k]!==undefined && prev[k]!==n){ f.classList.add('flash'); const t0=performance.now(), d=prev[k]; const step=t=>{ const q=Math.min(1,(t-t0)/500); c.textContent=Math.round(d+(n-d)*q); if(q<1) requestAnimationFrame(step); }; requestAnimationFrame(step); } });
   $('embudo').querySelectorAll('button.fz').forEach(b=>b.onclick=()=>{ ETF = ETF===b.dataset.k ? '' : b.dataset.k; pintar(); });
+}
+function pintarResumen(){
+  const per = $('rper') ? $('rper').value : 'mes';
+  const base = ITEMS.filter(l=>F==='todas'||mio(l)), ab = base.filter(l=>!l.cierre);
+  const desde = per==='7' ? Date.now()-7*864e5 : per==='30' ? Date.now()-30*864e5 : per==='mes' ? new Date(new Date(Date.now()-3*3600000).toISOString().slice(0,7)+'-01T03:00:00Z').getTime() : 0;
+  const cer = base.filter(l=>l.cierre && l.cierre.at && new Date(l.cierre.at).getTime()>=desde);
+  const gan = cer.filter(l=>l.cierre.estado==='ganada'), perd = cer.filter(l=>l.cierre.estado!=='ganada');
+  const sv = a => a.reduce((x,l)=>x+(l.valor||0),0), pc = (a,b) => b ? Math.round(a/b*100)+'%' : '—';
+  const hoy = ab.filter(l=>l.columna==='hoy'), venc = hoy.filter(l=>l.prox&&l.prox.dias<0), sd = ab.filter(l=>l.sinDec), sinResp = ab.filter(l=>l.recordar);
+  const bars = (rows, color) => { const mx = Math.max(1,...rows.map(r=>r.n)); return rows.length ? rows.map(r=>`<div class="br" style="--cc:${r.c||color||'var(--accent)'}"><span class="nm" title="${esc(r.k)}">${esc(r.k)}</span><span class="tr"><i style="width:${Math.round(r.n/mx*100)}%"></i></span><span class="vl">${r.n}${r.v?`<small>${money(r.v)}</small>`:''}</span></div>`).join('') : '<div class="tip">Sin datos todavía.</div>'; };
+  const grp = (arr, fn) => { const m = new Map(); arr.forEach(l=>{ const k = fn(l)||'Sin definir'; const e = m.get(k)||{k,n:0,v:0}; e.n++; e.v+=l.valor||0; m.set(k,e); }); return [...m.values()].sort((a,b)=>b.n-a.n); };
+  const etp = ETAPAS.map(e=>({k:e.n, n:ab.filter(l=>l.etapa===e.k).length, v:sv(ab.filter(l=>l.etapa===e.k)), c:{nuevo:'var(--cold)',conversando:'var(--warm)',presupuesto:'var(--violet)',cerrando:'var(--accent)'}[e.k]}));
+  const tmp = [['caliente','Caliente','var(--hot)'],['tibio','Tibio','var(--warm)'],['frio','Frío','var(--cold)']].map(([k,n,c])=>({k:n,c,n:ab.filter(l=>l.temperatura===k).length,v:sv(ab.filter(l=>l.temperatura===k))}));
+  const ases = [...new Set(base.map(l=>l.asesorNombre||'Sin asignar'))].map(a=>{ const m = base.filter(l=>(l.asesorNombre||'Sin asignar')===a), o = m.filter(l=>!l.cierre), g = m.filter(l=>l.cierre&&l.cierre.estado==='ganada'&&new Date(l.cierre.at)>=desde), p = m.filter(l=>l.cierre&&l.cierre.estado!=='ganada'&&new Date(l.cierre.at)>=desde);
+    return {a, ab:o.length, hoy:o.filter(l=>l.columna==='hoy').length, sd:o.filter(l=>l.sinDec).length, g:g.length, p:p.length, vg:sv(g)}; }).sort((x,y)=>y.ab-x.ab);
+  const urg = ab.filter(l=>l.convId && (l.esperaCliente||l.sinDec||l.recordar||(l.prox&&l.prox.dias<0))).sort((a,b)=>orden(a)-orden(b)).slice(0,8);
+  $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span></div>
+   <div class="kp">
+    <div class="k"><span>Oportunidades abiertas</span><b>${ab.length}</b><small>${money(sv(ab))} en juego</small></div>
+    <div class="k ${hoy.length?'bad':'ok'}"><span>Por resolver hoy</span><b>${hoy.length}</b><small>${venc.length?venc.length+' vencidas':'al día'}</small></div>
+    <div class="k ${sd.length?'bad':''}"><span>Sin decidir</span><b>${sd.length}</b><small>${sinResp.length} sin respuesta del cliente</small></div>
+    <div class="k ok"><span>Ganadas</span><b>${gan.length}</b><small>${money(sv(gan))}</small></div>
+    <div class="k"><span>Perdidas</span><b>${perd.length}</b><small>${money(sv(perd))}</small></div>
+    <div class="k"><span>Tasa de cierre</span><b>${pc(gan.length, gan.length+perd.length)}</b><small>ganadas / cerradas</small></div>
+   </div>
+   <div class="rg">
+    <div class="bx"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
+    <div class="bx"><h3>Temperatura</h3>${bars(tmp)}</div>
+    <div class="bx"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
+    <div class="bx"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
+   </div>
+   <div class="rg">
+    <div class="bx" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
+    <div class="bx" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
+   </div>`;
+  $('rper').value = per;
+  $('rper').onchange = pintarResumen;
+  $('v-res').querySelectorAll('.aten button').forEach(b=>b.onclick=()=>{ setV('tablero'); abrir(b.dataset.id); });
 }
 function pintarLista(){
   const rows = filtradas().filter(l=>!l.cierre||$('fCer').checked).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
@@ -495,9 +553,10 @@ document.querySelectorAll('.zona').forEach(z=>{
 /* ---- vistas y filtros ---- */
 function setV(v){
   VISTA = v; document.querySelectorAll('#vistas button').forEach(b=>b.classList.toggle('on', b.dataset.v===v));
-  $('tab').hidden = v!=='tablero'; $('embudo').hidden = v==='bot'; $('cierres').hidden = v!=='tablero'; $('v-lista').hidden = v!=='lista'; $('barra').hidden = v==='bot'; $('bot').hidden = v!=='bot';
+  $('tab').hidden = v!=='tablero'; $('embudo').hidden = v==='bot'||v==='resumen'; $('v-res').hidden = v!=='resumen'; $('cierres').hidden = v!=='tablero'; $('v-lista').hidden = v!=='lista'; $('barra').hidden = v==='bot'; $('bot').hidden = v!=='bot';
   if (v==='bot' && !$('bot').src) $('bot').src = '/admin-bot.html?embed=1';
   if (v==='lista') pintarLista();
+  if (v==='resumen') pintarResumen();
 }
 $('vistas').onclick = e => { const b = e.target.closest('button'); if (b) setV(b.dataset.v); };
 document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ F=b.dataset.f; document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b)); pintar(); });
