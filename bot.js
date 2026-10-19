@@ -284,6 +284,14 @@ async function convDeReq(db, req) {
   if (!/^[0-9a-f]{24}$/i.test(req.params.id)) return null;
   return db.collection(COL_C).findOne(Object.assign({ _id: new ObjectId(req.params.id) }, filtroOrg(req)));
 }
+// conversación de WhatsApp de un teléfono (para abrirla desde el CRM): últimos 10 dígitos
+router.get('/conversacion-por-tel/:tel', auth, async (req, res) => {
+  try { const t = String(req.params.tel || '').replace(/\D/g, '').slice(-10); if (t.length < 8) return res.json({ conversacion: null, mensajes: [] });
+    const db = await getDb(); const c = await db.collection(COL_C).findOne(Object.assign({ tel10: t }, filtroOrg(req)));
+    if (!c) return res.json({ conversacion: null, mensajes: [] });
+    res.json({ conversacion: { _id: c._id, nombre: c.nombre, tel: c.tel, estado: c.estado, resumen: c.resumen }, mensajes: await db.collection(COL_M).find({ convId: c._id }).sort({ at: 1 }).limit(500).toArray() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.get('/conversaciones/:id', auth, async (req, res) => {
   try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     res.json({ conversacion: c, mensajes: await db.collection(COL_M).find({ convId: c._id }).sort({ at: 1 }).limit(500).toArray() }); } catch (e) { res.status(500).json({ error: e.message }); }

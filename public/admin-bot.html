@@ -113,7 +113,8 @@ document.getElementById('tabs').onclick = e => { if (e.target.dataset.t) tab(e.t
 async function init(){
   if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
   try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'bot'); }catch(e){ err(e); return; }
-  await cargar(); setInterval(()=>{ if (!document.getElementById('v-c').classList.contains('hidden')) { cargar(); if (SEL) abrir(SEL, true); } }, 15000);
+  await cargar(); { const q = new URLSearchParams(location.search).get('conv'); if (/^[0-9a-f]{24}$/i.test(q||'')) abrir(q); }
+  setInterval(()=>{ if (!document.getElementById('v-c').classList.contains('hidden')) { cargar(); if (SEL) abrir(SEL, true); } }, 15000);
 }
 async function cargar(){
   try{ const q = document.getElementById('fEst').value; const d = await api('/api/bot/conversaciones' + (q?'?estado='+q:''), {headers:H()}); ITEMS = d.items;
