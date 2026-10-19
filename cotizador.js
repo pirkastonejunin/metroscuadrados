@@ -388,7 +388,7 @@ async function buscarProductoTiendanubePorSku(sku) {
     if (!store || !store.access_token) return null;
     const response = await fetch(
       API_BASE + '/' + store.store_id + '/products?q=' + encodeURIComponent(sku) +
-        '&fields=id,name,handle,variants,images&per_page=10',
+        '&fields=id,name,handle,variants,images,canonical_url&per_page=10',
       { headers: apiHeaders(store.access_token) }
     );
     if (!response.ok) return null;

@@ -98,19 +98,21 @@ function jsonDe(t) {
 // historial: [{role:'user'|'model', text, media?:{mime,data(base64)}}]
 // Vendedor con datos reales (Fase 1): por sucursal, apagado por defecto. Guardado en bot_config 'vendedor:<orgId>'.
 const cacheVend = new Map();
-async function vendedorActivo(orgId) {
-  if (!orgId) return false;
+async function vendedorCfg(orgId) { // { activo, modoPrecio: 'precio' | 'link' | 'link_o_precio' }
+  if (!orgId) return { activo: false, modoPrecio: 'precio' };
   const k = String(orgId), c = cacheVend.get(k); if (c && Date.now() - c.t < 30000) return c.v;
-  let v = false; try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'vendedor:' + k }); v = !!(d && d.activo); } catch (e) { /* apagado */ }
+  let v = { activo: false, modoPrecio: 'precio' };
+  try { const d = await (await getDb()).collection('bot_config').findOne({ _id: 'vendedor:' + k }); if (d) v = { activo: !!d.activo, modoPrecio: ['precio', 'link', 'link_o_precio'].includes(d.modoPrecio) ? d.modoPrecio : 'precio' }; } catch (e) { /* apagado */ }
   cacheVend.set(k, { t: Date.now(), v }); return v;
 }
+const vendedorActivo = async (orgId) => (await vendedorCfg(orgId)).activo;
 // opciones.conDatos: true/false fuerza (simulador); undefined = lo que diga la sucursal. Devuelve el JSON del bot (+ _pasos con las consultas hechas al sistema).
 async function llamarIA(historial, promptBaseTexto, orgId, opciones) {
   const o = opciones || {};
   let sistema = await promptSistema(promptBaseTexto, orgId);
   const conDatos = orgId && (o.conDatos === undefined ? await vendedorActivo(orgId) : !!o.conDatos);
   let herramientas;
-  if (conDatos) { const vt = require('./vendedorTools'); herramientas = vt.herramientas(await getDb(), orgId); sistema += vt.REGLAS_PROMPT; }
+  if (conDatos) { const vt = require('./vendedorTools'); const modo = (await vendedorCfg(orgId)).modoPrecio; herramientas = vt.herramientas(await getDb(), orgId, modo); sistema += vt.reglasPrompt(modo); }
   const r = await ia.generar({
     uso: conDatos ? 'bot-datos' : 'bot', orgId: orgId || null, sistema, mensajes: historial, esquema: ESQUEMA, temperatura: 0.4, maxTokens: 800, timeoutMs: conDatos ? 60000 : 45000,
     proveedor: o.proveedor || process.env.BOT_PROVEEDOR, modelo: o.modelo || process.env.BOT_MODELO || undefined, modelos: { anthropic: 'claude-haiku-4-5-20251001' },
@@ -425,11 +427,12 @@ router.get('/vendedor-config', auth, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return res.json({ activo: false, sinSucursal: true });
     const db = await getDb(); const d = await db.collection('bot_config').findOne({ _id: 'vendedor:' + orgId });
     const [conPrecio, total] = await Promise.all([db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false }, precio: { $gt: 0 } }), db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false } })]);
-    res.json({ activo: !!(d && d.activo), productosConPrecio: conPrecio, productosTotal: total }); } catch (e) { res.status(500).json({ error: e.message }); }
+    const vinc = await db.collection('productos_catalogo').countDocuments({ orgId, activo: { $ne: false }, skuTiendanube: { $nin: [null, ''] } });
+    res.json({ activo: !!(d && d.activo), modoPrecio: (await vendedorCfg(orgId)).modoPrecio, productosConPrecio: conPrecio, productosTotal: total, productosConLink: vinc }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.put('/vendedor-config', auth, soloAdmin, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return sinOrg(res);
-    await (await getDb()).collection('bot_config').updateOne({ _id: 'vendedor:' + orgId }, { $set: { activo: !!(req.body && req.body.activo), updatedAt: new Date() } }, { upsert: true }); cacheVend.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'vendedor:' + orgId }, { $set: Object.assign({ updatedAt: new Date() }, req.body && req.body.activo !== undefined ? { activo: !!req.body.activo } : {}, req.body && ['precio', 'link', 'link_o_precio'].includes(req.body.modoPrecio) ? { modoPrecio: req.body.modoPrecio } : {}) }, { upsert: true }); cacheVend.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.put('/conocimiento-config', auth, soloAdmin, async (req, res) => { try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); await (await getDb()).collection('bot_config').updateOne({ _id: 'conocimiento:' + orgId }, { $set: { incluirCatalogo: !!(req.body && req.body.incluirCatalogo) } }, { upsert: true }); cacheCon.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 

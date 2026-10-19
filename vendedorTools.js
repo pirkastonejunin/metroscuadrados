@@ -12,6 +12,21 @@ const { ObjectId } = require('mongodb');
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const esM2 = (u) => /^(m2|m²|mts?2|metros?\s*cuadrados?)$/i.test(String(u || '').trim());
 
+// ---- enlaces a la tienda online (Tiendanube) ----
+// El producto del sistema se vincula con la tienda por su SKU (skuTiendanube). El link se pide a Tiendanube y se guarda en memoria un rato.
+const cacheLinks = new Map();
+let buscadorLinks = async (sku) => { const r = await require('./cotizador').buscarProductoTiendanubePorSku(sku); return r && r.url ? r.url : null; };
+async function enlaceDe(sku) {
+  if (!sku) return null;
+  const k = String(sku).toUpperCase(), c = cacheLinks.get(k);
+  if (c && Date.now() - c.t < (c.v ? 6 * 3600e3 : 10 * 60e3)) return c.v;
+  let v = null;
+  try { v = await Promise.race([buscadorLinks(sku), new Promise(r => setTimeout(() => r(null), 4000))]); } catch (e) { v = null; }
+  cacheLinks.set(k, { t: Date.now(), v }); if (cacheLinks.size > 3000) cacheLinks.delete(cacheLinks.keys().next().value);
+  return v;
+}
+const MODOS = ['precio', 'link', 'link_o_precio'];
+
 // ---- búsqueda ----
 const ACENTOS = { a: 'aáàäâ', e: 'eéèëê', i: 'iíìïî', o: 'oóòöô', u: 'uúùüû', n: 'nñ' };
 function sinAcentos(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
@@ -60,7 +75,8 @@ async function disponibilidades(db, orgId, ids) {
   return out; // número interno: nunca se le pasa al modelo
 }
 
-async function buscarProductos(db, orgId, args) {
+async function buscarProductos(db, orgId, args, modo) {
+  modo = MODOS.includes(modo) ? modo : 'precio';
   const consulta = String((args && args.consulta) || '').slice(0, 200);
   const limite = Math.min(Math.max(parseInt(args && args.limite, 10) || 6, 1), 10);
   const tokens = tokensDe(consulta);
@@ -68,7 +84,7 @@ async function buscarProductos(db, orgId, args) {
   const base = { orgId, activo: { $ne: false } };
   const campos = (re) => ({ $or: [{ nombre: re }, { sku: re }, { marca: re }, { rubro: re }, { subrubro: re }] });
   const regs = tokens.map(t => new RegExp(patronDeToken(t), 'i'));
-  const proj = { sku: 1, nombre: 1, marca: 1, rubro: 1, subrubro: 1, unidad: 1, unidadesPorBulto: 1, indicaCtdBultos: 1, precio: 1, preciosPorLista: 1, porcentajeIva: 1, descripcion: 1, stockeable: 1, moneda: 1, costo: 1 };
+  const proj = { sku: 1, nombre: 1, marca: 1, rubro: 1, subrubro: 1, unidad: 1, unidadesPorBulto: 1, indicaCtdBultos: 1, precio: 1, preciosPorLista: 1, porcentajeIva: 1, descripcion: 1, stockeable: 1, moneda: 1, costo: 1, skuTiendanube: 1 };
   let cand = await db.collection('productos_catalogo').find(Object.assign({ $and: regs.map(campos) }, base)).project(proj).limit(60).toArray();
   if (!cand.length && regs.length > 1) { // sin coincidencia exacta: alcanza con la mayoría de las palabras
     const flojo = await db.collection('productos_catalogo').find(Object.assign({ $or: regs.map(r => campos(r)) }, base)).project(proj).limit(300).toArray();
@@ -83,25 +99,31 @@ async function buscarProductos(db, orgId, args) {
   conPrecio.sort((a, b) => (b.precio != null) - (a.precio != null) || String(a.p.nombre).length - String(b.p.nombre).length);
   const top = conPrecio.slice(0, limite);
   const disp = await disponibilidades(db, orgId, top.map(x => x.p._id));
+  const links = modo === 'precio' ? top.map(() => null) : await Promise.all(top.map(x => enlaceDe(x.p.skuTiendanube)));
   return {
-    productos: top.map(({ p, precio }) => {
+    productos: top.map(({ p, precio }, i) => {
       const upb = Number(p.unidadesPorBulto) > 0 ? Number(p.unidadesPorBulto) : null;
       const o = {
         id: String(p._id), nombre: p.nombre, marca: p.marca || '', rubro: [p.rubro, p.subrubro].filter(Boolean).join(' / '),
         unidadDeVenta: p.unidad || 'unidad',
-        precioFinalConIva: precio, // por unidadDeVenta; null = sin precio cargado: derivar
         disponibilidad: (p.stockeable !== false && (disp.get(String(p._id)) || 0) > 0) ? 'disponible' : 'consultar'
       };
-      if (upb && upb > 1) { o.unidadesPorBulto = upb; if (precio != null && esM2(p.unidad)) o.precioFinalPorCajaConIva = round2(precio * upb); }
+      const enlace = links[i];
+      if (enlace) o.enlaceTienda = enlace;
+      const conPrecio = modo === 'precio' || (modo === 'link_o_precio' && !enlace);
+      if (conPrecio) o.precioFinalConIva = precio; // por unidadDeVenta; null = sin precio cargado: derivar
+      else if (!enlace) o.sinEnlace = 'No tiene link en la tienda online: el precio lo confirma un asesor.';
+      if (upb && upb > 1) { o.unidadesPorBulto = upb; if (conPrecio && precio != null && esM2(p.unidad)) o.precioFinalPorCajaConIva = round2(precio * upb); }
       if (p.descripcion) o.descripcion = String(p.descripcion).slice(0, 240);
       return o;
     }),
     totalEncontrados: cand.length + (cand.length >= 60 ? '+' : ''), mostrados: top.length,
-    nota: (cand.length > top.length ? 'Hay más productos que los mostrados: ofrecé acotar (formato, color, marca) o ver más. ' : '') + 'Los precios ya incluyen IVA (consumidor final). Disponibilidad: "disponible" o "consultar" (nunca digas cantidades).'
+    nota: (cand.length > top.length ? 'Hay más productos que los mostrados: ofrecé acotar (formato, color, marca) o ver más. ' : '') + (modo === 'precio' ? 'Los precios ya incluyen IVA (consumidor final). ' : modo === 'link' ? 'No des precios: compartí el enlaceTienda para que el cliente vea el precio en la tienda. ' : 'Si hay enlaceTienda compartilo (sin precio); si no hay, usá el precio indicado. ') + 'Disponibilidad: "disponible" o "consultar" (nunca digas cantidades).'
   };
 }
 
-async function calcularMaterial(db, orgId, args) {
+async function calcularMaterial(db, orgId, args, modo) {
+  modo = MODOS.includes(modo) ? modo : 'precio';
   let id; try { id = new ObjectId(String(args && args.productoId)); } catch (e) { return { error: 'productoId inválido: usá el id que devolvió buscar_productos.' }; }
   const m2 = Number(args && args.m2);
   if (!(m2 > 0) || m2 > 5000) return { error: 'Falta la superficie en m2 (número mayor que 0).' };
@@ -120,43 +142,52 @@ async function calcularMaterial(db, orgId, args) {
   const cajas = upb ? Math.ceil(necesarios / upb - 1e-9) : null;
   const m2Comprados = upb ? round2(cajas * upb) : Math.ceil(necesarios);
   const disp = await disponibilidades(db, orgId, [p._id]); const d = disp.get(String(p._id)) || 0;
-  return {
+  const enlace = modo === 'precio' ? null : await enlaceDe(p.skuTiendanube);
+  const conPrecio = modo === 'precio' || (modo === 'link_o_precio' && !enlace);
+  const o = {
     producto: p.nombre, m2Pedidos: round2(m2), desperdicioPct: desp, m2ConDesperdicio: necesarios,
     cajas, m2PorCaja: upb, m2QueSeCompran: m2Comprados,
-    precioFinalPorM2ConIva: precio, totalFinalConIva: precio != null ? round2(m2Comprados * precio) : null,
-    disponibilidad: p.stockeable !== false && d >= m2Comprados ? 'disponible' : 'consultar',
-    nota: 'Totales con IVA incluido. Es una estimación: el asesor confirma medidas, flete y disponibilidad.'
+    disponibilidad: p.stockeable !== false && d >= m2Comprados ? 'disponible' : 'consultar'
   };
+  if (enlace) o.enlaceTienda = enlace;
+  if (conPrecio) { o.precioFinalPorM2ConIva = precio; o.totalFinalConIva = precio != null ? round2(m2Comprados * precio) : null; }
+  o.nota = (conPrecio ? 'Totales con IVA incluido. ' : 'No des precios ni totales: compartí el enlaceTienda (si no hay, el asesor confirma el precio). ') + 'Es una estimación: el asesor confirma medidas, flete y disponibilidad.';
+  return o;
 }
 
 // Declaración para el modelo + ejecución. orgId: sucursal de la conversación.
-function herramientas(db, orgId) {
+function herramientas(db, orgId, modo) {
   return [
     {
       name: 'buscar_productos',
       description: 'Busca productos reales del catálogo de la sucursal y devuelve precio final con IVA y disponibilidad (disponible/consultar). Usala SIEMPRE antes de nombrar un producto, precio o disponibilidad.',
       parameters: { type: 'object', properties: { consulta: { type: 'string', description: 'Palabras clave: tipo de producto, formato, color, marca. Ej: "porcelanato 60x60 gris"' }, limite: { type: 'integer', description: 'Cantidad de resultados (1 a 10, por defecto 6)' } }, required: ['consulta'] },
-      ejecutar: (a) => buscarProductos(db, orgId, a)
+      ejecutar: (a) => buscarProductos(db, orgId, a, modo)
     },
     {
       name: 'calcular_material',
       description: 'Calcula cuántas cajas y cuánto cuesta (con IVA) cubrir una superficie con un producto que se vende por m2. Usá el id devuelto por buscar_productos.',
       parameters: { type: 'object', properties: { productoId: { type: 'string' }, m2: { type: 'number', description: 'Superficie a cubrir en m2' }, desperdicioPct: { type: 'number', description: 'Desperdicio en % (por defecto 10)' } }, required: ['productoId', 'm2'] },
-      ejecutar: (a) => calcularMaterial(db, orgId, a)
+      ejecutar: (a) => calcularMaterial(db, orgId, a, modo)
     }
   ];
 }
 
-const REGLAS_PROMPT = `
+const REGLAS_BASE = `
 
 ## Datos reales del sistema (herramientas)
 Tenés herramientas para consultar el catálogo real de la sucursal. Estas reglas REEMPLAZAN cualquier indicación anterior que diga que no des precios o que no menciones disponibilidad. Reglas obligatorias:
-- Para nombrar productos, precios o disponibilidad usá SIEMPRE "buscar_productos". Nunca inventes un producto, precio ni stock; si la herramienta no devuelve nada, decilo y ofrecé derivar a un asesor.
-- Podés dar precios: son siempre precios FINALES con IVA incluido (consumidor final), tal como los devuelve la herramienta. Indicá la unidad (por m2, por caja, por bolsa...).
+- Para nombrar productos, precios, enlaces o disponibilidad usá SIEMPRE "buscar_productos". Nunca inventes un producto, precio, enlace ni stock; si la herramienta no devuelve nada, decilo y ofrecé derivar a un asesor.
 - Stock: solo podés decir "disponible" o "te lo confirma un asesor". Nunca des cantidades.
-- Para cubrir una superficie usá "calcular_material" y explicá cajas y total; aclará que es una estimación a confirmar por un asesor.
+- Para cubrir una superficie usá "calcular_material" y explicá cajas y metros; aclará que es una estimación a confirmar por un asesor.
 - Si el cliente pide descuentos, financiación, envíos u otra cosa que no figura en tu base de conocimiento, no prometas: derivá a un asesor.
 - No des datos de otros clientes ni saldos o cuentas.
-- Si hay varias opciones, mostrá las que devolvió la herramienta (hasta 4 por mensaje), breves, con su precio, y preguntá cuál le interesa. Si totalEncontrados es mayor que los mostrados, avisá que hay más y ofrecé acotar o ver otras.`;
+- Si hay varias opciones, mostrá las que devolvió la herramienta (hasta 4 por mensaje), breves, y preguntá cuál le interesa. Si totalEncontrados es mayor que los mostrados, avisá que hay más y ofrecé acotar o ver otras.`;
+const REGLAS_MODO = {
+  precio: '\n- Podés dar precios: son siempre precios FINALES con IVA incluido (consumidor final), tal como los devuelve la herramienta. Indicá la unidad (por m2, por caja, por bolsa...).',
+  link: '\n- NO des precios ni totales en dinero. Para cada producto compartí su "enlaceTienda" (link a la tienda online) para que el cliente vea ahí el precio y pueda comprar. Si un producto no tiene enlace, decile que un asesor le confirma el precio. Copiá los enlaces tal cual, sin modificarlos.',
+  link_o_precio: '\n- Preferí compartir el "enlaceTienda" (link a la tienda online) en vez de dar el precio. Solo si un producto NO tiene enlace, dá su precio final con IVA tal como lo devuelve la herramienta. Copiá los enlaces tal cual, sin modificarlos.'
+};
+const reglasPrompt = (modo) => REGLAS_BASE + (REGLAS_MODO[modo] || REGLAS_MODO.precio);
 
-module.exports = { herramientas, buscarProductos, calcularMaterial, REGLAS_PROMPT, _interno: { tokensDe, patronDeToken, precioFinalDe, esM2 } };
+module.exports = { herramientas, buscarProductos, calcularMaterial, reglasPrompt, MODOS, _interno: { tokensDe, patronDeToken, precioFinalDe, esM2, usarBuscadorLinks: (f) => { buscadorLinks = f; cacheLinks.clear(); } } };
