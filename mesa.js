@@ -121,6 +121,15 @@ async function armar(db, req, { cerradas }) {
       notas: '', historial: [], cierre: null, actualizado: l.creadoOrigen || l.createdAt
     });
   }
+  // Campaña de origen (anuncio de Meta, UTM): sale del lead del mismo teléfono; si no, del anuncio con el que escribió por WhatsApp.
+  try {
+    const t10s = [...new Set(items.map(i => String(i.tel || '').replace(/\D/g, '').slice(-10)).filter(x => x.length >= 8))];
+    const lds = t10s.length ? await db.collection('leads_whatsapp').find(Object.assign({}, org, { tel10: { $in: t10s } })).project({ tel10: 1, campana: 1, fuente: 1 }).toArray() : [];
+    const pl = new Map(lds.map(l => [l.tel10, l]));
+    const convRef = new Map(convs.map(c => [c.tel10, c.referral && (c.referral.headline || c.referral.source_url) || '']));
+    for (const i of items) { const t = String(i.tel || '').replace(/\D/g, '').slice(-10); const l = pl.get(t);
+      i.campana = (l && l.campana) || convRef.get(t) || ''; i.canal = (l && l.fuente) || (i.campana ? 'Meta Ads' : ''); }
+  } catch (e) { items.forEach(i => { i.campana = i.campana || ''; i.canal = i.canal || ''; }); }
   return items;
 }
 
