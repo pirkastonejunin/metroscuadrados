@@ -342,6 +342,10 @@ function pintarResumen(){
     <div class="k"><span>Perdidas</span><b>${perd.length}</b><small>${money(sv(perd))}</small></div>
     <div class="k"><span>Tasa de cierre</span><b>${pc(gan.length, gan.length+perd.length)}</b><small>ganadas / cerradas</small></div>
    </div>
+   ${(()=>{ if (!RESL) return '<div class="bx"><h3>Consultas por fecha</h3><div class="tip">Cargando…</div></div>'; const g = graficoDias(RESL, per);
+     const bl = (arr,c)=>bars((arr||[]).map(x=>({k:x.nombre,n:x.leads,v:0})),c);
+     return `<div class="rg"><div class="bx" style="grid-column:1/-1"><h3>Consultas por fecha${per==='todo'?' (últimos 90 días)':''}</h3><div class="tip" style="margin:-4px 0 6px"><b style="color:var(--ink);font-size:15px">${g.tot}</b> consultas · promedio ${g.prom} por día · máximo ${g.mx} en un día</div>${g.svg}</div>
+      <div class="bx"><h3>Por canal</h3>${bl(RESL.porCanal,'var(--cold)')}</div><div class="bx"><h3>Por fuente</h3>${bl(RESL.porFuente,'var(--violet)')}</div></div>`; })()}
    <div class="rg">
     <div class="bx"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
     <div class="bx"><h3>Temperatura</h3>${bars(tmp)}</div>
@@ -354,7 +358,7 @@ function pintarResumen(){
     <div class="bx" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
    </div>`;
   $('rper').value = per;
-  $('rper').onchange = pintarResumen;
+  $('rper').onchange = cargarCamps;
   $('v-res').querySelectorAll('.aten button').forEach(b=>b.onclick=()=>{ setV('tablero'); abrir(b.dataset.id); });
 }
 function pintarLista(){
@@ -504,7 +508,24 @@ function pintarFicha(l){
 
 /* ---- ventana emergente (presupuestos) ---- */
 let POP = null, ADJ = null, CAMPS = null;
-async function cargarCamps(){ try{ CAMPS = (await api('/api/leads/campanas', {headers:H()})).items; }catch(e){ CAMPS = CAMPS||[]; } if (VISTA==='resumen') pintarResumen(); }
+let RESL = null;
+const diaAR = ms => new Date(ms-3*3600000).toISOString().slice(0,10);
+function desdeStr(per){ return per==='7' ? diaAR(Date.now()-6*864e5) : per==='30' ? diaAR(Date.now()-29*864e5) : per==='mes' ? diaAR(Date.now()).slice(0,8)+'01' : diaAR(Date.now()-89*864e5); }
+async function cargarCamps(){
+  const per = $('rper') ? $('rper').value : 'mes';
+  try{ CAMPS = (await api('/api/leads/campanas', {headers:H()})).items; }catch(e){ CAMPS = CAMPS||[]; }
+  try{ RESL = await api('/api/leads/resumen?desde='+desdeStr(per), {headers:H()}); RESL.per = per; }catch(e){ RESL = RESL||null; }
+  if (VISTA==='resumen') pintarResumen();
+}
+function graficoDias(res, per){
+  const mapa = new Map((res.porDia||[]).map(x=>[x.nombre,x])); const dias = []; const ini = desdeStr(per);
+  for (let d = new Date(ini+'T12:00:00Z'); diaAR(d.getTime()+3*3600000) <= diaAR(Date.now()); d = new Date(d.getTime()+864e5)){ const k = d.toISOString().slice(0,10); const e = mapa.get(k); dias.push({k, n:e?e.leads:0, c:e?e.clientes:0}); }
+  const mx = Math.max(1,...dias.map(d=>d.n)), W = 720, Hh = 105, pl = 26, pb = 18, bw = (W-pl)/Math.max(1,dias.length), tot = dias.reduce((s,d)=>s+d.n,0);
+  const step = Math.max(1, Math.ceil(dias.length/10));
+  const bars = dias.map((d,i)=>{ const h = Math.round(d.n/mx*(Hh-pb-8)); const x = pl+i*bw; return `<g><title>${d.k.slice(8)}/${d.k.slice(5,7)}: ${d.n} consulta${d.n===1?'':'s'}${d.c?`, ${d.c} ya cliente${d.c===1?'':'s'}`:''}</title><rect x="${x+bw*0.14}" y="${Hh-pb-h}" width="${Math.max(1,bw*0.72)}" height="${Math.max(d.n?2:0,h)}" rx="2" fill="var(--accent)" opacity=".9"/></g>${i%step===0?`<text x="${x+bw/2}" y="${Hh-4}" font-size="9.5" text-anchor="middle" fill="var(--mute)">${d.k.slice(8)}/${d.k.slice(5,7)}</text>`:''}`; }).join('');
+  const ticks = [0,Math.ceil(mx/2),mx].filter((v,i,a)=>a.indexOf(v)===i).map(v=>`<text x="${pl-5}" y="${Hh-pb-Math.round(v/mx*(Hh-pb-8))+3}" font-size="9.5" text-anchor="end" fill="var(--mute)">${v}</text><line x1="${pl}" x2="${W}" y1="${Hh-pb-Math.round(v/mx*(Hh-pb-8))}" y2="${Hh-pb-Math.round(v/mx*(Hh-pb-8))}" stroke="var(--line)" stroke-width="1"/>`).join('');
+  return {svg:`<svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Consultas por día" style="display:block">${ticks}${bars}</svg>`, tot, prom: dias.length ? (tot/dias.length).toFixed(1).replace('.',',') : '0', mx};
+}
 // PDF con el mismo diseño del botón Imprimir: se abre esa página en un marco oculto y se genera ahí.
 async function pdfPresupuesto(id){
   const r = await fetch('/api/presupuestos/'+id+'/imprimir', {headers:H()}); if (!r.ok) throw new Error('No se pudo abrir el presupuesto');

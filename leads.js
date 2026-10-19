@@ -217,14 +217,17 @@ router.get('/', auth, async (req, res) => {
 
 router.get('/resumen', auth, async (req, res) => {
   try {
-    const db = await getDb(); const col = db.collection(COL); const f = filtroOrg(req);
+    const db = await getDb(); const col = db.collection(COL); const f = Object.assign({}, filtroOrg(req));
+    const q = req.query; if (q.desde || q.hasta) { f.creadoOrigen = {}; if (q.desde) f.creadoOrigen.$gte = new Date(q.desde + 'T00:00:00-03:00'); if (q.hasta) f.creadoOrigen.$lte = new Date(q.hasta + 'T23:59:59-03:00'); }
     const agr = (campo) => col.aggregate([{ $match: f }, { $group: { _id: campo, leads: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }, { $sort: { leads: -1 } }]).toArray();
-    const [total, porCampana, porEstado, porFuente, porMes] = await Promise.all([
+    const [total, porCampana, porEstado, porFuente, porMes, porCanal, porDia] = await Promise.all([
       col.countDocuments(f), agr('$campana'), agr('$estado'), agr('$fuente'),
-      col.aggregate([{ $match: f }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$creadoOrigen', timezone: 'America/Argentina/Buenos_Aires' } }, leads: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }, { $sort: { _id: 1 } }]).toArray()
+      col.aggregate([{ $match: f }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$creadoOrigen', timezone: 'America/Argentina/Buenos_Aires' } }, leads: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }, { $sort: { _id: 1 } }]).toArray(),
+      agr('$canal'),
+      col.aggregate([{ $match: f }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$creadoOrigen', timezone: 'America/Argentina/Buenos_Aires' } }, leads: { $sum: 1 }, clientes: { $sum: { $cond: [{ $ne: ['$clienteId', null] }, 1, 0] } } } }, { $sort: { _id: 1 } }]).toArray()
     ]);
-    const n = (a) => a.map(x => ({ nombre: x._id || '(sin campaña)', leads: x.leads, clientes: x.clientes }));
-    res.json({ total, conCliente: porEstado.reduce((s, x) => s + x.clientes, 0), porCampana: n(porCampana), porEstado: n(porEstado), porFuente: n(porFuente), porMes: n(porMes) });
+    const n = (a, v) => a.map(x => ({ nombre: x._id || v || '(sin campaña)', leads: x.leads, clientes: x.clientes }));
+    res.json({ total, conCliente: porEstado.reduce((s, x) => s + x.clientes, 0), porCampana: n(porCampana), porEstado: n(porEstado), porFuente: n(porFuente, '(sin fuente)'), porMes: n(porMes), porCanal: n(porCanal, '(sin canal)'), porDia: n(porDia) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
