@@ -60,6 +60,7 @@ button{cursor:pointer}
 .k.bad b{color:var(--bad)}.k.ok b{color:var(--ok)}
 .rg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 .bx{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);min-width:0}
+.ia{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),var(--panel) 60%)}.ia ul.l li{margin-bottom:3px}
 .bx h3 .wx{float:right;border:0;background:transparent;color:var(--mute);font-size:12px;padding:0 4px;border-radius:6px;opacity:0;transition:opacity .15s}.bx:hover h3 .wx{opacity:1}@media (hover:none){.bx h3 .wx{opacity:.7}}.wx:hover{background:var(--panel2);color:var(--ink)}
 .bx h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:800}
 .br{display:grid;grid-template-columns:minmax(80px,1.1fr) 3fr auto;gap:8px;align-items:center;padding:3px 0;font-size:12.5px}
@@ -333,8 +334,15 @@ function pintarResumen(){
   base.forEach(l=>{ const k = l.campana||'(sin campaña)'; if (!cm.has(k)) cm.set(k,{k,leads:0,clientes:0,compraron:0,montoARS:0,montoUSD:0,ab:0,g:0,p:0,vj:0}); const e = cm.get(k);
     if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else e.p++; } });
   const camp = [...cm.values()].sort((a,b)=>(b.montoARS-a.montoARS)||(b.leads-a.leads)||(b.ab-a.ab));
+  SNAP = { periodo: ({mes:'este mes','7':'últimos 7 días','30':'últimos 30 días',todo:'todo el historial'})[per], alcance: F==='todas'?'toda la sucursal':'mis oportunidades y sin asignar',
+    abiertas: ab.length, montoEnJuego: sv(ab), porResolverHoy: hoy.length, vencidas: venc.length, sinDecidir: sd.length, sinRespuestaDelCliente: sinResp.length, ganadas: gan.length, montoGanado: sv(gan), perdidas: perd.length, montoPerdido: sv(perd),
+    porEtapa: etp.map(e=>({etapa:e.k,cantidad:e.n,monto:e.v})), temperatura: tmp.map(e=>({temp:e.k,cantidad:e.n,monto:e.v})), motivosDePerdida: grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({motivo:r.k,cantidad:r.n})),
+    productosAbiertas: grp(ab, l=>l.producto).slice(0,10).map(r=>({producto:r.k,cantidad:r.n})), campanas: camp.slice(0,15).map(r=>({campana:r.k,leads:r.leads,yaSonClientes:r.clientes,compraron:r.compraron,vendidoARS:r.montoARS,abiertasCRM:r.ab,ganadas:r.g,perdidas:r.p})),
+    vendedores: ases.map(r=>({vendedor:r.a,abiertas:r.ab,enHoy:r.hoy,sinDecidir:r.sd,ganadas:r.g,perdidas:r.p,montoGanado:r.vg})),
+    consultas: RESL ? { total: RESL.total, porCanal: (RESL.porCanal||[]).map(x=>({canal:x.nombre,leads:x.leads})), porFuente: (RESL.porFuente||[]).map(x=>({fuente:x.nombre,leads:x.leads})), porDia: (RESL.porDia||[]).map(x=>[x.nombre,x.leads]) } : null,
+    evolucionMensual: (EVO||[]).map(m=>({mes:m.mes,consultas:m.leads,presupuestos:m.presupuestos,montoPresupuestado:m.monto,aprobados:m.aprobados,montoAprobado:m.montoAprobado})) };
   const urg = ab.filter(l=>l.convId && (l.esperaCliente||l.sinDec||l.recordar||(l.prox&&l.prox.dias<0))).sort((a,b)=>orden(a)-orden(b)).slice(0,8);
-  $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span><span class="sp"></span><button class="btn sm" id="rpers">⚙ Elegir reportes</button></div><div class="bx" id="rpanel" hidden style="padding:10px 14px"></div>
+  $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span><span class="sp"></span><button class="btn sm pri" id="rai">🤖 Analizar con IA</button><button class="btn sm" id="rpers">⚙ Elegir reportes</button></div>${AIR?bloqueIA():''}<div class="bx" id="rpanel" hidden style="padding:10px 14px"></div>
    <div class="kp" data-w="kpis" data-t="Números clave">
     <div class="k"><span>Oportunidades abiertas</span><b>${ab.length}</b><small>${money(sv(ab))} en juego</small></div>
     <div class="k ${hoy.length?'bad':'ok'}"><span>Por resolver hoy</span><b>${hoy.length}</b><small>${venc.length?venc.length+' vencidas':'al día'}</small></div>
@@ -362,9 +370,23 @@ function pintarResumen(){
     <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
    </div>`;
   aplicarOcultos();
+  $('rai').onclick = analizarIA; const xa = $('aix'); if (xa) xa.onclick = () => { AIR = null; pintarResumen(); };
   $('rper').value = per;
   $('rper').onchange = cargarCamps;
   $('v-res').querySelectorAll('.aten button').forEach(b=>b.onclick=()=>{ setV('tablero'); abrir(b.dataset.id); });
+}
+function bloqueIA(){
+  const li = a => a&&a.length ? `<ul class="l">${a.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>` : '<div class="tip">—</div>';
+  if (AIR==='cargando') return '<div class="bx"><h3>Análisis con IA</h3><div class="tip">Analizando los números… puede tardar unos segundos.</div></div>';
+  if (AIR && AIR.error) return `<div class="bx"><h3>Análisis con IA</h3><div class="err" style="display:block">${esc(AIR.error)}</div></div>`;
+  return `<div class="bx ia"><h3>🤖 Análisis con IA <button class="wx" id="aix" style="opacity:1" title="Cerrar">✕</button></h3><p style="margin:0 0 10px;font-weight:600">${esc(AIR.resumen)}</p>
+   <div class="rg" style="gap:14px"><div><h3>Observaciones</h3>${li(AIR.observaciones)}</div><div><h3>Recomendaciones</h3>${li(AIR.recomendaciones)}</div></div>
+   ${AIR.alertas&&AIR.alertas.length?`<div style="margin-top:8px"><h3>Ojo con</h3>${li(AIR.alertas)}</div>`:''}<div class="tip" style="margin-top:8px">Generado ${hora(AIR.at)} con los números de la pantalla (${esc(SNAP?SNAP.periodo:'')}). Es una ayuda: verificá antes de decidir.</div></div>`;
+}
+async function analizarIA(){
+  if (!SNAP) return; AIR = 'cargando'; pintarResumen();
+  try{ AIR = await post('/api/mesa/analisis-ia', {datos:SNAP}); }catch(e){ AIR = {error:e.message}; }
+  pintarResumen();
 }
 const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['evo','Evolución mensual: consultas y presupuestos'],['evom','Evolución mensual: monto presupuestado'],['atencion','Lo que pide atención ahora']];
 let OCULTOS = (()=>{ try{ return JSON.parse(localStorage.getItem('crm_res_ocultos')||'[]'); }catch(e){ return []; } })();
@@ -530,7 +552,7 @@ function pintarFicha(l){
 
 /* ---- ventana emergente (presupuestos) ---- */
 let POP = null, ADJ = null, CAMPS = null;
-let RESL = null, EVO = null;
+let RESL = null, EVO = null, SNAP = null, AIR = null;
 const diaAR = ms => new Date(ms-3*3600000).toISOString().slice(0,10);
 function desdeStr(per){ return per==='7' ? diaAR(Date.now()-6*864e5) : per==='30' ? diaAR(Date.now()-29*864e5) : per==='mes' ? diaAR(Date.now()).slice(0,8)+'01' : diaAR(Date.now()-89*864e5); }
 async function cargarCamps(){
