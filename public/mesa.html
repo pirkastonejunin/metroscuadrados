@@ -106,6 +106,7 @@ button{cursor:pointer}
 .r3{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .tag{font-size:11px;font-weight:800;border-radius:7px;padding:2px 8px;background:var(--panel2);color:var(--mute);white-space:nowrap}
 .tag.bad{background:var(--bad-soft);color:var(--bad)}.tag.warm{background:var(--warm-soft);color:var(--warm)}.tag.cold{background:var(--cold-soft);color:var(--cold)}.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.cmpn{font-size:11px;font-weight:700;color:var(--violet);background:var(--violet-soft);border-radius:6px;padding:1px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:flex-start;max-width:100%}
 .tmp{font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px;color:var(--mute)}
 .tmp::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .tmp.caliente{color:var(--hot)}.tmp.tibio{color:var(--warm)}.tmp.frio{color:var(--cold)}
@@ -208,6 +209,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
   <div class="barra" id="barra">
     <button class="chip on" data-f="mias" title="Mías y sin asignar">Mías</button><button class="chip" data-f="todas" title="Toda la sucursal">Sucursal</button>
     <select id="fTemp" aria-label="Temperatura"><option value="">Temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select>
+    <select id="fCamp" aria-label="Campaña"><option value="">Campaña</option></select>
     <select id="fProd" aria-label="Producto"><option value="">Producto</option></select>
     <input id="q" type="search" placeholder="Buscar" aria-label="Buscar" style="max-width:110px">
     <label class="tip"><input type="checkbox" id="fCer"> Cerradas</label>
@@ -215,7 +217,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
   </div>
   <div class="embudo" id="embudo"></div>
   <div class="tablero" id="tab"></div>
-  <div class="tabla" id="v-lista" hidden><table><thead><tr><th>Cliente</th><th>Producto</th><th>Temp.</th><th>Etapa</th><th>Columna</th><th>Asesor</th><th>Aviso</th><th class="n">Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
+  <div class="tabla" id="v-lista" hidden><table><thead><tr><th>Cliente</th><th>Producto</th><th>Campaña</th><th>Temp.</th><th>Etapa</th><th>Columna</th><th>Asesor</th><th>Aviso</th><th class="n">Presupuesto</th><th>Actividad</th></tr></thead><tbody id="tBody"></tbody></table></div>
   <div class="res" id="v-res" hidden></div>
   <iframe id="bot" title="Bot de WhatsApp" hidden></iframe>
   <div class="cierres" id="cierres"><div class="zona ok" data-z="ganada">✅ Soltá acá para marcar como ganada</div><div class="zona bad" data-z="perdida">❌ Soltá acá para marcar como perdida</div></div>
@@ -257,7 +259,7 @@ const cur = () => ITEMS.find(l=>l.id===sel);
 const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
 function filtradas(){
   const t=$('fTemp').value, p=$('fProd').value, q=$('q').value.trim().toLowerCase(), h=$('soloHoy').classList.contains('on');
-  return ITEMS.filter(l=>(F==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)) && (!h||l.columna==='hoy') && (!ETF||l.etapa===ETF));
+  return ITEMS.filter(l=>(F==='todas'||mio(l)) && (!t||l.temperatura===t) && (!p||l.producto===p) && (!q||(l.nombre+' '+l.tel+' '+l.producto).toLowerCase().includes(q)) && (!h||l.columna==='hoy') && (!ETF||l.etapa===ETF) && (!$('fCamp').value||(l.campana||'(sin campaña)')===$('fCamp').value));
 }
 const orden = l => (l.sinDec?-5:0) + (l.esperaCliente?0:50) + (l.prox&&l.prox.dias<=0?10:20) + ({caliente:0,tibio:3,frio:6}[l.temperatura]) - Math.min(9,(l.esperaMin||0)/1000);
 function aviso(l){
@@ -276,7 +278,7 @@ function tarjeta(l){
   return `<div class="card ${l.id===sel?'sel':''}" draggable="${l.convId?'true':'false'}" data-id="${esc(l.id)}" tabindex="0">
     <div class="r1"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div class="who"><b>${esc(l.nombre)}</b><span>${esc(l.producto||'Sin producto definido')}</span></div>${l.valor?`<span class="val">${money(l.valor)}</span>`:''}</div>
     ${l.ultimo||l.resumen?`<p class="ult">${esc(l.ultimo?l.ultimo.texto:l.resumen)}</p>`:''}
-    <div class="r3"><span class="tag ${c}">${esc(t)}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}<span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span><span class="mini">${esc(l.asesorNombre||'Sin asignar')}</span></div></div>`;
+    <div class="r3"><span class="tag ${c}">${esc(t)}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}<span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span><span class="mini">${esc(l.asesorNombre||'Sin asignar')}</span></div>${l.campana?`<div class="cmpn" title="${esc(l.campana)}">📣 ${esc(l.campana)}</div>`:''}</div>`;
 }
 function pintar(){
   const L = filtradas().filter(l=>!l.cierre || $('fCer').checked);
@@ -290,6 +292,7 @@ function pintar(){
   $('resumen').innerHTML = `<div class="stat ${h?'al':'okk'}"><b>${h}</b><span>${h?'por resolver hoy':'Hoy al día'}</span></div>${ve?`<div class="stat al"><b>${ve}</b><span>vencidas</span></div>`:''}${sd?`<div class="stat al"><b>${sd}</b><span>sin decidir</span></div>`:''}<div class="stat"><b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b><span>en presupuestos</span></div>`;
   $('cant').textContent = ''; $('ej').hidden = !ITEMS.some(i=>i.demo);
   const ps=$('fProd'), pv=ps.value; ps.innerHTML = '<option value="">Producto</option>' + [...new Set(ITEMS.map(i=>i.producto).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); ps.value = pv;
+  const cs=$('fCamp'), cv=cs.value; cs.innerHTML = '<option value="">Campaña</option>' + [...new Set(ITEMS.map(i=>i.campana||'(sin campaña)'))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); cs.value = cv;
   enlazar();
   if (VISTA==='lista') pintarLista();
   if (VISTA==='resumen') pintarResumen();
@@ -325,8 +328,10 @@ function pintarResumen(){
   const tmp = [['caliente','Caliente','var(--hot)'],['tibio','Tibio','var(--warm)'],['frio','Frío','var(--cold)']].map(([k,n,c])=>({k:n,c,n:ab.filter(l=>l.temperatura===k).length,v:sv(ab.filter(l=>l.temperatura===k))}));
   const ases = [...new Set(base.map(l=>l.asesorNombre||'Sin asignar'))].map(a=>{ const m = base.filter(l=>(l.asesorNombre||'Sin asignar')===a), o = m.filter(l=>!l.cierre), g = m.filter(l=>l.cierre&&l.cierre.estado==='ganada'&&new Date(l.cierre.at)>=desde), p = m.filter(l=>l.cierre&&l.cierre.estado!=='ganada'&&new Date(l.cierre.at)>=desde);
     return {a, ab:o.length, hoy:o.filter(l=>l.columna==='hoy').length, sd:o.filter(l=>l.sinDec).length, g:g.length, p:p.length, vg:sv(g)}; }).sort((x,y)=>y.ab-x.ab);
-  const camp = [...new Set(base.map(l=>l.campana||'(sin campaña)'))].map(k=>{ const m = base.filter(l=>(l.campana||'(sin campaña)')===k), o = m.filter(l=>!l.cierre), g = m.filter(l=>l.cierre&&l.cierre.estado==='ganada'&&new Date(l.cierre.at)>=desde), p = m.filter(l=>l.cierre&&l.cierre.estado!=='ganada'&&new Date(l.cierre.at)>=desde);
-    return {k, n:m.length, ab:o.length, g:g.length, p:p.length, vg:sv(g), vj:sv(o)}; }).sort((a,b)=>b.n-a.n);
+  const cm = new Map((CAMPS||[]).map(x=>[x.nombre,{k:x.nombre,leads:x.leads,clientes:x.clientes,compraron:x.compraron,montoARS:x.montoARS,montoUSD:x.montoUSD,ab:0,g:0,p:0,vj:0}]));
+  base.forEach(l=>{ const k = l.campana||'(sin campaña)'; if (!cm.has(k)) cm.set(k,{k,leads:0,clientes:0,compraron:0,montoARS:0,montoUSD:0,ab:0,g:0,p:0,vj:0}); const e = cm.get(k);
+    if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else e.p++; } });
+  const camp = [...cm.values()].sort((a,b)=>(b.montoARS-a.montoARS)||(b.leads-a.leads)||(b.ab-a.ab));
   const urg = ab.filter(l=>l.convId && (l.esperaCliente||l.sinDec||l.recordar||(l.prox&&l.prox.dias<0))).sort((a,b)=>orden(a)-orden(b)).slice(0,8);
   $('v-res').innerHTML = `<div class="rh"><h2>Cómo venimos</h2><select id="rper" aria-label="Período" style="border:1px solid var(--line);background:var(--panel);border-radius:99px;padding:3px 10px;font-size:12px;font-weight:600"><option value="mes">Este mes</option><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option><option value="todo">Todo</option></select><span class="tip">Lo abierto se ve tal como está hoy; ganadas y perdidas, del período.</span></div>
    <div class="kp">
@@ -343,7 +348,7 @@ function pintarResumen(){
     <div class="bx"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
     <div class="bx"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
    </div>
-   <div class="rg"><div class="bx" style="grid-column:1/-1"><h3>Campañas</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Consultas</th><th>Abiertas</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.n}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Consultas = todas las que llegaron desde esa campaña (abiertas y cerradas). Sin campaña = contacto directo u orgánico.</div></div></div>
+   <div class="rg"><div class="bx" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="9" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
    <div class="rg">
     <div class="bx" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
     <div class="bx" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
@@ -356,7 +361,7 @@ function pintarLista(){
   const rows = filtradas().filter(l=>!l.cierre||$('fCer').checked).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
   $('cant').textContent = rows.length + ' de ' + ITEMS.length;
   const CN = Object.fromEntries(COLS.map(c=>[c.k,c.n]));
-  $('tBody').innerHTML = rows.map(l=>{ const [t,c]=aviso(l); return `<tr class="f" data-id="${esc(l.id)}"><td><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td><span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span></td><td>${esc(l.cierre?l.cierre.estado:ETN[l.etapa]||l.etapa)}</td><td>${esc(CN[l.columna]||'')}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="tag ${c}">${esc(t)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="9" class="vacio">Nada con esos filtros.</td></tr>';
+  $('tBody').innerHTML = rows.map(l=>{ const [t,c]=aviso(l); return `<tr class="f" data-id="${esc(l.id)}"><td><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td class="tip">${esc(l.campana||'—')}</td><td><span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span></td><td>${esc(l.cierre?l.cierre.estado:ETN[l.etapa]||l.etapa)}</td><td>${esc(CN[l.columna]||'')}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="tag ${c}">${esc(t)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="10" class="vacio">Nada con esos filtros.</td></tr>';
 }
 
 async function cargar(opts){
@@ -498,7 +503,8 @@ function pintarFicha(l){
 }
 
 /* ---- ventana emergente (presupuestos) ---- */
-let POP = null, ADJ = null;
+let POP = null, ADJ = null, CAMPS = null;
+async function cargarCamps(){ try{ CAMPS = (await api('/api/leads/campanas', {headers:H()})).items; }catch(e){ CAMPS = CAMPS||[]; } if (VISTA==='resumen') pintarResumen(); }
 // PDF con el mismo diseño del botón Imprimir: se abre esa página en un marco oculto y se genera ahí.
 async function pdfPresupuesto(id){
   const r = await fetch('/api/presupuestos/'+id+'/imprimir', {headers:H()}); if (!r.ok) throw new Error('No se pudo abrir el presupuesto');
@@ -559,12 +565,12 @@ function setV(v){
   $('tab').hidden = v!=='tablero'; $('embudo').hidden = v==='bot'||v==='resumen'; $('v-res').hidden = v!=='resumen'; $('cierres').hidden = v!=='tablero'; $('v-lista').hidden = v!=='lista'; $('barra').hidden = v==='bot'; $('bot').hidden = v!=='bot';
   if (v==='bot' && !$('bot').src) $('bot').src = '/admin-bot.html?embed=1';
   if (v==='lista') pintarLista();
-  if (v==='resumen') pintarResumen();
+  if (v==='resumen'){ pintarResumen(); cargarCamps(); }
 }
 $('vistas').onclick = e => { const b = e.target.closest('button'); if (b) setV(b.dataset.v); };
 document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ F=b.dataset.f; document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b)); pintar(); });
 $('soloHoy').onclick = () => { $('soloHoy').classList.toggle('on'); pintar(); };
-['fTemp','fProd','q'].forEach(i=>$(i).addEventListener('input', pintar));
+['fTemp','fProd','fCamp','q'].forEach(i=>$(i).addEventListener('input', pintar));
 $('fCer').addEventListener('change', pintar);
 $('tBody').onclick = e => { const tr = e.target.closest('tr.f'); if (tr){ setV('tablero'); abrir(tr.dataset.id); } };
 async function ejemplos(alta){ if (!alta && !confirm('¿Quitar las conversaciones de ejemplo y las oportunidades creadas desde ellas?')) return; try{ await api('/api/bot/conversaciones/ejemplos', {method: alta?'POST':'DELETE', headers:H(J), body:'{}'}); sel=null; cierre(); await cargar(); }catch(e){ err(e); } }
