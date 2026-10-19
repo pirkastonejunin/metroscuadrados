@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo } = require('./usuarios');
+const ia = require('./ia');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -103,18 +104,6 @@ const ESQUEMA = {
 };
 
 const TIMEOUT_MS = 60000;
-async function pedir(url, opciones) {
-  const c = new AbortController();
-  const t = setTimeout(() => c.abort(), TIMEOUT_MS);
-  try { return await fetch(url, Object.assign({}, opciones, { signal: c.signal })); }
-  catch (e) { throw err(e.name === 'AbortError' ? 504 : 502, e.name === 'AbortError' ? 'El asistente tardó demasiado en responder. Probá de nuevo.' : 'No se pudo conectar con el servicio de IA.'); }
-  finally { clearTimeout(t); }
-}
-function proveedor() {
-  const f = String(process.env.ASISTENTE_PROVEEDOR || process.env.FACTURA_IA_PROVEEDOR || '').toLowerCase();
-  if (f === 'gemini' || f === 'anthropic') return f;
-  return process.env.GEMINI_API_KEY ? 'gemini' : 'anthropic';
-}
 function jsonDe(texto) {
   const limpio = String(texto || '').replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
   try { return JSON.parse(limpio); } catch (e) {
@@ -130,41 +119,21 @@ function sinNullable(n) { // Gemini no acepta "nullable" en este esquema: se sac
 }
 
 async function llamarIA(mensajes, pantalla) {
-  const sistema = instrucciones(pantalla);
-  if (proveedor() === 'gemini') {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw err(503, 'El asistente todavía no está configurado: falta la variable GEMINI_API_KEY (o ANTHROPIC_API_KEY) en el servidor.');
-    const modelo = process.env.ASISTENTE_MODELO || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-    const resp = await pedir('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modelo) + ':generateContent', {
-      method: 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: sistema }] },
-        contents: mensajes.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: sinNullable(ESQUEMA), temperature: 0.3 }
-      })
+  try {
+    const r = await ia.generar({
+      uso: 'asistente', sistema: instrucciones(pantalla), esquema: sinNullable(ESQUEMA), temperatura: 0.3, maxTokens: 1200, timeoutMs: TIMEOUT_MS,
+      proveedor: process.env.ASISTENTE_PROVEEDOR || process.env.FACTURA_IA_PROVEEDOR, modelo: process.env.ASISTENTE_MODELO || undefined,
+      modelos: { anthropic: process.env.FACTURA_IA_MODEL || 'claude-sonnet-5-5' },
+      mensajes: mensajes.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', text: m.content }))
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const d = (data && data.error && data.error.message) || ('estado ' + resp.status);
-      if (resp.status === 429) throw err(429, 'El asistente alcanzó su límite de uso por ahora. Probá en unos minutos.');
-      throw err(502, 'El servicio de IA devolvió un error: ' + d);
-    }
-    const cand = (data.candidates || [])[0];
-    return jsonDe(cand && cand.content && cand.content.parts ? cand.content.parts.map(x => x.text || '').join('') : '');
+    return r.json || jsonDe(r.texto);
+  } catch (e) {
+    if (e.sinClave) throw err(503, 'El asistente todavía no está configurado: falta la variable GEMINI_API_KEY (o ANTHROPIC_API_KEY) en el servidor.');
+    if (e.tope) throw err(429, 'El asistente está en pausa: se alcanzó el tope mensual de gasto en IA. Avisale al administrador.');
+    if (e.status === 429 || e.http === 429) throw err(429, 'El asistente alcanzó su límite de uso por ahora. Probá en unos minutos.');
+    if (e.red) throw err(e.status, e.status === 504 ? 'El asistente tardó demasiado en responder. Probá de nuevo.' : 'No se pudo conectar con el servicio de IA.');
+    throw err(502, 'El servicio de IA devolvió un error: ' + (e.detalle || e.message));
   }
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw err(503, 'El asistente todavía no está configurado: falta la variable GEMINI_API_KEY (o ANTHROPIC_API_KEY) en el servidor.');
-  const resp = await pedir('https://api.anthropic.com/v1/messages', {
-    method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: process.env.ASISTENTE_MODELO || process.env.FACTURA_IA_MODEL || 'claude-sonnet-5-5', max_tokens: 1200, system: sistema, messages: mensajes.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })) })
-  });
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    const d = (data && data.error && data.error.message) || ('estado ' + resp.status);
-    if (resp.status === 429) throw err(429, 'El asistente alcanzó su límite de uso por ahora. Probá en unos minutos.');
-    throw err(502, 'El servicio de IA devolvió un error: ' + d);
-  }
-  return jsonDe((data.content || []).filter(b => b.type === 'text').map(b => b.text).join(''));
 }
 
 // Tope de uso por usuario (en memoria): evita que un usuario o un bucle gaste la cuota de la IA.

@@ -16,6 +16,7 @@ const path = require('path');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereAlgunModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const leads = require('./leads');
+const ia = require('./ia');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -96,33 +97,13 @@ function jsonDe(t) {
 }
 // historial: [{role:'user'|'model', text, media?:{mime,data(base64)}}]
 async function llamarIA(historial, promptBaseTexto, orgId) {
-  const prov = String(process.env.BOT_PROVEEDOR || '').toLowerCase() || (process.env.GEMINI_API_KEY ? 'gemini' : 'anthropic');
   const sistema = await promptSistema(promptBaseTexto, orgId);
-  if (prov === 'gemini') {
-    const key = process.env.GEMINI_API_KEY; if (!key) throw new Error('Falta GEMINI_API_KEY');
-    const modelo = process.env.BOT_MODELO || process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-    const r = await pedir((process.env.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta') + '/models/' + encodeURIComponent(modelo) + ':generateContent', {
-      method: 'POST', headers: { 'x-goog-api-key': key, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: sistema }] },
-        contents: historial.map(m => ({ role: m.role, parts: [{ text: m.text || '(sin texto)' }].concat(m.media ? [{ inlineData: { mimeType: m.media.mime, data: m.media.data } }] : []) })),
-        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: ESQUEMA, temperature: 0.4 }
-      })
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error('IA ' + r.status + ': ' + ((d.error && d.error.message) || ''));
-    const c = (d.candidates || [])[0];
-    return jsonDe(c && c.content && c.content.parts ? c.content.parts.map(x => x.text || '').join('') : '');
-  }
-  const key = process.env.ANTHROPIC_API_KEY; if (!key) throw new Error('Falta ANTHROPIC_API_KEY');
-  const r = await pedir('https://api.anthropic.com/v1/messages', {
-    method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ model: process.env.BOT_MODELO || 'claude-haiku-4-5-20251001', max_tokens: 800, system: sistema + '\nEl JSON debe tener: respuesta, derivar, aceptoAsesor, producto, medidas, estilo, resumen, etiquetas.',
-      messages: historial.map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.media && /^image\//.test(m.media.mime) ? [{ type: 'image', source: { type: 'base64', media_type: m.media.mime, data: m.media.data } }, { type: 'text', text: m.text || '(foto)' }] : (m.text || '(sin texto)') })) })
+  const r = await ia.generar({
+    uso: 'bot', orgId: orgId || null, sistema, mensajes: historial, esquema: ESQUEMA, temperatura: 0.4, maxTokens: 800, timeoutMs: 45000,
+    proveedor: process.env.BOT_PROVEEDOR, modelo: process.env.BOT_MODELO || undefined, modelos: { anthropic: 'claude-haiku-4-5-20251001' },
+    notaJson: 'El JSON debe tener: respuesta, derivar, aceptoAsesor, producto, medidas, estilo, resumen, etiquetas.'
   });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('IA ' + r.status + ': ' + ((d.error && d.error.message) || ''));
-  return jsonDe((d.content || []).filter(b => b.type === 'text').map(b => b.text).join(''));
+  return r.json;
 }
 
 // ---- WhatsApp (Meta) ----
