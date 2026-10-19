@@ -19,7 +19,10 @@ function escapar(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function patronDeToken(t) {
   const m = t.match(/^(\d+(?:[.,]\d+)?)\s*[x×*]\s*(\d+(?:[.,]\d+)?)$/); // 60x60 -> 60 x 60, 60X60, 60×60
   if (m) return m[1].replace(',', '[.,]') + '\\s*[x×*]\\s*' + m[2].replace(',', '[.,]');
-  return escapar(t).replace(/[aeioun]/g, (c) => '[' + ACENTOS[c] + ']');
+  // plural/singular: "ranurados" también encuentra "ranurado"; "paredes" encuentra "pared"
+  const vars = [t]; if (t.length > 4 && t.endsWith('s')) vars.push(t.slice(0, -1)); if (t.length > 5 && t.endsWith('es')) vars.push(t.slice(0, -2));
+  const conAcentos = (x) => escapar(x).replace(/[aeioun]/g, (c) => '[' + ACENTOS[c] + ']');
+  return vars.length > 1 ? '(?:' + vars.map(conAcentos).join('|') + ')' : conAcentos(t);
 }
 const PALABRAS_VACIAS = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'para', 'con', 'por', 'y', 'en', 'que', 'tienen', 'tenes', 'tenés', 'hay', 'precio', 'cuanto', 'cuánto', 'sale', 'cuesta', 'quiero', 'necesito', 'busco', 'me', 'si', 'algo', 'tipo']);
 function tokensDe(consulta) {
@@ -59,7 +62,7 @@ async function disponibilidades(db, orgId, ids) {
 
 async function buscarProductos(db, orgId, args) {
   const consulta = String((args && args.consulta) || '').slice(0, 200);
-  const limite = Math.min(Math.max(parseInt(args && args.limite, 10) || 5, 1), 8);
+  const limite = Math.min(Math.max(parseInt(args && args.limite, 10) || 6, 1), 10);
   const tokens = tokensDe(consulta);
   if (!tokens.length) return { productos: [], aviso: 'Consulta vacía: pedile al cliente qué producto busca.' };
   const base = { orgId, activo: { $ne: false } };
@@ -93,7 +96,8 @@ async function buscarProductos(db, orgId, args) {
       if (p.descripcion) o.descripcion = String(p.descripcion).slice(0, 240);
       return o;
     }),
-    nota: 'Los precios ya incluyen IVA (consumidor final). Disponibilidad: "disponible" o "consultar" (nunca digas cantidades).'
+    totalEncontrados: cand.length + (cand.length >= 60 ? '+' : ''), mostrados: top.length,
+    nota: (cand.length > top.length ? 'Hay más productos que los mostrados: ofrecé acotar (formato, color, marca) o ver más. ' : '') + 'Los precios ya incluyen IVA (consumidor final). Disponibilidad: "disponible" o "consultar" (nunca digas cantidades).'
   };
 }
 
@@ -131,7 +135,7 @@ function herramientas(db, orgId) {
     {
       name: 'buscar_productos',
       description: 'Busca productos reales del catálogo de la sucursal y devuelve precio final con IVA y disponibilidad (disponible/consultar). Usala SIEMPRE antes de nombrar un producto, precio o disponibilidad.',
-      parameters: { type: 'object', properties: { consulta: { type: 'string', description: 'Palabras clave: tipo de producto, formato, color, marca. Ej: "porcelanato 60x60 gris"' }, limite: { type: 'integer', description: 'Cantidad de resultados (1 a 8, por defecto 5)' } }, required: ['consulta'] },
+      parameters: { type: 'object', properties: { consulta: { type: 'string', description: 'Palabras clave: tipo de producto, formato, color, marca. Ej: "porcelanato 60x60 gris"' }, limite: { type: 'integer', description: 'Cantidad de resultados (1 a 10, por defecto 6)' } }, required: ['consulta'] },
       ejecutar: (a) => buscarProductos(db, orgId, a)
     },
     {
@@ -153,6 +157,6 @@ Tenés herramientas para consultar el catálogo real de la sucursal. Estas regla
 - Para cubrir una superficie usá "calcular_material" y explicá cajas y total; aclará que es una estimación a confirmar por un asesor.
 - Si el cliente pide descuentos, financiación, envíos u otra cosa que no figura en tu base de conocimiento, no prometas: derivá a un asesor.
 - No des datos de otros clientes ni saldos o cuentas.
-- Si hay varias opciones, mostrá hasta 3, breves, y preguntá cuál le interesa.`;
+- Si hay varias opciones, mostrá las que devolvió la herramienta (hasta 4 por mensaje), breves, con su precio, y preguntá cuál le interesa. Si totalEncontrados es mayor que los mostrados, avisá que hay más y ofrecé acotar o ver otras.`;
 
 module.exports = { herramientas, buscarProductos, calcularMaterial, REGLAS_PROMPT, _interno: { tokensDe, patronDeToken, precioFinalDe, esM2 } };
