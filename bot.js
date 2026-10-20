@@ -378,6 +378,39 @@ router.post('/webhook', async (req, res) => {
   registrarAviso(req.body);
   try { await procesarEvento(req.body); } catch (e) { console.error('[bot] webhook:', e.message); }
 });
+// Historial que Meta manda una vez al vincular el número en coexistencia (hasta ~6 meses de chats).
+// Entra sin disparar al bot, sin avisos ni leads: las conversaciones quedan en estado "bot" (no aparecen en el tablero) con `desdeHistorial`,
+// y los mensajes con `historial: true` (no cuentan en el consumo).
+async function procesarHistorial(db, orgId, v) {
+  let guardados = 0, hilos = 0, fase = null, progreso = null, error = null;
+  for (const h of v.history || []) {
+    if (h.errors && h.errors[0]) { error = String(h.errors[0].message || h.errors[0].title || 'Meta no compartió el historial'); continue; }
+    if (h.metadata) { fase = h.metadata.phase; progreso = h.metadata.progress; }
+    for (const th of h.threads || []) {
+      const tel = digitos(th.id); if (tel.length < 8) continue; const t10 = tel.slice(-10); const ms = th.messages || []; if (!ms.length) continue;
+      const ult = ms.reduce((a, m) => Math.max(a, Number(m.timestamp) || 0), 0);
+      const ag = await db.collection('wa_agenda').findOne({ orgId, tel10: t10 });
+      const r = await db.collection(COL_C).findOneAndUpdate({ orgId, tel10: t10 }, { $setOnInsert: { orgId, tel, tel10: t10, estado: 'bot', datos: {}, createdAt: new Date(ult * 1000 || Date.now()), desdeHistorial: true, ...(ag ? { nombre: ag.nombre } : {}) }, $max: { updatedAt: new Date(ult * 1000 || Date.now()) } }, { upsert: true, returnDocument: 'after' });
+      const conv = r && r.value !== undefined ? r.value : r; hilos++;
+      for (const m of ms) {
+        if (!m.id || m.type === 'reaction') continue; const entra = digitos(m.from).slice(-10) === t10; const arch = archivoDe(m);
+        const ok = await guardarMensaje(db, conv, Object.assign({ waId: m.id, dir: entra ? 'in' : 'out', origen: entra ? 'cliente' : 'asesor', tipo: m.type, texto: textoDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(), historial: true }, arch ? { archivo: arch } : {}));
+        if (ok) guardados++;
+      }
+    }
+  }
+  await db.collection('bot_config').updateOne({ _id: 'historial-estado' }, { $set: { at: new Date(), fase, progreso, error: error || null }, $inc: { mensajes: guardados, hilos } }, { upsert: true });
+}
+// Contactos de la agenda del celular: sirven para ponerle nombre a las conversaciones.
+async function procesarAgenda(db, orgId, v) {
+  for (const s of v.state_sync || []) {
+    const c = s.contact || {}; const tel = digitos(c.phone_number); if (s.type && s.type !== 'contacts' || tel.length < 8) continue; const t10 = tel.slice(-10);
+    if (s.action === 'remove') { await db.collection('wa_agenda').deleteOne({ orgId, tel10: t10 }); continue; }
+    const nombre = String(c.full_name || c.first_name || '').trim().slice(0, 120); if (!nombre) continue;
+    await db.collection('wa_agenda').updateOne({ orgId, tel10: t10 }, { $set: { nombre, at: new Date() } }, { upsert: true });
+    await db.collection(COL_C).updateOne({ orgId, tel10: t10, $or: [{ nombre: { $exists: false } }, { nombre: '' }, { nombre: null }] }, { $set: { nombre } });
+  }
+}
 async function procesarEvento(body) {
   const orgId = orgBot(); if (!orgId) { console.error('[bot] falta BOT_ORG_ID'); return; }
   const db = await getDb();
@@ -387,6 +420,8 @@ async function procesarEvento(body) {
       if (!st.id) continue; const err = (st.errors && st.errors[0]) || null;
       await db.collection(COL_M).updateOne({ waId: st.id }, { $set: Object.assign({ estadoEnvio: st.status, estadoAt: st.timestamp ? new Date(Number(st.timestamp) * 1000) : new Date() }, err ? { errorEnvio: { codigo: err.code, texto: String(err.title || err.message || '').slice(0, 200) } } : {}) }).catch(() => {});
     }
+    if (v.history) await procesarHistorial(db, orgId, v); // historial de la app del celular (coexistencia): se guarda en silencio
+    if (v.state_sync) await procesarAgenda(db, orgId, v);
     if (!v.messages && !v.message_echoes) continue;
     const nombres = new Map((v.contacts || []).map(c => [digitos(c.wa_id), c.profile && c.profile.name]));
     for (const m of v.messages || []) {
@@ -551,6 +586,27 @@ router.put('/plantillas', auth, soloAdmin, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = plantillasLimpias(req.body && req.body.items);
     await (await getDb()).collection('bot_config').updateOne({ _id: 'plantillas:' + orgId }, { $set: { items, updatedAt: new Date() } }, { upsert: true }); res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ---- conexión en modo coexistencia (Embedded Signup): el celular sigue usando el número y el sistema lo recibe también ----
+router.get('/coexistencia', auth, soloAdmin, async (req, res) => {
+  try { const db = await getDb(); const e = process.env;
+    res.json({ appId: e.META_APP_ID || '', configId: e.WA_ES_CONFIG_ID || '', version: e.WA_GRAPH_VERSION || 'v23.0', appSecret: !!e.META_APP_SECRET,
+      conexion: await db.collection('bot_config').findOne({ _id: 'coexistencia' }), historial: await db.collection('bot_config').findOne({ _id: 'historial-estado' }) }); } catch (er) { res.status(500).json({ error: er.message }); }
+});
+router.post('/coexistencia/completar', auth, soloAdmin, async (req, res) => {
+  try { const b = req.body || {}; const code = String(b.code || ''), waba = String(b.wabaId || ''), phone = String(b.phoneId || '');
+    if (!code || !/^\d{5,25}$/.test(waba) || !/^\d{5,25}$/.test(phone)) return res.status(400).json({ error: 'Faltan datos de la conexión (código, WABA o número).' });
+    const e = process.env; if (!e.META_APP_ID || !e.META_APP_SECRET) return res.status(400).json({ error: 'Cargá META_APP_ID y META_APP_SECRET en Render antes de conectar.' });
+    const pasos = []; const paso = async (nombre, fn) => { try { const d = await fn(); pasos.push({ paso: nombre, ok: true }); return d; } catch (x) { pasos.push({ paso: nombre, ok: false, error: x.message }); return null; } };
+    const llamar = async (url, op) => { const r = await pedir(url, op, 30000); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error((d.error && (d.error.error_user_msg || d.error.message)) || ('Error ' + r.status)); return d; };
+    const tk = await paso('Canjear el código por un acceso', async () => (await llamar(graph() + '/oauth/access_token?client_id=' + encodeURIComponent(e.META_APP_ID) + '&client_secret=' + encodeURIComponent(e.META_APP_SECRET) + '&code=' + encodeURIComponent(code))).access_token);
+    if (tk) { const h = { Authorization: 'Bearer ' + tk, 'content-type': 'application/json' };
+      await paso('Suscribir la app a la cuenta de WhatsApp', () => llamar(graph() + '/' + waba + '/subscribed_apps', { method: 'POST', headers: h, body: '{}' }));
+      await paso('Pedir los contactos de la agenda', () => llamar(graph() + '/' + phone + '/smb_app_data', { method: 'POST', headers: h, body: JSON.stringify({ messaging_product: 'whatsapp', sync_type: 'smb_app_state_sync' }) }));
+      await paso('Pedir el historial de chats', () => llamar(graph() + '/' + phone + '/smb_app_data', { method: 'POST', headers: h, body: JSON.stringify({ messaging_product: 'whatsapp', sync_type: 'history' }) })); }
+    const doc = { wabaId: waba, phoneId: phone, at: new Date(), pasos, usuario: (req.usuario && req.usuario.nombre) || '' };
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'coexistencia' }, { $set: doc }, { upsert: true });
+    res.json({ ok: pasos.every(p => p.ok), pasos, wabaId: waba, phoneId: phone }); } catch (er) { res.status(500).json({ error: er.message }); }
+});
 // ---- consumo y costo estimado de mensajes de WhatsApp (tarifas de Meta, editables por variables de entorno) ----
 const num = (v, d) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : d; };
 function tarifasWA() { return { servicio: num(process.env.WA_TARIFA_SERVICIO, 0.026), utilidad: num(process.env.WA_TARIFA_UTILIDAD, 0.026), marketing: num(process.env.WA_TARIFA_MARKETING, 0.0618), cupoGratis: num(process.env.WA_CUPO_SERVICIO, 1000) }; }
@@ -558,7 +614,7 @@ async function consumoDelMes(db, orgId, mes, t) {
   const [a, m] = mes.split('-').map(Number); const desde = new Date(Date.UTC(a, m - 1, 1, 3)); const hasta = new Date(Date.UTC(a, m, 1, 3)); // mes calendario argentino (UTC-3)
   const convs = await db.collection(COL_C).find({ orgId, demo: { $ne: true } }, { projection: { referral: 1 } }).toArray(); const conRef = new Set(convs.filter(c => c.referral).map(c => String(c._id)));
   const primeros = new Map(); if (conRef.size) for (const x of await db.collection(COL_M).aggregate([{ $match: { orgId, dir: 'in', convId: { $in: [...conRef].map(i => convs.find(c => String(c._id) === i)._id) } } }, { $group: { _id: '$convId', at: { $min: '$at' } } }]).toArray()) primeros.set(String(x._id), x.at);
-  const sal = await db.collection(COL_M).find({ orgId, dir: 'out', at: { $gte: desde, $lt: hasta }, prueba: { $ne: true }, celular: { $ne: true } }, { projection: { convId: 1, at: 1, tipo: 1, origen: 1 } }).sort({ at: 1 }).toArray();
+  const sal = await db.collection(COL_M).find({ orgId, dir: 'out', at: { $gte: desde, $lt: hasta }, prueba: { $ne: true }, celular: { $ne: true }, historial: { $ne: true } }, { projection: { convId: 1, at: 1, tipo: 1, origen: 1 } }).sort({ at: 1 }).toArray();
   const r = { mes, salientes: 0, gratisAnuncio: 0, gratisCupo: 0, servicioCobrado: 0, plantillas: 0, bot: 0, asesor: 0, conversaciones: new Set() }; let cupo = t.cupoGratis;
   for (const x of sal) { r.salientes++; r.conversaciones.add(String(x.convId)); if (x.origen === 'bot') r.bot++; else r.asesor++;
     const p = primeros.get(String(x.convId)); if (p && x.at < new Date(new Date(p).getTime() + 7 * 86400000)) { r.gratisAnuncio++; continue; } // chat que entró por un anuncio: gratis 7 días si se respondió dentro de las 24 h

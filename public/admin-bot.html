@@ -76,6 +76,11 @@
 <!-- Conexión -->
 <div id="v-w" class="hidden"><style>#wPl select{width:auto!important;max-width:210px;display:inline-block}</style>
   <div class="card"><div class="hdr"><b>🔌 Conexión de WhatsApp</b><span id="wModo"></span></div><div class="pad" id="wChecks">Cargando…</div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Conectar en modo coexistencia</b><span id="coxEst"></span></div><div class="pad">
+    <div class="muted" style="margin-bottom:8px">Conecta el número de la app WhatsApp Business <b>sin sacarlo del celular</b>: seguís escribiendo desde el teléfono, todo queda en el sistema y Meta manda el historial de chats (hasta ~6 meses) y los contactos. En la ventana de Meta elegí <b>compartir el historial</b>: si lo rechazás no hay segunda oportunidad. Hace falta la app WhatsApp Business actualizada, y usar el celular al menos una vez cada 14 días.</div>
+    <div id="coxChecks" class="muted" style="margin-bottom:8px"></div>
+    <button class="b" id="coxBtn" onclick="coxConectar()">Conectar con coexistencia</button> <span id="coxMsg" class="muted"></span>
+    <div id="coxRes" style="margin-top:8px"></div></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Datos para configurar en Meta</b></div><div class="pad" id="wDatos"></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Probar sin cambiar nada</b></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Estas pruebas no pasan el número al sistema nuevo. Solo funcionan cuando ya cargaste WA_TOKEN y WA_PHONE_ID.</div>
@@ -161,7 +166,7 @@ async function cargarW(){
       <div class="muted" style="margin-top:8px">Token de verificación</div><div>${d.tokenSugerido?`Sugerido (cargalo en Render como WA_VERIFY_TOKEN y pegalo igual en Meta): <code>${esc(d.tokenSugerido)}</code>`:'Ya está cargado en Render. Usá el mismo valor en Meta.'}</div>
       <div class="muted" style="margin-top:8px">Último aviso recibido de Meta</div><div>${d.ultimoAviso?esc(hora(d.ultimoAviso.at))+' · '+esc((d.ultimoAviso.tipos||[]).join(', ')||'sin datos'):'Todavía no llegó ninguno.'}</div>
       <div class="muted" style="margin-top:8px">Conversaciones reales guardadas: <b>${d.conversacionesReales}</b> · plantillas cargadas: <b>${d.plantillas}</b></div>`;
-    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar(); rsCargar(); coCargar();
+    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar(); rsCargar(); coCargar(); coxCargar();
     document.getElementById('wGuia').innerHTML = '<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">'+WGUIA.map(x=>'<li>'+x+'</li>').join('')+'</ol>';
   }catch(e){ document.getElementById('wChecks').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; }
 }
@@ -177,6 +182,27 @@ function wPlSugeridas(){ let n = 0; WSUG.forEach(sg=>{ if (!WPL.some(p=>p.nombre
 function wPlCopiar(i){ const p = WPL[i]; const sg = WSUG.find(x=>x.nombre===p.nombre); const ej = {nombre:'Marta',asesor:'Carla',producto:'porcelanato 60x60'};
   const t = ['Nombre: '+p.nombre,'Idioma: Español (Argentina)','Categoría: '+((sg&&sg.categoria)||'Utilidad'),'Cuerpo:',p.texto,'Ejemplos de las variables: '+(p.variables.map((v,n)=>'{{'+(n+1)+'}} = '+ej[v]).join(' · ')||'sin variables')].join('\n');
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{ document.getElementById('wPlMsg').textContent = 'Copiado: pegalo en el formulario de Meta.'; }).catch(()=>{ prompt('Copiá estos datos para Meta:', t); }); }
+let COX = null, COX_IDS = null, COX_CODE = null;
+async function coxCargar(){ try{ COX = await api('/api/bot/coexistencia', {headers:H()});
+  const f = (ok,t)=>(ok?'✅ ':'⬜ ')+t;
+  document.getElementById('coxChecks').innerHTML = [f(!!COX.appId,'META_APP_ID'), f(COX.appSecret,'META_APP_SECRET'), f(!!COX.configId,'WA_ES_CONFIG_ID (configuración de Embedded Signup)')].join(' · ');
+  const c = COX.conexion, h = COX.historial;
+  document.getElementById('coxEst').innerHTML = c ? '<span class="chip"><i class="dot"></i>Conectado el '+esc(hora(c.at))+'</span>' : '';
+  document.getElementById('coxRes').innerHTML = (c ? '<div>Cuenta de WhatsApp (WABA): <b>'+esc(c.wabaId)+'</b> · Número (WA_PHONE_ID): <b>'+esc(c.phoneId)+'</b></div>'+(c.pasos||[]).map(p=>'<div>'+(p.ok?'✅':'⚠')+' '+esc(p.paso)+(p.error?': '+esc(p.error):'')+'</div>').join('') : '')
+    + (h ? '<div style="margin-top:6px">Historial recibido: <b>'+(h.mensajes||0)+'</b> mensajes en <b>'+(h.hilos||0)+'</b> chats'+(h.progreso!=null?' · avance '+esc(h.progreso)+'%':'')+' · último aviso '+esc(hora(h.at))+(h.error?' · ⚠ '+esc(h.error):'')+'</div>' : ''); }catch(e){ document.getElementById('coxRes').textContent = e.message; } }
+function coxSdk(){ return new Promise((ok,ko)=>{ if (window.FB) return ok(); window.fbAsyncInit = () => { FB.init({appId:COX.appId, autoLogAppEvents:true, xfbml:false, version:COX.version}); ok(); };
+  const s = document.createElement('script'); s.src = 'https://connect.facebook.net/es_LA/sdk.js'; s.async = true; s.onerror = () => ko(new Error('No se pudo cargar el conector de Facebook (¿bloqueador de anuncios?).')); document.body.appendChild(s); }); }
+window.addEventListener('message', e => { if (!/facebook\.com$/.test(new URL(e.origin).hostname)) return; let d; try{ d = JSON.parse(e.data); }catch(x){ return; }
+  if (d && d.type==='WA_EMBEDDED_SIGNUP'){ if (d.data && d.data.phone_number_id && d.data.waba_id){ COX_IDS = {phoneId:String(d.data.phone_number_id), wabaId:String(d.data.waba_id)}; coxTerminar(); } else if (/CANCEL/.test(d.event||'')) { document.getElementById('coxMsg').textContent = 'Se canceló en el paso: '+((d.data&&d.data.current_step)||'—'); document.getElementById('coxBtn').disabled = false; } } });
+async function coxConectar(){ const m = document.getElementById('coxMsg'); m.textContent=''; if (!COX) await coxCargar();
+  if (!COX.appId || !COX.configId || !COX.appSecret){ m.textContent = 'Faltan variables en Render (ver la lista de arriba).'; return; }
+  try{ await coxSdk(); }catch(e){ m.textContent = e.message; return; }
+  COX_IDS = null; COX_CODE = null; document.getElementById('coxBtn').disabled = true; m.textContent = 'Seguí los pasos en la ventana de Meta…';
+  FB.login(r => { if (r.authResponse && r.authResponse.code){ COX_CODE = r.authResponse.code; coxTerminar(); } else { m.textContent = 'No se completó la conexión.'; document.getElementById('coxBtn').disabled = false; } },
+    {config_id:COX.configId, response_type:'code', override_default_response_type:true, extras:{setup:{}, featureType:'whatsapp_business_app_onboarding', sessionInfoVersion:'3'}}); }
+async function coxTerminar(){ if (!COX_CODE || !COX_IDS) return; const m = document.getElementById('coxMsg'); m.textContent = 'Terminando la conexión…'; const code = COX_CODE; COX_CODE = null;
+  try{ const d = await api('/api/bot/coexistencia/completar', {method:'POST', headers:H(J), body:JSON.stringify({code, wabaId:COX_IDS.wabaId, phoneId:COX_IDS.phoneId})}); m.textContent = d.ok ? 'Listo. Cargá WA_PHONE_ID en Render con el número que figura abajo.' : 'Quedó conectado pero un paso falló (ver abajo).'; }catch(e){ m.textContent = e.message; }
+  document.getElementById('coxBtn').disabled = false; coxCargar(); }
 let CO = null;
 const usd = n => 'US$ ' + (Math.round(n*100)/100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 async function coCargar(){ const el = document.getElementById('co'); try{ CO = await api('/api/bot/consumo', {headers:H()}); const t = CO.tarifas;
