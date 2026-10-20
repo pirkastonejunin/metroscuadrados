@@ -281,6 +281,7 @@ function cerrarModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 // -------------------------------------------------------------------
 let proveedoresCache = [];
 let conceptosCache = [];
+let conceptosError = '';
 // Tesorería: cajas/bancos habilitados para este usuario+sucursal, para
 // elegir de dónde sale un pago (o qué banco propio emite un cheque).
 let cajasTesoreriaCache = [];
@@ -293,7 +294,9 @@ async function cargarListasBase(){
     fetch('/api/tesoreria/bancos', {headers: headersAuth()})
   ]);
   proveedoresCache = rp2.ok ? await rp2.json() : [];
-  conceptosCache = rc.ok ? await rc.json() : [];
+  conceptosError = '';
+  if (rc.ok) conceptosCache = await rc.json();
+  else { conceptosCache = []; try { const e = await rc.json(); conceptosError = (e && e.error) || ('error ' + rc.status); } catch(x){ conceptosError = 'error ' + rc.status; } }
   // Si el usuario no tiene el módulo Tesorería habilitado esto da 403 —
   // no es una falla real, simplemente no va a poder elegir cuenta al pagar.
   cajasTesoreriaCache = rcj.ok ? await rcj.json() : [];
@@ -370,7 +373,7 @@ function opcionesProveedoresSelect(seleccionado){
 // desde la propia pantalla (pedido de Mato: "en caso de que no esté que
 // se pueda cargar de la misma pantalla").
 function opcionesConceptosGasto(seleccionado){
-  return '<option value="">Elegí un concepto…</option>' + conceptosCache.map(c =>
+  return '<option value="">' + (conceptosError ? 'No se pudieron cargar los conceptos: ' + escapeHtml(conceptosError) : (conceptosCache.length ? 'Elegí un concepto…' : 'Todavía no hay conceptos: creá uno abajo')) + '</option>' + conceptosCache.map(c =>
     `<option value="${c._id}" ${c._id===seleccionado?'selected':''}>${escapeHtml(c.nombre)}</option>`
   ).join('') + '<option value="__nuevo__">+ Nuevo concepto…</option>';
 }
