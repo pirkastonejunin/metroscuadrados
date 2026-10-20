@@ -937,8 +937,39 @@ async function abrirNuevaVenta(prefill){
     agregarFilaVenta();
   }
   if (prefill && prefill.esFiscalOrigen) document.getElementById('nvEsFiscal').checked = true;
+  edicionEnCurso = null;
   actualizarVisibilidadDeposito();
+  if (prefill && prefill.editaId) prepararFormularioEdicion(prefill);
   if (prefill && prefill.duplicaDe) { actualizarPreviewLetra(); actualizarTotalesVenta(); }
+}
+
+function prepararFormularioEdicion(p){
+  const $ = id => document.getElementById(id);
+  edicionEnCurso = { id: p.editaId, importado: p.importado, listaInicial: '' };
+  $('nvTitulo').textContent = 'Editar venta Nº ' + (p.editaNumero || '');
+  ['nvTipoEntregaWrap','nvDepositoWrap','nvReingresaWrap','nvFiscalWrap'].forEach(i => { if ($(i)) $(i).classList.add('hidden'); });
+  const tc = $('nvTipoComprobante'); if (tc) tc.closest('div').classList.add('hidden');
+  const suc = $('nvSucursal'); if (suc) suc.closest('.grid3').classList.add('hidden');
+  if (p.fechaEdicion) $('nvFecha').value = p.fechaEdicion;
+  if (p.vendedorEdicion) { const sel = $('nvVendedor'); if (![...sel.options].some(o => o.value === p.vendedorEdicion)) sel.add(new Option(p.vendedorEdicion, p.vendedorEdicion)); sel.value = p.vendedorEdicion; }
+  if (!p.listaPrecioId && $('nvListaPrecio')) { try { $('nvListaPrecio').value = ''; } catch(e){} }
+  edicionEnCurso.listaInicial = $('nvListaPrecio') ? $('nvListaPrecio').value : '';
+  const avisos = [];
+  if (p.importado) avisos.push('Venta migrada de Dux: solo se pueden cambiar la fecha, el vendedor y las observaciones.');
+  else {
+    avisos.push('Si cambiás la lista de precio se recalculan los precios de todas las líneas; la diferencia se suma (o resta) al saldo del cliente.');
+    if (p.hayCobros) avisos.push('Tiene cobros: no se puede cambiar el cliente ni la moneda, y el nuevo total no puede quedar por debajo de lo ya cobrado (anulá un cobro en Tesorería → Cobranzas si hace falta).');
+    if (p.acreditada) avisos.push('Tiene notas de crédito: los productos no se pueden modificar.');
+  }
+  const caja = document.createElement('div'); caja.className = 'muted'; caja.style.cssText = 'font-size:12px;margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px';
+  caja.innerHTML = avisos.map(a => '• ' + a).join('<br>');
+  $('nvTitulo').insertAdjacentElement('afterend', caja);
+  if (p.importado || p.acreditada) { document.querySelectorAll('#nvFilasItems input, #nvFilasItems select, #nvFilasItems button').forEach(el => el.disabled = true); const b = document.querySelector('button[onclick="agregarFilaVenta()"]'); if (b) b.disabled = true; }
+  if (p.importado) { ['nvCliente','nvMoneda','nvListaPrecio','nvDescuentoPorcentaje','nvDescuentoMonto'].forEach(i => { if ($(i)) $(i).disabled = true; }); }
+  if (p.hayCobros) { if ($('nvMoneda')) $('nvMoneda').disabled = true; }
+  const g = $('nvGuardarBtn'); g.textContent = 'Guardar cambios'; g.setAttribute('onclick', 'guardarEdicionVenta()');
+  const gc = $('nvGuardarCobrarBtn'); if (gc) gc.remove();
+  actualizarTotalesVenta();
 }
 
 // Duplicar una factura / comprobante (15/10/2026): abre "Nueva venta" con los mismos datos (cliente, ítems con su
@@ -964,6 +995,51 @@ async function reenviarMailVenta(id, btn){
     await cargarVentas();
     verDetalle(id);
   }catch(e){ alert(e.message); btn.disabled = false; }
+}
+// Editar una venta NO fiscal ya cargada: reusa el formulario de Nueva venta con los datos puestos.
+// Las líneas ya entregadas no se pueden quitar ni cambiar de producto (ver PUT /api/ventas/:id).
+let edicionEnCurso = null;
+function editarVenta(id){
+  const v = ventasCache.find(x => x._id === id);
+  if (!v) return;
+  cerrarModal();
+  const dia = v.fecha ? new Date(new Date(v.fecha).getTime() - 3*3600*1000).toISOString().slice(0,10) : '';
+  const hayCobros = Number(v.totalCobrado) > 0.005 || Math.abs(Number(v.saldoPendiente) - Number(v.total)) > 0.005;
+  const acreditada = (v.items || []).some(it => (it.cantidadAcreditada || 0) > 0);
+  abrirNuevaVenta({
+    editaId: v._id, editaNumero: v.numero, fechaEdicion: dia, vendedorEdicion: v.vendedor || '',
+    hayCobros, acreditada, importado: !!v.importado,
+    tipoComprobante: 'comprobante_x', clienteId: v.clienteId, moneda: v.moneda,
+    observaciones: v.observaciones || '', descuentoPorcentaje: v.descuentoPorcentaje || 0, descuentoMonto: v.descuentoMonto || 0,
+    listaPrecioId: v.listaPrecioId || '',
+    items: (v.items || []).map((it, i) => ({ index: i, productoId: it.productoId || null, nombre: it.nombre, cantidad: it.cantidad, precioUnitario: it.precioUnitario, descuentoPorcentaje: it.descuentoPorcentaje || 0, cantidadEntregada: it.cantidadEntregada || 0 }))
+  });
+}
+async function guardarEdicionVenta(){
+  const e = edicionEnCurso; if (!e) return;
+  const err = document.getElementById('nvErr'); err.textContent = '';
+  const body = { fecha: document.getElementById('nvFecha').value, vendedor: document.getElementById('nvVendedor').value.trim(), observaciones: document.getElementById('nvObservaciones').value.trim() };
+  if (!e.importado) {
+    const items = juntarItemsVenta();
+    if (!document.getElementById('nvCliente').value) { err.textContent = 'Elegí un cliente'; return; }
+    if (!items.length) { err.textContent = 'La venta necesita al menos un producto'; return; }
+    body.clienteId = document.getElementById('nvCliente').value;
+    body.moneda = document.getElementById('nvMoneda').value;
+    body.items = items;
+    body.descuentoPorcentaje = Number(document.getElementById('nvDescuentoPorcentaje').value) || 0;
+    body.descuentoMonto = Number(document.getElementById('nvDescuentoMonto').value) || 0;
+    const lp = document.getElementById('nvListaPrecio') ? document.getElementById('nvListaPrecio').value : '';
+    if (lp !== e.listaInicial) body.listaPrecioId = lp || null;
+  }
+  const btn = document.getElementById('nvGuardarBtn'); if (btn.disabled) return;
+  btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Guardando…';
+  try {
+    const r = await fetch(BASE + '/' + e.id, {method:'PUT', headers: headersAuthJsonOrg(ventaOrgSeleccionada), body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error al guardar');
+    cerrarModal(); edicionEnCurso = null;
+    await cargarVentas(); verDetalle(e.id);
+  } catch (ex) { err.textContent = ex.message; btn.disabled = false; btn.textContent = txt; }
 }
 function duplicarVenta(id){
   const v = ventasCache.find(x => x._id === id);
@@ -1397,6 +1473,14 @@ function agregarFilaVentaPrefill(it){
   } else {
     buscar.value = it.nombre || '';
   }
+  if (it.index !== undefined && it.index !== null) {
+    fila.dataset.index = it.index;
+    if (it.cantidadEntregada > 0) {
+      fila.dataset.entregada = it.cantidadEntregada;
+      buscar.disabled = true; buscar.title = 'Ya se entregaron ' + it.cantidadEntregada + ': no se puede cambiar el producto';
+      const q = fila.querySelector('.btn-quitar'); if (q) { q.disabled = true; q.title = 'Tiene mercadería entregada: no se puede quitar'; q.style.opacity = '.4'; }
+    }
+  }
   unidadInput.value = it.cantidad;
   actualizarFilaVenta(fila);
   precioInput.value = it.precioUnitario;
@@ -1497,6 +1581,7 @@ function juntarItemsVenta(){
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
     const descuentoPorcentaje = Number(fila.querySelector('.campo-desc input').value) || 0;
     const it = { productoId: oculto.value, cantidad, precioUnitario, descuentoPorcentaje };
+    if (fila.dataset.index !== undefined && fila.dataset.index !== '') it.index = Number(fila.dataset.index);
     if (ventaEsFiscalUI()) it.porcentajeIva = Number(fila.querySelector('.select-iva').value);
     if (oculto.value && cantidad > 0) items.push(it);
   });
@@ -1740,6 +1825,7 @@ function verDetalle(id){
           ${(v.tipoComprobante === 'fiscal' || v.tipoComprobante === 'comprobante_x') ? `<button class="btn small secondary" onclick="duplicarVenta('${v._id}')">Duplicar</button>` : ''}
           ${(v.estado !== 'anulada' && (v.tipoComprobante === 'fiscal' || v.tipoComprobante === 'comprobante_x')) ? `<button class="btn small secondary" onclick="generarNotaCreditoDesdeVenta('${v._id}')">Generar Nota de Crédito</button>` : ''}
           ${(v.estado !== 'anulada' && v.tipoComprobante === 'comprobante_x' && !v.esFiscal && !v.importado) ? `<button class="btn small" id="btnConvertirFiscal" onclick="convertirAFiscal('${v._id}')">Convertir a fiscal</button>` : ''}
+          ${(v.estado !== 'anulada' && v.tipoComprobante === 'comprobante_x' && !v.esFiscal && !v.cae && !v.canceladaPorNota) ? `<button class="btn small secondary" onclick="editarVenta('${v._id}')">Editar venta</button>` : ''}
           ${(v.estado !== 'anulada' && !v.cae) ? `<button class="btn small danger" onclick="anularVenta('${v._id}')">Anular</button>` : ''}
           ${(v.cae && (v.tipoComprobante === 'nota_credito' || v.tipoComprobante === 'nota_debito') && v.estado !== 'anulada') ? `<button class="btn small danger" onclick="generarNotaContraria('${v._id}')">Anular con ${v.tipoComprobante === 'nota_credito' ? 'Nota de Débito' : 'Nota de Crédito'}</button><span class="muted" style="font-size:12px">Con CAE no se borra: se compensa con la nota contraria.</span>` : (v.cae ? `<span class="muted" style="font-size:12px">Con CAE no se anula: corregilo con una Nota de Crédito.</span>` : '')}
         </div>

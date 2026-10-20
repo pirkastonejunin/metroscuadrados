@@ -1748,6 +1748,118 @@ async function autorizarAlGuardar(req, venta) {
   }
 }
 
+// Editar una venta NO fiscal ya cargada (20/10/2026, pedido de Mato: "las ventas que no son fiscales las pueda editar una vez que ya
+// están cargadas" — p. ej. se cargó a precio de contado y el cliente paga con tarjeta: se cambia la lista de precio y se recalculan los precios).
+// Reglas: solo comprobante X no anulado. Fecha, vendedor y observaciones siempre. En una venta migrada de Dux, solo eso. En el resto además
+// cliente y moneda (si no tiene cobros), lista de precio, descuentos y productos (no se puede quitar ni bajar de lo ya entregado ni cambiar el
+// producto de una línea entregada). Ajusta solo: la reserva de stock de lo pendiente, y la cuenta corriente con un movimiento por la diferencia.
+// El nuevo total no puede quedar por debajo de lo ya cobrado.
+router.put('/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await buscarVentaOperable(db, req, id);
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.tipoComprobante !== 'comprobante_x' || venta.esFiscal) throw err(400, 'Solo se pueden editar las ventas no fiscales (comprobante X). Un comprobante fiscal se corrige con una nota de crédito.');
+      if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada: no se puede editar.');
+      if (venta.cae || venta.canceladaPorNota) throw err(400, 'Esta venta no se puede editar (tiene CAE o está cancelada por una nota de crédito).');
+      const ahora = new Date();
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const set = { updatedAt: ahora };
+      const cambios = [];
+      // --- cabecera: siempre editable ---
+      if (body.fecha) {
+        const dia = String(body.fecha).slice(0, 10); const actual = new Date(new Date(venta.fecha).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dia) && dia !== actual) { set.fecha = new Date(`${dia}T12:00:00-03:00`); cambios.push('fecha'); }
+      }
+      if (body.vendedor !== undefined && normalizarTexto(body.vendedor) !== (venta.vendedor || '')) { set.vendedor = normalizarTexto(body.vendedor); cambios.push('vendedor'); }
+      if (body.observaciones !== undefined && normalizarTexto(body.observaciones) !== (venta.observaciones || '')) { set.observaciones = normalizarTexto(body.observaciones); cambios.push('observaciones'); }
+      if (venta.importado) {
+        if (body.items || body.clienteId || body.moneda || body.descuentoPorcentaje !== undefined || body.descuentoMonto !== undefined) throw err(400, 'Es una venta migrada de Dux: solo se puede cambiar la fecha, el vendedor y las observaciones.');
+      } else {
+        const originales = venta.items || [];
+        const hayCobros = Number(venta.totalCobrado) > 0.005 || Math.abs(Number(venta.saldoPendiente) - Number(venta.total)) > 0.005;
+        // cliente y moneda
+        const nuevoClienteId = body.clienteId ? toObjectId(body.clienteId) : venta.clienteId;
+        if (!nuevoClienteId) throw err(400, 'Cliente inválido');
+        const clienteCambia = String(nuevoClienteId) !== String(venta.clienteId);
+        const monedaNueva = body.moneda ? normalizarTexto(body.moneda).toUpperCase() : (venta.moneda || 'ARS');
+        if (!MONEDAS_VALIDAS.includes(monedaNueva)) throw err(400, 'Moneda inválida (ARS o USD)');
+        const monedaCambia = monedaNueva !== (venta.moneda || 'ARS');
+        if ((clienteCambia || monedaCambia) && hayCobros) throw err(400, 'Esta venta ya tiene cobros: no se puede cambiar el cliente ni la moneda. Anulá primero esos cobros (Tesorería → Cobranzas).');
+        let cliente = null;
+        if (clienteCambia) { cliente = await cargarClienteParaOperar(db, req, nuevoClienteId); if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)'); }
+        // productos
+        let items = originales, subtotal = Number(venta.subtotal) || 0;
+        if (Array.isArray(body.items)) {
+          if (!body.items.length) throw err(400, 'La venta necesita al menos un producto.');
+          if (originales.some(o => (o.cantidadAcreditada || 0) > 0)) throw err(400, 'Esta venta tiene notas de crédito aplicadas: no se pueden cambiar sus productos.');
+          const usados = new Set();
+          body.items.forEach(it => { if (it.index !== undefined && it.index !== null && it.index !== '') { const i = Number(it.index); if (!Number.isInteger(i) || i < 0 || i >= originales.length || usados.has(i)) throw err(400, 'Hay un producto inválido en la venta.'); usados.add(i); } });
+          originales.forEach((o, i) => { if (!usados.has(i) && (o.cantidadEntregada || 0) > 0) throw err(400, `No se puede quitar "${o.nombre}": ya se entregó.`); });
+          const norm = await normalizarItems(db, req, body.items);
+          items = norm.items.map((n, k) => {
+            const raw = body.items[k]; if (raw.index === undefined || raw.index === null || raw.index === '') return n;
+            const o = originales[Number(raw.index)]; const ent = o.cantidadEntregada || 0;
+            if (ent > 0 && String(o.productoId || '') !== String(n.productoId || '')) throw err(400, `No se puede cambiar el producto "${o.nombre}": ya se entregó.`);
+            if (n.cantidad < ent - 1e-9) throw err(400, `De "${o.nombre}" ya se entregaron ${ent}: no se puede bajar la cantidad por debajo de eso.`);
+            return Object.assign({}, o, n, { cantidadEntregada: ent });
+          });
+          subtotal = norm.subtotal;
+        }
+        const dp = body.descuentoPorcentaje !== undefined ? (body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0) : (venta.descuentoPorcentaje || 0);
+        const dm = body.descuentoMonto !== undefined ? (body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0) : (venta.descuentoMonto || 0);
+        const total = calcularTotal(subtotal, dp, dm);
+        const saldoNuevo = Math.round((Number(venta.saldoPendiente) + (total - Number(venta.total))) * 100) / 100;
+        if (saldoNuevo < -0.005) throw err(400, `El nuevo total ($ ${total.toFixed(2)}) queda por debajo de lo ya cobrado ($ ${(Number(venta.total) - Number(venta.saldoPendiente)).toFixed(2)}). Anulá un cobro (Tesorería → Cobranzas) o subí el total.`);
+        if (Math.abs(total - Number(venta.total)) > 0.004) cambios.push(`total $ ${Number(venta.total).toFixed(2)} → $ ${total.toFixed(2)}`);
+        if (Array.isArray(body.items)) { const sig = it => `${it.productoId || ''}|${it.cantidad}|${it.precioUnitario}|${it.descuentoPorcentaje || 0}`; if (items.map(sig).join(';') !== originales.map(sig).join(';')) cambios.push('productos'); }
+        if (clienteCambia) { set.clienteId = nuevoClienteId; set.clienteNombre = nombreCompletoCliente(cliente) || cliente.apellidoRazonSocial || cliente.nombre || ''; cambios.push('cliente'); }
+        if (monedaCambia) { set.moneda = monedaNueva; cambios.push('moneda'); }
+        if (body.listaPrecioId !== undefined) { const l = body.listaPrecioId ? toObjectId(body.listaPrecioId) : null; if (String(l || '') !== String(venta.listaPrecioId || '')) { set.listaPrecioId = l; cambios.push('lista de precio'); } }
+        if (dp !== (venta.descuentoPorcentaje || 0)) { set.descuentoPorcentaje = dp; cambios.push('descuento %'); }
+        if (dm !== (venta.descuentoMonto || 0)) { set.descuentoMonto = dm; cambios.push('descuento $'); }
+        Object.assign(set, { items, subtotal, total, saldoPendiente: saldoNuevo, estado: estadoSegunItems(items) });
+        if (set.estado === 'entregada' && !venta.entregadaEn) set.entregadaEn = ahora;
+        if (set.estado !== 'entregada') set.entregadaEn = null;
+        // efectos: reserva de stock y cuenta corriente (después de validar todo)
+        if (cambios.length) {
+          const reserva = (lista) => { const m = new Map(); for (const it of lista) { if (!it.productoId) continue; const k = String(it.productoId); m.set(k, { productoId: it.productoId, q: (m.get(k) ? m.get(k).q : 0) + cantidadPendiente(it) }); } return m; };
+          const antes = reserva(originales), despues = reserva(items);
+          // se toma la versión de la venta que leímos: si en el medio cambió (un cobro, otra edición) se rechaza en vez de pisarla
+          const guarda = await db.collection('ventas').updateOne({ _id: id, updatedAt: venta.updatedAt }, { $set: Object.assign({}, set, { editadaEn: ahora }), $push: { ediciones: { at: ahora, usuario: usuarioNombre, cambios } } });
+          if (!guarda.matchedCount) throw err(409, 'La venta cambió mientras la editabas (por ejemplo, se registró un cobro). Abrila de nuevo y repetí el cambio.');
+          if (venta.stockComprometido) {
+            for (const k of new Set([...antes.keys(), ...despues.keys()])) {
+              const delta = Math.round(((despues.get(k) ? despues.get(k).q : 0) - (antes.get(k) ? antes.get(k).q : 0)) * 1000) / 1000; if (Math.abs(delta) < 1e-9) continue;
+              const pid = (antes.get(k) || despues.get(k)).productoId;
+              await db.collection('stock_actual').updateOne(Object.assign({ productoId: pid, depositoId: venta.depositoId || null }, filtroOrg(req)),
+                { $inc: { cantidadComprometida: delta }, $set: { actualizadoEn: ahora }, $setOnInsert: Object.assign({ productoId: pid, depositoId: venta.depositoId || null, cantidad: 0 }, filtroOrg(req)) }, { upsert: true });
+            }
+          }
+          const concepto = `Ajuste por edición de Venta Nº ${venta.numero}`;
+          if (clienteCambia) {
+            if (Number(venta.saldoPendiente) > 0) await registrarMovimientoCuentaCorriente(db, req, { clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'credito', monto: Number(venta.saldoPendiente), moneda: venta.moneda || 'ARS', concepto: `Cambio de cliente de Venta Nº ${venta.numero}`, origen: 'venta', ventaId: venta._id });
+            if (total > 0) await registrarMovimientoCuentaCorriente(db, req, { clienteId: nuevoClienteId, clienteNombre: set.clienteNombre, tipo: 'debito', monto: total, moneda: monedaNueva, concepto: `Venta Nº ${venta.numero}`, origen: 'venta', ventaId: venta._id, fecha: set.fecha || venta.fecha });
+          } else {
+            const dif = Math.round((total - Number(venta.total)) * 100) / 100;
+            if (Math.abs(dif) >= 0.01) await registrarMovimientoCuentaCorriente(db, req, { clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: dif > 0 ? 'debito' : 'credito', monto: Math.abs(dif), moneda: venta.moneda || 'ARS', concepto, origen: 'venta', ventaId: venta._id });
+          }
+          return db.collection('ventas').findOne({ _id: id });
+        }
+      }
+      if (cambios.length) {
+        await db.collection('ventas').updateOne({ _id: id }, { $set: Object.assign({}, set, { editadaEn: ahora }), $push: { ediciones: { at: ahora, usuario: usuarioNombre, cambios } } });
+      }
+      return db.collection('ventas').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Genera un remito de una venta "pendiente" o "parcialmente_entregada"
 // — recién ahí se descuenta de verdad el stock que ya estaba
 // comprometido. `body.items` (3/10/2026, pedido de Mato: "una venta

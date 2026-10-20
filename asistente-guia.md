@@ -31,6 +31,7 @@ Ficha con datos personales, de facturación (categoría fiscal obligatoria, CUIT
 - Se cargan con cliente, tipo de comprobante (Comprobante X no fiscal o Factura), lista de precios, ítems, descuentos, vendedor y tipo de entrega.
 - **Entrega inmediata:** descuenta stock en ese momento y genera remito (pide depósito). **Pendiente:** no toca stock hasta entregarla; el depósito se elige al entregar.
 - Anular una venta reingresa el stock y revierte la cuenta corriente.
+- Editar una venta no fiscal (comprobante X): botón "Editar venta" en el detalle. Se pueden cambiar cliente, fecha, vendedor, productos, cantidades, precios, descuentos, observaciones y lista de precio (al cambiar la lista se recalculan los precios y la diferencia va al saldo). No se puede quitar ni cambiar de producto una línea ya entregada, ni bajar la cantidad por debajo de lo entregado. Con cobros no se cambia cliente/moneda y el total no puede quedar menor a lo cobrado (anular primero el cobro). Las migradas de Dux solo permiten fecha, vendedor y observaciones. Las fiscales no se editan: nota de crédito. Queda historial de ediciones.
 - Cobros: parciales o totales, en efectivo (a una caja), transferencia o tarjeta (a un banco) o cheque (entra en cartera). La fecha del cobro se puede cambiar. Cada cobro puede imprimir recibo.
 - La venta siempre se carga a precio de contado. El recargo por cuotas se aplica al cobrar.
 - Botones del detalle: imprimir comprobante, imprimir remito, recibo por cada pago, cobrar con Point, link de pago, anular pago.
