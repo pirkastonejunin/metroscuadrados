@@ -159,6 +159,8 @@ iframe#bot{flex:1;min-height:0;width:100%;border:1px solid var(--line);border-ra
 .m small{display:block;font-size:10.5px;color:var(--mute);margin-top:2px;font-weight:600}
 .sug{padding:10px 16px;border-top:1px solid var(--line);background:var(--accent-soft);display:flex;gap:12px;align-items:center;flex:none}
 .sug .tx{flex:1;min-width:0;font-weight:600}.sug .lb{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:800;display:block;margin-bottom:2px}
+.vent{margin:0 16px 8px;padding:9px 12px;border-radius:12px;background:var(--warm-soft,#fff4e0);border:1px solid var(--warm,#e0a040);font-size:12.5px;flex:none}.vent.ok{background:var(--panel2);border-color:var(--line);color:var(--mute);font-weight:600}.vent .vrow{display:flex;gap:8px;margin-top:8px}.vent select{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:5px 8px;background:var(--panel)}
+.m .tpl{display:inline-block;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--violet);margin-right:6px}.m .fallo{color:var(--bad);font-weight:800}.m .leido{color:var(--cold);font-weight:800}
 .comp{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end;flex:none}
 .comp textarea{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:14px;padding:9px 13px;background:var(--panel2);height:48px}
 .comp select{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px;max-width:112px;font-size:12px}
@@ -265,7 +267,7 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let PREV = {}, ETF = '', ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], dragId = null, pend = null, decOpen = false;
+let PREV = {}, ETF = '', ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
 const cur = () => ITEMS.find(l=>l.id===sel);
 const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
@@ -468,7 +470,8 @@ async function cargar(opts){
 
 /* ---- cajón ---- */
 async function abrirCaj(l, o){
-  if (l.convId){ try{ MSGS = (await api('/api/bot/conversaciones/'+l.convId, {headers:H()})).mensajes; }catch(e){ err(e); MSGS=[]; } } else MSGS = [];
+  VENT = null; PLANT = [];
+  if (l.convId){ try{ const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()}); MSGS = d.mensajes; VENT = d.ventana||null; PLANT = d.plantillas||[]; }catch(e){ err(e); MSGS=[]; } } else MSGS = [];
   pintarCaj(l, o);
 }
 function abrir(id){
@@ -535,12 +538,16 @@ function pintarCaj(l, o){
   const hdr = `<div class="chead"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div><h2>${esc(l.nombre)}</h2><div class="sb">+${esc(l.tel)}${l.producto?' · '+esc(l.producto):''}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${l.convId&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':''}${l.convId&&l.cierre?'<button class="btn sm pri" id="reab">Reabrir</button>':''}<button class="x" id="cx">Cerrar</button></div>`;
   let izq;
   if (l.convId){
-    const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('');
+    const est = m => m.dir!=='out' ? '' : m.errorEnvio||m.estadoEnvio==='failed' ? ` · <span class="fallo" title="${esc((m.errorEnvio&&m.errorEnvio.texto)||'No se pudo entregar')}">⚠ No se entregó</span>` : m.estadoEnvio==='read' ? ' · <span class="leido">✓✓ Leído</span>' : m.estadoEnvio==='delivered' ? ' · ✓✓ Entregado' : m.estadoEnvio==='sent' ? ' · ✓ Enviado' : '';
+    const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${m.tipo==='template'?'<span class="tpl">Plantilla</span>':''}${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}${est(m)}</small></div>`).join('');
+    const vc = !!(VENT && !VENT.abierta && !VENT.demo);
+    const venTip = VENT && VENT.abierta && !VENT.demo && VENT.venceAt && (new Date(VENT.venceAt)-Date.now()) < 3*3600e3 ? `<div class="vent ok">Podés escribirle libremente hasta las ${hora(VENT.venceAt)}. Después, solo con plantilla.</div>` : '';
+    const plBar = vc ? `<div class="vent"><b>Pasaron más de 24 h desde su último mensaje.</b> WhatsApp solo deja mandar una plantilla aprobada.${PLANT.length?`<div class="vrow"><select id="plsel" aria-label="Plantilla">${PLANT.map(p=>`<option value="${esc(p.nombre)}">${esc(p.titulo)}</option>`).join('')}</select><button class="btn pri sm" id="plenv">Enviar plantilla</button></div><div class="tip" id="plprev"></div>`:'<div class="tip" style="margin-top:4px">Todavía no hay plantillas cargadas. Se cargan en Bot de WhatsApp → Conexión.</div>'}</div>` : '';
     const sug = sugDe(l);
     const sugBar = (l.esperaCliente||l.recordar) && sug ? `<div class="sug"><div class="tx"><span class="lb">${l.recordar?'Recordatorio sugerido':'Sugerencia de la IA'}</span>${esc(sug)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
       : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '');
     izq = `${hdr}<div class="msgs" id="msgs">${msgs||'<div class="vacio">Sin mensajes.</div>'}</div>${sugBar}
-      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}<div class="comp"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
+      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}${plBar||venTip}<div class="comp" ${vc?'hidden':''}><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
   } else if (l.leadId){
     izq = `${hdr}<div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
   } else {
@@ -562,6 +569,8 @@ function pintarCaj(l, o){
       try{ if (ADJ&&ADJ.conv===l.id){ $('env').textContent='Armando PDF…'; let pdfBase64=''; try{ pdfBase64 = await pdfPresupuesto(ADJ.id); }catch(x){ console.warn('PDF en el navegador falló, se usa el del servidor', x); } await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id, pdfBase64}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
     $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
   }
+  if ($('plsel')){ const pv = () => { const p = PLANT.find(x=>x.nombre===$('plsel').value); if (!p) return; const val = {nombre:(l.nombre||'cliente').trim().split(/\s+/)[0], asesor:YO.nombre||'un asesor'}; $('plprev').textContent = p.texto.replace(/\{\{(\d+)\}\}/g,(_,n)=>val[p.variables[n-1]]||''); }; $('plsel').onchange = pv; pv();
+    $('plenv').onclick = async () => { $('plenv').disabled = true; try{ await post(`/api/bot/conversaciones/${l.convId}/enviar-plantilla`, {nombre:$('plsel').value}); TOC.add(l.id); toast('Plantilla enviada'); await cargar({forzar:true}); }catch(e){ err(e); $('plenv').disabled=false; } }; }
   if ($('adjx')) $('adjx').onclick = () => { ADJ=null; pintarCaj(l,{keep:true}); };
   if ($('dq')) $('dq').onclick = () => { pend=null; decOpen=true; pintarCaj(l,{keep:true}); };
   if (decOpen) ligarDec(l);

@@ -160,6 +160,49 @@ async function bajarMedia(mediaId) {
   } catch (e) { return null; }
 }
 
+// ---- ventana de 24 h y plantillas ----
+// WhatsApp solo deja mandar texto libre hasta 24 h después del último mensaje del cliente; pasado ese tiempo hay que usar una plantilla aprobada por Meta.
+const VENTANA_H = 24;
+function ventanaDe(ultimoClienteAt) {
+  if (!ultimoClienteAt) return { abierta: false, venceAt: null, ultimoCliente: null };
+  const ult = new Date(ultimoClienteAt), vence = new Date(ult.getTime() + VENTANA_H * 3600 * 1000);
+  return { abierta: vence > new Date(), venceAt: vence, ultimoCliente: ult };
+}
+async function ventanaConv(db, convId) {
+  const m = await db.collection(COL_M).find({ convId, dir: 'in' }).sort({ at: -1 }).limit(1).toArray();
+  return ventanaDe(m[0] && m[0].at);
+}
+const MSJ_VENTANA = 'Pasaron más de 24 h desde el último mensaje del cliente: WhatsApp solo deja mandar una plantilla aprobada. Elegí una plantilla o esperá a que escriba.';
+const VARIABLES_PLANTILLA = { nombre: 'Nombre del cliente', asesor: 'Nombre del asesor' };
+function plantillasLimpias(arr) {
+  const out = []; const usados = new Set();
+  for (const p of Array.isArray(arr) ? arr : []) {
+    const nombre = String((p && p.nombre) || '').trim().toLowerCase(); const texto = String((p && p.texto) || '').trim().slice(0, 1024);
+    if (!/^[a-z0-9_]{1,200}$/.test(nombre) || !texto || usados.has(nombre)) continue; usados.add(nombre);
+    const n = (texto.match(/\{\{\d+\}\}/g) || []).length;
+    const variables = (Array.isArray(p.variables) ? p.variables : []).map(String).filter(v => VARIABLES_PLANTILLA[v]).slice(0, n);
+    while (variables.length < n) variables.push('nombre');
+    out.push({ nombre, idioma: /^[a-z]{2}(_[A-Z]{2})?$/.test(String(p.idioma || '')) ? p.idioma : 'es_AR', texto, variables, titulo: String(p.titulo || '').trim().slice(0, 60) || nombre });
+  }
+  return out.slice(0, 20);
+}
+async function plantillasDe(db, orgId) { const d = await db.collection('bot_config').findOne({ _id: 'plantillas:' + orgId }); return plantillasLimpias(d && d.items); }
+function paramsPlantilla(pl, conv, usuario) {
+  const primero = String((conv && conv.nombre) || '').trim().split(/\s+/)[0] || 'cliente';
+  const v = { nombre: primero, asesor: String((usuario && (usuario.nombre || usuario.name)) || 'un asesor') };
+  return pl.variables.map(k => v[k] || '');
+}
+const rellenar = (texto, params) => String(texto || '').replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] != null ? params[Number(n) - 1] : '');
+async function enviarPlantilla(tel, pl, params) {
+  if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return { id: 'prueba-' + crypto.randomBytes(6).toString('hex'), prueba: true };
+  const tpl = { name: pl.nombre, language: { code: pl.idioma } };
+  if (params.length) tpl.components = [{ type: 'body', parameters: params.map(t => ({ type: 'text', text: String(t) })) }];
+  const r = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.WA_TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: tel, type: 'template', template: tpl }) });
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error('WhatsApp ' + r.status + ': ' + ((d.error && d.error.message) || ''));
+  return { id: d.messages && d.messages[0] && d.messages[0].id };
+}
+
 // ---- conversaciones ----
 async function guardarMensaje(db, conv, m) {
   try { await db.collection(COL_M).insertOne(Object.assign({ orgId: conv.orgId, convId: conv._id }, m)); return true; }
@@ -173,7 +216,20 @@ async function convDe(db, orgId, tel, nombre, referral) {
   const r = await db.collection(COL_C).findOneAndUpdate({ orgId, tel10: t10 }, { $set: set, $setOnInsert: ins }, { upsert: true, returnDocument: 'after' });
   return r && r.value !== undefined ? r.value : r;
 }
-const textoDe = (m) => m.type === 'text' ? (m.text && m.text.body) || '' : m.type === 'button' ? (m.button && m.button.text) || '' : m.type === 'interactive' ? ((m.interactive && ((m.interactive.button_reply && m.interactive.button_reply.title) || (m.interactive.list_reply && m.interactive.list_reply.title))) || '') : (m[m.type] && m[m.type].caption) || '';
+const textoDe = (m) => {
+  const t = m.type, x = m[t] || {}, cap = String(x.caption || '').trim();
+  if (t === 'text') return (m.text && m.text.body) || '';
+  if (t === 'button') return (m.button && m.button.text) || '';
+  if (t === 'interactive') return ((m.interactive && ((m.interactive.button_reply && m.interactive.button_reply.title) || (m.interactive.list_reply && m.interactive.list_reply.title))) || '');
+  if (t === 'document') return '📎 ' + (x.filename || 'Documento') + (cap ? '\n' + cap : '');
+  if (t === 'video') return '🎬 Video' + (cap ? '\n' + cap : '');
+  if (t === 'sticker') return '(sticker)';
+  if (t === 'location') return '📍 Ubicación' + [x.name, x.address].filter(Boolean).map(v => ': ' + v).join('') + (x.latitude != null ? ' https://maps.google.com/?q=' + x.latitude + ',' + x.longitude : '');
+  if (t === 'contacts') return '👤 Contacto compartido: ' + ((m.contacts || []).map(c => c.name && c.name.formatted_name).filter(Boolean).join(', ') || '—');
+  if (t === 'reaction') return '(reaccionó con ' + (x.emoji || '👍') + ')';
+  if (t === 'unsupported' || t === 'order' || t === 'system') return '(mensaje que WhatsApp no deja ver en el sistema)';
+  return cap;
+};
 const mediaIdDe = (m) => (m.type === 'audio' || m.type === 'image') && m[m.type] ? m[m.type].id : null;
 
 const timers = new Map(), ocupadas = new Set();
@@ -259,18 +315,31 @@ function firmaOk(raw, header) {
   const esp = 'sha256=' + crypto.createHmac('sha256', sec).update(raw).digest('hex'); const h = String(header || '');
   return esp.length === h.length && crypto.timingSafeEqual(Buffer.from(esp), Buffer.from(h));
 }
+
+// último aviso real recibido de Meta (para que el panel de Conexión muestre si el webhook está llegando)
+function registrarAviso(body) {
+  try { const tipos = new Set(); for (const e of (body && body.entry) || []) for (const c of e.changes || []) { const v = c.value || {}; if (v.messages) tipos.add('mensajes'); if (v.statuses) tipos.add('estados'); if (v.message_echoes) tipos.add('mensajes del celular'); }
+    getDb().then(db => db.collection('bot_config').updateOne({ _id: 'ultimo-aviso' }, { $set: { at: new Date(), tipos: [...tipos] } }, { upsert: true })).catch(() => {}); } catch (e) { /* no importa */ }
+}
 router.post('/webhook', async (req, res) => {
   if (!firmaOk(req.rawBody, req.headers['x-hub-signature-256'])) return res.sendStatus(process.env.META_APP_SECRET ? 401 : 503);
   res.sendStatus(200); // Meta reintenta si tardamos: se responde ya y se procesa después
+  registrarAviso(req.body);
   try { await procesarEvento(req.body); } catch (e) { console.error('[bot] webhook:', e.message); }
 });
 async function procesarEvento(body) {
   const orgId = orgBot(); if (!orgId) { console.error('[bot] falta BOT_ORG_ID'); return; }
   const db = await getDb();
   for (const ent of (body && body.entry) || []) for (const ch of ent.changes || []) {
-    const v = ch.value || {}; if (!v.messages && !v.message_echoes) continue;
+    const v = ch.value || {};
+    for (const st of v.statuses || []) { // enviado / entregado / leído / falló
+      if (!st.id) continue; const err = (st.errors && st.errors[0]) || null;
+      await db.collection(COL_M).updateOne({ waId: st.id }, { $set: Object.assign({ estadoEnvio: st.status, estadoAt: st.timestamp ? new Date(Number(st.timestamp) * 1000) : new Date() }, err ? { errorEnvio: { codigo: err.code, texto: String(err.title || err.message || '').slice(0, 200) } } : {}) }).catch(() => {});
+    }
+    if (!v.messages && !v.message_echoes) continue;
     const nombres = new Map((v.contacts || []).map(c => [digitos(c.wa_id), c.profile && c.profile.name]));
     for (const m of v.messages || []) {
+      if (m.type === 'reaction') continue; // una reacción no es una consulta nueva
       const conv = await convDe(db, orgId, m.from, nombres.get(digitos(m.from)), m.referral);
       const ok = await guardarMensaje(db, conv, { waId: m.id, dir: 'in', origen: 'cliente', tipo: m.type, texto: textoDe(m), mediaId: mediaIdDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() });
       if (ok) programar(conv._id, orgId);
@@ -283,6 +352,38 @@ async function procesarEvento(body) {
     }
   }
 }
+
+// ---- panel de Conexión de WhatsApp: qué falta para pasar el número al bot propio (no conecta nada por sí solo) ----
+router.get('/conexion', auth, soloAdmin, async (req, res) => {
+  try { const db = await getDb(); const e = process.env;
+    const org = orgBot(); const dominio = (e.PUBLIC_URL || ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.get('host'))).replace(/\/$/, '');
+    const checks = [
+      { k: 'WA_TOKEN', ok: !!e.WA_TOKEN, ayuda: 'Token permanente del usuario del sistema, con los permisos whatsapp_business_messaging y whatsapp_business_management.' },
+      { k: 'WA_PHONE_ID', ok: !!e.WA_PHONE_ID, ayuda: 'Identificador del número (Meta → WhatsApp → Configuración de la API). No es el teléfono.' },
+      { k: 'WA_VERIFY_TOKEN', ok: !!e.WA_VERIFY_TOKEN, ayuda: 'Una clave que inventamos y se carga igual en Render y en Meta (al configurar el webhook).' },
+      { k: 'META_APP_SECRET', ok: !!e.META_APP_SECRET, ayuda: 'Clave secreta de la app (Meta → App → Configuración → Básica). Sirve para comprobar que los avisos vienen de Meta.' },
+      { k: 'BOT_ORG_ID', ok: !!org, ayuda: 'Identificador de la sucursal a la que entran los mensajes (Piedra Negra).' },
+      { k: 'GEMINI_API_KEY', ok: !!(e.GEMINI_API_KEY || e.ANTHROPIC_API_KEY || e.OPENAI_API_KEY), ayuda: 'Clave de la IA que redacta las respuestas.' }
+    ];
+    const aviso = await db.collection('bot_config').findOne({ _id: 'ultimo-aviso' });
+    const [reales, plantillas] = await Promise.all([db.collection(COL_C).countDocuments(Object.assign({ demo: { $ne: true } }, org ? { orgId: org } : {})), org ? plantillasDe(db, org) : []]);
+    res.json({ modo: (e.WA_TOKEN && e.WA_PHONE_ID) ? 'real' : 'prueba', botActivo: e.BOT_ACTIVO !== '0', checks, listo: checks.every(c => c.ok), webhookUrl: dominio + '/api/bot/webhook',
+      tokenSugerido: e.WA_VERIFY_TOKEN ? '' : crypto.randomBytes(18).toString('hex'), ultimoAviso: aviso ? { at: aviso.at, tipos: aviso.tipos || [] } : null, conversacionesReales: reales, plantillas: plantillas.length });
+  } catch (er) { res.status(500).json({ error: er.message }); }
+});
+router.post('/conexion/probar', auth, soloAdmin, async (req, res) => { // consulta a Meta los datos del número: solo lee, no manda nada
+  try { if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return res.json({ ok: false, error: 'Faltan WA_TOKEN y WA_PHONE_ID en Render.' });
+    const r = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '?fields=display_phone_number,verified_name,quality_rating,name_status,code_verification_status,platform_type', { headers: { Authorization: 'Bearer ' + process.env.WA_TOKEN } }, 20000);
+    const d = await r.json().catch(() => ({})); if (!r.ok) return res.json({ ok: false, error: 'Meta respondió ' + r.status + ': ' + ((d.error && d.error.message) || '') });
+    res.json({ ok: true, numero: d.display_phone_number, nombre: d.verified_name, calidad: d.quality_rating, estadoNombre: d.name_status, verificacion: d.code_verification_status, plataforma: d.platform_type });
+  } catch (er) { res.json({ ok: false, error: er.message }); }
+});
+router.post('/conexion/mensaje-prueba', auth, soloAdmin, async (req, res) => { // manda la plantilla "hello_world" que Meta trae por defecto, a un celular propio
+  try { const tel = digitos(req.body && req.body.tel); if (tel.length < 10) return res.status(400).json({ error: 'Poné tu celular con código de área (ej: 549236…).' });
+    if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return res.json({ ok: true, prueba: true, aviso: 'Modo prueba: no se mandó nada porque todavía no está conectado.' });
+    await enviarPlantilla(tel, { nombre: 'hello_world', idioma: 'en_US' }, []); res.json({ ok: true });
+  } catch (er) { res.status(502).json({ error: er.message }); }
+});
 
 // ---- API para la pantalla ----
 router.get('/conversaciones', auth, async (req, res) => {
@@ -306,7 +407,8 @@ router.get('/conversacion-por-tel/:tel', auth, async (req, res) => {
 });
 router.get('/conversaciones/:id', auth, async (req, res) => {
   try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
-    res.json({ conversacion: c, mensajes: await db.collection(COL_M).find({ convId: c._id }).sort({ at: 1 }).limit(500).toArray() }); } catch (e) { res.status(500).json({ error: e.message }); }
+    const mensajes = await db.collection(COL_M).find({ convId: c._id }).sort({ at: 1 }).limit(500).toArray(); const ult = [...mensajes].reverse().find(m => m.dir === 'in');
+    res.json({ conversacion: c, mensajes, ventana: c.demo ? { abierta: true, demo: true } : ventanaDe(ult && ult.at), plantillas: c.demo ? [] : await plantillasDe(db, c.orgId) }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.post('/conversaciones/:id/estado', auth, async (req, res) => {
   try { const est = req.body && req.body.estado; if (!['bot', 'derivado', 'aceptado', 'humano', 'pausado'].includes(est)) return res.status(400).json({ error: 'Estado inválido.' });
@@ -369,9 +471,28 @@ router.delete('/conversaciones/ejemplos', auth, soloAdmin, async (req, res) => {
 router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un asesor escribe desde el sistema: el bot queda afuera
   try { const texto = String((req.body && req.body.texto) || '').trim().slice(0, 4000); if (!texto) return res.status(400).json({ error: 'Escribí un mensaje.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    if (!c.demo && !(await ventanaConv(db, c._id)).abierta) return res.status(409).json({ error: MSJ_VENTANA, ventanaCerrada: true });
     const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarTexto(c.tel, texto); // los ejemplos nunca se mandan por WhatsApp
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'text', texto, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+router.get('/plantillas', auth, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return res.json({ items: [], variables: VARIABLES_PLANTILLA });
+    res.json({ items: await plantillasDe(await getDb(), orgId), variables: VARIABLES_PLANTILLA }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.put('/plantillas', auth, soloAdmin, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = plantillasLimpias(req.body && req.body.items);
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'plantillas:' + orgId }, { $set: { items, updatedAt: new Date() } }, { upsert: true }); res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/conversaciones/:id/enviar-plantilla', auth, async (req, res) => { // reabre la conversación fuera de las 24 h con una plantilla aprobada
+  try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    const pl = (await plantillasDe(db, c.orgId)).find(x => x.nombre === String((req.body && req.body.nombre) || '')); if (!pl) return res.status(400).json({ error: 'Elegí una plantilla de la lista.' });
+    const params = paramsPlantilla(pl, c, req.usuario); const texto = rellenar(pl.texto, params);
+    const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarPlantilla(c.tel, pl, params);
+    await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'template', plantilla: pl.nombre, texto, at: new Date(), prueba: !!env.prueba });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba, texto });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
@@ -380,6 +501,7 @@ router.post('/conversaciones/:id/enviar-presupuesto', auth, async (req, res) => 
     const texto = String((req.body && req.body.texto) || '').trim().slice(0, 1000);
     const pid = (() => { try { return new ObjectId(String(req.body && req.body.presupuestoId)); } catch (e) { return null; } })(); if (!pid) return res.status(400).json({ error: 'Falta el presupuesto.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    if (!c.demo && !(await ventanaConv(db, c._id)).abierta) return res.status(409).json({ error: MSJ_VENTANA, ventanaCerrada: true });
     const p = await db.collection('presupuestos').findOne({ _id: pid, orgId: c.orgId }); if (!p) return res.status(404).json({ error: 'Presupuesto no encontrado.' });
     const [org, cliente] = await Promise.all([db.collection('organizaciones').findOne({ _id: p.orgId }), p.clienteId ? db.collection('clientes').findOne({ _id: p.clienteId }) : null]);
     const b64 = String((req.body && req.body.pdfBase64) || '').replace(/^data:[^,]*,/, ''); // el navegador manda el PDF con el mismo diseño de Imprimir; si no, uno simple del servidor

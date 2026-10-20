@@ -55,7 +55,7 @@
   <div class="chips" id="chips"></div></div>
 <div id="estado" style="margin-top:12px"></div><div id="msg" class="err"></div>
 <div class="kpis" id="kpis"></div>
-<div class="tabs" id="tabs"><button data-t="c" class="on">💬 Conversaciones</button><button data-t="p">🧪 Probar el bot</button><button data-t="k">📚 Conocimiento</button><button data-t="i">📝 Instrucciones</button></div>
+<div class="tabs" id="tabs"><button data-t="c" class="on">💬 Conversaciones</button><button data-t="p">🧪 Probar el bot</button><button data-t="k">📚 Conocimiento</button><button data-t="i">📝 Instrucciones</button><button data-t="w">🔌 Conexión</button></div>
 
 <!-- Conversaciones -->
 <div id="v-c" class="grid">
@@ -70,6 +70,19 @@
     <div class="msgs" id="simMs"><div class="vacio"><span>👋</span>Escribí el primer mensaje del cliente.</div></div><div id="simInfo" class="datos hidden"></div>
     <div class="env"><input type="text" id="simTxt" placeholder="Mensaje del cliente…" onkeydown="if(event.key==='Enter')simEnviar()"><label class="b sec" style="display:grid;place-items:center;margin:0;cursor:pointer" title="Adjuntar foto o audio">📎<input type="file" id="simImg" accept="image/*,audio/*" class="hidden" onchange="document.getElementById('simTxt').placeholder='Adjunto: '+this.files[0].name"></label><button class="b" onclick="simEnviar()">Enviar</button></div></div>
   <div class="card"><div class="hdr"><b>Qué sabe el bot ahora</b></div><div class="pad muted" id="simResumen">Cargando…</div></div>
+</div>
+
+<!-- Conexión -->
+<div id="v-w" class="hidden"><style>#wPl select{width:auto!important;max-width:210px;display:inline-block}</style>
+  <div class="card"><div class="hdr"><b>🔌 Conexión de WhatsApp</b><span id="wModo"></span></div><div class="pad" id="wChecks">Cargando…</div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Datos para configurar en Meta</b></div><div class="pad" id="wDatos"></div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Probar sin cambiar nada</b></div><div class="pad">
+    <div class="muted" style="margin-bottom:8px">Estas pruebas no pasan el número al sistema nuevo. Solo funcionan cuando ya cargaste WA_TOKEN y WA_PHONE_ID.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="b sec mini" onclick="wProbar()">Consultar el número en Meta</button><input type="text" id="wTel" placeholder="Tu celular: 549236…" style="max-width:190px"><button class="b sec mini" onclick="wMsg()">Mandarme un mensaje de prueba</button></div><div id="wProbaOut" class="muted" style="margin-top:8px"></div></div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
+    <div class="muted" style="margin-bottom:8px">Después de 24 h sin que el cliente escriba, WhatsApp solo deja mandar plantillas aprobadas. Se crean y se aprueban en Meta (WhatsApp Manager → Plantillas). Acá cargás el mismo <b>nombre</b> e <b>idioma</b> para poder usarlas desde el chat. En el texto usá {{1}}, {{2}} para los datos variables.</div>
+    <div id="wPl"></div><div id="wPlMsg" class="muted"></div></div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Pasos para pasar el número al sistema</b></div><div class="pad" id="wGuia"></div></div>
 </div>
 
 <!-- Conocimiento -->
@@ -108,9 +121,48 @@ const ini = c => (String(c.nombre||'#').trim()[0]||'#').toUpperCase();
 function err(e){ document.getElementById('msg').textContent = e && e.message || e || ''; }
 async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d; }
 const hora = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'});
-function tab(t){ ['c','p','k','i'].forEach(x=>document.getElementById('v-'+x).classList.toggle('hidden', x!==t)); document.getElementById('v-c').style.display = t==='c'?'':'none'; document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===t));
-  if (t==='i' && !document.getElementById('prompt').value) cargarPrompt(); if (t==='k') cargarK(); if (t==='p') simResumen(); err(''); }
+function tab(t){ ['c','p','k','i','w'].forEach(x=>document.getElementById('v-'+x).classList.toggle('hidden', x!==t)); document.getElementById('v-c').style.display = t==='c'?'':'none'; document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on', b.dataset.t===t));
+  if (t==='i' && !document.getElementById('prompt').value) cargarPrompt(); if (t==='k') cargarK(); if (t==='w') cargarW(); if (t==='p') simResumen(); err(''); }
 document.getElementById('tabs').onclick = e => { if (e.target.dataset.t) tab(e.target.dataset.t); };
+
+// ---- Conexión de WhatsApp ----
+let WPL = [], WVARS = {};
+const WGUIA = [
+  'En Meta (developers.facebook.com) abrí la app <b>metroscuadrados</b> y agregale el producto <b>WhatsApp</b>.',
+  'En el portfolio <b>Piedra Negra</b> creá o elegí la <b>cuenta de WhatsApp Business</b> y agregá el número. <b>Ojo:</b> si hoy el número está en Vulcano/Azuite hay que desvincularlo de ahí antes, y mientras tanto no recibe mensajes. Conviene hacerlo fuera del horario de atención.',
+  'Con el usuario del sistema generá un token que incluya <b>whatsapp_business_messaging</b> y <b>whatsapp_business_management</b>. Va en Render como <b>WA_TOKEN</b>.',
+  'En WhatsApp → Configuración de la API copiá el <b>identificador del número</b> y cargalo en Render como <b>WA_PHONE_ID</b>.',
+  'Cargá en Render <b>WA_VERIFY_TOKEN</b> (la clave sugerida arriba) y <b>META_APP_SECRET</b> (App → Configuración → Básica → Clave secreta).',
+  'En WhatsApp → Configuración → Webhook pegá la <b>URL</b> y la misma clave de verificación, y suscribite al campo <b>messages</b>.',
+  'Creá y aprobá las plantillas en Meta y cargalas acá, arriba.',
+  'Probá primero con un celular propio (botones de arriba) y recién después pasá el número definitivo.'
+];
+async function cargarW(){
+  try{ const d = await api('/api/bot/conexion', {headers:H()});
+    document.getElementById('wModo').innerHTML = d.modo==='real' ? '<span class="chip"><i class="dot"></i>Conectado: manda mensajes reales</span>' : '<span class="chip"><i class="dot off"></i>Modo prueba: no manda nada</span>';
+    document.getElementById('wChecks').innerHTML = d.checks.map(c=>`<div style="display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line)"><span style="width:20px">${c.ok?'✅':'⬜'}</span><div><b>${c.k}</b> <span class="muted">${c.ok?'cargada':'falta'}</span><div class="muted" style="font-size:12.5px">${esc(c.ayuda)}</div></div></div>`).join('') +
+      `<div style="margin-top:10px">${d.listo?'<b>Todo cargado.</b> Falta probar la conexión.':'Faltan variables. Se cargan en Render → Environment (el servicio se reinicia solo).'}</div>`;
+    document.getElementById('wDatos').innerHTML = `<div class="muted">URL de devolución de llamada (webhook)</div><div><code>${esc(d.webhookUrl)}</code></div>
+      <div class="muted" style="margin-top:8px">Token de verificación</div><div>${d.tokenSugerido?`Sugerido (cargalo en Render como WA_VERIFY_TOKEN y pegalo igual en Meta): <code>${esc(d.tokenSugerido)}</code>`:'Ya está cargado en Render. Usá el mismo valor en Meta.'}</div>
+      <div class="muted" style="margin-top:8px">Último aviso recibido de Meta</div><div>${d.ultimoAviso?esc(hora(d.ultimoAviso.at))+' · '+esc((d.ultimoAviso.tipos||[]).join(', ')||'sin datos'):'Todavía no llegó ninguno.'}</div>
+      <div class="muted" style="margin-top:8px">Conversaciones reales guardadas: <b>${d.conversacionesReales}</b> · plantillas cargadas: <b>${d.plantillas}</b></div>`;
+    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; wPlPintar();
+    document.getElementById('wGuia').innerHTML = '<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">'+WGUIA.map(x=>'<li>'+x+'</li>').join('')+'</ol>';
+  }catch(e){ document.getElementById('wChecks').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; }
+}
+function wPlPintar(){
+  document.getElementById('wPl').innerHTML = WPL.length ? WPL.map((p,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;display:grid;gap:6px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><input type="text" data-i="${i}" data-k="titulo" value="${esc(p.titulo)}" placeholder="Título para el vendedor" style="flex:2;min-width:150px"><input type="text" data-i="${i}" data-k="nombre" value="${esc(p.nombre)}" placeholder="nombre_en_meta" style="flex:2;min-width:150px"><input type="text" data-i="${i}" data-k="idioma" value="${esc(p.idioma)}" style="flex:1;min-width:70px"><button class="b sec mini" onclick="wPlQuitar(${i})">Quitar</button></div>
+    <textarea data-i="${i}" data-k="texto" rows="2" placeholder="Hola {{1}}, ¿pudiste ver el presupuesto?">${esc(p.texto)}</textarea>
+    <div class="muted">${(p.texto.match(/\{\{\d+\}\}/g)||[]).map((_,n)=>`{{${n+1}}} = <select data-i="${i}" data-v="${n}">${Object.entries(WVARS).map(([k,l])=>`<option value="${k}" ${p.variables[n]===k?'selected':''}>${esc(l)}</option>`).join('')}</select>`).join(' · ')||'Sin datos variables.'}</div></div>`).join('') : '<div class="muted">Todavía no hay plantillas.</div>';
+  document.querySelectorAll('#wPl [data-k]').forEach(el=>el.onchange = ()=>{ WPL[el.dataset.i][el.dataset.k] = el.value; if (el.dataset.k==='texto') wPlPintar(); });
+  document.querySelectorAll('#wPl [data-v]').forEach(el=>el.onchange = ()=>{ WPL[el.dataset.i].variables[el.dataset.v] = el.value; });
+}
+function wPlAgregar(){ WPL.push({titulo:'',nombre:'',idioma:'es_AR',texto:'',variables:[]}); wPlPintar(); }
+function wPlQuitar(i){ WPL.splice(i,1); wPlPintar(); }
+async function wPlGuardar(){ const m = document.getElementById('wPlMsg'); m.textContent=''; try{ const d = await api('/api/bot/plantillas',{method:'PUT',headers:H(J),body:JSON.stringify({items:WPL})}); WPL = d.items; wPlPintar(); m.textContent = 'Guardado ('+d.items.length+' plantillas). Las que tengan nombre con mayúsculas, espacios o sin texto se descartan: el nombre va en minúsculas, con guion bajo.'; }catch(e){ m.textContent = e.message; } }
+async function wProbar(){ const o = document.getElementById('wProbaOut'); o.textContent='Consultando…'; try{ const d = await api('/api/bot/conexion/probar',{method:'POST',headers:H(J),body:'{}'}); o.innerHTML = d.ok ? `✅ Número <b>${esc(d.numero||'')}</b> · nombre: ${esc(d.nombre||'—')} (${esc(d.estadoNombre||'—')}) · calidad: ${esc(d.calidad||'—')} · verificación: ${esc(d.verificacion||'—')}` : '⚠ '+esc(d.error); }catch(e){ o.textContent = e.message; } }
+async function wMsg(){ const o = document.getElementById('wProbaOut'); o.textContent='Enviando…'; try{ const d = await api('/api/bot/conexion/mensaje-prueba',{method:'POST',headers:H(J),body:JSON.stringify({tel:document.getElementById('wTel').value})}); o.textContent = d.prueba ? d.aviso : '✅ Mensaje enviado. Revisá tu WhatsApp.'; }catch(e){ o.textContent = e.message; } }
 async function init(){
   if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
   const EMB = new URLSearchParams(location.search).get('embed')==='1'; if (EMB) document.body.classList.add('embed');
