@@ -161,6 +161,8 @@ iframe#bot{flex:1;min-height:0;width:100%;border:1px solid var(--line);border-ra
 .sug .tx{flex:1;min-width:0;font-weight:600}.sug .lb{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);font-weight:800;display:block;margin-bottom:2px}
 .vent{margin:0 16px 8px;padding:9px 12px;border-radius:12px;background:var(--warm-soft,#fff4e0);border:1px solid var(--warm,#e0a040);font-size:12.5px;flex:none}.vent.ok{background:var(--panel2);border-color:var(--line);color:var(--mute);font-weight:600}.vent .vrow{display:flex;gap:8px;margin-top:8px}.vent select{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:5px 8px;background:var(--panel)}
 .m .tpl{display:inline-block;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--violet);margin-right:6px}.m .fallo{color:var(--bad);font-weight:800}.m .leido{color:var(--cold);font-weight:800}
+.m .mi{display:block;max-width:240px;max-height:260px;border-radius:10px;margin-bottom:4px;background:var(--panel2);min-width:90px;min-height:70px;object-fit:cover;cursor:zoom-in}.m .mb{margin-bottom:4px}.m audio{display:block;max-width:240px;height:36px;margin-bottom:4px}.m video{display:block;max-width:280px;max-height:260px;border-radius:10px;margin-bottom:4px}
+.visor{position:fixed;inset:0;z-index:10003;background:rgba(0,0,0,.82);display:grid;place-items:center;cursor:zoom-out}.visor img{max-width:92vw;max-height:90vh;border-radius:8px}.visor button{position:absolute;top:14px;right:14px}
 .comp{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end;flex:none}
 .comp textarea{flex:1;min-width:0;resize:none;border:1px solid var(--line);border-radius:14px;padding:9px 13px;background:var(--panel2);height:48px}
 .comp select{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:6px;max-width:112px;font-size:12px}
@@ -447,6 +449,47 @@ function aplicarOcultos(){
   p.querySelectorAll('input').forEach(i=>i.onchange = () => { OCULTOS = OCULTOS.filter(x=>x!==i.dataset.k); if (!i.checked) OCULTOS.push(i.dataset.k); guardarOcultos(); aplicarOcultos(); });
   $('rpers').onclick = () => { PANEL = !PANEL; aplicarOcultos(); };
 }
+
+// ---- fotos, audios, videos y documentos del cliente ----
+function txtMsg(m){ const a = m.archivo; if (!a) return esc(m.texto||('['+(m.tipo||'archivo')+']')); const t = (a.tipo==='document'||a.tipo==='video') ? String(m.texto||'').split('\n').slice(1).join('\n') : (m.texto||''); return esc(t); }
+const MEDIA = {}; // id -> blob URL (así no se vuelve a bajar cada vez que se repinta el chat)
+function mediaHtml(m){
+  const a = m.archivo; if (!a) return '';
+  const id = esc(a.id);
+  if (a.tipo==='image'||a.tipo==='sticker') return `<img class="mi" data-mid="${id}" alt="${a.tipo==='sticker'?'Sticker':'Foto del cliente'}"${MEDIA[a.id]?` src="${MEDIA[a.id]}"`:''}>`;
+  if (a.tipo==='audio') return `<div class="mb"><button class="ghost" data-mid="${id}" data-act="audio">▶ ${a.voz?'Escuchar el audio':'Escuchar'}</button></div>`;
+  if (a.tipo==='video') return `<div class="mb"><button class="ghost" data-mid="${id}" data-act="video">▶ Ver el video</button></div>`;
+  return `<div class="mb"><button class="ghost" data-mid="${id}" data-act="doc" data-n="${esc(a.nombre||'archivo')}">📥 Abrir ${esc(a.nombre||'el archivo')}</button></div>`;
+}
+const MEDIA_OK = /^(image\/(jpeg|png|webp|gif)|audio\/(ogg|mpeg|mp4|aac|amr|wav|x-m4a)|video\/(mp4|3gpp|webm|quicktime)|application\/pdf)$/;
+async function bajarMedia(id){
+  if (MEDIA[id]) return MEDIA[id];
+  const r = await fetch('/api/bot/media/'+encodeURIComponent(id), {headers:H()});
+  if (!r.ok){ let d={}; try{ d = await r.json(); }catch(e){} throw new Error(d.error||('Error '+r.status)); }
+  const b = await r.blob(); const t = (b.type||'').split(';')[0];
+  return MEDIA[id] = URL.createObjectURL(MEDIA_OK.test(t) ? b : new Blob([b],{type:'application/octet-stream'}));
+}
+function verGrande(src){
+  const o = document.createElement('div'); o.className='visor'; o.innerHTML = `<img src="${src}" alt="Foto"><button class="btn" aria-label="Cerrar">✕</button>`;
+  const x = () => { o.remove(); document.removeEventListener('keydown', k); }; const k = e => { if (e.key==='Escape') x(); };
+  o.onclick = e => { if (e.target.tagName!=='IMG') x(); }; document.addEventListener('keydown', k); document.body.appendChild(o);
+}
+function activarMedia(){
+  const ms = $('msgs'); if (!ms) return;
+  ms.querySelectorAll('img.mi').forEach(img=>{
+    if (img.src && img.getAttribute('src')){ img.onclick = () => verGrande(img.src); return; }
+    bajarMedia(img.dataset.mid).then(u=>{ img.src = u; img.onclick = () => verGrande(u); const m = $('msgs'); if (m && m.scrollTop+m.clientHeight>=m.scrollHeight-260) m.scrollTop = m.scrollHeight; })
+      .catch(e=>{ const s = document.createElement('span'); s.className='tip'; s.textContent = '🖼 '+e.message; img.replaceWith(s); });
+  });
+  ms.querySelectorAll('button[data-act]').forEach(b=>b.onclick = async () => {
+    const id = b.dataset.mid, act = b.dataset.act; const t0 = b.textContent; b.disabled = true; b.textContent = 'Cargando…';
+    try{ const u = await bajarMedia(id);
+      if (act==='audio'){ const au = document.createElement('audio'); au.controls = true; au.src = u; au.autoplay = true; b.replaceWith(au); }
+      else if (act==='video'){ const v = document.createElement('video'); v.controls = true; v.src = u; v.autoplay = true; v.playsInline = true; b.replaceWith(v); }
+      else { const a = document.createElement('a'); a.href = u; a.target = '_blank'; a.rel='noopener'; a.download = b.dataset.n||'archivo'; document.body.appendChild(a); a.click(); a.remove(); b.disabled = false; b.textContent = t0; }
+    }catch(e){ b.disabled = false; b.textContent = t0; toast(e.message); }
+  });
+}
 function pintarLista(){
   const rows = filtradas().filter(l=>!l.cierre||$('fCer').checked).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
   $('cant').textContent = rows.length + ' de ' + ITEMS.length;
@@ -539,7 +582,7 @@ function pintarCaj(l, o){
   let izq;
   if (l.convId){
     const est = m => m.dir!=='out' ? '' : m.errorEnvio||m.estadoEnvio==='failed' ? ` · <span class="fallo" title="${esc((m.errorEnvio&&m.errorEnvio.texto)||'No se pudo entregar')}">⚠ No se entregó</span>` : m.estadoEnvio==='read' ? ' · <span class="leido">✓✓ Leído</span>' : m.estadoEnvio==='delivered' ? ' · ✓✓ Entregado' : m.estadoEnvio==='sent' ? ' · ✓ Enviado' : '';
-    const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${m.tipo==='template'?'<span class="tpl">Plantilla</span>':''}${esc(m.texto||('['+(m.tipo||'archivo')+']'))}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}${est(m)}</small></div>`).join('');
+    const msgs = MSGS.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${m.tipo==='template'?'<span class="tpl">Plantilla</span>':''}${mediaHtml(m)}${txtMsg(m)}<small>${m.origen==='bot'?'Bot':m.origen==='asesor'?'Asesor':'Cliente'} · ${hora(m.at)}${est(m)}</small></div>`).join('');
     const vc = !!(VENT && !VENT.abierta && !VENT.demo);
     const venTip = VENT && VENT.abierta && !VENT.demo && VENT.venceAt && (new Date(VENT.venceAt)-Date.now()) < 3*3600e3 ? `<div class="vent ok">Podés escribirle libremente hasta las ${hora(VENT.venceAt)}. Después, solo con plantilla.</div>` : '';
     const plBar = vc ? `<div class="vent"><b>Pasaron más de 24 h desde su último mensaje.</b> WhatsApp solo deja mandar una plantilla aprobada.${PLANT.length?`<div class="vrow"><select id="plsel" aria-label="Plantilla">${PLANT.map(p=>`<option value="${esc(p.nombre)}">${esc(p.titulo)}</option>`).join('')}</select><button class="btn pri sm" id="plenv">Enviar plantilla</button></div><div class="tip" id="plprev"></div>`:'<div class="tip" style="margin-top:4px">Todavía no hay plantillas cargadas. Se cargan en Bot de WhatsApp → Conexión.</div>'}</div>` : '';
@@ -556,7 +599,7 @@ function pintarCaj(l, o){
   c.innerHTML = `<div class="cp">${izq}</div><div class="cp fi" id="ficha"></div>`;
   c.hidden = false; $('vel').hidden = false;
   pintarFicha(l);
-  const ms = $('msgs'); if (ms) ms.scrollTop = ms.scrollHeight;
+  const ms = $('msgs'); if (ms) ms.scrollTop = ms.scrollHeight; activarMedia();
   $('cx').onclick = cerrarCaj; $('vel').onclick = cerrarCaj;
   const tx = $('txt'); if (tx){ tx.value = keep; if (!(o&&o.keep)) tx.focus(); }
   if ($('tomar')) $('tomar').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/tomar`); toast('Es tuya'); await cargar({forzar:true}); }catch(e){ err(e); } };

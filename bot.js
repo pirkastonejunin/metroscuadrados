@@ -203,6 +203,26 @@ async function enviarPlantilla(tel, pl, params) {
   return { id: d.messages && d.messages[0] && d.messages[0].id };
 }
 
+
+// ---- archivos del cliente (fotos, audios, videos, documentos) ----
+// Meta guarda cada archivo ~30 días y su link dura minutos: se baja con el token y se guarda una copia (hasta 6 MB, 120 días) para verlo desde el CRM.
+const MEDIA_MAX_COPIA = 6 * 1024 * 1024, MEDIA_MAX_VER = 25 * 1024 * 1024;
+async function traerMediaDeMeta(id) {
+  const h = { Authorization: 'Bearer ' + process.env.WA_TOKEN };
+  const mr = await pedir(graph() + '/' + id, { headers: h }, 20000); const m = await mr.json().catch(() => ({}));
+  if (!mr.ok || !m.url) { const e = new Error(mr.status === 404 || mr.status === 400 ? 'Meta ya no guarda este archivo (pasaron más de 30 días).' : 'No se pudo pedir el archivo a Meta (' + mr.status + ').'); e.vencido = mr.status === 404 || mr.status === 400; throw e; }
+  if (m.file_size && Number(m.file_size) > MEDIA_MAX_VER) throw new Error('El archivo es muy grande para verlo acá.');
+  const r = await pedir(m.url, { headers: h }, 60000); if (!r.ok) throw new Error('No se pudo bajar el archivo (' + r.status + ').');
+  const buf = Buffer.from(await r.arrayBuffer()); if (buf.length > MEDIA_MAX_VER) throw new Error('El archivo es muy grande para verlo acá.');
+  return { buf, mime: String(m.mime_type || r.headers.get('content-type') || '').split(';')[0] };
+}
+async function guardarCopiaMedia(db, orgId, archivo) {
+  if (!process.env.WA_TOKEN || !archivo) return null;
+  const { buf, mime } = await traerMediaDeMeta(archivo.id);
+  if (buf.length <= MEDIA_MAX_COPIA) await db.collection('wa_media').updateOne({ _id: archivo.id }, { $set: { orgId, mime, data: buf, bytes: buf.length, at: new Date() } }, { upsert: true }).catch(() => {});
+  return { buf, mime };
+}
+
 // ---- conversaciones ----
 async function guardarMensaje(db, conv, m) {
   try { await db.collection(COL_M).insertOne(Object.assign({ orgId: conv.orgId, convId: conv._id }, m)); return true; }
@@ -229,6 +249,10 @@ const textoDe = (m) => {
   if (t === 'reaction') return '(reaccionó con ' + (x.emoji || '👍') + ')';
   if (t === 'unsupported' || t === 'order' || t === 'system') return '(mensaje que WhatsApp no deja ver en el sistema)';
   return cap;
+};
+const archivoDe = (m) => { // foto, audio, video, documento o sticker que mandó el cliente: se guarda para poder verlo en el CRM
+  const t = m.type; if (!['image', 'audio', 'video', 'document', 'sticker'].includes(t)) return null; const x = m[t] || {};
+  return x.id ? { id: String(x.id), tipo: t, mime: String(x.mime_type || '').split(';')[0], nombre: x.filename || '', voz: !!x.voice } : null;
 };
 const mediaIdDe = (m) => (m.type === 'audio' || m.type === 'image') && m[m.type] ? m[m.type].id : null;
 
@@ -341,7 +365,9 @@ async function procesarEvento(body) {
     for (const m of v.messages || []) {
       if (m.type === 'reaction') continue; // una reacción no es una consulta nueva
       const conv = await convDe(db, orgId, m.from, nombres.get(digitos(m.from)), m.referral);
-      const ok = await guardarMensaje(db, conv, { waId: m.id, dir: 'in', origen: 'cliente', tipo: m.type, texto: textoDe(m), mediaId: mediaIdDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() });
+      const arch = archivoDe(m);
+      const ok = await guardarMensaje(db, conv, Object.assign({ waId: m.id, dir: 'in', origen: 'cliente', tipo: m.type, texto: textoDe(m), mediaId: mediaIdDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() }, arch ? { archivo: arch } : {}));
+      if (ok && arch && arch.tipo !== 'video') guardarCopiaMedia(db, orgId, arch).catch(e => console.error('[bot] copia de archivo:', e.message));
       if (ok) programar(conv._id, orgId);
     }
     // mensajes que un asesor mandó desde la app del celular (coexistencia): el bot deja de contestar en esa conversación
@@ -383,6 +409,18 @@ router.post('/conexion/mensaje-prueba', auth, soloAdmin, async (req, res) => { /
     if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return res.json({ ok: true, prueba: true, aviso: 'Modo prueba: no se mandó nada porque todavía no está conectado.' });
     await enviarPlantilla(tel, { nombre: 'hello_world', idioma: 'en_US' }, []); res.json({ ok: true });
   } catch (er) { res.status(502).json({ error: er.message }); }
+});
+
+router.get('/media/:id', auth, async (req, res) => { // el CRM pide el archivo con su sesión; se sirve desde la copia o, si no hay, desde Meta
+  try { const id = String(req.params.id); if (!/^[\w.-]{4,200}$/.test(id)) return res.status(400).json({ error: 'Archivo inválido.' });
+    const db = await getDb(); const m = await db.collection(COL_M).findOne(Object.assign({ 'archivo.id': id }, filtroOrg(req))); if (!m) return res.status(404).json({ error: 'Archivo no encontrado.' });
+    let data = null, mime = m.archivo.mime || '';
+    const c = await db.collection('wa_media').findOne({ _id: id }); if (c && c.data) { data = c.data.buffer ? Buffer.from(c.data.buffer) : Buffer.from(c.data); mime = c.mime || mime; }
+    if (!data) { if (!process.env.WA_TOKEN) return res.status(503).json({ error: 'Todavía no hay conexión con WhatsApp: el archivo se va a poder ver cuando esté conectado.' });
+      let r; try { r = await guardarCopiaMedia(db, m.orgId, m.archivo); } catch (e) { return res.status(e.vencido ? 410 : 502).json({ error: e.message }); } data = r.buf; mime = r.mime || mime; }
+    if (!/^(image\/(jpeg|png|webp|gif)|audio\/(ogg|mpeg|mp4|aac|amr|wav|x-m4a)|video\/(mp4|3gpp|webm|quicktime)|application\/pdf)$/.test(mime)) mime = 'application/octet-stream'; // nunca se sirve HTML/SVG de un cliente
+    res.set({ 'Content-Type': mime, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'Content-Length': String(data.length) }); res.send(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- API para la pantalla ----
@@ -656,7 +694,7 @@ router.put('/vendedor-config', auth, soloAdmin, async (req, res) => {
 });
 router.put('/conocimiento-config', auth, soloAdmin, async (req, res) => { try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); await (await getDb()).collection('bot_config').updateOne({ _id: 'conocimiento:' + orgId }, { $set: { incluirCatalogo: !!(req.body && req.body.incluirCatalogo) } }, { upsert: true }); cacheCon.delete(String(orgId)); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
-(async () => { try { const db = await getDb(); await db.collection(COL_M).createIndex({ waId: 1 }, { unique: true, sparse: true }); await db.collection(COL_C).createIndex({ orgId: 1, tel10: 1 }, { unique: true }); await db.collection(COL_M).createIndex({ convId: 1, at: 1 }); } catch (e) { /* sin base al arrancar */ } })();
+(async () => { try { const db = await getDb(); await db.collection(COL_M).createIndex({ waId: 1 }, { unique: true, sparse: true }); await db.collection(COL_C).createIndex({ orgId: 1, tel10: 1 }, { unique: true }); await db.collection(COL_M).createIndex({ convId: 1, at: 1 }); await db.collection('wa_media').createIndex({ at: 1 }, { expireAfterSeconds: 120 * 86400 }); await db.collection(COL_M).createIndex({ 'archivo.id': 1 }, { sparse: true }); } catch (e) { /* sin base al arrancar */ } })();
 
 module.exports = router;
 module.exports.abierto = abierto;
