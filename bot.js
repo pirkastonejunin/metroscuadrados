@@ -190,7 +190,17 @@ async function ventanaConv(db, convId) {
   return ventanaDe(m[0] && m[0].at);
 }
 const MSJ_VENTANA = 'Pasaron más de 24 h desde el último mensaje del cliente: WhatsApp solo deja mandar una plantilla aprobada. Elegí una plantilla o esperá a que escriba.';
-const VARIABLES_PLANTILLA = { nombre: 'Nombre del cliente', asesor: 'Nombre del asesor' };
+const VARIABLES_PLANTILLA = { nombre: 'Nombre del cliente', asesor: 'Nombre del asesor', producto: 'Producto que consultó' };
+// Plantillas sugeridas (para crear y aprobar en Meta). 'categoria' y 'ejemplos' son para completar el formulario de Meta; el sistema usa nombre, idioma, texto y variables.
+const PLANTILLAS_SUGERIDAS = [
+  { titulo: 'Seguimiento de presupuesto', nombre: 'seguimiento_presupuesto', categoria: 'Utilidad', texto: 'Hola {{1}}, soy {{2}} de Piedra Negra. Quería saber si pudiste revisar el presupuesto que te enviamos. Si tenés alguna duda o querés ajustar algo, respondé este mensaje y lo vemos juntos.', variables: ['nombre', 'asesor'] },
+  { titulo: 'Presupuesto por vencer', nombre: 'presupuesto_por_vencer', categoria: 'Utilidad', texto: 'Hola {{1}}, soy {{2}} de Piedra Negra. Te aviso que el presupuesto que te pasamos está por vencer y los precios pueden actualizarse. Si querés avanzar o necesitás ajustarlo, respondé este mensaje.', variables: ['nombre', 'asesor'] },
+  { titulo: 'Consulta sin respuesta', nombre: 'consulta_sin_respuesta', categoria: 'Utilidad (Meta puede pasarla a Marketing)', texto: 'Hola {{1}}, soy {{2}} de Piedra Negra. Hace unos días nos consultaste por {{3}} y queremos saber si todavía te interesa. Respondé este mensaje y te ayudamos con lo que necesites.', variables: ['nombre', 'asesor', 'producto'] },
+  { titulo: 'Retomar consulta', nombre: 'retomar_consulta', categoria: 'Utilidad (Meta puede pasarla a Marketing)', texto: 'Hola {{1}}, soy {{2}} de Piedra Negra. Retomamos tu consulta por {{3}}. ¿Querés que sigamos por acá y te paso el detalle?', variables: ['nombre', 'asesor', 'producto'] },
+  { titulo: 'Coordinar entrega', nombre: 'coordinar_entrega', categoria: 'Utilidad', texto: 'Hola {{1}}, te escribimos de Piedra Negra para coordinar la entrega de tu pedido. ¿Qué día y horario te queda cómodo? Respondé este mensaje y lo coordinamos.', variables: ['nombre'] },
+  { titulo: 'Poscompra', nombre: 'poscompra', categoria: 'Utilidad', texto: 'Hola {{1}}, gracias por tu compra en Piedra Negra. Si tenés alguna duda con los materiales o necesitás algo más para tu obra, escribinos por acá.', variables: ['nombre'] }
+];
+const EJEMPLOS_VARIABLE = { nombre: 'Marta', asesor: 'Carla', producto: 'porcelanato 60x60' };
 function plantillasLimpias(arr) {
   const out = []; const usados = new Set();
   for (const p of Array.isArray(arr) ? arr : []) {
@@ -206,7 +216,7 @@ function plantillasLimpias(arr) {
 async function plantillasDe(db, orgId) { const d = await db.collection('bot_config').findOne({ _id: 'plantillas:' + orgId }); return plantillasLimpias(d && d.items); }
 function paramsPlantilla(pl, conv, usuario) {
   const primero = String((conv && conv.nombre) || '').trim().split(/\s+/)[0] || 'cliente';
-  const v = { nombre: primero, asesor: String((usuario && (usuario.nombre || usuario.name)) || 'un asesor') };
+  const v = { nombre: primero, asesor: String((usuario && (usuario.nombre || usuario.name)) || 'un asesor'), producto: String((conv && conv.datos && conv.datos.producto) || '').trim() || 'materiales' };
   return pl.variables.map(k => v[k] || '');
 }
 const rellenar = (texto, params) => String(texto || '').replace(/\{\{(\d+)\}\}/g, (_, n) => params[Number(n) - 1] != null ? params[Number(n) - 1] : '');
@@ -534,8 +544,8 @@ router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un ases
 });
 
 router.get('/plantillas', auth, async (req, res) => {
-  try { const orgId = orgCon(req); if (!orgId) return res.json({ items: [], variables: VARIABLES_PLANTILLA });
-    res.json({ items: await plantillasDe(await getDb(), orgId), variables: VARIABLES_PLANTILLA }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { const orgId = orgCon(req); if (!orgId) return res.json({ items: [], variables: VARIABLES_PLANTILLA, sugeridas: [] });
+    res.json({ items: await plantillasDe(await getDb(), orgId), variables: VARIABLES_PLANTILLA, sugeridas: PLANTILLAS_SUGERIDAS.map(p => Object.assign({ idioma: 'es_AR', ejemplos: p.variables.map(v => EJEMPLOS_VARIABLE[v]) }, p)) }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.put('/plantillas', auth, soloAdmin, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = plantillasLimpias(req.body && req.body.items);

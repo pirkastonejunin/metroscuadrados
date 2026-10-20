@@ -79,7 +79,7 @@
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Probar sin cambiar nada</b></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Estas pruebas no pasan el número al sistema nuevo. Solo funcionan cuando ya cargaste WA_TOKEN y WA_PHONE_ID.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="b sec mini" onclick="wProbar()">Consultar el número en Meta</button><input type="text" id="wTel" placeholder="Tu celular: 549236…" style="max-width:190px"><button class="b sec mini" onclick="wMsg()">Mandarme un mensaje de prueba</button></div><div id="wProbaOut" class="muted" style="margin-top:8px"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlSugeridas()">Cargar las sugeridas</button> <button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Después de 24 h sin que el cliente escriba, WhatsApp solo deja mandar plantillas aprobadas. Se crean y se aprueban en Meta (WhatsApp Manager → Plantillas). Acá cargás el mismo <b>nombre</b> e <b>idioma</b> para poder usarlas desde el chat. En el texto usá {{1}}, {{2}} para los datos variables.</div>
     <div id="wPl"></div><div id="wPlMsg" class="muted"></div></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Pasos para pasar el número al sistema</b></div><div class="pad" id="wGuia"></div></div>
@@ -126,7 +126,7 @@ function tab(t){ ['c','p','k','i','w'].forEach(x=>document.getElementById('v-'+x
 document.getElementById('tabs').onclick = e => { if (e.target.dataset.t) tab(e.target.dataset.t); };
 
 // ---- Conexión de WhatsApp ----
-let WPL = [], WVARS = {};
+let WPL = [], WVARS = {}, WSUG = [];
 const WGUIA = [
   'En Meta (developers.facebook.com) abrí la app <b>metroscuadrados</b> y agregale el producto <b>WhatsApp</b>.',
   'En el portfolio <b>Piedra Negra</b> creá o elegí la <b>cuenta de WhatsApp Business</b> y agregá el número. <b>Ojo:</b> si hoy el número está en Vulcano/Azuite hay que desvincularlo de ahí antes, y mientras tanto no recibe mensajes. Conviene hacerlo fuera del horario de atención.',
@@ -146,18 +146,22 @@ async function cargarW(){
       <div class="muted" style="margin-top:8px">Token de verificación</div><div>${d.tokenSugerido?`Sugerido (cargalo en Render como WA_VERIFY_TOKEN y pegalo igual en Meta): <code>${esc(d.tokenSugerido)}</code>`:'Ya está cargado en Render. Usá el mismo valor en Meta.'}</div>
       <div class="muted" style="margin-top:8px">Último aviso recibido de Meta</div><div>${d.ultimoAviso?esc(hora(d.ultimoAviso.at))+' · '+esc((d.ultimoAviso.tipos||[]).join(', ')||'sin datos'):'Todavía no llegó ninguno.'}</div>
       <div class="muted" style="margin-top:8px">Conversaciones reales guardadas: <b>${d.conversacionesReales}</b> · plantillas cargadas: <b>${d.plantillas}</b></div>`;
-    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; wPlPintar();
+    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar();
     document.getElementById('wGuia').innerHTML = '<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">'+WGUIA.map(x=>'<li>'+x+'</li>').join('')+'</ol>';
   }catch(e){ document.getElementById('wChecks').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; }
 }
 function wPlPintar(){
   document.getElementById('wPl').innerHTML = WPL.length ? WPL.map((p,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;display:grid;gap:6px">
-    <div style="display:flex;gap:6px;flex-wrap:wrap"><input type="text" data-i="${i}" data-k="titulo" value="${esc(p.titulo)}" placeholder="Título para el vendedor" style="flex:2;min-width:150px"><input type="text" data-i="${i}" data-k="nombre" value="${esc(p.nombre)}" placeholder="nombre_en_meta" style="flex:2;min-width:150px"><input type="text" data-i="${i}" data-k="idioma" value="${esc(p.idioma)}" style="flex:1;min-width:70px"><button class="b sec mini" onclick="wPlQuitar(${i})">Quitar</button></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><input type="text" data-i="${i}" data-k="titulo" value="${esc(p.titulo)}" placeholder="Título para el vendedor" style="flex:2;min-width:150px"><input type="text" data-i="${i}" data-k="nombre" value="${esc(p.nombre)}" placeholder="nombre_en_meta" style="flex:2;min-width:150px"><input type="text" data-i="${i}" data-k="idioma" value="${esc(p.idioma)}" style="flex:1;min-width:70px"><button class="b sec mini" onclick="wPlCopiar(${i})" title="Copia los datos para pegarlos en el formulario de Meta">Copiar para Meta</button><button class="b sec mini" onclick="wPlQuitar(${i})">Quitar</button></div>
     <textarea data-i="${i}" data-k="texto" rows="2" placeholder="Hola {{1}}, ¿pudiste ver el presupuesto?">${esc(p.texto)}</textarea>
     <div class="muted">${(p.texto.match(/\{\{\d+\}\}/g)||[]).map((_,n)=>`{{${n+1}}} = <select data-i="${i}" data-v="${n}">${Object.entries(WVARS).map(([k,l])=>`<option value="${k}" ${p.variables[n]===k?'selected':''}>${esc(l)}</option>`).join('')}</select>`).join(' · ')||'Sin datos variables.'}</div></div>`).join('') : '<div class="muted">Todavía no hay plantillas.</div>';
   document.querySelectorAll('#wPl [data-k]').forEach(el=>el.onchange = ()=>{ WPL[el.dataset.i][el.dataset.k] = el.value; if (el.dataset.k==='texto') wPlPintar(); });
   document.querySelectorAll('#wPl [data-v]').forEach(el=>el.onchange = ()=>{ WPL[el.dataset.i].variables[el.dataset.v] = el.value; });
 }
+function wPlSugeridas(){ let n = 0; WSUG.forEach(sg=>{ if (!WPL.some(p=>p.nombre===sg.nombre)){ WPL.push({titulo:sg.titulo,nombre:sg.nombre,idioma:sg.idioma||'es_AR',texto:sg.texto,variables:sg.variables.slice()}); n++; } }); wPlPintar(); document.getElementById('wPlMsg').textContent = n ? 'Se agregaron '+n+' plantillas. Tocá Guardar para que queden cargadas.' : 'Ya están todas cargadas.'; }
+function wPlCopiar(i){ const p = WPL[i]; const sg = WSUG.find(x=>x.nombre===p.nombre); const ej = {nombre:'Marta',asesor:'Carla',producto:'porcelanato 60x60'};
+  const t = ['Nombre: '+p.nombre,'Idioma: Español (Argentina)','Categoría: '+((sg&&sg.categoria)||'Utilidad'),'Cuerpo:',p.texto,'Ejemplos de las variables: '+(p.variables.map((v,n)=>'{{'+(n+1)+'}} = '+ej[v]).join(' · ')||'sin variables')].join('\n');
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{ document.getElementById('wPlMsg').textContent = 'Copiado: pegalo en el formulario de Meta.'; }).catch(()=>{ prompt('Copiá estos datos para Meta:', t); }); }
 function wPlAgregar(){ WPL.push({titulo:'',nombre:'',idioma:'es_AR',texto:'',variables:[]}); wPlPintar(); }
 function wPlQuitar(i){ WPL.splice(i,1); wPlPintar(); }
 async function wPlGuardar(){ const m = document.getElementById('wPlMsg'); m.textContent=''; try{ const d = await api('/api/bot/plantillas',{method:'PUT',headers:H(J),body:JSON.stringify({items:WPL})}); WPL = d.items; wPlPintar(); m.textContent = 'Guardado ('+d.items.length+' plantillas). Las que tengan nombre con mayúsculas, espacios o sin texto se descartan: el nombre va en minúsculas, con guion bajo.'; }catch(e){ m.textContent = e.message; } }
