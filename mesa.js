@@ -190,15 +190,61 @@ async function traerGastoMeta(db, orgId, meses) {
   }
   return { campanasMes: filas.length, meses: [...new Set([...vistos].map(x => x.split('|')[0]))].length };
 }
+function ultimos12Meses() {
+  const hoy = new Date(Date.now() - 3 * 3600000); const meses = [];
+  for (let i = 11; i >= 0; i--) meses.push(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
+  return meses;
+}
+// Vencimiento del token: el Depurador de tokens de Meta dice cuándo caduca (expires_at = 0 significa que no vence).
+async function infoTokenMeta() {
+  const tk = process.env.META_ADS_TOKEN; if (!tk) return null;
+  const base = process.env.WA_GRAPH_BASE || ('https://graph.facebook.com/' + (process.env.WA_GRAPH_VERSION || 'v23.0'));
+  try {
+    const r = await fetch(base + '/debug_token?input_token=' + encodeURIComponent(tk) + '&access_token=' + encodeURIComponent(tk), { signal: AbortSignal.timeout(20000) });
+    const d = (await r.json().catch(() => ({}))).data;
+    if (!r.ok || !d) return null;
+    return { tokenValido: d.is_valid !== false, tokenVenceAt: d.expires_at ? new Date(d.expires_at * 1000) : null };
+  } catch (e) { return null; }
+}
+const SYNC_ID = 'metaAdsSync';
+async function guardarEstadoMeta(db, set) { await db.collection('configuracion').updateOne({ _id: SYNC_ID }, { $set: set }, { upsert: true }); }
+// Sincroniza el gasto (últimos 12 meses) y revisa el token; deja el resultado guardado para mostrarlo y avisar si algo falla.
+async function sincronizarMetaYRegistrar(db, orgId) {
+  try {
+    const r = await traerGastoMeta(db, orgId, ultimos12Meses());
+    await guardarEstadoMeta(db, Object.assign({ okAt: new Date(), error: null, errorAt: null }, (await infoTokenMeta()) || {}));
+    return r;
+  } catch (e) {
+    await guardarEstadoMeta(db, Object.assign({ error: e.message, errorAt: new Date() }, (await infoTokenMeta()) || {})).catch(() => {});
+    throw e;
+  }
+}
+// Una vez por día (se dispara al abrir el Resumen y cada 30 min en segundo plano), para la sucursal de META_ADS_ORG_ID (o BOT_ORG_ID).
+async function sincronizacionDiariaMeta(db) {
+  if (!process.env.META_ADS_TOKEN || !process.env.META_AD_ACCOUNT_ID) return;
+  const org = process.env.META_ADS_ORG_ID || process.env.BOT_ORG_ID; if (!/^[0-9a-f]{24}$/i.test(org || '')) return;
+  const corte = new Date(Date.now() - 20 * 3600000);
+  try { const r = await db.collection('configuracion').updateOne({ _id: SYNC_ID, $or: [{ intentoAt: { $exists: false } }, { intentoAt: { $lt: corte } }] }, { $set: { intentoAt: new Date() } }, { upsert: true }); if (!r.modifiedCount && !r.upsertedCount) return; } catch (e) { return; } // otro proceso ya la tomó (o la hizo hace poco)
+  try { await sincronizarMetaYRegistrar(db, new ObjectId(org)); } catch (e) { console.error('[mesa] sync Meta Ads:', e.message); }
+}
+if (process.env.MONGODB_URI) setInterval(async () => { try { await sincronizacionDiariaMeta(await getDb()); } catch (e) {} }, 30 * 60 * 1000).unref();
 router.post('/gasto-ads/sincronizar', auth, async (req, res) => {
   try {
     if (!req.orgId) return res.status(400).json({ error: 'Elegí con qué sucursal estás trabajando.' });
-    const hoy = new Date(Date.now() - 3 * 3600000); const meses = [];
-    for (let i = 11; i >= 0; i--) meses.push(new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
-    res.json(Object.assign({ ok: true }, await traerGastoMeta(await getDb(), req.orgId, meses)));
+    res.json(Object.assign({ ok: true }, await sincronizarMetaYRegistrar(await getDb(), req.orgId)));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
-router.get('/gasto-ads/estado', auth, (req, res) => res.json({ conectado: !!(process.env.META_ADS_TOKEN && process.env.META_AD_ACCOUNT_ID) }));
+router.get('/gasto-ads/estado', auth, async (req, res) => {
+  const conectado = !!(process.env.META_ADS_TOKEN && process.env.META_AD_ACCOUNT_ID);
+  if (!conectado) return res.json({ conectado });
+  try {
+    const db = await getDb();
+    sincronizacionDiariaMeta(db).catch(() => {}); // si pasó más de un día desde la última, se actualiza en segundo plano
+    const e = (await db.collection('configuracion').findOne({ _id: SYNC_ID })) || {};
+    res.json({ conectado, ultimaSync: e.okAt || null, error: e.error || null, tokenVenceAt: e.tokenVenceAt || null, tokenValido: e.tokenValido !== false,
+      diasToken: e.tokenVenceAt ? Math.floor((new Date(e.tokenVenceAt) - Date.now()) / 86400000) : null });
+  } catch (x) { res.json({ conectado }); }
+});
 // Lo que se gastó en Meta Ads por mes (se carga a mano desde el Resumen; después se puede traer solo de la cuenta publicitaria).
 router.put('/gasto-ads', auth, async (req, res) => {
   try {

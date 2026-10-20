@@ -446,6 +446,7 @@
     let items = [];
     const destino = function (tipo, id) {
       if (tipo === 'crm') return '/crm.html?abrir=crm-' + id;
+      if (tipo === 'meta_token') return '/mesa.html';
       if (tipo === 'crm_sin_decidir') return '/mesa.html?abrir=' + id;
       if (tipo === 'visita') return '/admin-visitas.html?abrir=visita-' + id;
       if (tipo === 'obra') return '/admin-obras.html?abrir=obra-' + id;

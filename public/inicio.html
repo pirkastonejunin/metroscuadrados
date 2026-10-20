@@ -1288,6 +1288,7 @@ function renderNotifPanel(){
 function irANotificacion(tipo, id){
   toggleNotifPanel();
   if (tipo === 'crm') location.href = '/crm.html?abrir=crm-' + id;
+  else if (tipo === 'meta_token') location.href = '/mesa.html';
   else if (tipo === 'crm_sin_decidir') location.href = '/mesa.html?abrir=' + id;
   else if (tipo === 'visita') location.href = '/admin-visitas.html?abrir=visita-' + id;
   else if (tipo === 'obra') location.href = '/admin-obras.html?abrir=obra-' + id;

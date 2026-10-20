@@ -88,6 +88,7 @@ const CONFIG_ID_GLOBAL = 'notificaciones';
 const CATALOGO = [
   { key: 'crm', grupo: 'Comercial', label: 'CRM — próximas acciones vencidas', default: true, modulo: 'visitas' },
   { key: 'crmSinDecidir', grupo: 'Comercial', label: 'CRM — consultas con más de 24 h sin decisión', default: true, modulo: 'visitas' },
+  { key: 'metaAdsToken', grupo: 'Comercial', label: 'Meta Ads — el token vence en 7 días o dejó de funcionar', default: true, modulo: 'crm' },
   { key: 'visitas', grupo: 'Comercial', label: 'Visitas sin confirmar', default: true, modulo: 'visitas' },
   { key: 'obras', grupo: 'Obras', label: 'Obras — tareas atrasadas', default: true, modulo: 'obras' },
   { key: 'chequesVencidos', grupo: 'Tesorería', label: 'Cheques vencidos (de terceros sin depositar / propios sin pagar)', default: true, modulo: 'tesoreria' },
@@ -192,6 +193,19 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
               fecha: x.desde, etiquetaFecha: 'Desde' });
           });
         } catch (e) { console.error('crmSinDecidir:', e.message); }
+      }
+
+      if (activa('metaAdsToken') && process.env.META_ADS_TOKEN && process.env.META_AD_ACCOUNT_ID) {
+        try {
+          const e = (await db.collection('configuracion').findOne({ _id: 'metaAdsSync' })) || {};
+          const dias = e.tokenVenceAt ? Math.floor((new Date(e.tokenVenceAt) - Date.now()) / 86400000) : null;
+          const roto = e.tokenValido === false || (e.error && /token|session|expired|OAuth|190/i.test(e.error));
+          if (roto || (dias !== null && dias <= 7)) {
+            items.push({ tipo: 'meta_token', id: 'meta', titulo: 'Meta Ads: hay que renovar el token',
+              subtitulo: roto ? 'El token dejó de funcionar: el gasto de anuncios no se actualiza. Generá uno nuevo y cargalo en Render (META_ADS_TOKEN).' : ('Vence ' + (dias <= 0 ? 'hoy' : 'en ' + dias + ' día' + (dias === 1 ? '' : 's')) + '. Generá uno nuevo y cargalo en Render (META_ADS_TOKEN).'),
+              fecha: ahora, etiquetaFecha: 'Hoy' });
+          }
+        } catch (x) { /* sin estado todavía */ }
       }
 
       if (activa('visitas')) {
