@@ -61,6 +61,15 @@ button{cursor:pointer}
 .rg{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
 .bx{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow);min-width:0}
 .gads{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px}.gads label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--mute);font-weight:700}.gads input{border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:4px 7px;font-size:12.5px;font-weight:600;width:100%}
+.res{max-width:1280px;width:100%;margin:0 auto;gap:26px}
+.rh{position:sticky;top:0;z-index:6;background:var(--bg);padding:6px 0 8px;margin-bottom:-8px}
+.rsec{display:flex;flex-direction:column;gap:10px}
+.rsh{font-size:15px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:0 2px 7px;border-bottom:1px solid var(--line)}.rsh small{font-size:12px;color:var(--mute);font-weight:600}
+.rg{grid-template-columns:repeat(2,minmax(0,1fr))!important}@media (max-width:900px){.rg{grid-template-columns:minmax(0,1fr)!important}}
+.bx h3{text-transform:none!important;letter-spacing:0!important;font-size:13.5px!important;color:var(--ink)!important;margin-bottom:10px!important}
+.rt tbody tr:hover td{background:var(--panel2)}.rt td:first-child{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aten .av{margin-left:0!important}[data-w=evo],[data-w=evom]{grid-column:1/-1}[data-w=ads] svg{max-height:250px}
+details.mm{margin-top:4px;border-top:1px dashed var(--line);padding-top:8px}details.mm summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--mute);margin-bottom:8px}details.mm[open] summary{color:var(--ink)}
 .ia{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),var(--panel) 60%)}.ia ul.l li{margin-bottom:3px}
 .bx h3 .wx{float:right;border:0;background:transparent;color:var(--mute);font-size:12px;padding:0 4px;border-radius:6px;opacity:0;transition:opacity .15s}.bx:hover h3 .wx{opacity:1}@media (hover:none){.bx h3 .wx{opacity:.7}}.wx:hover{background:var(--panel2);color:var(--ink)}
 .bx h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:800}
@@ -353,13 +362,32 @@ function pintarResumen(){
     <div class="k"><span>Perdidas</span><b>${perd.length}</b><small>${money(sv(perd))}</small></div>
     <div class="k"><span>Tasa de cierre</span><b>${pc(gan.length, gan.length+perd.length)}</b><small>ganadas / cerradas</small></div>
    </div>
+<div class="rsec"><div class="rsh">Para atender ahora<small>lo que está pendiente hoy y cómo viene cada vendedor</small></div>
+<div class="rg">
+    <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
+    <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
+</div>
+</div>
+<div class="rsec"><div class="rsh">Oportunidades abiertas<small>cómo está el trabajo comercial</small></div>
+   <div class="rg">
+    <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
+    <div class="bx" data-w="temp" data-t="Temperatura"><h3>Temperatura</h3>${bars(tmp)}</div>
+    <div class="bx" data-w="perdidas" data-t="Por qué perdemos"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
+    <div class="bx" data-w="productos" data-t="Productos más consultados"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
+   </div>
+</div>
+<div class="rsec"><div class="rsh">Consultas que entran<small>por fecha, canal y fuente</small></div>
    ${(()=>{ if (!RESL) return '<div class="bx"><h3>Consultas por fecha</h3><div class="tip">Cargando…</div></div>'; const g = graficoDias(RESL, per);
      const bl = (arr,c)=>bars((arr||[]).map(x=>({k:x.nombre,n:x.leads,v:0})),c);
      return `<div class="rg"><div class="bx" data-w="fecha" data-t="Consultas por fecha" style="grid-column:1/-1"><h3>Consultas por fecha${per==='todo'?' (últimos 90 días)':''}</h3><div class="tip" style="margin:-4px 0 6px"><b style="color:var(--ink);font-size:15px">${g.tot}</b> consultas · promedio ${g.prom} por día · máximo ${g.mx} en un día</div>${g.svg}</div>
       <div class="bx" data-w="canal" data-t="Por canal"><h3>Por canal</h3>${bl(RESL.porCanal,'var(--cold)')}</div><div class="bx" data-w="fuente" data-t="Por fuente"><h3>Por fuente</h3>${bl(RESL.porFuente,'var(--violet)')}</div></div>`; })()}
+</div>
+<div class="rsec"><div class="rsh">Evolución mensual<small>consultas y presupuestos, mes a mes</small></div>
    ${(()=>{ if (!EVO) return ''; const g = graficoMeses(EVO); const lg = (c,t)=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:12px"><i style="width:10px;height:10px;border-radius:3px;background:${c};display:inline-block"></i>${t}</span>`;
      return `<div class="rg"><div class="bx" data-w="evo" data-t="Evolución mensual: consultas y presupuestos"><h3>Evolución mensual: consultas y presupuestos (cantidad)</h3><div class="tip" style="margin:-4px 0 6px">${lg('var(--accent)','Consultas (leads)')}${lg('var(--violet)','Presupuestos hechos')}</div>${g.cant}</div>
       <div class="bx" data-w="evom" data-t="Evolución mensual: monto presupuestado"><h3>Evolución mensual: monto presupuestado</h3><div class="tip" style="margin:-4px 0 6px">${lg('rgba(109,79,216,.35)','Presupuestado')}${lg('var(--ok)','Aprobado')}</div>${g.monto}</div></div>`; })()}
+</div>
+<div class="rsec"><div class="rsh">Meta Ads<small>inversión, consultas y campañas</small></div>
    ${(()=>{ if (!EVO) return ''; const ms = EVO; const tg = ms.reduce((s,m)=>s+m.gastoAds,0), tl = ms.reduce((s,m)=>s+m.leadsMeta,0); const cur = ms[ms.length-1], prev = ms[ms.length-2];
      const cpl = m => m.leadsMeta && m.gastoAds ? Math.round(m.gastoAds/m.leadsMeta) : 0;
      return `<div class="rg"><div class="bx" data-w="ads" data-t="Meta Ads: consultas e inversión" style="grid-column:1/-1"><h3>Meta Ads: consultas e inversión por mes</h3>
@@ -368,19 +396,10 @@ function pintarResumen(){
        <div class="k"><span>Costo por consulta (este mes)</span><b>${cpl(cur)?money(cpl(cur)):'—'}</b><small>${prev&&cpl(prev)?'mes anterior '+money(cpl(prev)):''}</small></div>
        <div class="k"><span>Últimos 12 meses</span><b>${money(tg)}</b><small>${tl} consultas${tl&&tg?' · '+money(Math.round(tg/tl))+' c/u':''}</small></div></div>
       ${graficoAds(ms)}
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 4px">${ADSCON?'<button class="btn sm pri" id="adsSync">⬇ Traer de Meta Ads</button><span class="tip">Trae lo invertido por campaña y por mes de la cuenta publicitaria. Los meses traídos de Meta no se editan a mano.</span>':'<span class="tip">Cargá lo gastado en Meta Ads cada mes (en pesos, como figura en la cuenta publicitaria). Para que se traiga solo, falta conectar la cuenta publicitaria (ver la guía del asistente).</span>'}</div>
-      <div class="gads">${ms.map(m=>`<label><span>${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1]} ${m.mes.slice(2,4)}</span><input type="number" min="0" step="1" data-mes="${m.mes}" value="${m.gastoAds||''}" placeholder="0" ${EVOX.meta&&EVOX.meta.includes(m.mes)?'disabled title="Viene de Meta Ads"':''}></label>`).join('')}</div>
-      <div class="err" id="gadsErr"></div></div></div>`; })()}
-   <div class="rg">
-    <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
-    <div class="bx" data-w="temp" data-t="Temperatura"><h3>Temperatura</h3>${bars(tmp)}</div>
-    <div class="bx" data-w="perdidas" data-t="Por qué perdemos"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
-    <div class="bx" data-w="productos" data-t="Productos más consultados"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
-   </div>
+      <div class="err" id="gadsErr"></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 8px">${ADSCON?'<button class="btn sm pri" id="adsSync">⬇ Traer de Meta Ads</button><span class="tip">Trae lo invertido por campaña y por mes de la cuenta publicitaria. Los meses traídos de Meta no se editan a mano.</span>':'<span class="tip">Cargá lo gastado en Meta Ads cada mes (en pesos, como figura en la cuenta publicitaria). Para que se traiga solo, falta conectar la cuenta publicitaria (ver la guía del asistente).</span>'}</div>
+      <details class="mm" ${ADSCON?'':'open'}><summary>Cargar o corregir la inversión mes a mes</summary><div class="gads">${ms.map(m=>`<label><span>${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1]} ${m.mes.slice(2,4)}</span><input type="number" min="0" step="1" data-mes="${m.mes}" value="${m.gastoAds||''}" placeholder="0" ${EVOX.meta&&EVOX.meta.includes(m.mes)?'disabled title="Viene de Meta Ads"':''}></label>`).join('')}</div></details></div></div>`; })()}
    <div class="rg"><div class="bx" data-w="campanas" data-t="Campañas de Meta Ads" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Invertido</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${r.inv?money(r.inv):'—'}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="10" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
-   <div class="rg">
-    <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
-    <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
+</div>
    </div>`;
   v_gads();
   aplicarOcultos();
@@ -408,7 +427,7 @@ function v_gads(){
   document.querySelectorAll('.gads input').forEach(i=>i.onchange = async () => { const e = $('gadsErr'); if (e) e.textContent='';
     try{ await api('/api/mesa/gasto-ads', {method:'PUT', headers:H(J), body:JSON.stringify({mes:i.dataset.mes, monto:Number(i.value)||0})}); const m = (EVO||[]).find(x=>x.mes===i.dataset.mes); if (m) m.gastoAds = Number(i.value)||0; toast('Guardado'); pintarResumen(); }catch(x){ if (e) e.textContent = x.message; } });
 }
-const WNOM = [['kpis','Números clave'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['campanas','Campañas de Meta Ads'],['vendedor','Por vendedor'],['evo','Evolución mensual: consultas y presupuestos'],['ads','Meta Ads: consultas e inversión'],['evom','Evolución mensual: monto presupuestado'],['atencion','Lo que pide atención ahora']];
+const WNOM = [['kpis','Números clave'],['atencion','Lo que pide atención ahora'],['vendedor','Por vendedor'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['evo','Evolución mensual: consultas y presupuestos'],['evom','Evolución mensual: monto presupuestado'],['ads','Meta Ads: consultas e inversión'],['campanas','Campañas de Meta Ads']];
 let OCULTOS = (()=>{ try{ return JSON.parse(localStorage.getItem('crm_res_ocultos')||'[]'); }catch(e){ return []; } })();
 let PANEL = false;
 function guardarOcultos(){ try{ localStorage.setItem('crm_res_ocultos', JSON.stringify(OCULTOS)); }catch(e){} }
@@ -420,6 +439,7 @@ function aplicarOcultos(){
   });
   // las filas de grilla que quedan vacías no ocupan lugar
   v.querySelectorAll('.rg').forEach(g=>{ g.style.display = [...g.children].every(c=>c.style.display==='none') ? 'none' : ''; });
+  v.querySelectorAll('.rsec').forEach(g=>{ const w=[...g.querySelectorAll('[data-w]')]; g.style.display = w.length && w.every(c=>c.style.display==='none') ? 'none' : ''; });
   const p = $('rpanel'); p.hidden = !PANEL;
   p.innerHTML = '<div class="tip" style="margin-bottom:6px">Tildá los reportes que querés ver. Se guarda en este navegador.</div><div style="display:flex;flex-wrap:wrap;gap:6px 16px">' + WNOM.map(([k,n])=>`<label style="font-weight:600;display:flex;gap:5px;align-items:center"><input type="checkbox" data-k="${k}" ${OCULTOS.includes(k)?'':'checked'}>${n}</label>`).join('') + '</div>';
   p.querySelectorAll('input').forEach(i=>i.onchange = () => { OCULTOS = OCULTOS.filter(x=>x!==i.dataset.k); if (!i.checked) OCULTOS.push(i.dataset.k); guardarOcultos(); aplicarOcultos(); });
