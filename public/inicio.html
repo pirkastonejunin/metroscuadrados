@@ -1288,6 +1288,7 @@ function renderNotifPanel(){
 function irANotificacion(tipo, id){
   toggleNotifPanel();
   if (tipo === 'crm') location.href = '/crm.html?abrir=crm-' + id;
+  else if (tipo === 'crm_sin_decidir') location.href = '/mesa.html?abrir=' + id;
   else if (tipo === 'visita') location.href = '/admin-visitas.html?abrir=visita-' + id;
   else if (tipo === 'obra') location.href = '/admin-obras.html?abrir=obra-' + id;
   else if (tipo === 'cheque_vencido' || tipo === 'cheque_por_vencer') location.href = '/admin-tesoreria.html?tab=cheques';

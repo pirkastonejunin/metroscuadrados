@@ -87,6 +87,7 @@ const CONFIG_ID_GLOBAL = 'notificaciones';
 // Los que "molestan" más (muchos avisos) arrancan apagados.
 const CATALOGO = [
   { key: 'crm', grupo: 'Comercial', label: 'CRM — próximas acciones vencidas', default: true, modulo: 'visitas' },
+  { key: 'crmSinDecidir', grupo: 'Comercial', label: 'CRM — consultas con más de 24 h sin decisión', default: true, modulo: 'visitas' },
   { key: 'visitas', grupo: 'Comercial', label: 'Visitas sin confirmar', default: true, modulo: 'visitas' },
   { key: 'obras', grupo: 'Obras', label: 'Obras — tareas atrasadas', default: true, modulo: 'obras' },
   { key: 'chequesVencidos', grupo: 'Tesorería', label: 'Cheques vencidos (de terceros sin depositar / propios sin pagar)', default: true, modulo: 'tesoreria' },
@@ -177,6 +178,20 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
             fecha: o.proximaAccion.fecha
           });
         }
+      }
+
+      if (activa('crmSinDecidir')) {
+        try {
+          const lista = await require('./mesa').sinDecidir24(db, req);
+          const u = req.usuario || {}; const veTodo = !!(u.rol && u.rol.protegido) || tieneModulo(u, 'crm');
+          // Quien tiene el módulo CRM (encargado) ve todas; un vendedor ve las suyas y las que no tienen asesor.
+          lista.filter(x => veTodo || !x.asesorId || String(x.asesorId) === String(u._id)).slice(0, 40).forEach(x => {
+            const h = Math.floor((ahora - new Date(x.desde)) / 3600000);
+            items.push({ tipo: 'crm_sin_decidir', id: x.convId, titulo: x.nombre,
+              subtitulo: (x.sinDec ? 'Quedó sin decidir hace ' : 'Sin decisión hace ') + (h >= 48 ? Math.floor(h / 24) + ' días' : h + ' h') + ' — ' + (x.asesorNombre || 'sin asesor'),
+              fecha: x.desde, etiquetaFecha: 'Desde' });
+          });
+        } catch (e) { console.error('crmSinDecidir:', e.message); }
       }
 
       if (activa('visitas')) {

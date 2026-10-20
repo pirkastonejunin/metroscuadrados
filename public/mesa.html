@@ -229,7 +229,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
     <select id="fProd" aria-label="Producto"><option value="">Producto</option></select>
     <input id="q" type="search" placeholder="Buscar" aria-label="Buscar" style="max-width:110px">
     <label class="tip"><input type="checkbox" id="fCer"> Cerradas</label>
-    <span class="sp"></span><span class="tip" id="cant"></span><button class="chip" id="soloHoy">Solo Hoy</button><button class="btn sm" id="ej" hidden>Quitar ejemplos</button><a class="ghost" href="/crm.html" title="Vista clásica del CRM">Clásica</a>
+    <span class="sp"></span><span class="tip" id="cant"></span><button class="chip" id="soloHoy">Solo Hoy</button><button class="chip" id="snd" title="Sonido cuando entra un mensaje o un lead">🔔 Sonido</button><button class="btn sm" id="ej" hidden>Quitar ejemplos</button><a class="ghost" href="/crm.html" title="Vista clásica del CRM">Clásica</a>
   </div>
   <div class="embudo" id="embudo"></div>
   <div class="tablero" id="tab"></div>
@@ -304,8 +304,8 @@ function pintar(){
     return `<section class="colu" data-e="${e.k}"><div class="ch"><span class="ico">${e.i}</span><h2>${e.n}</h2><span class="n">${c.length}</span><span class="v">${tot?money(tot):''}</span></div><div class="ch-sub" title="${e.sub}">${e.sub}</div><div class="cards">${c.map(tarjeta).join('')||vacio}</div></section>`;
   }).join('');
   pintarEmbudo();
-  const a = ITEMS.filter(l=>!l.cierre), h = a.filter(l=>l.columna==='hoy').length, ve = a.filter(l=>l.columna==='hoy'&&l.prox&&l.prox.dias<0).length, sd = a.filter(l=>l.sinDec).length;
-  $('resumen').innerHTML = `<div class="stat ${h?'al':'okk'}"><b>${h}</b><span>${h?'por resolver hoy':'Hoy al día'}</span></div>${ve?`<div class="stat al"><b>${ve}</b><span>vencidas</span></div>`:''}${sd?`<div class="stat al"><b>${sd}</b><span>sin decidir</span></div>`:''}<div class="stat"><b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b><span>en presupuestos</span></div>`;
+  const a = ITEMS.filter(l=>!l.cierre), s24n = a.filter(l=>l.sin24).length, h = a.filter(l=>l.columna==='hoy').length, ve = a.filter(l=>l.columna==='hoy'&&l.prox&&l.prox.dias<0).length, sd = a.filter(l=>l.sinDec).length;
+  $('resumen').innerHTML = `<div class="stat ${h?'al':'okk'}"><b>${h}</b><span>${h?'por resolver hoy':'Hoy al día'}</span></div>${ve?`<div class="stat al"><b>${ve}</b><span>vencidas</span></div>`:''}${sd?`<div class="stat al"><b>${sd}</b><span>sin decidir</span></div>`:''}${s24n?`<div class="stat al" title="Consultas con 24 h o más sin decisión"><b>${s24n}</b><span>+24 h sin decidir</span></div>`:''}<div class="stat"><b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b><span>en presupuestos</span></div>`;
   $('cant').textContent = ''; $('ej').hidden = !ITEMS.some(i=>i.demo);
   const ps=$('fProd'), pv=ps.value; ps.innerHTML = '<option value="">Producto</option>' + [...new Set(ITEMS.map(i=>i.producto).filter(Boolean))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); ps.value = pv;
   const cs=$('fCamp'), cv=cs.value; cs.innerHTML = '<option value="">Campaña</option>' + [...new Set(ITEMS.map(i=>i.campana||'(sin campaña)'))].sort().map(x=>`<option>${esc(x)}</option>`).join(''); cs.value = cv;
@@ -337,23 +337,23 @@ function pintarResumen(){
   const cer = base.filter(l=>l.cierre && l.cierre.at && new Date(l.cierre.at).getTime()>=desde);
   const gan = cer.filter(l=>l.cierre.estado==='ganada'), perd = cer.filter(l=>l.cierre.estado!=='ganada');
   const sv = a => a.reduce((x,l)=>x+(l.valor||0),0), pc = (a,b) => b ? Math.round(a/b*100)+'%' : '—';
-  const hoy = ab.filter(l=>l.columna==='hoy'), venc = hoy.filter(l=>l.prox&&l.prox.dias<0), sd = ab.filter(l=>l.sinDec), sinResp = ab.filter(l=>l.recordar);
+  const hoy = ab.filter(l=>l.columna==='hoy'), venc = hoy.filter(l=>l.prox&&l.prox.dias<0), sd = ab.filter(l=>l.sinDec), s24 = ab.filter(l=>l.sin24), sinResp = ab.filter(l=>l.recordar);
   const bars = (rows, color) => { const mx = Math.max(1,...rows.map(r=>r.n)); return rows.length ? rows.map(r=>`<div class="br" style="--cc:${r.c||color||'var(--accent)'}"><span class="nm" title="${esc(r.k)}">${esc(r.k)}</span><span class="tr"><i style="width:${Math.round(r.n/mx*100)}%"></i></span><span class="vl">${r.n}${r.v?`<small>${money(r.v)}</small>`:''}</span></div>`).join('') : '<div class="tip">Sin datos todavía.</div>'; };
   const grp = (arr, fn) => { const m = new Map(); arr.forEach(l=>{ const k = fn(l)||'Sin definir'; const e = m.get(k)||{k,n:0,v:0}; e.n++; e.v+=l.valor||0; m.set(k,e); }); return [...m.values()].sort((a,b)=>b.n-a.n); };
   const etp = ETAPAS.map(e=>({k:e.n, n:ab.filter(l=>l.etapa===e.k).length, v:sv(ab.filter(l=>l.etapa===e.k)), c:{nuevo:'var(--cold)',conversando:'var(--warm)',presupuesto:'var(--violet)',cerrando:'var(--accent)'}[e.k]}));
   const tmp = [['caliente','Caliente','var(--hot)'],['tibio','Tibio','var(--warm)'],['frio','Frío','var(--cold)']].map(([k,n,c])=>({k:n,c,n:ab.filter(l=>l.temperatura===k).length,v:sv(ab.filter(l=>l.temperatura===k))}));
   const ases = [...new Set(base.map(l=>l.asesorNombre||'Sin asignar'))].map(a=>{ const m = base.filter(l=>(l.asesorNombre||'Sin asignar')===a), o = m.filter(l=>!l.cierre), g = m.filter(l=>l.cierre&&l.cierre.estado==='ganada'&&new Date(l.cierre.at)>=desde), p = m.filter(l=>l.cierre&&l.cierre.estado!=='ganada'&&new Date(l.cierre.at)>=desde);
-    return {a, ab:o.length, hoy:o.filter(l=>l.columna==='hoy').length, sd:o.filter(l=>l.sinDec).length, g:g.length, p:p.length, vg:sv(g)}; }).sort((x,y)=>y.ab-x.ab);
+    return {a, ab:o.length, hoy:o.filter(l=>l.columna==='hoy').length, sd:o.filter(l=>l.sinDec).length, s24:o.filter(l=>l.sin24).length, g:g.length, p:p.length, vg:sv(g)}; }).sort((x,y)=>y.ab-x.ab);
   const cm = new Map((CAMPS||[]).map(x=>[x.nombre,{k:x.nombre,leads:x.leads,clientes:x.clientes,compraron:x.compraron,montoARS:x.montoARS,montoUSD:x.montoUSD,ab:0,g:0,p:0,vj:0}]));
   base.forEach(l=>{ const k = l.campana||'(sin campaña)'; if (!cm.has(k)) cm.set(k,{k,leads:0,clientes:0,compraron:0,montoARS:0,montoUSD:0,ab:0,g:0,p:0,vj:0}); const e = cm.get(k);
     if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else e.p++; } });
   const nrm = x => String(x||'').toLowerCase().replace(/\s+/g,' ').trim(); const invm = new Map((EVOX.camp||[]).map(c=>[nrm(c.campana), c.monto])); cm.forEach(e=>{ e.inv = invm.get(nrm(e.k))||0; });
   const camp = [...cm.values()].sort((a,b)=>(b.montoARS-a.montoARS)||(b.leads-a.leads)||(b.ab-a.ab));
   SNAP = { periodo: ({mes:'este mes','7':'últimos 7 días','30':'últimos 30 días',todo:'todo el historial'})[per], alcance: F==='todas'?'toda la sucursal':'mis oportunidades y sin asignar',
-    abiertas: ab.length, montoEnJuego: sv(ab), porResolverHoy: hoy.length, vencidas: venc.length, sinDecidir: sd.length, sinRespuestaDelCliente: sinResp.length, ganadas: gan.length, montoGanado: sv(gan), perdidas: perd.length, montoPerdido: sv(perd),
+    abiertas: ab.length, montoEnJuego: sv(ab), porResolverHoy: hoy.length, vencidas: venc.length, sinDecidir: sd.length, masDe24hSinDecidir: s24.length, sinRespuestaDelCliente: sinResp.length, ganadas: gan.length, montoGanado: sv(gan), perdidas: perd.length, montoPerdido: sv(perd),
     porEtapa: etp.map(e=>({etapa:e.k,cantidad:e.n,monto:e.v})), temperatura: tmp.map(e=>({temp:e.k,cantidad:e.n,monto:e.v})), motivosDePerdida: grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({motivo:r.k,cantidad:r.n})),
     productosAbiertas: grp(ab, l=>l.producto).slice(0,10).map(r=>({producto:r.k,cantidad:r.n})), campanas: camp.slice(0,15).map(r=>({campana:r.k,leads:r.leads,yaSonClientes:r.clientes,compraron:r.compraron,vendidoARS:r.montoARS,invertidoMetaARS:r.inv,abiertasCRM:r.ab,ganadas:r.g,perdidas:r.p})),
-    vendedores: ases.map(r=>({vendedor:r.a,abiertas:r.ab,enHoy:r.hoy,sinDecidir:r.sd,ganadas:r.g,perdidas:r.p,montoGanado:r.vg})),
+    vendedores: ases.map(r=>({vendedor:r.a,abiertas:r.ab,enHoy:r.hoy,sinDecidir:r.sd,masDe24hSinDecidir:r.s24,ganadas:r.g,perdidas:r.p,montoGanado:r.vg})),
     consultas: RESL ? { total: RESL.total, porCanal: (RESL.porCanal||[]).map(x=>({canal:x.nombre,leads:x.leads})), porFuente: (RESL.porFuente||[]).map(x=>({fuente:x.nombre,leads:x.leads})), porDia: (RESL.porDia||[]).map(x=>[x.nombre,x.leads]) } : null,
     evolucionMensual: (EVO||[]).map(m=>({mes:m.mes,consultas:m.leads,consultasMetaAds:m.leadsMeta,inversionMetaAdsARS:m.gastoAds,presupuestos:m.presupuestos,montoPresupuestado:m.monto,aprobados:m.aprobados,montoAprobado:m.montoAprobado})) };
   const urg = ab.filter(l=>l.convId && (l.esperaCliente||l.sinDec||l.recordar||(l.prox&&l.prox.dias<0))).sort((a,b)=>orden(a)-orden(b)).slice(0,8);
@@ -361,7 +361,7 @@ function pintarResumen(){
    <div class="kp" data-w="kpis" data-t="Números clave">
     <div class="k"><span>Oportunidades abiertas</span><b>${ab.length}</b><small>${money(sv(ab))} en juego</small></div>
     <div class="k ${hoy.length?'bad':'ok'}"><span>Por resolver hoy</span><b>${hoy.length}</b><small>${venc.length?venc.length+' vencidas':'al día'}</small></div>
-    <div class="k ${sd.length?'bad':''}"><span>Sin decidir</span><b>${sd.length}</b><small>${sinResp.length} sin respuesta del cliente</small></div>
+    <div class="k ${sd.length?'bad':''}"><span>Sin decidir</span><b>${sd.length}</b><small>${s24.length} con +24 h · ${sinResp.length} sin respuesta del cliente</small></div>
     <div class="k ok"><span>Ganadas</span><b>${gan.length}</b><small>${money(sv(gan))}</small></div>
     <div class="k"><span>Perdidas</span><b>${perd.length}</b><small>${money(sv(perd))}</small></div>
     <div class="k"><span>Tasa de cierre</span><b>${pc(gan.length, gan.length+perd.length)}</b><small>ganadas / cerradas</small></div>
@@ -369,7 +369,7 @@ function pintarResumen(){
 <div class="rsec"><div class="rsh">Para atender ahora<small>lo que está pendiente hoy y cómo viene cada vendedor</small></div>
 <div class="rg">
     <div class="bx" data-w="atencion" data-t="Lo que pide atención ahora" style="grid-column:1/-1"><h3>Lo que pide atención ahora</h3><div class="aten">${urg.map(l=>{ const [t]=aviso(l); return `<button data-id="${esc(l.id)}"><span class="av" style="background:${colorDe(l.nombre)};width:22px;height:22px;font-size:9px;display:grid;place-items:center;border-radius:50%;color:#fff">${esc(iniciales(l.nombre))}</span><b>${esc(l.nombre)}</b><span class="tip">${esc(l.producto||'')}</span><span>${esc(t)}</span></button>`; }).join('')||'<div class="tip">Nada urgente. 👌</div>'}</div></div>
-    <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="8" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
+    <div class="bx" data-w="vendedor" data-t="Por vendedor" style="grid-column:1/-1"><h3>Por vendedor</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Vendedor</th><th>Abiertas</th><th>En Hoy</th><th>Sin decidir</th><th title="Con 24 h o más sin decisión">+24 h</th><th>Ganadas</th><th>Perdidas</th><th>Cierre</th><th>Monto ganado</th></tr></thead><tbody>${ases.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.ab}</td><td>${r.hoy}</td><td class="${r.sd?'bad':''}">${r.sd}</td><td class="${r.s24?'bad':''}">${r.s24}</td><td>${r.g}</td><td>${r.p}</td><td>${pc(r.g,r.g+r.p)}</td><td>${money(r.vg)}</td></tr>`).join('')||'<tr><td colspan="9" class="tip">Sin datos.</td></tr>'}</tbody></table></div></div>
 </div>
 </div>
 <div class="rsec"><div class="rsh">Oportunidades abiertas<small>cómo está el trabajo comercial</small></div>
@@ -520,9 +520,41 @@ function pintarLista(){
   $('tBody').innerHTML = rows.map(l=>{ const [t,c]=aviso(l); return `<tr class="f" data-id="${esc(l.id)}"><td><b>${esc(l.nombre)}</b><div class="tip">${esc(l.tel)}</div></td><td>${esc(l.producto||'—')}</td><td class="tip">${esc(l.campana||'—')}</td><td><span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span></td><td>${esc(l.cierre?l.cierre.estado:ETN[l.etapa]||l.etapa)}</td><td>${esc(CN[l.columna]||'')}</td><td>${esc(l.asesorNombre||'Sin asignar')}</td><td><span class="tag ${c}">${esc(t)}</span></td><td class="n">${l.presupuesto?money(l.presupuesto.total):'—'}</td><td class="tip">${l.actualizado?hora(l.actualizado):''}</td></tr>`; }).join('') || '<tr><td colspan="10" class="vacio">Nada con esos filtros.</td></tr>';
 }
 
+/* ---- sonido de aviso (20/10/2026): mensaje nuevo = un tono; lead o consulta nueva = dos tonos ---- */
+let SND_ON = (function(){ try{ return localStorage.getItem('crm_sonido') !== '0'; }catch(e){ return true; } })();
+let AUDIO = null, VISTO = null;
+function audioListo(){ try{ if (!AUDIO) AUDIO = new (window.AudioContext||window.webkitAudioContext)(); if (AUDIO.state==='suspended') AUDIO.resume(); return AUDIO; }catch(e){ return null; } }
+function tono(ctx, f, t0, dur){ const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'sine'; o.frequency.value = f; o.connect(g); g.connect(ctx.destination); g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.25, t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0+dur); o.start(t0); o.stop(t0+dur+0.02); }
+function sonar(tipo){
+  if (!SND_ON) return; const c = audioListo(); if (!c || c.state!=='running') return;
+  const t = c.currentTime;
+  if (tipo==='lead'){ tono(c, 880, t, 0.18); tono(c, 1175, t+0.2, 0.28); } else { tono(c, 988, t, 0.25); }
+}
+function pintarSnd(){ const b = $('snd'); if (b){ b.textContent = SND_ON ? '🔔 Sonido' : '🔕 Sin sonido'; b.classList.toggle('on', SND_ON); } }
+// Compara con lo ya visto: un mensaje del cliente más nuevo = mensaje; una conversación/lead que no estaba = lead nuevo.
+function novedades(items){
+  const nuevo = new Map(); let msg = false, lead = false;
+  for (const l of items){
+    if (l.cierre || l.demo) continue;
+    const at = l.ultimo && l.ultimo.dir==='in' ? new Date(l.ultimo.at).getTime() : 0;
+    nuevo.set(l.id, at);
+    if (!VISTO) continue;
+    if (!VISTO.has(l.id)){ if (!l.convId || at) lead = true; }
+    else if (at > VISTO.get(l.id)) msg = true;
+  }
+  VISTO = nuevo;
+  if (lead) sonar('lead'); else if (msg) sonar('msg');
+}
+document.addEventListener('click', audioListo, {once:true}); document.addEventListener('keydown', audioListo, {once:true});
+{ pintarSnd(); const b = $('snd'); if (b) b.onclick = () => { SND_ON = !SND_ON; try{ localStorage.setItem('crm_sonido', SND_ON?'1':'0'); }catch(e){} pintarSnd(); if (SND_ON){ audioListo(); sonar('msg'); } }; }
+// Con la pestaña en segundo plano no se redibuja, pero se sigue revisando para avisar con el sonido.
+async function sondear(){ try{ const d = await api('/api/mesa?cerradas=1', {headers:H()}); ITEMS = d.items; novedades(d.items); }catch(e){} }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) cargar(); });
+
 async function cargar(opts){
   try{
     const d = await api('/api/mesa?cerradas=1', {headers:H()});
+    novedades(d.items);
     const antes = cur(); ITEMS = d.items; YO = d.yo; MOTIVOS = d.motivosPerdida;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
     pintar();
@@ -787,8 +819,9 @@ document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hi
   if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
   try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'crm'); }catch(e){ err(e); return; }
   await cargar();
+  { const q = new URLSearchParams(location.search).get('abrir'); if (q && ITEMS.some(i=>i.id===q)) abrir(q); } // enlace desde la campanita
   if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);
-  setInterval(() => { if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
+  setInterval(() => { if (document.hidden) { sondear(); return; } if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
 })();
 </script>
 </body>

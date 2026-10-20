@@ -27,6 +27,18 @@ const HORA_CIERRE = 15;
 // Antes de las 15 hs vence hoy a las 15; si se marca después, vence a la medianoche (vuelve a Hoy al día siguiente).
 function venceEsperando(ahora) { const t = hoyAR(ahora).getTime() + HORA_CIERRE * 3600000; return new Date(t > ahora.getTime() ? t : hoyAR(ahora).getTime() + 86400000); }
 
+// Desde cuándo está pendiente de decisión una conversación (20/10/2026): si el cliente escribió y nadie respondió/decidió, desde su último mensaje;
+// si quedó marcada "sin decidir", desde que se marcó. Pasadas 24 h sin decisión se avisa por la campanita y se cuenta por vendedor.
+const HORAS_SIN_DECIDIR = 24;
+function desdePendiente({ esperaCliente, ultimoAt, m, c }) {
+  const fechas = [];
+  if (esperaCliente && ultimoAt) fechas.push(new Date(ultimoAt));
+  if (m.sinDec) {
+    const h = (m.historial || []).filter(x => /sin decidir/i.test(x.txt || '')).pop();
+    fechas.push(new Date((h && h.at) || c.updatedAt || c.createdAt || Date.now()));
+  }
+  return fechas.length ? new Date(Math.min(...fechas.map(f => f.getTime()))) : null; // la más antigua: es desde cuando sigue sin resolverse
+}
 function etapaDe(c, m, pres) {
   if (m.etapa && ['nuevo', 'conversando', 'presupuesto', 'cerrando'].includes(m.etapa)) return m.etapa;
   if (pres && pres.estado === 'presupuestado' && !pres.convertidoEnVentaId && ((pres.seguimiento || []).length > 1 || !pres.origenBot)) return 'presupuesto';
@@ -84,6 +96,8 @@ async function armar(db, req, { cerradas }) {
     const pf = op && op.proximaAccion && op.proximaAccion.fecha ? op.proximaAccion : (m.prox && m.prox.fecha ? m.prox : null);
     const prox = pf ? { fecha: pf.fecha, nota: pf.nota || '', dias: diasHasta(pf.fecha, ahora) } : null;
     const etapa = etapaDe(c, m, pres);
+    const pendDesde = (cerrada || c.demo) ? null : desdePendiente({ esperaCliente, ultimoAt: ultimo && ultimo.at, m, c });
+    const sin24 = !!(pendDesde && (ahora - pendDesde) >= HORAS_SIN_DECIDIR * 3600000);
     const productos = a && a.productos && a.productos.length ? a.productos : (c.datos && c.datos.producto ? [c.datos.producto] : []);
     items.push({
       id: String(c._id), convId: String(c._id), opId: op ? String(op._id) : null, opNumero: op ? op.numero : null, nombre: c.nombre || (op && op.cliente && op.cliente.nombre) || ('+' + c.tel), tel: c.tel,
@@ -95,7 +109,8 @@ async function armar(db, req, { cerradas }) {
       prox, paso: a ? a.proximoPaso : '', resumen: (a && a.resumen) || c.resumen || '', falta: (a && a.datosFaltantes) || [], sugerida: a ? a.respuestaSugerida : '', analizadoAt: a ? a.at : null,
       presupuesto: pres ? { id: String(pres._id), numero: pres.numero, total: Number(pres.total) || 0, items: (pres.items || []).length, estado: pres.estado, borrador: !!(pres.origenBot && pres.usuarioNombre === 'Bot de WhatsApp' && (pres.seguimiento || []).length <= 1) } : null,
       etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
-      notas: m.notas || '', historial: (m.historial || []).slice(-30), cierre: m.cierre || null, actualizado: (ultimo && ultimo.at) || c.updatedAt
+      notas: m.notas || '', historial: (m.historial || []).slice(-30), cierre: m.cierre || null, actualizado: (ultimo && ultimo.at) || c.updatedAt,
+      pendienteDesde: pendDesde, sin24
     });
   }
   // oportunidades activas sin conversación guardada (vienen de Azuite o se cargaron a mano): se ven igual, sin chat
@@ -357,5 +372,23 @@ router.post('/:id/mover', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Versión liviana para la campanita: conversaciones abiertas con 24 h o más sin decisión (no escribe nada en la base).
+async function sinDecidir24(db, req) {
+  const ahora = new Date(); const corte = new Date(ahora.getTime() - HORAS_SIN_DECIDIR * 3600000);
+  const convs = await db.collection(COL_C).find(Object.assign({}, filtroOrg(req), { estado: { $ne: 'bot' }, demo: { $ne: true }, 'mesa.cierre': { $in: [null] } })).sort({ updatedAt: -1 }).limit(400).toArray();
+  if (!convs.length) return [];
+  const ult = await db.collection(COL_M).aggregate([{ $match: { convId: { $in: convs.map(c => c._id) } } }, { $sort: { at: 1 } }, { $group: { _id: '$convId', ult: { $last: '$$ROOT' } } }]).toArray();
+  const porConv = new Map(ult.map(u => [String(u._id), u.ult]));
+  const out = [];
+  for (const c of convs) {
+    const m = c.mesa || {}; const u = porConv.get(String(c._id));
+    const esperaCliente = !!(u && u.dir === 'in' && !(m.atendidoAt && new Date(u.at) <= new Date(m.atendidoAt)));
+    const desde = desdePendiente({ esperaCliente, ultimoAt: u && u.at, m, c });
+    if (desde && desde < corte) out.push({ convId: String(c._id), nombre: c.nombre || ('+' + c.tel), asesorId: m.asesorId ? String(m.asesorId) : null, asesorNombre: m.asesorNombre || '', desde, sinDec: !!m.sinDec });
+  }
+  return out.sort((a, b) => a.desde - b.desde);
+}
+
 module.exports = router;
 module.exports.armar = armar;
+module.exports.sinDecidir24 = sinDecidir24;
