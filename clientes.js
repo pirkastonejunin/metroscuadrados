@@ -547,7 +547,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       if (ventaIds.length) {
         const ventas = await db.collection('ventas')
           .find({ _id: { $in: ventaIds } })
-          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1, stockDescontado: 1, letra: 1, tipoComprobante: 1, numeroOriginal: 1, esFiscal: 1, cae: 1 })
+          .project({ numero: 1, estado: 1, saldoPendiente: 1, moneda: 1, total: 1, stockDescontado: 1, letra: 1, tipoComprobante: 1, numeroOriginal: 1, esFiscal: 1, cae: 1, imputaciones: 1 })
           .toArray();
         // Número de comprobante completo y si es fiscal o no (15/10/2026, pedido de Mato).
         const ETQ = { fiscal: 'FACT', nota_credito: 'NC', nota_debito: 'ND', comprobante_x: 'COMP X' };
@@ -569,6 +569,132 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos, ventasPorId, historial, completo: movimientos.length < limite };
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// -----------------------------------------------------------------------
+// Imputar un cobro a cuenta a facturas (20/10/2026, pedido de Mato: "no puedo relacionar cobranzas con facturas").
+// El cobro a cuenta ya acreditó la cuenta corriente y la venta ya la debitó: imputar NO toca el saldo del cliente, solo marca cuánto de
+// cada comprobante quedó cubierto por ese recibo (baja el saldoPendiente de la venta y sube su totalCobrado). Queda registrado en las dos
+// puntas (movimiento.imputaciones y venta.imputaciones, unidas por impId) y se puede deshacer. Anular el cobro deshace sus imputaciones.
+// -----------------------------------------------------------------------
+const TIPOS_IMPUTABLES = ['fiscal', 'comprobante_x', 'nota_debito'];
+const r2c = n => Math.round((Number(n) || 0) * 100) / 100;
+function disponibleDeCobro(mov) { return r2c((Number(mov.monto) || 0) - (mov.imputaciones || []).filter(i => !i.anulada).reduce((t, i) => t + i.monto, 0)); }
+function etiquetaComprobante(v) {
+  const ETQ = { fiscal: 'FACT', nota_debito: 'ND', comprobante_x: 'COMP X' };
+  return (ETQ[v.tipoComprobante] || 'COMP X') + ' ' + (v.numeroOriginal || ((v.tipoComprobante === 'comprobante_x' ? '' : (v.letra || '') + '-') + String(v.numero).padStart(5, '0')));
+}
+
+// Quita el efecto de UNA imputación sobre su venta (si la venta sigue viva) — la usa "deshacer" y la anulación del cobro.
+async function revertirImputacionEnVenta(db, imp) {
+  if (!imp || !imp.ventaId) return;
+  const venta = await db.collection('ventas').findOne({ _id: imp.ventaId });
+  if (!venta) return;
+  const ii = (venta.imputaciones || []).findIndex(i => i.impId === imp.impId && !i.anulada);
+  if (ii < 0) return;
+  const set = { ['imputaciones.' + ii + '.anulada']: true, ['imputaciones.' + ii + '.anuladaEn']: new Date(), updatedAt: new Date() };
+  if (venta.estado !== 'anulada') {
+    set.totalCobrado = r2c(Math.max(0, (venta.totalCobrado || 0) - imp.monto));
+    set.saldoPendiente = r2c(Math.min(venta.total, (venta.saldoPendiente || 0) + imp.monto));
+  }
+  await db.collection('ventas').updateOne({ _id: venta._id }, { $set: set });
+}
+router.revertirImputacionEnVenta = revertirImputacionEnVenta;
+
+router.get('/:id/ventas-pendientes', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!cliente) throw err(404, 'Cliente no encontrado');
+      const q = { clienteId: id, estado: { $ne: 'anulada' }, importado: { $ne: true }, tipoComprobante: { $in: TIPOS_IMPUTABLES }, saldoPendiente: { $gt: 0.005 } };
+      if (req.query.moneda) q.moneda = String(req.query.moneda).toUpperCase();
+      const vs = await db.collection('ventas').find(q).sort({ fecha: 1 }).limit(300).toArray();
+      return vs.map(v => ({ _id: v._id, numero: v.numero, comprobante: etiquetaComprobante(v), fecha: v.fecha, total: v.total, saldoPendiente: v.saldoPendiente, moneda: v.moneda || 'ARS', fiscal: v.tipoComprobante === 'fiscal' || !!v.esFiscal || !!v.cae }));
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/:id/imputar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const movId = toObjectId(req.body && req.body.movimientoId); if (!movId) throw err(400, 'Falta el cobro a imputar');
+    const crudas = Array.isArray(req.body && req.body.imputaciones) ? req.body.imputaciones : [];
+    const porVenta = new Map();
+    for (const x of crudas) {
+      const vid = toObjectId(x && x.ventaId); const m = r2c(x && x.monto);
+      if (!vid || !(m > 0)) continue;
+      porVenta.set(String(vid), r2c((porVenta.get(String(vid)) || 0) + m));
+    }
+    if (!porVenta.size) throw err(400, 'Indicá a qué facturas y por cuánto.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!cliente) throw err(404, 'Cliente no encontrado');
+      const movs = db.collection('cuenta_corriente_movimientos');
+      const mov = await movs.findOne({ _id: movId, clienteId: id });
+      if (!mov || mov.tipo !== 'credito' || mov.origen !== 'cobro_cuenta') throw err(404, 'Solo se pueden imputar cobros a cuenta del cliente.');
+      if (mov.anulado) throw err(400, 'Ese cobro está anulado.');
+      if (mov.importado) throw err(400, 'Es un cobro histórico importado de Dux: no se puede imputar.');
+      const total = r2c([...porVenta.values()].reduce((t, m) => t + m, 0));
+      const disp = disponibleDeCobro(mov);
+      if (total > disp + 0.005) throw err(400, `El cobro solo tiene ${disp} sin imputar y querés imputar ${total}.`);
+      const ventas = await db.collection('ventas').find({ _id: { $in: [...porVenta.keys()].map(toObjectId) } }).toArray();
+      if (ventas.length !== porVenta.size) throw err(404, 'No encuentro alguna de las facturas.');
+      for (const v of ventas) {
+        const m = porVenta.get(String(v._id));
+        if (String(v.clienteId) !== String(id)) throw err(400, 'Una de las facturas es de otro cliente.');
+        if (v.estado === 'anulada' || v.importado || !TIPOS_IMPUTABLES.includes(v.tipoComprobante)) throw err(400, `El comprobante Nº ${v.numero} no admite imputación (anulado, histórico de Dux o nota de crédito).`);
+        if ((v.moneda || 'ARS') !== (mov.moneda || 'ARS')) throw err(400, `El comprobante Nº ${v.numero} está en otra moneda que el cobro.`);
+        if (m > (v.saldoPendiente || 0) + 0.005) throw err(400, `El comprobante ${etiquetaComprobante(v)} solo debe ${r2c(v.saldoPendiente)} y querés imputar ${m}.`);
+      }
+      const ahora = new Date();
+      const usuario = (req.usuario && req.usuario.nombre) || '';
+      const nuevas = ventas.map(v => ({ impId: new ObjectId().toString(), ventaId: v._id, ventaNumero: v.numero, comprobante: etiquetaComprobante(v), monto: porVenta.get(String(v._id)), fecha: ahora, usuario }));
+      const previo = mov.imputado == null ? null : mov.imputado;
+      const claim = await movs.updateOne({ _id: movId, imputado: previo }, { $push: { imputaciones: { $each: nuevas } }, $set: { imputado: r2c((mov.imputado || 0) + total) } });
+      if (!claim.matchedCount) throw err(409, 'El cobro cambió mientras imputabas: abrilo de nuevo.');
+      const hechas = [];
+      try {
+        for (const imp of nuevas) {
+          const v = ventas.find(x => String(x._id) === String(imp.ventaId));
+          const r = await db.collection('ventas').updateOne({ _id: v._id, updatedAt: v.updatedAt },
+            { $push: { imputaciones: { impId: imp.impId, movId, monto: imp.monto, fecha: ahora, usuario } }, $set: { totalCobrado: r2c((v.totalCobrado || 0) + imp.monto), saldoPendiente: r2c(Math.max(0, (v.saldoPendiente || 0) - imp.monto)), updatedAt: ahora } });
+          if (!r.matchedCount) throw err(409, `La factura ${imp.comprobante} cambió mientras imputabas: probá de nuevo.`);
+          hechas.push(imp);
+        }
+      } catch (e) {
+        for (const imp of hechas) await revertirImputacionEnVenta(db, imp).catch(() => {});
+        await movs.updateOne({ _id: movId }, { $pull: { imputaciones: { impId: { $in: nuevas.map(n => n.impId) } } }, $set: { imputado: mov.imputado || 0 } });
+        throw e;
+      }
+      return { ok: true, imputado: total, sinImputar: r2c(disp - total) };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.post('/:id/desimputar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const movId = toObjectId(req.body && req.body.movimientoId); const idx = Number(req.body && req.body.idx);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!cliente) throw err(404, 'Cliente no encontrado');
+      const movs = db.collection('cuenta_corriente_movimientos');
+      const mov = await movs.findOne({ _id: movId, clienteId: id });
+      const imp = mov && (mov.imputaciones || [])[idx];
+      if (!imp || imp.anulada) throw err(404, 'No encuentro esa imputación.');
+      const r = await movs.updateOne({ _id: movId, ['imputaciones.' + idx + '.anulada']: { $ne: true } }, { $set: { ['imputaciones.' + idx + '.anulada']: true, ['imputaciones.' + idx + '.anuladaEn']: new Date(), imputado: r2c(Math.max(0, (mov.imputado || 0) - imp.monto)) } });
+      if (!r.matchedCount) throw err(409, 'Esa imputación ya se había quitado.');
+      await revertirImputacionEnVenta(db, imp);
+      return { ok: true };
+    });
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

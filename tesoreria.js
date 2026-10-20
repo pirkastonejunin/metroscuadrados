@@ -1473,13 +1473,15 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
       // --- 2) La venta: el cobro queda marcado como anulado y se recalcula lo cobrado / el saldo.
       if (venta) {
         const pagos = venta.pagos.map((p, i) => i === pagoIdx ? Object.assign({}, p, { anulado: true, anuladoEn: ahora, anuladoMotivo: motivo }) : p);
-        const totalCobrado = pagos.filter(p => !p.anulado).reduce((t, p) => t + (p.monto || 0) + (p.totalRetenciones || 0), 0);
+        const totalCobrado = pagos.filter(p => !p.anulado).reduce((t, p) => t + (p.monto || 0) + (p.totalRetenciones || 0), 0) + (venta.imputaciones || []).filter(i => !i.anulada).reduce((t, i) => t + (i.monto || 0), 0);
         await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { pagos, totalCobrado, saldoPendiente: Math.max(0, Math.round((venta.total - totalCobrado - (venta.totalAcreditado || 0)) * 100) / 100), updatedAt: ahora } });
         await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_venta', ventaId: venta._id, fecha: mov.fecha });
       } else if (mov.reciboId) {
         await db.collection('retenciones_sufridas').deleteMany({ origen: 'cobro_cuenta', reciboId: mov.reciboId });
       }
 
+      // Si el cobro estaba imputado a facturas, esas facturas vuelven a quedar con su saldo (20/10/2026).
+      for (const imp of (mov.imputaciones || [])) { if (!imp.anulada) await require('./clientes').revertirImputacionEnVenta(db, imp); }
       // --- 3) Cuenta corriente: el cobro queda anulado y un débito lo compensa (el saldo vuelve a como estaba).
       await db.collection('cuenta_corriente_movimientos').updateOne({ _id: id }, { $set: { anulado: true, anuladoEn: ahora, anuladoPor: usuarioNombre, anuladoMotivo: motivo } });
       await registrarMovimientoCuentaCorriente(db, reqOrg, {

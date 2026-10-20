@@ -897,6 +897,58 @@ async function anularVentaDesdeCC(ventaId, numero, stockDescontado, clienteId){
 // Pensada para la pestaña "Cuenta corriente" del modal de Editar cliente
 // (ver abrirEditarCliente/mostrarTabCliente arriba) — no es un modal
 // propio, rellena el contenedor #ccContenido que ya está en el DOM.
+// ---- Imputar un cobro a cuenta a facturas (20/10/2026) ----
+let _imp = null;
+async function abrirImputarCC(clienteId, movId){
+  const f = (window._ccCtx && window._ccCtx.filas || []).find(x => String(x.m._id) === String(movId));
+  if (!f) return;
+  const m = f.m, sin = Math.round(((m.monto || 0) - (m.imputaciones || []).filter(x => !x.anulada).reduce((t, x) => t + x.monto, 0)) * 100) / 100;
+  let vs = [];
+  try { const r = await fetch(BASE + '/' + clienteId + '/ventas-pendientes?moneda=' + encodeURIComponent(m.moneda || 'ARS'), {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); vs = d; } catch(e){ alert(e.message); return; }
+  _imp = { clienteId, movId, sin, vs };
+  let root = document.getElementById('imputarRoot'); if (!root) { root = document.createElement('div'); root.id = 'imputarRoot'; document.body.appendChild(root); }
+  root.innerHTML = `<div class="modal-bg" style="z-index:70"><div class="modal wide"><span class="close-x" onclick="cerrarImputarCC()">✕</span>
+    <h2>Imputar cobro a facturas</h2>
+    <p class="muted">Cobro del ${fechaCorta(m.fecha)} por <b>${moneyMon(m.monto, m.moneda)}</b> — sin imputar: <b>${moneyMon(sin, m.moneda)}</b>. Esto no cambia el saldo del cliente: solo marca qué facturas cubre este cobro.</p>
+    ${vs.length ? `<table><thead><tr><th>Comprobante</th><th>Fecha</th><th>Total</th><th>Debe</th><th>Imputar</th></tr></thead><tbody>${vs.map((v, i) => `<tr><td><b>${escapeHtml(v.comprobante)}</b> <span class="pill ${v.fiscal ? 'entregada' : 'pendiente'}" style="font-size:11px">${v.fiscal ? 'Fiscal' : 'No fiscal'}</span></td><td>${fechaCorta(v.fecha)}</td><td>${money(v.total)}</td><td>${money(v.saldoPendiente)}</td><td><input type="number" class="impMonto" data-i="${i}" min="0" step="0.01" style="width:110px" oninput="actualizarTotalImputarCC()"></td></tr>`).join('')}</tbody></table>` : '<p class="muted">Este cliente no tiene facturas con saldo pendiente en esta moneda.</p>'}
+    <div class="row" style="margin-top:10px;gap:8px;align-items:center;flex-wrap:wrap"><button data-iconizado="1" class="btn secondary small" onclick="autoImputarCC()">Aplicar a las más viejas primero</button><span id="impTotal" class="muted"></span></div>
+    <div class="err" id="impErr"></div>
+    <button data-iconizado="1" class="btn" id="impBtn" style="margin-top:10px" onclick="guardarImputarCC()">Guardar imputación</button>
+  </div></div>`;
+  actualizarTotalImputarCC();
+}
+function cerrarImputarCC(){ const r = document.getElementById('imputarRoot'); if (r) r.innerHTML = ''; _imp = null; }
+function autoImputarCC(){
+  let resto = _imp.sin;
+  document.querySelectorAll('.impMonto').forEach(inp => { const v = _imp.vs[Number(inp.dataset.i)]; const m = Math.max(0, Math.min(resto, v.saldoPendiente)); inp.value = m > 0 ? (Math.round(m * 100) / 100) : ''; resto = Math.round((resto - m) * 100) / 100; });
+  actualizarTotalImputarCC();
+}
+function actualizarTotalImputarCC(){
+  if (!_imp) return;
+  const t = [...document.querySelectorAll('.impMonto')].reduce((a, i) => a + (Number(i.value) || 0), 0);
+  const el = document.getElementById('impTotal'); if (!el) return;
+  const rest = Math.round((_imp.sin - t) * 100) / 100;
+  el.innerHTML = `Imputado ahora: <b>${money(t)}</b> — queda sin imputar: <b style="color:${rest < -0.005 ? 'var(--danger)' : 'inherit'}">${money(rest)}</b>`;
+}
+async function guardarImputarCC(){
+  const imputaciones = [...document.querySelectorAll('.impMonto')].map(i => ({ ventaId: _imp.vs[Number(i.dataset.i)]._id, monto: Number(i.value) || 0 })).filter(x => x.monto > 0);
+  const err = document.getElementById('impErr'); err.textContent = '';
+  if (!imputaciones.length) { err.textContent = 'Cargá el monto de al menos una factura.'; return; }
+  const btn = document.getElementById('impBtn'); btn.disabled = true;
+  try {
+    const r = await fetch(BASE + '/' + _imp.clienteId + '/imputar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ movimientoId: _imp.movId, imputaciones })});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al imputar');
+    const cid = _imp.clienteId; cerrarImputarCC(); cargarCuentaCorrienteTab(cid);
+  } catch(e){ err.textContent = e.message; btn.disabled = false; }
+}
+async function desimputarCC(clienteId, movId, idx){
+  if (!confirm('¿Quitar esta imputación? La factura vuelve a figurar con ese saldo pendiente (el saldo del cliente no cambia).')) return;
+  try {
+    const r = await fetch(BASE + '/' + clienteId + '/desimputar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ movimientoId: movId, idx })});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cargarCuentaCorrienteTab(clienteId);
+  } catch(e){ alert(e.message); }
+}
 async function cargarCuentaCorrienteTab(id){
   const cont0 = document.getElementById('ccContenido');
   if (cont0) cont0.innerHTML = 'Cargando...';
@@ -979,7 +1031,13 @@ async function cargarCuentaCorrienteTab(id){
             // imprimirlo").
             const venta = m.ventaId ? ventasPorId[String(m.ventaId)] : null;
             const cobrable = venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' && venta.saldoPendiente > 0;
-            const conceptoHtml = `${escapeHtml(m.concepto || '—')}${m.observaciones ? `<div class="muted">${escapeHtml(m.observaciones)}</div>` : ''}`;
+            const impsAct = (m.imputaciones || []).map((x, i) => Object.assign({ i }, x)).filter(x => !x.anulada);
+            const sinImp = Math.round(((m.monto || 0) - impsAct.reduce((t, x) => t + x.monto, 0)) * 100) / 100;
+            const esCobroCta = m.origen === 'cobro_cuenta' && m.tipo === 'credito' && !m.anulado && !m.importado;
+            const impHtml = esCobroCta ? `<div class="muted" style="font-size:12px">${impsAct.map(x => `→ ${escapeHtml(x.comprobante || ('Nº ' + x.ventaNumero))}: ${money(x.monto)} <a href="javascript:void(0)" onclick="desimputarCC('${id}','${m._id}',${x.i})" title="Quitar esta imputación">✕</a>`).join('<br>')}${impsAct.length ? '<br>' : ''}${sinImp > 0.005 ? `Sin imputar a facturas: ${money(sinImp)}` : '✓ Totalmente imputado'}</div>` : '';
+            const vImp = venta && (venta.imputaciones || []).filter(x => !x.anulada);
+            const vImpHtml = vImp && vImp.length ? `<div class="muted" style="font-size:12px">Cubierto con cobro a cuenta: ${vImp.map(x => money(x.monto) + ' (' + fechaCorta(x.fecha) + ')').join(', ')}</div>` : '';
+            const conceptoHtml = `${escapeHtml(m.concepto || '—')}${m.observaciones ? `<div class="muted">${escapeHtml(m.observaciones)}</div>` : ''}${impHtml}${vImpHtml}`;
             return `
             <tr>
               <td>${fechaCorta(m.fecha)}</td>
@@ -994,6 +1052,7 @@ async function cargarCuentaCorrienteTab(id){
               <td style="white-space:nowrap">
                 ${venta ? botonesImprimible('/api/ventas/' + m.ventaId + '/comprobante') : ''}
                 ${(venta && !m.importado && m.tipo === 'debito' && (venta.estado === 'pendiente' || venta.estado === 'parcialmente_entregada')) ? ` <button class="btn small secondary" onclick="window.open('/admin-ventas.html?abrir=${m.ventaId}&entregar=1', '_blank')" title="Generar el remito (descuenta stock)">Generar remito</button>` : ''}
+                ${(esCobroCta && sinImp > 0.005) ? ` <button data-iconizado="1" class="btn small secondary" onclick="abrirImputarCC('${id}','${m._id}')" title="Relacionar este cobro con una o más facturas">Imputar a facturas</button>` : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
                 ${venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
