@@ -796,12 +796,16 @@ function abrirAjusteStock(){
       <div class="modal wide" style="max-width:840px">
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Ajustar stock</h2>
-        <p class="muted">Elegí el depósito y cargá todos los productos que contaste. Escribí los metros o los bultos (se calculan entre sí) — el sistema calcula la diferencia sola y la carga como ingreso o egreso.</p>
+        <div class="row" style="gap:6px;margin-bottom:8px">
+          <button type="button" data-iconizado="1" id="ajModoContado" class="btn small" onclick="ajCambiarModo('contado')">Cantidad contada</button>
+          <button type="button" data-iconizado="1" id="ajModoMover" class="btn small secondary" onclick="ajCambiarModo('mover')">Sumar / restar</button>
+        </div>
+        <p class="muted" id="ajExplica">Elegí el depósito y cargá todos los productos que contaste. Escribí los metros o los bultos (se calculan entre sí) — el sistema calcula la diferencia sola y la carga como ingreso o egreso.</p>
         <div class="grid2">
           <div><label>Depósito *</label><select id="ajDeposito" onchange="ajRefrescarTodo(true)">${opcionesDepositosSelect()}</select></div>
           <div><label>Motivo (para todos)</label><input id="ajMotivo" placeholder="Ej: Conteo físico, Rotura, Diferencia de inventario"></div>
         </div>
-        <div class="ajf-cab"><span>Producto</span><span>Stock actual</span><span>Contado (m² / unidad)</span><span>Contado (bultos)</span><span></span></div>
+        <div class="ajf-cab"><span>Producto</span><span>Stock actual</span><span id="ajCab1">Contado (m² / unidad)</span><span id="ajCab2">Contado (bultos)</span><span></span></div>
         <div id="ajFilas"></div>
         <button class="btn secondary small" style="margin-top:8px" onclick="ajAgregarFila()">+ Agregar producto</button>
         <div class="err" id="ajErr"></div>
@@ -817,13 +821,39 @@ function abrirAjusteStock(){
       @media(max-width:700px){.ajf-cab{display:none}.ajf-fila{grid-template-columns:1fr 1fr}.ajf-fila>.campo-combo-producto{grid-column:1 / -1}}
     </style>
   `;
-  ajSeq = 0;
+  ajSeq = 0; ajModo = 'contado';
   const activos = depositosCache.filter(d => d.activo !== false);
   if (activos.length === 1) document.getElementById('ajDeposito').value = String(activos[0]._id);
   ajAgregarFila();
 }
 
-let ajSeq = 0;
+let ajSeq = 0, ajModo = 'contado';
+// Modo "Sumar / restar": en vez de la cantidad contada, se carga cuánto entra (+) o sale (−) por unidad; el servidor lo suma al stock actual.
+function ajCambiarModo(m){
+  ajModo = m;
+  document.getElementById('ajModoContado').className = 'btn small' + (m === 'contado' ? '' : ' secondary');
+  document.getElementById('ajModoMover').className = 'btn small' + (m === 'mover' ? '' : ' secondary');
+  document.getElementById('ajExplica').textContent = m === 'mover'
+    ? 'Elegí el depósito y, por cada producto, escribí cuánto sumar (por ejemplo 5) o restar (por ejemplo -3). Podés cargarlo en metros/unidades o en bultos. Se suma o resta al stock actual y queda registrado como ingreso o egreso.'
+    : 'Elegí el depósito y cargá todos los productos que contaste. Escribí los metros o los bultos (se calculan entre sí) — el sistema calcula la diferencia sola y la carga como ingreso o egreso.';
+  document.getElementById('ajCab1').textContent = m === 'mover' ? '+ / − (m² / unidad)' : 'Contado (m² / unidad)';
+  document.getElementById('ajCab2').textContent = m === 'mover' ? '+ / − (bultos)' : 'Contado (bultos)';
+  document.querySelectorAll('#ajFilas .ajf-fila').forEach(f => {
+    const n = f.dataset.n, a = document.getElementById('ajf' + n + 'M2'), b = document.getElementById('ajf' + n + 'Bultos');
+    a.value = ''; b.value = ''; a.placeholder = m === 'mover' ? '+5 / -3' : 'm²';
+    if (m === 'mover') { a.removeAttribute('min'); b.removeAttribute('min'); } else { a.min = 0; b.min = 0; }
+    document.getElementById('ajf' + n + 'Q').textContent = '';
+  });
+}
+function ajActualizarQuedaria(n){
+  const q = document.getElementById('ajf' + n + 'Q'), f = document.getElementById('ajf' + n + 'Fila');
+  if (!q) return;
+  const v = document.getElementById('ajf' + n + 'M2').value;
+  if (ajModo !== 'mover' || v === '' || !f || f.dataset.cant === undefined || f.dataset.cant === '') { q.textContent = ''; return; }
+  const nuevo = ajRedondear(Number(f.dataset.cant) + Number(v), 4);
+  q.textContent = 'Quedaría en ' + nuevo;
+  q.style.color = nuevo < 0 ? 'var(--danger)' : '';
+}
 function ajProductoDeFila(n){
   const id = document.getElementById('ajf' + n + 'Producto').value;
   return id ? productosCache.find(p => String(p._id) === id) : null;
@@ -837,9 +867,10 @@ function ajAgregarFila(){
   div.innerHTML = `
     ${comboProductoHtml('ajf' + n, '', 'ajRefrescarTodo')}
     <div class="ajf-act" id="ajf${n}Actual">—</div>
-    <input id="ajf${n}M2" type="number" min="0" step="0.01" placeholder="m²" oninput="ajDesdeMetros(${n})">
-    <input id="ajf${n}Bultos" type="number" min="0" step="0.01" placeholder="bultos" oninput="ajDesdeBultos(${n})">
+    <input id="ajf${n}M2" type="number" ${ajModo === 'mover' ? '' : 'min="0" '}step="0.01" placeholder="${ajModo === 'mover' ? '+5 / -3' : 'm²'}" oninput="ajDesdeMetros(${n})">
+    <input id="ajf${n}Bultos" type="number" ${ajModo === 'mover' ? '' : 'min="0" '}step="0.01" placeholder="bultos" oninput="ajDesdeBultos(${n})">
     <button type="button" class="btn small secondary" title="Quitar" onclick="ajQuitarFila(${n})" style="padding:6px 8px">✕</button>
+    <div class="ajf-msg muted" id="ajf${n}Q"></div>
     <div class="ajf-msg err" id="ajf${n}Msg"></div>`;
   document.getElementById('ajFilas').appendChild(div);
 }
@@ -852,11 +883,13 @@ function ajDesdeMetros(n){
   const prod = ajProductoDeFila(n), b = ajBultoDe(prod);
   const v = document.getElementById('ajf' + n + 'M2').value;
   document.getElementById('ajf' + n + 'Bultos').value = (b && v !== '') ? ajRedondear(Number(v) / b, 2) : '';
+  ajActualizarQuedaria(n);
 }
 function ajDesdeBultos(n){
   const prod = ajProductoDeFila(n), b = ajBultoDe(prod);
   const v = document.getElementById('ajf' + n + 'Bultos').value;
   if (b && v !== '') document.getElementById('ajf' + n + 'M2').value = ajRedondear(Number(v) * b, 4);
+  ajActualizarQuedaria(n);
 }
 // Refresca el "stock actual" de las filas (solo las que cambiaron de producto, o todas si cambió el depósito).
 async function ajRefrescarTodo(forzar){
@@ -882,10 +915,12 @@ async function ajRefrescarTodo(forzar){
       if (!r.ok) throw new Error(data.error || 'Error');
       const filas = Array.isArray(data) ? data : (data.items || data.filas || []);
       const cant = filas.reduce((t, x) => t + (Number(x.cantidad) || 0), 0);
+      f.dataset.cant = String(cant);
       const b = ajBultoDe(prod), u = (prod && prod.unidad) || 'un.';
       act.textContent = ajRedondear(cant, 2) + ' ' + u + (b ? ' · ' + ajRedondear(cant / b, 2) + ' bultos' : '') + (depositoId ? '' : ' (todos los depósitos)');
     }catch(e){ act.textContent = 'No se pudo leer'; act.title = e.message; }
     if (document.getElementById('ajf' + n + 'M2').value !== '') ajDesdeMetros(n);
+    else ajActualizarQuedaria(n);
   }
 }
 
@@ -936,6 +971,11 @@ async function guardarAjusteStock(){
     const msg = document.getElementById('ajf' + n + 'Msg'); msg.textContent = '';
     if (!productoId && cant === '' && !document.getElementById('ajf' + n + 'Buscar').value.trim()) continue; // fila vacía
     if (!productoId) { msg.textContent = 'Elegí el producto de la lista.'; errEl.textContent = 'Revisá las filas marcadas.'; return; }
+    if (ajModo === 'mover') {
+      if (cant === '' || !Number(cant)) { msg.textContent = 'Escribí cuánto sumar (ej: 5) o restar (ej: -3).'; errEl.textContent = 'Revisá las filas marcadas.'; return; }
+      aCargar.push({ n, f, body: { productoId, depositoId, diferencia: Number(cant), motivo } });
+      continue;
+    }
     if (cant === '' || Number(cant) < 0) { msg.textContent = 'Escribí la cantidad contada (puede ser 0).'; errEl.textContent = 'Revisá las filas marcadas.'; return; }
     aCargar.push({ n, f, body: { productoId, depositoId, cantidadReal: Number(cant), motivo } });
   }

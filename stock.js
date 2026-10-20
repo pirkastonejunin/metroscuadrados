@@ -840,8 +840,13 @@ router.post('/ajustar', authAdmin, async (req, res) => {
     if (!productoId) throw err(400, 'Elegí un producto');
     const depositoId = toObjectId(body.depositoId);
     if (!depositoId) throw err(400, 'Elegí un depósito');
-    const cantidadReal = Number(body.cantidadReal);
-    if (!Number.isFinite(cantidadReal) || cantidadReal < 0) throw err(400, 'La cantidad contada tiene que ser un número mayor o igual a 0');
+    // Dos formas de ajustar (20/10/2026, pedido de Mato): "cantidadReal" = lo que se contó (el sistema calcula la diferencia), o
+    // "diferencia" = cuánto sumar (positivo) o restar (negativo) al stock actual, por unidad.
+    const porDiferencia = body.cantidadReal === undefined && body.diferencia !== undefined && body.diferencia !== '';
+    const diferenciaPedida = Number(body.diferencia);
+    if (porDiferencia && !Number.isFinite(diferenciaPedida)) throw err(400, 'La cantidad a sumar o restar tiene que ser un número');
+    let cantidadReal = Number(body.cantidadReal);
+    if (!porDiferencia && (!Number.isFinite(cantidadReal) || cantidadReal < 0)) throw err(400, 'La cantidad contada tiene que ser un número mayor o igual a 0');
     const motivo = normalizarTexto(body.motivo) || 'Ajuste de inventario';
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = normalizarFecha(body.fecha);
@@ -855,7 +860,11 @@ router.post('/ajustar', authAdmin, async (req, res) => {
 
       const actualDoc = await db.collection('stock_actual').findOne(Object.assign({ productoId, depositoId }, filtroOrg(req)));
       const cantidadAnterior = actualDoc ? actualDoc.cantidad : 0;
-      const diferencia = cantidadReal - cantidadAnterior;
+      if (porDiferencia) {
+        cantidadReal = Math.round((cantidadAnterior + diferenciaPedida) * 10000) / 10000;
+        if (cantidadReal < 0 && !producto.aceptaStockNegativo) throw err(400, `No se puede restar ${Math.abs(diferenciaPedida)}: "${producto.nombre}" tiene ${cantidadAnterior} en ${deposito.nombre} y quedaría en negativo.`);
+      }
+      const diferencia = Math.round((cantidadReal - cantidadAnterior) * 10000) / 10000;
       if (diferencia === 0) throw err(400, `El stock de "${producto.nombre}" en ${deposito.nombre} ya es ${cantidadAnterior} — no hay diferencia para ajustar.`);
       const tipo = diferencia > 0 ? 'ingreso' : 'egreso';
       const cantidadMovimiento = Math.abs(diferencia);
