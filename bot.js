@@ -160,6 +160,23 @@ async function bajarMedia(mediaId) {
   } catch (e) { return null; }
 }
 
+// Manda una foto, video, audio o documento por WhatsApp: se sube como media y se envía con el tipo que corresponde (foto/video/documento con texto de acompañamiento).
+const TIPOS_ENVIO = { 'image/jpeg': 'image', 'image/png': 'image', 'video/mp4': 'video', 'video/3gpp': 'video', 'audio/aac': 'audio', 'audio/mp4': 'audio', 'audio/mpeg': 'audio', 'audio/amr': 'audio', 'audio/ogg': 'audio',
+  'application/pdf': 'document', 'application/msword': 'document', 'application/vnd.ms-excel': 'document', 'application/vnd.ms-powerpoint': 'document', 'text/plain': 'document',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'document', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'document' };
+const LIMITE_ENVIO = { image: 5 * 1024 * 1024, video: 16 * 1024 * 1024, audio: 16 * 1024 * 1024, document: 18 * 1024 * 1024 };
+async function enviarMedia(tel, buffer, nombre, mime, tipo, texto) {
+  if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return { id: 'prueba-' + crypto.randomBytes(6).toString('hex'), prueba: true };
+  const h = { Authorization: 'Bearer ' + process.env.WA_TOKEN };
+  const fd = new FormData(); fd.append('messaging_product', 'whatsapp'); fd.append('type', mime); fd.append('file', new Blob([buffer], { type: mime }), nombre);
+  const up = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '/media', { method: 'POST', headers: h, body: fd }, 90000);
+  const ud = await up.json().catch(() => ({})); if (!up.ok || !ud.id) throw new Error('WhatsApp no aceptó el archivo: ' + ((ud.error && ud.error.message) || up.status));
+  const o = { id: ud.id }; if (tipo === 'document') o.filename = nombre; if (texto && tipo !== 'audio') o.caption = String(texto).slice(0, 1000);
+  const r = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '/messages', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, h), body: JSON.stringify({ messaging_product: 'whatsapp', to: tel, type: tipo, [tipo]: o }) });
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error('WhatsApp ' + r.status + ': ' + ((d.error && d.error.message) || ''));
+  return { id: d.messages && d.messages[0] && d.messages[0].id, mediaId: ud.id };
+}
+
 // ---- ventana de 24 h y plantillas ----
 // WhatsApp solo deja mandar texto libre hasta 24 h después del último mensaje del cliente; pasado ese tiempo hay que usar una plantilla aprobada por Meta.
 const VENTANA_H = 24;
@@ -531,6 +548,24 @@ router.post('/conversaciones/:id/enviar-plantilla', auth, async (req, res) => { 
     const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarPlantilla(c.tel, pl, params);
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'template', plantilla: pl.nombre, texto, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba, texto });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+router.post('/conversaciones/:id/enviar-archivo', auth, async (req, res) => { // el asesor manda una foto, video, audio o documento (con texto opcional)
+  try { const b = req.body || {}; const mime = String(b.mime || '').toLowerCase().split(';')[0]; const tipo = TIPOS_ENVIO[mime];
+    if (!tipo) return res.status(400).json({ error: 'Ese tipo de archivo no se puede mandar por WhatsApp. Sirven fotos JPG/PNG, videos MP4, audios, PDF y documentos de Word, Excel o PowerPoint.' });
+    const b64 = String(b.data || '').replace(/^data:[^,]*,/, ''); if (!/^[A-Za-z0-9+/=\s]+$/.test(b64) || b64.length < 4) return res.status(400).json({ error: 'Falta el archivo.' });
+    const buf = Buffer.from(b64, 'base64'); if (!buf.length) return res.status(400).json({ error: 'El archivo está vacío.' });
+    if (buf.length > LIMITE_ENVIO[tipo]) return res.status(413).json({ error: 'El archivo pesa ' + (buf.length / 1048576).toFixed(1) + ' MB y el máximo para ' + ({ image: 'una foto', video: 'un video', audio: 'un audio', document: 'un documento' })[tipo] + ' es ' + Math.round(LIMITE_ENVIO[tipo] / 1048576) + ' MB.' });
+    const nombre = String(b.nombre || 'archivo').replace(/[^\w.\- ()áéíóúñÁÉÍÓÚÑ]/g, '_').slice(0, 100) || 'archivo'; const texto = String(b.texto || '').trim().slice(0, 1000);
+    const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    if (!c.demo && !(await ventanaConv(db, c._id)).abierta) return res.status(409).json({ error: MSJ_VENTANA, ventanaCerrada: true });
+    const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarMedia(c.tel, buf, nombre, mime, tipo, texto);
+    const aid = env.mediaId || env.id; // para verlo en el chat: copia propia (hasta 6 MB) y, si no hay, se pide a Meta
+    if (buf.length <= MEDIA_MAX_COPIA) await db.collection('wa_media').updateOne({ _id: aid }, { $set: { orgId: c.orgId, mime, data: buf, bytes: buf.length, at: new Date() } }, { upsert: true }).catch(() => {});
+    const etiqueta = tipo === 'document' ? '📎 ' + nombre : tipo === 'video' ? '🎬 Video' : '';
+    await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo, texto: (etiqueta + (texto ? (etiqueta ? '\n' : '') + texto : '')).trim(), archivo: { id: aid, tipo, mime, nombre }, at: new Date(), prueba: !!env.prueba });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 

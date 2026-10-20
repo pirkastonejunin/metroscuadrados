@@ -269,7 +269,7 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let PREV = {}, ETF = '', ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], dragId = null, pend = null, decOpen = false;
+let PREV = {}, ETF = '', ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
 const cur = () => ITEMS.find(l=>l.id===sel);
 const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
@@ -490,6 +490,29 @@ function activarMedia(){
     }catch(e){ b.disabled = false; b.textContent = t0; toast(e.message); }
   });
 }
+
+// ---- mandar fotos y archivos ----
+const EXT_MIME = {pdf:'application/pdf',doc:'application/msword',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',xls:'application/vnd.ms-excel',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',ppt:'application/vnd.ms-powerpoint',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',txt:'text/plain',mp4:'video/mp4','3gp':'video/3gpp',mp3:'audio/mpeg',aac:'audio/aac',m4a:'audio/mp4',amr:'audio/amr',ogg:'audio/ogg',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png'};
+const LIM_MB = {image:5, video:16, audio:16, document:18};
+const aB64 = blob => new Promise((ok,ko)=>{ const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]||''); r.onerror = () => ko(new Error('No se pudo leer el archivo.')); r.readAsDataURL(blob); });
+async function prepararArchivo(f){
+  let mime = (f.type||'').toLowerCase().split(';')[0]; const ext = (f.name.split('.').pop()||'').toLowerCase(); if (!mime || mime==='application/octet-stream') mime = EXT_MIME[ext]||mime;
+  let blob = f, nombre = f.name||'archivo', thumb = '';
+  if (mime.startsWith('image/')){ // las fotos se achican y pasan a JPG: WhatsApp acepta solo JPG/PNG, hasta 5 MB
+    const bmp = await createImageBitmap(f).catch(()=>null); if (!bmp) throw new Error('No pude leer esa imagen.');
+    const k = Math.min(1, 1600/Math.max(bmp.width,bmp.height)); const liviano = (mime==='image/jpeg'||mime==='image/png') && k===1 && f.size<=1.5*1048576;
+    if (!liviano){ const c = document.createElement('canvas'); c.width = Math.round(bmp.width*k); c.height = Math.round(bmp.height*k); const cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0,0,c.width,c.height); cx.drawImage(bmp,0,0,c.width,c.height);
+      blob = await new Promise(r=>c.toBlob(r,'image/jpeg',.85)); mime = 'image/jpeg'; nombre = nombre.replace(/\.[^.]+$/,'')+'.jpg'; }
+    thumb = URL.createObjectURL(blob);
+  }
+  const tipo = mime.startsWith('image/')?'image':mime.startsWith('video/')?'video':mime.startsWith('audio/')?'audio':'document';
+  if (!Object.values(EXT_MIME).includes(mime)) throw new Error('Ese tipo de archivo no se puede mandar por WhatsApp. Sirven fotos, videos MP4, audios, PDF, Word, Excel y PowerPoint.');
+  if (blob.size > LIM_MB[tipo]*1048576) throw new Error('Pesa '+(blob.size/1048576).toFixed(1)+' MB; el máximo para '+({image:'una foto',video:'un video',audio:'un audio',document:'un documento'})[tipo]+' es '+LIM_MB[tipo]+' MB.');
+  return { nombre, mime, data: await aB64(blob), kb: Math.max(1,Math.round(blob.size/1024)), thumb };
+}
+async function adjuntar(l, f){
+  try{ toast('Preparando archivo…'); const a = await prepararArchivo(f); a.conv = l.id; FILE = a; ADJ = null; pintarCaj(l,{keep:true}); }catch(e){ toast(e.message); }
+}
 function pintarLista(){
   const rows = filtradas().filter(l=>!l.cierre||$('fCer').checked).sort((a,b)=>new Date(b.actualizado||0)-new Date(a.actualizado||0));
   $('cant').textContent = rows.length + ' de ' + ITEMS.length;
@@ -590,7 +613,7 @@ function pintarCaj(l, o){
     const sugBar = (l.esperaCliente||l.recordar) && sug ? `<div class="sug"><div class="tx"><span class="lb">${l.recordar?'Recordatorio sugerido':'Sugerencia de la IA'}</span>${esc(sug)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
       : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '');
     izq = `${hdr}<div class="msgs" id="msgs">${msgs||'<div class="vacio">Sin mensajes.</div>'}</div>${sugBar}
-      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}${plBar||venTip}<div class="comp" ${vc?'hidden':''}><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
+      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}${FILE&&FILE.conv===l.id?`<div class="adj">${FILE.thumb?`<img src="${FILE.thumb}" alt="" style="height:34px;border-radius:6px;vertical-align:middle"> `:'📎 '}<b>${esc(FILE.nombre)}</b> <span class="tip">(${FILE.kb>=1024?(FILE.kb/1024).toFixed(1)+' MB':FILE.kb+' KB'}) · lo que escribas va como texto del archivo</span> <button class="ghost" id="filex">Quitar</button></div>`:''}${plBar||venTip}<div class="comp" ${vc?'hidden':''}><button class="ghost" id="adjf" title="Adjuntar foto, video o archivo" aria-label="Adjuntar" style="font-size:20px;padding:6px 8px;align-self:center">📎</button><input type="file" id="fileIn" hidden accept="image/*,video/mp4,video/3gpp,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
   } else if (l.leadId){
     izq = `${hdr}<div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
   } else {
@@ -608,12 +631,16 @@ function pintarCaj(l, o){
   if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await post(`/api/bot/conversaciones/${l.convId}/asistente`); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };
   if ($('rap')) $('rap').onchange = e => { const r={Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value=(tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
   if ($('env')){
-    const enviar = async () => { const v = tx.value.trim(); if (!v) return; $('env').disabled = true;
-      try{ if (ADJ&&ADJ.conv===l.id){ $('env').textContent='Armando PDF…'; let pdfBase64=''; try{ pdfBase64 = await pdfPresupuesto(ADJ.id); }catch(x){ console.warn('PDF en el navegador falló, se usa el del servidor', x); } await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id, pdfBase64}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
+    const enviar = async () => { const v = tx.value.trim(); const ff = FILE&&FILE.conv===l.id ? FILE : null; if (!v && !ff) return; $('env').disabled = true;
+      try{ if (ff){ $('env').textContent='Enviando…'; await post(`/api/bot/conversaciones/${l.convId}/enviar-archivo`, {nombre:ff.nombre, mime:ff.mime, data:ff.data, texto:v}); FILE = null; } else if (ADJ&&ADJ.conv===l.id){ $('env').textContent='Armando PDF…'; let pdfBase64=''; try{ pdfBase64 = await pdfPresupuesto(ADJ.id); }catch(x){ console.warn('PDF en el navegador falló, se usa el del servidor', x); } await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id, pdfBase64}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
     $('env').onclick = enviar; tx.onkeydown = e => { if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) enviar(); };
   }
   if ($('plsel')){ const pv = () => { const p = PLANT.find(x=>x.nombre===$('plsel').value); if (!p) return; const val = {nombre:(l.nombre||'cliente').trim().split(/\s+/)[0], asesor:YO.nombre||'un asesor'}; $('plprev').textContent = p.texto.replace(/\{\{(\d+)\}\}/g,(_,n)=>val[p.variables[n-1]]||''); }; $('plsel').onchange = pv; pv();
     $('plenv').onclick = async () => { $('plenv').disabled = true; try{ await post(`/api/bot/conversaciones/${l.convId}/enviar-plantilla`, {nombre:$('plsel').value}); TOC.add(l.id); toast('Plantilla enviada'); await cargar({forzar:true}); }catch(e){ err(e); $('plenv').disabled=false; } }; }
+  if ($('adjf')){ $('adjf').onclick = () => $('fileIn').click(); $('fileIn').onchange = e => { const f = e.target.files[0]; if (f) adjuntar(l, f); e.target.value=''; };
+    tx.onpaste = e => { const it = [...(e.clipboardData&&e.clipboardData.files||[])][0]; if (it){ e.preventDefault(); adjuntar(l, it); } };
+    const cp = tx.closest('.comp'); cp.ondragover = e => { e.preventDefault(); }; cp.ondrop = e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) adjuntar(l, f); }; }
+  if ($('filex')) $('filex').onclick = () => { FILE = null; pintarCaj(l,{keep:true}); };
   if ($('adjx')) $('adjx').onclick = () => { ADJ=null; pintarCaj(l,{keep:true}); };
   if ($('dq')) $('dq').onclick = () => { pend=null; decOpen=true; pintarCaj(l,{keep:true}); };
   if (decOpen) ligarDec(l);
