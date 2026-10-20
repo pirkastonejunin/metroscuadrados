@@ -926,5 +926,20 @@ module.exports.cargarClienteParaOperar = async function (db, req, clienteId) {
   await col.updateOne({ _id: clienteId }, { $addToSet: { orgIdsCompartidas: req.orgId } });
   return Object.assign(otro, { orgIdsCompartidas: (otro.orgIdsCompartidas || []).concat([req.orgId]) });
 };
+// Igual que con los clientes: un proveedor de OTRA sucursal (a la que el usuario tiene acceso) se comparte con la sucursal en la que se está
+// operando al cargarle un gasto o una compra, así queda UNA sola ficha y una sola cuenta corriente (20/10/2026).
+module.exports.cargarProveedorParaOperar = async function (db, req, proveedorId) {
+  const col = db.collection('proveedores');
+  const filtro = req.orgId ? { $or: [{ orgId: req.orgId }, { orgIdsCompartidas: req.orgId }] } : {};
+  let p = await col.findOne(Object.assign({ _id: proveedorId }, filtro));
+  if (p || !req.orgId) return p;
+  const otro = await col.findOne({ _id: proveedorId });
+  if (!otro) return null;
+  const u = req.usuario || {};
+  const acceso = (u.rol && u.rol.protegido) || [String(otro.orgId)].concat((otro.orgIdsCompartidas || []).map(String)).some(o => (u.orgIds || []).map(String).includes(o));
+  if (!acceso) return null;
+  await col.updateOne({ _id: proveedorId }, { $addToSet: { orgIdsCompartidas: req.orgId } });
+  return Object.assign(otro, { orgIdsCompartidas: (otro.orgIdsCompartidas || []).concat([req.orgId]) });
+};
 module.exports.backfillOrgId = backfillOrgId;
 module.exports.asegurarOrgPorDefecto = asegurarOrgPorDefecto;

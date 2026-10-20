@@ -63,7 +63,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes, cargarProveedorParaOperar } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
 // Impuestos (5/10/2026): percepciones, retenciones, crédito/débito y otros
 // — ver impuestos.js. Lectura de facturas con IA — ver facturaIA.js.
@@ -879,7 +879,7 @@ router.post('/ordenes', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrgClientes(req)));
+      const proveedor = await cargarProveedorParaOperar(db, req, proveedorId);
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
       cotizacionDolar = await resolverCotizacion(db, req, moneda, cotizacionDolar, false);
       const { items, subtotal } = await normalizarItemsOrden(db, req, body.items);
@@ -1239,7 +1239,7 @@ router.post('/', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrgClientes(req)));
+      const proveedor = await cargarProveedorParaOperar(db, req, proveedorId);
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
       // Evita cargar el mismo comprobante dos veces para el mismo
       // proveedor (mismo tipo + punto de venta + número) — no bloquea
@@ -1707,7 +1707,7 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: proveedorId }, filtroOrgClientes(req)));
+      const proveedor = await cargarProveedorParaOperar(db, req, proveedorId);
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
       const proveedorNombre = proveedor.razonSocial || proveedor.nombreFantasia || '';
 
