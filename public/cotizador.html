@@ -2085,6 +2085,7 @@ $('#btnVolverProductos').addEventListener('click', () => {
 function renderResumen(data, editable, vistaSimple){
   editable = editable !== false && !vistaSimple;
   let html = '';
+  if (editable) { iniciarCobro(data); cargarPlanesCot(); }
 
   const descTxt = descripcionObra(data.obra);
 
@@ -2143,6 +2144,7 @@ function renderResumen(data, editable, vistaSimple){
       '</div>';
   }
 
+  if (editable && !vistaSimple && data.total > 0) html += panelCobroHtml(data);
   if (data.formasPago && data.formasPago.length){
     html += '<div class="formas-pago">';
     data.formasPago.forEach(fp => {
@@ -2198,11 +2200,71 @@ function renderResumen(data, editable, vistaSimple){
 function recalcularTotalesFront(){
   cotizacionActual.totalProductos = round2(cotizacionActual.items.reduce((s, it) => s + (Number(it.subtotal) || 0), 0));
   cotizacionActual.total = round2(cotizacionActual.totalProductos + (Number(cotizacionActual.totalManoObra) || 0));
-  cotizacionActual.formasPago = (cotizacionActual.formasPago || []).map(fp => {
-    const pct = Number(fp.porcentaje) || 0;
-    const factor = fp.tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
-    return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(cotizacionActual.total * factor) };
+  iniciarCobro(cotizacionActual);
+  cotizacionActual.formasPago = construirFormasPago(cotizacionActual);
+}
+
+// ---- Cobro: IVA 21% y plan de tarjeta (20/10/2026, pedido de Mato) ----
+// Mismo criterio que el presupuesto del sistema: se elige la tarjeta/medio y salen todos sus planes (cuotas + recargo).
+// El botón "+ 21% IVA" le suma el 21% al precio de contado y DESPUÉS se aplica el recargo del plan sobre ese valor.
+// Todo se guarda como "formas de pago" (nombre, %, total) para que el PDF, la visita y el resumen sigan igual; el porcentaje de un plan con IVA
+// es el compuesto sobre el contado (1,21 × (1 + recargo) − 1) así el total del servidor da exactamente lo mismo.
+let PLANES_COT = null, PLANES_COT_CARGANDO = false;
+function cargarPlanesCot(){
+  if (PLANES_COT !== null || PLANES_COT_CARGANDO) return;
+  PLANES_COT_CARGANDO = true;
+  fetch('/api/presupuestos/planes-tarjeta').then(r => r.ok ? r.json() : []).catch(() => []).then(d => {
+    PLANES_COT = Array.isArray(d) ? d : []; PLANES_COT_CARGANDO = false;
+    if (cotizacionActual && PLANES_COT.length) renderResumen(cotizacionActual, true, vistaSimpleResumen);
   });
+}
+function iniciarCobro(d){
+  if (d._cobroInit) return;
+  d._cobroInit = true;
+  const fps = d.formasPago || [];
+  d.fpCatalogo = fps.filter(fp => !fp.planId && !fp.ivaPct).map(fp => ({ nombre: fp.nombre, tipo: fp.tipo, porcentaje: Number(fp.porcentaje) || 0 }));
+  d.ivaPct = fps.some(fp => fp.ivaPct) ? 21 : 0;
+  d.planIds = fps.filter(fp => fp.planId).map(fp => String(fp.planId));
+}
+function planesDeGrupo(grupo){
+  const vistos = {}; const out = [];
+  (PLANES_COT || []).filter(pl => (pl.tarjeta || 'Otras') === grupo).forEach(pl => { const k = pl.cuotas + '|' + pl.recargoPorcentaje; if (!vistos[k]) { vistos[k] = 1; out.push(String(pl._id)); } });
+  return out;
+}
+function construirFormasPago(d){
+  const total = Number(d.total) || 0, iva = Number(d.ivaPct) || 0;
+  const out = (d.fpCatalogo || []).map(fp => {
+    const factor = fp.tipo === 'recargo' ? (1 + fp.porcentaje / 100) : (1 - fp.porcentaje / 100);
+    return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: fp.porcentaje, total: round2(total * factor) };
+  });
+  if (iva) out.push({ nombre: 'Contado + IVA ' + iva + '%', tipo: 'recargo', porcentaje: iva, total: round2(total * (1 + iva / 100)), ivaPct: iva });
+  (d.planIds || []).forEach(id => {
+    const pl = (PLANES_COT || []).find(x => String(x._id) === String(id));
+    if (!pl) return;
+    const comp = Math.round(((1 + iva / 100) * (1 + pl.recargoPorcentaje / 100) - 1) * 1000000) / 10000;
+    const tot = round2(total * (1 + comp / 100));
+    out.push({ nombre: pl.nombre + (pl.cuotas > 1 ? ' (' + pl.cuotas + ' cuotas de ' + money(tot / pl.cuotas) + ')' : '') + (iva ? ' — con IVA' : ''), tipo: 'recargo', porcentaje: comp, total: tot, planId: String(id), ivaPct: iva || undefined });
+  });
+  return out;
+}
+function panelCobroHtml(d){
+  const iva = !!d.ivaPct;
+  const grupos = [...new Set((PLANES_COT || []).map(pl => pl.tarjeta || 'Otras'))];
+  const sel = (d.planIds && d.planIds.length) ? (((PLANES_COT || []).find(x => String(x._id) === d.planIds[0]) || {}).tarjeta || 'Otras') : '';
+  return '<div class="cobro-panel" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">' +
+    '<button type="button" id="btnIva21" class="' + (iva ? 'primary' : 'secondary') + '" onclick="alternarIva21()" title="Le suma el 21% al precio de contado; los recargos de tarjeta se calculan sobre ese valor">' + (iva ? '✓ ' : '+ ') + '21% IVA</button>' +
+    (grupos.length ? '<select id="selPlanTarjeta" onchange="elegirPlanTarjetaCot(this.value)" style="max-width:260px"><option value="">Cuotas con tarjeta: no ofrecer</option>' + grupos.map(g => '<option value="' + escapeHtml(g) + '"' + (g === sel ? ' selected' : '') + '>' + escapeHtml(g) + '</option>').join('') + '</select>' : '<span class="hint" style="margin:0">Sin planes de tarjeta cargados.</span>') +
+    '</div>';
+}
+function alternarIva21(){
+  if (!cotizacionActual) return;
+  cotizacionActual.ivaPct = cotizacionActual.ivaPct ? 0 : 21;
+  recalcularTotalesFront(); renderResumen(cotizacionActual, true, vistaSimpleResumen);
+}
+function elegirPlanTarjetaCot(grupo){
+  if (!cotizacionActual) return;
+  cotizacionActual.planIds = grupo ? planesDeGrupo(grupo) : [];
+  recalcularTotalesFront(); renderResumen(cotizacionActual, true, vistaSimpleResumen);
 }
 
 $('#btnAgregarOtro').addEventListener('click', () => {

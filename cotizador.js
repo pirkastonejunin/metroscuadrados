@@ -1478,7 +1478,11 @@ router.post('/guardar', async (req, res) => {
     const formasPagoFinales = (formasPago || []).map((fp) => {
       const pct = Number(fp.porcentaje) || 0;
       const factor = fp.tipo === 'recargo' ? (1 + pct / 100) : (1 - pct / 100);
-      return { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(total * factor) };
+      const o = { nombre: fp.nombre, tipo: fp.tipo, porcentaje: pct, total: round2(total * factor) };
+      // Marcas del cobro con IVA / plan de tarjeta elegidos en el cotizador (para poder reabrir la cotización con la misma selección).
+      if (fp.planId) o.planId = String(fp.planId);
+      if (Number(fp.ivaPct)) o.ivaPct = Number(fp.ivaPct);
+      return o;
     });
 
     // Simulaciones de piso con IA (ver /simular-piso): el vendedor puede
