@@ -899,8 +899,20 @@ function filaCosto(tipoTrabajo='', costoPorM2=''){
 }
 
 function abrirNuevoColocador(){ abrirFormColocador(null); }
-function abrirEditarColocador(id){ abrirFormColocador(COLOCADORES.find(c=>c._id===id)); }
+function abrirEditarColocador(id){ abrirFormColocadorConOrgs(COLOCADORES.find(c=>c._id===id)); }
 
+// Sucursales donde el colocador, además de la suya, también se ve y se puede asignar a obras.
+let ORGS_COLOCADOR = [];
+function checksSucursalesColocador(c){
+  const otras = ORGS_COLOCADOR.filter(o => String(o._id) !== String(c.orgId));
+  if (!otras.length) return '';
+  const comp = (c.orgIdsCompartidas || []).map(String);
+  return `<div class="campo-edit"><label>También trabaja en la sucursal</label>${otras.map(o => `<label style="display:flex;align-items:center;gap:6px;font-weight:400"><input type="checkbox" class="colOrgComp" value="${o._id}" style="width:auto" ${comp.includes(String(o._id))?'checked':''}> ${escapeHtml(o.nombre)}</label>`).join('')}<div class="muted" style="margin-top:2px">Aparece en la lista de colocadores y se puede asignar a obras de esa sucursal.</div></div>`;
+}
+async function abrirFormColocadorConOrgs(c){
+  if (!ORGS_COLOCADOR.length) { try { ORGS_COLOCADOR = await api('/organizaciones'); } catch(e){ ORGS_COLOCADOR = []; } }
+  abrirFormColocador(c);
+}
 function abrirFormColocador(c){
   const costosHtml = (c && c.costos && c.costos.length) ? c.costos.map(x=>filaCosto(x.tipoTrabajo,x.costoPorM2)).join('') : filaCosto();
   document.getElementById('modalRoot').innerHTML = `
@@ -912,6 +924,7 @@ function abrirFormColocador(c){
         <div class="campo-edit"><label>Teléfono</label><input id="colTelefono" value="${c?escapeHtml(c.telefono||''):''}"></div>
         <div class="campo-edit"><label>PIN (para que ingrese desde el celular)</label><input id="colPin" value="${c?escapeHtml(c.pin||''):''}"></div>
         <div class="campo-edit"><label>Estado</label><select id="colActivo"><option value="true" ${!c||c.activo!==false?'selected':''}>Activo</option><option value="false" ${c&&c.activo===false?'selected':''}>Inactivo</option></select></div>
+        ${c ? checksSucursalesColocador(c) : ''}
         <div class="campo-edit">
           <label>Calendario Google</label>
           ${c ? celdaCalendarioColocador(c) : '<div class="muted">Guardá el colocador primero — después de creado vas a poder darle de alta su calendario desde "Editar".</div>'}
@@ -940,7 +953,10 @@ async function guardarColocador(id){
   const errEl = document.getElementById('colErr');
   errEl.textContent = '';
   try{
-    if (id) await apiObras(`/colocadores/${id}`, {method:'PUT', body:{nombre,telefono,pin,costos,activo}});
+    const chk = [...document.querySelectorAll('.colOrgComp')];
+    const body = {nombre,telefono,pin,costos,activo};
+    if (chk.length) body.orgIdsCompartidas = chk.filter(x=>x.checked).map(x=>x.value);
+    if (id) await apiObras(`/colocadores/${id}`, {method:'PUT', body});
     else await apiObras('/colocadores', {method:'POST', body:{nombre,telefono,pin,costos}});
     cerrarModal();
     cargarColocadores();

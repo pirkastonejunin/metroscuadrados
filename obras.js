@@ -317,7 +317,8 @@ router.get('/colocadores', authAdmin, async (req, res) => {
     const lista = await conReintento(async () => {
       const db = await getDb();
       await backfillOrgId(db, 'obras_colocadores');
-      return db.collection('obras_colocadores').find(filtroOrg(req)).sort({ nombre: 1 }).toArray();
+      // Un colocador puede trabajar en más de una sucursal (orgIdsCompartidas): se ve y se asigna a obras también en las otras.
+      return db.collection('obras_colocadores').find(req.orgId ? { $or: [{ orgId: req.orgId }, { orgIdsCompartidas: req.orgId }] } : {}).sort({ nombre: 1 }).toArray();
     });
     res.json(lista);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -359,7 +360,7 @@ router.put('/colocadores/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) return res.status(400).json({ error: 'id inválido' });
-    const { nombre, telefono, pin, costos, activo, googleCalendarId } = req.body || {};
+    const { nombre, telefono, pin, costos, activo, googleCalendarId, orgIdsCompartidas } = req.body || {};
     const actualizado = await conReintento(async () => {
       const db = await getDb();
       const col = db.collection('obras_colocadores');
@@ -374,6 +375,10 @@ router.put('/colocadores/:id', authAdmin, async (req, res) => {
       if (Array.isArray(costos)) set.costos = costos;
       if (activo !== undefined) set.activo = activo;
       if (googleCalendarId !== undefined) set.googleCalendarId = googleCalendarId;
+      if (Array.isArray(orgIdsCompartidas)) {
+        const actual = await col.findOne({ _id: id }, { projection: { orgId: 1 } });
+        set.orgIdsCompartidas = orgIdsCompartidas.map(toObjectId).filter(o => o && (!actual || String(o) !== String(actual.orgId)));
+      }
       await col.updateOne({ _id: id }, { $set: set });
       return col.findOne({ _id: id });
     });
