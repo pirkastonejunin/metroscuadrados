@@ -83,6 +83,17 @@
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlSugeridas()">Cargar las sugeridas</button> <button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Después de 24 h sin que el cliente escriba, WhatsApp solo deja mandar plantillas aprobadas. Se crean y se aprueban en Meta (WhatsApp Manager → Plantillas). Acá cargás el mismo <b>nombre</b> e <b>idioma</b> para poder usarlas desde el chat. En el texto usá {{1}}, {{2}} para los datos variables.</div>
     <div id="wPl"></div><div id="wPlMsg" class="muted"></div></div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Consumo y costo de WhatsApp</b><button class="b sec mini" onclick="coCargar()">Actualizar</button></div><div class="pad">
+    <div class="muted" style="margin-bottom:8px">Meta cobra por mensaje que sale (los que manda el cliente no cuestan). Desde el 1/10/2026 las respuestas libres dentro de las 24 h también se cobran, salvo las primeras 1.000 por mes y las de chats que entraron por un anuncio (gratis 7 días). Lo que escribís desde la app del celular (si el número está en modo coexistencia) no se cobra y no se cuenta acá. Es una estimación: manda lo que figure en la facturación de Meta.</div>
+    <div id="co">Cargando…</div>
+    <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px"><b>Simulador</b> <span class="muted">¿cuánto costaría con este movimiento?</span>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0;align-items:end">
+        <label class="muted">Chats por mes<br><input type="number" id="coC" value="600" min="0" style="width:90px"></label>
+        <label class="muted">Mensajes nuestros por chat<br><input type="number" id="coM" value="10" min="0" style="width:90px"></label>
+        <label class="muted">% que vienen de anuncios<br><input type="number" id="coA" value="70" min="0" max="100" style="width:90px"></label>
+        <label class="muted">Plantillas por mes<br><input type="number" id="coP" value="50" min="0" style="width:90px"></label>
+        <label class="muted">Plantillas de marketing %<br><input type="number" id="coK" value="0" min="0" max="100" style="width:90px"></label></div>
+      <div id="coSim" style="font-weight:600"></div></div></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Respuestas de seguimiento y rápidas</b><span><button class="b sec mini" onclick="rsAgregar('seguimiento')">+ Seguimiento</button> <button class="b sec mini" onclick="rsAgregar('rapida')">+ Rápida</button> <button class="b sec mini" onclick="rsBase()">Volver a las originales</button> <button class="b mini" onclick="rsGuardar()">Guardar</button></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Textos que el vendedor elige desde el chat del CRM (menú <b>Respuestas…</b>) y puede ajustar antes de enviar. Sirven dentro de las 24 h; pasado ese tiempo hay que usar una plantilla aprobada (arriba). Podés usar <b>{nombre}</b>, <b>{asesor}</b>, <b>{producto}</b> y <b>{presupuesto}</b> (el número, si hay uno).</div>
     <div id="rs"></div><div id="rsMsg" class="muted"></div></div></div>
@@ -150,7 +161,7 @@ async function cargarW(){
       <div class="muted" style="margin-top:8px">Token de verificación</div><div>${d.tokenSugerido?`Sugerido (cargalo en Render como WA_VERIFY_TOKEN y pegalo igual en Meta): <code>${esc(d.tokenSugerido)}</code>`:'Ya está cargado en Render. Usá el mismo valor en Meta.'}</div>
       <div class="muted" style="margin-top:8px">Último aviso recibido de Meta</div><div>${d.ultimoAviso?esc(hora(d.ultimoAviso.at))+' · '+esc((d.ultimoAviso.tipos||[]).join(', ')||'sin datos'):'Todavía no llegó ninguno.'}</div>
       <div class="muted" style="margin-top:8px">Conversaciones reales guardadas: <b>${d.conversacionesReales}</b> · plantillas cargadas: <b>${d.plantillas}</b></div>`;
-    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar(); rsCargar();
+    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar(); rsCargar(); coCargar();
     document.getElementById('wGuia').innerHTML = '<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">'+WGUIA.map(x=>'<li>'+x+'</li>').join('')+'</ol>';
   }catch(e){ document.getElementById('wChecks').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; }
 }
@@ -166,6 +177,15 @@ function wPlSugeridas(){ let n = 0; WSUG.forEach(sg=>{ if (!WPL.some(p=>p.nombre
 function wPlCopiar(i){ const p = WPL[i]; const sg = WSUG.find(x=>x.nombre===p.nombre); const ej = {nombre:'Marta',asesor:'Carla',producto:'porcelanato 60x60'};
   const t = ['Nombre: '+p.nombre,'Idioma: Español (Argentina)','Categoría: '+((sg&&sg.categoria)||'Utilidad'),'Cuerpo:',p.texto,'Ejemplos de las variables: '+(p.variables.map((v,n)=>'{{'+(n+1)+'}} = '+ej[v]).join(' · ')||'sin variables')].join('\n');
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{ document.getElementById('wPlMsg').textContent = 'Copiado: pegalo en el formulario de Meta.'; }).catch(()=>{ prompt('Copiá estos datos para Meta:', t); }); }
+let CO = null;
+const usd = n => 'US$ ' + (Math.round(n*100)/100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+async function coCargar(){ const el = document.getElementById('co'); try{ CO = await api('/api/bot/consumo', {headers:H()}); const t = CO.tarifas;
+  el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:13px"><tr style="text-align:left" class="muted"><th>Mes</th><th>Chats</th><th>Mensajes salientes</th><th>Gratis (anuncio)</th><th>Gratis (cupo '+t.cupoGratis+')</th><th>Cobrados</th><th>Plantillas</th><th>Costo estimado</th></tr>'+CO.items.map(r=>'<tr style="border-top:1px solid var(--line)"><td>'+esc(r.mes)+'</td><td>'+r.conversaciones+'</td><td>'+r.salientes+' <span class="muted">(🤖 '+r.bot+' · 🙋 '+r.asesor+')</span></td><td>'+r.gratisAnuncio+'</td><td>'+r.gratisCupo+'</td><td>'+r.servicioCobrado+'</td><td>'+r.plantillas+'</td><td><b>'+usd(r.costoUSD)+'</b></td></tr>').join('')+'</table><div class="muted" style="margin-top:6px">Tarifas usadas por mensaje: libre/utilidad '+usd(t.servicio)+' · marketing '+usd(t.marketing)+'. Si Meta las cambia, se ajustan con WA_TARIFA_SERVICIO, WA_TARIFA_UTILIDAD y WA_TARIFA_MARKETING en Render.</div>'; coSim(); }catch(e){ el.innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; } }
+function coSim(){ if (!CO) return; const t = CO.tarifas; const v = id => Math.max(0, parseFloat(document.getElementById(id).value)||0);
+  const ch = v('coC'), mc = v('coM'), pa = Math.min(100, v('coA'))/100, pl = v('coP'), pk = Math.min(100, v('coK'))/100;
+  const libres = Math.max(0, ch*(1-pa)*mc - t.cupoGratis); const costo = libres*t.servicio + pl*(1-pk)*t.utilidad + pl*pk*t.marketing;
+  document.getElementById('coSim').innerHTML = 'Costo estimado: '+usd(costo)+' por mes <span class="muted">('+Math.round(ch*(1-pa)*mc)+' mensajes libres fuera de anuncios, 1.000 gratis, '+pl+' plantillas)</span>'; }
+['coC','coM','coA','coP','coK'].forEach(i=>document.addEventListener('input', e=>{ if (e.target.id===i) coSim(); }));
 let RS = [], RSBASE = [];
 async function rsCargar(){ try{ const d = await api('/api/bot/respuestas', {headers:H()}); RS = d.items.map(x=>Object.assign({},x)); RSBASE = d.base||[]; rsPintar(); }catch(e){ document.getElementById('rs').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; } }
 function rsPintar(){

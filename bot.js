@@ -400,7 +400,7 @@ async function procesarEvento(body) {
     // mensajes que un asesor mandó desde la app del celular (coexistencia): el bot deja de contestar en esa conversación
     for (const m of v.message_echoes || []) {
       const conv = await convDe(db, orgId, m.to, null, null);
-      const ok = await guardarMensaje(db, conv, { waId: m.id, dir: 'out', origen: 'asesor', tipo: m.type, texto: textoDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() });
+      const ok = await guardarMensaje(db, conv, { waId: m.id, dir: 'out', origen: 'asesor', celular: true, tipo: m.type, texto: textoDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() });
       if (ok) await db.collection(COL_C).updateOne({ _id: conv._id }, { $set: { estado: 'humano', humanoAt: new Date() } });
     }
   }
@@ -550,6 +550,27 @@ router.get('/plantillas', auth, async (req, res) => {
 router.put('/plantillas', auth, soloAdmin, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = plantillasLimpias(req.body && req.body.items);
     await (await getDb()).collection('bot_config').updateOne({ _id: 'plantillas:' + orgId }, { $set: { items, updatedAt: new Date() } }, { upsert: true }); res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ---- consumo y costo estimado de mensajes de WhatsApp (tarifas de Meta, editables por variables de entorno) ----
+const num = (v, d) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : d; };
+function tarifasWA() { return { servicio: num(process.env.WA_TARIFA_SERVICIO, 0.026), utilidad: num(process.env.WA_TARIFA_UTILIDAD, 0.026), marketing: num(process.env.WA_TARIFA_MARKETING, 0.0618), cupoGratis: num(process.env.WA_CUPO_SERVICIO, 1000) }; }
+async function consumoDelMes(db, orgId, mes, t) {
+  const [a, m] = mes.split('-').map(Number); const desde = new Date(Date.UTC(a, m - 1, 1, 3)); const hasta = new Date(Date.UTC(a, m, 1, 3)); // mes calendario argentino (UTC-3)
+  const convs = await db.collection(COL_C).find({ orgId, demo: { $ne: true } }, { projection: { referral: 1 } }).toArray(); const conRef = new Set(convs.filter(c => c.referral).map(c => String(c._id)));
+  const primeros = new Map(); if (conRef.size) for (const x of await db.collection(COL_M).aggregate([{ $match: { orgId, dir: 'in', convId: { $in: [...conRef].map(i => convs.find(c => String(c._id) === i)._id) } } }, { $group: { _id: '$convId', at: { $min: '$at' } } }]).toArray()) primeros.set(String(x._id), x.at);
+  const sal = await db.collection(COL_M).find({ orgId, dir: 'out', at: { $gte: desde, $lt: hasta }, prueba: { $ne: true }, celular: { $ne: true } }, { projection: { convId: 1, at: 1, tipo: 1, origen: 1 } }).sort({ at: 1 }).toArray();
+  const r = { mes, salientes: 0, gratisAnuncio: 0, gratisCupo: 0, servicioCobrado: 0, plantillas: 0, bot: 0, asesor: 0, conversaciones: new Set() }; let cupo = t.cupoGratis;
+  for (const x of sal) { r.salientes++; r.conversaciones.add(String(x.convId)); if (x.origen === 'bot') r.bot++; else r.asesor++;
+    const p = primeros.get(String(x.convId)); if (p && x.at < new Date(new Date(p).getTime() + 7 * 86400000)) { r.gratisAnuncio++; continue; } // chat que entró por un anuncio: gratis 7 días si se respondió dentro de las 24 h
+    if (x.tipo === 'template') { r.plantillas++; continue; }
+    if (cupo > 0) { cupo--; r.gratisCupo++; } else r.servicioCobrado++; }
+  r.conversaciones = r.conversaciones.size; r.costoUSD = Math.round((r.servicioCobrado * t.servicio + r.plantillas * t.utilidad) * 100) / 100; return r;
+}
+router.get('/consumo', auth, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const db = await getDb(); const t = tarifasWA(); const ar = new Date(Date.now() - 3 * 3600000); const meses = [];
+    for (let i = 0; i < 4; i++) meses.push(new Date(Date.UTC(ar.getUTCFullYear(), ar.getUTCMonth() - i, 1)).toISOString().slice(0, 7));
+    const items = []; for (const m of meses) items.push(await consumoDelMes(db, orgId, m, t));
+    res.json({ tarifas: t, items, nota: 'Estimación con las tarifas de Meta para Argentina. Lo que figura en WhatsApp Manager → Facturación es lo que vale.' }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ---- respuestas rápidas y de seguimiento (texto libre, para usar dentro de las 24 h; las edita el admin) ----
 const RESPUESTAS_BASE = [
