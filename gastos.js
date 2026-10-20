@@ -240,10 +240,15 @@ async function unificarCatalogoConceptos(db) {
 async function listarConceptos(req) {
   return conReintento(async () => {
     const db = await getDb();
-    await unificarCatalogoConceptos(db);
-    const match = { compartido: true };
+    // Si la fusión de duplicados falla (p. ej. base sin espacio para escribir) la lista igual se muestra: no tiene que bloquear la carga de un gasto.
+    try { await unificarCatalogoConceptos(db); } catch (e) { console.error('unificarCatalogoConceptos:', e.message); }
+    const match = {};
     if (!req.query.incluirInactivos) match.activo = { $ne: false };
-    return db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
+    const todos = await db.collection('gastos_conceptos').find(match).sort({ nombre: 1 }).toArray();
+    // Normalmente son los compartidos; si quedaron sueltos sin fusionar se muestran igual (sin repetir nombres).
+    const vistos = new Set();
+    return todos.sort((x, y) => (y.compartido === true) - (x.compartido === true)).filter(d => { const k = claveConcepto(d.nombre); if (!k || vistos.has(k)) return false; vistos.add(k); return true; })
+      .sort((x, y) => String(x.nombre).localeCompare(String(y.nombre), 'es'));
   });
 }
 router.get('/conceptos', authAdmin, async (req, res) => {
