@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="/nav-sidebar.js"></script>
+<script src="/wa-voz.js"></script>
 <style>
 :root{
   --bg:#f3f4f6; --panel:#ffffff; --panel2:#f6f7f9; --line:#e5e7eb; --ink:#171a1f; --mute:#6b7280; --chat:#efeae2;
@@ -510,6 +511,35 @@ async function prepararArchivo(f){
   if (blob.size > LIM_MB[tipo]*1048576) throw new Error('Pesa '+(blob.size/1048576).toFixed(1)+' MB; el máximo para '+({image:'una foto',video:'un video',audio:'un audio',document:'un documento'})[tipo]+' es '+LIM_MB[tipo]+' MB.');
   return { nombre, mime, data: await aB64(blob), kb: Math.max(1,Math.round(blob.size/1024)), thumb };
 }
+// ---- respuestas rápidas y de seguimiento (las edita el admin en Bot → WhatsApp) ----
+let RESP = [{grupo:'rapida',titulo:'Saludo',texto:'Hola, soy {asesor} de Piedra Negra. ¿En qué te puedo ayudar?'},{grupo:'rapida',titulo:'Precio final',texto:'Los precios que te paso son finales, con IVA incluido.'},{grupo:'rapida',titulo:'Medios de pago',texto:'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.'},{grupo:'rapida',titulo:'Horarios',texto:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}];
+function rapOpts(){ const g = k => RESP.map((r,i)=>r.grupo===k?`<option value="${i}">${esc(r.titulo)}</option>`:'').join(''); const s = g('seguimiento'), q = g('rapida');
+  return '<option value="">Respuestas…</option>'+(s?`<optgroup label="Seguimiento">${s}</optgroup>`:'')+(q?`<optgroup label="Rápidas">${q}</optgroup>`:''); }
+function rapRellenar(t, l){ const pr = l.presupuesto; const val = {nombre:(l.nombre||'').trim().split(/\s+/)[0]||'', asesor:YO.nombre||'un asesor', producto:l.producto||'materiales', presupuesto: pr&&pr.numero ? ' Nº '+String(pr.numero).padStart(5,'0') : ''};
+  return String(t).replace(/\{(nombre|asesor|producto|presupuesto)\}/g,(_,k)=>val[k]).replace(/Hola ,/,'Hola,'); }
+async function cargarResp(){ try{ const d = await api('/api/bot/respuestas', {headers:H()}); if (Array.isArray(d.items)&&d.items.length){ RESP = d.items; const s = $('rap'); if (s) s.innerHTML = rapOpts(); } }catch(e){} }
+// ---- notas de voz ----
+let REC = null; // {ctl, conv, tick}
+function micPintar(){ const b = $('mic'), x = $('micx'); if (!b) return; if (REC && REC.conv===curId()){ const s = Math.floor((Date.now()-REC.ctl.inicio)/1000); b.textContent = '⏹ '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); b.style.color = '#dc2626'; b.title = 'Detener y adjuntar'; if (x) x.hidden = false; } else { b.textContent = '🎤'; b.style.color = ''; b.title = 'Grabar una nota de voz'; if (x) x.hidden = true; } }
+function curId(){ return window.CUR ? CUR.id : null; }
+function micLigar(l){
+  const b = $('mic'); window.CUR = l; if (REC) micPintar();
+  b.onclick = async () => {
+    if (!REC){
+      try{ const ctl = await waVozIniciar(); REC = {ctl, conv:l.id, tick:setInterval(micPintar, 500)}; micPintar(); }
+      catch(e){ toast(e && e.name==='NotAllowedError' ? 'El navegador no tiene permiso para usar el micrófono. Habilitalo en el candado de la barra de direcciones.' : (e.message||'No se pudo abrir el micrófono.')); }
+      return;
+    }
+    const r = REC; REC = null; clearInterval(r.tick); b.disabled = true;
+    try{ const g = await r.ctl.detener(); if (g.blob.size > 15*1048576) throw new Error('La nota de voz es demasiado larga.');
+      const data = await aB64(g.blob); const url = URL.createObjectURL(g.blob);
+      FILE = {nombre:'nota-de-voz.'+g.ext, mime:g.mime, data, kb:Math.max(1,Math.round(g.blob.size/1024)), thumb:'', audioUrl:url, conv:r.conv}; ADJ = null;
+      const cur = ITEMS.find(x=>x.id===r.conv) || l; pintarCaj(cur,{keep:true});
+    }catch(e){ toast(e.message||'No se pudo guardar la grabación.'); micPintar(); }
+    b.disabled = false;
+  };
+  $('micx').onclick = () => { if (!REC) return; REC.ctl.cancelar(); clearInterval(REC.tick); REC = null; micPintar(); toast('Grabación descartada'); };
+}
 async function adjuntar(l, f){
   try{ toast('Preparando archivo…'); const a = await prepararArchivo(f); a.conv = l.id; FILE = a; ADJ = null; pintarCaj(l,{keep:true}); }catch(e){ toast(e.message); }
 }
@@ -645,7 +675,7 @@ function pintarCaj(l, o){
     const sugBar = (l.esperaCliente||l.recordar) && sug ? `<div class="sug"><div class="tx"><span class="lb">${l.recordar?'Recordatorio sugerido':'Sugerencia de la IA'}</span>${esc(sug)}</div><button class="btn pri sm" id="usar">Usar</button></div>`
       : (l.esperaCliente ? `<div class="sug"><div class="tx"><span class="lb">Sugerencia de la IA</span>Pedile a la IA un resumen y una respuesta para esta conversación.</div><button class="btn pri sm" id="analizar">Analizar</button></div>` : '');
     izq = `${hdr}<div class="msgs" id="msgs">${msgs||'<div class="vacio">Sin mensajes.</div>'}</div>${sugBar}
-      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}${FILE&&FILE.conv===l.id?`<div class="adj">${FILE.thumb?`<img src="${FILE.thumb}" alt="" style="height:34px;border-radius:6px;vertical-align:middle"> `:'📎 '}<b>${esc(FILE.nombre)}</b> <span class="tip">(${FILE.kb>=1024?(FILE.kb/1024).toFixed(1)+' MB':FILE.kb+' KB'}) · lo que escribas va como texto del archivo</span> <button class="ghost" id="filex">Quitar</button></div>`:''}${plBar||venTip}<div class="comp" ${vc?'hidden':''}><button class="ghost" id="adjf" title="Adjuntar foto, video o archivo" aria-label="Adjuntar" style="font-size:20px;padding:6px 8px;align-self:center">📎</button><input type="file" id="fileIn" hidden accept="image/*,video/mp4,video/3gpp,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida"><option value="">Rápidas…</option><option>Saludo</option><option>Precio final</option><option>Medios de pago</option><option>Horarios</option></select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
+      ${decOpen?decBar(l):`${ADJ&&ADJ.conv===l.id?`<div class="adj">📎 Se envía el PDF del presupuesto Nº ${String(ADJ.numero).padStart(5,'0')} con este texto <button class="ghost" id="adjx">Solo texto</button></div>`:''}${FILE&&FILE.conv===l.id?`<div class="adj">${FILE.thumb?`<img src="${FILE.thumb}" alt="" style="height:34px;border-radius:6px;vertical-align:middle"> `:FILE.audioUrl?`<audio controls src="${FILE.audioUrl}" style="height:32px;vertical-align:middle;max-width:200px"></audio> `:'📎 '}<b>${esc(FILE.nombre)}</b> <span class="tip">(${FILE.kb>=1024?(FILE.kb/1024).toFixed(1)+' MB':FILE.kb+' KB'}) · lo que escribas va como texto del archivo</span> <button class="ghost" id="filex">Quitar</button></div>`:''}${plBar||venTip}<div class="comp" ${vc?'hidden':''}><button class="ghost" id="adjf" title="Adjuntar foto, video o archivo" aria-label="Adjuntar" style="font-size:20px;padding:6px 8px;align-self:center">📎</button><button class="ghost" id="mic" title="Grabar una nota de voz" aria-label="Grabar nota de voz" style="font-size:20px;padding:6px 8px;align-self:center" ${window.waVozDisponible&&waVozDisponible()?'':'hidden'}>🎤</button><button class="ghost" id="micx" title="Descartar la grabación" aria-label="Descartar grabación" style="padding:6px 8px;align-self:center" hidden>✕</button><input type="file" id="fileIn" hidden accept="image/*,video/mp4,video/3gpp,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"><textarea id="txt" placeholder="Escribir como asesor…  (Ctrl+Enter para enviar)"></textarea><div style="display:flex;flex-direction:column;gap:5px"><button class="btn pri" id="env">Enviar</button><select id="rap" aria-label="Respuesta rápida o de seguimiento">${rapOpts()}</select></div></div><div class="acc"><button class="ghost" id="dq">Decidir qué sigue ▸</button></div>`}`;
   } else if (l.leadId){
     izq = `${hdr}<div class="vacio">Es un contacto nuevo que todavía no es una oportunidad.<br>No tiene conversación guardada en el sistema.<br><br><button class="btn pri" id="aop">Pasar a oportunidad</button></div>`;
   } else {
@@ -661,7 +691,7 @@ function pintarCaj(l, o){
   if ($('reab')) $('reab').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/reabrir`); toast('Reabierta'); await cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('usar')) $('usar').onclick = () => { tx.value = sugDe(l); tx.focus(); };
   if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await post(`/api/bot/conversaciones/${l.convId}/asistente`); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };
-  if ($('rap')) $('rap').onchange = e => { const r={Saludo:'Hola, soy '+(YO.nombre||'un asesor')+' de Piedra Negra. ¿En qué te puedo ayudar?','Precio final':'Los precios que te paso son finales, con IVA incluido.','Medios de pago':'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.',Horarios:'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.'}; const v=r[e.target.value]; if (v){ tx.value=(tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
+  if ($('rap')) $('rap').onchange = e => { const r = RESP[+e.target.value]; if (r){ const v = rapRellenar(r.texto, l); tx.value = (tx.value?tx.value+' ':'')+v; tx.focus(); } e.target.value=''; };
   if ($('env')){
     const enviar = async () => { const v = tx.value.trim(); const ff = FILE&&FILE.conv===l.id ? FILE : null; if (!v && !ff) return; $('env').disabled = true;
       try{ if (ff){ $('env').textContent='Enviando…'; await post(`/api/bot/conversaciones/${l.convId}/enviar-archivo`, {nombre:ff.nombre, mime:ff.mime, data:ff.data, texto:v}); FILE = null; } else if (ADJ&&ADJ.conv===l.id){ $('env').textContent='Armando PDF…'; let pdfBase64=''; try{ pdfBase64 = await pdfPresupuesto(ADJ.id); }catch(x){ console.warn('PDF en el navegador falló, se usa el del servidor', x); } await post(`/api/bot/conversaciones/${l.convId}/enviar-presupuesto`, {texto:v, presupuestoId:ADJ.id, pdfBase64}); ADJ=null; } else await post(`/api/bot/conversaciones/${l.convId}/enviar`, {texto:v}); TOC.add(l.id); tx.value=''; await cargar({forzar:true}); }catch(e){ err(e); $('env').disabled=false; } };
@@ -672,6 +702,7 @@ function pintarCaj(l, o){
   if ($('adjf')){ $('adjf').onclick = () => $('fileIn').click(); $('fileIn').onchange = e => { const f = e.target.files[0]; if (f) adjuntar(l, f); e.target.value=''; };
     tx.onpaste = e => { const it = [...(e.clipboardData&&e.clipboardData.files||[])][0]; if (it){ e.preventDefault(); adjuntar(l, it); } };
     const cp = tx.closest('.comp'); cp.ondragover = e => { e.preventDefault(); }; cp.ondrop = e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) adjuntar(l, f); }; }
+  if ($('mic')) micLigar(l);
   if ($('filex')) $('filex').onclick = () => { FILE = null; pintarCaj(l,{keep:true}); };
   if ($('adjx')) $('adjx').onclick = () => { ADJ=null; pintarCaj(l,{keep:true}); };
   if ($('dq')) $('dq').onclick = () => { pend=null; decOpen=true; pintarCaj(l,{keep:true}); };
@@ -827,6 +858,7 @@ document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hi
 (async function init(){
   if (!TOKEN){ err('Entrá primero al sistema con tu usuario.'); return; }
   try{ const me = await api('/api/usuarios/me', {headers:H()}); if (window.PiedraSidebar) PiedraSidebar.render(me, 'crm'); }catch(e){ err(e); return; }
+  cargarResp();
   await cargar();
   { const q = new URLSearchParams(location.search).get('abrir'); if (q && ITEMS.some(i=>i.id===q)) abrir(q); } // enlace desde la campanita
   if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);

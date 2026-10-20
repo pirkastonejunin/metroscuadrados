@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="/nav-sidebar.js"></script>
+<script src="/wa-media.js"></script>
 <style>
   :root{--bg:#f3f4f6;--card:#fff;--text:#171a1f;--muted:#6b7280;--border:#e5e7eb;--accent:#ff5a36;--accent-soft:#ffe7de;--in:#fff;--out:#d9fdd3;--bot:#ece7ff;--chat:#efeae2;--danger:#c53030;--ok:#1f8a5f;--ok-soft:#e1f5ea;--warn-soft:#fff4d6;--shadow:0 1px 2px rgba(17,20,24,.04),0 10px 24px -14px rgba(17,20,24,.18)}
   @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121316;--card:#1c1e22;--text:#f4f5f6;--muted:#9aa0a8;--border:#2c2f34;--accent:#ff7a56;--accent-soft:#3a241f;--in:#2a2d33;--out:#1d3a2a;--bot:#2a2547;--chat:#17191c;--ok-soft:#173328;--warn-soft:#3a2f14;--shadow:none}}
@@ -82,6 +83,9 @@
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlSugeridas()">Cargar las sugeridas</button> <button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Después de 24 h sin que el cliente escriba, WhatsApp solo deja mandar plantillas aprobadas. Se crean y se aprueban en Meta (WhatsApp Manager → Plantillas). Acá cargás el mismo <b>nombre</b> e <b>idioma</b> para poder usarlas desde el chat. En el texto usá {{1}}, {{2}} para los datos variables.</div>
     <div id="wPl"></div><div id="wPlMsg" class="muted"></div></div></div>
+  <div class="card" style="margin-top:12px"><div class="hdr"><b>Respuestas de seguimiento y rápidas</b><span><button class="b sec mini" onclick="rsAgregar('seguimiento')">+ Seguimiento</button> <button class="b sec mini" onclick="rsAgregar('rapida')">+ Rápida</button> <button class="b sec mini" onclick="rsBase()">Volver a las originales</button> <button class="b mini" onclick="rsGuardar()">Guardar</button></span></div><div class="pad">
+    <div class="muted" style="margin-bottom:8px">Textos que el vendedor elige desde el chat del CRM (menú <b>Respuestas…</b>) y puede ajustar antes de enviar. Sirven dentro de las 24 h; pasado ese tiempo hay que usar una plantilla aprobada (arriba). Podés usar <b>{nombre}</b>, <b>{asesor}</b>, <b>{producto}</b> y <b>{presupuesto}</b> (el número, si hay uno).</div>
+    <div id="rs"></div><div id="rsMsg" class="muted"></div></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Pasos para pasar el número al sistema</b></div><div class="pad" id="wGuia"></div></div>
 </div>
 
@@ -146,7 +150,7 @@ async function cargarW(){
       <div class="muted" style="margin-top:8px">Token de verificación</div><div>${d.tokenSugerido?`Sugerido (cargalo en Render como WA_VERIFY_TOKEN y pegalo igual en Meta): <code>${esc(d.tokenSugerido)}</code>`:'Ya está cargado en Render. Usá el mismo valor en Meta.'}</div>
       <div class="muted" style="margin-top:8px">Último aviso recibido de Meta</div><div>${d.ultimoAviso?esc(hora(d.ultimoAviso.at))+' · '+esc((d.ultimoAviso.tipos||[]).join(', ')||'sin datos'):'Todavía no llegó ninguno.'}</div>
       <div class="muted" style="margin-top:8px">Conversaciones reales guardadas: <b>${d.conversacionesReales}</b> · plantillas cargadas: <b>${d.plantillas}</b></div>`;
-    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar();
+    const pl = await api('/api/bot/plantillas', {headers:H()}); WPL = pl.items; WVARS = pl.variables; WSUG = pl.sugeridas||[]; wPlPintar(); rsCargar();
     document.getElementById('wGuia').innerHTML = '<ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">'+WGUIA.map(x=>'<li>'+x+'</li>').join('')+'</ol>';
   }catch(e){ document.getElementById('wChecks').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; }
 }
@@ -162,6 +166,18 @@ function wPlSugeridas(){ let n = 0; WSUG.forEach(sg=>{ if (!WPL.some(p=>p.nombre
 function wPlCopiar(i){ const p = WPL[i]; const sg = WSUG.find(x=>x.nombre===p.nombre); const ej = {nombre:'Marta',asesor:'Carla',producto:'porcelanato 60x60'};
   const t = ['Nombre: '+p.nombre,'Idioma: Español (Argentina)','Categoría: '+((sg&&sg.categoria)||'Utilidad'),'Cuerpo:',p.texto,'Ejemplos de las variables: '+(p.variables.map((v,n)=>'{{'+(n+1)+'}} = '+ej[v]).join(' · ')||'sin variables')].join('\n');
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{ document.getElementById('wPlMsg').textContent = 'Copiado: pegalo en el formulario de Meta.'; }).catch(()=>{ prompt('Copiá estos datos para Meta:', t); }); }
+let RS = [], RSBASE = [];
+async function rsCargar(){ try{ const d = await api('/api/bot/respuestas', {headers:H()}); RS = d.items.map(x=>Object.assign({},x)); RSBASE = d.base||[]; rsPintar(); }catch(e){ document.getElementById('rs').innerHTML = '<div class="err" style="display:block">'+esc(e.message)+'</div>'; } }
+function rsPintar(){
+  document.getElementById('rs').innerHTML = RS.length ? RS.map((r,i)=>`<div style="border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;display:grid;gap:6px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><input type="text" data-i="${i}" data-k="titulo" value="${esc(r.titulo)}" placeholder="Título" style="flex:2;min-width:160px"><select data-i="${i}" data-k="grupo" style="flex:1;min-width:130px"><option value="seguimiento" ${r.grupo==='seguimiento'?'selected':''}>Seguimiento</option><option value="rapida" ${r.grupo!=='seguimiento'?'selected':''}>Rápida</option></select><button class="b sec mini" onclick="rsQuitar(${i})">Quitar</button></div>
+    <textarea data-i="${i}" data-k="texto" rows="2" placeholder="Hola {nombre}, ...">${esc(r.texto)}</textarea></div>`).join('') : '<div class="muted">No hay respuestas. Agregá una con los botones de arriba.</div>';
+  document.querySelectorAll('#rs [data-k]').forEach(el=>el.onchange = ()=>{ RS[el.dataset.i][el.dataset.k] = el.value; });
+}
+function rsAgregar(g){ RS.push({grupo:g,titulo:'',texto:''}); rsPintar(); }
+function rsQuitar(i){ RS.splice(i,1); rsPintar(); }
+function rsBase(){ if (!confirm('¿Reemplazar la lista por las respuestas originales? Se pierden los cambios que no guardaste.')) return; RS = RSBASE.map(x=>Object.assign({},x)); rsPintar(); document.getElementById('rsMsg').textContent = 'Listo. Tocá Guardar para que queden así.'; }
+async function rsGuardar(){ const m = document.getElementById('rsMsg'); m.textContent=''; try{ const d = await api('/api/bot/respuestas',{method:'PUT',headers:H(J),body:JSON.stringify({items:RS})}); RS = d.items; rsPintar(); m.textContent = 'Guardado ('+d.items.length+' respuestas). Las que no tienen título o texto se descartan.'; }catch(e){ m.textContent = e.message; } }
 function wPlAgregar(){ WPL.push({titulo:'',nombre:'',idioma:'es_AR',texto:'',variables:[]}); wPlPintar(); }
 function wPlQuitar(i){ WPL.splice(i,1); wPlPintar(); }
 async function wPlGuardar(){ const m = document.getElementById('wPlMsg'); m.textContent=''; try{ const d = await api('/api/bot/plantillas',{method:'PUT',headers:H(J),body:JSON.stringify({items:WPL})}); WPL = d.items; wPlPintar(); m.textContent = 'Guardado ('+d.items.length+' plantillas). Las que tengan nombre con mayúsculas, espacios o sin texto se descartan: el nombre va en minúsculas, con guion bajo.'; }catch(e){ m.textContent = e.message; } }
@@ -193,9 +209,9 @@ async function abrir(id, silencioso){
       <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="b sec mini" onclick="est('${id}','humano')">🙋 Tomar yo</button><button class="b sec mini" onclick="est('${id}','bot')">🤖 Devolver al bot</button><button class="b sec mini" onclick="est('${id}','pausado')">⏸ Pausar</button></div></div>
       <div class="datos">${c.resumen?'<div style="margin-bottom:4px"><b>'+esc(c.resumen)+'</b></div>':''}Producto: <b>${esc(dt.producto||'-')}</b> · Medidas: <b>${esc(dt.medidas||'-')}</b> · Estilo: <b>${esc(dt.estilo||'-')}</b>${c.referral&&c.referral.headline?' · Anuncio: <b>'+esc(c.referral.headline)+'</b>':''}</div>
       ${panelAsistente(id, c.asistente)}
-      <div class="chat"><div class="msgs" id="ms">${d.mensajes.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${esc(m.texto||('['+m.tipo+']'))}<small>${m.origen==='bot'?'🤖 Bot':m.origen==='asesor'?'🙋 Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('')}</div></div>
+      <div class="chat"><div class="msgs" id="ms">${d.mensajes.map(m=>`<div class="m ${m.dir==='out'?(m.origen==='bot'?'bot':'out'):''}">${waMediaHtml(m)}${esc(waMediaTexto(m))}<small>${m.origen==='bot'?'🤖 Bot':m.origen==='asesor'?'🙋 Asesor':'Cliente'} · ${hora(m.at)}</small></div>`).join('')}</div></div>
       <div class="env"><input type="text" id="txt" placeholder="Escribir como asesor (el bot deja de contestar)" onkeydown="if(event.key==='Enter')enviar('${id}')"><button class="b" onclick="enviar('${id}')">Enviar</button></div>`;
-    document.getElementById('txt').value = keep; { const ar = document.getElementById('asResp'); if (kr && ar && ar.dataset.at === kr.at) ar.value = kr.v; } const ms = document.getElementById('ms'); if (!silencioso) ms.scrollTop = ms.scrollHeight; if (!silencioso) cargar();
+    document.getElementById('txt').value = keep; { const ar = document.getElementById('asResp'); if (kr && ar && ar.dataset.at === kr.at) ar.value = kr.v; } const ms = document.getElementById('ms'); waMediaActivar(ms); if (!silencioso) ms.scrollTop = ms.scrollHeight; if (!silencioso) cargar();
   }catch(e){ err(e); }
 }
 const ETQ_INT = {comprar_ahora:'Quiere comprar ya', cotizando:'Está cotizando', consulta:'Consulta', postventa:'Postventa', reclamo:'Reclamo', otro:'Otro'};

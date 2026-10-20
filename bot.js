@@ -551,6 +551,29 @@ router.put('/plantillas', auth, soloAdmin, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = plantillasLimpias(req.body && req.body.items);
     await (await getDb()).collection('bot_config').updateOne({ _id: 'plantillas:' + orgId }, { $set: { items, updatedAt: new Date() } }, { upsert: true }); res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ---- respuestas rápidas y de seguimiento (texto libre, para usar dentro de las 24 h; las edita el admin) ----
+const RESPUESTAS_BASE = [
+  { grupo: 'seguimiento', titulo: 'Presupuesto enviado', texto: 'Hola {nombre}, soy {asesor} de Piedra Negra. ¿Pudiste ver el presupuesto{presupuesto}? Si necesitás ajustar algo o tenés alguna duda, avisame y lo vemos.' },
+  { grupo: 'seguimiento', titulo: '24 h sin respuesta', texto: 'Hola {nombre}, ¿cómo estás? Te escribo para saber si pudiste avanzar con {producto}. Si querés, te ayudo con cualquier duda.' },
+  { grupo: 'seguimiento', titulo: 'A los 3 días', texto: 'Hola {nombre}, ¿seguís con el proyecto de {producto}? Si querés te actualizo el presupuesto o te paso otras opciones.' },
+  { grupo: 'seguimiento', titulo: 'Después de visitarnos', texto: 'Hola {nombre}, gracias por pasar por Piedra Negra. ¿Pudiste pensar en lo que vimos? Si querés te armo el presupuesto con lo que más te gustó.' },
+  { grupo: 'seguimiento', titulo: 'Último aviso', texto: 'Hola {nombre}, no quiero molestarte. Si ya resolviste {producto} por otro lado no hay problema, avisame y cierro tu consulta. Si lo seguís evaluando, acá estoy.' },
+  { grupo: 'rapida', titulo: 'Saludo', texto: 'Hola, soy {asesor} de Piedra Negra. ¿En qué te puedo ayudar?' },
+  { grupo: 'rapida', titulo: 'Precio final', texto: 'Los precios que te paso son finales, con IVA incluido.' },
+  { grupo: 'rapida', titulo: 'Medios de pago', texto: 'Aceptamos efectivo, transferencia y tarjetas. Consultame por cuotas.' },
+  { grupo: 'rapida', titulo: 'Horarios', texto: 'Atendemos de lunes a viernes de 8 a 18 y sábados de 8 a 13.' }];
+function respuestasLimpias(arr) {
+  return (Array.isArray(arr) ? arr : []).map(r => ({ grupo: r && r.grupo === 'seguimiento' ? 'seguimiento' : 'rapida', titulo: String((r && r.titulo) || '').trim().slice(0, 60), texto: String((r && r.texto) || '').trim().slice(0, 1000) }))
+    .filter(r => r.titulo && r.texto).slice(0, 60);
+}
+router.get('/respuestas', auth, async (req, res) => {
+  try { const orgId = orgCon(req); const g = orgId ? await (await getDb()).collection('bot_config').findOne({ _id: 'respuestas:' + orgId }) : null;
+    res.json({ items: g && Array.isArray(g.items) ? g.items : RESPUESTAS_BASE, propias: !!g, base: RESPUESTAS_BASE, variables: { nombre: 'Nombre del cliente', asesor: 'Nombre del asesor', producto: 'Producto de interés', presupuesto: 'Nº del presupuesto (si hay)' } }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.put('/respuestas', auth, soloAdmin, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = respuestasLimpias(req.body && req.body.items);
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'respuestas:' + orgId }, { $set: { items, updatedAt: new Date() } }, { upsert: true }); res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.post('/conversaciones/:id/enviar-plantilla', auth, async (req, res) => { // reabre la conversación fuera de las 24 h con una plantilla aprobada
   try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const pl = (await plantillasDe(db, c.orgId)).find(x => x.nombre === String((req.body && req.body.nombre) || '')); if (!pl) return res.status(400).json({ error: 'Elegí una plantilla de la lista.' });
