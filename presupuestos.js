@@ -313,7 +313,7 @@ router.get('/', authAdmin, async (req, res) => {
       if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
       if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59');
     }
-    const limite = Math.min(Number(req.query.limite) || 200, 500);
+    const limite = Math.min(Number(req.query.limite) || 1500, 3000); // (21/10/2026) sube por el historial de Dux importado
     const lista = await conReintento(async () => {
       const db = await getDb();
       return db.collection('presupuestos').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
@@ -548,6 +548,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       const actual = await db.collection('presupuestos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Presupuesto no encontrado');
       if (actual.convertidoEnVentaId) throw err(400, 'Este presupuesto ya se convirtió en una venta — no se puede editar.');
+      if (actual.importado && body.items !== undefined) throw err(400, 'Es un presupuesto histórico importado de Dux (sin detalle de artículos): no se edita. Armá uno nuevo si hace falta.');
 
       const set = { updatedAt: new Date() };
 

@@ -141,7 +141,7 @@ body.embed>header{display:none!important}body.embed{padding-top:8px!important}
   <main>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div class="row" style="gap:8px"><button class="btn" onclick="abrirNuevoPresupuesto()">+ Nuevo presupuesto</button><button class="btn secondary" id="btnTraerVisitas" title="Trae al panel los presupuestos armados desde Visitas que todavía no figuran acá" onclick="traerPresupuestosDeVisitas()">Traer presupuestos de visitas</button></div>
+        <div class="row" style="gap:8px"><button class="btn" onclick="abrirNuevoPresupuesto()">+ Nuevo presupuesto</button><button class="btn secondary" id="btnImportDux" title="Cargar el historial de presupuestos que exporta Dux (sin detalle de artículos)" onclick="abrirImportarPresDux()">Importar de Dux</button><button class="btn secondary" id="btnTraerVisitas" title="Trae al panel los presupuestos armados desde Visitas que todavía no figuran acá" onclick="traerPresupuestosDeVisitas()">Traer presupuestos de visitas</button></div>
         <div class="row" style="gap:8px">
           <div style="min-width:160px"><label>Estado</label><select id="fEstado" onchange="renderPresupuestos()">
             <option value="">Todos</option>
@@ -194,6 +194,73 @@ if (MODO_VISITA) document.documentElement.classList.add('modo-visita');
 function cerrarModal(){
   if (MODO_VISITA) { location.href = '/vendedor.html'; return; }
   document.getElementById('modalRoot').innerHTML = '';
+}
+
+
+// --- Importar historial de presupuestos de Dux (21/10/2026) ---
+let impPresB64 = null;
+function hImpPres(){ const h = headersAuthJson(); const sel = document.getElementById('impPresOrg'); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }
+async function abrirImportarPresDux(){
+  impPresB64 = null;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg"><div class="modal">
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>Importar presupuestos de Dux</h2>
+      <p class="muted">Subí el listado "Consulta De Gestion Presupuesto" de Dux (.xls o .xlsx). Se cargan como historial: sin detalle de artículos, sin stock, sin cuenta corriente y sin recordatorios. Los facturados se enlazan con su venta si ya está importada. Si lo subís dos veces no duplica: actualiza estado y total.</p>
+      <label>Sucursal donde se cargan</label>
+      <select id="impPresOrg" onchange="previewImportPresDux()"><option value="">Cargando…</option></select>
+      <input type="file" id="impPresArchivo" accept=".xls,.xlsx" onchange="leerArchivoPresDux()">
+      <div class="err" id="impPresErr"></div>
+      <div id="impPresResumen"></div>
+      <button class="btn" id="impPresBtn" style="margin-top:10px;display:none" onclick="aplicarImportPresDux()">Importar</button>
+    </div></div>`;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    const orgs = r.ok ? ((await r.json()).organizaciones || []) : [];
+    const sel = document.getElementById('impPresOrg');
+    if (sel) sel.innerHTML = orgs.map(o => `<option value="${o._id}"${o._id === ORG ? ' selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('');
+  }catch(e){}
+}
+function leerArchivoPresDux(){
+  const f = document.getElementById('impPresArchivo').files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => { impPresB64 = String(rd.result).split(',')[1]; previewImportPresDux(); };
+  rd.readAsDataURL(f);
+}
+async function previewImportPresDux(){
+  const err = document.getElementById('impPresErr'), box = document.getElementById('impPresResumen'), btn = document.getElementById('impPresBtn');
+  err.textContent = ''; box.innerHTML = ''; btn.style.display = 'none';
+  if (!impPresB64) return;
+  box.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    const r = await fetch('/api/presupuestos-import-dux/preview', {method:'POST', headers: hImpPres(), body: JSON.stringify({archivoBase64: impPresB64})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const est = Object.keys(d.estados).map(k => `<li>${escapeHtml(k)}: <b>${d.estados[k]}</b> (${money(d.montoPorEstado[k])})</li>`).join('');
+    box.innerHTML = `<ul style="margin:8px 0;padding-left:18px">
+      <li>Sucursal: <b>${escapeHtml(d.sucursalDestino)}</b></li>
+      <li>${d.filasLeidas} presupuestos en el archivo (${fechaCorta(d.desde)} al ${fechaCorta(d.hasta)}): <b>${d.aImportar}</b> nuevos, ${d.yaImportados} ya cargados</li>
+      <li>Importe de los nuevos: <b>${money(d.totalImporte)}</b></li>
+      <li>Clientes: ${d.clientesExistentes} existentes, <b>${d.clientesNuevos}</b> se crean${d.clientesAmbiguos ? `, ${d.clientesAmbiguos} ambiguos (quedan sin cliente vinculado)` : ''}</li>
+      <li>Facturados con venta ya importada para enlazar: <b>${d.conVentaEnlazable}</b> de ${d.conComprobante}</li>
+      ${d.numerosQueChocanConPropios ? `<li style="color:var(--warn)">Atención: ${d.numerosQueChocanConPropios} números de Dux coinciden con presupuestos propios del sistema (van a verse dos con el mismo número).</li>` : ''}
+    </ul><div class="muted">Por estado en Dux:</div><ul style="margin:4px 0;padding-left:18px">${est}</ul>
+    ${d.errores.length ? `<div class="err">${d.errores.length} filas con error (no se importan): ${d.errores.slice(0,5).map(e => 'fila ' + e.fila + ': ' + escapeHtml(e.motivo)).join(' · ')}</div>` : ''}`;
+    btn.style.display = '';
+    btn.textContent = d.aImportar ? 'Importar ' + d.aImportar + ' presupuestos' : 'Actualizar estados';
+  }catch(e){ box.innerHTML = ''; err.textContent = e.message; }
+}
+async function aplicarImportPresDux(){
+  const err = document.getElementById('impPresErr'), box = document.getElementById('impPresResumen'), btn = document.getElementById('impPresBtn');
+  btn.disabled = true; err.textContent = '';
+  try{
+    const r = await fetch('/api/presupuestos-import-dux/aplicar', {method:'POST', headers: hImpPres(), body: JSON.stringify({archivoBase64: impPresB64})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    box.innerHTML = `<p style="color:var(--ok);font-weight:700">Listo: ${d.insertados} presupuestos cargados, ${d.clientesCreados} clientes creados, ${d.actualizados} actualizados.</p>`;
+    btn.style.display = 'none';
+    cargarPresupuestos();
+  }catch(e){ err.textContent = e.message; }
+  btn.disabled = false;
 }
 
 async function login(){
@@ -460,7 +527,7 @@ function renderPresupuestos(){
   body.innerHTML = lista.map(p => `
     <tr>
       <td>${fechaCorta(p.fecha)}</td>
-      <td><strong>${String(p.numero).padStart(5,'0')}</strong>${p.origenVisita ? `<div class="muted" style="font-size:11px">Visita #${p.origenVisita.numero}</div>` : ''}</td>
+      <td><strong>${String(p.numero).padStart(5,'0')}</strong>${p.importado ? `<div class="muted" style="font-size:11px">Dux${p.comprobanteDux ? ' · ' + escapeHtml(p.comprobanteDux) : ''}</div>` : ''}${p.origenVisita ? `<div class="muted" style="font-size:11px">Visita #${p.origenVisita.numero}</div>` : ''}</td>
       <td>${escapeHtml(p.clienteNombre || '—')}</td>
       <td class="muted">${escapeHtml(p.vendedor || '—')}</td>
       <td>${money(p.total)}</td>
