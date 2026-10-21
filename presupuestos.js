@@ -296,6 +296,24 @@ async function sincronizarEventoSeguimiento(db, presupuesto, usuarioId) {
 // -----------------------------------------------------------------------
 // Listado y detalle
 // -----------------------------------------------------------------------
+
+// (21/10/2026) Si la venta a la que quedó atado un presupuesto se anula, el presupuesto
+// vuelve a quedar libre (editable, con su seguimiento) en lugar de bloqueado para siempre.
+async function liberarPresupuestosDeVentasAnuladas(db, filtro) {
+  const atados = await db.collection('presupuestos').find(Object.assign({}, filtro, { convertidoEnVentaId: { $ne: null }, importado: { $ne: true } })).project({ _id: 1, convertidoEnVentaId: 1, convertidoEnVentaNumero: 1 }).toArray();
+  if (!atados.length) return;
+  const anuladas = await db.collection('ventas').find({ _id: { $in: atados.map(a => a.convertidoEnVentaId) }, estado: 'anulada' }).project({ _id: 1 }).toArray();
+  const setAnuladas = new Set(anuladas.map(v => String(v._id)));
+  const ahora = new Date();
+  for (const a of atados) {
+    if (!setAnuladas.has(String(a.convertidoEnVentaId))) continue;
+    await db.collection('presupuestos').updateOne({ _id: a._id }, {
+      $set: { convertidoEnVentaId: null, convertidoEnVentaNumero: null, estado: 'presupuestado', updatedAt: ahora },
+      $push: { seguimiento: { fecha: ahora, estado: 'presupuestado', nota: `Se anuló la venta Nº ${a.convertidoEnVentaNumero || ''}: el presupuesto vuelve a estar disponible`, usuarioNombre: 'Sistema' } }
+    });
+  }
+}
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
@@ -316,6 +334,7 @@ router.get('/', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 1500, 3000); // (21/10/2026) sube por el historial de Dux importado
     const lista = await conReintento(async () => {
       const db = await getDb();
+      await liberarPresupuestosDeVentasAnuladas(db, filtroOrg(req)).catch(() => {});
       return db.collection('presupuestos').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
     });
     res.json(lista);
@@ -545,6 +564,7 @@ router.put('/:id', authAdmin, async (req, res) => {
     const body = req.body || {};
     const resultado = await conReintento(async () => {
       const db = await getDb();
+      await liberarPresupuestosDeVentasAnuladas(db, Object.assign({ _id: id }, filtroOrg(req))).catch(() => {});
       const actual = await db.collection('presupuestos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Presupuesto no encontrado');
       if (actual.convertidoEnVentaId) throw err(400, 'Este presupuesto ya se convirtió en una venta — no se puede editar.');
