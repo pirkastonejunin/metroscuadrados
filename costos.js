@@ -763,8 +763,15 @@ function validarFecha(v) {
 // una carga anterior), cuánto representa "N paquetes" de cada ítem. Si el
 // producto no tiene rendimiento por paquete cargado, no hay forma de
 // convertir — se guarda tal cual en paquetes, para no inventar un número.
+// (21/10/2026) Un producto que se maneja por unidad y no tiene "Unidades por paquete" ni rendimiento cargado
+// no necesita conversión: cada "paquete" cargado es una unidad (1 a 1).
+function rendimientoEfectivo(p) {
+  if (!p) return null;
+  if (p.rendimientoPorPaquete) return p.rendimientoPorPaquete;
+  return (p.tipoCosteo === 'unidad' && !p.unidadesPorPaquete) ? 1 : null;
+}
 function convertirItemProduccion(producto, paquetes, unidades) {
-  const rinde = producto.rendimientoPorPaquete || null;
+  const rinde = rendimientoEfectivo(producto);
   // Si se cargó por unidad / m² (15/10/2026), esa cantidad manda tal cual y los paquetes se deducen.
   if (unidades && rinde) paquetes = Math.round(unidades / rinde * 10000) / 10000;
   const cantidadConvertida = rinde ? (unidades ? unidades : paquetes * rinde) : paquetes;
@@ -908,7 +915,7 @@ router.post('/produccion/ingresar', authProduccion, async (req, res) => {
         else if (!Number.isFinite(paquetes) || paquetes <= 0) throw err(400, 'La cantidad de paquetes tiene que ser un número mayor a 0');
         const producto = await db.collection('costos_productos').findOne({ _id: productoId, orgId: req.orgId });
         if (!producto) throw err(400, 'Uno de los productos cargados no existe');
-        if (unidades !== null && !producto.rendimientoPorPaquete) throw err(400, `"${producto.nombre}" no tiene rendimiento por paquete configurado: cargalo en paquetes.`);
+        if (unidades !== null && !rendimientoEfectivo(producto)) throw err(400, `"${producto.nombre}" no tiene rendimiento por paquete configurado: cargalo en paquetes.`);
         items.push(convertirItemProduccion(producto, unidades !== null ? 0 : paquetes, unidades));
       }
       const ahora = new Date();
@@ -1014,7 +1021,7 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
         };
       };
       const filas = productos.map(p => {
-        const rinde = p.rendimientoPorPaquete || null;
+        const rinde = rendimientoEfectivo(p);
         const unidad = rinde ? (p.tipoCosteo === 'm2' ? 'm2' : 'unidad') : 'paquete';
         return fila(p, p.nombre, p.sku || null, unidad, rinde, porProd.get(String(p._id)) || new Array(fechas.length).fill(0), catDe(p));
       });
@@ -1174,7 +1181,7 @@ router.post('/produccion/cargas/:id/reintentar', authProduccion, async (req, res
         if (it.unidadConvertida !== 'paquete') { nuevos.push(it); continue; }
         // Producto actual: por id; si no, por SKU o nombre (puede haber una copia con el rendimiento cargado).
         const cand = await db.collection('costos_productos').find({ orgId: req.orgId, activo: { $ne: false }, $or: [{ _id: it.productoId }].concat(it.sku ? [{ sku: it.sku }] : [{ nombre: it.nombre }]) }).toArray();
-        const prod = cand.find(c => c.rendimientoPorPaquete) || null;
+        const prod = cand.find(c => rendimientoEfectivo(c)) || null;
         if (!prod) {
           const base = cand[0];
           faltan.push(`"${it.nombre}"${base && base.unidadesPorPaquete ? ` (tiene "Unidades por paquete" = ${base.unidadesPorPaquete}, pero falta "Rinde por paquete")` : ''}`);
