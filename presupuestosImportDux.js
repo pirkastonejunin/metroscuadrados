@@ -209,7 +209,7 @@ async function procesar(req, aplicar) {
     const ops = [];
     presupuestos.forEach(p => {
       if (!existentes.has(claveImport(p))) return;
-      ops.push({ updateOne: { filter: { orgId, claveImport: claveImport(p) }, update: { $set: { fecha: p.fecha, createdAt: p.fecha, estado: p.estado, estadoDux: p.estadoDux, comprobanteDux: p.comprobante, total: p.total, subtotal: p.total, 'items.0.precioUnitario': p.total, 'items.0.subtotal': p.total, updatedAt: p.modificado || ahora } } } });
+      ops.push({ updateOne: { filter: { orgId, claveImport: claveImport(p), editadoManual: { $ne: true } }, update: { $set: { fecha: p.fecha, createdAt: p.fecha, estado: p.estado, estadoDux: p.estadoDux, comprobanteDux: p.comprobante, total: p.total, subtotal: p.total, 'items.0.precioUnitario': p.total, 'items.0.subtotal': p.total, updatedAt: p.modificado || ahora } } } });
     });
     let actualizados = 0;
     for (let i = 0; i < ops.length; i += 500) { const r = await db.collection('presupuestos').bulkWrite(ops.slice(i, i + 500), { ordered: false }); actualizados += r.modifiedCount; }

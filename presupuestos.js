@@ -548,9 +548,10 @@ router.put('/:id', authAdmin, async (req, res) => {
       const actual = await db.collection('presupuestos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Presupuesto no encontrado');
       if (actual.convertidoEnVentaId) throw err(400, 'Este presupuesto ya se convirtió en una venta — no se puede editar.');
-      if (actual.importado && body.items !== undefined) throw err(400, 'Es un presupuesto histórico importado de Dux (sin detalle de artículos): no se edita. Armá uno nuevo si hace falta.');
 
       const set = { updatedAt: new Date() };
+      // (21/10/2026) los importados de Dux se pueden editar; se marcan para que una reimportación no pise los cambios.
+      if (actual.importado) set.editadoManual = true;
 
       if (body.clienteId !== undefined) {
         const clienteId = toObjectId(body.clienteId);
