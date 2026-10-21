@@ -2200,6 +2200,31 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
   }
 }
 
+// Anti duplicado de cobros (21/10/2026): cada pantalla de cobro manda una clave única; si el mismo pedido llega dos veces
+// (doble clic, conexión lenta) el segundo no registra otro pago: espera y devuelve el resultado del primero.
+const _pagosClaves = new Map();
+function limpiarClavesPago() { const lim = Date.now() - 10 * 60 * 1000; for (const [k, v] of _pagosClaves) if (v.t < lim) _pagosClaves.delete(k); }
+router.post('/:id/pagos', authAdmin, async (req, res, next) => {
+  const clave = req.body && req.body.claveUnica ? String(req.body.claveUnica).slice(0, 80) : '';
+  if (!clave) return next();
+  limpiarClavesPago();
+  const k = String(req.params.id) + '|' + clave;
+  const previo = _pagosClaves.get(k);
+  if (previo) {
+    try { const r = await previo.promesa; return res.json(r); }
+    catch (e) { return res.status(409).json({ error: 'El pago anterior no se pudo registrar: volvé a intentar.' }); }
+  }
+  const entrada = { t: Date.now() };
+  entrada.promesa = new Promise((resolve, reject) => { entrada.resolve = resolve; entrada.reject = reject; });
+  entrada.promesa.catch(() => {});
+  _pagosClaves.set(k, entrada);
+  const jsonOrig = res.json.bind(res);
+  res.json = (data) => {
+    if (res.statusCode >= 400) { _pagosClaves.delete(k); entrada.reject(new Error('fallo')); } else entrada.resolve(data);
+    return jsonOrig(data);
+  };
+  next();
+});
 router.post('/:id/pagos', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);

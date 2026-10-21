@@ -2158,10 +2158,12 @@ function actualizarResumenCobro(){
     : '';
 }
 
+let ncClave = '';
 function abrirCobro(id){
   const v = ventasCache.find(x => x._id === id);
   if (!v) return;
   ventaCobroActual = v;
+  ncClave = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
   ncValores = [];
   montoCobroTocado = false;
   document.getElementById('modalRoot').innerHTML = `
@@ -2216,7 +2218,7 @@ function abrirCobro(id){
         <div class="muted" id="ncResumenCobro" style="margin-top:6px"></div>
         <div style="margin-top:10px"><label>Nota</label><input id="ncNota" placeholder="Opcional"></div>
         <div class="err" id="ncErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="confirmarCobro('${id}')">Registrar</button>
+        <button class="btn" id="ncRegistrarBtn" style="margin-top:10px" onclick="confirmarCobro('${id}')">Registrar</button>
         ${v.moneda === 'ARS' ? `<div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><span class="muted">O cobrar con Mercado Pago:</span>
           <button class="btn secondary" type="button" onclick="MPCobro.abrir({tipo:'point', ventaId:'${id}', planesSugeridos:${JSON.stringify(v.planesSugeridosIds||[]).replace(/"/g,'&quot;')}, titulo:'${nombreDoc(v.tipoComprobante)} #${v.numero}', saldo:${v.saldoPendiente}, montoFn:()=>document.getElementById('ncMonto').value, onAcreditado:()=>{cerrarModal();cargarVentas();}})">Cobrar con Point</button>
           <button class="btn secondary" type="button" onclick="MPCobro.abrir({tipo:'link', ventaId:'${id}', planesSugeridos:${JSON.stringify(v.planesSugeridosIds||[]).replace(/"/g,'&quot;')}, titulo:'${nombreDoc(v.tipoComprobante)} #${v.numero}', saldo:${v.saldoPendiente}, montoFn:()=>document.getElementById('ncMonto').value, onAcreditado:()=>{cerrarModal();cargarVentas();}})">Link de pago</button></div>` : ''}
@@ -2294,6 +2296,10 @@ async function confirmarCobro(id){
     retenciones: ImpuestosUI.leer('impCV').retenciones
   };
   const body = valores.length > 1 ? Object.assign({}, comun, { valores }) : Object.assign({}, comun, valores[0]);
+  body.claveUnica = ncClave;
+  // Anti doble clic: el botón queda bloqueado hasta que se cierra o se recarga el detalle (antes se podía tocar de nuevo mientras cargaba).
+  const btnReg = document.getElementById('ncRegistrarBtn');
+  if (btnReg) { if (btnReg.disabled) return; btnReg.disabled = true; btnReg.textContent = 'Registrando…'; }
   try{
     const r = await fetchUnico(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
@@ -2302,6 +2308,7 @@ async function confirmarCobro(id){
     verDetalle(id);
   }catch(e){
     document.getElementById('ncErr').textContent = e.message;
+    if (btnReg && !/Ya se está registrando/.test(e.message)) { btnReg.disabled = false; btnReg.textContent = 'Registrar'; }
   }
 }
 
