@@ -195,6 +195,15 @@
           <tbody id="vendedoresBody"></tbody>
         </table>
       </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div><strong>Unificar vendedores de Dux</strong>
+            <div class="muted">Las ventas y presupuestos importados de Dux traen el vendedor como "APELLIDO, NOMBRE". Acá los vinculás con los del sistema para que cuenten en comisiones, tablero e informes.</div></div>
+          <button class="btn secondary" onclick="analizarVendedores()">Buscar vendedores</button>
+        </div>
+        <div class="err" id="unifVendErr"></div>
+        <div id="unifVendBox"></div>
+      </div>
     </section>
 
     <!-- COLOCADORES -->
@@ -793,6 +802,39 @@ async function darDeBajaCalendarioUsuario(id){
 }
 
 // ---------------------------------------------------------------------
+
+// Unificar vendedores importados de Dux (21/10/2026)
+let UNIF_VEND = null;
+async function analizarVendedores(){
+  const err = document.getElementById('unifVendErr'), box = document.getElementById('unifVendBox');
+  err.textContent = ''; box.innerHTML = '<p class="muted">Analizando…</p>';
+  try{
+    const r = await fetch('/api/unificar-vendedores/analisis', {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    UNIF_VEND = d;
+    if (!d.filas.length) { box.innerHTML = '<p class="muted">No hay ventas ni presupuestos con vendedor cargado.</p>'; return; }
+    const opts = (sel) => '<option value="">— dejar como está —</option>' + d.sistema.map(n => `<option value="${escapeHtml(n)}"${n === sel ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('');
+    const ETQ = {ya:'Ya coincide', propuesto:'Coincidencia propuesta', ambiguo:'Varias coincidencias', sin_coincidencia:'Sin coincidencia'};
+    box.innerHTML = `<table style="margin-top:10px"><thead><tr><th>Nombre en ventas / presupuestos</th><th>Ventas</th><th>Presupuestos</th><th>Estado</th><th>Unificar con</th></tr></thead><tbody>`
+      + d.filas.map((f, i) => `<tr><td>${escapeHtml(f.nombre)}</td><td>${f.ventas}</td><td>${f.presupuestos}</td><td class="muted">${ETQ[f.estado]}</td>
+        <td>${f.estado === 'ya' ? '<span class="muted">—</span>' : `<select id="unifV${i}">${opts(f.estado === 'propuesto' ? f.sugerido : '')}</select>`}</td></tr>`).join('')
+      + `</tbody></table><button class="btn" style="margin-top:10px" onclick="aplicarUnificarVendedores()">Unificar los elegidos</button>`;
+  }catch(e){ box.innerHTML = ''; err.textContent = e.message; }
+}
+async function aplicarUnificarVendedores(){
+  const err = document.getElementById('unifVendErr'), box = document.getElementById('unifVendBox');
+  err.textContent = '';
+  const cambios = [];
+  (UNIF_VEND ? UNIF_VEND.filas : []).forEach((f, i) => { const el = document.getElementById('unifV' + i); if (el && el.value) cambios.push({desde: f.nombre, hacia: el.value}); });
+  if (!cambios.length) { err.textContent = 'No elegiste ningún cambio.'; return; }
+  if (!confirm('Se van a reescribir los vendedores de ' + cambios.length + ' nombre(s) en ventas y presupuestos. ¿Seguir?')) return;
+  try{
+    const r = await fetch('/api/unificar-vendedores/aplicar', {method:'POST', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({cambios})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    box.innerHTML = `<p style="color:var(--ok);font-weight:700">Listo: ${d.ventas} ventas y ${d.presupuestos} presupuestos actualizados.</p>`;
+  }catch(e){ err.textContent = e.message; }
+}
+
 // VENDEDORES
 // ---------------------------------------------------------------------
 async function cargarVendedores(){
