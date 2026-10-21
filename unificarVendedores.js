@@ -39,13 +39,15 @@ async function orgsAccesibles(db, req) {
 }
 const filtroOrgs = (orgIds) => (orgIds && orgIds.length ? { orgId: { $in: orgIds } } : {});
 
-// ¿El nombre de Dux corresponde a este nombre del sistema? Mismas palabras en cualquier orden, o todas las de uno incluidas en el otro (mínimo 2).
+// ¿El nombre de Dux corresponde a este nombre del sistema? Mismas palabras en cualquier orden, o todas las de uno incluidas en el otro (también un nombre de pila solo).
 function coincide(a, b) {
   const ta = tokens(a), tb = tokens(b);
   if (!ta.length || !tb.length) return false;
   if (clave(a) === clave(b)) return true;
   const [chico, grande] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
-  return chico.length >= 2 && chico.every(t => grande.includes(t));
+  // todas las palabras del nombre corto están en el largo ("Lucas" ~ "CUELLO, LUCAS"; "Carlos" ~ "Carlos Velazquez").
+  // Si hay más de un candidato en el sistema, queda como "varias coincidencias" y se elige a mano.
+  return chico.every(t => grande.includes(t));
 }
 
 router.get('/analisis', auth, async (req, res) => {
