@@ -814,10 +814,10 @@ async function analizarVendedores(){
     UNIF_VEND = d;
     if (!d.filas.length) { box.innerHTML = '<p class="muted">No hay ventas ni presupuestos con vendedor cargado.</p>'; return; }
     const opts = (sel) => '<option value="">— dejar como está —</option>' + d.sistema.map(n => `<option value="${escapeHtml(n)}"${n === sel ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('');
-    const ETQ = {ya:'Ya coincide', propuesto:'Coincidencia propuesta', ambiguo:'Varias coincidencias', sin_coincidencia:'Sin coincidencia'};
+    const ETQ = {ya:'Ya es una persona del sistema', propuesto:'Coincidencia propuesta', ambiguo:'Varias coincidencias', sin_coincidencia:'Sin coincidencia'};
     box.innerHTML = `<table style="margin-top:10px"><thead><tr><th>Nombre en ventas / presupuestos</th><th>Ventas</th><th>Presupuestos</th><th>Estado</th><th>Unificar con</th></tr></thead><tbody>`
       + d.filas.map((f, i) => `<tr><td>${escapeHtml(f.nombre)}</td><td>${f.ventas}</td><td>${f.presupuestos}</td><td class="muted">${ETQ[f.estado]}</td>
-        <td>${f.estado === 'ya' ? '<span class="muted">—</span>' : `<select id="unifV${i}">${opts(f.estado === 'propuesto' ? f.sugerido : '')}</select>`}</td></tr>`).join('')
+        <td><select id="unifV${i}">${opts(f.estado === 'propuesto' ? f.sugerido : '')}</select></td></tr>`).join('')
       + `</tbody></table><button class="btn" style="margin-top:10px" onclick="aplicarUnificarVendedores()">Unificar los elegidos</button>`
       + `<h4 style="margin:16px 0 4px">Personas cargadas en el sistema</h4><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Usuario</th><th>Sucursal</th></tr></thead><tbody>` + (d.detalle || []).map(x => `<tr><td>${escapeHtml(x.nombre)}</td><td class="muted">${escapeHtml(x.tipo)}</td><td class="muted">${escapeHtml(x.detalle)}</td><td class="muted">${escapeHtml(x.sucursal || '—')}</td></tr>`).join('') + `</tbody></table>`;
   }catch(e){ box.innerHTML = ''; err.textContent = e.message; }
