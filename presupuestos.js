@@ -300,16 +300,20 @@ async function sincronizarEventoSeguimiento(db, presupuesto, usuarioId) {
 // (21/10/2026) Si la venta a la que quedó atado un presupuesto se anula, el presupuesto
 // vuelve a quedar libre (editable, con su seguimiento) en lugar de bloqueado para siempre.
 async function liberarPresupuestosDeVentasAnuladas(db, filtro) {
-  const atados = await db.collection('presupuestos').find(Object.assign({}, filtro, { convertidoEnVentaId: { $ne: null }, importado: { $ne: true } })).project({ _id: 1, convertidoEnVentaId: 1, convertidoEnVentaNumero: 1 }).toArray();
+  const atados = await db.collection('presupuestos').find(Object.assign({}, filtro, { convertidoEnVentaId: { $ne: null } })).project({ _id: 1, convertidoEnVentaId: 1, convertidoEnVentaNumero: 1, seguimiento: 1 }).toArray();
   if (!atados.length) return;
   const anuladas = await db.collection('ventas').find({ _id: { $in: atados.map(a => a.convertidoEnVentaId) }, estado: 'anulada' }).project({ _id: 1 }).toArray();
   const setAnuladas = new Set(anuladas.map(v => String(v._id)));
   const ahora = new Date();
   for (const a of atados) {
     if (!setAnuladas.has(String(a.convertidoEnVentaId))) continue;
+    // vuelve al estado que tenía antes de aprobarse (el anterior en el seguimiento)
+    const seg = a.seguimiento || [];
+    const previo = seg.length >= 2 ? seg[seg.length - 2].estado : null;
+    const estadoPrevio = ESTADOS_VALIDOS.includes(previo) && previo !== 'aprobado' ? previo : 'presupuestado';
     await db.collection('presupuestos').updateOne({ _id: a._id }, {
-      $set: { convertidoEnVentaId: null, convertidoEnVentaNumero: null, estado: 'presupuestado', updatedAt: ahora },
-      $push: { seguimiento: { fecha: ahora, estado: 'presupuestado', nota: `Se anuló la venta Nº ${a.convertidoEnVentaNumero || ''}: el presupuesto vuelve a estar disponible`, usuarioNombre: 'Sistema' } }
+      $set: { convertidoEnVentaId: null, convertidoEnVentaNumero: null, estado: estadoPrevio, updatedAt: ahora },
+      $push: { seguimiento: { fecha: ahora, estado: estadoPrevio, nota: `Se anuló la venta Nº ${a.convertidoEnVentaNumero || ''}: el presupuesto vuelve a estar disponible`, usuarioNombre: 'Sistema' } }
     });
   }
 }
