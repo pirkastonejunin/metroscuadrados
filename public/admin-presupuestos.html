@@ -462,7 +462,9 @@ async function traerPresupuestosDeVisitas(){
   }catch(e){ alert(e.message); }
   btn.disabled = false;
 }
+let seqPresupuestos = 0; // (21/10/2026) si se cambian las fechas rápido, una respuesta vieja y más lenta no pisa a la última
 async function cargarPresupuestos(){
+  const mi = ++seqPresupuestos;
   const params = new URLSearchParams();
   const desde = document.getElementById('fDesde').value;
   const hasta = document.getElementById('fHasta').value;
@@ -473,10 +475,12 @@ async function cargarPresupuestos(){
   try{
     const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
     const data = await r.json();
+    if (mi !== seqPresupuestos) return;
     if (!r.ok) throw new Error(data.error || 'Error al cargar');
     presupuestosCache = data;
     renderPresupuestos();
   }catch(e){
+    if (mi !== seqPresupuestos) return;
     body.innerHTML = '<tr><td colspan="8" class="err">' + escapeHtml(e.message) + '</td></tr>';
   }
 }
