@@ -205,11 +205,11 @@ async function procesar(req, aplicar) {
     let insertados = 0;
     for (let i = 0; i < docs.length; i += 500) { const lote = docs.slice(i, i + 500); await db.collection('presupuestos').insertMany(lote, { ordered: false }); insertados += lote.length; }
 
-    // Los que ya estaban: se alinean estado y total con Dux (sin tocar nada más).
+    // Los que ya estaban: se alinean fecha, estado y total con Dux (sin tocar nada más). Re-subir el archivo repara cualquier fecha cambiada.
     const ops = [];
     presupuestos.forEach(p => {
       if (!existentes.has(claveImport(p))) return;
-      ops.push({ updateOne: { filter: { orgId, claveImport: claveImport(p) }, update: { $set: { estado: p.estado, estadoDux: p.estadoDux, comprobanteDux: p.comprobante, total: p.total, subtotal: p.total, 'items.0.precioUnitario': p.total, 'items.0.subtotal': p.total, updatedAt: p.modificado || ahora } } } });
+      ops.push({ updateOne: { filter: { orgId, claveImport: claveImport(p) }, update: { $set: { fecha: p.fecha, createdAt: p.fecha, estado: p.estado, estadoDux: p.estadoDux, comprobanteDux: p.comprobante, total: p.total, subtotal: p.total, 'items.0.precioUnitario': p.total, 'items.0.subtotal': p.total, updatedAt: p.modificado || ahora } } } });
     });
     let actualizados = 0;
     for (let i = 0; i < ops.length; i += 500) { const r = await db.collection('presupuestos').bulkWrite(ops.slice(i, i + 500), { ordered: false }); actualizados += r.modifiedCount; }
