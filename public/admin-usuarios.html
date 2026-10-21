@@ -818,7 +818,8 @@ async function analizarVendedores(){
     box.innerHTML = `<table style="margin-top:10px"><thead><tr><th>Nombre en ventas / presupuestos</th><th>Ventas</th><th>Presupuestos</th><th>Estado</th><th>Unificar con</th></tr></thead><tbody>`
       + d.filas.map((f, i) => `<tr><td>${escapeHtml(f.nombre)}</td><td>${f.ventas}</td><td>${f.presupuestos}</td><td class="muted">${ETQ[f.estado]}</td>
         <td>${f.estado === 'ya' ? '<span class="muted">—</span>' : `<select id="unifV${i}">${opts(f.estado === 'propuesto' ? f.sugerido : '')}</select>`}</td></tr>`).join('')
-      + `</tbody></table><button class="btn" style="margin-top:10px" onclick="aplicarUnificarVendedores()">Unificar los elegidos</button>`;
+      + `</tbody></table><button class="btn" style="margin-top:10px" onclick="aplicarUnificarVendedores()">Unificar los elegidos</button>`
+      + `<h4 style="margin:16px 0 4px">Personas cargadas en el sistema</h4><table><thead><tr><th>Nombre</th><th>Tipo</th><th>Usuario</th><th>Sucursal</th></tr></thead><tbody>` + (d.detalle || []).map(x => `<tr><td>${escapeHtml(x.nombre)}</td><td class="muted">${escapeHtml(x.tipo)}</td><td class="muted">${escapeHtml(x.detalle)}</td><td class="muted">${escapeHtml(x.sucursal || '—')}</td></tr>`).join('') + `</tbody></table>`;
   }catch(e){ box.innerHTML = ''; err.textContent = e.message; }
 }
 async function aplicarUnificarVendedores(){

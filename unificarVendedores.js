@@ -57,11 +57,17 @@ router.get('/analisis', auth, async (req, res) => {
       const cuenta = async (col) => (await db.collection(col).aggregate([
         { $match: Object.assign({ vendedor: { $nin: [null, ''] } }, fo) },
         { $group: { _id: '$vendedor', n: { $sum: 1 } } }]).toArray());
-      const [vs, ps, usuarios, vendedores] = await Promise.all([
+      const [vs, ps, usuarios, vendedores, orgs] = await Promise.all([
         cuenta('ventas'), cuenta('presupuestos'),
-        db.collection('usuarios').find({ activo: { $ne: false } }).project({ nombre: 1 }).toArray(),
-        db.collection('visitas_vendedores').find(Object.assign({ activo: { $ne: false } }, fo)).project({ nombre: 1 }).toArray()
+        db.collection('usuarios').find({ activo: { $ne: false } }).project({ nombre: 1, usuario: 1, orgIds: 1 }).toArray(),
+        db.collection('visitas_vendedores').find(Object.assign({ activo: { $ne: false } }, fo)).project({ nombre: 1, orgId: 1 }).toArray(),
+        db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()
       ]);
+      const nombreOrg = (id) => { const o = orgs.find(x => String(x._id) === String(id)); return o ? o.nombre : ''; };
+      const detalle = [
+        ...usuarios.map(u => ({ nombre: u.nombre, tipo: 'Usuario (login)', detalle: u.usuario || '', sucursal: (u.orgIds || []).map(nombreOrg).filter(Boolean).join(', ') })),
+        ...vendedores.map(v => ({ nombre: v.nombre, tipo: 'Vendedor (visitas)', detalle: '', sucursal: nombreOrg(v.orgId) }))
+      ].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
       const sistema = [];
       const vistos = new Set();
       [...usuarios.map(u => u.nombre), ...vendedores.map(v => v.nombre)].forEach(n => { const k = clave(n); if (n && !vistos.has(k)) { vistos.add(k); sistema.push(n); } });
@@ -78,7 +84,7 @@ router.get('/analisis', auth, async (req, res) => {
         else estado = 'sin_coincidencia';
         return Object.assign(o, { estado, sugerido, candidatos: cand });
       }).sort((a, b) => (b.ventas + b.presupuestos) - (a.ventas + a.presupuestos));
-      return { filas, sistema: sistema.sort((a, b) => a.localeCompare(b, 'es')) };
+      return { filas, sistema: sistema.sort((a, b) => a.localeCompare(b, 'es')), detalle };
     });
     res.json(r);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
