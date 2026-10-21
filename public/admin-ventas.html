@@ -2014,7 +2014,7 @@ async function abrirEntregar(id){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Generar remito — venta #${v.numero}</h2>
         <p class="muted">Por defecto se entrega todo lo pendiente. Si el cliente retira solo una parte, cambiá la cantidad de ese ítem — el resto queda pendiente para otro remito. No se puede deshacer — si hace falta corregir, se anula la venta.</p>
-        ${deposito ? '' : `<label>Depósito *</label><select id="ntDeposito">${opcionesDepositosVenta()}</select>`}
+        <label>Sacar el stock del depósito *</label><select id="ntDeposito">${opcionesDepositosVenta(v.depositoId)}</select>
         <table style="margin-top:10px">
           <thead><tr><th>Producto</th><th>Pendiente</th><th>A entregar ahora</th></tr></thead>
           <tbody>${filasItems}</tbody>

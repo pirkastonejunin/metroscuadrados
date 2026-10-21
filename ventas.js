@@ -1885,7 +1885,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
       if (venta.estado === 'entregada') throw err(400, 'Esta venta ya tiene todo entregado.');
       if (venta.canceladaPorNota) throw err(400, 'Esta factura está cancelada con una nota de crédito: no se entrega.');
 
-      const depositoId = venta.depositoId || depositoIdBody;
+      const depositoId = depositoIdBody || venta.depositoId;
       if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a descontar el stock.');
 
       if (venta.stockComprometido) {
@@ -1893,7 +1893,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
         // depósito de la venta si tenía uno, o en el "sin asignar"
         // (null) si no. Si el depósito elegido ahora es otro, se migra
         // lo pendiente antes de generar el remito.
-        await migrarCompromisoDeposito(db, req, venta, venta.depositoId, depositoId);
+        await migrarCompromisoDeposito(db, req, venta, venta.depositoId || null, depositoId);
       } else {
         // Venta cargada antes de este cambio (sin depósito ni reserva
         // hecha al momento de guardarla) — se compromete recién ahora,
