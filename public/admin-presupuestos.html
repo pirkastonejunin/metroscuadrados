@@ -828,6 +828,40 @@ function htmlTotalesTarjeta(pre, total){
 // -----------------------------------------------------------------------
 // Modal: nuevo / editar presupuesto
 // -----------------------------------------------------------------------
+
+// Vincular el presupuesto a una visita (21/10/2026): buscador + lista; vacío = sin visita.
+function visitaVincularHtml(pre){
+  if (pre === 'p' && VISITA_PENDIENTE) return '';
+  return `<div style="margin-top:10px"><label>Vincular a una visita (opcional)</label>
+    <input type="text" id="${pre}VisitaBuscar" placeholder="Buscar por cliente, dirección o Nº de visita…" autocomplete="off" oninput="buscarVisitasVincular('${pre}')">
+    <select id="${pre}Visita" style="margin-top:6px"><option value="">— Sin visita —</option></select></div>`;
+}
+let _timerVisitas = null;
+function buscarVisitasVincular(pre, presupuestoId, actual){
+  clearTimeout(_timerVisitas);
+  _timerVisitas = setTimeout(() => cargarVisitasVincular(pre, presupuestoId, actual), 250);
+}
+async function cargarVisitasVincular(pre, presupuestoId, actual){
+  const sel = document.getElementById(pre + 'Visita');
+  if (!sel) return;
+  if (presupuestoId === undefined) presupuestoId = sel.dataset.pres || '';
+  if (actual === undefined) actual = sel.dataset.actual || '';
+  sel.dataset.pres = presupuestoId; sel.dataset.actual = actual;
+  const q = (document.getElementById(pre + 'VisitaBuscar') || {}).value || '';
+  const elegido = sel.value || actual;
+  try{
+    const r = await fetch(BASE + '/visitas-disponibles?q=' + encodeURIComponent(q) + (presupuestoId ? '&presupuestoId=' + presupuestoId : ''), {headers: headersAuth()});
+    const lista = await r.json();
+    if (!r.ok) throw new Error(lista.error || 'Error');
+    const fmt = v => '#' + v.numero + ' · ' + (v.cliente || 'Sin nombre') + (v.direccion ? ' — ' + v.direccion : '') + (v.fechaHora ? ' · ' + new Date(v.fechaHora).toLocaleDateString('es-AR') : '');
+    sel.innerHTML = '<option value="">— Sin visita —</option>' + lista.map(v =>
+      `<option value="${v._id}" ${v.ocupada ? 'disabled' : ''} ${String(v._id) === String(elegido) ? 'selected' : ''}>${escapeHtml(fmt(v))}${v.ocupada ? ' (ya tiene presupuesto Nº ' + (v.presupuestoNumero || '') + ')' : ''}</option>`).join('');
+    if (elegido && !lista.some(v => String(v._id) === String(elegido))) {
+      sel.insertAdjacentHTML('beforeend', `<option value="${elegido}" selected>Visita actual</option>`);
+    }
+  }catch(e){ sel.innerHTML = '<option value="">No se pudieron cargar las visitas</option>' + (elegido ? `<option value="${elegido}" selected>Visita actual</option>` : ''); }
+}
+
 function abrirNuevoPresupuesto(prefill){
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg">
@@ -858,6 +892,7 @@ function abrirNuevoPresupuesto(prefill){
           <div><label>Descuento ($)</label><input id="pDescuentoMonto" type="number" min="0" step="0.01" value="0" oninput="actualizarTotalesPresupuesto()"></div>
         </div>
 
+        ${visitaVincularHtml('p')}
         <div class="planes-box"><label>Cuotas con tarjeta (opcional)</label><div id="pPlanes" class="muted">Cargando…</div></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="pObservaciones"></textarea></div>
 
@@ -871,6 +906,7 @@ function abrirNuevoPresupuesto(prefill){
   // escapar un JSON con comillas dentro de un atributo onclick — cosa que
   // se rompe fácil (ver nota de "nunca a mano" en otras pantallas).
   origenCotizadorPendiente = (prefill && prefill.origenCotizador) || null;
+  cargarVisitasVincular('p', '', '');
   if (prefill && prefill.items && prefill.items.length) {
     prefill.items.forEach(it => agregarFilaItem(it));
   } else {
@@ -903,6 +939,7 @@ async function guardarNuevoPresupuesto(){
   if (origenCotizadorPendiente) body.origenCotizador = origenCotizadorPendiente;
   if (CONV_ID) body.convId = CONV_ID;
   if (VISITA_PENDIENTE) body.origenVisita = { visitaId: VISITA_PENDIENTE.visitaId };
+  else { const vSel = (document.getElementById('pVisita') || {}).value; if (vSel) body.origenVisita = { visitaId: vSel }; }
   const btn = document.getElementById('pGuardarBtn');
   if (btn.disabled) return;
   btn.disabled = true;
@@ -954,6 +991,7 @@ function abrirEditarPresupuesto(id){
           <div><label>Descuento ($)</label><input id="peDescuentoMonto" type="number" min="0" step="0.01" value="${p.descuentoMonto||0}" oninput="actualizarTotalesEdicion()"></div>
         </div>
 
+        ${visitaVincularHtml('pe')}
         <div class="planes-box"><label>Cuotas con tarjeta (opcional)</label><div id="pePlanes" class="muted">Cargando…</div></div>
         <div style="margin-top:10px"><label>Observaciones</label><textarea id="peObservaciones">${escapeHtml(p.observaciones||'')}</textarea></div>
 
@@ -967,6 +1005,9 @@ function abrirEditarPresupuesto(id){
   (p.items || []).forEach(it => agregarFilaItemGenerica(cont, it));
   actualizarTotalesEn('peItemsBody', 'peDescuentoPorcentaje', 'peDescuentoMonto', 'peTotales');
   cargarPlanesTarjeta('pe', p.planesTarjetaIds);
+  const visActual = p.origenVisita && p.origenVisita.visitaId ? p.origenVisita.visitaId : '';
+  if (visActual) document.getElementById('peVisita').insertAdjacentHTML('beforeend', `<option value="${visActual}" selected>Visita #${p.origenVisita.numero || ''} (actual)</option>`);
+  cargarVisitasVincular('pe', p._id, visActual);
 }
 // Variantes genéricas (acepta un contenedor distinto a 'pItemsBody') para
 // poder reusar las mismas filas de ítem en el modal de edición, sin
@@ -1080,7 +1121,8 @@ async function guardarEdicionPresupuesto(id){
     descuentoPorcentaje: Number(document.getElementById('peDescuentoPorcentaje').value) || 0,
     descuentoMonto: Number(document.getElementById('peDescuentoMonto').value) || 0,
     observaciones: document.getElementById('peObservaciones').value.trim(),
-    planesTarjetaIds: planesElegidos('pe')
+    planesTarjetaIds: planesElegidos('pe'),
+    visitaId: (document.getElementById('peVisita') || {}).value || ''
   };
   try{
     const r = await fetch(BASE + '/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});

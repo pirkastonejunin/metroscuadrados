@@ -318,6 +318,40 @@ async function liberarPresupuestosDeVentasAnuladas(db, filtro) {
   }
 }
 
+
+// (21/10/2026) Vincular un presupuesto a una visita desde el panel de presupuestos (al cargarlo o al editarlo).
+// Lista de visitas para elegir: las más recientes (o las que coincidan con la búsqueda); marca las que ya tienen otro presupuesto comercial.
+router.get('/visitas-disponibles', authAdmin, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const actualId = toObjectId(req.query.presupuestoId);
+    const match = Object.assign({}, filtroOrg(req));
+    if (q) {
+      const rx = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+      const ors = [{ 'cliente.nombre': rx }, { 'cliente.telefono': rx }, { 'cliente.direccion': rx }];
+      if (/^\d+$/.test(q)) ors.push({ numero: Number(q) });
+      match.$or = ors;
+    }
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      return db.collection('visitas').find(match).project({ numero: 1, cliente: 1, fechaHora: 1, estado: 1, vendedorNombre: 1, presupuestoComercialId: 1, presupuestoComercialNumero: 1 }).sort({ fechaHora: -1 }).limit(40).toArray();
+    });
+    res.json(lista.map(v => ({
+      _id: v._id, numero: v.numero, fechaHora: v.fechaHora, estado: v.estado,
+      cliente: (v.cliente && v.cliente.nombre) || '', direccion: (v.cliente && v.cliente.direccion) || '',
+      ocupada: !!(v.presupuestoComercialId && (!actualId || String(v.presupuestoComercialId) !== String(actualId))),
+      presupuestoNumero: v.presupuestoComercialNumero || null
+    })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Deja libre una visita que estaba enlazada a este presupuesto.
+async function desenlazarVisita(db, visitaId, presupuestoId) {
+  const visita = await db.collection('visitas').findOne({ _id: visitaId });
+  if (!visita || !visita.presupuestoComercialId || String(visita.presupuestoComercialId) !== String(presupuestoId)) return;
+  await db.collection('visitas').updateOne({ _id: visitaId }, { $unset: { presupuestoComercialId: '', presupuestoComercialNumero: '', presupuestoComercialEstado: '', presupuestoComercialCongelado: '', presupuesto: '' }, $set: { updatedAt: new Date() } });
+}
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
@@ -601,6 +635,22 @@ router.put('/:id', authAdmin, async (req, res) => {
         set.descuentoMonto = descuentoMonto;
         set.total = calcularTotal(actual.subtotal, descuentoPorcentaje, descuentoMonto);
       }
+      let visitaNueva = null, desenlazar = null, quitarVisita = false;
+      if (body.visitaId !== undefined) {
+        const actualVid = actual.origenVisita && actual.origenVisita.visitaId ? String(actual.origenVisita.visitaId) : '';
+        if (!body.visitaId) { if (actualVid) { desenlazar = actual.origenVisita.visitaId; quitarVisita = true; } }
+        else if (String(body.visitaId) !== actualVid) {
+          const vid = toObjectId(body.visitaId);
+          visitaNueva = vid ? await db.collection('visitas').findOne(Object.assign({ _id: vid }, filtroOrg(req))) : null;
+          if (!visitaNueva) throw err(400, 'La visita no existe (o no pertenece a esta organización)');
+          if (visitaNueva.presupuestoComercialId && String(visitaNueva.presupuestoComercialId) !== String(id)) {
+            const ya = await db.collection('presupuestos').findOne({ _id: visitaNueva.presupuestoComercialId });
+            if (ya) throw err(400, 'Esa visita ya tiene el presupuesto Nº ' + ya.numero + '.');
+          }
+          if (actualVid) desenlazar = actual.origenVisita.visitaId;
+          set.origenVisita = { visitaId: visitaNueva._id, numero: visitaNueva.numero, direccion: (visitaNueva.cliente && visitaNueva.cliente.direccion) || '' };
+        }
+      }
       if (body.vendedor !== undefined) set.vendedor = normalizarTexto(body.vendedor);
       if (body.observaciones !== undefined) set.observaciones = normalizarTexto(body.observaciones);
       if (body.fecha !== undefined) set.fecha = new Date(body.fecha);
@@ -615,7 +665,10 @@ router.put('/:id', authAdmin, async (req, res) => {
       if (body.planesTarjetaIds !== undefined || set.total !== undefined) {
         set.planesTarjeta = await calcularPlanesTarjeta(db, actual.orgId, set.total !== undefined ? set.total : actual.total, set.planesTarjetaIds || actual.planesTarjetaIds);
       }
-      await db.collection('presupuestos').updateOne({ _id: id }, { $set: set });
+      const upd = { $set: set };
+      if (quitarVisita) upd.$unset = { origenVisita: '' };
+      await db.collection('presupuestos').updateOne({ _id: id }, upd);
+      if (desenlazar) await desenlazarVisita(db, desenlazar, id);
       const nuevo = await db.collection('presupuestos').findOne({ _id: id });
       if (nuevo.origenVisita) await espejarEnVisita(db, nuevo);
       // Si ya se convirtió en venta, la venta también recibe los planes sugeridos para el cobro.
