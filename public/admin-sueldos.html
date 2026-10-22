@@ -96,7 +96,7 @@
 
 <div id="app" class="hidden">
   <main>
-    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="pag">Pagos</button><button data-v="col">Colocadores</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button></div>
+    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="pag">Pagos</button><button data-v="col">Colocadores</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button><button data-v="f931">Cargas sociales (F.931)</button></div>
     <div id="err"></div><div id="ok"></div>
 
     <div class="vista" id="v-liq">
@@ -176,6 +176,17 @@
       <div class="panel" id="pAde"></div>
       <div class="tabla"><table><thead><tr><th>Fecha</th><th>Empleado</th><th class="n">Monto</th><th>Estado</th><th>Nota</th><th></th></tr></thead><tbody id="tAde"></tbody></table></div>
     </div>
+
+    <div class="vista hidden" id="v-f931">
+      <div class="tb-filtros">
+        <input type="month" id="fcPeriodo" aria-label="Período del F.931" title="Período (mes) al que corresponde el F.931" onchange="cargarF931()">
+        <span class="tb-info" title="El F.931 se paga una sola vez desde una caja o banco y se reparte entre las sucursales con los porcentajes fijos. Para el período cargado, el costo de cargas sociales de cada sucursal es lo que le toca de acá (reemplaza lo estimado en las liquidaciones).">ⓘ</span>
+      </div>
+      <details class="panel" id="fcCfg"><summary style="cursor:pointer;font-weight:700">Reparto entre sucursales (porcentajes fijos)</summary><div id="fcCfgBody" style="margin-top:8px"></div></details>
+      <div class="panel" id="fcForm"></div>
+      <div class="tabla" style="margin-top:12px"><table><thead><tr><th>Fecha pago</th><th>VEP / transacción</th><th class="n">Total</th><th>Reparto</th><th>Estado</th><th></th></tr></thead><tbody id="fcLista"></tbody></table></div>
+      <div class="tabla" style="margin-top:12px"><table><thead><tr><th>Sucursal</th><th class="n" title="Cargas sociales que se estimaron en las liquidaciones del período">Liquidado en Sueldos</th><th class="n">Le toca del F.931</th><th class="n">Diferencia</th></tr></thead><tbody id="fcControl"></tbody></table></div>
+    </div>
   </main>
 </div>
 
@@ -239,8 +250,8 @@ if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 document.addEventListener('click', e => {
   const b = e.target.closest('#tabs button'); if (!b) return;
   [...document.querySelectorAll('#tabs button')].forEach(x => x.classList.toggle('on', x === b));
-  ['liq','pag','col','emp','ade'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
-  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'pag') iniciarPagos(); else if (b.dataset.v === 'col') iniciarCol(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else { formAde(); cargarAde(); }
+  ['liq','pag','col','emp','ade','f931'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
+  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'pag') iniciarPagos(); else if (b.dataset.v === 'col') iniciarCol(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else if (b.dataset.v === 'f931') iniciarF931(); else { formAde(); cargarAde(); }
 });
 
 // ---------------- Liquidaciones ----------------
@@ -611,6 +622,80 @@ async function cargarAde(){
   }catch(e){ error(e); }
 }
 async function anularAde(id){ if (!confirm('¿Anular este adelanto? La plata vuelve a la caja o banco de donde salió.')) return; try{ await api('DELETE', '/adelantos/' + id); await cargarAde(); }catch(e){ error(e); } }
+
+// ---------------- Cargas sociales (F.931) ----------------
+let F931CFG = null, F931REP_EDITADO = false;
+function mesAnterior(){ const d = new Date(Date.now() - 3*3600e3); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); }
+async function iniciarF931(){
+  if (!$('fcPeriodo').value) $('fcPeriodo').value = mesAnterior();
+  try{ F931CFG = await api('GET', '/f931/config'); }catch(e){ error(e); return; }
+  pintarCfgF931(); pintarFormF931(); await cargarF931();
+}
+function pintarCfgF931(){
+  $('fcCfg').open = !F931CFG.configurado;
+  $('fcCfgBody').innerHTML = '<div class="muted" style="margin-bottom:6px">Qué parte del F.931 le toca a cada sucursal. Tiene que sumar 100.</div>' +
+    F931CFG.sucursales.map(o => '<div class="form" style="margin-bottom:4px"><div><label>' + escapeHtml(o.nombre) + ' (%)</label><input type="number" min="0" step="0.01" class="fc-pct" data-org="' + o._id + '" value="' + (o.pct || '') + '"></div></div>').join('') +
+    '<div class="acciones" style="margin-top:6px"><button class="btn" onclick="guardarCfgF931()">Guardar porcentajes</button> <span class="muted" id="fcPctSuma"></span></div>';
+  [...document.querySelectorAll('.fc-pct')].forEach(i => i.addEventListener('input', sumaPctF931)); sumaPctF931();
+}
+function sumaPctF931(){ const t = [...document.querySelectorAll('.fc-pct')].reduce((s, i) => s + (Number(i.value) || 0), 0); const e = $('fcPctSuma'); if (e) e.textContent = 'Suma: ' + (Math.round(t * 100) / 100) + '%'; }
+async function guardarCfgF931(){
+  const reparto = [...document.querySelectorAll('.fc-pct')].map(i => ({ orgId: i.dataset.org, pct: Number(i.value) || 0 })).filter(r => r.pct > 0);
+  try{ await api('PUT', '/f931/config', { reparto }); F931CFG = await api('GET', '/f931/config'); exito('Porcentajes guardados.'); pintarCfgF931(); F931REP_EDITADO = false; repartoF931(); }catch(e){ error(e); }
+}
+function pintarFormF931(){
+  const filas = F931CFG.conceptos.map(c => '<tr><td>' + c.codigo + '</td><td>' + escapeHtml(c.nombre) + '</td><td class="n"><input type="number" min="0" step="0.01" class="fc-imp" data-cod="' + c.codigo + '" data-nom="' + escapeHtml(c.nombre) + '" style="width:140px;text-align:right"></td></tr>').join('');
+  $('fcForm').innerHTML = '<h3>Cargar pago de F.931</h3><div class="form">' +
+    '<div><label>Fecha de pago</label><input type="date" id="fcFecha" value="' + hoyISO() + '"></div>' +
+    '<div><label>Nº de VEP</label><input id="fcVep" autocomplete="off"></div>' +
+    '<div><label>Nº de transacción</label><input id="fcTrans" autocomplete="off"></div>' +
+    '<div><label>Sale de</label><select id="fcCuenta">' + opcionesCuentas() + '</select></div></div>' +
+    '<div class="tabla" style="margin-top:8px"><table><thead><tr><th>Cód.</th><th>Concepto</th><th class="n">Importe</th></tr></thead><tbody>' + filas + '<tr><td colspan="2"><b>Total</b></td><td class="n"><b id="fcTotal">$ 0,00</b></td></tr></tbody></table></div>' +
+    '<div style="margin-top:8px;font-weight:700">Reparto entre sucursales</div><div class="tabla"><table><thead><tr><th>Sucursal</th><th class="n">%</th><th class="n">Importe</th></tr></thead><tbody id="fcRep"></tbody></table></div><div class="muted" id="fcRepAviso" style="font-size:12px"></div>' +
+    '<div class="acciones" style="margin-top:10px"><button class="btn" id="fcBtn" onclick="guardarF931()">Registrar pago</button></div>';
+  [...document.querySelectorAll('.fc-imp')].forEach(i => i.addEventListener('input', () => { F931REP_EDITADO = false; repartoF931(); }));
+  F931REP_EDITADO = false; repartoF931();
+}
+function totalF931(){ return Math.round([...document.querySelectorAll('.fc-imp')].reduce((s, i) => s + (Number(i.value) || 0), 0) * 100) / 100; }
+function repartoF931(){
+  const total = totalF931(); $('fcTotal').textContent = pesos(total);
+  const act = F931CFG.sucursales.filter(o => o.pct > 0);
+  if (!F931REP_EDITADO) {
+    let acum = 0;
+    act.forEach((o, i) => { o._m = i === act.length - 1 ? Math.round((total - acum) * 100) / 100 : Math.round(total * o.pct) / 100; acum = Math.round((acum + o._m) * 100) / 100; });
+  }
+  $('fcRep').innerHTML = act.length ? act.map(o => '<tr><td>' + escapeHtml(o.nombre) + '</td><td class="n">' + o.pct + '%</td><td class="n"><input type="number" min="0" step="0.01" class="fc-rep" data-org="' + o._id + '" value="' + (o._m || 0) + '" style="width:140px;text-align:right" oninput="F931REP_EDITADO = true; avisoRepF931()"></td></tr>').join('') : '<tr><td colspan="3" class="muted">Configurá primero los porcentajes (arriba).</td></tr>';
+  avisoRepF931();
+}
+function avisoRepF931(){
+  const suma = Math.round([...document.querySelectorAll('.fc-rep')].reduce((s, i) => s + (Number(i.value) || 0), 0) * 100) / 100, total = totalF931();
+  $('fcRepAviso').textContent = Math.abs(suma - total) > 0.01 ? 'El reparto suma ' + pesos(suma) + ' y el total es ' + pesos(total) + '.' : '';
+}
+let F931_GUARDANDO = false;
+async function guardarF931(){
+  if (F931_GUARDANDO) return;
+  const conceptos = [...document.querySelectorAll('.fc-imp')].map(i => ({ codigo: i.dataset.cod, nombre: i.dataset.nom, monto: Number(i.value) || 0 })).filter(c => c.monto > 0);
+  if (!conceptos.length) { error('Cargá al menos un importe.'); return; }
+  if (!$('fcCuenta').value) { error('Elegí la caja o el banco de donde sale el pago.'); return; }
+  const reparto = [...document.querySelectorAll('.fc-rep')].map(i => ({ orgId: i.dataset.org, monto: Number(i.value) || 0 }));
+  F931_GUARDANDO = true; $('fcBtn').disabled = true;
+  try{
+    const r = await api('POST', '/f931', Object.assign({ periodo: $('fcPeriodo').value, fecha: $('fcFecha').value, vep: $('fcVep').value, transaccion: $('fcTrans').value, conceptos, reparto }, cuentaElegida('fcCuenta')));
+    exito('F.931 registrado por ' + pesos(r.total) + '.');
+    pintarFormF931(); await cargarF931();
+  }catch(e){ error(e); }
+  F931_GUARDANDO = false; if ($('fcBtn')) $('fcBtn').disabled = false;
+}
+async function cargarF931(){
+  let d; try{ d = await api('GET', '/f931?periodo=' + $('fcPeriodo').value); }catch(e){ error(e); return; }
+  $('err').innerHTML = '';
+  $('fcLista').innerHTML = d.f931.map(f => '<tr' + (f.estado === 'anulado' ? ' style="opacity:.55"' : '') + '><td>' + fmtF(f.fecha) + '</td><td>' + escapeHtml(f.vep || '—') + (f.transaccion ? ' <span class="muted">· ' + escapeHtml(f.transaccion) + '</span>' : '') + '</td><td class="n">' + pesos(f.total) + '</td><td class="muted" style="font-size:12px">' + f.reparto.map(r => escapeHtml(r.orgNombre || '') + ' ' + pesos(r.monto)).join(' · ') + '</td><td>' + (f.estado === 'anulado' ? 'Anulado' : 'Pagado') + '</td><td>' + (f.estado === 'anulado' ? '' : '<button class="btn secondary" onclick="anularF931(\'' + f._id + '\')">Anular</button>') + '</td></tr>').join('') || '<tr><td colspan="6" class="muted">Todavía no cargaste el F.931 de este período.</td></tr>';
+  $('fcControl').innerHTML = d.control.map(c => '<tr><td>' + escapeHtml(c.sucursal) + '</td><td class="n">' + pesos(c.liquidado) + '</td><td class="n">' + pesos(c.pagado) + '</td><td class="n">' + pesos(c.diferencia) + '</td></tr>').join('') || '<tr><td colspan="4" class="muted">Sin datos para este período.</td></tr>';
+}
+async function anularF931(id){
+  const motivo = prompt('Motivo de la anulación (opcional). Se revierte el egreso de caja/banco.'); if (motivo === null) return;
+  try{ await api('POST', '/f931/' + id + '/anular', { motivo }); exito('F.931 anulado.'); await cargarF931(); }catch(e){ error(e); }
+}
 </script>
 </body>
 </html>

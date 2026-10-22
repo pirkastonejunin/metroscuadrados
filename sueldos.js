@@ -1140,5 +1140,145 @@ router.post('/mover-sucursal', authSueldosLectura, async (req, res) => {
   } catch (e) { responder(res, e); }
 });
 
+
+// ---------------------------------------------------------------------------
+// Cargas sociales (F.931) — 22/10/2026, pedido de Mato: el pago del F.931 (VEP) se carga acá, desde Sueldos, y se
+// prorratea entre las sucursales con porcentajes fijos. La plata sale UNA sola vez, del banco/caja elegido (egreso de
+// Tesorería); cada sucursal ve su parte como costo en el Estado de resultados (sin deudas entre sucursales).
+// Para el período del F.931, ese monto REEMPLAZA a las cargas sociales estimadas de las liquidaciones (informes.js);
+// mientras no esté cargado, el resultado sigue usando lo liquidado.
+// Colecciones: sueldos_f931 { periodo, fecha, vep, transaccion, conceptos:[{codigo,nombre,monto}], total,
+//   reparto:[{orgId, orgNombre, pct, monto}], cuentaTipo, cuentaId, movimientoId, orgPagadoraId, estado
+//   (activo|anulado), usuarioNombre, createdAt }; sueldos_f931_config { clave:'reparto', reparto:[{orgId, pct}] }.
+// ---------------------------------------------------------------------------
+const CONCEPTOS_F931 = [
+  { codigo: '351', nombre: 'Contribuciones Seg. Social' }, { codigo: '301', nombre: 'Empleador - Aportes Seg. Social' },
+  { codigo: '352', nombre: 'Contribuciones Obra Social' }, { codigo: '302', nombre: 'Aportes Obras Sociales' },
+  { codigo: '312', nombre: 'Aseg. Riesgo de Trabajo (Ley 24557)' }, { codigo: '28', nombre: 'Seguro de Vida Colectivo' }
+];
+async function repartoConfig(db) {
+  const c = await db.collection('sueldos_f931_config').findOne({ clave: 'reparto' });
+  return (c && c.reparto) || [];
+}
+// Reparte `total` según los % (el último absorbe el redondeo). Devuelve [{orgId, pct, monto}].
+function repartirPorPct(total, reparto) {
+  const out = []; let acum = 0;
+  reparto.forEach((r, i) => {
+    const m = i === reparto.length - 1 ? r2(total - acum) : r2(total * Number(r.pct) / 100);
+    acum = r2(acum + m); out.push({ orgId: r.orgId, pct: Number(r.pct), monto: m });
+  });
+  return out;
+}
+router.get('/f931/config', authSueldosLectura, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const orgs = await db.collection('organizaciones').find({}).project({ nombre: 1 }).sort({ nombre: 1 }).toArray();
+      const reparto = await repartoConfig(db);
+      const pct = new Map(reparto.map(r => [String(r.orgId), Number(r.pct)]));
+      return { conceptos: CONCEPTOS_F931, sucursales: orgs.map(o => ({ _id: String(o._id), nombre: o.nombre, pct: pct.has(String(o._id)) ? pct.get(String(o._id)) : 0 })), configurado: reparto.length > 0 };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+router.put('/f931/config', authSueldosLectura, async (req, res) => {
+  try {
+    const lista = Array.isArray((req.body || {}).reparto) ? req.body.reparto : [];
+    const reparto = lista.map(r => ({ orgId: toObjectId(r.orgId), pct: r2(Number(r.pct) || 0) })).filter(r => r.orgId && r.pct > 0);
+    if (!reparto.length) throw err(400, 'Cargá el porcentaje de al menos una sucursal.');
+    const suma = r2(reparto.reduce((s, r) => s + r.pct, 0));
+    if (Math.abs(suma - 100) > 0.01) throw err(400, 'Los porcentajes tienen que sumar 100 (ahora suman ' + suma + ').');
+    await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('sueldos_f931_config').updateOne({ clave: 'reparto' }, { $set: { clave: 'reparto', reparto, updatedAt: new Date(), por: (req.usuario && req.usuario.nombre) || '' } }, { upsert: true });
+    });
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+// Lista de F.931 de un período + control contra las cargas sociales liquidadas (por sucursal).
+router.get('/f931', authSueldosLectura, async (req, res) => {
+  try {
+    const periodo = validarPeriodo(req.query.periodo || periodoActual());
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const lista = await db.collection('sueldos_f931').find({ periodo }).sort({ fecha: -1, createdAt: -1 }).toArray();
+      const liq = await db.collection('sueldos_liquidaciones').aggregate([{ $match: { periodo } }, { $group: { _id: '$orgId', cargas: { $sum: '$cargasSociales' } } }]).toArray();
+      const orgs = Object.fromEntries((await db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()).map(o => [String(o._id), o.nombre]));
+      const activos = lista.filter(f => f.estado !== 'anulado');
+      const pagadoPorOrg = {};
+      activos.forEach(f => (f.reparto || []).forEach(r => { pagadoPorOrg[String(r.orgId)] = r2((pagadoPorOrg[String(r.orgId)] || 0) + r.monto); }));
+      const control = {};
+      liq.forEach(l => { control[String(l._id)] = { liquidado: r2(l.cargas), pagado: 0 }; });
+      Object.keys(pagadoPorOrg).forEach(k => { control[k] = Object.assign(control[k] || { liquidado: 0 }, { pagado: pagadoPorOrg[k] }); });
+      return {
+        periodo,
+        f931: lista.map(f => Object.assign({}, f, { _id: String(f._id), cuentaId: f.cuentaId ? String(f.cuentaId) : null, reparto: (f.reparto || []).map(r => Object.assign({}, r, { orgId: String(r.orgId) })) })),
+        control: Object.keys(control).map(k => ({ orgId: k, sucursal: orgs[k] || '', liquidado: control[k].liquidado || 0, pagado: control[k].pagado || 0, diferencia: r2((control[k].pagado || 0) - (control[k].liquidado || 0)) })).sort((a, b) => a.sucursal.localeCompare(b.sucursal, 'es'))
+      };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+router.post('/f931', authSueldosLectura, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal estás trabajando: es la que paga (de ahí sale el egreso de Tesorería).');
+    const periodo = validarPeriodo(b.periodo);
+    const fechaISO = b.fecha || hoyAR();
+    const fecha = fechaDe(fechaISO);
+    const conceptos = (Array.isArray(b.conceptos) ? b.conceptos : []).map(c => ({ codigo: texto(c.codigo), nombre: texto(c.nombre), monto: monto(c.monto, 'El importe de ' + (texto(c.nombre) || texto(c.codigo) || 'un concepto')) })).filter(c => c.monto > 0);
+    if (!conceptos.length) throw err(400, 'Cargá al menos un concepto con importe.');
+    conceptos.forEach(c => { if (!c.nombre) { const k = CONCEPTOS_F931.find(x => x.codigo === c.codigo); c.nombre = k ? k.nombre : (c.codigo || 'Concepto'); } });
+    const total = r2(conceptos.reduce((s, c) => s + c.monto, 0));
+    const vep = texto(b.vep), transaccion = texto(b.transaccion);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      if (vep && await db.collection('sueldos_f931').findOne({ vep, estado: { $ne: 'anulado' } })) throw err(409, 'Ya cargaste un F.931 con ese número de VEP.');
+      // Reparto: si vino editado se valida que sume el total; si no, se calcula con los porcentajes fijos.
+      let reparto;
+      if (Array.isArray(b.reparto) && b.reparto.length) {
+        reparto = b.reparto.map(r => ({ orgId: toObjectId(r.orgId), pct: null, monto: monto(r.monto, 'El importe de una sucursal') })).filter(r => r.orgId && r.monto > 0);
+        const suma = r2(reparto.reduce((s, r) => s + r.monto, 0));
+        if (Math.abs(suma - total) > 0.01) throw err(400, 'El reparto entre sucursales suma ' + suma + ' y el F.931 es ' + total + '.');
+        reparto.forEach(r => { r.pct = total ? r2(r.monto / total * 100) : 0; });
+      } else {
+        const cfg = await repartoConfig(db);
+        if (!cfg.length) throw err(400, 'Primero configurá los porcentajes de reparto entre sucursales.');
+        reparto = repartirPorPct(total, cfg);
+      }
+      const orgs = Object.fromEntries((await db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()).map(o => [String(o._id), o.nombre]));
+      reparto.forEach(r => { r.orgNombre = orgs[String(r.orgId)] || ''; });
+      const dd = fecha.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+      const mov = await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: total, motivo: 'Cargas sociales F.931 ' + periodo + (vep ? ' · VEP ' + vep : ''), observaciones: transaccion ? 'Transacción ' + transaccion : '', origen: 'f931', fecha });
+      const doc = { periodo, fecha, vep, transaccion, conceptos, total, reparto, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), movimientoId: mov && mov._id, orgPagadoraId: req.orgId, estado: 'activo', nota: texto(b.nota), usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date() };
+      const ins = await db.collection('sueldos_f931').insertOne(doc);
+      return { _id: String(ins.insertedId), total, reparto: reparto.map(r => Object.assign({}, r, { orgId: String(r.orgId) })), fecha: dd };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+router.post('/f931/:id/anular', authSueldosLectura, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const motivo = texto((req.body || {}).motivo);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const f = await db.collection('sueldos_f931').findOne({ _id: id });
+      if (!f) throw err(404, 'F.931 no encontrado.');
+      if (f.estado === 'anulado') throw err(400, 'Ese F.931 ya está anulado.');
+      const marca = await db.collection('sueldos_f931').updateOne({ _id: id, estado: { $ne: 'anulado' } }, { $set: { estado: 'anulado', anuladoEn: new Date(), anuladoPor: (req.usuario && req.usuario.nombre) || '', anuladoMotivo: motivo } });
+      if (!marca.modifiedCount) throw err(409, 'Ese F.931 ya se estaba anulando.');
+      try {
+        await tesoreria.revertirEgresoPago(db, Object.assign({}, req, { orgId: f.orgPagadoraId || req.orgId }), { movimientoId: f.movimientoId || null, cuentaTipo: f.cuentaTipo, cuentaId: f.cuentaId, monto: f.total, origen: 'f931', motivo: 'Cargas sociales F.931 ' + f.periodo, fecha: f.fecha, motivoAnulacion: motivo });
+      } catch (e) {
+        await db.collection('sueldos_f931').updateOne({ _id: id }, { $set: { estado: 'activo' }, $unset: { anuladoEn: '', anuladoPor: '', anuladoMotivo: '' } });
+        throw e;
+      }
+      return { ok: true };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+
 module.exports = router;
 module.exports.SECTORES = SECTORES;

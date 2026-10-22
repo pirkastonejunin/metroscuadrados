@@ -341,11 +341,22 @@ async function resultadosOrg(db, orgId, d0, d1) {
   // Producción: ya está dentro del costo de los productos (solo informativo); el resto es gasto.
   const SECTORES = { obra: 'Obra', produccion: 'Producción', administracion: 'Administración', ventas: 'Ventas', logistica: 'Logística', otro: 'Otros' };
   const periodos = mesesEntre(fechaAR(d0), fechaAR(d1));
-  const liqs = await db.collection('sueldos_liquidaciones').find({ orgId, periodo: { $in: periodos } }).project({ periodo: 1, sector: 1, costoEmpresa: 1 }).toArray();
+  const liqs = await db.collection('sueldos_liquidaciones').find({ orgId, periodo: { $in: periodos } }).project({ periodo: 1, sector: 1, costoEmpresa: 1, cargasSociales: 1 }).toArray();
+  // Cargas sociales reales (F.931, 22/10/2026): para un período con F.931 cargado, la parte prorrateada de esta sucursal
+  // REEMPLAZA a las cargas sociales estimadas de sus liquidaciones (no se cuentan dos veces).
+  const f931 = await db.collection('sueldos_f931').find({ estado: { $ne: 'anulado' }, periodo: { $in: periodos }, 'reparto.orgId': orgId }).toArray();
+  const conF931 = new Set(f931.map(f => f.periodo));
   liqs.forEach(l => {
     const m = mes(l.periodo);
-    if (l.sector === 'produccion' && !sueldosGasto) m.enCosto += Number(l.costoEmpresa || 0);
-    else { const c = 'Sueldos y cargas · ' + (SECTORES[l.sector] || 'Otros'); m.gastos[c] = (m.gastos[c] || 0) + Number(l.costoEmpresa || 0); }
+    const costo = Number(l.costoEmpresa || 0) - (conF931.has(l.periodo) ? Number(l.cargasSociales || 0) : 0);
+    if (l.sector === 'produccion' && !sueldosGasto) m.enCosto += costo;
+    else { const c = 'Sueldos y cargas · ' + (SECTORES[l.sector] || 'Otros'); m.gastos[c] = (m.gastos[c] || 0) + costo; }
+  });
+  f931.forEach(f => {
+    const r = (f.reparto || []).find(x => String(x.orgId) === String(orgId));
+    if (!r) return;
+    const c = 'Sueldos y cargas · Cargas sociales y aportes';
+    mes(f.periodo).gastos[c] = (mes(f.periodo).gastos[c] || 0) + Number(r.monto || 0);
   });
   if (colocacionGasto) {
     const obras = await db.collection('obras').aggregate([
