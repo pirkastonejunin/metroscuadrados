@@ -10,6 +10,7 @@
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
+<script src="/factura-ia-ui.js"></script>
 <style>
   :root{
     --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
@@ -645,7 +646,7 @@ async function guardarCfgF931(){
 }
 function pintarFormF931(){
   const filas = F931CFG.conceptos.map(c => '<tr><td>' + c.codigo + '</td><td>' + escapeHtml(c.nombre) + '</td><td class="n"><input type="number" min="0" step="0.01" class="fc-imp" data-cod="' + c.codigo + '" data-nom="' + escapeHtml(c.nombre) + '" style="width:140px;text-align:right"></td></tr>').join('');
-  $('fcForm').innerHTML = '<h3>Cargar pago de F.931</h3><div class="form">' +
+  $('fcForm').innerHTML = '<h3>Cargar pago de F.931</h3>' + FacturaIAUI.cajaHtml('fc', 'Subí el comprobante de pago (PDF o foto del VEP): la IA completa fecha, VEP, transacción e importes. Revisá todo antes de registrar.', '🧾 Leer comprobante con IA') + '<div class="form">' +
     '<div><label>Fecha de pago</label><input type="date" id="fcFecha" value="' + hoyISO() + '"></div>' +
     '<div><label>Nº de VEP</label><input id="fcVep" autocomplete="off"></div>' +
     '<div><label>Nº de transacción</label><input id="fcTrans" autocomplete="off"></div>' +
@@ -655,6 +656,23 @@ function pintarFormF931(){
     '<div class="acciones" style="margin-top:10px"><button class="btn" id="fcBtn" onclick="guardarF931()">Registrar pago</button></div>';
   [...document.querySelectorAll('.fc-imp')].forEach(i => i.addEventListener('input', () => { F931REP_EDITADO = false; repartoF931(); }));
   F931REP_EDITADO = false; repartoF931();
+  FacturaIAUI.registrar('fc', { url: BASE + '/f931/leer', headers: () => headersAuth({'Content-Type':'application/json'}), alResultado: aplicarComprobanteF931 });
+}
+function aplicarComprobanteF931(d){
+  if (d.fecha) $('fcFecha').value = d.fecha;
+  if (d.vep) $('fcVep').value = d.vep;
+  if (d.transaccion) $('fcTrans').value = d.transaccion;
+  if (d.periodo && $('fcPeriodo').value !== d.periodo) { $('fcPeriodo').value = d.periodo; cargarF931(); }
+  const av = (d.avisos || []).slice();
+  const conocidos = {}; document.querySelectorAll('.fc-imp').forEach(i => { i.value = ''; conocidos[i.dataset.cod] = i; });
+  d.conceptos.forEach(c => {
+    if (conocidos[c.codigo]) conocidos[c.codigo].value = c.monto;
+    else av.push('Concepto ' + c.codigo + (c.nombre ? ' (' + c.nombre + ')' : '') + ' por ' + pesos(c.monto) + ' no está en la lista: cargalo a mano si corresponde.');
+  });
+  F931REP_EDITADO = false; repartoF931();
+  const total = totalF931();
+  if (d.total && Math.abs(total - d.total) > 0.5) av.push('La suma de los conceptos (' + pesos(total) + ') no coincide con el total del comprobante (' + pesos(d.total) + '). Revisá los importes.');
+  FacturaIAUI.avisos('fc', av);
 }
 function totalF931(){ return Math.round([...document.querySelectorAll('.fc-imp')].reduce((s, i) => s + (Number(i.value) || 0), 0) * 100) / 100; }
 function repartoF931(){

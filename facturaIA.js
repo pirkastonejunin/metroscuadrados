@@ -690,7 +690,40 @@ async function leerChequesConIA({ base64, mimeType, nombreArchivo }) {
   return { cheques, avisos: Array.isArray(crudo.avisos) ? crudo.avisos.map(String) : [] };
 }
 
+const INSTRUCCIONES_F931 = `Sos un asistente que lee comprobantes de pago de cargas sociales argentinas (VEP / F.931 de ARCA-AFIP: aportes y contribuciones de la seguridad social), por ejemplo el comprobante de Banco Provincia, Link o Interbanking.
+Extraé con la herramienta "registrar_f931":
+- "fecha": fecha del pago AAAA-MM-DD.
+- "vep": número de VEP.
+- "transaccion": número de transacción / operación / comprobante bancario.
+- "periodo": período devengado AAAA-MM si figura.
+- "conceptos": una fila por cada concepto/impuesto del VEP con "codigo" (ej. 351, 301, 352, 302, 312, 28), "nombre" y "monto" (número en pesos, sin símbolos ni separadores de miles, decimal con punto).
+- "total": importe total pagado.
+- Si un dato no figura, dejalo vacío (0 en montos): nunca inventes. Si el archivo no es un comprobante de este tipo, poné esComprobante en false.
+- En "avisos" anotá dudas de lectura en frases cortas.`;
+const HERRAMIENTA_F931 = {
+  name: 'registrar_f931',
+  description: 'Registra los datos del pago de F.931.',
+  input_schema: { type: 'object', properties: {
+    esComprobante: { type: 'boolean' }, fecha: { type: 'string' }, vep: { type: 'string' }, transaccion: { type: 'string' }, periodo: { type: 'string' },
+    conceptos: { type: 'array', items: { type: 'object', properties: { codigo: { type: 'string' }, nombre: { type: 'string' }, monto: { type: 'number' } }, required: ['codigo', 'monto'] } },
+    total: { type: 'number' }, avisos: { type: 'array', items: { type: 'string' } }
+  }, required: ['esComprobante', 'conceptos'] }
+};
+async function leerF931ConIA({ base64, mimeType, nombreArchivo }) {
+  const contenido = await armarContenidoArchivo({ base64, mimeType, nombreArchivo });
+  const crudo = await llamarIA(contenido, { instrucciones: INSTRUCCIONES_F931, herramienta: HERRAMIENTA_F931, pedido: 'Leé este comprobante de pago de F.931 / VEP y registrá sus datos.' });
+  if (!crudo || crudo.esComprobante === false || !Array.isArray(crudo.conceptos) || !crudo.conceptos.length) throw err(400, 'No encontré un comprobante de F.931/VEP en ese archivo. Probá con una foto más nítida o con el PDF.');
+  const fechaOk = f => /^\d{4}-\d{2}-\d{2}$/.test(String(f || '')) ? String(f) : '';
+  const conceptos = crudo.conceptos.map(c => ({ codigo: String(c.codigo || '').replace(/\D/g, ''), nombre: String(c.nombre || '').trim(), monto: redondear2(c.monto) })).filter(c => c.codigo && c.monto > 0);
+  return {
+    fecha: fechaOk(crudo.fecha), vep: String(crudo.vep || '').trim(), transaccion: String(crudo.transaccion || '').trim(),
+    periodo: /^\d{4}-\d{2}$/.test(String(crudo.periodo || '')) ? String(crudo.periodo) : '',
+    conceptos, total: redondear2(crudo.total), avisos: Array.isArray(crudo.avisos) ? crudo.avisos.map(String) : []
+  };
+}
+
 module.exports = {
+  leerF931ConIA,
   leerChequesConIA,
   registrarRutasFacturaIA,
   // Expuestos para pruebas:

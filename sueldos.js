@@ -1169,6 +1169,13 @@ function repartirPorPct(total, reparto) {
   });
   return out;
 }
+router.post('/f931/leer', authSueldosLectura, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.archivoBase64) return res.status(400).json({ error: 'Falta el archivo.' });
+    res.json(await require('./facturaIA').leerF931ConIA({ base64: b.archivoBase64, mimeType: b.mimeType, nombreArchivo: b.nombreArchivo }));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message || 'No se pudo leer el comprobante.' }); }
+});
 router.get('/f931/config', authSueldosLectura, async (req, res) => {
   try {
     const out = await conReintento(async () => {
