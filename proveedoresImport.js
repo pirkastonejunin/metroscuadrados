@@ -206,7 +206,13 @@ function reglaParaCliente(r) {
 async function proveedorDeOrg(db, req) {
   const id = oid(req.params.id);
   if (!id) throw err(400, 'id inválido');
-  const p = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+  let p = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+  // (22/10/2026) Un administrador puede estar parado en otra sucursal (o en "todas" operando con una distinta de la del
+  // proveedor): en vez de "Proveedor no encontrado", se opera con la sucursal propia del proveedor.
+  if (!p && req.usuario && req.usuario.rol && req.usuario.rol.protegido) {
+    p = await db.collection('proveedores').findOne({ _id: id });
+    if (p && p.orgId) { req.orgId = p.orgId; req.vistaTodas = false; }
+  }
   if (!p) throw err(404, 'Proveedor no encontrado');
   return p;
 }
