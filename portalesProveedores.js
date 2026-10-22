@@ -275,7 +275,11 @@ async function leerCatalogoVigorita(cred, maxPaginas, porPagina) {
 
 async function filasVigorita(cred, opciones) {
   const productos = await leerCatalogoVigorita(cred);
-  if (!productos.length) throw err(502, 'El catálogo de Vigorita vino vacío.');
+  return filasDeProductosVigorita(productos, opciones);
+}
+// (22/10/2026) También sirve para un archivo bajado a mano desde el portal (carga manual, cuando el portal bloquea al sistema).
+function filasDeProductosVigorita(productos, opciones) {
+  if (!Array.isArray(productos) || !productos.length) throw err(502, 'El catálogo de Vigorita vino vacío.');
   const monedaRegla = (opciones && opciones.moneda) || 'USD';
   return productos.map(filaDeProductoVigorita).filter(f => f.codigo).map(f => {
     const m = f.moneda || monedaRegla;
@@ -306,4 +310,4 @@ async function muestraDePortal(portal) {
   if (!portal.usuario || !portal.claveCifrada) throw err(400, 'Faltan el usuario y la clave del portal en la ficha del proveedor.');
   return con.muestra({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' });
 }
-module.exports = { bultoDeProducto, muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso, filaDeProductoVigorita };
+module.exports = { bultoDeProducto, muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso, filaDeProductoVigorita, filasDeProductosVigorita };

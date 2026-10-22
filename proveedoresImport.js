@@ -470,13 +470,49 @@ async function calcular(db, req, prov, regla, filas) {
   return { cambios, sinMatch, duplicados, sinPrecio, aCero, resumen, deposito, listas, cotizacion };
 }
 
+
+// Carga manual del portal (22/10/2026): si el portal bloquea al sistema (protección anti-robots), el archivo bajado a mano
+// desde el navegador se guarda acá y "Actualizar desde el portal" lo usa durante unas horas en vez de entrar al portal.
+const HORAS_CARGA_MANUAL = 6;
+async function filasDePortalProv(db, prov, regla) {
+  const carga = await db.collection('portal_cargas_manuales').findOne({ proveedorId: prov._id });
+  if (carga && prov.portal && carga.tipo === prov.portal.tipo && Date.now() - new Date(carga.createdAt).getTime() < HORAS_CARGA_MANUAL * 3600 * 1000) {
+    if (carga.tipo === 'vigorita') return portales.filasDeProductosVigorita(carga.productos, { moneda: regla && regla.moneda });
+  }
+  return portales.filasDePortal(prov.portal, regla);
+}
+router.post('/:id/portal/carga-manual', authAdmin, async (req, res) => {
+  try {
+    const productos = (req.body || {}).productos;
+    if (!Array.isArray(productos) || !productos.length) throw err(400, 'El archivo no trae productos: bajalo de nuevo con el código indicado.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeOrg(db, req);
+      if (!prov.portal) throw err(400, 'Primero guardá la conexión del portal en esta ficha.');
+      if (prov.portal.tipo !== 'vigorita') throw err(400, 'La carga manual todavía solo está disponible para Vigorita.');
+      if (!productos.some(x => x && x.sku && x.prices)) throw err(400, 'El archivo no parece ser el catálogo de Vigorita (faltan sku y precios). Bajalo de nuevo con el código indicado, entrando con tu usuario.');
+      const limpios = productos.filter(x => x && typeof x === 'object').map(x => ({
+        sku: x.sku, name: x.name,
+        prices: x.prices ? { price: x.prices.price, regular_price: x.prices.regular_price, currency_minor_unit: x.prices.currency_minor_unit } : null,
+        tags: (x.tags || []).map(t => ({ name: t && t.name })),
+        attributes: (x.attributes || []).map(a => ({ name: a && a.name, terms: ((a && a.terms) || []).slice(0, 1).map(t => ({ name: t && t.name })) })),
+        images: (x.images || []).slice(0, 5).map(i => ({ src: i && i.src })),
+        categories: (x.categories || []).map(c => ({ name: c && c.name }))
+      }));
+      await db.collection('portal_cargas_manuales').updateOne({ proveedorId: prov._id }, { $set: { orgId: prov.orgId, proveedorId: prov._id, tipo: prov.portal.tipo, productos: limpios, createdAt: new Date(), por: (req.usuario && req.usuario.nombre) || '' } }, { upsert: true });
+      return { productos: limpios.length, horas: HORAS_CARGA_MANUAL };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 async function prepararCalculo(req) {
   const db = await getDb();
   const prov = await proveedorDeOrg(db, req);
   if (!prov.reglaImport) throw err(400, 'Primero guardá la regla de importación de este proveedor.');
   const regla = prov.reglaImport;
   const desdePortal = !!(req.body || {}).desdePortal;
-  const filas = desdePortal ? await portales.filasDePortal(prov.portal, regla) : filasDeArchivo((req.body || {}).archivoBase64, regla);
+  const filas = desdePortal ? await filasDePortalProv(db, prov, regla) : filasDeArchivo((req.body || {}).archivoBase64, regla);
   if (!filas.length) throw err(400, desdePortal ? 'El portal no devolvió productos.' : 'No encontré filas con código en el archivo. Revisá la fila de encabezado y la columna de código.');
   const calc = await calcular(db, req, prov, regla, filas);
   return { db, prov, regla, calc };
@@ -664,7 +700,7 @@ router.post('/:id/equivalencias', authAdmin, async (req, res) => {
       if (!prov.reglaImport) throw err(400, 'Primero guardá la regla de importación de este proveedor.');
       const regla = prov.reglaImport;
       const desdePortal = !!(req.body || {}).desdePortal;
-      const filas = desdePortal ? await portales.filasDePortal(prov.portal, regla) : filasDeArchivo((req.body || {}).archivoBase64, regla);
+      const filas = desdePortal ? await filasDePortalProv(db, prov, regla) : filasDeArchivo((req.body || {}).archivoBase64, regla);
       const productos = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1 }).toArray();
       const campo = regla.matchPor === 'sku' ? 'sku' : 'codigoExterno';
       const codigosLista = new Set(filas.map(f => codigoClave(f.codigo)));

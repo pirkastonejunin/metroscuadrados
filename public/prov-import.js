@@ -100,9 +100,35 @@
       '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">Si el portal pide código de verificación en dos pasos</summary>' +
         '<div style="margin-top:6px"><label>Secreto del autenticador (la clave de texto que muestra al configurar la app)</label><input id="pptDosPasos" type="password" autocomplete="off" placeholder="' + (p && p.tieneDosPasos ? '•••• (guardado)' : 'Opcional') + '">' +
         '<div class="muted" style="font-size:12px;margin-top:4px">Con esto el sistema genera el código solo. Si preferís no guardarlo, pedile al proveedor un usuario para el sistema sin dos pasos.</div></div></details>' +
+      (p && p.tipo === 'vigorita' ? '<details style="margin-top:10px"><summary class="muted" style="cursor:pointer">Si el portal bloquea al sistema (error 403): cargar la lista a mano</summary>' +
+        '<div style="margin-top:6px;font-size:13px"><ol style="margin:0 0 8px 18px;padding:0"><li>Entrá a <b>vigorita.com.ar</b> en tu navegador e iniciá sesión con tu usuario.</li><li>En esa misma pestaña abrí la consola (Mac: Cmd+Opción+J, Windows: Ctrl+Mayús+J), pegá el código de abajo y apretá Enter. Se descarga el archivo <b>vigorita-productos.json</b>.</li><li>Subí ese archivo acá y después tocá <b>Actualizar desde el portal</b>.</li></ol>' +
+        '<textarea id="pptCodigoManual" readonly rows="3" style="width:100%;font-size:11px;font-family:monospace">' + E(CODIGO_VIGORITA) + '</textarea>' +
+        '<div class="row" style="margin-top:6px;gap:8px"><button type="button" class="btn secondary small" onclick="pimpCopiarCodigo()">Copiar código</button><input type="file" id="pptArchivoManual" accept=".json,application/json" onchange="pimpSubirCargaManual()"></div>' +
+        '<div class="err" id="pptManualErr"></div><div class="ok-msg" id="pptManualOk"></div></div></details>' : '') +
       '<div class="err" id="pptErr"></div><div class="ok-msg" id="pptOk"></div>' +
       '<div class="row" style="margin-top:8px;gap:8px"><button type="button" class="btn" onclick="pimpGuardarPortal()">Guardar conexión</button>' + (p ? '<button type="button" class="btn secondary" onclick="pimpQuitarPortal()">Quitar</button>' : '') + '</div></div></details>';
   }
+  var CODIGO_VIGORITA = "(async()=>{let t=[];for(let p=1;p<=200;p++){const r=await fetch('/wp-json/wc/store/v1/products?per_page=100&page='+p,{credentials:'include'});if(!r.ok)break;const j=await r.json();if(!Array.isArray(j)||!j.length)break;t.push(...j);if(j.length<100)break}const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(t)],{type:'application/json'}));a.download='vigorita-productos.json';a.click();console.log(t.length+' productos')})()";
+  window.pimpCopiarCodigo = function () {
+    var t = document.getElementById('pptCodigoManual'); if (!t) return;
+    t.select(); try { document.execCommand('copy'); } catch (e) {}
+    if (navigator.clipboard) navigator.clipboard.writeText(t.value).catch(function () {});
+    document.getElementById('pptManualOk').textContent = 'Código copiado.';
+  };
+  window.pimpSubirCargaManual = async function () {
+    var inp = document.getElementById('pptArchivoManual'), er = document.getElementById('pptManualErr'), ok = document.getElementById('pptManualOk');
+    er.textContent = ''; ok.textContent = '';
+    if (!inp || !inp.files || !inp.files[0]) return;
+    try {
+      var texto = await new Promise(function (res, rej) { var r = new FileReader(); r.onload = function () { res(String(r.result)); }; r.onerror = function () { rej(new Error('No se pudo leer el archivo.')); }; r.readAsText(inp.files[0]); });
+      var productos; try { productos = JSON.parse(texto); } catch (e) { throw new Error('El archivo no es válido: bajalo de nuevo con el código.'); }
+      ok.textContent = 'Subiendo…';
+      var d = await pedir('/' + estado.id + '/portal/carga-manual', { method: 'POST', body: JSON.stringify({ productos: productos }) });
+      ok.textContent = 'Listo: ' + d.productos + ' productos cargados. Ahora tocá "Actualizar desde el portal" (vale por ' + d.horas + ' horas).';
+    } catch (e) { ok.textContent = ''; er.textContent = e.message; }
+    inp.value = '';
+  };
+
   window.pimpGuardarPortal = async function () {
     var err = document.getElementById('pptErr'), ok = document.getElementById('pptOk'); err.textContent = ''; ok.textContent = '';
     try {
