@@ -390,6 +390,29 @@ async function productoPorSku(store, sku) {
   return null;
 }
 
+// Cielorraso: los artículos están en el catálogo del sistema (productos_catalogo), no en Tiendanube. Se busca por SKU exacto
+// (sin distinguir mayúsculas) y el precio sale de la lista predeterminada (Consumidor Final) de la organización del producto.
+const CATEGORIAS_CIELO = ['tablaCielo', 'perimetralCielo', 'soleraCielo', 'montanteCielo', 'tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo'];
+async function productoPorSkuSistema(sku) {
+  const db = await getDb();
+  const limpio = String(sku || '').trim();
+  if (!limpio) return null;
+  const rx = new RegExp('^' + limpio.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
+  const p = await db.collection('productos_catalogo').findOne({ sku: rx, activo: { $ne: false } });
+  if (!p) return null;
+  let precio = p.precio != null ? Number(p.precio) : null;
+  try {
+    const lista = await db.collection('productos_listas_precio').findOne({ predeterminada: true, orgId: p.orgId });
+    if (lista) {
+      const cotDoc = await db.collection('config_general').findOne({ orgId: p.orgId, clave: 'cotizacionDolar' });
+      const r = require('./productos').precioResuelto(p, lista, cotDoc ? cotDoc.valor : null);
+      if (r && r.precio != null) precio = Number(r.precio);
+    }
+  } catch (e) { /* si falla, queda el precio simple del producto */ }
+  return { nombre: p.nombre || ('SKU ' + limpio), precio: (precio != null && !isNaN(precio)) ? precio : null, imagen: null };
+}
+const buscarArticulo = (store, categoria, sku) => (CATEGORIAS_CIELO.indexOf(categoria) >= 0 ? productoPorSkuSistema(sku) : productoPorSku(store, sku));
+
 // Helper exportado para otros módulos (30/9/2026, pedido de Mato: en la
 // ficha de Productos, si ese producto está publicado en Tiendanube, mostrar
 // un link a su página pública y sus fotos). Busca por SKU exacto en la
@@ -936,7 +959,7 @@ async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
   } catch (e) { item = null; }
   if (!item) return null;
 
-  const info = await productoPorSku(store, item.sku);
+  const info = await buscarArticulo(store, categoria, item.sku);
   if (!info || info.precio === null) return null;
 
   return {
@@ -1444,13 +1467,13 @@ router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
 
     const resultado = [];
     for (const it of items) {
-      const info = await productoPorSku(store, it.sku);
+      const info = await buscarArticulo(store, categoria, it.sku);
       resultado.push({
         id: it._id,
         sku: it.sku,
         cobertura: Number(it.cobertura) || 1,
         ancho: Number(it.ancho) || 0,
-        nombre: info ? info.nombre : ('SKU ' + it.sku + ' (no encontrado en Tiendanube)'),
+        nombre: info ? info.nombre : ('SKU ' + it.sku + (CATEGORIAS_CIELO.indexOf(categoria) >= 0 ? ' (no encontrado en Productos)' : ' (no encontrado en Tiendanube)')),
         precio: info ? info.precio : null,
         imagen: info ? info.imagen : null
       });
@@ -1470,8 +1493,8 @@ router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
     }
     if (!sku) return res.status(400).json({ error: 'Falta el SKU.' });
 
-    const info = await productoPorSku(store, sku);
-    if (!info) return res.status(404).json({ error: 'No se encontro ningun producto con ese SKU en Tiendanube.' });
+    const info = await buscarArticulo(store, categoria, sku);
+    if (!info) return res.status(404).json({ error: CATEGORIAS_CIELO.indexOf(categoria) >= 0 ? 'No se encontró ningún producto activo con ese SKU en Productos.' : 'No se encontro ningun producto con ese SKU en Tiendanube.' });
 
     const datos = {
       store_id: store.store_id,
@@ -2278,3 +2301,4 @@ module.exports.getStoreById = getStoreById;
 module.exports.API_BASE = API_BASE;
 module.exports.apiHeaders = apiHeaders;
 module.exports.nombreLocalizado = nombreLocalizado;
+module.exports.productoPorSkuSistema = productoPorSkuSistema; // exportado para tests

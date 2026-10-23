@@ -503,7 +503,7 @@
           <p class="hint">Estos ítems no tienen rubro propio en Tiendanube: se cargan una sola vez por SKU y quedan disponibles solo para este tipo de obra, con precio siempre actualizado.</p>
           <div id="cfg-catalogo-lista"></div>
           <div class="grid" style="margin-top:10px;">
-            <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
+            <div class="field"><label id="cat_sku_label">SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
             <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="0.01" step="any" value="1"></div>
             <div class="field hidden" id="cat_ancho_wrap"><label>Ancho de la tabla (m)</label><input type="number" id="cat_ancho" min="0.01" step="any" placeholder="Ej: 0.20"></div>
           </div>
@@ -2882,6 +2882,7 @@ $$('.catsub-btn').forEach(b => {
 function prepararFormCatalogoCielo(){
   const esTabla = categoriaActivaCatalogo === 'tablaCielo';
   $('#cat_ancho_wrap').classList.toggle('hidden', !esTabla);
+  $('#cat_sku_label').textContent = gestionandoTipoObraCategoria === 'cielorraso' ? 'SKU del producto en el sistema' : 'SKU en Tiendanube';
   $('#cat_ancho').value = '';
   if (['tablaCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = '';
   else if (['perimetralCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 3;
