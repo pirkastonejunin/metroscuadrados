@@ -880,7 +880,19 @@ router.get('/colocadores', authSueldosLectura, async (req, res) => {
       if (orgS && !(c && c.sucursalSueldoId ? String(c.sucursalSueldoId) === orgS : String(t.obraOrgId) === orgS)) return false;
       return !yaCargado.has(String(t.obraId) + '|' + String(t.colocadorId));
     }).map(t => ({ obra: t.obra, obraId: String(t.obraId), tipoTrabajo: t.tipoTrabajo, m2: t.m2, fecha: t.fecha, colocadorId: String(t.colocadorId), colocador: (infoC.get(String(t.colocadorId)) || {}).nombre || '' }));
-    res.json({ periodo, especialesSinCargar, colocadores: filas, totales: { m2: sum('m2'), devengado: sum('devengado'), pendienteLiquidar: sum('pendienteLiquidar'), liquidado: sum('liquidado'), pagado: sum('pagado'), saldo: sum('saldo') } });
+    // Obras terminadas con colocador cuyas tareas no cuentan por estar incompletas (tarea sin terminar o sin fecha de fin).
+    const incompletas = await db2.collection('obras').aggregate([
+      { $match: { estado: 'terminada' } }, { $unwind: '$tareas' },
+      { $match: { 'tareas.colocadorId': { $ne: null }, 'tareas.sinCostoM2': { $ne: true }, $or: [{ 'tareas.estado': { $ne: 'terminada' } }, { 'tareas.fechaFinReal': null }, { 'tareas.fechaFinReal': { $exists: false } }] } },
+      { $project: { numero: 1, orgId: 1, cliente: '$cliente.nombre', updatedAt: 1, t: '$tareas' } }
+    ]).toArray();
+    const { d0: pd0, d1: pd1 } = rangoPeriodo(periodo);
+    const tareasIncompletas = incompletas.filter(f => {
+      const c = infoC.get(String(f.t.colocadorId));
+      if (orgS && !(c && c.sucursalSueldoId ? String(c.sucursalSueldoId) === orgS : String(f.orgId) === orgS)) return false;
+      return f.updatedAt && new Date(f.updatedAt) >= new Date(pd0.getTime() - 45 * 86400e3);
+    }).map(f => ({ obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', colocador: (infoC.get(String(f.t.colocadorId)) || {}).nombre || '', motivo: f.t.estado !== 'terminada' ? 'tarea en estado ' + (f.t.estado || '-') : 'sin fecha de fin' }));
+    res.json({ periodo, especialesSinCargar, tareasIncompletas, colocadores: filas, totales: { m2: sum('m2'), devengado: sum('devengado'), pendienteLiquidar: sum('pendienteLiquidar'), liquidado: sum('liquidado'), pagado: sum('pagado'), saldo: sum('saldo') } });
   } catch (e) { responder(res, e); }
 });
 
