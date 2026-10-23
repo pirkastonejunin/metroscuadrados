@@ -875,6 +875,43 @@ function ambienteTxtCielo(i, a, sentidoTxt, r) {
     (r.montantes ? ' · ' + r.montantes + ' montantes de ' + fmCielo(r.Wt) + ' m' : '');
 }
 
+// Recomendación de qué tablas usar para desperdiciar menos: prueba todas las combinaciones de largos disponibles (mismo ancho) con el
+// sentido elegido en cada ambiente. tablas: [{ id, largo, ancho }], seleccionIds: ids elegidos hoy (opcional).
+function recomendarTablasCielo(ambientes, tablas, seleccionIds) {
+  ambientes = (ambientes || []).map((a) => ({ largo: Number(a.largo) || 0, ancho: Number(a.ancho) || 0, sentido: a.sentido === 'ancho' ? 'ancho' : 'largo' })).filter((a) => a.largo > 0 && a.ancho > 0);
+  tablas = (tablas || []).filter((t) => Number(t.largo) > 0 && Number(t.ancho) > 0);
+  if (!ambientes.length || !tablas.length) return null;
+  const anchoTabla = Number(tablas[0].ancho);
+  tablas = tablas.filter((t) => Math.abs(Number(t.ancho) - anchoTabla) < 1e-9);
+  const largos = Array.from(new Set(tablas.map((t) => Number(t.largo)))).sort((a, b) => a - b);
+  const m2Obra = ambientes.reduce((acc, a) => acc + a.largo * a.ancho, 0);
+  const evaluar = (set, usarMejorSentido) => {
+    let comprados = 0; const sentidos = [];
+    for (const a of ambientes) {
+      const op = { largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, set, false, 2.6), ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, set, false, 2.6) };
+      const elegido = usarMejorSentido
+        ? (op.largo && op.ancho ? (op.largo.m2Tablas <= op.ancho.m2Tablas ? 'largo' : 'ancho') : (op.largo ? 'largo' : 'ancho'))
+        : a.sentido;
+      if (!op[elegido]) return null;
+      comprados += op[elegido].m2Tablas; sentidos.push(elegido);
+    }
+    return { largos: set, comprados: round2(comprados), sobrante: round2(comprados - m2Obra), pct: round2((comprados - m2Obra) / m2Obra * 100), sentidos };
+  };
+  let mejor = null;
+  for (let mask = 1; mask < (1 << largos.length); mask++) {
+    const set = largos.filter((_, i) => mask & (1 << i));
+    const r = evaluar(set, false);
+    if (!r) continue;
+    if (!mejor || r.comprados < mejor.comprados - 1e-9 || (Math.abs(r.comprados - mejor.comprados) < 1e-9 && set.length < mejor.largos.length)) mejor = r;
+  }
+  if (!mejor) return null;
+  const mejorConSentido = evaluar(mejor.largos, true);
+  let actual = null;
+  const sel = Array.from(new Set(tablas.filter((t) => (seleccionIds || []).map(String).indexOf(String(t.id)) >= 0).map((t) => Number(t.largo)))).sort((a, b) => a - b);
+  if (sel.length) actual = evaluar(sel, false);
+  return { anchoTabla, m2Obra: round2(m2Obra), mejor, mejorConSentido, actual, sentidosElegidos: ambientes.map((a) => a.sentido) };
+}
+
 function calcularItemsCielo({ obra, productos, tarifas: t }) {
   const items = []; const faltantes = []; const avisos = [];
   let totalProductos = 0; let totalManoObra = 0;
@@ -1627,6 +1664,18 @@ router.post('/tipos-obra/:tipoObraId/tarifas', async (req, res) => {
 // Rutas: calcular / guardar / historial / pdf
 // =====================================================================
 
+router.post('/tipos-obra/:tipoObraId/cielorraso/recomendar', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const { obra, seleccionIds } = req.body || {};
+    const items = await (await getTipoObraItemsCollection()).find({ store_id: store.store_id, tipoObraId: String(req.params.tipoObraId), categoria: 'tablaCielo' }).toArray();
+    const tablas = items.map((it) => ({ id: String(it._id), largo: Number(it.cobertura), ancho: Number(it.ancho) }));
+    res.json(recomendarTablasCielo(obra && obra.ambientes, tablas, seleccionIds) || {});
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 router.post('/calcular', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
@@ -2336,3 +2385,5 @@ module.exports.API_BASE = API_BASE;
 module.exports.apiHeaders = apiHeaders;
 module.exports.nombreLocalizado = nombreLocalizado;
 module.exports.productoPorSkuSistema = productoPorSkuSistema; // exportado para tests
+
+module.exports.recomendarTablasCielo = recomendarTablasCielo; // exportado para tests
