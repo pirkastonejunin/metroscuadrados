@@ -2128,6 +2128,8 @@ async function actualizarRecomendacionCielo(){
     const m = d.mejor, a = d.actual;
     const largosTxt = l => { const t = l.map(x => fmL(x) + ' m'); return t.length > 1 ? t.slice(0, -1).join(', ') + ' y ' + t[t.length - 1] : t[0]; };
     let html = '<strong>💡 Recomendación para desperdiciar menos:</strong> usá tablas de ' + largosTxt(m.largos) + ' — se compran ' + fmL(m.comprados) + ' m² para ' + fmL(d.m2Obra) + ' m² de obra (sobran ' + fmL(m.sobrante) + ' m², ' + fmL(m.pct) + '%).';
+    if (m.cortes && m.cortes.length) html += '<br>Cortes: ' + m.cortes.map(escapeHtml).join(' · ') + '.';
+    if (m.alternativas && m.alternativas.length) html += '<br>Con el mismo desperdicio también podés usar: ' + m.alternativas.slice(0, 3).map(l => 'solo tablas de ' + largosTxt(l)).join('; ') + '.';
     const igual = a && a.largos.join() === m.largos.join();
     if (a && !igual){
       html += '<br>Con lo que tenés elegido (' + largosTxt(a.largos) + ') se compran ' + fmL(a.comprados) + ' m²' + (a.comprados > m.comprados + 0.01 ? ' (' + fmL(a.comprados - m.comprados) + ' m² más).' : ' (el mismo desperdicio).');

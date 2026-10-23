@@ -811,56 +811,114 @@ const SEPARACION_CIELO_M = 0.4; // fijaciones a la pared (tarugo + N8)
 const SEPARACION_MONTANTES_M = 0.6;
 const GRILLA_CIELO = 20; // 1 unidad = 5 cm
 
-// Cómo cubrir una fila de largo L con piezas enteras o medias de las tablas disponibles (menor sobrante; a igualdad, menos piezas y menos mitades).
-function planFilaCielo(L, largosStock) {
-  const piezas = [];
-  largosStock.forEach((S) => {
-    piezas.push({ stock: S, mitad: false, u: Math.round(S * GRILLA_CIELO) });
-    piezas.push({ stock: S, mitad: true, u: Math.round(S / 2 * GRILLA_CIELO) });
+// ---- Corte de tablas ----
+// Cada fila de tablas (de largo L, el lado paralelo al que van) se arma con una o varias piezas, cortadas de tablas enteras de 4/5/6 m (las que haya).
+// Una tabla se puede cortar en varias piezas (ej. de 6 m salen 3 de 2 m; de 4 m salen 2 de 2 m; con L = 3,5 m se usa la de 4 m y sobran 0,5 m).
+// Si L es mayor que la tabla más larga, la fila se arma con 2 o más piezas unidas con unión H. Las sobras se reaprovechan entre filas.
+const UCIELO = 20; // 1 unidad = 5 cm
+const PIEZA_MIN_U = 10; // pieza mínima: 50 cm
+const uCielo = (m) => Math.round(m * UCIELO);
+const mCielo = (u) => u / UCIELO;
+
+// Cómo repartir el largo L (en unidades) en piezas: 1 pieza si entra en la tabla más larga; si no, n piezas (n mínimo) con distintos largos candidatos.
+function descomposicionesCielo(Lu, smaxU, stocksU) {
+  const n = Math.ceil(Lu / smaxU - 1e-9);
+  if (n <= 1) return [[Lu]];
+  const cand = new Set([Math.ceil(Lu / n)]);
+  stocksU.forEach((S) => { for (let m = 1; m <= 4; m++) cand.add(Math.floor(S / m)); });
+  const out = []; const vistos = new Set();
+  cand.forEach((x) => {
+    if (x <= 0 || x > smaxU) return;
+    const r = Lu - (n - 1) * x;
+    if (r < PIEZA_MIN_U || x < PIEZA_MIN_U || r > smaxU) return; // no se arman piezas de menos de 50 cm
+    const arr = new Array(n - 1).fill(x).concat([r]);
+    const k = arr.slice().sort((a, b) => a - b).join(',');
+    if (!vistos.has(k)) { vistos.add(k); out.push(arr); }
   });
-  const meta = Math.ceil(L * GRILLA_CIELO - 1e-9);
-  const maxU = Math.max.apply(null, piezas.map((p) => p.u));
-  const tope = meta + maxU;
-  const costo = new Array(tope + 1).fill(Infinity);
-  const eleccion = new Array(tope + 1).fill(-1);
-  costo[0] = 0;
-  for (let s = 1; s <= tope; s++) {
-    piezas.forEach((p, i) => {
-      if (p.u > s || costo[s - p.u] === Infinity) return;
-      const c = costo[s - p.u] + 1000 + (p.mitad ? 1 : 0);
-      if (c < costo[s]) { costo[s] = c; eleccion[s] = i; }
-    });
-  }
-  let objetivo = -1;
-  for (let s = meta; s <= tope; s++) if (costo[s] !== Infinity) { objetivo = s; break; }
-  if (objetivo < 0) return null;
-  const usadas = [];
-  for (let s = objetivo; s > 0; s -= piezas[eleccion[s]].u) usadas.push(piezas[eleccion[s]]);
-  return { piezas: usadas, comprado: objetivo / GRILLA_CIELO };
+  if (!out.length) { const x = Math.ceil(Lu / n); out.push(new Array(n - 1).fill(x).concat([Lu - (n - 1) * x])); }
+  return out;
 }
 
+// Empaqueta piezas {largoU: cantidad} en tablas enteras (stocksU): en cada tabla nueva se prueba cada largo y se llena con el mejor subconjunto de
+// piezas pendientes (menor sobrante). Devuelve { comprado (unidades), barras: {S: cantidad}, patrones: [{ S, piezas: [u...], cantidad }] }.
+function empaquetarConStocks(conteo, stocksU) {
+  const resto = {}; Object.keys(conteo).forEach((k) => { if (conteo[k] > 0) resto[k] = conteo[k]; });
+  const barras = {}; const patrones = {}; let comprado = 0;
+  const pendientes = () => Object.keys(resto).filter((k) => resto[k] > 0).map(Number).sort((a, b) => b - a);
+  let guarda = 0;
+  while (pendientes().length && guarda++ < 5000) {
+    const ls = pendientes();
+    let mejor = null;
+    stocksU.forEach((S) => {
+      const items = [];
+      ls.forEach((l) => { if (l > S) return; const n = Math.min(resto[l], Math.floor(S / l)); for (let i = 0; i < n; i++) items.push(l); });
+      if (!items.length) return;
+      const via = new Array(S + 1).fill(-1); const alcanzable = new Array(S + 1).fill(false); alcanzable[0] = true;
+      items.forEach((l, i) => { for (let s = S; s >= l; s--) if (!alcanzable[s] && alcanzable[s - l]) { alcanzable[s] = true; via[s] = i; } });
+      let usado = S; while (usado > 0 && !alcanzable[usado]) usado--;
+      const sobra = S - usado;
+      if (!mejor || sobra < mejor.sobra || (sobra === mejor.sobra && usado > mejor.usado) || (sobra === mejor.sobra && usado === mejor.usado && S < mejor.S)) {
+        const piezas = []; let s = usado; while (s > 0) { const l = items[via[s]]; piezas.push(l); s -= l; }
+        mejor = { S, usado, sobra, piezas };
+      }
+    });
+    if (!mejor) break;
+    mejor.piezas.forEach((l) => { resto[l] -= 1; });
+    barras[mejor.S] = (barras[mejor.S] || 0) + 1; comprado += mejor.S;
+    const key = mejor.S + ':' + mejor.piezas.slice().sort((a, b) => b - a).join(',');
+    if (!patrones[key]) patrones[key] = { S: mejor.S, piezas: mejor.piezas.slice().sort((a, b) => b - a), cantidad: 0 };
+    patrones[key].cantidad += 1;
+  }
+  if (pendientes().length) return null; // hay una pieza más larga que cualquier tabla disponible
+  return { comprado, barras, patrones: Object.keys(patrones).map((k) => patrones[k]) };
+}
+
+// Prueba también cada subconjunto de los largos disponibles y se queda con el que menos tabla compra (a igualdad, menos tablas):
+// el armado "tabla por tabla" no siempre es el mejor (ej.: 10 piezas de 2 m salen mejor de 5 tablas de 4 m que de 3 de 6 m + 1 de 4 m).
+function empaquetarCielo(conteo, stocksU) {
+  const unicos = Array.from(new Set(stocksU)).sort((a, b) => a - b);
+  let mejor = null;
+  for (let mask = 1; mask < (1 << unicos.length); mask++) {
+    const sub = unicos.filter((_, i) => mask & (1 << i));
+    const r = empaquetarConStocks(conteo, sub);
+    if (!r) continue;
+    const n = Object.keys(r.barras).reduce((acc, k) => acc + r.barras[k], 0);
+    if (!mejor || r.comprado < mejor.comprado || (r.comprado === mejor.comprado && n < mejor.n)) mejor = Object.assign(r, { n });
+  }
+  return mejor;
+}
+
+function sumarConteo(a, b) { Object.keys(b).forEach((k) => { a[k] = (a[k] || 0) + b[k]; }); return a; }
+
+// Una orientación de un ambiente: Lt = lado paralelo a las tablas, Wt = lado en el que se van sucediendo las filas.
 function calcularAmbienteCielo(Lt, Wt, anchoTabla, largosStock, conEstructura, largoPerfil) {
   const filas = Math.ceil(Wt / anchoTabla - 1e-9);
-  const plan = planFilaCielo(Lt, largosStock);
-  if (!plan) return null;
-  const enteras = {}; const mitades = {};
-  plan.piezas.forEach((p) => {
-    const k = String(p.stock);
-    if (p.mitad) mitades[k] = (mitades[k] || 0) + filas; else enteras[k] = (enteras[k] || 0) + filas;
+  const stocksU = largosStock.map(uCielo).sort((a, b) => a - b);
+  const smaxU = stocksU[stocksU.length - 1];
+  const Lu = uCielo(Lt);
+  let mejor = null;
+  descomposicionesCielo(Lu, smaxU, stocksU).forEach((piezasFila) => {
+    const conteo = {}; piezasFila.forEach((l) => { conteo[l] = (conteo[l] || 0) + filas; });
+    const emp = empaquetarCielo(conteo, stocksU);
+    if (!emp) return;
+    const nBarras = Object.keys(emp.barras).reduce((acc, k) => acc + emp.barras[k], 0);
+    if (!mejor || emp.comprado < mejor.emp.comprado || (emp.comprado === mejor.emp.comprado && nBarras < mejor.nBarras)) mejor = { piezasFila, conteo, emp, nBarras };
   });
+  if (!mejor) return null;
   const montantes = Math.ceil(Lt / SEPARACION_MONTANTES_M - 1e-9) + 1;
   const piezasPorMontante = Math.max(1, Math.ceil(Wt / largoPerfil - 1e-9));
+  const juntasPorFila = mejor.piezasFila.length - 1;
   const r = {
-    Lt, Wt, filas, plan, enteras, mitades,
-    m2Tablas: round2(plan.comprado * filas * anchoTabla),
+    Lt, Wt, filas, piezasFila: mejor.piezasFila.map(mCielo), conteo: mejor.conteo, juntasPorFila,
+    compradoM: mCielo(mejor.emp.comprado),
+    m2Tablas: round2(mCielo(mejor.emp.comprado) * anchoTabla),
     perimetroMl: 2 * (Lt + Wt),
     montantes, piezasPorMontante,
+    // La solera corre por todo el perímetro, pegada al perimetral: una sola fijación (tarugo + N8) cada 0,40 m para las dos.
     solerasMl: 2 * (Lt + Wt),
-    juntasPorFila: plan.piezas.length - 1,
-    unionHMl: (plan.piezas.length - 1) * Wt,
+    unionHMl: juntasPorFila * Wt,
     montantesMl: montantes * Wt,
     empalmes: montantes * (piezasPorMontante - 1),
-    // La solera corre por todo el perímetro, pegada al perimetral: una sola fijación (tarugo + N8) cada 0,40 m para las dos.
     fijacionesPerimetral: Math.ceil(2 * (Lt + Wt) / SEPARACION_CIELO_M - 1e-9)
   };
   r.t1Montantes = 4 * montantes + 4 * r.empalmes;
@@ -869,14 +927,23 @@ function calcularAmbienteCielo(Lt, Wt, anchoTabla, largosStock, conEstructura, l
 }
 
 const fmCielo = (n) => String(round2(n)).replace('.', ',');
-function ambienteTxtCielo(i, a, sentidoTxt, r) {
-  const piezas = r.plan.piezas.map((p) => (p.mitad ? '½ de ' : '') + fmCielo(p.stock) + ' m').join(' + ');
-  return 'Ambiente ' + (i + 1) + ' (' + fmCielo(a.largo) + ' x ' + fmCielo(a.ancho) + ' m): tablas paralelas al lado de ' + fmCielo(sentidoTxt) + ' m → ' + r.filas + ' filas de ' + piezas + ' (sobran ' + fmCielo(r.plan.comprado - r.Lt) + ' m por fila)' +
+function ambienteTxtCielo(i, a, r) {
+  const piezas = r.piezasFila.length === 1 ? 'una pieza de ' + fmCielo(r.piezasFila[0]) + ' m' : r.piezasFila.length + ' piezas (' + r.piezasFila.map((p) => fmCielo(p) + ' m').join(' + ') + ', unidas con unión H)';
+  return 'Ambiente ' + (i + 1) + ' (' + fmCielo(a.largo) + ' x ' + fmCielo(a.ancho) + ' m): tablas paralelas al lado de ' + fmCielo(r.Lt) + ' m → ' + r.filas + ' filas, cada una con ' + piezas +
     (r.montantes ? ' · ' + r.montantes + ' montantes de ' + fmCielo(r.Wt) + ' m' : '');
 }
+function patronesTxtCielo(patrones) {
+  return patrones.slice().sort((a, b) => a.S - b.S || b.cantidad - a.cantidad).map((p) => {
+    const cortes = p.piezas.map(mCielo);
+    const agrup = {}; cortes.forEach((c) => { agrup[c] = (agrup[c] || 0) + 1; });
+    const txt = Object.keys(agrup).map(Number).sort((x, y) => y - x).map((c) => (agrup[c] > 1 ? agrup[c] + ' de ' : '1 de ') + fmCielo(c) + ' m').join(' + ');
+    const sobra = mCielo(p.S) - cortes.reduce((acc, c) => acc + c, 0);
+    return p.cantidad + ' tabla' + (p.cantidad === 1 ? '' : 's') + ' de ' + fmCielo(mCielo(p.S)) + ' m → ' + txt + (sobra > 0.001 ? ' (sobran ' + fmCielo(sobra) + ' m)' : '');
+  });
+}
 
-// Recomendación de qué tablas usar para desperdiciar menos: prueba todas las combinaciones de largos disponibles (mismo ancho) con el
-// sentido elegido en cada ambiente. tablas: [{ id, largo, ancho }], seleccionIds: ids elegidos hoy (opcional).
+// Recomendación de qué tablas usar para desperdiciar menos: prueba todas las combinaciones de largos disponibles (mismo ancho) con el sentido elegido
+// en cada ambiente. tablas: [{ id, largo, ancho }], seleccionIds: ids elegidos hoy (opcional).
 function recomendarTablasCielo(ambientes, tablas, seleccionIds) {
   ambientes = (ambientes || []).map((a) => ({ largo: Number(a.largo) || 0, ancho: Number(a.ancho) || 0, sentido: a.sentido === 'ancho' ? 'ancho' : 'largo' })).filter((a) => a.largo > 0 && a.ancho > 0);
   tablas = (tablas || []).filter((t) => Number(t.largo) > 0 && Number(t.ancho) > 0);
@@ -886,25 +953,39 @@ function recomendarTablasCielo(ambientes, tablas, seleccionIds) {
   const largos = Array.from(new Set(tablas.map((t) => Number(t.largo)))).sort((a, b) => a - b);
   const m2Obra = ambientes.reduce((acc, a) => acc + a.largo * a.ancho, 0);
   const evaluar = (set, usarMejorSentido) => {
-    let comprados = 0; const sentidos = [];
+    const total = {}; const sentidos = []; const stocksU = set.map(uCielo); let hayUniones = false;
     for (const a of ambientes) {
       const op = { largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, set, false, 2.6), ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, set, false, 2.6) };
       const elegido = usarMejorSentido
-        ? (op.largo && op.ancho ? (op.largo.m2Tablas <= op.ancho.m2Tablas ? 'largo' : 'ancho') : (op.largo ? 'largo' : 'ancho'))
+        ? (op.largo && op.ancho ? (op.largo.m2Tablas < op.ancho.m2Tablas - 1e-9 ? 'largo' : (op.ancho.m2Tablas < op.largo.m2Tablas - 1e-9 ? 'ancho' : a.sentido)) : (op.largo ? 'largo' : 'ancho'))
         : a.sentido;
       if (!op[elegido]) return null;
-      comprados += op[elegido].m2Tablas; sentidos.push(elegido);
+      sumarConteo(total, op[elegido].conteo); sentidos.push(elegido); if (op[elegido].juntasPorFila > 0) hayUniones = true;
     }
-    return { largos: set, comprados: round2(comprados), sobrante: round2(comprados - m2Obra), pct: round2((comprados - m2Obra) / m2Obra * 100), sentidos };
+    const emp = empaquetarCielo(total, stocksU.sort((x, y) => x - y));
+    if (!emp) return null;
+    const comprados = round2(mCielo(emp.comprado) * anchoTabla);
+    return { largos: set, comprados, sobrante: round2(comprados - m2Obra), pct: round2((comprados - m2Obra) / m2Obra * 100), sentidos, conUniones: hayUniones, cortes: patronesTxtCielo(emp.patrones) };
   };
+  // Si con todas las tablas disponibles se pueden armar las filas sin uniones, no se recomiendan combinaciones que obliguen a empalmar.
+  const todas = evaluar(largos, false);
+  const permitirUniones = !!(todas && todas.conUniones);
   let mejor = null;
   for (let mask = 1; mask < (1 << largos.length); mask++) {
     const set = largos.filter((_, i) => mask & (1 << i));
     const r = evaluar(set, false);
-    if (!r) continue;
+    if (!r || (r.conUniones && !permitirUniones)) continue;
     if (!mejor || r.comprados < mejor.comprados - 1e-9 || (Math.abs(r.comprados - mejor.comprados) < 1e-9 && set.length < mejor.largos.length)) mejor = r;
   }
   if (!mejor) return null;
+  const alternativas = [];
+  for (let mask = 1; mask < (1 << largos.length); mask++) {
+    const set = largos.filter((_, i) => mask & (1 << i));
+    if (set.join() === mejor.largos.join()) continue;
+    const r = evaluar(set, false);
+    if (r && (permitirUniones || !r.conUniones) && Math.abs(r.comprados - mejor.comprados) < 0.01 && r.cortes.join('|') !== mejor.cortes.join('|')) alternativas.push(set);
+  }
+  mejor.alternativas = alternativas;
   const mejorConSentido = evaluar(mejor.largos, true);
   let actual = null;
   const sel = Array.from(new Set(tablas.filter((t) => (seleccionIds || []).map(String).indexOf(String(t.id)) >= 0).map((t) => Number(t.largo)))).sort((a, b) => a - b);
@@ -939,7 +1020,7 @@ function calcularItemsCielo({ obra, productos, tarifas: t }) {
   if (faltantes.length) return { items, faltantes, totalProductos, totalManoObra, avisos, detalle: [] };
 
   const largoPerfil = conEstructura ? Math.min(Number(productos.soleraCielo.cobertura) || 2.6, Number(productos.montanteCielo.cobertura) || 2.6) : 2.6;
-  const tot = { enteras: {}, mitades: {}, perimetroMl: 0, solerasMl: 0, montantesMl: 0, empalmes: 0, montantes: 0, fijaciones: 0, t1: 0, m2: 0, unionHMl: 0 };
+  const tot = { conteo: {}, perimetroMl: 0, solerasMl: 0, montantesMl: 0, empalmes: 0, montantes: 0, fijaciones: 0, t1: 0, m2: 0, unionHMl: 0 };
   const detalle = [];
   ambientes.forEach((a, i) => {
     const op = {
@@ -948,13 +1029,12 @@ function calcularItemsCielo({ obra, productos, tarifas: t }) {
     };
     const elegido = op[a.sentido]; const otro = op[a.sentido === 'largo' ? 'ancho' : 'largo'];
     if (!elegido) { avisos.push('Ambiente ' + (i + 1) + ': no se pudo armar el plan de tablas.'); return; }
-    detalle.push(ambienteTxtCielo(i, a, elegido.Lt, elegido));
+    detalle.push(ambienteTxtCielo(i, a, elegido));
     if (otro && Math.abs(otro.m2Tablas - elegido.m2Tablas) > 0.01) {
       const dif = round2(otro.m2Tablas - elegido.m2Tablas);
       detalle.push('   Con las tablas paralelas al lado de ' + fmCielo(otro.Lt) + ' m se compran ' + fmCielo(otro.m2Tablas) + ' m² de tablas (' + (dif > 0 ? '+' : '') + fmCielo(dif) + ' m² vs. la opción elegida).');
     }
-    Object.keys(elegido.enteras).forEach((k) => { tot.enteras[k] = (tot.enteras[k] || 0) + elegido.enteras[k]; });
-    Object.keys(elegido.mitades).forEach((k) => { tot.mitades[k] = (tot.mitades[k] || 0) + elegido.mitades[k]; });
+    sumarConteo(tot.conteo, elegido.conteo);
     tot.perimetroMl += elegido.perimetroMl;
     tot.m2 += a.largo * a.ancho;
     tot.unionHMl += elegido.unionHMl;
@@ -967,15 +1047,19 @@ function calcularItemsCielo({ obra, productos, tarifas: t }) {
 
   if (tot.unionHMl > 0 && !productos.unionHCielo) { faltantes.push('unionHCielo'); return { items, faltantes, totalProductos, totalManoObra, avisos, detalle }; }
   const agregar = (it) => { items.push(it); totalProductos += it.subtotal; };
-  largosStock.forEach((S) => {
-    const k = String(S);
-    const barras = (tot.enteras[k] || 0) + Math.ceil((tot.mitades[k] || 0) / 2 - 1e-9);
-    if (!barras) return;
-    const p = stockPorLargo[k];
-    const it = calcularItem({ rubro: 'Tablas de cielorraso ' + S + ' m', unidadObra: 'u', cantidadObra: barras, producto: Object.assign({}, p, { cobertura: Number(p.porCaja) > 1 ? Number(p.porCaja) : 1, envase: Number(p.porCaja) > 1 ? 'caja' : 'unidad', categoria: 'Tablas de cielorraso' }), desperdicioPct: pct });
-    agregar(it);
-    if (tot.mitades[k]) detalle.push('Tablas de ' + fmCielo(S) + ' m: ' + (tot.enteras[k] || 0) + ' enteras + ' + tot.mitades[k] + ' mitades (' + fmCielo(S / 2) + ' m) = ' + barras + ' tablas.');
-  });
+  // Se arman las tablas a comprar con todas las piezas de todos los ambientes juntas (las sobras se reaprovechan entre ambientes).
+  const emp = empaquetarCielo(tot.conteo, largosStock.map(uCielo).sort((x, y) => x - y));
+  if (emp) {
+    largosStock.forEach((S) => {
+      const barras = emp.barras[uCielo(S)] || 0;
+      if (!barras) return;
+      const p = stockPorLargo[String(S)];
+      agregar(calcularItem({ rubro: 'Tablas de cielorraso ' + fmCielo(S) + ' m', unidadObra: 'u', cantidadObra: barras, producto: Object.assign({}, p, { cobertura: Number(p.porCaja) > 1 ? Number(p.porCaja) : 1, envase: Number(p.porCaja) > 1 ? 'caja' : 'unidad', categoria: 'Tablas de cielorraso' }), desperdicioPct: pct }));
+    });
+    detalle.push('Cortes de tablas: ' + patronesTxtCielo(emp.patrones).join(' · ') + '.');
+  } else {
+    avisos.push('No se pudo armar el plan de tablas con los largos elegidos.');
+  }
   if (tot.unionHMl > 0) {
     agregar(calcularItem({ rubro: 'Unión H', unidadObra: 'ml', cantidadObra: tot.unionHMl, producto: productos.unionHCielo, desperdicioPct: pct }));
     detalle.push('Unión H: ' + fmCielo(tot.unionHMl) + ' m en total (una por cada empalme de tablas en el recorrido).');
