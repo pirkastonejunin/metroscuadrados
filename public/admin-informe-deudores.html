@@ -190,11 +190,13 @@ async function cargar(){
   } else {
     const max = Math.max(1, ...d.filas.map(f => f.saldo));
     $('tHead').innerHTML = '<tr><th>Cliente</th><th class="n">Comprob.</th><th class="n">0-30 días</th><th class="n">31-60 días</th><th class="n">61-90 días</th><th class="n">+90 días</th><th class="n" title="Días del comprobante más viejo con saldo.">Más viejo</th><th class="n">% del total</th><th class="n">Saldo</th></tr>';
-    $('tBody').innerHTML = d.filas.map((f, i) => '<tr class="clic" data-i="' + i + '" title="Ver los comprobantes de ' + escapeHtml(f.nombre) + '"><td>' + escapeHtml(f.nombre) + '</td><td class="n">' + f.comprobantes + '</td>' + celda(f.t0) + celda(f.t1) + celda(f.t2) + celda(f.t3, 'venc') + '<td class="n ' + (f.masAntiguo > 90 ? 'venc' : '') + '">' + f.masAntiguo + ' d</td><td class="n">' + f.participacion.toLocaleString('es-AR', {maximumFractionDigits:1}) + ' %</td><td class="n"><div class="barra-imp"><div class="pista"><div style="width:' + f.saldo / max * 100 + '%"></div></div>' + pesos(f.saldo) + '</div></td></tr>').join('');
+    $('tBody').innerHTML = d.filas.map((f, i) => '<tr class="clic" data-i="' + i + '" title="Ver la cuenta corriente de ' + escapeHtml(f.nombre) + '"><td>' + escapeHtml(f.nombre) + '</td><td class="n">' + f.comprobantes + '</td>' + celda(f.t0) + celda(f.t1) + celda(f.t2) + celda(f.t3, 'venc') + '<td class="n ' + (f.masAntiguo > 90 ? 'venc' : '') + '">' + f.masAntiguo + ' d</td><td class="n">' + f.participacion.toLocaleString('es-AR', {maximumFractionDigits:1}) + ' %</td><td class="n"><div class="barra-imp"><div class="pista"><div style="width:' + f.saldo / max * 100 + '%"></div></div>' + pesos(f.saldo) + '</div></td></tr>').join('');
     $('tFoot').innerHTML = '<tr><td>Total</td><td class="n">' + T.comprobantes + '</td><td class="n">' + pesos(T.t0) + '</td><td class="n">' + pesos(T.t1) + '</td><td class="n">' + pesos(T.t2) + '</td><td class="n">' + pesos(T.t3) + '</td><td></td><td class="n">100 %</td><td class="n">' + pesos(T.saldo) + '</td></tr>';
     $('tBody').onclick = e => {
       const tr = e.target.closest('tr.clic'); if (!tr) return;
-      $('fCuenta').value = d.filas[+tr.dataset.i].nombre;
+      const f = d.filas[+tr.dataset.i];
+      if (f.cuentaId) { window.open('/admin-clientes.html?id=' + encodeURIComponent(f.cuentaId) + '&tab=cuenta-corriente', '_blank'); return; }
+      $('fCuenta').value = f.nombre;
       VER = 'comprobante'; [...document.querySelectorAll('#seg button')].forEach(x => x.classList.toggle('on', x.dataset.a === 'comprobante')); cargar();
     };
   }
