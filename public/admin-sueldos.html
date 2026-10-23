@@ -133,38 +133,25 @@
     </div>
 
     <div class="vista hidden" id="v-col">
-      <div class="tabs" id="colTabs"><button data-s="m2" class="on">Por m² (obras)</button><button data-s="esp">Trabajos especiales</button></div>
-      <div id="col-m2">
       <div class="tb-filtros">
         <input type="month" id="cPeriodo" aria-label="Mes" onchange="cargarCol()">
         <input type="date" id="cHasta" aria-label="Liquidar hasta" title="Fecha hasta la que se liquida la semana (se liquidan las tareas terminadas hasta ese día)">
         <button data-iconizado="1" class="btn secondary" onclick="liquidarCol('parcial')" title="Liquida a todos los colocadores las tareas terminadas hasta la fecha elegida que todavía no se liquidaron">Liquidar semana</button>
         <button data-iconizado="1" class="btn secondary" onclick="liquidarCol('final')" title="Liquida todo lo que quede sin liquidar del mes y lo da por cerrado">Cerrar mes</button>
-        <span class="tb-info" title="Lo que se les paga a los colocadores por las obras: m² de cada tarea terminada por el costo por m² del colocador, en el mes en que se terminó (así figura en el Estado de resultados, como Sueldos y cargas · Obra). Cada semana hacés una liquidación parcial hasta la fecha elegida y la pagás; al final del mes, Cerrar mes liquida lo que haya quedado. Cada liquidación tiene sus propios pagos desde Tesorería.">i</span>
+        <button data-iconizado="1" class="btn" onclick="formEsp()">+ Trabajo especial</button>
+        <label class="chk"><input type="checkbox" id="espTodos" onchange="cargarCol()"> Ver trabajos especiales ya pagados</label>
+        <span class="tb-info" title="Lo que se les paga a los colocadores por las obras: m² de cada tarea terminada por el costo por m² del colocador, en el mes en que se terminó (así figura en el Estado de resultados, como Sueldos y cargas · Obra). Cada semana hacés una liquidación parcial hasta la fecha elegida y la pagás; al final del mes, Cerrar mes liquida lo que haya quedado. Cada liquidación tiene sus propios pagos desde Tesorería. Los trabajos especiales (obras a medida con monto acordado) se cargan con &quot;+ Trabajo especial&quot; y se pagan de a partes desde la ficha de cada colocador.">i</span>
       </div>
       <div class="kpis">
-        <div class="kpi main"><div class="et">Devengado del mes</div><div class="val" id="cDev">$ —</div></div>
-        <div class="kpi"><div class="et">Sin liquidar</div><div class="val" id="cPen">—</div></div>
+        <div class="kpi main"><div class="et">Obras por m² del mes</div><div class="val" id="cDev">$ —</div><div class="muted" id="cPenTxt" style="font-size:12px"></div></div>
+        <div class="kpi"><div class="et">Trabajos especiales</div><div class="val" id="eAco">—</div></div>
         <div class="kpi"><div class="et">Pagado</div><div class="val" id="cPag">—</div></div>
         <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="cSal">—</div></div>
       </div>
-      <div class="tabla"><table><thead><tr><th>Colocador</th><th class="n">m² terminados</th><th class="n">Devengado</th><th class="n">Sin liquidar</th><th class="n">Liquidado</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Sucursal</th><th></th></tr></thead><tbody id="tCol"></tbody></table></div>
-      <div class="panel hidden" id="pCol" style="margin-top:14px"></div>
-      </div>
-      <div id="col-esp" class="hidden">
-        <div class="tb-filtros">
-          <button data-iconizado="1" class="btn" onclick="formEsp()">+ Nuevo trabajo especial</button>
-          <select id="espFiltro" aria-label="Mostrar" onchange="cargarEsp()"><option value="pend">Con saldo por pagar</option><option value="todos">Todos</option></select>
-          <span class="tb-info" title="Obras atípicas que se presupuestan una por una: cargás el trabajo con el monto acordado para el colocador. Podés pagarlo de a partes (anticipos, avance, saldo) hasta completar el monto. No pasa por Liquidar semana / Cerrar mes.">i</span>
-        </div>
-        <div class="kpis">
-          <div class="kpi main"><div class="et">Monto acordado</div><div class="val" id="eAco">$ —</div></div>
-          <div class="kpi"><div class="et">Pagado</div><div class="val" id="ePag">—</div></div>
-          <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="eSal">—</div></div>
-        </div>
+      <div class="panel hidden" id="pCol"></div>
       <div class="panel hidden" id="pEsp"></div>
-      <div class="tabla"><table><thead><tr><th>Colocador</th><th>Obra / cliente</th><th>Trabajo</th><th class="n">Monto acordado</th><th class="n">Pagado</th><th class="n">Falta</th><th>Estado</th><th></th></tr></thead><tbody id="tEsp"></tbody></table></div>
-      </div>
+      <div id="cAvisos"></div>
+      <div id="listaCol"></div>
     </div>
 
     <div class="vista hidden" id="v-emp">
@@ -433,45 +420,65 @@ function iniciarCol(){
   cargarCol();
 }
 async function cargarCol(){
-  $('pCol').classList.add('hidden'); cargarEsp();
-  // la fecha "hasta" siempre cae dentro del mes mirado
+  $('pCol').classList.add('hidden');
   const per = $('cPeriodo').value, h = $('cHasta').value;
   if (!h || h.slice(0, 7) !== per) { const hoy = hoyISO(); $('cHasta').value = hoy.slice(0, 7) === per ? hoy : per + '-' + String(new Date(Number(per.slice(0, 4)), Number(per.slice(5, 7)), 0).getDate()).padStart(2, '0'); }
-  try{ COL = await api('GET', '/colocadores?periodo=' + per); }catch(e){ error(e); return; }
-  const t = COL.totales;
-  { const sc = COL.especialesSinCargar || []; let av = $('cAvisoEsp');
-    if (!av) { av = document.createElement('div'); av.id = 'cAvisoEsp'; $('cPeriodo').parentNode.insertAdjacentElement('afterend', av); }
-    const ti = COL.tareasIncompletas || [];
-    let av2 = $('cAvisoInc'); if (!av2) { av2 = document.createElement('div'); av2.id = 'cAvisoInc'; av.insertAdjacentElement('afterend', av2); }
-    av2.innerHTML = ti.length ? '<div class="aviso" style="background:#fdecec;border:1px solid #e39a9a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>Obras terminadas que no suman acá:</b> la obra figura terminada pero la tarea no.<ul style="margin:6px 0 0 18px">' + ti.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + ' (' + escapeHtml(x.motivo) + ') <button class="btn secondary" onclick="repararTarea(\'' + x.obraId + '\',\'' + x.tareaId + '\')">Marcar terminada</button></li>').join('') + '</ul>Tocá "Marcar terminada" para que cuente en este mes.</div>' : '';
-    av.innerHTML = sc.length ? '<div class="aviso" style="background:#fff7e0;border:1px solid #e6c36a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>' + sc.length + ' trabajo' + (sc.length === 1 ? '' : 's') + ' a medida terminado' + (sc.length === 1 ? '' : 's') + ' sin cargar.</b> No entran por m² (tipo "Otros"/a medida): cargalos en la pestaña <b>Trabajos especiales</b> con el monto acordado.<ul style="margin:6px 0 0 18px">' + sc.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + '</li>').join('') + '</ul></div>' : ''; }
-  $('cDev').textContent = pesos(t.devengado); $('cPen').textContent = pesos(t.pendienteLiquidar); $('cPag').textContent = pesos(t.pagado); $('cSal').textContent = pesos(t.saldo);
-  $('tCol').innerHTML = COL.colocadores.length ? COL.colocadores.map((f, i) => {
+  try{ COL = await api('GET', '/colocadores?periodo=' + per); ESP = await api('GET', '/colocadores/especiales'); }catch(e){ error(e); return; }
+  const verTodos = $('espTodos').checked;
+  const espVis = x => x.liquidada ? false : (verTodos || (x.monto - (x.totalPagado || 0)) > 0.005 || x.estado !== 'terminada' || String(x.fechaFin || '').slice(0, 7) === per);
+  const espActivos = ESP.filter(x => !x.liquidada);
+  const sumE = (arr, g) => Math.round(arr.reduce((a, x) => a + g(x), 0) * 100) / 100;
+  // Avisos (tareas que no están sumando)
+  const sc = COL.especialesSinCargar || [], ti = COL.tareasIncompletas || [];
+  $('cAvisos').innerHTML =
+    (ti.length ? '<div class="aviso" style="background:#fdecec;border:1px solid #e39a9a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>Obras terminadas que no suman acá:</b> la obra figura terminada pero la tarea no.<ul style="margin:6px 0 0 18px">' + ti.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + ' (' + escapeHtml(x.motivo) + ') <button class="btn secondary" onclick="repararTarea(\'' + x.obraId + '\',\'' + x.tareaId + '\')">Marcar terminada</button></li>').join('') + '</ul></div>' : '') +
+    (sc.length ? '<div class="aviso" style="background:#fff7e0;border:1px solid #e6c36a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>' + sc.length + ' trabajo' + (sc.length === 1 ? '' : 's') + ' a medida terminado' + (sc.length === 1 ? '' : 's') + ' sin cargar.</b> No entran por m² (tipo "Otros"/a medida): cargalos con <b>+ Trabajo especial</b> y el monto acordado.<ul style="margin:6px 0 0 18px">' + sc.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + '</li>').join('') + '</ul></div>' : '');
+  // KPIs
+  const t = COL.totales, espSal = sumE(espActivos, x => Math.max(0, x.monto - (x.totalPagado || 0)));
+  $('cDev').textContent = pesos(t.devengado); $('cPenTxt').textContent = t.pendienteLiquidar > 0 ? 'Sin liquidar: ' + pesos(t.pendienteLiquidar) : '';
+  $('eAco').textContent = pesos(sumE(espActivos.filter(espVis), x => x.monto));
+  $('cPag').textContent = pesos(t.pagado + sumE(espActivos, x => x.totalPagado || 0)); $('cSal').textContent = pesos(t.saldo + espSal);
+  // Un colocador por tarjeta: obras por m², trabajos especiales y pagos juntos
+  const lista = COL.colocadores.map((f, i) => Object.assign({ _i: i }, f));
+  ESP.filter(espVis).forEach(x => { const id = String(x.colocadorId); if (!lista.some(f => f.colocadorId === id)) lista.push({ _i: -1, colocadorId: id, nombre: x.colocadorNombre || '(desconocido)', sucursalId: '', asignado: false, tareas: [], liquidaciones: [], m2: 0, devengado: 0, pendienteLiquidar: 0, liquidado: 0, pagado: 0, saldo: 0, cerrado: false }); });
+  lista.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  $('listaCol').innerHTML = lista.length ? lista.map(f => {
     const ab = !!COL_ABIERTO[f.colocadorId];
-    const estado = f.cerrado && f.pendienteLiquidar <= 0 ? (f.saldo > 0 ? '<span class="chip par">Cerrado · debe ' + pesos(f.saldo) + '</span>' : '<span class="chip ok">Cerrado y pagado</span>') : f.saldo > 0 ? '<span class="chip par">Debe ' + pesos(f.saldo) + '</span>' : f.pendienteLiquidar > 0 ? '<span class="muted">sin liquidar</span>' : '<span class="chip ok">Al día</span>';
-    const det = ab ? '<tr class="sin"><td colspan="10" style="padding:0">' +
-      (f.liquidaciones.length ? '<table style="width:100%"><thead><tr><th>Liquidación</th><th class="n">Tareas</th><th class="n">Total</th><th class="n">Pagado</th><th class="n">Falta pagar</th><th>Estado</th><th>Pagos</th><th></th></tr></thead><tbody>' + f.liquidaciones.map(l => '<tr><td><b>' + escapeHtml(etiquetaLiq(l)) + '</b></td><td class="n">' + l.cantTareas + '</td><td class="n">' + pesos(l.total) + '</td><td class="n">' + pesos(l.totalPagado) + '</td><td class="n">' + pesos(l.saldo) + '</td><td><span class="chip ' + ESTADO[l.estado][1] + '">' + ESTADO[l.estado][0] + '</span></td><td class="muted">' + (l.pagos.map((p, k) => p.anulado ? '<s title="Pago anulado">' + fmtF(p.fecha) + ' ' + pesos(p.monto) + '</s>' : fmtF(p.fecha) + ' ' + pesos(p.monto) + ' <a href="#" title="Anular este pago" style="color:#b91c1c" onclick="event.stopPropagation();anularPagoLiq(\'' + l._id + '\',' + k + ',true);return false">anular</a>').join(' · ') || '—') + '</td><td class="acc">' + (l.saldo > 0 ? '<button class="btn" onclick="formPagoCol(\'' + l._id + '\')">Pagar</button> ' : '') + (!l.totalPagado ? '<button class="btn secondary" onclick="deshacerCol(\'' + l._id + '\')" title="Borra esta liquidación; sus tareas vuelven a quedar sin liquidar">Deshacer</button>' : '') + '</td></tr>').join('') + '</tbody></table>' : '') +
-      '<table style="width:100%"><thead><tr><th>Obra</th><th>Trabajo</th><th>Terminada</th><th class="n">m²</th><th class="n">$/m²</th><th class="n">Monto</th><th>Liquidación</th></tr></thead><tbody>' + f.tareas.map(x => { const l = f.liquidaciones.find(y => y._id === x.liquidacionId); return '<tr><td>' + escapeHtml(x.obra) + '</td><td>' + escapeHtml(x.tipoTrabajo) + '</td><td>' + fmtF(x.fecha) + '</td><td class="n">' + m2f(x.m2) + '</td><td class="n">' + pesos(x.costoPorM2) + '</td><td class="n">' + pesos(x.monto) + '</td><td>' + (x.liquidada ? '<span class="chip ok">' + escapeHtml(l ? etiquetaLiq(l) : 'liquidada') + '</span>' : '<span class="chip mal">sin liquidar</span>') + '</td></tr>'; }).join('') + '</tbody></table></td></tr>' : '';
-    return '<tr class="clic" onclick="abrirCol(\'' + f.colocadorId + '\')"><td>' + (ab ? '▾ ' : '▸ ') + escapeHtml(f.nombre) + ' <span class="muted">' + f.tareas.length + ' tarea' + (f.tareas.length === 1 ? '' : 's') + '</span></td><td class="n">' + m2f(f.m2) + '</td><td class="n">' + pesos(f.devengado) + '</td><td class="n">' + pesos(f.pendienteLiquidar) + '</td><td class="n">' + pesos(f.liquidado) + '</td><td class="n">' + pesos(f.pagado) + '</td><td class="n">' + pesos(f.saldo) + '</td><td>' + estado + '</td><td onclick="event.stopPropagation()">' + selSucursal('colocador', f.colocadorId, f.asignado ? f.sucursalId : '') + '</td><td class="acc" onclick="event.stopPropagation()">' +
-      (f.pendienteLiquidar > 0 ? '<button class="btn secondary" onclick="liquidarCol(\'parcial\',\'' + f.colocadorId + '\')">Liquidar semana</button> <button class="btn secondary" onclick="liquidarCol(\'final\',\'' + f.colocadorId + '\')">Cerrar mes</button> ' : '') + (f.saldo > 0 ? '<button class="btn" onclick="formPagoCol(null,' + i + ')">Pagar</button>' : '') + '</td></tr>' + det;
-  }).join('') : '<tr><td colspan="10" class="vacio">No hay tareas terminadas por colocadores en este mes.</td></tr>';
+    const esps = ESP.filter(x => String(x.colocadorId) === f.colocadorId && espVis(x));
+    const eSal = sumE(esps, x => Math.max(0, x.monto - (x.totalPagado || 0))), eMonto = sumE(esps, x => x.monto);
+    const falta = Math.round((f.saldo + eSal) * 100) / 100;
+    const chip = falta > 0 ? '<span class="chip par">Debe ' + pesos(falta) + '</span>' : f.pendienteLiquidar > 0 ? '<span class="chip">Sin liquidar ' + pesos(f.pendienteLiquidar) + '</span>' : '<span class="chip ok">Al día</span>';
+    const resumen = '<div style="display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:6px;font-size:13px" class="muted">' +
+      '<span>Obras por m²: <b>' + m2f(f.m2) + ' m²</b> · ' + pesos(f.devengado) + '</span>' +
+      '<span>Trabajos especiales: <b>' + esps.length + '</b> · ' + pesos(eMonto) + '</span>' +
+      '<span>Pagado: <b>' + pesos(f.pagado + sumE(esps, x => x.totalPagado || 0)) + '</b></span></div>';
+    let det = '';
+    if (ab) {
+      // 1) Obras por m²
+      const sec1 = f.tareas.length || f.pendienteLiquidar > 0 ? '<h4 style="margin:12px 0 6px;font-size:13px">Obras por m²' + (f.pendienteLiquidar > 0 ? ' <span class="acc" style="margin-left:8px"><button class="btn secondary" onclick="liquidarCol(\'parcial\',\'' + f.colocadorId + '\')">Liquidar semana</button> <button class="btn secondary" onclick="liquidarCol(\'final\',\'' + f.colocadorId + '\')">Cerrar mes</button></span>' : '') + '</h4>' +
+        '<div class="tabla"><table style="width:100%"><thead><tr><th>Obra</th><th>Trabajo</th><th>Terminada</th><th class="n">m²</th><th class="n">$/m²</th><th class="n">Monto</th><th>Estado</th></tr></thead><tbody>' + f.tareas.map(x => { const l = f.liquidaciones.find(y => y._id === x.liquidacionId); return '<tr><td>' + escapeHtml(x.obra) + '</td><td>' + escapeHtml(x.tipoTrabajo) + '</td><td>' + fmtF(x.fecha) + '</td><td class="n">' + m2f(x.m2) + '</td><td class="n">' + pesos(x.costoPorM2) + '</td><td class="n">' + pesos(x.monto) + '</td><td>' + (x.liquidada ? '<span class="chip ok">' + escapeHtml(l ? etiquetaLiq(l) : 'liquidada') + '</span>' : '<span class="chip mal">sin liquidar</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '';
+      // 2) Trabajos especiales
+      const sec2 = esps.length ? '<h4 style="margin:12px 0 6px;font-size:13px">Trabajos especiales</h4><div class="tabla"><table style="width:100%"><thead><tr><th>Obra / trabajo</th><th class="n">Acordado</th><th class="n">Pagado</th><th class="n">Falta</th><th>Estado</th><th></th></tr></thead><tbody>' + esps.map(x => { const pag = x.totalPagado || 0, sal = Math.round((x.monto - pag) * 100) / 100;
+        return '<tr><td>' + escapeHtml([x.obra, x.descripcion].filter(Boolean).join(' · ')) + '</td><td class="n">' + pesos(x.monto) + '</td><td class="n">' + pesos(pag) + '</td><td class="n">' + pesos(Math.max(0, sal)) + '</td><td>' + (x.estado === 'terminada' ? '<span class="chip">Terminado ' + fmtF(x.fechaFin) + '</span> ' : '<span class="chip">En curso</span> ') + (sal <= 0.005 ? '<span class="chip ok">Pagado</span>' : pag > 0 ? '<span class="chip par">Pago parcial</span>' : '<span class="chip mal">Sin pagar</span>') + '</td><td class="acc">' +
+          (sal > 0.005 ? '<button class="btn" onclick="formPagoEsp(\'' + x._id + '\')">Pagar</button> ' : '') + (x.estado === 'terminada' ? '<button class="btn secondary" onclick="reabrirEsp(\'' + x._id + '\')">Reabrir</button> ' : '<button class="btn secondary" onclick="terminarEsp(\'' + x._id + '\')">Marcar terminado</button> ') + '<button class="btn secondary" onclick="formEsp(\'' + x._id + '\')">Editar</button> ' + (pag > 0 ? '' : '<button class="btn secondary" title="Borrar" onclick="borrarEsp(\'' + x._id + '\')">🗑</button>') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '';
+      // 3) Pagos (liquidaciones por m² + pagos de trabajos especiales), uno debajo del otro
+      const liqs = f.liquidaciones.length ? '<div class="tabla"><table style="width:100%"><thead><tr><th>Liquidación</th><th class="n">Total</th><th class="n">Pagado</th><th class="n">Falta</th><th></th></tr></thead><tbody>' + f.liquidaciones.map(l => '<tr><td><b>' + escapeHtml(etiquetaLiq(l)) + '</b> <span class="muted">· ' + l.cantTareas + ' tarea' + (l.cantTareas === 1 ? '' : 's') + '</span></td><td class="n">' + pesos(l.total) + '</td><td class="n">' + pesos(l.totalPagado) + '</td><td class="n">' + pesos(l.saldo) + '</td><td class="acc">' + (l.saldo > 0 ? '<button class="btn" onclick="formPagoCol(\'' + l._id + '\')">Pagar</button> ' : '<span class="chip ok">Pagada</span> ') + (!l.totalPagado ? '<button class="btn secondary" onclick="deshacerCol(\'' + l._id + '\')" title="Borra esta liquidación; sus tareas vuelven a quedar sin liquidar">Deshacer</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>' : '';
+      const pagos = [];
+      f.liquidaciones.forEach(l => (l.pagos || []).forEach((p, k) => pagos.push({ f: p.fecha, m: p.monto, an: p.anulado, c: etiquetaLiq(l), accion: 'anularPagoLiq(\'' + l._id + '\',' + k + ',true)' })));
+      esps.forEach(x => (x.pagos || []).forEach((p, k) => pagos.push({ f: p.fecha, m: p.monto, an: p.anulado, c: 'Trabajo especial · ' + (x.obra || x.descripcion || ''), accion: 'anularPagoEsp(\'' + x._id + '\',' + k + ')' })));
+      pagos.sort((a, b) => new Date(a.f) - new Date(b.f));
+      const lp = pagos.length ? '<div style="margin-top:6px;font-size:13px">' + pagos.map(p => '<div style="padding:3px 0;border-top:1px solid var(--border)"' + (p.an ? ' class="muted"' : '') + '>' + (p.an ? '<s>' : '') + fmtF(p.f) + ' · ' + escapeHtml(p.c) + ' · <b>' + pesos(p.m) + '</b>' + (p.an ? '</s> <span class="chip mal">anulado</span>' : ' <a href="#" style="color:#b91c1c" onclick="' + p.accion + ';return false">anular</a>') + '</div>').join('') + '</div>' : '';
+      const sec3 = (liqs || lp) ? '<h4 style="margin:12px 0 6px;font-size:13px">Pagos</h4>' + liqs + lp : '';
+      det = '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:2px">' + (sec1 + sec2 + sec3 || '<div class="muted" style="padding:8px 0">Sin movimientos este mes.</div>') + '</div>';
+    }
+    return '<div class="panel" style="padding:12px 16px"><div class="clic" onclick="abrirCol(\'' + f.colocadorId + '\')" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><b style="font-size:15px">' + (ab ? '▾ ' : '▸ ') + escapeHtml(f.nombre) + '</b> &nbsp;' + chip + resumen + '</div>' +
+      '<div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:10px"><div style="text-align:right;white-space:nowrap"><div class="muted" style="font-size:11px">Falta pagar</div><b style="font-size:18px;white-space:nowrap">' + pesos(falta) + '</b></div>' + selSucursal('colocador', f.colocadorId, f.asignado ? f.sucursalId : '') + '</div></div>' + det + '</div>';
+  }).join('') : '<div class="panel vacio">No hay tareas terminadas ni trabajos especiales de colocadores en este mes.</div>';
 }
 
 // ---- Trabajos especiales (tareas con monto acordado, fuera del esquema por m²)
 let ESP = [], COL_LISTA = [];
-async function cargarEsp(){
-  try{ ESP = await api('GET', '/colocadores/especiales'); }catch(e){ return error(e); }
-  const todos = $('espFiltro').value === 'todos';
-  const vis = ESP.filter(x => todos || x.liquidada ? true : (x.monto - (x.totalPagado || 0)) > 0.005);
-  const sum = (arr, g) => Math.round(arr.reduce((a, x) => a + g(x), 0) * 100) / 100;
-  const act = ESP.filter(x => !x.liquidada);
-  $('eAco').textContent = pesos(sum(act, x => x.monto)); $('ePag').textContent = pesos(sum(act, x => x.totalPagado || 0)); $('eSal').textContent = pesos(sum(act, x => x.monto - (x.totalPagado || 0)));
-  $('tEsp').innerHTML = vis.length ? vis.map(x => { const pag = x.totalPagado || 0, sal = Math.round((x.monto - pag) * 100) / 100;
-    return '<tr><td>' + escapeHtml(x.colocadorNombre) + '</td><td>' + escapeHtml(x.obra || '') + '</td><td>' + escapeHtml(x.descripcion) + '</td><td class="n">' + pesos(x.monto) + '</td><td class="n">' + pesos(pag) + '</td><td class="n">' + pesos(sal) + '</td><td>' +
-    (x.liquidada ? '<span class="chip ok">Liquidado (por liquidación)</span>' : (x.estado === 'terminada' ? '<span class="chip">Terminado ' + fmtF(x.fechaFin) + '</span> ' : '<span class="chip">En curso</span> ') + (sal <= 0.005 ? '<span class="chip ok">Pagado</span>' : pag > 0 ? '<span class="chip par">Pago parcial</span>' : '<span class="chip mal">Sin pagar</span>')) + '</td><td class="acc">' +
-    (x.liquidada ? '' : (sal > 0.005 ? '<button class="btn" onclick="formPagoEsp(\'' + x._id + '\')">Pagar</button> ' : '') + ((x.pagos || []).length ? '<button class="btn secondary" onclick="verPagosEsp(\'' + x._id + '\')">Pagos</button> ' : '') +
-      (x.estado === 'terminada' ? '<button class="btn secondary" onclick="reabrirEsp(\'' + x._id + '\')">Reabrir</button> ' : '<button class="btn secondary" onclick="terminarEsp(\'' + x._id + '\')">Marcar terminado</button> ') + '<button class="btn secondary" onclick="formEsp(\'' + x._id + '\')">Editar</button> ' + (pag > 0 ? '' : '<button class="btn secondary" title="Borrar" onclick="borrarEsp(\'' + x._id + '\')">🗑</button>')) + '</td></tr>'; }).join('') : '<tr><td colspan="8" class="vacio">' + (ESP.length ? 'No hay trabajos con saldo por pagar.' : 'Todavía no cargaste trabajos especiales. Usá "+ Nuevo trabajo especial".') + '</td></tr>';
-}
+async function cargarEsp(){ try{ ESP = await api('GET', '/colocadores/especiales'); }catch(e){ return error(e); } }
 function formPagoEsp(id){
   const x = ESP.find(y => y._id === id), sal = Math.round((x.monto - (x.totalPagado || 0)) * 100) / 100;
   $('pEsp').innerHTML = '<h3>Pagar trabajo · ' + escapeHtml(x.colocadorNombre) + ' · ' + escapeHtml(x.obra || x.descripcion) + ' · falta pagar ' + pesos(sal) + '</h3><div class="form" data-id="' + id + '"><div><label>Monto</label><input type="number" min="0" step="any" id="epMonto" value="' + sal + '"></div>' +
@@ -481,7 +488,7 @@ function formPagoEsp(id){
 }
 async function pagarEsp(){
   const id = document.querySelector('#pEsp .form').dataset.id;
-  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos', Object.assign({monto: n$('epMonto'), fecha: $('epFecha').value, nota: $('epNota').value}, cuentaElegida('epCuenta'))); exito('Pago registrado.'); cerrarPEsp(); await cargarEsp(); }catch(e){ error(e); }
+  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos', Object.assign({monto: n$('epMonto'), fecha: $('epFecha').value, nota: $('epNota').value}, cuentaElegida('epCuenta'))); exito('Pago registrado.'); cerrarPEsp(); await cargarCol(); }catch(e){ error(e); }
 }
 function verPagosEsp(id){
   const x = ESP.find(y => y._id === id);
@@ -492,7 +499,7 @@ function verPagosEsp(id){
 async function anularPagoEsp(id, idx){
   if (!confirm('¿Anular este pago? Se revierte la caja/banco y vuelve a quedar saldo por pagar. Queda registrado como anulado (no se borra).')) return;
   const motivo = prompt('Motivo de la anulación (opcional):', ''); if (motivo === null) return;
-  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos/' + idx + '/anular', {motivo}); exito('Pago anulado.'); cerrarPEsp(); await cargarEsp(); }catch(e){ error(e); }
+  try{ await api('POST', '/colocadores/especiales/' + id + '/pagos/' + idx + '/anular', {motivo}); exito('Pago anulado.'); cerrarPEsp(); await cargarCol(); }catch(e){ error(e); }
 }
 function cerrarPEsp(){ $('pEsp').innerHTML = ''; $('pEsp').classList.add('hidden'); }
 let OBRAS_LISTA = [];
@@ -522,11 +529,6 @@ async function repararTarea(obraId, tareaId){ try{ await api('POST', '/colocador
 async function terminarEsp(id){ const f = prompt('Fecha en que se terminó (AAAA-MM-DD):', hoyISO()); if (!f) return; try{ await api('POST', '/colocadores/especiales/' + id + '/terminar', {fecha: f}); await cargarCol(); }catch(e){ error(e); } }
 async function reabrirEsp(id){ try{ await api('POST', '/colocadores/especiales/' + id + '/reabrir', {}); await cargarCol(); }catch(e){ error(e); } }
 async function borrarEsp(id){ if (!confirm('¿Borrar este trabajo especial?')) return; try{ await api('DELETE', '/colocadores/especiales/' + id); await cargarCol(); }catch(e){ error(e); } }
-document.addEventListener('click', e => {
-  const b = e.target.closest('#colTabs button'); if (!b) return;
-  document.querySelectorAll('#colTabs button').forEach(x => x.classList.toggle('on', x === b));
-  $('col-m2').classList.toggle('hidden', b.dataset.s !== 'm2'); $('col-esp').classList.toggle('hidden', b.dataset.s !== 'esp');
-});
 function abrirCol(id){ COL_ABIERTO[id] = !COL_ABIERTO[id]; cargarCol(); }
 async function liquidarCol(tipo, colocadorId){
   if (tipo === 'final' && !confirm('Cerrar el mes liquida todo lo que falte liquidar de ' + $('cPeriodo').value + (colocadorId ? ' de este colocador' : ' de todos los colocadores') + '. ¿Seguimos?')) return;
