@@ -257,6 +257,8 @@ async function iniciarApp(){
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
     me = await r.json();
     NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    window.ES_ADMIN_BASES = !!(me.rol && me.rol.protegido);
+    { const f = document.getElementById('cgNombre'); if (f && !window.ES_ADMIN_BASES) f.closest('.row').style.display = 'none'; }
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('productos'));
     if (!tieneAcceso) {
       document.getElementById('loginScreen').classList.add('hidden');

@@ -267,10 +267,14 @@ async function crearConceptoInterno(db, req, nombreRaw) {
   const k = claveConcepto(nombre);
   const existente = (await col.find({ compartido: true }).toArray()).find(d => claveConcepto(d.nombre) === k);
   const ahora = new Date();
+  const esAdminRol = !!(req.usuario && req.usuario.rol && req.usuario.rol.protegido);
   if (existente) {
-    if (existente.activo === false) { await col.updateOne({ _id: existente._id }, { $set: { activo: true, updatedAt: ahora } }); return Object.assign({}, existente, { activo: true }); }
+    if (existente.activo === false) {
+      if (!esAdminRol) throw err(403, 'Solo el administrador puede crear o reactivar conceptos de gasto.');
+      await col.updateOne({ _id: existente._id }, { $set: { activo: true, updatedAt: ahora } }); return Object.assign({}, existente, { activo: true }); }
     return existente;
   }
+  if (!esAdminRol) throw err(403, 'Solo el administrador puede crear conceptos de gasto. Elegí uno de la lista o pedile al administrador que lo cree.');
   const doc = { nombre, activo: true, compartido: true, orgId: null, createdAt: ahora, updatedAt: ahora };
   doc._id = (await col.insertOne(doc)).insertedId;
   return doc;

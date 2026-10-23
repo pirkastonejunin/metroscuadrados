@@ -245,6 +245,7 @@ function resolverOrgActiva(me){
 }
 
 let NOMBRE_USUARIO = '';
+let ES_ADMIN_GASTOS = false;
 async function iniciarApp(){
   let me;
   try{
@@ -252,6 +253,7 @@ async function iniciarApp(){
     if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
     me = await r.json();
     NOMBRE_USUARIO = (me.usuario && me.usuario.nombre) ? me.usuario.nombre : '';
+    ES_ADMIN_GASTOS = !!(me.rol && me.rol.protegido);
     const tieneAcceso = me.rol && (me.rol.protegido || (me.rol.modulos||[]).includes('gastos'));
     if (!tieneAcceso) {
       document.getElementById('loginScreen').classList.add('hidden');
@@ -375,7 +377,7 @@ function opcionesProveedoresSelect(seleccionado){
 function opcionesConceptosGasto(seleccionado){
   return '<option value="">' + (conceptosError ? 'No se pudieron cargar los conceptos: ' + escapeHtml(conceptosError) : (conceptosCache.length ? 'Elegí un concepto…' : 'Todavía no hay conceptos: creá uno abajo')) + '</option>' + conceptosCache.map(c =>
     `<option value="${c._id}" ${c._id===seleccionado?'selected':''}>${escapeHtml(c.nombre)}</option>`
-  ).join('') + '<option value="__nuevo__">+ Nuevo concepto…</option>';
+  ).join('') + (ES_ADMIN_GASTOS ? '<option value="__nuevo__">+ Nuevo concepto…</option>' : '');
 }
 
 async function manejarSelectConcepto(select){
@@ -679,7 +681,7 @@ function iaRenderPendientes(){
         <button class="btn small secondary" onclick="iaUsarConcepto(${it._iaId}, document.getElementById('iaSel${it._iaId}').value)">Usar este concepto</button>
       </div>
       <div class="fia-acciones">
-        <button class="btn small" onclick="iaCrearConcepto(${it._iaId})">Crear concepto «${escapeHtml(it.descripcion.length > 40 ? it.descripcion.slice(0, 40) + '…' : it.descripcion)}»</button>
+        ${ES_ADMIN_GASTOS ? `<button class="btn small" onclick="iaCrearConcepto(${it._iaId})">Crear concepto «${escapeHtml(it.descripcion.length > 40 ? it.descripcion.slice(0, 40) + '…' : it.descripcion)}»</button>` : ''}
         <button class="btn small secondary" onclick="iaQuitarPend(${it._iaId})">No cargar este ítem</button>
       </div>
       <div class="err" id="iaPendErr${it._iaId}"></div>
