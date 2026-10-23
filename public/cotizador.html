@@ -2179,7 +2179,7 @@ $('#btnCalcular').addEventListener('click', async () => {
     if (!res.ok) throw new Error(data.error || 'Error al calcular');
     if (data.faltantes && data.faltantes.length){
       if (tipoObraElegido && tipoObraElegido.categoria === 'cielorraso' && data.faltantes.some(f => f !== 'tablaCielo')){
-        mostrarMsg('Falta cargar en Configuración → Tipos de obra → Catálogos: ' + data.faltantes.filter(f => f !== 'tablaCielo').map(f => ({ perimetralCielo: 'perimetral', soleraCielo: 'solera', montanteCielo: 'montante', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos N8', tornilloT1Cielo: 'tornillos T1', unionHCielo: 'unión H' }[f] || f)).join(', ') + '.');
+        mostrarMsg('Falta cargar en Configuración → Tipos de obra → Catálogos: ' + data.faltantes.filter(f => f !== 'tablaCielo').map(f => ({ perimetralCielo: 'perimetral', soleraCielo: 'solera', montanteCielo: 'montante', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos N8', tornilloT1Cielo: 'tornillos T1', unionHCielo: 'unión H' }[f] || f)).join(', ') + ' (revisá que haya un artículo cargado, que su SKU exista en Productos y que tenga precio).');
         return;
       }
       mostrarMsg('Falta elegir producto para: ' + data.faltantes.map(f => ({ tablaCielo: 'tablas', perimetralCielo: 'perimetral', soleraCielo: 'solera', montanteCielo: 'montante', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos N8', tornilloT1Cielo: 'tornillos T1' }[f] || f)).join(', '));

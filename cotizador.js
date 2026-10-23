@@ -1639,20 +1639,23 @@ router.post('/calcular', async (req, res) => {
     const categoria = categoriaTipoObra(tipoObraDoc && tipoObraDoc.categoria);
 
     // Cielorraso: solo se eligen las tablas; perimetral, perfilería, uniones y tornillería salen solos del catálogo (el primer artículo cargado de cada categoría).
-    let seleccionFinal = productos;
-    if (categoria === 'cielorraso') {
-      seleccionFinal = Object.assign({}, productos || {});
-      const colItems = await getTipoObraItemsCollection();
-      for (const cat of CATEGORIAS_CIELO.filter((c) => c !== 'tablaCielo')) {
-        const it = await colItems.find({ store_id: store.store_id, tipoObraId: String(tipoObraId), categoria: cat }).sort({ _id: 1 }).limit(1).toArray();
-        if (it.length) seleccionFinal[cat] = String(it[0]._id);
-      }
-    }
+    const seleccionFinal = productos;
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, seleccionFinal, tipoObraId),
       getTarifas(store.store_id, tipoObraId),
       (await getFormasPagoCollection()).find({ store_id: store.store_id }).toArray()
     ]);
+    if (categoria === 'cielorraso') {
+      // Solo se eligen las tablas: lo demás sale solo del catálogo (el primer artículo cargado de cada categoría que se encuentre en Productos y tenga precio).
+      const colItems = await getTipoObraItemsCollection();
+      for (const cat of CATEGORIAS_CIELO.filter((c) => c !== 'tablaCielo')) {
+        const lista = await colItems.find({ store_id: store.store_id, tipoObraId: String(tipoObraId), categoria: cat }).sort({ _id: 1 }).toArray();
+        for (const it of lista) {
+          const prod = await resolverItemCatalogo(store, tipoObraId, cat, String(it._id));
+          if (prod) { productosElegidos[cat] = prod; break; }
+        }
+      }
+    }
 
     const obraCalc = (categoria === 'placas' && tipoObraDoc && tipoObraDoc.generico) ? Object.assign({}, obra, { generico: true }) : Object.assign({}, obra, { generico: false });
     const resultado = calcularCotizacion({ categoria, obra: obraCalc, productos: productosElegidos, tarifas, formasPago });
