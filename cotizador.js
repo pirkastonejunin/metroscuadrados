@@ -935,7 +935,7 @@ function calcularItemsCielo({ obra, productos, tarifas: t }) {
     const barras = (tot.enteras[k] || 0) + Math.ceil((tot.mitades[k] || 0) / 2 - 1e-9);
     if (!barras) return;
     const p = stockPorLargo[k];
-    const it = calcularItem({ rubro: 'Tablas de cielorraso ' + S + ' m', unidadObra: 'u', cantidadObra: barras, producto: Object.assign({}, p, { cobertura: 1, envase: 'unidad', categoria: 'Tablas de cielorraso' }), desperdicioPct: pct });
+    const it = calcularItem({ rubro: 'Tablas de cielorraso ' + S + ' m', unidadObra: 'u', cantidadObra: barras, producto: Object.assign({}, p, { cobertura: Number(p.porCaja) > 1 ? Number(p.porCaja) : 1, envase: Number(p.porCaja) > 1 ? 'caja' : 'unidad', categoria: 'Tablas de cielorraso' }), desperdicioPct: pct });
     agregar(it);
     if (tot.mitades[k]) detalle.push('Tablas de ' + fmCielo(S) + ' m: ' + (tot.enteras[k] || 0) + ' enteras + ' + tot.mitades[k] + ' mitades (' + fmCielo(S / 2) + ' m) = ' + barras + ' tablas.');
   });
@@ -989,6 +989,7 @@ async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
     cobertura: Number(item.cobertura) || 1,
     largo: Number(item.cobertura) || 1,
     ancho: Number(item.ancho) || 0,
+    porCaja: Number(item.porCaja) > 1 ? Number(item.porCaja) : 1,
     envase: 'unidad',
     precio: info.precio
   };
@@ -1491,6 +1492,7 @@ router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
         sku: it.sku,
         cobertura: Number(it.cobertura) || 1,
         ancho: Number(it.ancho) || 0,
+        porCaja: Number(it.porCaja) > 1 ? Number(it.porCaja) : 1,
         nombre: info ? info.nombre : ('SKU ' + it.sku + (CATEGORIAS_CIELO.indexOf(categoria) >= 0 ? ' (no encontrado en Productos)' : ' (no encontrado en Tiendanube)')),
         precio: info ? info.precio : null,
         imagen: info ? info.imagen : null
@@ -1505,7 +1507,7 @@ router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
 router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { categoria, sku, cobertura, ancho } = req.body || {};
+    const { categoria, sku, cobertura, ancho, porCaja } = req.body || {};
     if (CATEGORIAS_ITEM.indexOf(categoria) === -1) {
       return res.status(400).json({ error: 'Categoria invalida.' });
     }
@@ -1524,6 +1526,7 @@ router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
     if (categoria === 'tablaCielo') {
       if (!(Number(ancho) > 0) || !(Number(cobertura) > 0)) return res.status(400).json({ error: 'Cargá el largo y el ancho de la tabla (en metros).' });
       datos.ancho = Number(ancho);
+      datos.porCaja = Math.max(1, Math.floor(Number(porCaja)) || 1);
       datos.cobertura = Number(cobertura);
     }
     const col = await getTipoObraItemsCollection();

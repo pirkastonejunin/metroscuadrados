@@ -507,6 +507,7 @@
             <div class="field"><label id="cat_sku_label">SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
             <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="0.01" step="any" value="1"></div>
             <div class="field hidden" id="cat_ancho_wrap"><label>Ancho de la tabla (m)</label><input type="number" id="cat_ancho" min="0.01" step="any" placeholder="Ej: 0.20"></div>
+            <div class="field hidden" id="cat_caja_wrap"><label>Tablas por caja (1 si se vende suelta)</label><input type="number" id="cat_caja" min="1" step="1" value="1"></div>
           </div>
           <div class="actions">
             <button class="primary" id="btnAgregarCatalogoItem">Buscar y agregar</button>
@@ -2119,7 +2120,7 @@ function pintarListaTablasCielo(listaEl, lista){
     const sel = seleccion.tablaCielo.some(x => String(x.id) === String(n.id));
     return '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + n.id + '">' +
       (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
-      '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div><div class="sub">' + n.cobertura + ' m de largo x ' + (n.ancho || '?') + ' m de ancho</div></div>' +
+      '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div><div class="sub">' + n.cobertura + ' m de largo x ' + (n.ancho || '?') + ' m de ancho' + (n.porCaja > 1 ? ' · se vende en caja de ' + n.porCaja : '') + '</div></div>' +
       '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div></div>';
   }).join('');
   listaEl.querySelectorAll('.prod-item').forEach(el => {
@@ -2883,6 +2884,7 @@ function prepararFormCatalogoCielo(){
   $('#cat_ancho_wrap').classList.toggle('hidden', !esTabla);
   $('#cat_sku_label').textContent = gestionandoTipoObraCategoria === 'cielorraso' ? 'SKU del producto en el sistema' : 'SKU en Tiendanube';
   $('#cat_ancho').value = '';
+  $('#cat_caja_wrap').classList.toggle('hidden', !esTabla); $('#cat_caja').value = 1;
   if (['tablaCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = '';
   else if (['perimetralCielo', 'unionHCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 3;
   else if (['soleraCielo', 'montanteCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 2.6;
@@ -2901,7 +2903,7 @@ async function cargarCatalogoActivo(){
   cont.innerHTML = lista.map(it =>
     '<div class="cfg-row">' +
       '<div><strong>' + escapeHtml(it.nombre) + '</strong><div class="cfg-meta">SKU ' + escapeHtml(it.sku) +
-        (categoriaActivaCatalogo === 'tablaCielo' ? ' · ' + it.cobertura + ' m de largo x ' + (it.ancho || '?') + ' m de ancho' : ' · cubre ' + it.cobertura + ' ' + etiqueta) + ' · ' + (it.precio !== null ? money(it.precio) : 'sin precio') + '</div></div>' +
+        (categoriaActivaCatalogo === 'tablaCielo' ? ' · ' + it.cobertura + ' m de largo x ' + (it.ancho || '?') + ' m de ancho' + (it.porCaja > 1 ? ' · caja de ' + it.porCaja : '') : ' · cubre ' + it.cobertura + ' ' + etiqueta) + ' · ' + (it.precio !== null ? money(it.precio) : 'sin precio') + '</div></div>' +
       '<button class="secondary small" data-borrar="' + it.id + '">Borrar</button>' +
     '</div>'
   ).join('');
@@ -2921,11 +2923,12 @@ $('#btnAgregarCatalogoItem').addEventListener('click', async () => {
   const coberturaRaw = parseFloat($('#cat_cobertura').value);
   const cobertura = coberturaRaw > 0 ? coberturaRaw : 1;
   const ancho = parseFloat($('#cat_ancho').value) || 0;
+  const porCaja = parseInt($('#cat_caja').value, 10) || 1;
   if (!sku){ mostrarMsg('Cargá un SKU.'); return; }
   if (categoriaActivaCatalogo === 'tablaCielo' && (!ancho || !(coberturaRaw > 0))){ mostrarMsg('Cargá el largo y el ancho de la tabla.'); return; }
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items?store_id=' + storeId, {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ categoria: categoriaActivaCatalogo, sku, cobertura, ancho })
+    body: JSON.stringify({ categoria: categoriaActivaCatalogo, sku, cobertura, ancho, porCaja })
   });
   const data = await res.json();
   if (!res.ok){ mostrarMsg(data.error || 'Error al agregar.'); return; }
