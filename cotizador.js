@@ -78,7 +78,8 @@ const API_BASE = 'https://api.tiendanube.com/v1';
 // en tipos de obra "piso") para no mezclar etiquetas/catálogos entre los
 // dos flujos aunque ambos se guarden en la misma colección tipo_obra_items
 // (ya vienen scopeados por tipoObraId, así que no hay choque de datos).
-const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta', 'pegamento', 'pegamentoPiedra', 'laca', 'pegamentoPlacas', 'masilla'];
+const CATEGORIAS_ITEM = ['puerta', 'nivelacion', 'manta', 'pegamento', 'pegamentoPiedra', 'laca', 'pegamentoPlacas', 'masilla',
+  'tablaCielo', 'perimetralCielo', 'soleraCielo', 'montanteCielo', 'tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo'];
 const ETIQUETA_CATEGORIA = {
   puerta: 'Niveladores de puerta',
   nivelacion: 'Nivelantes de piso',
@@ -87,7 +88,14 @@ const ETIQUETA_CATEGORIA = {
   pegamentoPiedra: 'Pegamento para piedra',
   laca: 'Laca',
   pegamentoPlacas: 'Pegamento para placas',
-  masilla: 'Masilla'
+  masilla: 'Masilla',
+  tablaCielo: 'Tablas de cielorraso',
+  perimetralCielo: 'Perimetral',
+  soleraCielo: 'Solera',
+  montanteCielo: 'Montante',
+  tarugoCielo: 'Tarugos',
+  tornilloN8Cielo: 'Tornillos N8',
+  tornilloT1Cielo: 'Tornillos T1'
 };
 
 // Descripción corta y legible del alcance de la obra, en base a los datos
@@ -110,6 +118,10 @@ function descripcionObra(o) {
     const m2Total = o.superficies.reduce((s, x) => s + (o.categoria === 'placas' ? m2PlacasDeSuperficie(x) : (Number(x.largo) || 0) * (Number(x.alto) || 0)), 0);
     const etiqueta = o.categoria === 'placas' ? 'placas' : 'piedra';
     if (m2Total > 0) datos.push(round2(m2Total) + ' m2 de ' + etiqueta + ' (' + o.superficies.length + ' superficie' + (o.superficies.length === 1 ? '' : 's') + ')');
+  }
+  if (Array.isArray(o.ambientes) && o.ambientes.length) {
+    const m2 = o.ambientes.reduce((acc, a) => acc + (Number(a.largo) || 0) * (Number(a.ancho) || 0), 0);
+    if (m2 > 0) datos.push(round2(m2) + ' m2 de cielorraso (' + o.ambientes.length + ' ambiente' + (o.ambientes.length === 1 ? '' : 's') + ')' + (o.conEstructura ? ' con estructura' : ' sin estructura'));
   }
   if (o.manoObra) datos.push('con mano de obra');
   return datos.join(' · ');
@@ -199,6 +211,8 @@ const TARIFA_DEFAULT = {
   // pero no se borra por si Mato vuelve a necesitarlo).
   piedra_m2_completo: 0,
   placas_m2: 0,
+  cielorraso_m2: 0,
+  cielorraso_estructura_m2: 0,
   // Placas genérico (sin productos): precio por m² total (llave en mano), cuántos m² cubre 1 envase de pegamento y cómo se llama el envase.
   placas_m2_completo: 0,
   pegamento_rinde_m2: 0,
@@ -228,6 +242,8 @@ async function setTarifas(storeId, tipoObraId, tarifas) {
     piedra_m2: Number(tarifas.piedra_m2) || 0,
     piedra_m2_completo: Number(tarifas.piedra_m2_completo) || 0,
     placas_m2: Number(tarifas.placas_m2) || 0,
+    cielorraso_m2: Number(tarifas.cielorraso_m2) || 0,
+    cielorraso_estructura_m2: Number(tarifas.cielorraso_estructura_m2) || 0,
     placas_m2_completo: Number(tarifas.placas_m2_completo) || 0,
     pegamento_rinde_m2: Number(tarifas.pegamento_rinde_m2) || 0,
     pegamento_envase: String(tarifas.pegamento_envase || '').trim().slice(0, 30) || 'envase',
@@ -465,6 +481,7 @@ function calcularItem({ rubro, unidadObra, cantidadObra, producto, desperdicioPc
   };
 }
 
+function categoriaTipoObra(c) { return (c === 'piedra' || c === 'placas' || c === 'cielorraso') ? c : 'piso'; }
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
 // Placas de 0,60 x 0,60 m: cada lado de la pared se mide en módulos enteros de 0,60 (se redondea para arriba), así
 // la superficie a cubrir es la que realmente se compra y el desperdicio queda incluido en el redondeo.
@@ -486,8 +503,9 @@ function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago })
   const t = Object.assign({}, TARIFA_DEFAULT, tarifas || {});
   const calcularItems = categoria === 'piedra' ? calcularItemsPiedra
     : categoria === 'placas' ? calcularItemsPlacas
+    : categoria === 'cielorraso' ? calcularItemsCielo
     : calcularItemsPiso;
-  const { items, faltantes, totalProductos: tp, totalManoObra: tm, avisos } = calcularItems({ obra, productos, tarifas: t });
+  const { items, faltantes, totalProductos: tp, totalManoObra: tm, avisos, detalle } = calcularItems({ obra, productos, tarifas: t });
 
   const totalProductos = round2(tp);
   const totalManoObra = round2(tm);
@@ -510,7 +528,7 @@ function calcularCotizacion({ categoria, obra, productos, tarifas, formasPago })
   const llaveEnMano = categoria === 'piedra' && !!(obra && obra.manoObra);
   const soloCantidades = categoria === 'placas' && !!(obra && obra.generico);
 
-  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano, soloCantidades, avisos: avisos || [] };
+  return { items, faltantes, totalProductos, totalManoObra, total, formasPago: formasPagoCalculadas, llaveEnMano, soloCantidades, avisos: avisos || [], detalle: detalle || [] };
 }
 
 // ---- Piso (lógica original, sin cambios de comportamiento) ----
@@ -749,6 +767,160 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
   return { items, faltantes, totalProductos, totalManoObra };
 }
 
+// ---- Cielorraso: tablas (lado por lado, en el sentido que se elija) + perimetral + estructura opcional ----
+// obra: { ambientes: [{ largo, ancho, sentido: 'largo'|'ancho' }], conEstructura, desperdicioPctCielo, manoObra }
+//   sentido = a qué lado del ambiente van PARALELAS las tablas.
+// productos: tablaCielo (ARRAY de items con largo/ancho), perimetralCielo, soleraCielo, montanteCielo, tarugoCielo,
+//   tornilloN8Cielo, tornilloT1Cielo (cada uno con "cobertura": ml por pieza en perfiles/perimetral, unidades por envase en tornillería).
+// Reglas de Mato: tablas de 4/5/6 m que se pueden cortar al medio (2/2,5/3 m); perimetral de 3 m alrededor; soleras en los dos
+// laterales paralelos a las tablas y montantes perpendiculares cada 0,40 m (ambos de 2,6 m); soleras y perimetral fijados a la
+// pared cada 0,40 m con tarugo + tornillo N8; T1: 2 por extremo de montante, 4 por empalme y 2 por cada cruce tabla-montante.
+const SEPARACION_CIELO_M = 0.4;
+const GRILLA_CIELO = 20; // 1 unidad = 5 cm
+
+// Cómo cubrir una fila de largo L con piezas enteras o medias de las tablas disponibles (menor sobrante; a igualdad, menos piezas y menos mitades).
+function planFilaCielo(L, largosStock) {
+  const piezas = [];
+  largosStock.forEach((S) => {
+    piezas.push({ stock: S, mitad: false, u: Math.round(S * GRILLA_CIELO) });
+    piezas.push({ stock: S, mitad: true, u: Math.round(S / 2 * GRILLA_CIELO) });
+  });
+  const meta = Math.ceil(L * GRILLA_CIELO - 1e-9);
+  const maxU = Math.max.apply(null, piezas.map((p) => p.u));
+  const tope = meta + maxU;
+  const costo = new Array(tope + 1).fill(Infinity);
+  const eleccion = new Array(tope + 1).fill(-1);
+  costo[0] = 0;
+  for (let s = 1; s <= tope; s++) {
+    piezas.forEach((p, i) => {
+      if (p.u > s || costo[s - p.u] === Infinity) return;
+      const c = costo[s - p.u] + 1000 + (p.mitad ? 1 : 0);
+      if (c < costo[s]) { costo[s] = c; eleccion[s] = i; }
+    });
+  }
+  let objetivo = -1;
+  for (let s = meta; s <= tope; s++) if (costo[s] !== Infinity) { objetivo = s; break; }
+  if (objetivo < 0) return null;
+  const usadas = [];
+  for (let s = objetivo; s > 0; s -= piezas[eleccion[s]].u) usadas.push(piezas[eleccion[s]]);
+  return { piezas: usadas, comprado: objetivo / GRILLA_CIELO };
+}
+
+function calcularAmbienteCielo(Lt, Wt, anchoTabla, largosStock, conEstructura, largoPerfil) {
+  const filas = Math.ceil(Wt / anchoTabla - 1e-9);
+  const plan = planFilaCielo(Lt, largosStock);
+  if (!plan) return null;
+  const enteras = {}; const mitades = {};
+  plan.piezas.forEach((p) => {
+    const k = String(p.stock);
+    if (p.mitad) mitades[k] = (mitades[k] || 0) + filas; else enteras[k] = (enteras[k] || 0) + filas;
+  });
+  const montantes = Math.ceil(Lt / SEPARACION_CIELO_M - 1e-9) + 1;
+  const piezasPorMontante = Math.max(1, Math.ceil(Wt / largoPerfil - 1e-9));
+  const r = {
+    Lt, Wt, filas, plan, enteras, mitades,
+    m2Tablas: round2(plan.comprado * filas * anchoTabla),
+    perimetroMl: 2 * (Lt + Wt),
+    montantes, piezasPorMontante,
+    solerasMl: 2 * Lt,
+    montantesMl: montantes * Wt,
+    empalmes: montantes * (piezasPorMontante - 1),
+    fijacionesSolera: 2 * (Math.ceil(Lt / SEPARACION_CIELO_M - 1e-9) + 1),
+    fijacionesPerimetral: Math.ceil(2 * (Lt + Wt) / SEPARACION_CIELO_M - 1e-9)
+  };
+  r.t1Montantes = 4 * montantes + 4 * r.empalmes;
+  r.t1Tablas = 2 * filas * montantes;
+  return r;
+}
+
+const fmCielo = (n) => String(round2(n)).replace('.', ',');
+function ambienteTxtCielo(i, a, sentidoTxt, r) {
+  const piezas = r.plan.piezas.map((p) => (p.mitad ? '½ de ' : '') + fmCielo(p.stock) + ' m').join(' + ');
+  return 'Ambiente ' + (i + 1) + ' (' + fmCielo(a.largo) + ' x ' + fmCielo(a.ancho) + ' m): tablas paralelas al lado de ' + fmCielo(sentidoTxt) + ' m → ' + r.filas + ' filas de ' + piezas + ' (sobran ' + fmCielo(r.plan.comprado - r.Lt) + ' m por fila)' +
+    (r.montantes ? ' · ' + r.montantes + ' montantes de ' + fmCielo(r.Wt) + ' m' : '');
+}
+
+function calcularItemsCielo({ obra, productos, tarifas: t }) {
+  const items = []; const faltantes = []; const avisos = [];
+  let totalProductos = 0; let totalManoObra = 0;
+  const ambientes = (Array.isArray(obra.ambientes) ? obra.ambientes : [])
+    .map((a) => ({ largo: Number(a.largo) || 0, ancho: Number(a.ancho) || 0, sentido: a.sentido === 'ancho' ? 'ancho' : 'largo' }))
+    .filter((a) => a.largo > 0 && a.ancho > 0);
+  if (!ambientes.length) return { items, faltantes, totalProductos, totalManoObra, avisos, detalle: [] };
+  const conEstructura = !!obra.conEstructura;
+  const pct = Number(obra.desperdicioPctCielo) || 0;
+  const manoObra = !!obra.manoObra;
+
+  // Tablas: se usa el ancho de la primera tabla elegida; las de otro ancho se ignoran (con aviso).
+  let tablas = (Array.isArray(productos.tablaCielo) ? productos.tablaCielo : []).filter((x) => x && Number(x.largo) > 0 && Number(x.ancho) > 0);
+  if (!tablas.length) faltantes.push('tablaCielo');
+  const anchoTabla = tablas.length ? Number(tablas[0].ancho) : 0;
+  if (tablas.some((x) => Math.abs(Number(x.ancho) - anchoTabla) > 1e-9)) {
+    avisos.push('Las tablas elegidas tienen anchos distintos: se calculó solo con las de ' + anchoTabla + ' m de ancho.');
+    tablas = tablas.filter((x) => Math.abs(Number(x.ancho) - anchoTabla) <= 1e-9);
+  }
+  const stockPorLargo = {};
+  tablas.forEach((x) => { stockPorLargo[String(Number(x.largo))] = x; });
+  const largosStock = Object.keys(stockPorLargo).map(Number).sort((a, b) => a - b);
+  const requeridos = ['perimetralCielo', 'tarugoCielo', 'tornilloN8Cielo'].concat(conEstructura ? ['soleraCielo', 'montanteCielo', 'tornilloT1Cielo'] : []);
+  requeridos.forEach((k) => { if (!productos[k]) faltantes.push(k); });
+  if (faltantes.length) return { items, faltantes, totalProductos, totalManoObra, avisos, detalle: [] };
+
+  const largoPerfil = conEstructura ? Math.min(Number(productos.soleraCielo.cobertura) || 2.6, Number(productos.montanteCielo.cobertura) || 2.6) : 2.6;
+  const tot = { enteras: {}, mitades: {}, perimetroMl: 0, solerasMl: 0, montantesMl: 0, empalmes: 0, montantes: 0, fijaciones: 0, t1: 0, m2: 0 };
+  const detalle = [];
+  ambientes.forEach((a, i) => {
+    const op = {
+      largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, largosStock, conEstructura, largoPerfil),
+      ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, largosStock, conEstructura, largoPerfil)
+    };
+    const elegido = op[a.sentido]; const otro = op[a.sentido === 'largo' ? 'ancho' : 'largo'];
+    if (!elegido) { avisos.push('Ambiente ' + (i + 1) + ': no se pudo armar el plan de tablas.'); return; }
+    detalle.push(ambienteTxtCielo(i, a, elegido.Lt, elegido));
+    if (otro && Math.abs(otro.m2Tablas - elegido.m2Tablas) > 0.01) {
+      const dif = round2(otro.m2Tablas - elegido.m2Tablas);
+      detalle.push('   Con las tablas paralelas al lado de ' + fmCielo(otro.Lt) + ' m se compran ' + fmCielo(otro.m2Tablas) + ' m² de tablas (' + (dif > 0 ? '+' : '') + fmCielo(dif) + ' m² vs. la opción elegida).');
+    }
+    Object.keys(elegido.enteras).forEach((k) => { tot.enteras[k] = (tot.enteras[k] || 0) + elegido.enteras[k]; });
+    Object.keys(elegido.mitades).forEach((k) => { tot.mitades[k] = (tot.mitades[k] || 0) + elegido.mitades[k]; });
+    tot.perimetroMl += elegido.perimetroMl;
+    tot.m2 += a.largo * a.ancho;
+    tot.fijaciones += elegido.fijacionesPerimetral;
+    if (conEstructura) {
+      tot.solerasMl += elegido.solerasMl; tot.montantesMl += elegido.montantesMl; tot.empalmes += elegido.empalmes; tot.montantes += elegido.montantes;
+      tot.fijaciones += elegido.fijacionesSolera; tot.t1 += elegido.t1Montantes + elegido.t1Tablas;
+    }
+  });
+
+  const agregar = (it) => { items.push(it); totalProductos += it.subtotal; };
+  largosStock.forEach((S) => {
+    const k = String(S);
+    const barras = (tot.enteras[k] || 0) + Math.ceil((tot.mitades[k] || 0) / 2 - 1e-9);
+    if (!barras) return;
+    const p = stockPorLargo[k];
+    const it = calcularItem({ rubro: 'Tablas de cielorraso ' + S + ' m', unidadObra: 'u', cantidadObra: barras, producto: Object.assign({}, p, { cobertura: 1, envase: 'unidad', categoria: 'Tablas de cielorraso' }), desperdicioPct: pct });
+    agregar(it);
+    if (tot.mitades[k]) detalle.push('Tablas de ' + fmCielo(S) + ' m: ' + (tot.enteras[k] || 0) + ' enteras + ' + tot.mitades[k] + ' mitades (' + fmCielo(S / 2) + ' m) = ' + barras + ' tablas.');
+  });
+  agregar(calcularItem({ rubro: 'Perimetral', unidadObra: 'ml', cantidadObra: tot.perimetroMl, producto: productos.perimetralCielo, desperdicioPct: pct }));
+  if (conEstructura) {
+    agregar(calcularItem({ rubro: 'Soleras', unidadObra: 'ml', cantidadObra: tot.solerasMl, producto: productos.soleraCielo, desperdicioPct: pct }));
+    agregar(calcularItem({ rubro: 'Montantes', unidadObra: 'ml', cantidadObra: tot.montantesMl, producto: productos.montanteCielo, desperdicioPct: pct }));
+    agregar(calcularItem({ rubro: 'Tornillos T1', unidadObra: 'u', cantidadObra: tot.t1, producto: productos.tornilloT1Cielo, desperdicioPct: pct }));
+  } else {
+    avisos.push('Sin estructura: no se calculan soleras, montantes ni tornillos T1 de fijación de tablas.');
+  }
+  agregar(calcularItem({ rubro: 'Tarugos', unidadObra: 'u', cantidadObra: tot.fijaciones, producto: productos.tarugoCielo, desperdicioPct: pct }));
+  agregar(calcularItem({ rubro: 'Tornillos N8', unidadObra: 'u', cantidadObra: tot.fijaciones, producto: productos.tornilloN8Cielo, desperdicioPct: pct }));
+
+  if (manoObra) {
+    const minimoM2 = obra.aplicarMinimo === false ? 0 : (Number(t.minimoM2Cotizable) || 0);
+    const m2Cot = tot.m2 > 0 ? Math.max(tot.m2, minimoM2) : 0;
+    totalManoObra += round2(m2Cot * ((Number(t.cielorraso_m2) || 0) + (conEstructura ? (Number(t.cielorraso_estructura_m2) || 0) : 0)));
+  }
+  return { items, faltantes, totalProductos, totalManoObra, avisos, detalle };
+}
+
 // ---------- Helper: resuelve un item de catálogo por SKU (puerta/nivelacion/manta/pegamento/pegamentoPiedra/laca/pegamentoPlacas/masilla) ----------
 
 async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
@@ -774,6 +946,8 @@ async function resolverItemCatalogo(store, tipoObraId, categoria, itemId) {
     imagen: info.imagen || null,
     tipo: 'unidad',
     cobertura: Number(item.cobertura) || 1,
+    largo: Number(item.cobertura) || 1,
+    ancho: Number(item.ancho) || 0,
     envase: 'unidad',
     precio: info.precio
   };
@@ -804,7 +978,12 @@ async function resolverProductosElegidos(store, seleccion, tipoObraId) {
   }
 
   // Puerta/nivelación/manta/pegamento: idem, en paralelo en vez de uno por uno.
-  const categoriasElegidas = CATEGORIAS_ITEM.filter((categoria) => seleccion[categoria]);
+  // Tablas de cielorraso: se eligen varias a la vez (4, 5 y 6 m), llegan como lista de ids.
+  if (Array.isArray(seleccion.tablaCielo) && seleccion.tablaCielo.length) {
+    const tablas = await Promise.all(seleccion.tablaCielo.map((id) => resolverItemCatalogo(store, tipoObraId, 'tablaCielo', id)));
+    resultado.tablaCielo = tablas.filter(Boolean);
+  }
+  const categoriasElegidas = CATEGORIAS_ITEM.filter((categoria) => categoria !== 'tablaCielo' && seleccion[categoria]);
   await Promise.all(categoriasElegidas.map(async (categoria) => {
     const prod = await resolverItemCatalogo(store, tipoObraId, categoria, seleccion[categoria]);
     if (prod) resultado[categoria] = prod;
@@ -1137,7 +1316,7 @@ function normalizarTipoObra(doc) {
     nombre: doc.nombre,
     // 'piso' por defecto: los tipos de obra creados antes de que existieran
     // Piedra/Placas no tienen este campo guardado en Mongo y siguen siendo Piso.
-    categoria: (doc.categoria === 'piedra' || doc.categoria === 'placas') ? doc.categoria : 'piso',
+    categoria: categoriaTipoObra(doc.categoria),
     rubroPiso: doc.rubroPiso || '',
     rubroZocalo: doc.rubroZocalo || '',
     rubroPiedra: doc.rubroPiedra || '',
@@ -1162,7 +1341,7 @@ router.post('/tipos-obra', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
     const { id, nombre, categoria, rubroPiso, rubroZocalo, rubroPiedra, rubroPlacas, desperdicioDefaultPct, generico } = req.body || {};
-    const categoriaNorm = (categoria === 'piedra' || categoria === 'placas') ? categoria : 'piso';
+    const categoriaNorm = categoriaTipoObra(categoria);
     if (!nombre) {
       return res.status(400).json({ error: 'Falta el nombre.' });
     }
@@ -1177,6 +1356,14 @@ router.post('/tipos-obra', async (req, res) => {
         rubroPiso: '',
         rubroZocalo: '',
         rubroPlacas: '',
+        desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
+      };
+    } else if (categoriaNorm === 'cielorraso') {
+      datos = {
+        store_id: store.store_id,
+        nombre: String(nombre).trim(),
+        categoria: 'cielorraso',
+        rubroPiso: '', rubroZocalo: '', rubroPiedra: '', rubroPlacas: '',
         desperdicioDefaultPct: Number(desperdicioDefaultPct) || 0
       };
     } else if (categoriaNorm === 'placas') {
@@ -1262,6 +1449,7 @@ router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
         id: it._id,
         sku: it.sku,
         cobertura: Number(it.cobertura) || 1,
+        ancho: Number(it.ancho) || 0,
         nombre: info ? info.nombre : ('SKU ' + it.sku + ' (no encontrado en Tiendanube)'),
         precio: info ? info.precio : null,
         imagen: info ? info.imagen : null
@@ -1276,7 +1464,7 @@ router.get('/tipos-obra/:tipoObraId/items', async (req, res) => {
 router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { categoria, sku, cobertura } = req.body || {};
+    const { categoria, sku, cobertura, ancho } = req.body || {};
     if (CATEGORIAS_ITEM.indexOf(categoria) === -1) {
       return res.status(400).json({ error: 'Categoria invalida.' });
     }
@@ -1292,6 +1480,11 @@ router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
       sku: String(sku).trim(),
       cobertura: Number(cobertura) || 1
     };
+    if (categoria === 'tablaCielo') {
+      if (!(Number(ancho) > 0) || !(Number(cobertura) > 0)) return res.status(400).json({ error: 'Cargá el largo y el ancho de la tabla (en metros).' });
+      datos.ancho = Number(ancho);
+      datos.cobertura = Number(cobertura);
+    }
     const col = await getTipoObraItemsCollection();
     const { insertedId } = await col.insertOne(datos);
     res.json(Object.assign({ id: insertedId }, datos, info));
@@ -1402,9 +1595,7 @@ router.post('/calcular', async (req, res) => {
     // La categoría se resuelve del lado del servidor (no de lo que mande el
     // front) para que el cálculo sea siempre consistente con cómo se
     // configuró el tipo de obra, no con lo que la pantalla crea que es.
-    const categoria = (tipoObraDoc && (tipoObraDoc.categoria === 'piedra' || tipoObraDoc.categoria === 'placas'))
-      ? tipoObraDoc.categoria
-      : 'piso';
+    const categoria = categoriaTipoObra(tipoObraDoc && tipoObraDoc.categoria);
 
     const [productosElegidos, tarifas, formasPago] = await Promise.all([
       resolverProductosElegidos(store, productos, tipoObraId),
@@ -1452,7 +1643,7 @@ function finalizarItems(items) {
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { _id, obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones } = req.body || {};
+    const { _id, obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones, detalle } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
     if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
     if (!Array.isArray(items) || !items.length) {
@@ -1465,9 +1656,7 @@ router.post('/guardar', async (req, res) => {
     // se reabre esta cotización más adelante.
     let tipoObraDoc = null;
     try { tipoObraDoc = await (await getTiposObraCollection()).findOne({ _id: new ObjectId(tipoObraId), store_id: store.store_id }); } catch (e) { tipoObraDoc = null; }
-    const categoriaGuardado = (tipoObraDoc && (tipoObraDoc.categoria === 'piedra' || tipoObraDoc.categoria === 'placas'))
-      ? tipoObraDoc.categoria
-      : 'piso';
+    const categoriaGuardado = categoriaTipoObra(tipoObraDoc && tipoObraDoc.categoria);
     const llaveEnMano = categoriaGuardado === 'piedra' && !!(obra && obra.manoObra);
     const soloCantidades = categoriaGuardado === 'placas' && !!(tipoObraDoc && tipoObraDoc.generico);
 
@@ -1522,7 +1711,8 @@ router.post('/guardar', async (req, res) => {
       formasPago: formasPagoFinales,
       simulaciones: simulacionesFinales,
       llaveEnMano,
-      soloCantidades
+      soloCantidades,
+      detalle: Array.isArray(detalle) ? detalle.slice(0, 60).map((x) => String(x).slice(0, 400)) : []
     };
 
     const col = await getCotizacionesCollection();

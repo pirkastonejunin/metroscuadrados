@@ -339,6 +339,18 @@
           <div class="field hidden" id="campoPrecioM2Generico"><label>Precio por m² total ($)</label><input type="number" id="precioM2Generico" min="0" step="0.01" placeholder="Vacío = el de la configuración"></div>
         </div>
       </div>
+      <div id="camposCielo" class="hidden">
+        <h3>Ambientes a cubrir con cielorraso</h3>
+        <p class="hint">Cargá cada ambiente por separado (lado por lado) y elegí a qué lado van paralelas las tablas. Las tablas se pueden cortar al medio; al calcular te muestro cuánto cambia el material si las ponés en el otro sentido.</p>
+        <div id="listaAmbientes"></div>
+        <div class="actions" style="margin-top:0;margin-bottom:14px;">
+          <button class="secondary small" type="button" id="btnAgregarAmbiente">+ Agregar ambiente</button>
+        </div>
+        <label class="check"><input type="checkbox" id="cieloEstructura" checked> Lleva estructura (soleras, montantes y tornillos T1)</label>
+        <div class="grid">
+          <div class="field"><label>% desperdicio adicional</label><input type="number" id="desperdicioPctCielo" min="0" step="0.5" value="0"></div>
+        </div>
+      </div>
       <label class="check"><input type="checkbox" id="manoObra"> Incluir mano de obra</label>
       <label class="check" id="lblAplicarMinimo" title="Cobra la mano de obra por m² como mínimo sobre los m² mínimos cotizables de la tarifa, aunque la obra tenga menos"><input type="checkbox" id="aplicarMinimo" checked> Aplicar mínimo cotizable</label>
       <div class="actions">
@@ -436,7 +448,7 @@
           <div class="field"><label>% desperdicio por defecto</label><input type="number" id="to_desperdicio" min="0" step="0.5" value="0"></div>
         </div>
         <div class="grid">
-          <div class="field"><label>Categoría</label><select id="to_categoria"><option value="piso">Piso</option><option value="piedra">Piedra</option><option value="placas">Placas</option><option value="placas_generico">Placas genérico (sin productos)</option></select></div>
+          <div class="field"><label>Categoría</label><select id="to_categoria"><option value="piso">Piso</option><option value="piedra">Piedra</option><option value="placas">Placas</option><option value="cielorraso">Cielorraso (tablas + perimetral + estructura)</option><option value="placas_generico">Placas genérico (sin productos)</option></select></div>
         </div>
         <div class="grid" id="to_camposPiso">
           <div class="field"><label>Rubro de piso (obligatorio)</label><select id="to_rubroPiso"></select></div>
@@ -470,6 +482,16 @@
           <button class="catsub-btn" data-cat="laca">Laca</button>
           <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
         </div>
+        <div class="subtabs hidden" id="cfg-catsub-cielo">
+          <button class="catsub-btn active" data-cat="tablaCielo">Tablas</button>
+          <button class="catsub-btn" data-cat="perimetralCielo">Perimetral</button>
+          <button class="catsub-btn" data-cat="soleraCielo">Solera</button>
+          <button class="catsub-btn" data-cat="montanteCielo">Montante</button>
+          <button class="catsub-btn" data-cat="tarugoCielo">Tarugos</button>
+          <button class="catsub-btn" data-cat="tornilloN8Cielo">Tornillos N8</button>
+          <button class="catsub-btn" data-cat="tornilloT1Cielo">Tornillos T1</button>
+          <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
+        </div>
         <div class="subtabs hidden" id="cfg-catsub-placas">
           <button class="catsub-btn active" data-cat="pegamentoPlacas">Pegamento</button>
           <button class="catsub-btn" data-cat="masilla">Masilla</button>
@@ -482,7 +504,8 @@
           <div id="cfg-catalogo-lista"></div>
           <div class="grid" style="margin-top:10px;">
             <div class="field"><label>SKU en Tiendanube</label><input type="text" id="cat_sku" placeholder="Ej: NIV-ALU-01"></div>
-            <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="1" step="1" value="1"></div>
+            <div class="field"><label id="cat_cobertura_label">Cuántas puertas cubre 1 unidad</label><input type="number" id="cat_cobertura" min="0.01" step="any" value="1"></div>
+            <div class="field hidden" id="cat_ancho_wrap"><label>Ancho de la tabla (m)</label><input type="number" id="cat_ancho" min="0.01" step="any" placeholder="Ej: 0.20"></div>
           </div>
           <div class="actions">
             <button class="primary" id="btnAgregarCatalogoItem">Buscar y agregar</button>
@@ -505,6 +528,10 @@
           </div>
           <div class="grid hidden" id="t_camposPiedra">
             <div class="field"><label>Valor m² completo, llave en mano ($)</label><input type="number" id="t_piedra_m2_completo" min="0" step="0.01"></div>
+          </div>
+          <div class="grid hidden" id="t_camposCielo">
+            <div class="field"><label>Por m² de cielorraso ($)</label><input type="number" id="t_cielorraso_m2" min="0" step="0.01"></div>
+            <div class="field"><label>Adicional por m² si lleva estructura ($)</label><input type="number" id="t_cielorraso_estructura_m2" min="0" step="0.01"></div>
           </div>
           <div class="grid hidden" id="t_camposPlacas">
             <div class="field"><label>Por m² de placas ($)</label><input type="number" id="t_placas_m2" min="0" step="0.01"></div>
@@ -634,7 +661,7 @@ let productoSimulandoRevestimiento = null; // producto de piedra o placas sobre 
 let fotoSimuladorRevestimientoActual = null; // foto de la pared ya elegida en esta cotización (se reutiliza entre productos, como fotoSimuladorActual)
 let areaSimuladorRevestimientoActual = null; // lista de áreas marcadas sobre esa foto (ver mostrarModalMarcarArea)
 
-const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml', pegamentoPiedra: 'm²', laca: 'm²', pegamentoPlacas: 'm²', masilla: 'm²' };
+const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml', pegamentoPiedra: 'm²', laca: 'm²', pegamentoPlacas: 'm²', masilla: 'm²', tablaCielo: 'm de largo', perimetralCielo: 'ml', soleraCielo: 'ml', montanteCielo: 'ml', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos', tornilloT1Cielo: 'tornillos' };
 const LABEL_COBERTURA_INPUT = {
   puerta: 'Cuántas puertas cubre 1 unidad',
   nivelacion: 'Cuántos m² cubre 1 unidad',
@@ -643,7 +670,14 @@ const LABEL_COBERTURA_INPUT = {
   pegamentoPiedra: 'Cuántos m² de piedra cubre 1 unidad',
   laca: 'Cuántos m² de piedra cubre 1 unidad',
   pegamentoPlacas: 'Cuántos m² de placas cubre 1 unidad',
-  masilla: 'Cuántos m² de placas cubre 1 unidad'
+  masilla: 'Cuántos m² de placas cubre 1 unidad',
+  tablaCielo: 'Largo de la tabla (m)',
+  perimetralCielo: 'Largo de cada pieza (m)',
+  soleraCielo: 'Largo de cada solera (m)',
+  montanteCielo: 'Largo de cada montante (m)',
+  tarugoCielo: 'Cuántos tarugos trae 1 envase',
+  tornilloN8Cielo: 'Cuántos tornillos trae 1 envase',
+  tornilloT1Cielo: 'Cuántos tornillos trae 1 envase'
 };
 // Categorías de catálogo por SKU que corresponden a cada categoría de tipo
 // de obra — determina qué pestañas de "Catálogos" mostrar en Configuración
@@ -651,7 +685,8 @@ const LABEL_COBERTURA_INPUT = {
 const CATEGORIAS_ITEM_POR_TIPO = {
   piso: ['puerta', 'nivelacion', 'manta', 'pegamento'],
   piedra: ['pegamentoPiedra', 'laca'],
-  placas: ['pegamentoPlacas', 'masilla']
+  placas: ['pegamentoPlacas', 'masilla'],
+  cielorraso: ['tablaCielo', 'perimetralCielo', 'soleraCielo', 'montanteCielo', 'tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo']
 };
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -677,6 +712,10 @@ function descripcionObra(o){
     const m2Total = o.superficies.reduce((s, x) => s + (o.categoria === 'placas' ? m2PlacasDeSuperficie(x) : (Number(x.largo)||0) * (Number(x.alto)||0)), 0);
     const etiqueta = o.categoria === 'placas' ? 'placas' : 'piedra';
     if (m2Total > 0) datos.push(round2(m2Total) + ' m2 de ' + etiqueta + ' (' + o.superficies.length + ' superficie' + (o.superficies.length===1?'':'s') + ')');
+  }
+  if (Array.isArray(o.ambientes) && o.ambientes.length){
+    const m2 = o.ambientes.reduce((a, x) => a + (Number(x.largo)||0) * (Number(x.ancho)||0), 0);
+    if (m2 > 0) datos.push(round2(m2) + ' m2 de cielorraso (' + o.ambientes.length + ' ambiente' + (o.ambientes.length===1?'':'s') + ')' + (o.conEstructura ? ' con estructura' : ' sin estructura'));
   }
   if (o.manoObra) datos.push('con mano de obra');
   return datos.join(' · ');
@@ -859,8 +898,17 @@ $('#btnContinuarDatos').addEventListener('click', () => {
 
   const categoria = tipoObraElegido.categoria || 'piso';
   const esSuperficies = categoria === 'piedra' || categoria === 'placas';
-  $('#camposPiso').classList.toggle('hidden', esSuperficies);
+  const esCielo = categoria === 'cielorraso';
+  $('#camposPiso').classList.toggle('hidden', esSuperficies || esCielo);
   $('#camposSuperficies').classList.toggle('hidden', !esSuperficies);
+  $('#camposCielo').classList.toggle('hidden', !esCielo);
+  if (esCielo){
+    $('#desperdicioPctCielo').value = tipoObraElegido.desperdicioDefaultPct || 0;
+    $('#cieloEstructura').checked = true;
+    resetAmbientes();
+    document.getElementById('manoObra').closest('label').classList.remove('hidden');
+    $('#lblAplicarMinimo').classList.remove('hidden');
+  }
   if (esSuperficies){
     $('#desperdicioPctSuperficies').value = tipoObraElegido.desperdicioDefaultPct || 0;
     resetSuperficies();
@@ -951,8 +999,58 @@ function leerSuperficies(){
 }
 $('#btnAgregarSuperficie').addEventListener('click', () => agregarFilaSuperficie());
 
+// Cielorraso: filas de ambiente (largo x ancho) + a qué lado van paralelas las tablas.
+function filaAmbienteHtml(){
+  return '<div class="superficie-row ambiente-row">' +
+    '<div class="superficie-num"></div>' +
+    '<div class="field"><label>Lado A (m)</label><input type="number" class="amb-largo" min="0" step="0.01"></div>' +
+    '<div class="field"><label>Lado B (m)</label><input type="number" class="amb-ancho" min="0" step="0.01"></div>' +
+    '<div class="field"><label>Tablas paralelas al lado</label><select class="amb-sentido"><option value="largo">A</option><option value="ancho">B</option></select></div>' +
+    '<button type="button" class="secondary small btn-quitar-ambiente">Quitar</button>' +
+  '</div>';
+}
+function renumerarAmbientes(){ $$('#listaAmbientes .ambiente-row').forEach((row, i) => { row.querySelector('.superficie-num').textContent = 'Ambiente ' + (i + 1); }); }
+function agregarFilaAmbiente(){
+  const wrap = document.createElement('div');
+  wrap.innerHTML = filaAmbienteHtml();
+  const fila = wrap.firstElementChild;
+  $('#listaAmbientes').appendChild(fila);
+  const etiquetar = () => {
+    const a = fila.querySelector('.amb-largo').value, b = fila.querySelector('.amb-ancho').value;
+    const sel = fila.querySelector('.amb-sentido');
+    sel.options[0].textContent = 'A' + (a ? ' (' + a + ' m)' : '');
+    sel.options[1].textContent = 'B' + (b ? ' (' + b + ' m)' : '');
+  };
+  fila.querySelector('.amb-largo').addEventListener('input', etiquetar);
+  fila.querySelector('.amb-ancho').addEventListener('input', etiquetar);
+  fila.querySelector('.btn-quitar-ambiente').addEventListener('click', () => {
+    if ($$('#listaAmbientes .ambiente-row').length <= 1){ fila.querySelector('.amb-largo').value = ''; fila.querySelector('.amb-ancho').value = ''; etiquetar(); return; }
+    fila.remove(); renumerarAmbientes();
+  });
+  renumerarAmbientes();
+}
+function resetAmbientes(){ $('#listaAmbientes').innerHTML = ''; agregarFilaAmbiente(); }
+function leerAmbientes(){
+  return $$('#listaAmbientes .ambiente-row').map(row => ({
+    largo: parseFloat(row.querySelector('.amb-largo').value) || 0,
+    ancho: parseFloat(row.querySelector('.amb-ancho').value) || 0,
+    sentido: row.querySelector('.amb-sentido').value === 'ancho' ? 'ancho' : 'largo'
+  })).filter(a => a.largo > 0 && a.ancho > 0);
+}
+$('#btnAgregarAmbiente').addEventListener('click', agregarFilaAmbiente);
+
 function leerObra(){
   const categoria = tipoObraElegido && tipoObraElegido.categoria;
+  if (categoria === 'cielorraso'){
+    return {
+      categoria: 'cielorraso',
+      ambientes: leerAmbientes(),
+      conEstructura: $('#cieloEstructura').checked,
+      desperdicioPctCielo: parseFloat($('#desperdicioPctCielo').value) || 0,
+      manoObra: $('#manoObra').checked,
+      aplicarMinimo: $('#aplicarMinimo').checked
+    };
+  }
   if (categoria === 'piedra' || categoria === 'placas'){
     const obra = {
       categoria: categoria,
@@ -1012,7 +1110,9 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   const obra = leerObra();
   const categoria = tipoObraElegido && tipoObraElegido.categoria;
   const esSuperficies = categoria === 'piedra' || categoria === 'placas';
-  if (esSuperficies){
+  if (categoria === 'cielorraso'){
+    if (!obra.ambientes.length){ mostrarMsg('Cargá al menos un ambiente (los dos lados).'); return; }
+  } else if (esSuperficies){
     if (m2TotalSuperficies(obra) <= 0){
       mostrarMsg('Cargá al menos una superficie (largo y alto).');
       return;
@@ -1023,7 +1123,7 @@ $('#btnContinuarProductos').addEventListener('click', async () => {
   }
   try{
     await asegurarCatalogo();
-    if (!(tipoObraElegido && tipoObraElegido.generico) && (esSuperficies || obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0)){
+    if (!(tipoObraElegido && tipoObraElegido.generico) && (esSuperficies || categoria === 'cielorraso' || obra.cantidadPuertas > 0 || obra.requiereNivelacion || obra.m2Pisos > 0 || obra.mlZocalos > 0)){
       await asegurarCatalogosTipoObra();
     }
   }catch(e){
@@ -1231,6 +1331,22 @@ function renderPasoProductos(obra){
       pintarListaCatalogo(bloqueMasilla.querySelector('.prod-list'), 'masilla', catalogosTipoObraCache.masilla, m2);
     }
   });
+
+  if (obra.categoria === 'cielorraso'){
+    const bloquesCielo = [['tablaCielo', 'Tablas (elegí las que usás: 4, 5 y 6 m)'], ['perimetralCielo', 'Perimetral']];
+    if (obra.conEstructura) bloquesCielo.push(['soleraCielo', 'Solera'], ['montanteCielo', 'Montante']);
+    bloquesCielo.push(['tarugoCielo', 'Tarugos'], ['tornilloN8Cielo', 'Tornillos N8']);
+    if (obra.conEstructura) bloquesCielo.push(['tornilloT1Cielo', 'Tornillos T1']);
+    bloquesCielo.forEach(([clave, titulo]) => {
+      const bloque = document.createElement('div');
+      bloque.className = 'rubro-block';
+      bloque.innerHTML = '<h4>' + titulo + '</h4><div class="prod-list" data-lista="' + clave + '"></div>';
+      cont.appendChild(bloque);
+      const lista = bloque.querySelector('.prod-list');
+      if (clave === 'tablaCielo') pintarListaTablasCielo(lista, catalogosTipoObraCache.tablaCielo);
+      else pintarListaCatalogo(lista, clave, catalogosTipoObraCache[clave], null);
+    });
+  }
 
   if (obra.cantidadPuertas > 0){
     const bloque = document.createElement('div');
@@ -1997,6 +2113,30 @@ function verSimulacionGuardada(idx){
 // Lista genérica para catálogos por SKU (niveladores de puerta, nivelantes
 // de piso, manta y silicona/pegamento), todos con la misma forma:
 // { id, sku, cobertura, nombre, precio, imagen }.
+// Tablas de cielorraso: selección múltiple (4, 5 y 6 m); se guardan como lista en seleccion.tablaCielo.
+function pintarListaTablasCielo(listaEl, lista){
+  if (!lista || !lista.length){
+    listaEl.innerHTML = '<div class="empty">No hay tablas cargadas. Andá a Configuración → Tipos de obra → Catálogos → Tablas.</div>';
+    return;
+  }
+  if (!Array.isArray(seleccion.tablaCielo)) seleccion.tablaCielo = lista.slice();
+  listaEl.innerHTML = lista.map(n => {
+    const sel = seleccion.tablaCielo.some(x => String(x.id) === String(n.id));
+    return '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + n.id + '">' +
+      (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
+      '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div><div class="sub">' + n.cobertura + ' m de largo x ' + (n.ancho || '?') + ' m de ancho</div></div>' +
+      '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div></div>';
+  }).join('');
+  listaEl.querySelectorAll('.prod-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const item = lista.find(n => String(n.id) === el.dataset.id);
+      const ya = seleccion.tablaCielo.some(x => String(x.id) === String(item.id));
+      seleccion.tablaCielo = ya ? seleccion.tablaCielo.filter(x => String(x.id) !== String(item.id)) : seleccion.tablaCielo.concat([item]);
+      pintarListaTablasCielo(listaEl, lista);
+    });
+  });
+}
+
 function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase, ocultarPrecio){
   if (!lista || !lista.length){
     listaEl.innerHTML = '<div class="empty">No hay productos cargados en esta categoría para este tipo de obra. Andá a Configuración → Tipos de obra → Catálogos.</div>';
@@ -2005,12 +2145,12 @@ function pintarListaCatalogo(listaEl, clave, lista, cantidadNecesariaBase, ocult
   const etiqueta = ETIQUETA_COBERTURA[clave] || 'unidad(es)';
   listaEl.innerHTML = lista.map(n => {
     const sel = seleccion[clave] && String(seleccion[clave].id) === String(n.id);
-    const necesarios = Math.ceil((cantidadNecesariaBase / (n.cobertura || 1)) - 1e-9);
+    const necesarios = cantidadNecesariaBase == null ? null : Math.ceil((cantidadNecesariaBase / (n.cobertura || 1)) - 1e-9);
     return (
       '<div class="prod-item' + (sel ? ' selected' : '') + '" data-id="' + n.id + '">' +
         (n.imagen ? '<img src="' + n.imagen + '">' : '<div style="width:32px;height:32px;border-radius:5px;background:#eee;"></div>') +
         '<div class="meta"><div class="name">' + escapeHtml(n.nombre) + '</div>' +
-        '<div class="sub">cubre ' + n.cobertura + ' ' + etiqueta + ' por unidad · necesita ' + necesarios + '</div></div>' +
+        '<div class="sub">' + (necesarios == null ? 'trae ' : 'cubre ') + n.cobertura + ' ' + etiqueta + (necesarios == null ? ' por pieza/envase' : ' por unidad · necesita ' + necesarios) + '</div></div>' +
         (ocultarPrecio ? '' : '<div class="precio">' + (n.precio !== null ? money(n.precio) : 'sin precio') + '</div>') +
       '</div>'
     );
@@ -2032,7 +2172,7 @@ $('#btnCalcular').addEventListener('click', async () => {
   const chkManta = document.getElementById('chkUtilizaManta');
   obra.utilizaManta = chkManta ? chkManta.checked : false;
   const seleccionIds = {};
-  Object.keys(seleccion).forEach(k => { if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
+  Object.keys(seleccion).forEach(k => { if (Array.isArray(seleccion[k])) seleccionIds[k] = seleccion[k].map(x => x.id); else if (seleccion[k]) seleccionIds[k] = seleccion[k].id; });
 
   try{
     const res = await fetch('/api/cotizador/calcular?store_id=' + storeId, {
@@ -2043,7 +2183,7 @@ $('#btnCalcular').addEventListener('click', async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al calcular');
     if (data.faltantes && data.faltantes.length){
-      mostrarMsg('Falta elegir producto para: ' + data.faltantes.join(', '));
+      mostrarMsg('Falta elegir producto para: ' + data.faltantes.map(f => ({ tablaCielo: 'tablas', perimetralCielo: 'perimetral', soleraCielo: 'solera', montanteCielo: 'montante', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos N8', tornilloT1Cielo: 'tornillos T1' }[f] || f)).join(', '));
       return;
     }
     ultimaCotizacionGuardadaId = null;
@@ -2111,6 +2251,7 @@ function renderResumen(data, editable, vistaSimple){
     const llaveEnMano = !!data.llaveEnMano || !!data.soloCantidades;
     const soloCant = !!data.soloCantidades;
     if (descTxt) html += '<div class="desc-obra">' + escapeHtml(descTxt) + '</div>';
+    if (data.detalle && data.detalle.length) html += '<div style="margin:6px 0 12px;white-space:pre-line;font-size:12.5px;line-height:1.5;color:#667085;">' + data.detalle.map(escapeHtml).join('\n') + '</div>';
     html += '<table><thead><tr><th></th><th>Producto</th><th>Cantidad</th>' +
       (llaveEnMano ? '' : '<th>Precio unit.</th><th>Subtotal</th>') +
       (editable ? '<th></th>' : '') + '</tr></thead><tbody>';
@@ -2289,7 +2430,8 @@ $('#btnAgregarOtro').addEventListener('click', () => {
 $('#btnGuardar').addEventListener('click', async () => {
   mostrarMsg(null);
   if (!cotizacionActual || !cotizacionActual.items.length){ mostrarMsg('No hay ítems para guardar.'); return; }
-  const obra = leerObra();
+  const esCieloGuardar = tipoObraElegido && tipoObraElegido.categoria === 'cielorraso' && cotizacionActual && cotizacionActual.obra;
+  const obra = esCieloGuardar ? cotizacionActual.obra : leerObra();
   const chkManta = document.getElementById('chkUtilizaManta');
   // Si estamos editando una cotización del historial y el checkbox de manta
   // no está en el DOM (porque no se volvió a pasar por paso-productos), se
@@ -2305,6 +2447,7 @@ $('#btnGuardar').addEventListener('click', async () => {
         cliente: $('#clienteGuardar').value, direccion: $('#direccion').value,
         tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
         items: cotizacionActual.items,
+        detalle: cotizacionActual.detalle || [],
         totalManoObra: cotizacionActual.totalManoObra,
         formasPago: cotizacionActual.formasPago,
         simulaciones: simulacionesPendientes
@@ -2584,7 +2727,9 @@ async function cargarConfigTipos(){
   cont.innerHTML = lista.map(t =>
     '<div class="cfg-row">' +
       '<div><strong>' + escapeHtml(t.nombre) + '</strong><div class="cfg-meta">' +
-        (t.categoria === 'piedra'
+        (t.categoria === 'cielorraso'
+          ? 'Cielorraso: tablas + perimetral + estructura'
+          : t.categoria === 'piedra'
           ? 'Piedra: ' + escapeHtml(t.rubroPiedra || '—')
           : t.categoria === 'placas'
           ? 'Placas: ' + (t.generico ? 'genérico (sin productos)' : escapeHtml(t.rubroPlacas || '—'))
@@ -2649,7 +2794,7 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
   const eraNuevo = !editandoTipoObraId;
   const categoriaVal = $('#to_categoria').value;
   const esGenerico = categoriaVal === 'placas_generico';
-  const categoria = (categoriaVal === 'piedra' || categoriaVal === 'placas' || esGenerico) ? (esGenerico ? 'placas' : categoriaVal) : 'piso';
+  const categoria = (categoriaVal === 'piedra' || categoriaVal === 'placas' || categoriaVal === 'cielorraso' || esGenerico) ? (esGenerico ? 'placas' : categoriaVal) : 'piso';
   const body = {
     id: editandoTipoObraId || undefined,
     nombre: $('#to_nombre').value.trim(),
@@ -2682,19 +2827,22 @@ $('#btnGuardarTipoObra').addEventListener('click', async () => {
 function abrirCatalogos(tipoObra){
   gestionandoTipoObraId = String(tipoObra.id);
   gestionandoTipoObraGenerico = !!tipoObra.generico;
-  const categoria = (tipoObra.categoria === 'piedra' || tipoObra.categoria === 'placas') ? tipoObra.categoria : 'piso';
+  const categoria = (tipoObra.categoria === 'piedra' || tipoObra.categoria === 'placas' || tipoObra.categoria === 'cielorraso') ? tipoObra.categoria : 'piso';
   gestionandoTipoObraCategoria = categoria;
-  categoriaActivaCatalogo = categoria === 'piedra' ? 'pegamentoPiedra' : categoria === 'placas' ? 'pegamentoPlacas' : 'puerta';
+  categoriaActivaCatalogo = categoria === 'piedra' ? 'pegamentoPiedra' : categoria === 'placas' ? 'pegamentoPlacas' : categoria === 'cielorraso' ? 'tablaCielo' : 'puerta';
   $('#cfg-catalogos-titulo').textContent = 'Catálogos de: ' + tipoObra.nombre;
   $('#cfg-catalogos-panel').classList.remove('hidden');
   $('#cfg-catsub-piso').classList.toggle('hidden', categoria !== 'piso');
   $('#cfg-catsub-piedra').classList.toggle('hidden', categoria !== 'piedra');
   $('#cfg-catsub-placas').classList.toggle('hidden', categoria !== 'placas');
+  $('#cfg-catsub-cielo').classList.toggle('hidden', categoria !== 'cielorraso');
+  prepararFormCatalogoCielo();
   $$('.catsub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === categoriaActivaCatalogo));
   $('#cfg-catalogo-sku').classList.remove('hidden');
   $('#cfg-catalogo-tarifas').classList.add('hidden');
   $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
   $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  prepararFormCatalogoCielo();
   if (gestionandoTipoObraGenerico){
     // Placas genérico: no hay catálogo por SKU, solo precio por m² y rendimiento del pegamento.
     $('#cfg-catsub-placas').classList.add('hidden');
@@ -2725,10 +2873,21 @@ $$('.catsub-btn').forEach(b => {
       $('#cfg-catalogo-sku').classList.remove('hidden');
       $('#cat_cobertura_label').textContent = LABEL_COBERTURA_INPUT[categoriaActivaCatalogo];
       $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+      prepararFormCatalogoCielo();
       cargarCatalogoActivo();
     }
   });
 });
+
+function prepararFormCatalogoCielo(){
+  const esTabla = categoriaActivaCatalogo === 'tablaCielo';
+  $('#cat_ancho_wrap').classList.toggle('hidden', !esTabla);
+  $('#cat_ancho').value = '';
+  if (['tablaCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = '';
+  else if (['perimetralCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 3;
+  else if (['soleraCielo', 'montanteCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 2.6;
+  else if (['tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 1;
+}
 
 async function cargarCatalogoActivo(){
   if (!gestionandoTipoObraId) return;
@@ -2742,7 +2901,7 @@ async function cargarCatalogoActivo(){
   cont.innerHTML = lista.map(it =>
     '<div class="cfg-row">' +
       '<div><strong>' + escapeHtml(it.nombre) + '</strong><div class="cfg-meta">SKU ' + escapeHtml(it.sku) +
-        ' · cubre ' + it.cobertura + ' ' + etiqueta + ' · ' + (it.precio !== null ? money(it.precio) : 'sin precio') + '</div></div>' +
+        (categoriaActivaCatalogo === 'tablaCielo' ? ' · ' + it.cobertura + ' m de largo x ' + (it.ancho || '?') + ' m de ancho' : ' · cubre ' + it.cobertura + ' ' + etiqueta) + ' · ' + (it.precio !== null ? money(it.precio) : 'sin precio') + '</div></div>' +
       '<button class="secondary small" data-borrar="' + it.id + '">Borrar</button>' +
     '</div>'
   ).join('');
@@ -2759,16 +2918,19 @@ $('#btnAgregarCatalogoItem').addEventListener('click', async () => {
   mostrarMsg(null);
   if (!gestionandoTipoObraId) return;
   const sku = $('#cat_sku').value.trim();
-  const cobertura = parseInt($('#cat_cobertura').value, 10) || 1;
+  const coberturaRaw = parseFloat($('#cat_cobertura').value);
+  const cobertura = coberturaRaw > 0 ? coberturaRaw : 1;
+  const ancho = parseFloat($('#cat_ancho').value) || 0;
   if (!sku){ mostrarMsg('Cargá un SKU.'); return; }
+  if (categoriaActivaCatalogo === 'tablaCielo' && (!ancho || !(coberturaRaw > 0))){ mostrarMsg('Cargá el largo y el ancho de la tabla.'); return; }
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/items?store_id=' + storeId, {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ categoria: categoriaActivaCatalogo, sku, cobertura })
+    body: JSON.stringify({ categoria: categoriaActivaCatalogo, sku, cobertura, ancho })
   });
   const data = await res.json();
   if (!res.ok){ mostrarMsg(data.error || 'Error al agregar.'); return; }
   mostrarMsg('Producto agregado: ' + data.nombre, 'ok');
-  $('#cat_sku').value = ''; $('#cat_cobertura').value = 1;
+  $('#cat_sku').value = ''; prepararFormCatalogoCielo(); if (gestionandoTipoObraCategoria !== 'cielorraso') $('#cat_cobertura').value = 1;
   catalogosTipoObraCache = null; // invalida cache del paso 3 de "Nueva cotización"
   cargarCatalogoActivo();
 });
@@ -2824,6 +2986,7 @@ async function cargarTarifasTipoObra(){
   $('#t_camposPiso').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'piso');
   $('#t_camposPiedra').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'piedra');
   $('#t_camposPlacas').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'placas' || gestionandoTipoObraGenerico);
+  $('#t_camposCielo').classList.toggle('hidden', gestionandoTipoObraCategoria !== 'cielorraso');
   $('#t_camposGenerico').classList.toggle('hidden', !gestionandoTipoObraGenerico);
   const res = await fetch('/api/cotizador/tipos-obra/' + gestionandoTipoObraId + '/tarifas?store_id=' + storeId);
   const t = await res.json();
@@ -2834,6 +2997,8 @@ async function cargarTarifasTipoObra(){
   $('#t_nivelacion_m2').value = t.nivelacion_m2;
   $('#t_piedra_m2_completo').value = t.piedra_m2_completo || 0;
   $('#t_placas_m2').value = t.placas_m2 || 0;
+  $('#t_cielorraso_m2').value = t.cielorraso_m2 || 0;
+  $('#t_cielorraso_estructura_m2').value = t.cielorraso_estructura_m2 || 0;
   $('#t_placas_m2_completo').value = t.placas_m2_completo || 0;
   $('#t_pegamento_rinde_m2').value = t.pegamento_rinde_m2 || 0;
   $('#t_pegamento_envase').value = t.pegamento_envase || 'envase';
@@ -2849,6 +3014,8 @@ $('#btnGuardarTarifasTipoObra').addEventListener('click', async () => {
     nivelacion_m2: parseFloat($('#t_nivelacion_m2').value) || 0,
     piedra_m2_completo: parseFloat($('#t_piedra_m2_completo').value) || 0,
     placas_m2: parseFloat($('#t_placas_m2').value) || 0,
+    cielorraso_m2: parseFloat($('#t_cielorraso_m2').value) || 0,
+    cielorraso_estructura_m2: parseFloat($('#t_cielorraso_estructura_m2').value) || 0,
     placas_m2_completo: parseFloat($('#t_placas_m2_completo').value) || 0,
     pegamento_rinde_m2: parseFloat($('#t_pegamento_rinde_m2').value) || 0,
     pegamento_envase: ($('#t_pegamento_envase').value || '').trim(),
