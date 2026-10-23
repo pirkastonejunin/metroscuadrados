@@ -439,6 +439,9 @@ async function cargarCol(){
   if (!h || h.slice(0, 7) !== per) { const hoy = hoyISO(); $('cHasta').value = hoy.slice(0, 7) === per ? hoy : per + '-' + String(new Date(Number(per.slice(0, 4)), Number(per.slice(5, 7)), 0).getDate()).padStart(2, '0'); }
   try{ COL = await api('GET', '/colocadores?periodo=' + per); }catch(e){ error(e); return; }
   const t = COL.totales;
+  { const sc = COL.especialesSinCargar || []; let av = $('cAvisoEsp');
+    if (!av) { av = document.createElement('div'); av.id = 'cAvisoEsp'; $('cPeriodo').parentNode.insertAdjacentElement('afterend', av); }
+    av.innerHTML = sc.length ? '<div class="aviso" style="background:#fff7e0;border:1px solid #e6c36a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>' + sc.length + ' trabajo' + (sc.length === 1 ? '' : 's') + ' a medida terminado' + (sc.length === 1 ? '' : 's') + ' sin cargar.</b> No entran por m² (tipo "Otros"/a medida): cargalos en la pestaña <b>Trabajos especiales</b> con el monto acordado.<ul style="margin:6px 0 0 18px">' + sc.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + '</li>').join('') + '</ul></div>' : ''; }
   $('cDev').textContent = pesos(t.devengado); $('cPen').textContent = pesos(t.pendienteLiquidar); $('cPag').textContent = pesos(t.pagado); $('cSal').textContent = pesos(t.saldo);
   $('tCol').innerHTML = COL.colocadores.length ? COL.colocadores.map((f, i) => {
     const ab = !!COL_ABIERTO[f.colocadorId];

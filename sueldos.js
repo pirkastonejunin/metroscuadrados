@@ -812,11 +812,11 @@ router.delete('/adelantos/:id', authSueldosDoc, async (req, res) => {
 // ---------------------------------------------------------------------------
 function rangoPeriodo(p) { return { d0: new Date(p + '-01T00:00:00.000-03:00'), d1: finPeriodo(p) }; }
 
-async function tareasTerminadasDelPeriodo(db, req, periodo) {
+async function tareasTerminadasDelPeriodo(db, req, periodo, soloEspeciales) {
   const { d0, d1 } = rangoPeriodo(periodo);
   const filas = await db.collection('obras').aggregate([
     { $match: { 'tareas.estado': 'terminada' } }, { $unwind: '$tareas' },
-    { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.sinCostoM2': { $ne: true }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
+    { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.sinCostoM2': soloEspeciales ? true : { $ne: true }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
     { $project: { numero: 1, orgId: 1, cliente: '$cliente.nombre', t: '$tareas' } }
   ]).toArray();
   return filas.map(f => {
@@ -867,7 +867,20 @@ router.get('/colocadores', authSueldosLectura, async (req, res) => {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
     const filas = await conReintento(async () => armarColocadores(await getDb(), req, periodo));
     const sum = k => r2(filas.reduce((s, f) => s + f[k], 0));
-    res.json({ periodo, colocadores: filas, totales: { m2: sum('m2'), devengado: sum('devengado'), pendienteLiquidar: sum('pendienteLiquidar'), liquidado: sum('liquidado'), pagado: sum('pagado'), saldo: sum('saldo') } });
+    // Tareas "a medida" (Otros, etc.) terminadas en el mes que no entran por m² y todavía no tienen su Trabajo especial cargado.
+    const db2 = await getDb();
+    const esp = await tareasTerminadasDelPeriodo(db2, req, periodo, true);
+    const colsI = await db2.collection('obras_colocadores').find({}).project({ nombre: 1, sucursalSueldoId: 1 }).toArray();
+    const infoC = new Map(colsI.map(c => [String(c._id), c]));
+    const orgS = req.orgId ? String(req.orgId) : null;
+    const cargados = await db2.collection('sueldos_tareas_especiales').find({ obraId: { $in: esp.map(t => t.obraId) } }).project({ obraId: 1, colocadorId: 1 }).toArray();
+    const yaCargado = new Set(cargados.map(e => String(e.obraId) + '|' + String(e.colocadorId)));
+    const especialesSinCargar = esp.filter(t => {
+      const c = infoC.get(String(t.colocadorId));
+      if (orgS && !(c && c.sucursalSueldoId ? String(c.sucursalSueldoId) === orgS : String(t.obraOrgId) === orgS)) return false;
+      return !yaCargado.has(String(t.obraId) + '|' + String(t.colocadorId));
+    }).map(t => ({ obra: t.obra, obraId: String(t.obraId), tipoTrabajo: t.tipoTrabajo, m2: t.m2, fecha: t.fecha, colocadorId: String(t.colocadorId), colocador: (infoC.get(String(t.colocadorId)) || {}).nombre || '' }));
+    res.json({ periodo, especialesSinCargar, colocadores: filas, totales: { m2: sum('m2'), devengado: sum('devengado'), pendienteLiquidar: sum('pendienteLiquidar'), liquidado: sum('liquidado'), pagado: sum('pagado'), saldo: sum('saldo') } });
   } catch (e) { responder(res, e); }
 });
 
