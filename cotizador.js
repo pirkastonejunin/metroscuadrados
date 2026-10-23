@@ -398,7 +398,15 @@ async function productoPorSkuSistema(sku) {
   const limpio = String(sku || '').trim();
   if (!limpio) return null;
   const rx = new RegExp('^' + limpio.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', 'i');
-  const p = await db.collection('productos_catalogo').findOne({ sku: rx, activo: { $ne: false } });
+  const col = db.collection('productos_catalogo');
+  let p = await col.findOne({ sku: rx, activo: { $ne: false } });
+  if (!p) {
+    // Sin coincidencia exacta: se busca por parte del SKU o del nombre; si hay uno solo se usa, si hay varios se avisa cuáles son.
+    const rxParte = new RegExp(limpio.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const cand = await col.find({ activo: { $ne: false }, $or: [{ sku: rxParte }, { nombre: rxParte }] }).project({ sku: 1, nombre: 1 }).limit(6).toArray();
+    if (cand.length === 1) p = await col.findOne({ _id: cand[0]._id });
+    else if (cand.length > 1) { const e = new Error('Hay varios productos que coinciden: ' + cand.slice(0, 5).map((c) => c.sku + ' (' + c.nombre + ')').join(' · ') + '. Escribí el SKU completo.'); e.status = 400; throw e; }
+  }
   if (!p) return null;
   let precio = p.precio != null ? Number(p.precio) : null;
   try {
@@ -409,7 +417,7 @@ async function productoPorSkuSistema(sku) {
       if (r && r.precio != null) precio = Number(r.precio);
     }
   } catch (e) { /* si falla, queda el precio simple del producto */ }
-  return { nombre: p.nombre || ('SKU ' + limpio), precio: (precio != null && !isNaN(precio)) ? precio : null, imagen: null };
+  return { sku: p.sku || limpio, nombre: p.nombre || ('SKU ' + limpio), precio: (precio != null && !isNaN(precio)) ? precio : null, imagen: null };
 }
 const buscarArticulo = (store, categoria, sku) => (CATEGORIAS_CIELO.indexOf(categoria) >= 0 ? productoPorSkuSistema(sku) : productoPorSku(store, sku));
 
@@ -1500,7 +1508,7 @@ router.post('/tipos-obra/:tipoObraId/items', async (req, res) => {
       store_id: store.store_id,
       tipoObraId: String(req.params.tipoObraId),
       categoria,
-      sku: String(sku).trim(),
+      sku: String((CATEGORIAS_CIELO.indexOf(categoria) >= 0 && info.sku) ? info.sku : sku).trim(),
       cobertura: Number(cobertura) || 1
     };
     if (categoria === 'tablaCielo') {
