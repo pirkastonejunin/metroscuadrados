@@ -490,6 +490,7 @@
           <button class="catsub-btn" data-cat="tarugoCielo">Tarugos</button>
           <button class="catsub-btn" data-cat="tornilloN8Cielo">Tornillos N8</button>
           <button class="catsub-btn" data-cat="tornilloT1Cielo">Tornillos T1</button>
+          <button class="catsub-btn" data-cat="unionHCielo">Unión H</button>
           <button class="catsub-btn" data-cat="tarifas">Mano de obra</button>
         </div>
         <div class="subtabs hidden" id="cfg-catsub-placas">
@@ -661,7 +662,7 @@ let productoSimulandoRevestimiento = null; // producto de piedra o placas sobre 
 let fotoSimuladorRevestimientoActual = null; // foto de la pared ya elegida en esta cotización (se reutiliza entre productos, como fotoSimuladorActual)
 let areaSimuladorRevestimientoActual = null; // lista de áreas marcadas sobre esa foto (ver mostrarModalMarcarArea)
 
-const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml', pegamentoPiedra: 'm²', laca: 'm²', pegamentoPlacas: 'm²', masilla: 'm²', tablaCielo: 'm de largo', perimetralCielo: 'ml', soleraCielo: 'ml', montanteCielo: 'ml', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos', tornilloT1Cielo: 'tornillos' };
+const ETIQUETA_COBERTURA = { puerta: 'puertas', nivelacion: 'm²', manta: 'm²', pegamento: 'ml', pegamentoPiedra: 'm²', laca: 'm²', pegamentoPlacas: 'm²', masilla: 'm²', tablaCielo: 'm de largo', perimetralCielo: 'ml', soleraCielo: 'ml', montanteCielo: 'ml', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos', tornilloT1Cielo: 'tornillos', unionHCielo: 'ml' };
 const LABEL_COBERTURA_INPUT = {
   puerta: 'Cuántas puertas cubre 1 unidad',
   nivelacion: 'Cuántos m² cubre 1 unidad',
@@ -677,7 +678,8 @@ const LABEL_COBERTURA_INPUT = {
   montanteCielo: 'Largo de cada montante (m)',
   tarugoCielo: 'Cuántos tarugos trae 1 envase',
   tornilloN8Cielo: 'Cuántos tornillos trae 1 envase',
-  tornilloT1Cielo: 'Cuántos tornillos trae 1 envase'
+  tornilloT1Cielo: 'Cuántos tornillos trae 1 envase',
+  unionHCielo: 'Largo de cada unión H (m)'
 };
 // Categorías de catálogo por SKU que corresponden a cada categoría de tipo
 // de obra — determina qué pestañas de "Catálogos" mostrar en Configuración
@@ -686,7 +688,7 @@ const CATEGORIAS_ITEM_POR_TIPO = {
   piso: ['puerta', 'nivelacion', 'manta', 'pegamento'],
   piedra: ['pegamentoPiedra', 'laca'],
   placas: ['pegamentoPlacas', 'masilla'],
-  cielorraso: ['tablaCielo', 'perimetralCielo', 'soleraCielo', 'montanteCielo', 'tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo']
+  cielorraso: ['tablaCielo', 'perimetralCielo', 'soleraCielo', 'montanteCielo', 'tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo', 'unionHCielo']
 };
 
 function money(n){ return '$ ' + Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -1333,19 +1335,12 @@ function renderPasoProductos(obra){
   });
 
   if (obra.categoria === 'cielorraso'){
-    const bloquesCielo = [['tablaCielo', 'Tablas (elegí las que usás: 4, 5 y 6 m)'], ['perimetralCielo', 'Perimetral']];
-    if (obra.conEstructura) bloquesCielo.push(['soleraCielo', 'Solera'], ['montanteCielo', 'Montante']);
-    bloquesCielo.push(['tarugoCielo', 'Tarugos'], ['tornilloN8Cielo', 'Tornillos N8']);
-    if (obra.conEstructura) bloquesCielo.push(['tornilloT1Cielo', 'Tornillos T1']);
-    bloquesCielo.forEach(([clave, titulo]) => {
-      const bloque = document.createElement('div');
-      bloque.className = 'rubro-block';
-      bloque.innerHTML = '<h4>' + titulo + '</h4><div class="prod-list" data-lista="' + clave + '"></div>';
-      cont.appendChild(bloque);
-      const lista = bloque.querySelector('.prod-list');
-      if (clave === 'tablaCielo') pintarListaTablasCielo(lista, catalogosTipoObraCache.tablaCielo);
-      else pintarListaCatalogo(lista, clave, catalogosTipoObraCache[clave], null);
-    });
+    // Solo se eligen las tablas: perimetral, perfilería, unión H y tornillería los toma el sistema del catálogo.
+    const bloque = document.createElement('div');
+    bloque.className = 'rubro-block';
+    bloque.innerHTML = '<h4>Tablas (elegí las que vas a usar)</h4><div class="rubro-tag">Perimetral, soleras, montantes, unión H, tarugos y tornillos se calculan solos con los artículos cargados en el catálogo del tipo de obra.</div><div class="prod-list" data-lista="tablaCielo"></div>';
+    cont.appendChild(bloque);
+    pintarListaTablasCielo(bloque.querySelector('.prod-list'), catalogosTipoObraCache.tablaCielo);
   }
 
   if (obra.cantidadPuertas > 0){
@@ -2183,6 +2178,10 @@ $('#btnCalcular').addEventListener('click', async () => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al calcular');
     if (data.faltantes && data.faltantes.length){
+      if (tipoObraElegido && tipoObraElegido.categoria === 'cielorraso' && data.faltantes.some(f => f !== 'tablaCielo')){
+        mostrarMsg('Falta cargar en Configuración → Tipos de obra → Catálogos: ' + data.faltantes.filter(f => f !== 'tablaCielo').map(f => ({ perimetralCielo: 'perimetral', soleraCielo: 'solera', montanteCielo: 'montante', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos N8', tornilloT1Cielo: 'tornillos T1', unionHCielo: 'unión H' }[f] || f)).join(', ') + '.');
+        return;
+      }
       mostrarMsg('Falta elegir producto para: ' + data.faltantes.map(f => ({ tablaCielo: 'tablas', perimetralCielo: 'perimetral', soleraCielo: 'solera', montanteCielo: 'montante', tarugoCielo: 'tarugos', tornilloN8Cielo: 'tornillos N8', tornilloT1Cielo: 'tornillos T1' }[f] || f)).join(', '));
       return;
     }
@@ -2885,7 +2884,7 @@ function prepararFormCatalogoCielo(){
   $('#cat_sku_label').textContent = gestionandoTipoObraCategoria === 'cielorraso' ? 'SKU del producto en el sistema' : 'SKU en Tiendanube';
   $('#cat_ancho').value = '';
   if (['tablaCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = '';
-  else if (['perimetralCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 3;
+  else if (['perimetralCielo', 'unionHCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 3;
   else if (['soleraCielo', 'montanteCielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 2.6;
   else if (['tarugoCielo', 'tornilloN8Cielo', 'tornilloT1Cielo'].indexOf(categoriaActivaCatalogo) >= 0) $('#cat_cobertura').value = 1;
 }
