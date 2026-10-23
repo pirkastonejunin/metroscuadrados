@@ -805,9 +805,10 @@ function calcularItemsPlacas({ obra, productos, tarifas: t }) {
 // productos: tablaCielo (ARRAY de items con largo/ancho), perimetralCielo, soleraCielo, montanteCielo, tarugoCielo,
 //   tornilloN8Cielo, tornilloT1Cielo (cada uno con "cobertura": ml por pieza en perfiles/perimetral, unidades por envase en tornillería).
 // Reglas de Mato: tablas de 4/5/6 m que se pueden cortar al medio (2/2,5/3 m); perimetral de 3 m alrededor; soleras en los dos
-// laterales paralelos a las tablas y montantes perpendiculares cada 0,40 m (ambos de 2,6 m); soleras y perimetral fijados a la
+// laterales paralelos a las tablas y montantes perpendiculares cada 0,60 m (ambos de 2,6 m); soleras y perimetral fijados a la
 // pared cada 0,40 m con tarugo + tornillo N8; T1: 2 por extremo de montante, 4 por empalme y 2 por cada cruce tabla-montante.
-const SEPARACION_CIELO_M = 0.4;
+const SEPARACION_CIELO_M = 0.4; // fijaciones a la pared (tarugo + N8)
+const SEPARACION_MONTANTES_M = 0.6;
 const GRILLA_CIELO = 20; // 1 unidad = 5 cm
 
 // Cómo cubrir una fila de largo L con piezas enteras o medias de las tablas disponibles (menor sobrante; a igualdad, menos piezas y menos mitades).
@@ -847,7 +848,7 @@ function calcularAmbienteCielo(Lt, Wt, anchoTabla, largosStock, conEstructura, l
     const k = String(p.stock);
     if (p.mitad) mitades[k] = (mitades[k] || 0) + filas; else enteras[k] = (enteras[k] || 0) + filas;
   });
-  const montantes = Math.ceil(Lt / SEPARACION_CIELO_M - 1e-9) + 1;
+  const montantes = Math.ceil(Lt / SEPARACION_MONTANTES_M - 1e-9) + 1;
   const piezasPorMontante = Math.max(1, Math.ceil(Wt / largoPerfil - 1e-9));
   const r = {
     Lt, Wt, filas, plan, enteras, mitades,
