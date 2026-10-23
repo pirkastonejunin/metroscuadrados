@@ -348,6 +348,7 @@
           <button class="secondary small" type="button" id="btnAgregarAmbiente">+ Agregar ambiente</button>
         </div>
         <label class="check"><input type="checkbox" id="cieloEstructura" checked> Lleva estructura (soleras, montantes y tornillos T1)</label>
+        <label class="check"><input type="checkbox" id="cieloUnionesLibres"> Reducir desperdicio: permitir que la unión H quede fuera del medio (por defecto va en el medio de la fila)</label>
         <div class="grid">
           <div class="field"><label>% desperdicio adicional</label><input type="number" id="desperdicioPctCielo" min="0" step="0.5" value="0"></div>
         </div>
@@ -909,6 +910,7 @@ $('#btnContinuarDatos').addEventListener('click', () => {
   if (esCielo){
     $('#desperdicioPctCielo').value = tipoObraElegido.desperdicioDefaultPct || 0;
     $('#cieloEstructura').checked = true;
+    $('#cieloUnionesLibres').checked = false;
     resetAmbientes();
     document.getElementById('manoObra').closest('label').classList.remove('hidden');
     $('#lblAplicarMinimo').classList.remove('hidden');
@@ -1050,6 +1052,7 @@ function leerObra(){
       categoria: 'cielorraso',
       ambientes: leerAmbientes(),
       conEstructura: $('#cieloEstructura').checked,
+      unionesLibres: $('#cieloUnionesLibres').checked,
       desperdicioPctCielo: parseFloat($('#desperdicioPctCielo').value) || 0,
       manoObra: $('#manoObra').checked,
       aplicarMinimo: $('#aplicarMinimo').checked

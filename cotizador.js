@@ -821,9 +821,11 @@ const uCielo = (m) => Math.round(m * UCIELO);
 const mCielo = (u) => u / UCIELO;
 
 // Cómo repartir el largo L (en unidades) en piezas: 1 pieza si entra en la tabla más larga; si no, n piezas (n mínimo) con distintos largos candidatos.
-function descomposicionesCielo(Lu, smaxU, stocksU) {
+function descomposicionesCielo(Lu, smaxU, stocksU, libres) {
   const n = Math.ceil(Lu / smaxU - 1e-9);
   if (n <= 1) return [[Lu]];
+  // Por defecto las uniones H van repartidas en partes iguales (con 2 piezas, en el medio). Con "libres" se prueban otros largos para desperdiciar menos.
+  if (!libres) { const x = Math.ceil(Lu / n); return [new Array(n - 1).fill(x).concat([Lu - (n - 1) * x])]; }
   const cand = new Set([Math.ceil(Lu / n)]);
   stocksU.forEach((S) => { for (let m = 1; m <= 4; m++) cand.add(Math.floor(S / m)); });
   const out = []; const vistos = new Set();
@@ -891,13 +893,13 @@ function empaquetarCielo(conteo, stocksU) {
 function sumarConteo(a, b) { Object.keys(b).forEach((k) => { a[k] = (a[k] || 0) + b[k]; }); return a; }
 
 // Una orientación de un ambiente: Lt = lado paralelo a las tablas, Wt = lado en el que se van sucediendo las filas.
-function calcularAmbienteCielo(Lt, Wt, anchoTabla, largosStock, conEstructura, largoPerfil) {
+function calcularAmbienteCielo(Lt, Wt, anchoTabla, largosStock, conEstructura, largoPerfil, unionesLibres) {
   const filas = Math.ceil(Wt / anchoTabla - 1e-9);
   const stocksU = largosStock.map(uCielo).sort((a, b) => a - b);
   const smaxU = stocksU[stocksU.length - 1];
   const Lu = uCielo(Lt);
   let mejor = null;
-  descomposicionesCielo(Lu, smaxU, stocksU).forEach((piezasFila) => {
+  descomposicionesCielo(Lu, smaxU, stocksU, unionesLibres).forEach((piezasFila) => {
     const conteo = {}; piezasFila.forEach((l) => { conteo[l] = (conteo[l] || 0) + filas; });
     const emp = empaquetarCielo(conteo, stocksU);
     if (!emp) return;
@@ -944,7 +946,7 @@ function patronesTxtCielo(patrones) {
 
 // Recomendación de qué tablas usar para desperdiciar menos: prueba todas las combinaciones de largos disponibles (mismo ancho) con el sentido elegido
 // en cada ambiente. tablas: [{ id, largo, ancho }], seleccionIds: ids elegidos hoy (opcional).
-function recomendarTablasCielo(ambientes, tablas, seleccionIds) {
+function recomendarTablasCielo(ambientes, tablas, seleccionIds, unionesLibres) {
   ambientes = (ambientes || []).map((a) => ({ largo: Number(a.largo) || 0, ancho: Number(a.ancho) || 0, sentido: a.sentido === 'ancho' ? 'ancho' : 'largo' })).filter((a) => a.largo > 0 && a.ancho > 0);
   tablas = (tablas || []).filter((t) => Number(t.largo) > 0 && Number(t.ancho) > 0);
   if (!ambientes.length || !tablas.length) return null;
@@ -955,7 +957,7 @@ function recomendarTablasCielo(ambientes, tablas, seleccionIds) {
   const evaluar = (set, usarMejorSentido) => {
     const total = {}; const sentidos = []; const stocksU = set.map(uCielo); let hayUniones = false;
     for (const a of ambientes) {
-      const op = { largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, set, false, 2.6), ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, set, false, 2.6) };
+      const op = { largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, set, false, 2.6, !!unionesLibres), ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, set, false, 2.6, !!unionesLibres) };
       const elegido = usarMejorSentido
         ? (op.largo && op.ancho ? (op.largo.m2Tablas < op.ancho.m2Tablas - 1e-9 ? 'largo' : (op.ancho.m2Tablas < op.largo.m2Tablas - 1e-9 ? 'ancho' : a.sentido)) : (op.largo ? 'largo' : 'ancho'))
         : a.sentido;
@@ -1024,8 +1026,8 @@ function calcularItemsCielo({ obra, productos, tarifas: t }) {
   const detalle = [];
   ambientes.forEach((a, i) => {
     const op = {
-      largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, largosStock, conEstructura, largoPerfil),
-      ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, largosStock, conEstructura, largoPerfil)
+      largo: calcularAmbienteCielo(a.largo, a.ancho, anchoTabla, largosStock, conEstructura, largoPerfil, !!obra.unionesLibres),
+      ancho: calcularAmbienteCielo(a.ancho, a.largo, anchoTabla, largosStock, conEstructura, largoPerfil, !!obra.unionesLibres)
     };
     const elegido = op[a.sentido]; const otro = op[a.sentido === 'largo' ? 'ancho' : 'largo'];
     if (!elegido) { avisos.push('Ambiente ' + (i + 1) + ': no se pudo armar el plan de tablas.'); return; }
@@ -1754,7 +1756,7 @@ router.post('/tipos-obra/:tipoObraId/cielorraso/recomendar', async (req, res) =>
     const { obra, seleccionIds } = req.body || {};
     const items = await (await getTipoObraItemsCollection()).find({ store_id: store.store_id, tipoObraId: String(req.params.tipoObraId), categoria: 'tablaCielo' }).toArray();
     const tablas = items.map((it) => ({ id: String(it._id), largo: Number(it.cobertura), ancho: Number(it.ancho) }));
-    res.json(recomendarTablasCielo(obra && obra.ambientes, tablas, seleccionIds) || {});
+    res.json(recomendarTablasCielo(obra && obra.ambientes, tablas, seleccionIds, obra && obra.unionesLibres) || {});
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
