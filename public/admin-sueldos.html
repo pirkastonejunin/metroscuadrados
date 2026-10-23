@@ -443,7 +443,7 @@ async function cargarCol(){
     if (!av) { av = document.createElement('div'); av.id = 'cAvisoEsp'; $('cPeriodo').parentNode.insertAdjacentElement('afterend', av); }
     const ti = COL.tareasIncompletas || [];
     let av2 = $('cAvisoInc'); if (!av2) { av2 = document.createElement('div'); av2.id = 'cAvisoInc'; av.insertAdjacentElement('afterend', av2); }
-    av2.innerHTML = ti.length ? '<div class="aviso" style="background:#fdecec;border:1px solid #e39a9a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>Obras terminadas que no suman acá:</b> la obra figura terminada pero la tarea no.<ul style="margin:6px 0 0 18px">' + ti.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + ' (' + escapeHtml(x.motivo) + ')</li>').join('') + '</ul>Volvé a marcar la obra como terminada en Gestión de Obras para que cuente.</div>' : '';
+    av2.innerHTML = ti.length ? '<div class="aviso" style="background:#fdecec;border:1px solid #e39a9a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>Obras terminadas que no suman acá:</b> la obra figura terminada pero la tarea no.<ul style="margin:6px 0 0 18px">' + ti.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + ' (' + escapeHtml(x.motivo) + ') <button class="btn secondary" onclick="repararTarea(\'' + x.obraId + '\',\'' + x.tareaId + '\')">Marcar terminada</button></li>').join('') + '</ul>Tocá "Marcar terminada" para que cuente en este mes.</div>' : '';
     av.innerHTML = sc.length ? '<div class="aviso" style="background:#fff7e0;border:1px solid #e6c36a;border-radius:8px;padding:10px 12px;margin:8px 0"><b>' + sc.length + ' trabajo' + (sc.length === 1 ? '' : 's') + ' a medida terminado' + (sc.length === 1 ? '' : 's') + ' sin cargar.</b> No entran por m² (tipo "Otros"/a medida): cargalos en la pestaña <b>Trabajos especiales</b> con el monto acordado.<ul style="margin:6px 0 0 18px">' + sc.map(x => '<li>' + escapeHtml(x.colocador) + ' · ' + escapeHtml(x.obra) + ' · ' + escapeHtml(x.tipoTrabajo) + '</li>').join('') + '</ul></div>' : ''; }
   $('cDev').textContent = pesos(t.devengado); $('cPen').textContent = pesos(t.pendienteLiquidar); $('cPag').textContent = pesos(t.pagado); $('cSal').textContent = pesos(t.saldo);
   $('tCol').innerHTML = COL.colocadores.length ? COL.colocadores.map((f, i) => {
@@ -518,6 +518,7 @@ async function guardarEsp(){
     exito('Trabajo guardado.'); cerrarPEsp(); await cargarCol();
   }catch(e){ error(e); }
 }
+async function repararTarea(obraId, tareaId){ try{ await api('POST', '/colocadores/tareas/reparar', {obraId, tareaId}); await cargarCol(); }catch(e){ error(e); } }
 async function terminarEsp(id){ const f = prompt('Fecha en que se terminó (AAAA-MM-DD):', hoyISO()); if (!f) return; try{ await api('POST', '/colocadores/especiales/' + id + '/terminar', {fecha: f}); await cargarCol(); }catch(e){ error(e); } }
 async function reabrirEsp(id){ try{ await api('POST', '/colocadores/especiales/' + id + '/reabrir', {}); await cargarCol(); }catch(e){ error(e); } }
 async function borrarEsp(id){ if (!confirm('¿Borrar este trabajo especial?')) return; try{ await api('DELETE', '/colocadores/especiales/' + id); await cargarCol(); }catch(e){ error(e); } }

@@ -862,6 +862,25 @@ async function armarColocadores(db, req, periodo) {
   }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
 }
 
+// Repara una tarea que quedó desfasada (obra terminada pero tarea sin terminar / sin fecha): la marca terminada.
+router.post('/colocadores/tareas/reparar', authSueldosDoc, async (req, res) => {
+  try {
+    const obraId = toObjectId((req.body || {}).obraId), tareaId = toObjectId((req.body || {}).tareaId);
+    if (!obraId || !tareaId) throw err(400, 'Datos inválidos.');
+    const r = await conReintento(async () => {
+      const db = await getDb();
+      const obra = await db.collection('obras').findOne({ _id: obraId });
+      if (!obra || obra.estado !== 'terminada') throw err(400, 'La obra no está terminada.');
+      const t = (obra.tareas || []).find(x => String(x._id) === String(tareaId));
+      if (!t) throw err(404, 'Tarea no encontrada.');
+      const ahora = new Date();
+      await db.collection('obras').updateOne({ _id: obraId, 'tareas._id': tareaId }, { $set: { 'tareas.$.estado': 'terminada', 'tareas.$.fechaFinReal': t.fechaFinReal || ahora, 'tareas.$.fechaInicio': t.fechaInicio || ahora, updatedAt: ahora } });
+      return { ok: true };
+    });
+    res.json(r);
+  } catch (e) { responder(res, e); }
+});
+
 router.get('/colocadores', authSueldosLectura, async (req, res) => {
   try {
     const periodo = validarPeriodo(req.query.periodo || periodoActual());
@@ -891,7 +910,7 @@ router.get('/colocadores', authSueldosLectura, async (req, res) => {
       const c = infoC.get(String(f.t.colocadorId));
       if (orgS && !(c && c.sucursalSueldoId ? String(c.sucursalSueldoId) === orgS : String(f.orgId) === orgS)) return false;
       return f.updatedAt && new Date(f.updatedAt) >= new Date(pd0.getTime() - 45 * 86400e3);
-    }).map(f => ({ obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', colocador: (infoC.get(String(f.t.colocadorId)) || {}).nombre || '', motivo: f.t.estado !== 'terminada' ? 'tarea en estado ' + (f.t.estado || '-') : 'sin fecha de fin' }));
+    }).map(f => ({ obraId: String(f._id), tareaId: String(f.t._id), obra: ('#' + (f.numero || '') + ' ' + (f.cliente || '')).trim(), tipoTrabajo: f.t.tipoTrabajo || '', colocador: (infoC.get(String(f.t.colocadorId)) || {}).nombre || '', motivo: f.t.estado !== 'terminada' ? 'tarea en estado ' + (f.t.estado || '-') : 'sin fecha de fin' }));
     res.json({ periodo, especialesSinCargar, tareasIncompletas, colocadores: filas, totales: { m2: sum('m2'), devengado: sum('devengado'), pendienteLiquidar: sum('pendienteLiquidar'), liquidado: sum('liquidado'), pagado: sum('pagado'), saldo: sum('saldo') } });
   } catch (e) { responder(res, e); }
 });
