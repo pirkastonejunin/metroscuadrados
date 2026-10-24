@@ -295,13 +295,13 @@ function precioVigente(variante) {
   return isNaN(precio) ? null : precio;
 }
 
-async function fetchAllProducts(storeId, accessToken) {
+async function fetchAllProducts(storeId, accessToken, campos) {
   let todos = [];
   let page = 1;
   while (true) {
     const response = await fetch(
       API_BASE + '/' + storeId + '/products?per_page=200&page=' + page +
-        '&fields=id,name,variants,handle,categories,images,brand,visibility,published,canonical_url',
+        '&fields=' + (campos || 'id,name,variants,handle,categories,images,brand,visibility,published,canonical_url'),
       { headers: apiHeaders(accessToken) }
     );
     const pagina = await response.json();
@@ -2384,7 +2384,7 @@ async function obtenerIndiceSkuTiendanube() {
     e.status = 400;
     throw e;
   }
-  const productosTienda = await fetchAllProducts(store.store_id, store.access_token);
+  const productosTienda = await fetchAllProducts(store.store_id, store.access_token, 'id,variants'); // solo lo necesario: mucho más liviano y rápido
   const indice = new Map();
   for (const p of productosTienda) {
     if (!p.variants) continue;
