@@ -449,7 +449,11 @@ async function buscarProductoTiendanubePorSku(sku) {
       return {
         nombre: nombreLocalizado(p.name),
         url: p.canonical_url || ((store.domain && nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${nombreLocalizado(p.handle)}` : null),
-        imagenes: (p.images || []).map(img => img.src).filter(Boolean)
+        imagenes: (p.images || []).map(img => img.src).filter(Boolean),
+        productId: p.id,
+        variantId: (p.variants.find(v => v.sku && String(v.sku).toLowerCase() === String(sku).toLowerCase()) || {}).id,
+        precio: parseFloat((p.variants.find(v => v.sku && String(v.sku).toLowerCase() === String(sku).toLowerCase()) || {}).price),
+        promo: (() => { const v = p.variants.find(x => x.sku && String(x.sku).toLowerCase() === String(sku).toLowerCase()) || {}; return v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null; })()
       };
     }
     return null;
@@ -2459,7 +2463,24 @@ async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
   return resultado;
 }
 
+// Actualiza el precio de UN producto en la tienda (botón de la ficha). Devuelve { estado, anterior, nuevo }.
+async function sincronizarPrecioTiendanubeUno(sku, precio) {
+  const info = await buscarProductoTiendanubePorSku(sku);
+  if (!info || !info.productId || !info.variantId) return { estado: 'noEncontrado' };
+  if (Number.isFinite(info.precio) && Math.abs(info.precio - precio) < 0.005) return { estado: 'sinCambios', anterior: info.precio, nuevo: precio, promo: info.promo };
+  const store = await getStoreById(process.env.TIENDA_REAL_STORE_ID);
+  let r = null;
+  for (let intento = 0; intento < 4; intento++) {
+    r = await fetch(API_BASE + '/' + store.store_id + '/products/' + info.productId + '/variants/' + info.variantId, { method: 'PUT', headers: apiHeaders(store.access_token), body: JSON.stringify({ price: String(precio) }) });
+    if (r.status !== 429) break;
+    await new Promise(x => setTimeout(x, 2000 * (intento + 1)));
+  }
+  if (!r.ok) { const t = await r.text().catch(() => ''); const e = new Error('Tiendanube respondió ' + r.status + (t ? ': ' + t.slice(0, 160) : '')); e.status = 502; throw e; }
+  return { estado: 'actualizado', anterior: info.precio, nuevo: precio, promo: info.promo };
+}
+
 module.exports = router;
+module.exports.sincronizarPrecioTiendanubeUno = sincronizarPrecioTiendanubeUno;
 module.exports.m2PlacasDeSuperficie = m2PlacasDeSuperficie; // exportado para tests
 module.exports.calcularCotizacion = calcularCotizacion; // exportado para tests
 module.exports.buscarProductoTiendanubePorSku = buscarProductoTiendanubePorSku; // exportado para productos.js

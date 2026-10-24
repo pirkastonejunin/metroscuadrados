@@ -977,10 +977,32 @@ async function cargarInfoTiendanube(p){
       <div class="card" style="margin-bottom:12px">
         <strong>En Tiendanube:</strong>
         ${data.url ? `<a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">Ver página del producto ↗</a>` : escapeHtml(data.nombre || '')}
+        <div style="margin-top:8px;font-size:13px" id="tnPrecioBox">
+          Precio en la tienda: <b>${data.precio != null && isFinite(data.precio) ? '$ ' + Math.round(data.precio).toLocaleString('es-AR') : '—'}</b>
+          ${data.promo != null ? ` · <span style="color:#b45309" title="Tiendanube muestra este precio promocional en lugar del normal">con promo: $ ${Math.round(data.promo).toLocaleString('es-AR')}</span>` : ''}
+          · Según el sistema: <b>${data.precioLista != null ? '$ ' + Math.round(data.precioLista).toLocaleString('es-AR') : '—'}</b>
+          ${data.precioLista != null && isFinite(data.precio) && Math.abs(data.precioLista - data.precio) >= 0.5 ? '<span class="chip mal" style="margin-left:6px">distinto</span>' : (data.precioLista != null ? '<span class="chip ok" style="margin-left:6px">igual</span>' : '')}
+          ${data.precioLista != null ? `<button class="btn secondary small" id="tnSyncBtn" style="margin-left:8px" onclick="sincronizarPrecioTn('${escapeHtml(p.sku)}')">Actualizar precio en Tiendanube</button>` : `<div class="muted" style="margin-top:4px">${escapeHtml(data.motivoSinPrecio || '')}</div>`}
+          <div id="tnSyncMsg" style="margin-top:4px"></div>
+        </div>
         ${fotos ? `<div class="row" style="gap:6px;margin-top:8px">${fotos}</div>` : ''}
       </div>
     `;
   }catch(e){ cont.innerHTML = ''; }
+}
+
+async function sincronizarPrecioTn(sku){
+  const btn = document.getElementById('tnSyncBtn'), msg = document.getElementById('tnSyncMsg');
+  btn.disabled = true; msg.innerHTML = '<span class="muted">Actualizando…</span>';
+  try{
+    const r = await fetch(BASE + '/tiendanube/' + encodeURIComponent(sku) + '/sincronizar-precio', {method:'POST', headers: headersAuthJson()});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    msg.innerHTML = d.estado === 'sinCambios' ? '<span class="ok-msg">Ya estaba al día en Tiendanube.</span>' : `<span class="ok-msg">Listo: pasó de $ ${Math.round(d.anterior||0).toLocaleString('es-AR')} a $ ${Math.round(d.nuevo).toLocaleString('es-AR')} en Tiendanube.</span>`;
+    if (d.promo != null) msg.innerHTML += ' <span style="color:#b45309">Ojo: tiene precio promocional cargado en la tienda y es el que ve el cliente.</span>';
+    const p = {sku}; setTimeout(() => { const prod = {sku}; cargarInfoTiendanube(prod); }, 1500);
+  }catch(e){ msg.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
+  btn.disabled = false;
 }
 
 async function guardarEdicionProducto(id){

@@ -93,7 +93,7 @@ const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64, leerEncabezadosX
 // Para mostrar en la ficha de producto el link y las fotos de Tiendanube
 // (30/9/2026, pedido de Mato) — ver buscarProductoTiendanubePorSku en
 // cotizador.js.
-const { buscarProductoTiendanubePorSku, sincronizarPreciosTiendanube, obtenerPreciosTiendanubePorSku } = require('./cotizador');
+const { buscarProductoTiendanubePorSku, sincronizarPreciosTiendanube, obtenerPreciosTiendanubePorSku, sincronizarPrecioTiendanubeUno } = require('./cotizador');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -823,7 +823,36 @@ router.get('/tiendanube/:sku', authAdmin, async (req, res) => {
     try { const db = await conReintento(getDb); const prod = await db.collection('productos_catalogo').findOne(Object.assign({ sku: req.params.sku, activo: { $ne: false } }, filtroOrg(req)), { projection: { skuTiendanube: 1 } }); if (prod && prod.skuTiendanube) skuTn = prod.skuTiendanube; } catch (e) { /* sin vínculo: se busca por el SKU propio */ }
     const info = await buscarProductoTiendanubePorSku(skuTn);
     if (!info) return res.json({ encontrado: false });
-    res.json(Object.assign({ encontrado: true }, info));
+    // Precio que se mandaría a la tienda (lista "Consumidor Final × bulto"), para compararlo con el actual
+    let precioLista = null, motivoSinPrecio = null;
+    try { const r = await precioTiendaDeProducto(req, req.params.sku); precioLista = r.precio; motivoSinPrecio = r.motivo || null; } catch (e) { motivoSinPrecio = null; }
+    res.json(Object.assign({ encontrado: true, precioLista, motivoSinPrecio }, info));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Precio que corresponde en Tiendanube para un producto: el de la lista "Consumidor Final × bulto" (la misma que sincroniza el botón de Listas).
+async function precioTiendaDeProducto(req, sku) {
+  const db = await conReintento(getDb);
+  const lista = await db.collection('productos_listas_precio').findOne(Object.assign({ formula: 'cf_x_bulto', activa: { $ne: false } }, filtroOrg(req)));
+  if (!lista) return { precio: null, motivo: 'No hay una lista "Consumidor Final × bulto" para calcular el precio de la tienda.' };
+  const prod = await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)));
+  if (!prod) return { precio: null, motivo: 'Producto no encontrado.' };
+  if (sinBultoPorM2(prod)) return { precio: null, motivo: 'El producto se vende por m² y no tiene m² por caja cargado.', prod, lista };
+  const { precio } = precioResuelto(prod, lista, null);
+  if (!(precio > 0)) return { precio: null, motivo: 'El producto no tiene precio calculado en la lista de la tienda.', prod, lista };
+  return { precio, prod, lista };
+}
+
+// Botón de la ficha: manda ya el precio de este producto a Tiendanube (la sincronización de la lista no es instantánea).
+router.post('/tiendanube/:sku/sincronizar-precio', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const r = await precioTiendaDeProducto(req, req.params.sku);
+    if (!(r.precio > 0)) throw err(400, r.motivo || 'No hay precio para enviar.');
+    const skuTn = String(r.prod.skuTiendanube || r.prod.sku);
+    const out = await sincronizarPrecioTiendanubeUno(skuTn, r.precio);
+    if (out.estado === 'noEncontrado') throw err(404, 'No se encontró el SKU "' + skuTn + '" en Tiendanube. Vinculalo desde la pantalla Tiendanube.');
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
