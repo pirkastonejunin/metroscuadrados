@@ -391,6 +391,31 @@ function camposPlanCobro(pl) {
 }
 
 // Planes ofrecibles al cobrar (activos y vigentes) para el canal Point / link, con el recargo ya calculado sobre el monto.
+// Valor de las cuotas según Mercado Pago (25/10/2026, pedido de Mato): el link cobra el monto de la venta y es Mercado Pago el que ofrece
+// las cuotas; esto consulta su calculadora para informarle al vendedor cuánto paga el cliente por cuota (referencia: depende de la tarjeta
+// y el banco, y de las promociones vigentes). Usa Visa y Mastercard de crédito como referencia.
+router.get('/cuotas-referencia', authCobro, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const monto = Number(req.query.monto) || 0;
+    if (!(monto > 0)) return res.json({ monto, medios: [] });
+    const db = await getDb();
+    const cfg = await cargarConfig(db, req.orgId);
+    const planes = await db.collection('tarjetas_planes').find({ orgId: req.orgId, tarjeta: CANAL_TARJETA.link, activo: { $ne: false } }).project({ cuotas: 1 }).toArray();
+    const maxCuotas = planes.reduce((m, p) => Math.max(m, Number(p.cuotas) || 1), 0) || 12;
+    const medios = [];
+    for (const [id, nombre] of [['visa', 'Visa crédito'], ['master', 'Mastercard crédito']]) {
+      try {
+        const d = await mp(cfg, 'GET', `/v1/payment_methods/installments?amount=${monto}&payment_method_id=${id}`);
+        const costos = ((Array.isArray(d) ? d[0] : d) || {}).payer_costs || [];
+        const cuotas = costos.filter(c => Number(c.installments) <= maxCuotas).map(c => ({ cuotas: Number(c.installments), cuota: redondear(c.installment_amount), total: redondear(c.total_amount), tasa: Number(c.installment_rate) || 0 }));
+        if (cuotas.length) medios.push({ id, nombre, cuotas });
+      } catch (e) { /* ese medio no se pudo consultar: se muestra el resto */ }
+    }
+    res.json({ monto, medios });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/planes-cobro', authCobro, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
