@@ -63,19 +63,6 @@
     let lista = [];
     let motivo = '';
     try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}${ctx.ventaId ? '&ventaId=' + ctx.ventaId : ctx.clienteId ? '&clienteId=' + ctx.clienteId : ''}`, { headers: hdr() }); const d = await r.json().catch(() => []); if (r.ok) lista = d; else motivo = (d && d.error) || ('Error ' + r.status); } catch (e) { motivo = e.message; }
-    if (ctx.tipo === 'link') {
-      ctx.planes = []; ctx.cuotasRef = null;
-      box.innerHTML = '<p class="muted" style="margin-top:8px;font-size:12px">El link va por el monto de la venta. El cliente elige las cuotas en Mercado Pago y el interés de financiar lo paga él.</p><div id="mpcCuotas" class="muted" style="font-size:12px">Consultando las cuotas…</div>';
-      try {
-        const r = await fetch(`${BASE}/cuotas-referencia?monto=${monto}${ctx.ventaId ? '&ventaId=' + ctx.ventaId : ctx.clienteId ? '&clienteId=' + ctx.clienteId : ''}`, { headers: hdr() });
-        const d = await r.json().catch(() => ({}));
-        const el = document.getElementById('mpcCuotas'); if (!el) return;
-        if (!r.ok || !(d.medios || []).length) { el.textContent = ''; return; }
-        ctx.cuotasRef = d.medios[0];
-        el.innerHTML = '<b>Cuotas según Mercado Pago</b> (referencia ' + esc(d.medios.map(x => x.nombre).join(' / ')) + ', varía por banco y promos):<table style="width:100%;margin-top:4px;font-size:12px"><tr><th style="text-align:left">Cuotas</th><th style="text-align:right">Cuota</th><th style="text-align:right">Total</th></tr>' + d.medios[0].cuotas.map(c => `<tr><td>${c.cuotas}</td><td style="text-align:right">${money(c.cuota)}</td><td style="text-align:right">${money(c.total)}</td></tr>`).join('') + '</table>';
-      } catch (e) { const el = document.getElementById('mpcCuotas'); if (el) el.textContent = ''; }
-      return;
-    }
     ctx.planes = lista;
     const previo = (document.getElementById('mpcPlan') || {}).value || (lista.find(p => sug.includes(String(p._id))) || {})._id || '';
     if (!lista.length) { box.innerHTML = '<p class="muted" style="margin-top:8px;font-size:12px">' + (motivo ? 'No se pudieron cargar los planes de cuotas: ' + esc(motivo) : 'No hay planes de cuotas para ' + (ctx.tipo === 'point' ? 'Point' : 'el link de pago') + '. Se cobra en un solo pago. Para ofrecer cuotas, cargalos en Mercado Pago → Cuotas y recargos (marcá "Ofrecer").') + '</p>'; return; }
@@ -95,6 +82,7 @@
     if (!(monto > 0)) { err.textContent = 'El monto tiene que ser mayor a 0'; return; }
     const body = { monto };
     const ps = document.getElementById('mpcPlan'); if (ps && ps.value) body.planId = ps.value;
+    ctx.planElegido = ps && ps.value ? ps.value : '';
     if (ctx.tipo === 'point') { const t = document.getElementById('mpcTerm').value; if (t) body.terminalId = t; }
     document.getElementById('mpcGo').disabled = true;
     try {
@@ -113,8 +101,8 @@
   }
 
   function mostrarLink(url, monto) {
-    const cr = ctx.cuotasRef && ctx.cuotasRef.cuotas ? ctx.cuotasRef.cuotas.filter(c => c.cuotas > 1) : [];
-    const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (cr.length ? `\nTambién podés pagar en cuotas (referencia, varía según tu banco): ${cr.map(c => c.cuotas + ' de ' + money(c.cuota)).join(', ')}.` : '');
+    const pl = (ctx.planes || []).find(x => String(x._id) === String(ctx.planElegido || ''));
+    const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (pl && pl.cuotas > 1 ? `\nPodés pagarlo en hasta ${pl.cuotas} cuotas sin interés de ${money(monto / pl.cuotas)}.` : '');
     pintar(`
       <h2>Link de pago — ${money(monto)}</h2>
       <input id="mpcLink" readonly value="${esc(url)}" onclick="this.select()">
