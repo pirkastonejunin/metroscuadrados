@@ -416,8 +416,12 @@ async function crearLink(req, res) {
     if (!cfg.bancoId) throw err(400, 'Falta elegir en qué banco de Tesorería entra la plata de Mercado Pago.');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
-    const plan = await planParaCobro(db, req, req.body && req.body.planId, monto);
-    const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
+    // Link de pago (25/10/2026, pedido de Mato): va por el monto de la venta, SIN recargo nuestro. Mercado Pago ofrece las cuotas y
+    // el interés de financiar lo paga el cliente (si no, se cobraba dos veces: nuestro recargo + el de Mercado Pago).
+    const plan = null;
+    const aCobrar = monto;
+    const planesLink = await db.collection('tarjetas_planes').find({ orgId: req.orgId, tarjeta: CANAL_TARJETA.link, activo: { $ne: false } }).project({ cuotas: 1 }).toArray();
+    const maxCuotas = planesLink.reduce((m, p) => Math.max(m, Number(p.cuotas) || 1), 0);
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const hoy = new Date();
@@ -427,7 +431,7 @@ async function crearLink(req, res) {
       external_reference: ref,
       notification_url: urlWebhook(req, cfg),
       expires: true, expiration_date_to: vence.toISOString(),
-      ...(plan && plan.tarjetaCuotas ? { payment_methods: { installments: plan.tarjetaCuotas, default_installments: plan.tarjetaCuotas } } : {})
+      ...(maxCuotas > 1 ? { payment_methods: { installments: maxCuotas } } : {})
     });
     const link = pref.init_point;
     if (!link) throw err(502, 'Mercado Pago no devolvió el link de pago.');
