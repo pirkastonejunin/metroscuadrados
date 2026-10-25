@@ -62,7 +62,7 @@
     const sug = (ctx.planesSugeridos || []).map(String);
     let lista = [];
     let motivo = '';
-    try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}`, { headers: hdr() }); const d = await r.json().catch(() => []); if (r.ok) lista = d; else motivo = (d && d.error) || ('Error ' + r.status); } catch (e) { motivo = e.message; }
+    try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}${ctx.ventaId ? '&ventaId=' + ctx.ventaId : ctx.clienteId ? '&clienteId=' + ctx.clienteId : ''}`, { headers: hdr() }); const d = await r.json().catch(() => []); if (r.ok) lista = d; else motivo = (d && d.error) || ('Error ' + r.status); } catch (e) { motivo = e.message; }
     ctx.planes = lista;
     const previo = (document.getElementById('mpcPlan') || {}).value || (lista.find(p => sug.includes(String(p._id))) || {})._id || '';
     if (!lista.length) { box.innerHTML = '<p class="muted" style="margin-top:8px;font-size:12px">' + (motivo ? 'No se pudieron cargar los planes de cuotas: ' + esc(motivo) : 'No hay planes de cuotas para ' + (ctx.tipo === 'point' ? 'Point' : 'el link de pago') + '. Se cobra en un solo pago. Para ofrecer cuotas, cargalos en Mercado Pago → Cuotas y recargos (marcá "Ofrecer").') + '</p>'; return; }

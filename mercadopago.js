@@ -35,6 +35,21 @@ const { registrarMovimientoCuentaCorriente } = require('./clientes');
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
 const auth = [authUsuario, resolverOrg, requiereModulo('tesoreria')];
+// Cobros desde "Todas las sucursales": si no hay una sucursal elegida, se usa la de la venta (o del cliente) que se está cobrando.
+async function orgDesdeDoc(req, res, next) {
+  try {
+    if (!req.orgId) {
+      const vId = req.params.ventaId || req.query.ventaId, cId = req.params.clienteId || req.query.clienteId;
+      const ventaId = vId ? toObjectId(vId) : null, clienteId = cId ? toObjectId(cId) : null;
+      const db = await getDb();
+      const doc = ventaId ? await db.collection('ventas').findOne({ _id: ventaId }, { projection: { orgId: 1 } })
+        : clienteId ? await db.collection('clientes').findOne({ _id: clienteId }, { projection: { orgId: 1 } }) : null;
+      if (doc && doc.orgId) req.orgId = doc.orgId;
+    }
+    next();
+  } catch (e) { next(e); }
+}
+const authCobro = [...auth, orgDesdeDoc];
 
 let mongoClient;
 let mongoConectando = null;
@@ -376,7 +391,7 @@ function camposPlanCobro(pl) {
 }
 
 // Planes ofrecibles al cobrar (activos y vigentes) para el canal Point / link, con el recargo ya calculado sobre el monto.
-router.get('/planes-cobro', auth, async (req, res) => {
+router.get('/planes-cobro', authCobro, async (req, res) => {
   try {
     if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const canal = req.query.canal === 'link' ? 'link' : 'point';
@@ -422,8 +437,8 @@ async function crearLink(req, res) {
     res.json(publico(doc));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 }
-router.post('/ventas/:ventaId/link', auth, crearLink);
-router.post('/clientes/:clienteId/link', auth, crearLink);
+router.post('/ventas/:ventaId/link', authCobro, crearLink);
+router.post('/clientes/:clienteId/link', authCobro, crearLink);
 
 async function crearPoint(req, res) {
   try {
@@ -453,8 +468,8 @@ async function crearPoint(req, res) {
     res.json(publico(doc));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 }
-router.post('/ventas/:ventaId/point', auth, crearPoint);
-router.post('/clientes/:clienteId/point', auth, crearPoint);
+router.post('/ventas/:ventaId/point', authCobro, crearPoint);
+router.post('/clientes/:clienteId/point', authCobro, crearPoint);
 
 function publico(c) {
   return { _id: c._id, ventaId: c.ventaId, clienteId: c.clienteId || null, aCuenta: !!c.aCuenta, tipo: c.tipo, monto: c.monto, montoCobrar: c.montoCobrar || c.monto, recargo: c.recargo || 0, planNombre: c.planNombre || '', estado: c.estado, linkUrl: c.linkUrl || null,
