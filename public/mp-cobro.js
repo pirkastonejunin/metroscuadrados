@@ -61,10 +61,11 @@
     const monto = Number(document.getElementById('mpcMonto').value) || 0;
     const sug = (ctx.planesSugeridos || []).map(String);
     let lista = [];
-    try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}`, { headers: hdr() }); lista = r.ok ? await r.json() : []; } catch (e) {}
+    let motivo = '';
+    try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}`, { headers: hdr() }); const d = await r.json().catch(() => []); if (r.ok) lista = d; else motivo = (d && d.error) || ('Error ' + r.status); } catch (e) { motivo = e.message; }
     ctx.planes = lista;
     const previo = (document.getElementById('mpcPlan') || {}).value || (lista.find(p => sug.includes(String(p._id))) || {})._id || '';
-    if (!lista.length) { box.innerHTML = ''; return; }
+    if (!lista.length) { box.innerHTML = '<p class="muted" style="margin-top:8px;font-size:12px">' + (motivo ? 'No se pudieron cargar los planes de cuotas: ' + esc(motivo) : 'No hay planes de cuotas para ' + (ctx.tipo === 'point' ? 'Point' : 'el link de pago') + '. Se cobra en un solo pago. Para ofrecer cuotas, cargalos en Mercado Pago → Cuotas y recargos (marcá "Ofrecer").') + '</p>'; return; }
     box.innerHTML = `<label style="margin-top:8px">Plan de pago</label><select id="mpcPlan" onchange="MPCobro.resumen()"><option value="">Sin plan (un pago, sin recargo)</option>${lista.map(p => `<option value="${esc(p._id)}"${String(p._id) === String(previo) ? ' selected' : ''}>${esc(p.nombre)}${p.recargoPorcentaje ? ' — recargo ' + p.recargoPorcentaje + '%' : ' — sin recargo'}</option>`).join('')}</select><div id="mpcResumen" class="muted" style="margin-top:6px"></div>`;
     resumen();
   }
