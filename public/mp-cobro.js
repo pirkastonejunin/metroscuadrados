@@ -60,10 +60,10 @@
     const box = document.getElementById('mpcPlanBox'); if (!box) return;
     const monto = Number(document.getElementById('mpcMonto').value) || 0;
     const sug = (ctx.planesSugeridos || []).map(String);
-    const previo = (document.getElementById('mpcPlan') || {}).value || (lista.find(p => sug.includes(String(p._id))) || {})._id || '';
     let lista = [];
     try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}`, { headers: hdr() }); lista = r.ok ? await r.json() : []; } catch (e) {}
     ctx.planes = lista;
+    const previo = (document.getElementById('mpcPlan') || {}).value || (lista.find(p => sug.includes(String(p._id))) || {})._id || '';
     if (!lista.length) { box.innerHTML = ''; return; }
     box.innerHTML = `<label style="margin-top:8px">Plan de pago</label><select id="mpcPlan" onchange="MPCobro.resumen()"><option value="">Sin plan (un pago, sin recargo)</option>${lista.map(p => `<option value="${esc(p._id)}"${String(p._id) === String(previo) ? ' selected' : ''}>${esc(p.nombre)}${p.recargoPorcentaje ? ' — recargo ' + p.recargoPorcentaje + '%' : ' — sin recargo'}</option>`).join('')}</select><div id="mpcResumen" class="muted" style="margin-top:6px"></div>`;
     resumen();
