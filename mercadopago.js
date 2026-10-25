@@ -569,22 +569,25 @@ function interpretar(data, esOrden) {
 // Trae el pago real (cualquier medio) para saber cuánto descuenta Mercado Pago:
 // comisión e impuestos/retenciones. Si falla, el cobro igual se registra completo.
 async function completarDescuentos(cfg, info) {
-  info.comision = info.comision || 0; info.impuestos = info.impuestos || 0;
+  info.comision = info.comision || 0; info.impuestos = info.impuestos || 0; info.financiacion = info.financiacion || 0;
   if (!/^\d+$/.test(String(info.paymentId || ''))) return info;
   let p;
   try { p = await mp(cfg, 'GET', '/v1/payments/' + info.paymentId); } catch (e) { return info; }
   const num = x => Number(x) || 0;
   const fees = (p.fee_details || []).reduce((a, f) => a + num(f.amount), 0);
+  // Costo de las cuotas (cuotas sin interés a cargo del vendedor): Mercado Pago lo informa aparte como "financing_fee"
+  const financiacionMp = (p.fee_details || []).filter(f => String(f.type || '').toLowerCase() === 'financing_fee').reduce((a, f) => a + num(f.amount), 0);
   let imp = 0;
   (p.charges_details || []).forEach(c => { if (String(c.type || '').toLowerCase() === 'tax') imp += num(c.amounts && c.amounts.original); });
   if (!imp) imp = num(p.taxes_amount);
-  let comision = redondear(fees), impuestos = redondear(imp);
+  let comision = redondear(fees - financiacionMp), impuestos = redondear(imp);
+  info.financiacion = redondear(financiacionMp);
   const bruto = num(p.transaction_amount) || info.monto;
   const neto = p.transaction_details && p.transaction_details.net_received_amount != null ? num(p.transaction_details.net_received_amount) : null;
   if (neto !== null && neto > 0 && neto <= bruto) {
     // Lo que realmente deposita Mercado Pago manda: si no coincide con comisión + impuestos, la diferencia se suma a la comisión.
     const total = redondear(bruto - neto);
-    if (total > comision + impuestos + 0.009) comision = redondear(total - impuestos);
+    if (total > comision + info.financiacion + impuestos + 0.009) comision = redondear(total - impuestos - info.financiacion);
     info.neto = neto;
   }
   info.comision = comision; info.impuestos = impuestos;
@@ -611,6 +614,12 @@ async function registrarCobroACuenta(db, cfg, cobro, info) {
     await aplicarMovimientoCuenta(db, reqFalso, {
       cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.comision, moneda: 'ARS',
       motivo: 'Comisión Mercado Pago', observaciones: `Cobro a cuenta ${clienteNombre} · pago ${info.paymentId}`, origen: 'manual', fecha, omitirPermiso: true
+    });
+  }
+  if (info.financiacion > 0) {
+    await aplicarMovimientoCuenta(db, reqFalso, {
+      cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.financiacion, moneda: 'ARS',
+      motivo: 'Costo de cuotas Mercado Pago', observaciones: `Cobro a cuenta ${clienteNombre} · pago ${info.paymentId}`, origen: 'manual', fecha, omitirPermiso: true
     });
   }
   if (info.impuestos > 0) {
@@ -658,6 +667,12 @@ async function registrarCobroEnVenta(db, cfg, cobro, info) {
       motivo: 'Comisión Mercado Pago', observaciones: `Venta Nº ${venta.numero} · pago ${info.paymentId}`, origen: 'manual', ventaId: venta._id, fecha, omitirPermiso: true
     });
   }
+  if (info.financiacion > 0 && !(await movimientoYaRegistrado(db, 'Costo de cuotas Mercado Pago', info))) {
+    await aplicarMovimientoCuenta(db, reqFalso, {
+      cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.financiacion, moneda: 'ARS',
+      motivo: 'Costo de cuotas Mercado Pago', observaciones: `Venta Nº ${venta.numero} · pago ${info.paymentId}`, origen: 'manual', ventaId: venta._id, fecha, omitirPermiso: true
+    });
+  }
   if (info.impuestos > 0 && !(await movimientoYaRegistrado(db, 'Impuestos y retenciones Mercado Pago', info))) {
     await aplicarMovimientoCuenta(db, reqFalso, {
       cuentaTipo: 'banco', cuentaId: cfg.bancoId, tipo: 'egreso', monto: info.impuestos, moneda: 'ARS',
@@ -700,7 +715,7 @@ async function conciliarCobro(db, cfg, cobro) {
     try {
       await completarDescuentos(cfg, info);
       await registrarCobroEnVenta(db, cfg, doc, info);
-      await db.collection('mp_cobros').updateOne({ _id: cobro._id }, { $set: { estado: 'acreditado', paymentId: info.paymentId, montoAcreditado: info.monto, comision: info.comision || 0, impuestos: info.impuestos || 0, neto: info.neto != null ? info.neto : null, acreditadoEn: new Date() } });
+      await db.collection('mp_cobros').updateOne({ _id: cobro._id }, { $set: { estado: 'acreditado', paymentId: info.paymentId, montoAcreditado: info.monto, comision: info.comision || 0, financiacion: info.financiacion || 0, impuestos: info.impuestos || 0, neto: info.neto != null ? info.neto : null, acreditadoEn: new Date() } });
     } catch (e) {
       await db.collection('mp_cobros').updateOne({ _id: cobro._id }, { $set: { estado: 'error', error: e.message } });
     }
