@@ -496,13 +496,12 @@ async function crearLink(req, res) {
     if (!cfg.bancoId) throw err(400, 'Falta elegir en qué banco de Tesorería entra la plata de Mercado Pago.');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
-    // Link de pago = Checkout Pro (26/10/2026, pedido de Mato): sin elegir plan. Va por el monto de la venta (precio de lista) y Mercado Pago ofrece
-    // al cliente hasta la mayor cantidad de cuotas marcada como "Ofrecer" en el canal Link de pago; son sin interés (a cargo del vendedor, según la
-    // configuración de Checkout en Mercado Pago) y el costo real queda registrado aparte al acreditarse el cobro.
-    const plan = null;
-    const aCobrar = monto;
-    const planesLink = await db.collection('tarjetas_planes').find({ orgId: req.orgId, tarjeta: CANAL_TARJETA.link, activo: { $ne: false } }).project({ cuotas: 1 }).toArray();
-    const maxCuotas = planesLink.reduce((m, p) => Math.max(m, Number(p.cuotas) || 1), 0) || 1;
+    // Link de pago = Checkout Pro (26/10/2026, mismo criterio que Point): en Mercado Pago las cuotas de Checkout se configuran todas sin interés
+    // y el recargo lo define el sistema: se elige el plan al generar el link y va el monto + el recargo de ese plan (0 % si no tiene interés).
+    // El link se limita a las cuotas del plan; sin plan, un solo pago. El costo real (comisión + cuotas) se registra al acreditarse.
+    const plan = await planParaCobro(db, req, req.body && req.body.planId, monto);
+    const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
+    const maxCuotas = plan && plan.tarjetaCuotas ? plan.tarjetaCuotas : 1;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const hoy = new Date();
@@ -512,7 +511,7 @@ async function crearLink(req, res) {
       external_reference: ref,
       notification_url: urlWebhook(req, cfg),
       expires: true, expiration_date_to: vence.toISOString(),
-      ...(maxCuotas > 1 ? { payment_methods: { installments: maxCuotas } } : {})
+      payment_methods: { installments: maxCuotas, default_installments: maxCuotas }
     });
     const link = pref.init_point;
     if (!link) throw err(502, 'Mercado Pago no devolvió el link de pago.');
