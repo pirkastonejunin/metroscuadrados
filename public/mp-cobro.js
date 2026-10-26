@@ -102,7 +102,7 @@
 
   function mostrarLink(url, monto) {
     const pl = (ctx.planes || []).find(x => String(x._id) === String(ctx.planElegido || ''));
-    const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (pl && pl.cuotas > 1 ? `\nPodés pagarlo en hasta ${pl.cuotas} cuotas sin interés de ${money(monto / pl.cuotas)}.` : '');
+    const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (pl && pl.cuotas > 1 ? `\nEl importe está calculado para pagarlo en ${pl.cuotas} cuotas de ${money(monto / pl.cuotas)}; elegí esa opción al pagar.` : '');
     pintar(`
       <h2>Link de pago — ${money(monto)}</h2>
       <input id="mpcLink" readonly value="${esc(url)}" onclick="this.select()">

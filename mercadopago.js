@@ -507,7 +507,7 @@ async function crearLink(req, res) {
     const hoy = new Date();
     const vence = new Date(hoy.getTime() + 7 * 24 * 3600 * 1000); // el link vive 7 días
     const pref = await mp(cfg, 'POST', '/checkout/preferences', {
-      items: [{ id: String(esCuenta ? cliente._id : venta._id), title: (esCuenta ? `Pago a cuenta — ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 120), quantity: 1, unit_price: aCobrar, currency_id: 'ARS' }],
+      items: [{ id: String(esCuenta ? cliente._id : venta._id), title: ((esCuenta ? `Pago a cuenta — ${clienteNombre}` : `Venta ${numeroVenta(venta)}`) + (maxCuotas > 1 ? ` — para pagar en ${maxCuotas} cuotas de $${Math.round(aCobrar / maxCuotas).toLocaleString('es-AR')}` : '')).slice(0, 120), quantity: 1, unit_price: aCobrar, currency_id: 'ARS' }],
       external_reference: ref,
       notification_url: urlWebhook(req, cfg),
       expires: true, expiration_date_to: vence.toISOString(),
