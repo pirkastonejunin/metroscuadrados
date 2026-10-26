@@ -536,8 +536,10 @@ async function crearPoint(req, res) {
     if (!terminalId) throw err(400, 'Elegí la terminal Point (o dejá una por defecto en la configuración).');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
-    const plan = await planParaCobro(db, req, req.body && req.body.planId, monto);
-    const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
+    // Point (26/10/2026, igual que el link): se cobra el monto de la venta, sin plan ni recargo. Las cuotas (sin interés o con interés para el
+    // cliente) las ofrece la terminal según la configuración de Point en Mercado Pago, y el costo real queda registrado al acreditarse.
+    const plan = null;
+    const aCobrar = monto;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
     const orden = await mp(cfg, 'POST', '/v1/orders', {
