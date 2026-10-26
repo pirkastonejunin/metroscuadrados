@@ -1348,7 +1348,8 @@ router.get('/:id/comprobante', authAdmin, async (req, res) => {
       titulo: `Comprobante Nº ${prefijo}-${numeroDigitos}`,
       org: datosNegocioParaImprimir(org),
       headerHtml,
-      bodyHtml
+      bodyHtml,
+      telefono: cliente ? (cliente.celular || cliente.telefono || '') : ''
     }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

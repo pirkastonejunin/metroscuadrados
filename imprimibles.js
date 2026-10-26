@@ -170,7 +170,7 @@ function recuadroClienteComprobante({ nombre, iva, cuit, domicilio, localidad, p
 // `headerHtml` (opcional, 3/10/2026): si se pasa, reemplaza el
 // encabezado genérico de `encabezadoNegocio` — lo usa el Comprobante
 // para su propio encabezado "tipo Dux" (ver `encabezadoComprobante`).
-function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
+function paginaImprimible({ titulo, org, bodyHtml, headerHtml, telefono }) {
   return `<!doctype html>
 <html>
 <head>
@@ -256,6 +256,7 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
   <div class="no-imprimir">
     <button onclick="window.print()">Imprimir</button>
     <button onclick="compartirDocumento()">Compartir</button>
+    <button onclick="whatsappDocumento()">WhatsApp</button>
     <span class="compartir-estado" id="compartirEstado"></span>
   </div>
   <script>
@@ -312,6 +313,24 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml }) {
       }
     }
     window.compartirDocumento = compartirDocumento;
+    // WhatsApp directo al cliente (si tiene teléfono cargado): en celular usa el menú de compartir (adjunta el PDF); en compu descarga el PDF y abre el chat con su número para adjuntarlo.
+    const TEL_CLIENTE = ${JSON.stringify(String(telefono || '').replace(/\D/g, ''))};
+    function telWA(t){ let d = String(t||'').replace(/\D/g,''); if (!d) return ''; if (d.startsWith('54')) return d; if (d.startsWith('0')) d = d.slice(1); d = d.replace(/^(\d{2,4})15/, '$1'); return '549' + d; }
+    async function whatsappDocumento(){
+      const estado = document.getElementById('compartirEstado');
+      try{
+        const { blob, nombreArchivo } = await generarPdfBlob();
+        const archivo = new File([blob], nombreArchivo, { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [archivo] })) { await navigator.share({ files: [archivo], title: document.title }); return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = nombreArchivo; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        const t = telWA(TEL_CLIENTE);
+        window.open('https://wa.me/' + t + '?text=' + encodeURIComponent('Hola! Te paso ' + document.title + '. Te adjunto el PDF que acabo de descargar.'), '_blank');
+        if (estado) estado.textContent = t ? 'Se descargó el PDF y se abrió el chat del cliente: adjuntalo.' : 'Se descargó el PDF y se abrió WhatsApp: elegí el contacto y adjuntalo (el cliente no tiene teléfono cargado).';
+      }catch(e){ if (!(e && e.name === 'AbortError') && estado) estado.textContent = 'No se pudo preparar el WhatsApp: ' + (e && e.message ? e.message : e); }
+    }
+    window.whatsappDocumento = whatsappDocumento;
   </script>
 </body>
 </html>`;

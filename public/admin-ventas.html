@@ -1901,6 +1901,8 @@ async function imprimirDocumento(url, accion){
       ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
     } else if (accion === 'compartir') {
       ventana.addEventListener('load', () => setTimeout(() => { if (ventana.compartirDocumento) ventana.compartirDocumento(); }, 250));
+    } else if (accion === 'whatsapp') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.whatsappDocumento) ventana.whatsappDocumento(); }, 250));
     }
   }catch(e){
     ventana.document.write('<p>No se pudo generar el documento: ' + escapeHtml(e.message) + '</p>');
@@ -1936,6 +1938,7 @@ function botonesImprimible(url){
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
     <button class="btn small secondary" onclick="copiarLinkPublico('${url}')">Copiar link</button>
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">PDF</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','whatsapp')">WhatsApp</button>
   `;
 }
 

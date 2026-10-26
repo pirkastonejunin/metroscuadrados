@@ -915,7 +915,8 @@ router.get('/:id/imprimir', authAdmin, async (req, res) => {
       titulo: `Presupuesto Nº ${numeroDigitos}`,
       org: org || { nombre: 'Organización' },
       headerHtml,
-      bodyHtml
+      bodyHtml,
+      telefono: cliente ? (cliente.celular || cliente.telefono || '') : ''
     }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
