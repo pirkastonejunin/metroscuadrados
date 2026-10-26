@@ -261,6 +261,32 @@ router.get('/canales', auth, async (req, res) => {
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// Costos reales por cantidad de cuotas, tomados de los cobros ya acreditados (Mercado Pago no publica por API su tabla de costos):
+// para cada cobro con tarjeta consulta el pago y calcula (comisión + costo de las cuotas) / monto. Devuelve el promedio por cuotas.
+router.get('/canales/:canal/costos-reales', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const canal = req.params.canal; if (!CANAL_TARJETA[canal]) throw err(400, 'Canal inválido.');
+    const iva = Number(req.query.iva); const ivaPct = Number.isFinite(iva) ? iva : 21;
+    const db = await getDb(); const cfg = await cargarConfig(db, req.orgId);
+    const cobros = await db.collection('mp_cobros').find({ orgId: req.orgId, tipo: canal, estado: 'acreditado', paymentId: { $regex: '^[0-9]+$' } }).sort({ createdAt: -1 }).limit(60).project({ paymentId: 1 }).toArray();
+    const grupos = {}; let consultados = 0;
+    for (const c of cobros) {
+      let p; try { p = await mp(cfg, 'GET', '/v1/payments/' + c.paymentId); } catch (e) { continue; }
+      consultados++;
+      if (!/card/.test(String(p.payment_type_id || ''))) continue;
+      const bruto = Number(p.transaction_amount) || 0; if (!(bruto > 0)) continue;
+      const fees = (p.fee_details || []).reduce((a, f) => a + (Number(f.amount) || 0), 0);
+      const neto = p.transaction_details && p.transaction_details.net_received_amount != null ? Number(p.transaction_details.net_received_amount) : null;
+      // si lo descontado coincide con las comisiones, el IVA ya viene incluido; si no, se lo agregamos
+      const conIva = neto != null && Math.abs((bruto - neto) - fees) <= bruto * 0.005 ? fees : fees * (1 + ivaPct / 100);
+      const n = Number(p.installments) || 1;
+      (grupos[n] = grupos[n] || []).push(conIva / bruto * 100);
+    }
+    const filas = Object.keys(grupos).map(n => ({ cuotas: Number(n), muestras: grupos[n].length, costoTotal: redondear(grupos[n].reduce((a, x) => a + x, 0) / grupos[n].length) })).sort((a, b) => a.cuotas - b.cuotas);
+    res.json({ consultados, filas });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.put('/canales/:canal', auth, async (req, res) => {
   try {
     const canal = req.params.canal, tarjeta = CANAL_TARJETA[canal];

@@ -320,9 +320,29 @@ function pintarCanal(){
     </div>`).join('')}
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="guardarCanal()">Guardar</button>
+      <button class="btn secondary" onclick="traerCostosMP()" title="Mercado Pago no publica su tabla de costos: se calcula con los cobros reales ya acreditados en este canal (comisión + costo de las cuotas)">Traer costos desde cobros reales</button>
       <button class="btn secondary" onclick="sugerirRecargos()" title="Calcula el recargo para que, descontado el costo, te quede el precio original">Sugerir recargos (el cliente cubre el costo)</button>
     </div>`;
   recalcCanal();
+}
+async function traerCostosMP(){
+  const ok = document.getElementById('canalOk'), er = document.getElementById('canalErr'); ok.textContent = 'Consultando los cobros en Mercado Pago…'; er.textContent = '';
+  try{
+    const iva = Number(document.getElementById('cIva').value); const base = Number(document.getElementById('cBase').value) || 0;
+    const r = await fetch(BASE + '/canales/' + CANAL_ACT + '/costos-reales?iva=' + (Number.isFinite(iva) ? iva : 21), {headers: headersAuth()}); const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    if (!d.filas.length){ ok.textContent = ''; er.textContent = 'No hay cobros con tarjeta acreditados en este canal para calcular (se consultaron ' + d.consultados + '). Cargá los costos a mano o probá después de un cobro real.'; return; }
+    const cargadas = [];
+    d.filas.forEach(f => {
+      const row = document.querySelector('#canalForm .tp-fila[data-n="' + f.cuotas + '"]'); if (!row) return;
+      const fin = row.querySelector('.cFin');
+      if (f.cuotas === 1){ document.getElementById('cBase').value = Math.round(f.costoTotal / (1 + (Number.isFinite(iva) ? iva : 21) / 100) * 100) / 100; }
+      else if (fin){ const v = f.costoTotal / (1 + (Number.isFinite(iva) ? iva : 21) / 100) - base; fin.value = Math.max(0, Math.round(v * 100) / 100); }
+      cargadas.push(f.cuotas + ' cuotas (' + f.muestras + ' cobro' + (f.muestras === 1 ? '' : 's') + ')');
+    });
+    recalcCanal();
+    ok.textContent = 'Cargados desde cobros reales: ' + cargadas.join(', ') + '. Las demás cuotas quedan como estaban. Revisalos y apretá Guardar.';
+  }catch(e){ ok.textContent = ''; er.textContent = e.message; }
 }
 function totalesCanal(){
   const base = Number(document.getElementById('cBase').value) || 0, iva = Number(document.getElementById('cIva').value) || 0;
