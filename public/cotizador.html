@@ -929,7 +929,7 @@ $('#btnContinuarDatos').addEventListener('click', () => {
     $('#campoPrecioM2Generico').classList.toggle('hidden', !gen);
     $('#precioM2Generico').value = '';
     document.getElementById('manoObra').closest('label').classList.toggle('hidden', gen);
-    $('#lblAplicarMinimo').classList.toggle('hidden', gen);
+    $('#lblAplicarMinimo').classList.remove('hidden');
     if (gen) document.getElementById('manoObra').checked = false;
   } else {
     $('#desperdicioPctPiso').value = tipoObraElegido.desperdicioDefaultPct || 0;
