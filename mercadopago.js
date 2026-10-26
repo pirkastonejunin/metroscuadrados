@@ -536,18 +536,29 @@ async function crearPoint(req, res) {
     if (!terminalId) throw err(400, 'Elegí la terminal Point (o dejá una por defecto en la configuración).');
     const esCuenta = !!req.params.clienteId;
     const { venta, cliente, clienteNombre, monto } = esCuenta ? await clienteParaCobrar(db, req, req.body && req.body.monto) : await ventaParaCobrar(db, req, req.body && req.body.monto);
-    // Point (26/10/2026, igual que el link): se cobra el monto de la venta, sin plan ni recargo. Las cuotas (sin interés o con interés para el
-    // cliente) las ofrece la terminal según la configuración de Point en Mercado Pago, y el costo real queda registrado al acreditarse.
-    const plan = null;
-    const aCobrar = monto;
+    // Point (26/10/2026): por un convenio las cuotas de la terminal son todas sin interés (no se configuran en Mercado Pago), así que el
+    // recargo lo define el sistema: se elige el plan al cobrar y a la terminal va el monto + el recargo de ese plan (0 % si no tiene interés).
+    // El costo real (comisión + costo de las cuotas) se registra al acreditarse el pago.
+    const plan = await planParaCobro(db, req, req.body && req.body.planId, monto);
+    const aCobrar = plan ? plan.tarjetaTotalCobrado : monto;
     const cobroId = new ObjectId();
     const ref = 'pn-' + String(cobroId);
-    const orden = await mp(cfg, 'POST', '/v1/orders', {
+    const cuotasPlan = plan && plan.tarjetaCuotas > 1 ? plan.tarjetaCuotas : 0;
+    const armar = (conCuotas) => ({
       type: 'point', external_reference: ref, expiration_time: 'PT15M',
       transactions: { payments: [{ amount: aCobrar.toFixed(2) }] },
-      config: { point: { terminal_id: terminalId, print_on_terminal: 'no_ticket' } },
+      config: Object.assign({ point: { terminal_id: terminalId, print_on_terminal: 'no_ticket' } },
+        conCuotas ? { payment_method: { default_type: 'credit_card', default_installments: cuotasPlan, installments_cost: 'seller' } } : {}),
       description: (esCuenta ? `Pago a cuenta ${clienteNombre}` : `Venta ${numeroVenta(venta)}`).slice(0, 150)
-    }, { 'X-Idempotency-Key': crypto.randomUUID() });
+    });
+    // Con plan de cuotas, la terminal arranca en crédito con esas cuotas (sin interés para el cliente). Si Mercado Pago no acepta ese
+    // parámetro, se reintenta sin él: el cliente elige las cuotas en la terminal.
+    let orden;
+    try { orden = await mp(cfg, 'POST', '/v1/orders', armar(!!cuotasPlan), { 'X-Idempotency-Key': crypto.randomUUID() }); }
+    catch (e) {
+      if (!cuotasPlan || e.status === 400 && /terminal|expir|amount/i.test(e.message)) throw e;
+      orden = await mp(cfg, 'POST', '/v1/orders', armar(false), { 'X-Idempotency-Key': crypto.randomUUID() });
+    }
     const hoy = new Date();
     const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'point', externalReference: ref, monto, estado: 'pendiente', ...camposPlanCobro(plan),
       ordenId: orden.id, terminalId, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: hoy, updatedAt: hoy };

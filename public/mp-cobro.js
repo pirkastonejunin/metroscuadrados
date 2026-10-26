@@ -63,7 +63,6 @@
     let lista = [];
     let motivo = '';
     try { const r = await fetch(`${BASE}/planes-cobro?canal=${ctx.tipo}&monto=${monto}${ctx.ventaId ? '&ventaId=' + ctx.ventaId : ctx.clienteId ? '&clienteId=' + ctx.clienteId : ''}`, { headers: hdr() }); const d = await r.json().catch(() => []); if (r.ok) lista = d; else motivo = (d && d.error) || ('Error ' + r.status); } catch (e) { motivo = e.message; }
-    if (ctx.tipo === 'point') { ctx.planes = []; box.innerHTML = '<p class="muted" style="margin-top:8px;font-size:12px">Se cobra el monto de la venta. El cliente elige las cuotas en la terminal, según cómo tengas configurado Point en tu cuenta de Mercado Pago.</p>'; return; }
     if (ctx.tipo === 'link') {
       ctx.planes = lista; const maxC = lista.reduce((x, p) => Math.max(x, p.cuotas || 1), 0);
       ctx.maxCuotas = maxC;
