@@ -733,7 +733,7 @@ router.get('/:id/productos', authAdmin, async (req, res) => {
       const cliente = await clienteDeLaOrg(db, req);
       const ventas = await db.collection('ventas')
         .find(Object.assign({ clienteId: cliente._id, estado: { $ne: 'anulada' } }, filtroOrg(req)))
-        .project({ numero: 1, fecha: 1, moneda: 1, items: 1 }).sort({ fecha: -1 }).limit(1000).toArray();
+        .project({ numero: 1, fecha: 1, moneda: 1, items: 1, tipoComprobante: 1, letra: 1, puntoVenta: 1 }).sort({ fecha: -1 }).limit(1000).toArray();
       const mapa = new Map();
       for (const v of ventas) {
         for (const it of (v.items || [])) {
@@ -747,6 +747,7 @@ router.get('/:id/productos', authAdmin, async (req, res) => {
           const mon = v.moneda || 'ARS';
           p.monto[mon] = (p.monto[mon] || 0) + (Number(it.subtotal) || 0);
           p.compras += 1;
+          (p.ventas = p.ventas || []).push({ ventaId: String(v._id), numero: v.numero, fecha: v.fecha, cantidad: Number(it.cantidad) || 0, subtotal: Number(it.subtotal) || 0, moneda: mon });
         }
       }
       return { ventas: ventas.length, productos: [...mapa.values()].sort((a, b) => new Date(b.ultimaCompra) - new Date(a.ultimaCompra)) };

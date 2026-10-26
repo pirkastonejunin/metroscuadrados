@@ -734,17 +734,31 @@ async function cargarProductosTab(id){
   try{
     const data = await traerTab(id, 'productos', 'prodContenido');
     const cont = document.getElementById('prodContenido'); if (!cont) return;
-    const lista = data.productos;
+    const lista = data.productos; window._prodCli = lista;
     cont.innerHTML = `<p class="muted" style="margin-top:0">${lista.length} producto(s) en ${data.ventas} venta(s) (sin contar anuladas).</p>
       <table>
       <thead><tr><th>SKU</th><th>Producto</th><th>Cantidad</th><th>Veces</th><th>Total comprado</th><th>Última compra</th></tr></thead>
-      <tbody>${lista.length ? lista.map(p => `<tr>
+      <tbody>${lista.length ? lista.map((p, i) => { const lk = t => `<a href="javascript:void(0)" onclick="verComprasProducto(${i})" style="text-decoration:underline;cursor:pointer" title="Ver los comprobantes">${t}</a>`; return `<tr>
         <td class="muted">${escapeHtml(p.sku || '—')}</td><td>${escapeHtml(p.nombre)}</td>
-        <td>${p.cantidad}</td><td>${p.compras}</td>
-        <td>${Object.keys(p.monto).map(m => moneyMon(p.monto[m], m)).join(' + ')}</td>
-        <td>${fechaCorta(p.ultimaCompra)}</td>
-      </tr>`).join('') : '<tr><td colspan="6" class="muted">Este cliente todavía no compró productos.</td></tr>'}</tbody></table>`;
+        <td>${lk(p.cantidad)}</td><td>${lk(p.compras)}</td>
+        <td>${lk(Object.keys(p.monto).map(m => moneyMon(p.monto[m], m)).join(' + '))}</td>
+        <td>${lk(fechaCorta(p.ultimaCompra))}</td>
+      </tr>`; }).join('') : '<tr><td colspan="6" class="muted">Este cliente todavía no compró productos.</td></tr>'}</tbody></table>`;
   }catch(e){ errTab('prodContenido', e); }
+}
+
+// Productos comprados → comprobantes: con una sola compra abre el comprobante; con varias, lista para elegir.
+function verComprasProducto(i){
+  const p = (window._prodCli || [])[i]; if (!p || !p.ventas || !p.ventas.length) return;
+  if (p.ventas.length === 1) { imprimirDocumento('/api/ventas/' + p.ventas[0].ventaId + '/comprobante'); return; }
+  let m = document.getElementById('modalComprasProd');
+  if (!m) { m = document.createElement('div'); m.id = 'modalComprasProd'; m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999'; m.onclick = e => { if (e.target === m) m.remove(); }; document.body.appendChild(m); }
+  m.innerHTML = `<div style="background:var(--card,#fff);color:var(--text,inherit);border-radius:12px;padding:18px;max-width:560px;width:calc(100% - 24px);max-height:80vh;overflow:auto">
+    <h3 style="margin:0 0 4px">${escapeHtml(p.nombre)}</h3><p class="muted" style="margin:0 0 10px">Tocá una venta para ver su comprobante.</p>
+    <table><thead><tr><th>Venta</th><th>Fecha</th><th>Cantidad</th><th>Total</th></tr></thead><tbody>${p.ventas.map(v => `<tr>
+      <td><a href="javascript:void(0)" onclick="imprimirDocumento('/api/ventas/${v.ventaId}/comprobante')" style="text-decoration:underline">#${escapeHtml(String(v.numero == null ? '' : v.numero))}</a></td>
+      <td>${fechaCorta(v.fecha)}</td><td>${v.cantidad}</td><td>${moneyMon(v.subtotal, v.moneda)}</td></tr>`).join('')}</tbody></table>
+    <div style="margin-top:12px;text-align:right"><button class="btn secondary" onclick="document.getElementById('modalComprasProd').remove()">Cerrar</button></div></div>`;
 }
 
 const ESTADO_OBRA_LABEL = {pendiente:'Pendiente', asignado:'Asignada', en_curso:'En curso', terminada:'Terminada', cancelada:'Cancelada'};
