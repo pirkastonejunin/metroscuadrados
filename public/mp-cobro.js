@@ -66,7 +66,7 @@
     if (ctx.tipo === 'link') {
       ctx.planes = lista; const maxC = lista.reduce((x, p) => Math.max(x, p.cuotas || 1), 0);
       ctx.maxCuotas = maxC;
-      box.innerHTML = maxC > 1 ? `<p class="muted" style="margin-top:8px;font-size:12px">El link va por el monto de la venta (precio de lista). Mercado Pago le ofrece al cliente hasta <b>${maxC} cuotas sin interés</b> y elige la que le conviene. El costo de las cuotas queda a tu cargo y se registra al cobrarse.</p>` : '<p class="muted" style="margin-top:8px;font-size:12px">El link va por el monto de la venta. No hay cuotas marcadas como "Ofrecer" en el canal Link de pago, así que se cobra en un solo pago.</p>';
+      box.innerHTML = maxC > 1 ? `<p class="muted" style="margin-top:8px;font-size:12px">El link va por el monto de la venta (precio de lista). Mercado Pago le ofrece al cliente hasta <b>${maxC} cuotas</b> según cómo lo tengas configurado en tu cuenta (sin interés o con interés para el cliente, y Mercado Pago le informa el costo al pagar). Lo que te cuesta a vos se registra al cobrarse.</p>` : '<p class="muted" style="margin-top:8px;font-size:12px">El link va por el monto de la venta. No hay cuotas marcadas como "Ofrecer" en el canal Link de pago, así que se cobra en un solo pago.</p>';
       return;
     }
     ctx.planes = lista;
@@ -108,7 +108,7 @@
 
   function mostrarLink(url, monto) {
     const mc = ctx.maxCuotas || 0;
-    const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (mc > 1 ? `\nPodés pagarlo en hasta ${mc} cuotas sin interés.` : '');
+    const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (mc > 1 ? `\nTambién podés pagarlo en cuotas (hasta ${mc}): elegís cuántas al pagar.` : '');
     pintar(`
       <h2>Link de pago — ${money(monto)}</h2>
       <input id="mpcLink" readonly value="${esc(url)}" onclick="this.select()">
