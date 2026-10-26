@@ -519,7 +519,10 @@ async function crearLink(req, res) {
     const doc = { _id: cobroId, orgId: req.orgId, ventaId: esCuenta ? null : venta._id, clienteId: esCuenta ? cliente._id : (venta.clienteId || null), clienteNombre: esCuenta ? clienteNombre : (venta.clienteNombre || ''), aCuenta: esCuenta, tipo: 'link', externalReference: ref, monto, estado: 'pendiente', ...camposPlanCobro(plan),
       preferenciaId: pref.id, linkUrl: link, venceEn: vence, usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: hoy, updatedAt: hoy };
     await db.collection('mp_cobros').insertOne(doc);
-    res.json(publico(doc));
+    // teléfono del cliente para abrir WhatsApp directo con el link (si está cargado)
+    let clienteTelefono = '';
+    try { const cid = esCuenta ? (cliente && cliente._id) : (venta && venta.clienteId); if (cid) { const c = await db.collection('clientes').findOne({ _id: cid }, { projection: { celular: 1, telefono: 1 } }); clienteTelefono = (c && (c.celular || c.telefono)) || ''; } } catch (e) {}
+    res.json(Object.assign({}, publico(doc), { clienteTelefono }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 }
 router.post('/ventas/:ventaId/link', authCobro, crearLink);

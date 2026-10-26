@@ -186,6 +186,7 @@ function render(){
   $('#btnSimple').addEventListener('click', () => { vistaSimple = true; render(); });
   $('#btnImprimir').addEventListener('click', () => window.print());
   $('#btnPdf').addEventListener('click', () => window.open(urlPdf(), '_blank'));
+  function waTel(t){ let d = String(t||'').replace(/\D/g,''); if (!d) return ''; if (d.startsWith('54')) return d; if (d.startsWith('0')) d = d.slice(1); d = d.replace(/^(\d{2,4})15/, '$1'); return '549' + d; }
   $('#btnWhatsapp').addEventListener('click', async () => {
     // Comparte el PDF (no el link a esta página), para que quien lo reciba
     // no pueda tocar "Ver desglose" y terminar viendo precios y cantidades.
@@ -205,7 +206,7 @@ function render(){
     }catch(e){
       if (e && e.name === 'AbortError') return;
       window.open(pdfUrl, '_blank');
-      window.open('https://wa.me/?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+      window.open('https://wa.me/' + waTel(doc.clienteTelefono) + '?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
     }
   });
   $('#btnCopiar').addEventListener('click', async () => {

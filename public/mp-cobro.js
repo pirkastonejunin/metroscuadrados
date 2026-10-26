@@ -96,7 +96,7 @@
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Error');
       ctx.cobroId = d._id; ctx.monto = d.monto; ctx.montoCobrar = d.montoCobrar;
-      if (ctx.tipo === 'link') mostrarLink(d.linkUrl, d.montoCobrar || d.monto); else esperarPoint();
+      if (ctx.tipo === 'link') mostrarLink(d.linkUrl, d.montoCobrar || d.monto, d.clienteTelefono); else esperarPoint();
       timer = setInterval(verificar, ctx.tipo === 'point' ? 4000 : 8000);
     } catch (e) { err.textContent = e.message; const b = document.getElementById('mpcGo'); if (b) b.disabled = false; }
   }
@@ -106,7 +106,9 @@
     document.getElementById('mpcGo').style.display = 'none';
   }
 
-  function mostrarLink(url, monto) {
+  function mostrarLink(url, monto, telCliente) {
+    const waTel = t => { let d = String(t || '').replace(/\D/g, ''); if (!d) return ''; if (d.startsWith('54')) return d; if (d.startsWith('0')) d = d.slice(1); d = d.replace(/^(\d{2,4})15/, '$1'); return '549' + d; };
+    const telWA = waTel(telCliente);
     const mc = ctx.maxCuotas || 0;
     const texto = `Hola! Te paso el link para pagar ${money(monto)}: ${url}` + (mc > 1 ? `\nTambién podés pagarlo en cuotas (hasta ${mc}): elegís cuántas al pagar.` : '');
     pintar(`
@@ -114,7 +116,7 @@
       <input id="mpcLink" readonly value="${esc(url)}" onclick="this.select()">
       <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap">
         <button class="btn" onclick="MPCobro.copiar()">Copiar link</button>
-        <a class="btn secondary" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(texto)}">Enviar por WhatsApp</a>
+        <a class="btn secondary" target="_blank" rel="noopener" href="https://wa.me/${telWA ? telWA : ''}?text=${encodeURIComponent(texto)}">Enviar por WhatsApp</a>
         <button class="btn secondary" onclick="MPCobro.verificar(true)">Verificar pago</button>
       </div>
       <div id="mpcEstado" class="muted" style="margin-top:10px">Esperando el pago… Cuando el cliente pague, el cobro se registra solo. El link vence en 7 días.</div>`);

@@ -1839,7 +1839,7 @@ function finalizarItems(items) {
 router.post('/guardar', async (req, res) => {
   try {
     const store = await getStoreFromQuery(req);
-    const { _id, obra, tipoObraId, cliente, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones, detalle } = req.body || {};
+    const { _id, obra, tipoObraId, cliente, clienteTelefono, direccion, tipoObraNombre, items, totalManoObra, formasPago, simulaciones, detalle } = req.body || {};
     if (!obra) return res.status(400).json({ error: 'Falta obra.' });
     if (!tipoObraId) return res.status(400).json({ error: 'Falta tipoObraId.' });
     if (!Array.isArray(items) || !items.length) {
@@ -1896,6 +1896,7 @@ router.post('/guardar', async (req, res) => {
       store_id: store.store_id,
       fecha: new Date(),
       cliente: cliente || '',
+      clienteTelefono: String(clienteTelefono || '').slice(0, 40),
       direccion: direccion || '',
       tipoObraId: String(tipoObraId),
       tipoObraNombre: tipoObraNombre || '',

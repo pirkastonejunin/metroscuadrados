@@ -394,7 +394,7 @@
       </div>
       <div class="field" style="margin-top:16px;max-width:320px;">
         <label>Nombre del cliente (para guardar el presupuesto)</label>
-        <input type="text" id="clienteGuardar" placeholder="Nombre y apellido">
+        <input type="text" id="clienteGuardar" placeholder="Nombre y apellido"> <input type="tel" id="telefonoGuardar" placeholder="WhatsApp del cliente (opcional)" style="margin-top:6px">
       </div>
       <div class="actions">
         <button class="secondary" id="btnVolverProductos">← Volver</button>
@@ -760,6 +760,7 @@ async function abrirPdfCotizador(id, vistaSimple){
 // para adjuntar el PDF directo en WhatsApp; si el navegador no lo soporta
 // (la mayoría de las notebooks) descarga el PDF y abre WhatsApp con el
 // mensaje, para adjuntarlo a mano.
+function waTel(t){ let d = String(t||'').replace(/\D/g,''); if (!d) return ''; if (d.startsWith('54')) return d; if (d.startsWith('0')) d = d.slice(1); d = d.replace(/^(\d{2,4})15/, '$1'); return '549' + d; }
 async function compartirWhatsapp(id, data, vistaSimple){
   const textoBase = 'Hola' + (data.cliente ? ' ' + data.cliente : '') + ', te comparto el presupuesto' +
     (data.tipoObraNombre ? ' de ' + data.tipoObraNombre : '') + ' — Total ' + money(data.total) + '.';
@@ -790,7 +791,7 @@ async function compartirWhatsapp(id, data, vistaSimple){
     // API directo — esa sigue pidiendo login) para que lo guarden/adjunten
     // a mano, y se abre WhatsApp aparte con el mensaje.
     window.open(URL.createObjectURL(blob), '_blank');
-    window.open('https://wa.me/?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+    window.open('https://wa.me/' + waTel(data.clienteTelefono) + '?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
   }
 }
 
@@ -2488,7 +2489,7 @@ $('#btnGuardar').addEventListener('click', async () => {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(Object.assign({
         obra, tipoObraId: tipoObraElegido.id,
-        cliente: $('#clienteGuardar').value, direccion: $('#direccion').value,
+        cliente: $('#clienteGuardar').value, clienteTelefono: ($('#telefonoGuardar') || {}).value || '', direccion: $('#direccion').value,
         tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
         items: cotizacionActual.items,
         detalle: cotizacionActual.detalle || [],
@@ -2521,7 +2522,7 @@ $('#btnImprimirResumen').addEventListener('click', () => window.print());
 $('#btnWhatsappResumen').addEventListener('click', () => {
   if (!ultimaCotizacionGuardadaId || !cotizacionActual) return;
   compartirWhatsapp(ultimaCotizacionGuardadaId, {
-    cliente: $('#clienteGuardar').value,
+    cliente: $('#clienteGuardar').value, clienteTelefono: ($('#telefonoGuardar') || {}).value || '',
     tipoObraNombre: tipoObraElegido ? tipoObraElegido.nombre : '',
     total: cotizacionActual.total
   }, vistaSimpleResumen);
@@ -2548,7 +2549,7 @@ $('#btnNueva').addEventListener('click', () => {
   $$('#vistaToggleResumen .vista-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.vista === 'detalle'));
   $('#formOtroItem').classList.remove('hidden');
   $('#accionesExtraResumen').classList.add('hidden');
-  $('#cliente').value=''; $('#direccion').value=''; $('#clienteGuardar').value='';
+  $('#cliente').value=''; $('#direccion').value=''; $('#clienteGuardar').value=''; if ($('#telefonoGuardar')) $('#telefonoGuardar').value='';
   $('#m2Pisos').value=0; $('#mlZocalos').value=0; $('#cantidadPuertas').value=0; $('#desperdicioPctPiso').value=0;
   $('#requiereNivelacion').checked=false;
   $('#manoObra').checked=false;
@@ -2626,7 +2627,7 @@ async function editarCotizacionHistorial(){
   // Precarga los campos del paso 2 (por si el usuario vuelve a esa
   // pantalla) y los que "Guardar" lee directo del DOM.
   $('#cliente').value = doc.cliente || '';
-  $('#clienteGuardar').value = doc.cliente || '';
+  $('#clienteGuardar').value = doc.cliente || ''; if ($('#telefonoGuardar')) $('#telefonoGuardar').value = doc.clienteTelefono || '';
   $('#direccion').value = doc.direccion || '';
   $('#m2Pisos').value = (doc.obra && doc.obra.m2Pisos != null) ? doc.obra.m2Pisos : 0;
   $('#mlZocalos').value = (doc.obra && doc.obra.mlZocalos != null) ? doc.obra.mlZocalos : 0;
