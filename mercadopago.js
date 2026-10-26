@@ -261,27 +261,36 @@ router.get('/canales', auth, async (req, res) => {
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// Las tablas de costos y cuotas son iguales para todas las sucursales: si no hay una elegida, se usan las sucursales que tengan Mercado Pago conectado.
+async function configsParaCostos(db, req) {
+  if (req.orgId) { const c = await cargarConfig(db, req.orgId); return c && c.accessToken ? [c] : []; }
+  const orgs = await require('./tesoreria').orgsParaPlanes(db, req);
+  const cfgs = await db.collection('mp_config').find({ orgId: { $in: orgs }, accessToken: { $nin: ['', null] } }).toArray();
+  return cfgs;
+}
 // Costos reales por cantidad de cuotas, tomados de los cobros ya acreditados (Mercado Pago no publica por API su tabla de costos):
 // para cada cobro con tarjeta consulta el pago y calcula (comisión + costo de las cuotas) / monto. Devuelve el promedio por cuotas.
 router.get('/canales/:canal/costos-reales', auth, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const canal = req.params.canal; if (!CANAL_TARJETA[canal]) throw err(400, 'Canal inválido.');
     const iva = Number(req.query.iva); const ivaPct = Number.isFinite(iva) ? iva : 21;
-    const db = await getDb(); const cfg = await cargarConfig(db, req.orgId);
-    const cobros = await db.collection('mp_cobros').find({ orgId: req.orgId, tipo: canal, estado: 'acreditado', paymentId: { $regex: '^[0-9]+$' } }).sort({ createdAt: -1 }).limit(60).project({ paymentId: 1 }).toArray();
+    const db = await getDb(); const cfgs = await configsParaCostos(db, req);
+    if (!cfgs.length) throw err(400, 'No hay una cuenta de Mercado Pago conectada.');
     const grupos = {}; let consultados = 0;
-    for (const c of cobros) {
-      let p; try { p = await mp(cfg, 'GET', '/v1/payments/' + c.paymentId); } catch (e) { continue; }
-      consultados++;
-      if (!/card/.test(String(p.payment_type_id || ''))) continue;
-      const bruto = Number(p.transaction_amount) || 0; if (!(bruto > 0)) continue;
-      const fees = (p.fee_details || []).reduce((a, f) => a + (Number(f.amount) || 0), 0);
-      const neto = p.transaction_details && p.transaction_details.net_received_amount != null ? Number(p.transaction_details.net_received_amount) : null;
-      // si lo descontado coincide con las comisiones, el IVA ya viene incluido; si no, se lo agregamos
-      const conIva = neto != null && Math.abs((bruto - neto) - fees) <= bruto * 0.005 ? fees : fees * (1 + ivaPct / 100);
-      const n = Number(p.installments) || 1;
-      (grupos[n] = grupos[n] || []).push(conIva / bruto * 100);
+    for (const cfg of cfgs) {
+      const cobros = await db.collection('mp_cobros').find({ orgId: cfg.orgId, tipo: canal, estado: 'acreditado', paymentId: { $regex: '^[0-9]+$' } }).sort({ createdAt: -1 }).limit(60).project({ paymentId: 1 }).toArray();
+      for (const c of cobros) {
+        let p; try { p = await mp(cfg, 'GET', '/v1/payments/' + c.paymentId); } catch (e) { continue; }
+        consultados++;
+        if (!/card/.test(String(p.payment_type_id || ''))) continue;
+        const bruto = Number(p.transaction_amount) || 0; if (!(bruto > 0)) continue;
+        const fees = (p.fee_details || []).reduce((a, f) => a + (Number(f.amount) || 0), 0);
+        const neto = p.transaction_details && p.transaction_details.net_received_amount != null ? Number(p.transaction_details.net_received_amount) : null;
+        // si lo descontado coincide con las comisiones, el IVA ya viene incluido; si no, se lo agregamos
+        const conIva = neto != null && Math.abs((bruto - neto) - fees) <= bruto * 0.005 ? fees : fees * (1 + ivaPct / 100);
+        const n = Number(p.installments) || 1;
+        (grupos[n] = grupos[n] || []).push(conIva / bruto * 100);
+      }
     }
     const filas = Object.keys(grupos).map(n => ({ cuotas: Number(n), muestras: grupos[n].length, costoTotal: redondear(grupos[n].reduce((a, x) => a + x, 0) / grupos[n].length) })).sort((a, b) => a.cuotas - b.cuotas);
     res.json({ consultados, filas });
@@ -291,10 +300,10 @@ router.get('/canales/:canal/costos-reales', auth, async (req, res) => {
 // de Visa y Mastercard de crédito. Es una referencia: si la cuenta ofrece esas cuotas sin interés para ese monto, la tasa viene en 0.
 router.get('/canales/:canal/costos-calculadora', auth, async (req, res) => {
   try {
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     if (!CANAL_TARJETA[req.params.canal]) throw err(400, 'Canal inválido.');
     const monto = Number(req.query.monto) > 0 ? Number(req.query.monto) : 100;
-    const db = await getDb(); const cfg = await cargarConfig(db, req.orgId);
+    const db = await getDb(); const cfg = (await configsParaCostos(db, req))[0];
+    if (!cfg) throw err(400, 'No hay una cuenta de Mercado Pago conectada.');
     const porCuotas = {};
     for (const id of ['visa', 'master']) {
       try {
