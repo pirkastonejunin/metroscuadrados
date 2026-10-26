@@ -320,7 +320,6 @@ function pintarCanal(){
     </div>`).join('')}
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="guardarCanal()">Guardar</button>
-      <button class="btn secondary" onclick="traerTasasCalculadora()" title="Consulta la calculadora de cuotas de Mercado Pago (la misma que muestra al cliente en el link) y carga el costo de cada cantidad de cuotas">Traer % desde Mercado Pago</button>
       <button class="btn secondary" onclick="traerCostosMP()" title="Mercado Pago no publica su tabla de costos: se calcula con los cobros reales ya acreditados en este canal (comisión + costo de las cuotas)">Traer costos desde cobros reales</button>
       <button class="btn secondary" onclick="sugerirRecargos()" title="Calcula el recargo para que, descontado el costo, te quede el precio original">Sugerir recargos (el cliente cubre el costo)</button>
     </div>`;
