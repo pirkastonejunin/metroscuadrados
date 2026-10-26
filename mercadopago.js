@@ -287,6 +287,26 @@ router.get('/canales/:canal/costos-reales', auth, async (req, res) => {
     res.json({ consultados, filas });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// Costo de las cuotas según la calculadora de Mercado Pago (la misma que usa el link): tasa que le cobra al comprador por cuota, promedio
+// de Visa y Mastercard de crédito. Es una referencia: si la cuenta ofrece esas cuotas sin interés para ese monto, la tasa viene en 0.
+router.get('/canales/:canal/costos-calculadora', auth, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    if (!CANAL_TARJETA[req.params.canal]) throw err(400, 'Canal inválido.');
+    const monto = Number(req.query.monto) > 0 ? Number(req.query.monto) : 100;
+    const db = await getDb(); const cfg = await cargarConfig(db, req.orgId);
+    const porCuotas = {};
+    for (const id of ['visa', 'master']) {
+      try {
+        const d = await mp(cfg, 'GET', `/v1/payment_methods/installments?amount=${monto}&payment_method_id=${id}`);
+        const costos = ((Array.isArray(d) ? d[0] : d) || {}).payer_costs || [];
+        costos.forEach(c => { const n = Number(c.installments); (porCuotas[n] = porCuotas[n] || []).push(Number(c.installment_rate) || 0); });
+      } catch (e) { /* ese medio no respondió */ }
+    }
+    const filas = Object.keys(porCuotas).map(n => ({ cuotas: Number(n), tasa: redondear(porCuotas[n].reduce((a, x) => a + x, 0) / porCuotas[n].length) })).sort((a, b) => a.cuotas - b.cuotas);
+    res.json({ monto, filas });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.put('/canales/:canal', auth, async (req, res) => {
   try {
     const canal = req.params.canal, tarjeta = CANAL_TARJETA[canal];

@@ -320,10 +320,31 @@ function pintarCanal(){
     </div>`).join('')}
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn" onclick="guardarCanal()">Guardar</button>
+      <button class="btn secondary" onclick="traerTasasCalculadora()" title="Consulta la calculadora de cuotas de Mercado Pago (la misma que muestra al cliente en el link) y carga el costo de cada cantidad de cuotas">Traer % desde Mercado Pago</button>
       <button class="btn secondary" onclick="traerCostosMP()" title="Mercado Pago no publica su tabla de costos: se calcula con los cobros reales ya acreditados en este canal (comisión + costo de las cuotas)">Traer costos desde cobros reales</button>
       <button class="btn secondary" onclick="sugerirRecargos()" title="Calcula el recargo para que, descontado el costo, te quede el precio original">Sugerir recargos (el cliente cubre el costo)</button>
     </div>`;
   recalcCanal();
+}
+async function traerTasasCalculadora(){
+  const ok = document.getElementById('canalOk'), er = document.getElementById('canalErr'); ok.textContent = 'Consultando a Mercado Pago…'; er.textContent = '';
+  try{
+    const iva = Number(document.getElementById('cIva').value), ivaN = Number.isFinite(iva) ? iva : 21, base = Number(document.getElementById('cBase').value) || 0;
+    const r = await fetch(BASE + '/canales/' + CANAL_ACT + '/costos-calculadora?monto=100', {headers: headersAuth()}); const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    const cargadas = [], enCero = [];
+    d.filas.forEach(f => {
+      const row = document.querySelector('#canalForm .tp-fila[data-n="' + f.cuotas + '"]'); if (!row || f.cuotas === 1) return;
+      if (!(f.tasa > 0)){ enCero.push(f.cuotas); return; }
+      // la tasa es un recargo sobre el precio; el costo equivalente sobre lo que se cobra es tasa / (1 + tasa)
+      const costoTotal = f.tasa / (1 + f.tasa / 100);
+      const fin = row.querySelector('.cFin'); if (fin) fin.value = Math.max(0, Math.round((costoTotal / (1 + ivaN / 100) - base) * 100) / 100);
+      cargadas.push(f.cuotas);
+    });
+    recalcCanal();
+    if (!cargadas.length){ ok.textContent = ''; er.textContent = 'Mercado Pago no informó tasas para ese monto (suele pasar cuando las cuotas están sin interés a tu cargo). Usá "Traer costos desde cobros reales" o cargalos a mano.'; return; }
+    ok.textContent = 'Cargados desde la calculadora de Mercado Pago: ' + cargadas.join(', ') + ' cuotas.' + (enCero.length ? ' Sin tasa informada: ' + enCero.join(', ') + '.' : '') + ' Son una referencia: revisalos y apretá Guardar.';
+  }catch(e){ ok.textContent = ''; er.textContent = e.message; }
 }
 async function traerCostosMP(){
   const ok = document.getElementById('canalOk'), er = document.getElementById('canalErr'); ok.textContent = 'Consultando los cobros en Mercado Pago…'; er.textContent = '';
