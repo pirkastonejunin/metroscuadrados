@@ -200,6 +200,7 @@
           <div style="min-width:200px"><label>Lista de precios</label><select id="pbLista" onchange="cargarCandidatos()"></select></div>
           <div style="min-width:200px"><label>Rubro</label><select id="pbRubro" onchange="cargarCandidatos()"></select></div>
           <div style="flex:1;min-width:220px"><label>Buscar</label><input id="pbQ" placeholder="Nombre, SKU o marca…" onkeydown="if(event.key==='Enter')cargarCandidatos()"></div>
+          <div style="min-width:150px"><label>Stock</label><select id="pbStock" onchange="LIM=400;cargarCandidatos()"><option value="">Todos</option><option value="con">Con stock</option><option value="sin">Sin stock</option></select></div>
           <div style="min-width:150px"><label style="display:block">&nbsp;</label><label class="check" style="margin:0"><input type="checkbox" id="pbDesc" style="width:auto" onchange="LIM=400;cargarCandidatos()"> Ver descartados</label></div>
           <div><button class="btn" onclick="LIM=400;cargarCandidatos()">Buscar</button></div>
         </div>
@@ -383,7 +384,7 @@ async function guardarMapa(){
 async function cargarCandidatos(){
   const err = document.getElementById('errB'), out = document.getElementById('resB'); err.textContent = ''; out.innerHTML = '<div class="card muted">Buscando… (lee Tiendanube para no ofrecer lo que ya está)</div>';
   try{
-    const q = new URLSearchParams({ listaId: document.getElementById('pbLista').value || '', rubro: document.getElementById('pbRubro').value || 'todos', q: document.getElementById('pbQ').value || '', limite: LIM, descartados: document.getElementById('pbDesc').checked ? '1' : '' });
+    const q = new URLSearchParams({ listaId: document.getElementById('pbLista').value || '', rubro: document.getElementById('pbRubro').value || 'todos', q: document.getElementById('pbQ').value || '', limite: LIM, stock: document.getElementById('pbStock').value || '', descartados: document.getElementById('pbDesc').checked ? '1' : '' });
     const desc = document.getElementById('pbDesc').checked;
     const r = await fetch('/api/tiendanube-vinculo/publicar/candidatos?' + q, {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); CAND = d.productos;
     if (!CAND.length) { out.innerHTML = '<div class="card">' + (desc ? 'No hay productos descartados con este filtro.' : 'No hay productos para publicar con este filtro.') + '</div>'; return; }
