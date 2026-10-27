@@ -460,7 +460,8 @@
       try {
         const hoy = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10), clave = 'pn_popup_dia_' + token.slice(0, 12);
         let visto = ''; try { visto = localStorage.getItem(clave) || ''; } catch (e) {}
-        if (visto === hoy) return;
+        if (visto === hoy && !enInicio) return; // en el Inicio sale siempre; en las demás pantallas, una vez por día
+        if (window.__pnPopupMostrado) return; window.__pnPopupMostrado = true;
         fetch('/api/notificaciones', { headers: hdrs }).then(r => r.ok ? r.json() : null).then(function (d) {
           if (!d) return;
           try { localStorage.setItem(clave, hoy); } catch (e) {}
