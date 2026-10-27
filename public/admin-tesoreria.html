@@ -238,6 +238,10 @@
                 <option value="propio">Propios</option>
               </select>
             </div>
+            <div style="min-width:220px;flex:1">
+              <label>Buscar</label>
+              <input type="search" id="fqBuscar" placeholder="Número, cliente, proveedor, banco o monto" oninput="pintarCheques()">
+            </div>
             <div style="min-width:160px">
               <label>Estado</label>
               <select id="fqEstado" onchange="cargarCheques()">
@@ -863,8 +867,20 @@ async function cargarCheques(){
   const body = document.getElementById('chequesBody');
   if (!r.ok) { body.innerHTML = '<tr><td colspan="7" class="err">No se pudo cargar.</td></tr>'; return; }
   chequesCache = await r.json();
+  pintarCheques();
+}
+function pintarCheques(){
+  const body = document.getElementById('chequesBody');
   if (!chequesCache.length) { body.innerHTML = '<tr><td colspan="7" class="muted">No hay cheques cargados todavía.</td></tr>'; return; }
-  body.innerHTML = chequesCache.map(c => `
+  const norm = t => String(t == null ? '' : t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const q = norm((document.getElementById('fqBuscar') || {}).value || '').trim();
+  const lista = !q ? chequesCache : chequesCache.filter(c => {
+    const montoTxt = String(c.monto == null ? '' : c.monto) + ' ' + Number(c.monto || 0).toLocaleString('es-AR');
+    const campos = [c.numero, c.banco, c.clienteNombre, c.proveedorNombre, c.librador, c.cuitLibrador, c.nota, c.observaciones, montoTxt, ESTADO_CHEQUE_LABEL[c.estado] || c.estado, fechaCorta(c.fechaVencimiento)];
+    return q.split(/\s+/).every(p => campos.some(x => norm(x).includes(p)));
+  });
+  if (!lista.length) { body.innerHTML = '<tr><td colspan="7" class="muted">Ningún cheque coincide con la búsqueda.</td></tr>'; return; }
+  body.innerHTML = lista.map(c => `
     <tr>
       <td>${c.tipo === 'tercero' ? 'De tercero' : 'Propio'}</td>
       <td>${escapeHtml(c.numero||'')}</td>
