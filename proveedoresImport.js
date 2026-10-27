@@ -150,6 +150,7 @@ function filasTodasLasHojas(wb) {
         const idxDe = re => txt.findIndex(t => t && re.test(t) && !/pallet/i.test(t));
         cols = { codigo: ci >= 0 ? ci : 0, nombre: ni >= 0 ? ni : 1, precio: precioCols, txt,
           m2Caja: idxDe(/(m2|mts?\.?|metros?)[^]*caja|caja[^]*(m2|mts|metros)/i),
+          medidas: idxDe(/^medidas?/i),
           uniCaja: idxDe(/^(cant\.?|unidades|paneles|mallas|uni)[^]*(x|por)\s*caja/i) };
         continue;
       }
@@ -167,7 +168,12 @@ function filasTodasLasHojas(wb) {
         const tp = cols.txt[colPrecio] || '';
         if (/caja/i.test(tp)) bulto = null;
         else if (/(mt2|m2|metro)/i.test(tp) && !/malla/i.test(tp)) { const v = cols.m2Caja >= 0 ? parseNumero(f[cols.m2Caja]) : null; bulto = v > 0 ? v : null; }
-        else { const v = cols.uniCaja >= 0 ? parseNumero(f[cols.uniCaja]) : null; bulto = v > 0 ? v : null; }
+        else {
+          // Precio por unidad: el costo queda por unidad; las "unidades por bulto" son la equivalencia en m² = piezas que hacen 1 m²
+          // (1 ÷ superficie de la pieza, con la medida de la lista en cm). Sin medida clara (2 lados, hasta 100 cm), no se carga nada.
+          const nums = cols.medidas >= 0 ? (String(f[cols.medidas]).replace(/cm/ig, '').match(/\d+(?:[.,]\d+)?/g) || []).map(x => parseFloat(x.replace(',', '.'))) : [];
+          if (nums.length === 2 && nums.every(n => n > 0 && n <= 100) && !/espejo|mueble/i.test(nombreHoja)) bulto = Math.round(10000 / (nums[0] * nums[1]) * 10000) / 10000;
+        }
       }
       filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, bultoSoloSiFalta: true });
     }
