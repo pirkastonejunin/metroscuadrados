@@ -211,7 +211,7 @@
       stock: { activo: document.getElementById('pimpStockOn').checked, depositoId: document.getElementById('pimpDeposito') ? document.getElementById('pimpDeposito').value : '', ceroSiNoViene: document.getElementById('pimpCero') ? document.getElementById('pimpCero').checked : false },
       alertaPct: document.getElementById('pimpAlerta').value
     };
-    if ((!body.columnas.codigo || !body.columnas.precio) && !estado.portal) { err.textContent = 'Indicá la columna del código y la del precio.'; return; }
+    if ((!body.columnas.codigo || !body.columnas.precio) && !estado.portal && !body.todasLasHojas) { err.textContent = 'Indicá la columna del código y la del precio.'; return; }
     try { await pedir('/' + estado.id + '/regla', { method: 'PUT', body: JSON.stringify(body) }); ok.textContent = 'Regla grabada.'; estado.regla = body; }
     catch (e) { err.textContent = e.message; }
   };
