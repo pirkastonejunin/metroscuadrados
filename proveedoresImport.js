@@ -150,6 +150,8 @@ function filasTodasLasHojas(wb) {
         const idxDe = re => txt.findIndex(t => t && re.test(t) && !/pallet/i.test(t));
         cols = { codigo: ci >= 0 ? ci : 0, nombre: ni >= 0 ? ni : 1, precio: precioCols, txt,
           m2Caja: idxDe(/(m2|mts?\.?|metros?)[^]*caja|caja[^]*(m2|mts|metros)/i),
+          m2Panel: idxDe(/(m2|mts?\.?|metros?)[^]*panel/i),
+          m2Unidad: (() => { for (const t of txt) { const mm = t && t.match(/\((\d+(?:[.,]\d+)?)\s*mt2?\)/i); if (mm) return parseFloat(mm[1].replace(',', '.')); } return 0; })(),
           medidas: idxDe(/^medidas?/i),
           uniCaja: idxDe(/^(cant\.?|unidades|paneles|mallas|uni)[^]*(x|por)\s*caja/i) };
         continue;
@@ -159,26 +161,40 @@ function filasTodasLasHojas(wb) {
       if (!codigo) continue;
       const nombre = String(f[cols.nombre] == null ? '' : f[cols.nombre]).trim();
       if (nombre === codigo || (!/\d/.test(codigo) && !nombre)) continue; // título de sección
-      let precio = null, colPrecio = -1;
-      for (const pc of cols.precio) { const n = parseNumero(f[pc]); if (n != null && n > 0) { precio = n; colPrecio = pc; break; } }
+      // Criterio único (m²): todo lo que cubre superficie se guarda con el PRECIO POR M² y "unidades por bulto" = m² que cubre la unidad de venta
+      // (caja, panel o malla). Cada columna de precio del Excel se convierte: por m² → tal cual; por caja → ÷ m² por caja; por panel → ÷ m² por panel;
+      // por malla/pieza → × piezas por m² (de MEDIDAS o del encabezado "(0,1 mt2)"). Lo que no cubre superficie (espejos, muebles, adhesivos, zócalos) queda por unidad.
+      const tipoDe = t => /caja/i.test(t) ? 'caja' : /panel/i.test(t) ? 'panel' : (/(mt2|m2|metro)/i.test(t) && !/malla/i.test(t)) ? 'm2' : 'unidad';
+      const cands = cols.precio.map(pc => ({ pc, n: parseNumero(f[pc]), tipo: tipoDe(cols.txt[pc] || '') })).filter(x => x.n != null && x.n > 0);
+      const elegido = ['m2', 'caja', 'panel', 'unidad'].map(t => cands.find(x => x.tipo === t)).find(Boolean) || null;
+      let precio = elegido ? elegido.n : null;
       if (precio == null && !/\d/.test(codigo)) continue;
-      // Unidades por bulto: solo si el precio es por m² → m² por caja. Por unidad/malla/panel o por caja: no se toca.
-      let bulto = null, porUnidad = false;
-      if (precio != null) {
-        const tp = cols.txt[colPrecio] || '';
-        if (/caja/i.test(tp)) bulto = null;
-        else if (/(mt2|m2|metro)/i.test(tp) && !/malla/i.test(tp)) { const v = cols.m2Caja >= 0 ? parseNumero(f[cols.m2Caja]) : null; bulto = v > 0 ? v : null; }
-        else { bulto = null; porUnidad = true; } // precio por unidad/malla/panel: se vende por unidad (sin multiplicar por bulto)
-      }
-      // Mallas: mismo criterio que el resto de los productos por m² → el precio se guarda POR M² y "unidades por bulto" = m² que cubre cada unidad de venta.
-      // piezas por m² = 1 / (ancho × alto de MEDIDAS), redondeado (30 x 30 → 11): precio por m² = precio por malla × 11; bulto = 1/11 m² por malla.
-      let piezasM2 = null;
-      if (porUnidad && precio != null && /malla/i.test(nombreHoja) && cols.medidas >= 0) {
+      const num = c => (c >= 0 ? parseNumero(f[c]) : null);
+      let bulto = null, porUnidad = false, piezasM2 = null, porM2 = false;
+      // piezas por m² de una pieza/malla: del encabezado (0,1 mt2) o de las MEDIDAS (ancho × alto)
+      const esPieza = /malla|venecita|geo/i.test(nombreHoja) || /^malla\b/i.test(nombre);
+      const piezasDe = () => {
+        if (!esPieza) return null;
+        if (cols.m2Unidad > 0) { const pz = Math.round(1 / cols.m2Unidad); if (pz >= 3 && pz <= 100) return pz; }
+        if (cols.medidas < 0) return null;
         const mm = String(f[cols.medidas] == null ? '' : f[cols.medidas]).match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)\s*(?:cm)?\s*$/);
-        if (mm) { const a = parseFloat(mm[1].replace(',', '.')), b = parseFloat(mm[2].replace(',', '.')); const pz = a > 0 && b > 0 ? Math.round(10000 / (a * b)) : 0; if (pz >= 3 && pz <= 60) piezasM2 = pz; }
+        if (!mm) return null;
+        const a = parseFloat(mm[1].replace(',', '.')), b = parseFloat(mm[2].replace(',', '.'));
+        const pz = a > 0 && b > 0 ? Math.round(10000 / (a * b)) : 0; return pz >= 3 && pz <= 100 ? pz : null;
+      };
+      if (elegido) {
+        if (elegido.tipo === 'm2') {
+          porM2 = true; const v = num(cols.m2Caja); const pz = v > 0 ? null : piezasDe();
+          bulto = v > 0 ? v : (pz ? 1 / pz : null);
+        } else if (elegido.tipo === 'caja' || elegido.tipo === 'panel') {
+          const v = num(elegido.tipo === 'caja' ? cols.m2Caja : cols.m2Panel);
+          if (v > 0) { precio = Math.round(precio / v * 10000) / 10000; bulto = v; porM2 = true; } else porUnidad = true;
+        } else {
+          const pz = piezasDe();
+          if (pz) { precio = Math.round(precio * pz * 100) / 100; bulto = 1 / pz; porM2 = true; piezasM2 = pz; } else porUnidad = true;
+        }
       }
-      if (piezasM2) { precio = Math.round(precio * piezasM2 * 100) / 100; bulto = 1 / piezasM2; porUnidad = false; }
-      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, porUnidad, piezasM2, porM2: !!piezasM2, bultoSoloSiFalta: !piezasM2 });
+      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, porUnidad, piezasM2, porM2, bultoSoloSiFalta: !porM2 });
     }
   });
   return filas;
