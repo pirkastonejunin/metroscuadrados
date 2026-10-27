@@ -441,9 +441,6 @@
       dolarEl.querySelector('.pn-dolar-v').textContent = '$ ' + Number(v).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       dolarEl.style.display = '';
     }).catch(function () {});
-    if (enInicio) return;
-    const bell = box.querySelector('.pn-bell'), btn = bell.querySelector('.pn-bell-btn'), badge = bell.querySelector('.pn-bell-badge'), body = bell.querySelector('.pn-bell-body');
-    let items = [];
     const destino = function (tipo, id) {
       if (tipo === 'crm') return '/crm.html?abrir=crm-' + id;
       if (tipo === 'meta_token') return '/mesa.html';
@@ -457,6 +454,46 @@
       if (tipo === 'stock_bajo') return '/admin-stock.html';
       return '';
     };
+
+    // Cartel diario (27/10/2026, pedido de Mato): la primera vez que se abre el sistema cada día, un pop-up con los recordatorios y pendientes.
+    (function popupDiario() {
+      try {
+        const hoy = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10), clave = 'pn_popup_dia_' + token.slice(0, 12);
+        let visto = ''; try { visto = localStorage.getItem(clave) || ''; } catch (e) {}
+        if (visto === hoy) return;
+        fetch('/api/notificaciones', { headers: hdrs }).then(r => r.ok ? r.json() : null).then(function (d) {
+          if (!d) return;
+          try { localStorage.setItem(clave, hoy); } catch (e) {}
+          const todos = d.items || [];
+          if (!todos.length) return;
+          const orden = todos.slice().sort((a, b) => (a.tipo === 'recordatorio' ? 0 : 1) - (b.tipo === 'recordatorio' ? 0 : 1));
+          const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+          const ov = document.createElement('div');
+          ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:12px';
+          ov.innerHTML = '<div style="background:var(--card,#fff);color:var(--text,#222);border-radius:14px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:inherit">' +
+            '<div style="padding:16px 18px;border-bottom:1px solid var(--border,#ddd);font-weight:800;font-size:16px">🔔 Pendientes de hoy (' + orden.length + ')</div>' +
+            '<div class="pn-pop-lista" style="overflow:auto;padding:6px 0">' + orden.map(function (it, i) {
+              const url = destino(it.tipo, it.id);
+              return '<div data-i="' + i + '" style="padding:10px 18px;border-bottom:1px solid var(--border,#eee);' + (url ? 'cursor:pointer' : '') + '"><b>' + esc(it.titulo) + '</b><div style="font-size:12.5px;opacity:.75">' + esc(it.subtitulo || '') + '</div>' +
+                (it.fecha ? '<div style="font-size:11.5px;opacity:.6">' + esc(it.etiquetaFecha || 'Venció el') + ' ' + esc(new Date(it.fecha).toLocaleString('es-AR', it.tipo === 'recordatorio' ? { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' } : undefined)) + '</div>' : '') +
+                (it.tipo === 'recordatorio' ? '<button type="button" data-hecho="' + i + '" style="margin-top:6px;border:1px solid var(--border,#ccc);background:transparent;border-radius:6px;font-size:12px;padding:3px 8px;cursor:pointer;color:inherit">✓ Hecho</button>' : '') + '</div>';
+            }).join('') + '</div>' +
+            '<div style="padding:12px 18px;text-align:right"><button type="button" class="pn-pop-ok" style="border:0;background:#e8603c;color:#fff;border-radius:8px;padding:8px 18px;font-weight:700;cursor:pointer">Entendido</button></div></div>';
+          document.body.appendChild(ov);
+          const cerrar = function () { ov.remove(); };
+          ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('.pn-pop-ok')) { cerrar(); return; }
+            const bh = e.target.closest('[data-hecho]');
+            if (bh) { const it = orden[Number(bh.dataset.hecho)]; fetch('/api/notificaciones/recordatorios/' + encodeURIComponent(it.id) + '/hecho', { method: 'POST', headers: hdrs }).then(function () { const row = bh.closest('[data-i]'); if (row) row.remove(); }); return; }
+            const row = e.target.closest('[data-i]'); if (!row) return;
+            const url = destino(orden[Number(row.dataset.i)].tipo, orden[Number(row.dataset.i)].id); if (url) location.href = url;
+          });
+        }).catch(function () {});
+      } catch (e) {}
+    })();
+    if (enInicio) return;
+    const bell = box.querySelector('.pn-bell'), btn = bell.querySelector('.pn-bell-btn'), badge = bell.querySelector('.pn-bell-badge'), body = bell.querySelector('.pn-bell-body');
+    let items = [];
     const pintar = function () {
       badge.textContent = items.length > 9 ? '9+' : String(items.length);
       badge.style.display = items.length ? '' : 'none';
