@@ -754,6 +754,19 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
     // Si el producto no esta configurado en nuestra base, intentamos
     // leer el campo personalizado "Rendimiento por caja" que se carga
     // directamente en la ficha del producto en Tiendanube.
+    // Rendimiento guardado que en realidad es "piezas por m2" (ej. 11 en vez de 0,0909): se corrige una sola vez.
+    if (cache && cache.cobertura && !cache.verificadoPiezas && parseFloat(cache.cobertura) >= 2) {
+      const ptv = await buscarProductoPorHandle(store, handleBuscado);
+      const pzV = ptv ? piezasPorM2Desc(ptv.description) : 0;
+      const col = await getRendimientosCollection();
+      if (pzV && Math.abs(parseFloat(cache.cobertura) - pzV) < 0.01) {
+        const nuevo = { cobertura: 1 / pzV, envase: 'malla', tipo: 'm2', verificadoPiezas: true };
+        await col.updateOne({ _id: cache._id }, { $set: nuevo });
+        cache = Object.assign({}, cache, nuevo);
+      } else if (ptv) {
+        await col.updateOne({ _id: cache._id }, { $set: { verificadoPiezas: true } });
+      }
+    }
     if (!cache || !cache.cobertura) {
       const productoTn = await buscarProductoPorHandle(store, handleBuscado);
       if (productoTn) {
@@ -762,11 +775,13 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
         if (!valorCampo) {
           // Sin dato cargado a mano: si la ficha dice "Nº de piezas por m2: N" (mallas, mosaicos, venta por pieza),
           // el rendimiento por unidad de venta es 1/N m². Así el precio aparece sin pasos extra al importar.
-          const d = productoTn.description;
-          const txt = (d && typeof d === 'object' ? (d.es || Object.values(d)[0] || '') : String(d || '')).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
-          const mm = txt.match(/piezas\s+por\s+m(?:2|²)\s*:?\s*(\d+(?:[.,]\d+)?)/i);
-          const pz = mm ? parseFloat(mm[1].replace(',', '.')) : 0;
+          const pz = piezasPorM2Desc(productoTn.description);
           if (pz > 0 && pz < 5000) { valorCampo = String(1 / pz); envaseAuto = 'malla'; }
+        }
+        if (valorCampo) {
+          // Corrige el error típico: cargaron "piezas por m2" (11) como rendimiento en vez de m² por unidad (1/11).
+          const pzC = piezasPorM2Desc(productoTn.description);
+          if (pzC && Math.abs(parseFloat(String(valorCampo).replace(',', '.')) - pzC) < 0.01) { valorCampo = String(1 / pzC); envaseAuto = 'malla'; }
         }
         if (valorCampo) {
           // Lo guarda en el cache para no volver a consultarlo
@@ -831,6 +846,14 @@ async function resolverAsociados(store, textoAsociados) {
   }
 
   return resultado;
+}
+
+// "Nº de piezas por m2: 11" en la descripción de la ficha → 11 (0 si no figura). Acepta string o {es:..}.
+function piezasPorM2Desc(d) {
+  const txt = (d && typeof d === 'object' ? (d.es || Object.values(d)[0] || '') : String(d || '')).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const mm = txt.match(/piezas\s+por\s+m(?:2|²)\s*:?\s*(\d+(?:[.,]\d+)?)/i);
+  const pz = mm ? parseFloat(mm[1].replace(',', '.')) : 0;
+  return pz > 0 && pz < 5000 ? pz : 0;
 }
 
 async function buscarProductoPorHandle(store, handle) {
