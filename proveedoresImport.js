@@ -162,18 +162,13 @@ function filasTodasLasHojas(wb) {
       let precio = null, colPrecio = -1;
       for (const pc of cols.precio) { const n = parseNumero(f[pc]); if (n != null && n > 0) { precio = n; colPrecio = pc; break; } }
       if (precio == null && !/\d/.test(codigo)) continue;
-      // Unidades por bulto: si el precio es por m² → m² por caja; si es por unidad/malla/panel → unidades por caja; si es por caja → no aplica.
+      // Unidades por bulto: solo si el precio es por m² → m² por caja. Por unidad/malla/panel o por caja: no se toca.
       let bulto = null;
       if (precio != null) {
         const tp = cols.txt[colPrecio] || '';
         if (/caja/i.test(tp)) bulto = null;
         else if (/(mt2|m2|metro)/i.test(tp) && !/malla/i.test(tp)) { const v = cols.m2Caja >= 0 ? parseNumero(f[cols.m2Caja]) : null; bulto = v > 0 ? v : null; }
-        else {
-          // Precio por unidad: el costo queda por unidad; las "unidades por bulto" son la equivalencia en m² = piezas que hacen 1 m²
-          // (1 ÷ superficie de la pieza, con la medida de la lista en cm). Sin medida clara (2 lados, hasta 100 cm), no se carga nada.
-          const nums = cols.medidas >= 0 ? (String(f[cols.medidas]).replace(/cm/ig, '').match(/\d+(?:[.,]\d+)?/g) || []).map(x => parseFloat(x.replace(',', '.'))) : [];
-          if (nums.length === 2 && nums.every(n => n > 0 && n <= 100) && !/espejo|mueble/i.test(nombreHoja)) bulto = Math.round(10000 / (nums[0] * nums[1]) * 10000) / 10000;
-        }
+        else bulto = null; // precio por unidad/malla/panel: se deja por unidad, no se toca la ficha (27/10/2026, pedido de Mato)
       }
       filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, bultoSoloSiFalta: true });
     }
