@@ -755,16 +755,21 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
     // leer el campo personalizado "Rendimiento por caja" que se carga
     // directamente en la ficha del producto en Tiendanube.
     // Rendimiento guardado que en realidad es "piezas por m2" (ej. 11 en vez de 0,0909): se corrige una sola vez.
-    if (cache && cache.cobertura && !cache.verificadoPiezas && parseFloat(cache.cobertura) >= 2) {
+    // Mallas (se venden por malla): el rendimiento es siempre 1/"piezas por m2" de la ficha, aunque hayan cargado otro número
+    // (ej. 11 o 0,36). Otros productos: solo se corrige si cargaron justo las piezas por m2 en vez de los m² por caja.
+    if (cache && cache.cobertura && cache.verificadoPiezas !== 2) {
       const ptv = await buscarProductoPorHandle(store, handleBuscado);
-      const pzV = ptv ? piezasPorM2Desc(ptv.description) : 0;
-      const col = await getRendimientosCollection();
-      if (pzV && Math.abs(parseFloat(cache.cobertura) - pzV) < 0.01) {
-        const nuevo = { cobertura: 1 / pzV, envase: 'malla', tipo: 'm2', verificadoPiezas: true };
-        await col.updateOne({ _id: cache._id }, { $set: nuevo });
-        cache = Object.assign({}, cache, nuevo);
-      } else if (ptv) {
-        await col.updateOne({ _id: cache._id }, { $set: { verificadoPiezas: true } });
+      if (ptv) {
+        const pzV = piezasPorM2Desc(ptv.description), cobV = parseFloat(cache.cobertura);
+        const col = await getRendimientosCollection();
+        const mal = esDeMallas(ptv);
+        if (pzV && (mal ? Math.abs(cobV - 1 / pzV) > 0.0005 : Math.abs(cobV - pzV) < 0.01)) {
+          const nuevo = { cobertura: 1 / pzV, envase: 'malla', tipo: 'm2', verificadoPiezas: 2 };
+          await col.updateOne({ _id: cache._id }, { $set: nuevo });
+          cache = Object.assign({}, cache, nuevo);
+        } else {
+          await col.updateOne({ _id: cache._id }, { $set: { verificadoPiezas: 2 } });
+        }
       }
     }
     if (!cache || !cache.cobertura) {
@@ -781,7 +786,7 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
         if (valorCampo) {
           // Corrige el error típico: cargaron "piezas por m2" (11) como rendimiento en vez de m² por unidad (1/11).
           const pzC = piezasPorM2Desc(productoTn.description);
-          if (pzC && Math.abs(parseFloat(String(valorCampo).replace(',', '.')) - pzC) < 0.01) { valorCampo = String(1 / pzC); envaseAuto = 'malla'; }
+          if (pzC && (esDeMallas(productoTn) || Math.abs(parseFloat(String(valorCampo).replace(',', '.')) - pzC) < 0.01)) { valorCampo = String(1 / pzC); envaseAuto = 'malla'; }
         }
         if (valorCampo) {
           // Lo guarda en el cache para no volver a consultarlo
@@ -856,10 +861,14 @@ function piezasPorM2Desc(d) {
   return pz > 0 && pz < 5000 ? pz : 0;
 }
 
+function esDeMallas(pt) {
+  return !!(pt && Array.isArray(pt.categories) && pt.categories.some(c => /malla/i.test(JSON.stringify(c && c.name || ''))));
+}
+
 async function buscarProductoPorHandle(store, handle) {
   try {
     const resp = await fetch(
-      API_BASE + '/' + store.store_id + '/products?handle=' + encodeURIComponent(handle) + '&fields=id,handle,description',
+      API_BASE + '/' + store.store_id + '/products?handle=' + encodeURIComponent(handle) + '&fields=id,handle,description,categories',
       { headers: apiHeaders(store.access_token) }
     );
     const productos = await resp.json();
