@@ -2385,7 +2385,7 @@ async function obtenerIndiceSkuTiendanube() {
     e.status = 400;
     throw e;
   }
-  const productosTienda = await fetchAllProducts(store.store_id, store.access_token, 'id,variants'); // solo lo necesario: mucho más liviano y rápido
+  const productosTienda = await fetchAllProducts(store.store_id, store.access_token, 'id,handle,variants'); // solo lo necesario: mucho más liviano y rápido
   const indice = new Map();
   for (const p of productosTienda) {
     if (!p.variants) continue;
@@ -2393,6 +2393,7 @@ async function obtenerIndiceSkuTiendanube() {
       if (!v.sku) continue;
       indice.set(String(v.sku).trim().toLowerCase(), {
         productId: p.id,
+        handle: nombreLocalizado(p.handle) || '',
         variantId: v.id,
         precioActual: parseFloat(v.price)
       });
@@ -2420,15 +2421,26 @@ async function obtenerPreciosTiendanubePorSku() {
   return porSku;
 }
 
-async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso) {
+async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso, piezasPorSku) {
   const { store, indice } = await obtenerIndiceSkuTiendanube();
 
-  const resultado = { actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [] };
+  const resultado = { actualizados: 0, sinCambios: 0, noEncontrados: 0, errores: [], rendimientos: 0 };
   let procesados = 0;
   const total = preciosPorSku.size;
   for (const [sku, precio] of preciosPorSku.entries()) {
     procesados++;
     const ref = indice.get(String(sku).trim().toLowerCase());
+    // Mallas/piezas: m² que cubre cada unidad de venta = 1 / piezas por m² (viene de la lista del proveedor), para la calculadora de la ficha.
+    const piezas = piezasPorSku && piezasPorSku.get(String(sku).trim().toLowerCase());
+    if (ref && piezas > 0) {
+      try {
+        const col = await getRendimientosCollection();
+        const doc = { store_id: store.store_id, product_id: parseInt(ref.productId, 10), tipo: 'm2', cobertura: 1 / piezas, envase: 'malla', verificadoPiezas: 2 };
+        if (ref.handle) doc.handle = String(ref.handle).toLowerCase();
+        await col.updateOne({ _id: store.store_id + '_' + ref.productId }, { $set: doc }, { upsert: true });
+        resultado.rendimientos++;
+      } catch (e) { resultado.errores.push({ sku, detalle: 'Rendimiento: ' + e.message }); }
+    }
     if (!ref) {
       resultado.noEncontrados++;
     } else if (Number.isFinite(precio) && ref.precioActual != null && Math.abs(ref.precioActual - precio) < 0.005) {

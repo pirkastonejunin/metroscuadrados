@@ -1962,14 +1962,15 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
 
     const productos = await db.collection('productos_catalogo')
       .find(matchProductosDeLista(req, lista))
-      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1, unidad: 1, tipoUnidad: 1, nombre: 1 }).toArray();
-    const preciosPorSku = new Map(); let omitidosSinBulto = 0;
+      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1, unidad: 1, tipoUnidad: 1, nombre: 1, piezasPorM2: 1 }).toArray();
+    const preciosPorSku = new Map(), piezasPorSku = new Map(); let omitidosSinBulto = 0;
     productos.forEach(p => {
       if (!p.sku && !p.skuTiendanube) return;
       if (sinBultoPorM2(p)) { omitidosSinBulto++; return; } // por m² sin m² por caja: no se sincroniza
       const { precio } = precioResuelto(p, lista, null);
       // si el producto está vinculado con Tiendanube bajo otro SKU, el precio va a ese SKU (tiendanubeVinculo.js)
       if (precio != null) preciosPorSku.set(String(p.skuTiendanube || p.sku), precio);
+      if (p.piezasPorM2 > 0) piezasPorSku.set(String(p.skuTiendanube || p.sku).trim().toLowerCase(), p.piezasPorM2);
     });
     if (!preciosPorSku.size) throw err(400, 'No hay productos con precio calculado para sincronizar en esta lista');
 
@@ -1980,7 +1981,7 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
     });
     res.json({ jobId, total: preciosPorSku.size, omitidosSinBulto });
 
-    procesarSincronizacionTiendanube(db, jobId, preciosPorSku).catch(async (e) => {
+    procesarSincronizacionTiendanube(db, jobId, preciosPorSku, piezasPorSku).catch(async (e) => {
       try {
         await db.collection('productos_import_jobs').updateOne(
           { _id: jobId }, { $set: { estado: 'error', errorGeneral: e.message, terminadoEn: new Date() } }
@@ -1990,10 +1991,10 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-async function procesarSincronizacionTiendanube(db, jobId, preciosPorSku) {
+async function procesarSincronizacionTiendanube(db, jobId, preciosPorSku, piezasPorSku) {
   const resultado = await sincronizarPreciosTiendanube(preciosPorSku, async (procesados, total) => {
     await db.collection('productos_import_jobs').updateOne({ _id: jobId }, { $set: { procesados, total } });
-  });
+  }, piezasPorSku);
   await db.collection('productos_import_jobs').updateOne(
     { _id: jobId },
     { $set: Object.assign({ estado: 'listo', terminadoEn: new Date() }, resultado) }

@@ -755,23 +755,6 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
     // leer el campo personalizado "Rendimiento por caja" que se carga
     // directamente en la ficha del producto en Tiendanube.
     // Rendimiento guardado que en realidad es "piezas por m2" (ej. 11 en vez de 0,0909): se corrige una sola vez.
-    // Mallas (se venden por malla): el rendimiento es siempre 1/"piezas por m2" de la ficha, aunque hayan cargado otro número
-    // (ej. 11 o 0,36). Otros productos: solo se corrige si cargaron justo las piezas por m2 en vez de los m² por caja.
-    if (cache && cache.cobertura && cache.verificadoPiezas !== 2) {
-      const ptv = await buscarProductoPorHandle(store, handleBuscado);
-      if (ptv) {
-        const pzV = piezasPorM2Desc(ptv.description), cobV = parseFloat(cache.cobertura);
-        const col = await getRendimientosCollection();
-        const mal = esDeMallas(ptv);
-        if (pzV && (mal ? Math.abs(cobV - 1 / pzV) > 0.0005 : Math.abs(cobV - pzV) < 0.01)) {
-          const nuevo = { cobertura: 1 / pzV, envase: 'malla', tipo: 'm2', verificadoPiezas: 2 };
-          await col.updateOne({ _id: cache._id }, { $set: nuevo });
-          cache = Object.assign({}, cache, nuevo);
-        } else {
-          await col.updateOne({ _id: cache._id }, { $set: { verificadoPiezas: 2 } });
-        }
-      }
-    }
     if (!cache || !cache.cobertura) {
       const productoTn = await buscarProductoPorHandle(store, handleBuscado);
       if (productoTn) {
@@ -784,13 +767,8 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
           if (pz > 0 && pz < 5000) { valorCampo = String(1 / pz); envaseAuto = 'malla'; }
         }
         if (valorCampo) {
-          // Corrige el error típico: cargaron "piezas por m2" (11) como rendimiento en vez de m² por unidad (1/11).
-          const pzC = piezasPorM2Desc(productoTn.description);
-          if (pzC && (esDeMallas(productoTn) || Math.abs(parseFloat(String(valorCampo).replace(',', '.')) - pzC) < 0.01)) { valorCampo = String(1 / pzC); envaseAuto = 'malla'; }
-        }
-        if (valorCampo) {
-          // Lo guarda en el cache para no volver a consultarlo
-          await guardarRendimientoCache(
+          // Lo guarda en el cache para no volver a consultarlo (lo calculado desde la descripción NO se guarda: solo se lee)
+          if (envaseAuto === 'caja') await guardarRendimientoCache(
             store.store_id, productoTn.id, 'm2', valorCampo, handleBuscado, envaseAuto, undefined
           );
           return res.json({

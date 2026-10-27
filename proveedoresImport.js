@@ -170,7 +170,13 @@ function filasTodasLasHojas(wb) {
         else if (/(mt2|m2|metro)/i.test(tp) && !/malla/i.test(tp)) { const v = cols.m2Caja >= 0 ? parseNumero(f[cols.m2Caja]) : null; bulto = v > 0 ? v : null; }
         else { bulto = null; porUnidad = true; } // precio por unidad/malla/panel: se vende por unidad (sin multiplicar por bulto)
       }
-      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, porUnidad, bultoSoloSiFalta: true });
+      // Mallas: piezas por m² = 1 / (ancho × alto de MEDIDAS), redondeado (30 x 30 → 11). Es lo que usa la calculadora de la ficha.
+      let piezasM2 = null;
+      if (porUnidad && /malla/i.test(nombreHoja) && cols.medidas >= 0) {
+        const mm = String(f[cols.medidas] == null ? '' : f[cols.medidas]).match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)\s*(?:cm)?\s*$/);
+        if (mm) { const a = parseFloat(mm[1].replace(',', '.')), b = parseFloat(mm[2].replace(',', '.')); const pz = a > 0 && b > 0 ? Math.round(10000 / (a * b)) : 0; if (pz >= 3 && pz <= 60) piezasM2 = pz; }
+      }
+      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, porUnidad, piezasM2, bultoSoloSiFalta: true });
     }
   });
   return filas;
@@ -455,6 +461,7 @@ async function calcular(db, req, prov, regla, filas) {
     if (f.bulto > 0 && (f.bultoSoloSiFalta ? !(Number(p.unidadesPorBulto) > 0) : Number(p.unidadesPorBulto) !== f.bulto)) c.bultoNuevo = f.bulto;
     // Precio por unidad/malla: si la ficha quedó con unidades por bulto (de importaciones anteriores), se quitan para que el precio de venta sea por unidad.
     if (f.porUnidad && Number(p.unidadesPorBulto) > 1) c.bultoQuitar = p.unidadesPorBulto;
+    if (f.piezasM2 > 0 && Number(p.piezasPorM2) !== f.piezasM2) c.piezasNuevo = { antes: p.piezasPorM2 || null, ahora: f.piezasM2 };
     if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
 
     if (f.precio != null && f.precio > 0) {
@@ -489,7 +496,7 @@ async function calcular(db, req, prov, regla, filas) {
       const ant = stockPrev.has(String(p._id)) ? stockPrev.get(String(p._id)) : 0;
       c.stock = { anterior: ant, nuevo, cambia: Math.abs(ant - nuevo) > 0.0005 };
     }
-    c.hayCambio = !!(c.vinculaCodigo || c.cambiaCosto || c.bultoNuevo || c.bultoQuitar || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
+    c.hayCambio = !!(c.vinculaCodigo || c.cambiaCosto || c.bultoNuevo || c.bultoQuitar || c.piezasNuevo || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
     cambios.push(c);
   }
 
@@ -509,7 +516,7 @@ async function calcular(db, req, prov, regla, filas) {
   const resumen = {
     filasArchivo: filas.length, vinculados: cambios.length, sinMatch: sinMatch.length, duplicados: duplicados.length, sinPrecio: sinPrecio.length,
     costosCambian: cambios.filter(c => c.cambiaCosto).length,
-    bultosCambian: cambios.filter(c => c.bultoNuevo || c.bultoQuitar || c.pasaAM2).length,
+    bultosCambian: cambios.filter(c => c.bultoNuevo || c.bultoQuitar || c.piezasNuevo || c.pasaAM2).length,
     preciosCambian: cambios.reduce((n, c) => n + (c.precios || []).filter(x => x.cambia).length, 0),
     stockCambia: cambios.filter(c => c.stock && c.stock.cambia).length + aCero.length,
     stockACero: aCero.length, alertas: cambios.filter(c => c.alerta).length,
@@ -573,7 +580,7 @@ router.post('/:id/preview', authAdmin, async (req, res) => {
     const ordenadas = calc.cambios.filter(c => c.hayCambio).sort((a, b) => (b.alerta ? 1 : 0) - (a.alerta ? 1 : 0) || Math.abs(b.variacionPct || 0) - Math.abs(a.variacionPct || 0));
     res.json({
       resumen: calc.resumen,
-      muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock, bultoNuevo: c.bultoNuevo || null, bultoQuitar: c.bultoQuitar || null })),
+      muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock, bultoNuevo: c.bultoNuevo || null, bultoQuitar: c.bultoQuitar || null, piezasNuevo: c.piezasNuevo || null })),
       hayMas: ordenadas.length > 300,
       sinMatch: calc.sinMatch.slice(0, 500), duplicados: calc.duplicados.slice(0, 50), sinPrecio: calc.sinPrecio.slice(0, 50),
       aCero: calc.aCero.slice(0, 100).map(a => ({ sku: a.sku, nombre: a.nombre, anterior: a.anterior }))
@@ -604,6 +611,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           for (const pr of (c.precios || [])) if (pr.predeterminada) set.precio = pr.nuevo;
           if (c.bultoNuevo) { set.unidadesPorBulto = c.bultoNuevo; bultos++; }
           else if (c.bultoQuitar) { set.unidadesPorBulto = null; bultos++; }
+          if (c.piezasNuevo) set.piezasPorM2 = c.piezasNuevo.ahora;
           if (c.pasaAM2) { set.unidad = 'm2'; set.tipoUnidad = 'superficie'; }
           opsProd.push({ updateOne: { filter: { _id: c.productoId }, update: { $set: set } } });
           if ((c.precios || []).length) opsProd.push({ updateOne: { filter: { _id: c.productoId, preciosPorLista: { $not: { $type: 'array' } } }, update: { $set: { preciosPorLista: [] } } } });
