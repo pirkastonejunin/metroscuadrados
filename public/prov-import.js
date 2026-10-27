@@ -88,7 +88,7 @@
         '<div class="err" id="pimpErr"></div><div id="pimpPreview" style="margin-top:10px"></div></div>' +
       '<details class="card" style="padding:12px"><summary style="cursor:pointer;font-weight:700">Fotos desde la página web del proveedor</summary><div style="margin-top:10px">' +
         '<p class="muted" style="margin:0 0 8px">Lee la página del proveedor (ej: misionesdeco.com), busca cada producto por su “Art.:” (el código de la lista) y guarda los links de sus fotos. Después, al crear productos en Tiendanube, las fotos viajan solas. No descarga archivos: guarda solo los links.</p>' +
-        '<div class="row"><div style="flex:1;min-width:240px"><label>Página del proveedor</label><input id="pfwUrl" value="https://www.misionesdeco.com/"></div><div><button type="button" class="btn" id="pfwBtn" onclick="pimpTraerFotosWeb()">Traer fotos</button></div></div>' +
+        '<div class="row"><div style="flex:1;min-width:240px"><label>Página del proveedor</label><input id="pfwUrl" value="https://www.misionesdeco.com/"></div><div><button type="button" class="btn" id="pfwBtn" onclick="pimpTraerFotosWeb()">Traer fotos</button> <button type="button" class="btn secondary" onclick="pimpTraerFotosWeb(true)">Ver resultado</button></div></div>' +
         '<div id="pfwEstado" class="muted" style="margin-top:8px"></div></div></details>' +
       '<div class="card" style="padding:12px"><div style="font-weight:700;margin-bottom:6px">Últimas actualizaciones</div><div id="pimpHist" class="muted">Cargando...</div></div>';
   }
@@ -183,20 +183,22 @@
     el.textContent = usd ? (estado.cotizacion ? 'El costo queda en dólares en el producto; los precios en pesos se calculan con el dólar de hoy ($ ' + num(estado.cotizacion, 2) + '). Si el dólar cambia, hay que volver a subir la lista para recalcular los precios.' : 'Atención: no hay cotización del dólar cargada (Productos → Listas de precio). Cargala antes de importar.') : '';
   };
 
-  window.pimpTraerFotosWeb = async function () {
+  window.pimpTraerFotosWeb = async function (soloResumen) {
     var est = document.getElementById('pfwEstado'), btn = document.getElementById('pfwBtn'), url = document.getElementById('pfwUrl').value;
-    btn.disabled = true; est.innerHTML = 'Buscando los productos en la página… (puede tardar un minuto)';
+    btn.disabled = true; est.innerHTML = soloResumen === true ? 'Calculando…' : 'Buscando los productos en la página… (puede tardar un minuto)';
     try {
+      var urls = [], ok = 0, sinCod = 0, sinFoto = 0;
+      if (soloResumen !== true) {
       var d = await pedir('/' + estado.id + '/fotos-web/descubrir', { method: 'POST', body: JSON.stringify({ url: url }) });
-      var urls = d.productos; if (!urls.length) { est.innerHTML = '<span class="err">No encontré productos en esa página (revisé ' + d.paginasRevisadas + ' páginas).</span>'; btn.disabled = false; return; }
-      var ok = 0, sinCod = 0, sinFoto = 0;
+      urls = d.productos; if (!urls.length) { est.innerHTML = '<span class="err">No encontré productos en esa página (revisé ' + d.paginasRevisadas + ' páginas).</span>'; btn.disabled = false; return; }
+      }
       for (var i = 0; i < urls.length; i += 12) {
         est.innerHTML = 'Leyendo productos… ' + Math.min(i, urls.length) + ' de ' + urls.length + '. No cierres esta pantalla.';
         var r = await pedir('/' + estado.id + '/fotos-web/leer', { method: 'POST', body: JSON.stringify({ url: url, urls: urls.slice(i, i + 12) }) });
         ok += r.guardadas; sinCod += r.sinCodigo; sinFoto += r.sinFoto;
       }
       var s = await pedir('/' + estado.id + '/fotos-web/resumen');
-      est.innerHTML = '<span class="ok-msg">Listo: ' + ok + ' productos de la página con fotos guardadas</span>' + (sinCod || sinFoto ? ' <span class="muted">(' + sinCod + ' sin código, ' + sinFoto + ' sin foto)</span>' : '') + '<br>De los ' + s.productos + ' productos de este proveedor en el sistema, <b>' + s.productosConFoto + '</b> tienen foto y <b>' + s.productosSinFoto + '</b> no (su código no está en la página).';
+      est.innerHTML = '<span class="ok-msg">' + (soloResumen === true ? 'Hay ' + s.guardadas : 'Listo: ' + ok) + ' productos de la página con fotos guardadas</span>' + (sinCod || sinFoto ? ' <span class="muted">(' + sinCod + ' sin código, ' + sinFoto + ' sin foto)</span>' : '') + '<br>De los ' + s.productos + ' productos de este proveedor en el sistema, <b>' + s.productosConFoto + '</b> tienen foto y <b>' + s.productosSinFoto + '</b> no (su código no está en la página).' + (s.sinFotoMuestra && s.sinFotoMuestra.length ? '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer">Ver productos nuestros sin foto (primeros ' + s.sinFotoMuestra.length + ')</summary><div style="font-size:12px">' + s.sinFotoMuestra.map(function (x) { return E(x.codigo) + ' — ' + E(x.nombre); }).join('<br>') + '</div></details>' : '') + (s.webSinProducto && s.webSinProducto.length ? '<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">Ver códigos de la web que no están en nuestros productos (primeros ' + s.webSinProducto.length + ')</summary><div style="font-size:12px">' + s.webSinProducto.map(function (x) { return E(x.codigo) + ' — ' + E(x.nombre); }).join('<br>') + '</div></details>' : '');
     } catch (e) { est.innerHTML = '<span class="err">' + E(e.message) + '</span>'; }
     btn.disabled = false;
   };

@@ -948,11 +948,15 @@ router.get('/:id/fotos-web/resumen', authAdmin, async (req, res) => {
   try {
     const out = await conReintento(async () => {
       const db = await getDb(); const prov = await proveedorDeOrg(db, req);
-      const fotos = await db.collection('proveedor_fotos_web').find({ proveedorId: prov._id }).project({ codigoClave: 1 }).toArray();
+      const fotos = await db.collection('proveedor_fotos_web').find({ proveedorId: prov._id }).project({ codigoClave: 1, codigo: 1, nombre: 1 }).toArray();
       const claves = new Set(fotos.map(f => f.codigoClave));
-      const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: prov._id, activo: { $ne: false } }, filtroOrg(req))).project({ codigoExterno: 1, sku: 1 }).toArray();
+      const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: prov._id, activo: { $ne: false } }, filtroOrg(req))).project({ codigoExterno: 1, sku: 1, nombre: 1 }).toArray();
       const con = prods.filter(p => claves.has(codigoClave(p.codigoExterno || p.sku))).length;
-      return { guardadas: fotos.length, productos: prods.length, productosConFoto: con, productosSinFoto: prods.length - con };
+      const nuestras = new Set(prods.map(p => codigoClave(p.codigoExterno || p.sku)));
+      const sinFoto = prods.filter(p => !claves.has(codigoClave(p.codigoExterno || p.sku)));
+      return { guardadas: fotos.length, productos: prods.length, productosConFoto: con, productosSinFoto: prods.length - con,
+        sinFotoMuestra: sinFoto.slice(0, 80).map(p => ({ codigo: p.codigoExterno || p.sku || '', nombre: p.nombre || '' })),
+        webSinProducto: fotos.filter(f => !nuestras.has(f.codigoClave)).slice(0, 80).map(f => ({ codigo: f.codigo, nombre: f.nombre })) };
     });
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
