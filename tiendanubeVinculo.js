@@ -264,12 +264,17 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     const store = await tiendaConfig(); const enTienda = new Set((await productosTienda()).map(f => K(f.sku)).filter(Boolean));
     let prods = (await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(20000).toArray()).filter(p => !enTienda.has(K(p.sku)));
     const limite = Math.min(3000, Math.max(50, Number(req.query.limite) || 400));
+    // Opciones de los filtros de marca y proveedor (sobre lo que ya pasó los otros filtros)
+    const cuenta = (fn) => { const m = new Map(); prods.forEach(p => { const k = fn(p); if (k && k.v) m.set(k.v, { v: k.v, n: k.n, c: ((m.get(k.v) || {}).c || 0) + 1 }); }); return [...m.values()].sort((a, b) => String(a.n).localeCompare(String(b.n), 'es')); };
+    const marcas = cuenta(p => p.marca ? { v: p.marca, n: p.marca } : null), proveedores = cuenta(p => (p.proveedorId || p.proveedor) ? { v: String(p.proveedorId || p.proveedor), n: p.proveedor || '(sin nombre)' } : null);
+    if (req.query.marca) prods = prods.filter(p => (p.marca || '') === req.query.marca);
+    if (req.query.proveedor) prods = prods.filter(p => String(p.proveedorId || p.proveedor || '') === req.query.proveedor);
     const filtroStock = req.query.stock === 'con' || req.query.stock === 'sin' ? req.query.stock : '';
     let stock;
     if (filtroStock) { stock = await stockDisponible(db, prods.map(p => p._id)); prods = prods.filter(p => { const s = stock.get(String(p._id)) || 0; return filtroStock === 'con' ? s > 0 : s <= 0; }); }
     else stock = await stockDisponible(db, prods.slice(0, limite).map(p => p._id));
     const { precioResuelto: pr } = { precioResuelto };
-    res.json({ total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite });
+    res.json({ total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
