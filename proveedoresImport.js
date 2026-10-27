@@ -131,8 +131,41 @@ function resolverColumna(enc, valor) {
   if (m) { const i = idxDeLetra(m[1]); if (i >= 0 && i < 300) return i; }
   return -1;
 }
+// Modo "todas las hojas" (27/10/2026, lista de Misiones Deco): cada hoja trae sus propios títulos y su propia columna de precio.
+// En cada hoja se busca sola la fila de títulos (la que tiene una columna "Precio…", sin contar "PRECIOS NETOS SIN IVA") y, debajo de
+// cada una, se toman los productos: código en la columna "CODIGO" (o la primera), precio = la primera columna "Precio…" con valor
+// (menos las "indicativo"). Los títulos de sección y las filas sin precio ("Discontinuo") no entran como productos.
+function filasTodasLasHojas(wb) {
+  const filas = [];
+  const esPrecio = h => /^precio(?!s)/i.test(h) && !/indicativ/i.test(h);
+  wb.SheetNames.forEach((nombreHoja, hi) => {
+    const m = matriz(wb, hi + 1);
+    let cols = null;
+    for (let r = 0; r < m.length; r++) {
+      const f = m[r] || [];
+      const txt = f.map(c => (typeof c === 'string' ? c.trim() : ''));
+      const precioCols = txt.map((t, i) => (t && esPrecio(t) ? i : -1)).filter(i => i >= 0);
+      if (precioCols.length && !f.some(c => typeof c === 'number')) {
+        const ci = txt.findIndex(t => /^c[oó]digo/i.test(t)), ni = txt.findIndex(t => /^descripci/i.test(t));
+        cols = { codigo: ci >= 0 ? ci : 0, nombre: ni >= 0 ? ni : 1, precio: precioCols };
+        continue;
+      }
+      if (!cols) continue;
+      const codigo = String(f[cols.codigo] == null ? '' : f[cols.codigo]).trim();
+      if (!codigo) continue;
+      const nombre = String(f[cols.nombre] == null ? '' : f[cols.nombre]).trim();
+      if (nombre === codigo || (!/\d/.test(codigo) && !nombre)) continue; // título de sección
+      let precio = null;
+      for (const pc of cols.precio) { const n = parseNumero(f[pc]); if (n != null && n > 0) { precio = n; break; } }
+      if (precio == null && !/\d/.test(codigo)) continue;
+      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null });
+    }
+  });
+  return filas;
+}
 function filasDeArchivo(base64, regla) {
   const wb = leerLibro(base64);
+  if (regla.todasLasHojas) return filasTodasLasHojas(wb);
   const m = matriz(wb, regla.hoja);
   const fe = Math.max(1, Number(regla.filaEncabezado) || 1) - 1;
   const enc = (m[fe] || []).map(h => String(h == null ? '' : h).trim());
@@ -186,6 +219,7 @@ function limpiarRegla(b) {
     matchPor: b.matchPor === 'sku' ? 'sku' : 'codigoExterno',
     columnas: { codigo: String(cols.codigo || '').trim(), precio: String(cols.precio || '').trim(), stock: String(cols.stock || '').trim(), nombre: String(cols.nombre || '').trim() },
     hoja: Math.max(1, parseInt(b.hoja, 10) || 1),
+    todasLasHojas: !!b.todasLasHojas,
     filaEncabezado: Math.max(1, parseInt(b.filaEncabezado, 10) || 1),
     moneda: b.moneda === 'USD' ? 'USD' : 'ARS',
     descuentos,
@@ -826,4 +860,4 @@ router.get('/:id/historial', authAdmin, async (req, res) => {
 });
 
 module.exports = router;
-module.exports._interno = { parseNumero, aplicarMargen, filasDeArchivo, resolverColumna, letraDeIdx };
+module.exports._interno = { parseNumero, aplicarMargen, filasDeArchivo, filasTodasLasHojas, resolverColumna, letraDeIdx };

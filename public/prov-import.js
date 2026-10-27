@@ -47,6 +47,7 @@
           '<div class="row"><div style="flex:1;min-width:240px"><label>Archivo de ejemplo (para elegir las columnas)</label><input type="file" id="pimpEjemplo" accept=".xlsx,.xls,.csv" onchange="pimpDetectar()"></div>' +
           '<div style="width:90px"><label>Hoja Nº</label><input type="number" min="1" id="pimpHoja" value="' + r.hoja + '"></div>' +
           '<div style="width:140px"><label>Fila de los títulos</label><input type="number" min="1" id="pimpFila" value="' + r.filaEncabezado + '"></div></div>' +
+          '<label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0;font-weight:600"><input type="checkbox" id="pimpTodas" style="width:auto;margin-top:3px"' + (r.todasLasHojas ? ' checked' : '') + '> <span>Leer todas las hojas del Excel (cada hoja con sus propios títulos)<br><span class="muted" style="font-weight:400;font-size:12px">Detecta sola, en cada hoja, la columna del código y la del precio (la primera columna “Precio…” que tenga valor). Con esto no hace falta completar hoja, fila ni columnas de abajo (el stock no se lee). Las filas sin precio (“Reemplazada por…”, “Discontinuo”) quedan como “sin precio”.</span></span></label>' +
           '<div id="pimpMuestra" class="muted" style="font-size:12px;margin:6px 0"></div>' +
           '<div class="muted" style="font-size:12px;margin:2px 0 6px">Podés escribir la letra de la columna del Excel (ej: <b>C</b>) o elegirla de la lista (ej: <b>C · Precio lista</b>). Con la letra no importa si hay celdas combinadas tapando el título.</div>' + '<datalist id="pimpCols">' + (estado.headers || []).map(function (h) { return '<option value="' + E(h) + '">'; }).join('') + '</datalist>' +
           '<div class="row" style="margin-top:8px">' +
@@ -184,7 +185,7 @@
     try {
       var b64 = await leerArchivo(f);
       var fila = parseInt(document.getElementById('pimpFila').value, 10);
-      var d = await pedir('/' + estado.id + '/encabezados', { method: 'POST', body: JSON.stringify({ archivoBase64: b64, hoja: document.getElementById('pimpHoja').value, filaEncabezado: document.getElementById('pimpFila').value && document.getElementById('pimpFila').dataset.manual ? fila : undefined }) });
+      var d = await pedir('/' + estado.id + '/encabezados', { method: 'POST', body: JSON.stringify({ archivoBase64: b64, todasLasHojas: document.getElementById('pimpTodas').checked, hoja: document.getElementById('pimpHoja').value, filaEncabezado: document.getElementById('pimpFila').value && document.getElementById('pimpFila').dataset.manual ? fila : undefined }) });
       estado.headers = d.encabezados;
       document.getElementById('pimpFila').value = d.filaEncabezado;
       document.getElementById('pimpCols').innerHTML = d.encabezados.map(function (h) { return '<option value="' + E(h) + '">'; }).join('');
