@@ -163,14 +163,14 @@ function filasTodasLasHojas(wb) {
       for (const pc of cols.precio) { const n = parseNumero(f[pc]); if (n != null && n > 0) { precio = n; colPrecio = pc; break; } }
       if (precio == null && !/\d/.test(codigo)) continue;
       // Unidades por bulto: solo si el precio es por m² → m² por caja. Por unidad/malla/panel o por caja: no se toca.
-      let bulto = null;
+      let bulto = null, porUnidad = false;
       if (precio != null) {
         const tp = cols.txt[colPrecio] || '';
         if (/caja/i.test(tp)) bulto = null;
         else if (/(mt2|m2|metro)/i.test(tp) && !/malla/i.test(tp)) { const v = cols.m2Caja >= 0 ? parseNumero(f[cols.m2Caja]) : null; bulto = v > 0 ? v : null; }
-        else bulto = null; // precio por unidad/malla/panel: se deja por unidad, no se toca la ficha (27/10/2026, pedido de Mato)
+        else { bulto = null; porUnidad = true; } // precio por unidad/malla/panel: se vende por unidad (sin multiplicar por bulto)
       }
-      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, bultoSoloSiFalta: true });
+      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, porUnidad, bultoSoloSiFalta: true });
     }
   });
   return filas;
@@ -453,6 +453,8 @@ async function calcular(db, req, prov, regla, filas) {
     if (campo === 'codigoExterno' && codigoClave(p.codigoExterno) !== k) c.vinculaCodigo = true; // mismo producto cargado por SKU: se le asocia el código del proveedor
     // Dato de la caja que trae el portal: m² por caja (unidades por bulto) y si el precio es por m². Solo se completa; nunca se borra.
     if (f.bulto > 0 && (f.bultoSoloSiFalta ? !(Number(p.unidadesPorBulto) > 0) : Number(p.unidadesPorBulto) !== f.bulto)) c.bultoNuevo = f.bulto;
+    // Precio por unidad/malla: si la ficha quedó con unidades por bulto (de importaciones anteriores), se quitan para que el precio de venta sea por unidad.
+    if (f.porUnidad && Number(p.unidadesPorBulto) > 1) c.bultoQuitar = p.unidadesPorBulto;
     if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
 
     if (f.precio != null && f.precio > 0) {
@@ -487,7 +489,7 @@ async function calcular(db, req, prov, regla, filas) {
       const ant = stockPrev.has(String(p._id)) ? stockPrev.get(String(p._id)) : 0;
       c.stock = { anterior: ant, nuevo, cambia: Math.abs(ant - nuevo) > 0.0005 };
     }
-    c.hayCambio = !!(c.vinculaCodigo || c.cambiaCosto || c.bultoNuevo || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
+    c.hayCambio = !!(c.vinculaCodigo || c.cambiaCosto || c.bultoNuevo || c.bultoQuitar || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
     cambios.push(c);
   }
 
@@ -507,7 +509,7 @@ async function calcular(db, req, prov, regla, filas) {
   const resumen = {
     filasArchivo: filas.length, vinculados: cambios.length, sinMatch: sinMatch.length, duplicados: duplicados.length, sinPrecio: sinPrecio.length,
     costosCambian: cambios.filter(c => c.cambiaCosto).length,
-    bultosCambian: cambios.filter(c => c.bultoNuevo || c.pasaAM2).length,
+    bultosCambian: cambios.filter(c => c.bultoNuevo || c.bultoQuitar || c.pasaAM2).length,
     preciosCambian: cambios.reduce((n, c) => n + (c.precios || []).filter(x => x.cambia).length, 0),
     stockCambia: cambios.filter(c => c.stock && c.stock.cambia).length + aCero.length,
     stockACero: aCero.length, alertas: cambios.filter(c => c.alerta).length,
@@ -571,7 +573,7 @@ router.post('/:id/preview', authAdmin, async (req, res) => {
     const ordenadas = calc.cambios.filter(c => c.hayCambio).sort((a, b) => (b.alerta ? 1 : 0) - (a.alerta ? 1 : 0) || Math.abs(b.variacionPct || 0) - Math.abs(a.variacionPct || 0));
     res.json({
       resumen: calc.resumen,
-      muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock, bultoNuevo: c.bultoNuevo || null })),
+      muestra: ordenadas.slice(0, 300).map(c => ({ sku: c.sku, nombre: c.nombre, fila: c.fila, precioLista: c.precioLista, costoAnterior: c.costoAnterior, monedaAnterior: c.monedaAnterior, costoNuevo: c.costoNuevo, moneda: c.moneda, variacionPct: c.variacionPct, alerta: c.alerta, precios: c.precios, stock: c.stock, bultoNuevo: c.bultoNuevo || null, bultoQuitar: c.bultoQuitar || null })),
       hayMas: ordenadas.length > 300,
       sinMatch: calc.sinMatch.slice(0, 500), duplicados: calc.duplicados.slice(0, 50), sinPrecio: calc.sinPrecio.slice(0, 50),
       aCero: calc.aCero.slice(0, 100).map(a => ({ sku: a.sku, nombre: a.nombre, anterior: a.anterior }))
@@ -601,6 +603,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           if (c.costoNuevo != null) { set.costo = c.costoNuevo; set.moneda = c.moneda; set.costoActualizadoEn = ahora; set.costoProveedorId = prov._id; costos++; }
           for (const pr of (c.precios || [])) if (pr.predeterminada) set.precio = pr.nuevo;
           if (c.bultoNuevo) { set.unidadesPorBulto = c.bultoNuevo; bultos++; }
+          else if (c.bultoQuitar) { set.unidadesPorBulto = null; bultos++; }
           if (c.pasaAM2) { set.unidad = 'm2'; set.tipoUnidad = 'superficie'; }
           opsProd.push({ updateOne: { filter: { _id: c.productoId }, update: { $set: set } } });
           if ((c.precios || []).length) opsProd.push({ updateOne: { filter: { _id: c.productoId, preciosPorLista: { $not: { $type: 'array' } } }, update: { $set: { preciosPorLista: [] } } } });
