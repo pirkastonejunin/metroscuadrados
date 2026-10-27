@@ -255,16 +255,18 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     const db = await getDb(); const { precioResuelto } = require('./productos');
     const { lista } = await listaDePrecios(db, req, req.query.listaId);
     const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
-    const filtro = Object.assign({ activo: { $ne: false }, skuTiendanube: { $in: [null, ''] }, sku: { $nin: [null, ''] } }, filtroOrg(req));
+    const verDescartados = req.query.descartados === '1';
+    const filtro = Object.assign({ activo: { $ne: false }, skuTiendanube: { $in: [null, ''] }, sku: { $nin: [null, ''] }, noTiendanube: verDescartados ? true : { $ne: true } }, filtroOrg(req));
     if (req.query.rubro !== undefined && req.query.rubro !== 'todos') filtro.rubro = req.query.rubro === '' ? { $in: [null, ''] } : req.query.rubro;
     const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     if (palabras.length) filtro.$and = palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }, { marca: { $regex: w, $options: 'i' } }] }));
     // los que ya están en la tienda con ese SKU no se ofrecen
     const store = await tiendaConfig(); const enTienda = new Set((await productosTienda()).map(f => K(f.sku)).filter(Boolean));
-    const prods = (await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(2000).toArray()).filter(p => !enTienda.has(K(p.sku)));
-    const stock = await stockDisponible(db, prods.map(p => p._id));
+    const prods = (await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(20000).toArray()).filter(p => !enTienda.has(K(p.sku)));
+    const limite = Math.min(3000, Math.max(50, Number(req.query.limite) || 400));
+    const stock = await stockDisponible(db, prods.slice(0, limite).map(p => p._id));
     const { precioResuelto: pr } = { precioResuelto };
-    res.json({ total: prods.length, productos: prods.slice(0, 400).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > 400 });
+    res.json({ total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -281,6 +283,17 @@ async function fotosPorCodigo(db, provId, req) {
   }
   cachePortal.set(k, { t: Date.now(), m }); return m;
 }
+
+// "Este producto nunca va a Tiendanube": sale de la lista de candidatos (y se puede volver a traer con "Ver descartados").
+router.post('/publicar/descartar', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const ids = (Array.isArray((req.body || {}).productoIds) ? req.body.productoIds : []).map(oid).filter(Boolean).slice(0, 5000);
+    const descartar = (req.body || {}).descartar !== false;
+    const r = await db.collection('productos_catalogo').updateMany(Object.assign({ _id: { $in: ids } }, filtroOrg(req)), descartar ? { $set: { noTiendanube: true, noTiendanubeEn: new Date() } } : { $unset: { noTiendanube: '', noTiendanubeEn: '' } });
+    res.json({ ok: true, modificados: r.modifiedCount });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 
 router.post('/publicar', auth, async (req, res) => {
   try {
