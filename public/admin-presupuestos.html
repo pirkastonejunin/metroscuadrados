@@ -540,6 +540,7 @@ function renderPresupuestos(){
       <td style="white-space:nowrap">
         <button class="btn small secondary" onclick="verPresupuesto('${p._id}')">Ver</button>
         <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${p._id}/imprimir')">Imprimir</button>
+        <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${p._id}/imprimir','pdf')">Exportar PDF</button>
         <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${p._id}/imprimir','whatsapp')">WhatsApp</button>
         ${p.convertidoEnVentaId ? '' : `<button class="btn small secondary" onclick="abrirEditarPresupuesto('${p._id}')">Editar</button>`}
         ${p.convertidoEnVentaId ? '' : `<button class="btn small danger" onclick="borrarPresupuesto('${p._id}')">Borrar</button>`}
@@ -558,6 +559,8 @@ async function imprimirDocumento(url, accion){
     ventana.document.close();
     if (accion === 'imprimir') {
       ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
+    } else if (accion === 'pdf') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.descargarPdfDocumento) ventana.descargarPdfDocumento(); }, 250));
     } else if (accion === 'whatsapp') {
       ventana.addEventListener('load', () => setTimeout(() => { if (ventana.whatsappDocumento) ventana.whatsappDocumento(); }, 250));
     }

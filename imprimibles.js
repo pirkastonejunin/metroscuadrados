@@ -313,6 +313,18 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml, telefono }) {
       }
     }
     window.compartirDocumento = compartirDocumento;
+    // Exportar a PDF: siempre descarga el archivo (en compu y en celular), sin menú de compartir.
+    async function descargarPdfDocumento(){
+      const estado = document.getElementById('compartirEstado');
+      try{
+        const { blob, nombreArchivo } = await generarPdfBlob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = nombreArchivo; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        if (estado) estado.textContent = 'PDF descargado.';
+      }catch(e){ if (estado) estado.textContent = 'No se pudo generar el PDF: ' + (e && e.message ? e.message : e); }
+    }
+    window.descargarPdfDocumento = descargarPdfDocumento;
     // WhatsApp directo al cliente (si tiene teléfono cargado): en celular usa el menú de compartir (adjunta el PDF); en compu descarga el PDF y abre el chat con su número para adjuntarlo.
     const TEL_CLIENTE = ${JSON.stringify(String(telefono || '').replace(/\D/g, ''))};
     function telWA(t){ let d = String(t||'').replace(/\D/g,''); if (!d) return ''; if (d.startsWith('54')) return d; if (d.startsWith('0')) d = d.slice(1); d = d.replace(/^(\d{2,4})15/, '$1'); return '549' + d; }

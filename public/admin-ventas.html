@@ -534,7 +534,7 @@ async function cargarVentas(){
       <td class="muted">${money(v.totalCobrado)}</td>
       <td>${v.saldoPendiente > 0 ? money(v.saldoPendiente) : '<span class="muted">—</span>'}</td>
       <td><span class="pill ${v.estado}">${estadoLabelVenta(v)}</span>${v.canceladaPorNota ? ' <span class="pill" style="background:rgba(46,160,67,.15);color:var(--ok,#2a7)" title="Cancelada con una nota de crédito">Cancelada por NC</span>' : ''}${(v.tipoComprobante === 'nota_credito' && v.aplicadaA) ? ' <span class="pill" title="Aplicada a ' + (v.aplicadaA.letra || 'X') + '-' + String(v.aplicadaA.numero).padStart(5,'0') + '">Aplicada</span>' : ''}</td>
-      <td><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button></td>
+      <td style="white-space:nowrap"><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button> <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante','pdf')">Exportar PDF</button></td>
     </tr>
   `).join('');
 }
@@ -1901,6 +1901,8 @@ async function imprimirDocumento(url, accion){
       ventana.addEventListener('load', () => setTimeout(() => ventana.print(), 250));
     } else if (accion === 'compartir') {
       ventana.addEventListener('load', () => setTimeout(() => { if (ventana.compartirDocumento) ventana.compartirDocumento(); }, 250));
+    } else if (accion === 'pdf') {
+      ventana.addEventListener('load', () => setTimeout(() => { if (ventana.descargarPdfDocumento) ventana.descargarPdfDocumento(); }, 250));
     } else if (accion === 'whatsapp') {
       ventana.addEventListener('load', () => setTimeout(() => { if (ventana.whatsappDocumento) ventana.whatsappDocumento(); }, 250));
     }
@@ -1938,6 +1940,7 @@ function botonesImprimible(url){
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','imprimir')">Imprimir</button>
     <button class="btn small secondary" onclick="copiarLinkPublico('${url}')">Copiar link</button>
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','compartir')">PDF</button>
+    <button class="btn small secondary" onclick="imprimirDocumento('${url}','pdf')">Exportar PDF</button>
     <button class="btn small secondary" onclick="imprimirDocumento('${url}','whatsapp')">WhatsApp</button>
   `;
 }
