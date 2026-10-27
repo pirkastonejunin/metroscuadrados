@@ -137,7 +137,7 @@ function resolverColumna(enc, valor) {
 // (menos las "indicativo"). Los títulos de sección y las filas sin precio ("Discontinuo") no entran como productos.
 function filasTodasLasHojas(wb) {
   const filas = [];
-  const esPrecio = h => /^precio(?!s)/i.test(h) && !/indicativ/i.test(h);
+  const esPrecio = h => /^(precio(?!s)|por (metro|malla|mt2))/i.test(h) && !/indicativ/i.test(h);
   wb.SheetNames.forEach((nombreHoja, hi) => {
     const m = matriz(wb, hi + 1);
     let cols = null;
@@ -147,7 +147,10 @@ function filasTodasLasHojas(wb) {
       const precioCols = txt.map((t, i) => (t && esPrecio(t) ? i : -1)).filter(i => i >= 0);
       if (precioCols.length && !f.some(c => typeof c === 'number')) {
         const ci = txt.findIndex(t => /^c[oó]digo/i.test(t)), ni = txt.findIndex(t => /^descripci/i.test(t));
-        cols = { codigo: ci >= 0 ? ci : 0, nombre: ni >= 0 ? ni : 1, precio: precioCols };
+        const idxDe = re => txt.findIndex(t => t && re.test(t) && !/pallet/i.test(t));
+        cols = { codigo: ci >= 0 ? ci : 0, nombre: ni >= 0 ? ni : 1, precio: precioCols, txt,
+          m2Caja: idxDe(/(m2|mts?\.?|metros?)[^]*caja|caja[^]*(m2|mts|metros)/i),
+          uniCaja: idxDe(/^(cant\.?|unidades|paneles|mallas|uni)[^]*(x|por)\s*caja/i) };
         continue;
       }
       if (!cols) continue;
@@ -155,10 +158,18 @@ function filasTodasLasHojas(wb) {
       if (!codigo) continue;
       const nombre = String(f[cols.nombre] == null ? '' : f[cols.nombre]).trim();
       if (nombre === codigo || (!/\d/.test(codigo) && !nombre)) continue; // título de sección
-      let precio = null;
-      for (const pc of cols.precio) { const n = parseNumero(f[pc]); if (n != null && n > 0) { precio = n; break; } }
+      let precio = null, colPrecio = -1;
+      for (const pc of cols.precio) { const n = parseNumero(f[pc]); if (n != null && n > 0) { precio = n; colPrecio = pc; break; } }
       if (precio == null && !/\d/.test(codigo)) continue;
-      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null });
+      // Unidades por bulto: si el precio es por m² → m² por caja; si es por unidad/malla/panel → unidades por caja; si es por caja → no aplica.
+      let bulto = null;
+      if (precio != null) {
+        const tp = cols.txt[colPrecio] || '';
+        if (/caja/i.test(tp)) bulto = null;
+        else if (/(mt2|m2|metro)/i.test(tp) && !/malla/i.test(tp)) { const v = cols.m2Caja >= 0 ? parseNumero(f[cols.m2Caja]) : null; bulto = v > 0 ? v : null; }
+        else { const v = cols.uniCaja >= 0 ? parseNumero(f[cols.uniCaja]) : null; bulto = v > 0 ? v : null; }
+      }
+      filas.push({ fila: r + 1, hoja: nombreHoja, codigo, nombre, precio, stock: null, stockCelda: null, bulto, bultoSoloSiFalta: true });
     }
   });
   return filas;
@@ -440,7 +451,7 @@ async function calcular(db, req, prov, regla, filas) {
     const c = { productoId: p._id, sku: p.sku, nombre: p.nombre, fila: f.fila, codigo: f.codigo, moneda: regla.moneda };
     if (campo === 'codigoExterno' && codigoClave(p.codigoExterno) !== k) c.vinculaCodigo = true; // mismo producto cargado por SKU: se le asocia el código del proveedor
     // Dato de la caja que trae el portal: m² por caja (unidades por bulto) y si el precio es por m². Solo se completa; nunca se borra.
-    if (f.bulto > 0 && Number(p.unidadesPorBulto) !== f.bulto) c.bultoNuevo = f.bulto;
+    if (f.bulto > 0 && (f.bultoSoloSiFalta ? !(Number(p.unidadesPorBulto) > 0) : Number(p.unidadesPorBulto) !== f.bulto)) c.bultoNuevo = f.bulto;
     if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
 
     if (f.precio != null && f.precio > 0) {
