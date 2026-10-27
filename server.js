@@ -757,16 +757,26 @@ app.get('/public/bulto-handle/:handle', async (req, res) => {
     if (!cache || !cache.cobertura) {
       const productoTn = await buscarProductoPorHandle(store, handleBuscado);
       if (productoTn) {
-        const valorCampo = await leerCampoPersonalizado(store, productoTn.id);
+        let valorCampo = await leerCampoPersonalizado(store, productoTn.id);
+        let envaseAuto = 'caja';
+        if (!valorCampo) {
+          // Sin dato cargado a mano: si la ficha dice "Nº de piezas por m2: N" (mallas, mosaicos, venta por pieza),
+          // el rendimiento por unidad de venta es 1/N m². Así el precio aparece sin pasos extra al importar.
+          const d = productoTn.description;
+          const txt = (d && typeof d === 'object' ? (d.es || Object.values(d)[0] || '') : String(d || '')).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+          const mm = txt.match(/piezas\s+por\s+m(?:2|²)\s*:?\s*(\d+(?:[.,]\d+)?)/i);
+          const pz = mm ? parseFloat(mm[1].replace(',', '.')) : 0;
+          if (pz > 0 && pz < 5000) { valorCampo = String(1 / pz); envaseAuto = 'malla'; }
+        }
         if (valorCampo) {
           // Lo guarda en el cache para no volver a consultarlo
           await guardarRendimientoCache(
-            store.store_id, productoTn.id, 'm2', valorCampo, handleBuscado, 'caja', undefined
+            store.store_id, productoTn.id, 'm2', valorCampo, handleBuscado, envaseAuto, undefined
           );
           return res.json({
-            coberturaCaja: valorCampo,
+            coberturaCaja: parseFloat(String(valorCampo).replace(',', '.')),
             tipoUnidad: 'm2',
-            envase: 'caja',
+            envase: envaseAuto,
             asociados: []
           });
         }
@@ -826,7 +836,7 @@ async function resolverAsociados(store, textoAsociados) {
 async function buscarProductoPorHandle(store, handle) {
   try {
     const resp = await fetch(
-      API_BASE + '/' + store.store_id + '/products?handle=' + encodeURIComponent(handle) + '&fields=id,handle',
+      API_BASE + '/' + store.store_id + '/products?handle=' + encodeURIComponent(handle) + '&fields=id,handle,description',
       { headers: apiHeaders(store.access_token) }
     );
     const productos = await resp.json();
