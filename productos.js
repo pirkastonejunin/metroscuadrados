@@ -1962,7 +1962,7 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
 
     const productos = await db.collection('productos_catalogo')
       .find(matchProductosDeLista(req, lista))
-      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1, unidad: 1, tipoUnidad: 1, nombre: 1, piezasPorM2: 1 }).toArray();
+      .project({ sku: 1, skuTiendanube: 1, precio: 1, unidadesPorBulto: 1, preciosPorLista: 1, unidad: 1, tipoUnidad: 1, nombre: 1, rubro: 1 }).toArray();
     const preciosPorSku = new Map(), piezasPorSku = new Map(); let omitidosSinBulto = 0;
     productos.forEach(p => {
       if (!p.sku && !p.skuTiendanube) return;
@@ -1970,7 +1970,8 @@ router.post('/listas-precio/:id/sincronizar-tiendanube', authAdmin, async (req, 
       const { precio } = precioResuelto(p, lista, null);
       // si el producto está vinculado con Tiendanube bajo otro SKU, el precio va a ese SKU (tiendanubeVinculo.js)
       if (precio != null) preciosPorSku.set(String(p.skuTiendanube || p.sku), precio);
-      if (p.piezasPorM2 > 0) piezasPorSku.set(String(p.skuTiendanube || p.sku).trim().toLowerCase(), p.piezasPorM2);
+      // Criterio único: producto por m² con "unidades por bulto" = m² que cubre cada unidad de venta → ese es el rendimiento de la calculadora de la ficha.
+      if ((p.unidad === 'm2' || p.tipoUnidad === 'superficie') && Number(p.unidadesPorBulto) > 0) piezasPorSku.set(String(p.skuTiendanube || p.sku).trim().toLowerCase(), { cobertura: Number(p.unidadesPorBulto), envase: /malla/i.test(String(p.nombre || '') + ' ' + String(p.rubro || '')) ? 'malla' : 'caja' });
     });
     if (!preciosPorSku.size) throw err(400, 'No hay productos con precio calculado para sincronizar en esta lista');
 

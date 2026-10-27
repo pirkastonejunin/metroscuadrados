@@ -2430,15 +2430,20 @@ async function sincronizarPreciosTiendanube(preciosPorSku, onProgreso, piezasPor
   for (const [sku, precio] of preciosPorSku.entries()) {
     procesados++;
     const ref = indice.get(String(sku).trim().toLowerCase());
-    // Mallas/piezas: m² que cubre cada unidad de venta = 1 / piezas por m² (viene de la lista del proveedor), para la calculadora de la ficha.
-    const piezas = piezasPorSku && piezasPorSku.get(String(sku).trim().toLowerCase());
-    if (ref && piezas > 0) {
+    // Rendimiento de la calculadora de la ficha = "unidades por bulto" del producto (m² que cubre cada unidad de venta). Un solo criterio para todos.
+    const rend = piezasPorSku && piezasPorSku.get(String(sku).trim().toLowerCase());
+    if (ref && rend && rend.cobertura > 0) {
       try {
         const col = await getRendimientosCollection();
-        const doc = { store_id: store.store_id, product_id: parseInt(ref.productId, 10), tipo: 'm2', cobertura: 1 / piezas, envase: 'malla', verificadoPiezas: 2 };
-        if (ref.handle) doc.handle = String(ref.handle).toLowerCase();
-        await col.updateOne({ _id: store.store_id + '_' + ref.productId }, { $set: doc }, { upsert: true });
-        resultado.rendimientos++;
+        const _id = store.store_id + '_' + ref.productId;
+        const ant = await col.findOne({ _id });
+        const igual = ant && Math.abs(parseFloat(ant.cobertura) - rend.cobertura) < 1e-9 && (ant.envase || 'caja') === rend.envase;
+        if (!igual) {
+          const doc = { store_id: store.store_id, product_id: parseInt(ref.productId, 10), tipo: 'm2', cobertura: rend.cobertura, envase: rend.envase };
+          if (ref.handle) doc.handle = String(ref.handle).toLowerCase();
+          await col.updateOne({ _id }, { $set: doc }, { upsert: true });
+          resultado.rendimientos++;
+        }
       } catch (e) { resultado.errores.push({ sku, detalle: 'Rendimiento: ' + e.message }); }
     }
     if (!ref) {

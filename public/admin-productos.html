@@ -1634,7 +1634,7 @@ async function confirmarSincronizarTiendanube(listaId){
     if (!r.ok) throw new Error(data.error || 'Error al sincronizar');
     document.getElementById('stnResultado').innerHTML = `<p class="muted">Procesando 0 / ${data.total}...</p>`;
     const job = await esperarJobImportListaPrecio(data.jobId, 'stnResultado');
-    let html = `<p class="ok-msg">Actualizados en Tiendanube: ${job.actualizados||0} · Sin cambios: ${job.sinCambios||0}${job.noEncontrados ? ` · No encontrados en la tienda: ${job.noEncontrados}` : ''}</p>`;
+    let html = `<p class="ok-msg">Actualizados en Tiendanube: ${job.actualizados||0} · Sin cambios: ${job.sinCambios||0}${job.noEncontrados ? ` · No encontrados en la tienda: ${job.noEncontrados}` : ''}${job.rendimientos ? ` · Rendimientos de la calculadora actualizados: ${job.rendimientos}` : ''}</p>`;
     if (job.errores && job.errores.length) {
       html += `<p class="err">${job.errores.length} producto(s) con error:</p><ul class="muted" style="margin-top:0">` +
         job.errores.slice(0, 100).map(e => `<li>${escapeHtml(e.sku||'')}: ${escapeHtml(e.detalle||'')}</li>`).join('') +

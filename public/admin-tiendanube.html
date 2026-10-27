@@ -326,7 +326,7 @@ async function sincronizarPrecios(){
       if (job.estado === 'error') throw new Error(job.errorGeneral || 'Falló la sincronización');
       break;
     }
-    o.innerHTML = '<span class="ok-msg">Actualizados: ' + (job.actualizados || 0) + ' · Sin cambios: ' + (job.sinCambios || 0) + (job.noEncontrados ? ' · No encontrados en la tienda: ' + job.noEncontrados : '') + (d.omitidosSinBulto ? ' · m² sin bulto omitidos: ' + d.omitidosSinBulto : '') + '</span>'
+    o.innerHTML = '<span class="ok-msg">Actualizados: ' + (job.actualizados || 0) + ' · Sin cambios: ' + (job.sinCambios || 0) + (job.rendimientos ? ' · Rendimientos de la calculadora actualizados: ' + job.rendimientos : '') + (job.noEncontrados ? ' · No encontrados en la tienda: ' + job.noEncontrados : '') + (d.omitidosSinBulto ? ' · m² sin bulto omitidos: ' + d.omitidosSinBulto : '') + '</span>'
       + (job.errores && job.errores.length ? '<div class="err">' + job.errores.length + ' con error: ' + job.errores.slice(0, 20).map(e => esc((e.sku || '') + ' ' + (e.detalle || ''))).join(' · ') + '</div>' : '');
     cargarVinculos();
   }catch(e){ o.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
