@@ -282,14 +282,16 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
 const cachePortal = new Map();
 async function fotosPorCodigo(db, provId, req) {
   const k = String(provId); const c = cachePortal.get(k);
-  if (c && Date.now() - c.t < 600000) return c.m;
+  if (c && c.portal && Date.now() - c.t < 600000) return c.m;
   const prov = await db.collection('proveedores').findOne(Object.assign({ _id: provId }, filtroOrg(req)));
   const m = new Map();
-  if (prov && prov.portal) {
+  if (prov && prov.portal && prov.portal.tipo) {
     const filas = await portales.filasDePortal(prov.portal, prov.reglaImport || {});
     for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null });
   }
-  cachePortal.set(k, { t: Date.now(), m }); return m;
+  // Fotos traídas de la página web del proveedor (links guardados por código); el portal tiene prioridad si trae las suyas
+  try { (await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1 }).toArray()).forEach(x => { if (x.imagenes && x.imagenes.length && !m.has(K(x.codigoClave))) m.set(K(x.codigoClave), { imagenes: x.imagenes, pesoCaja: null }); }); } catch (e) { /* sin fotos web */ }
+  cachePortal.set(k, { t: Date.now(), m, portal: !!(prov && prov.portal && prov.portal.tipo) }); return m;
 }
 
 // "Este producto nunca va a Tiendanube": sale de la lista de candidatos (y se puede volver a traer con "Ver descartados").

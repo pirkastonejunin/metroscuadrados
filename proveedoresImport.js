@@ -859,5 +859,104 @@ router.get('/:id/historial', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+
+// ---------------------------------------------------------------------------
+// Fotos desde la página web del proveedor (27/10/2026, pedido de Mato: traer las fotos de misionesdeco.com para después
+// subirlas a Tiendanube). Se guardan solo los LINKS de las fotos (no los archivos) por código de artículo ("Art.: BC3102"),
+// en proveedor_fotos_web; al crear productos en Tiendanube se usan esos links. Dos pasos que maneja la pantalla en tandas:
+//   1) /fotos-web/descubrir: recorre la home y las categorías y devuelve los links de producto.
+//   2) /fotos-web/leer: lee de a pocas páginas de producto y guarda código + fotos.
+// ---------------------------------------------------------------------------
+const UA_WEB = 'Mozilla/5.0 (compatible; PiedraNegraBot/1.0; +https://metroscuadrados.onrender.com)';
+function baseWebSegura(v) {
+  let u; try { u = new URL(String(v || '').trim()); } catch (e) { throw err(400, 'Escribí la dirección de la página, por ejemplo https://www.misionesdeco.com/'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw err(400, 'La dirección tiene que empezar con https://');
+  if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.|\[)/i.test(u.hostname) || !u.hostname.includes('.')) throw err(400, 'Esa dirección no es válida.');
+  return u;
+}
+async function bajarHtml(url) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': UA_WEB, 'Accept': 'text/html,*/*', 'Accept-Language': 'es-AR,es;q=0.9' }, signal: ctl.signal, redirect: 'follow' });
+    if (!r.ok) return '';
+    return await r.text();
+  } catch (e) { return ''; } finally { clearTimeout(t); }
+}
+function linksDe(html, base) {
+  const out = new Set();
+  const re = /href\s*=\s*["']([^"'#?]+)["']/gi; let m;
+  while ((m = re.exec(html))) { try { const u = new URL(m[1], base); if (u.hostname === base.hostname) out.add(u.origin + u.pathname.replace(/\/?$/, '/')); } catch (e) {} }
+  return [...out];
+}
+async function enTandas(lista, n, fn) { const res = []; for (let i = 0; i < lista.length; i += n) res.push(...await Promise.all(lista.slice(i, i + n).map(fn))); return res; }
+
+router.post('/:id/fotos-web/descubrir', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb(); await proveedorDeOrg(db, req);
+    const base = baseWebSegura((req.body || {}).url);
+    const rutaProd = /\/producto\/[^/]+\/$/, rutaCat = /\/(tienda|categoria-producto|categoria|productos?|shop)\/[^/]+(\/[^/]+)?\/$/;
+    const productos = new Set(), vistas = new Set();
+    let cola = [base.origin + '/'];
+    for (let nivel = 0; nivel < 3 && cola.length && vistas.size < 80; nivel++) {
+      const lote = cola.filter(u => !vistas.has(u)).slice(0, 80 - vistas.size); lote.forEach(u => vistas.add(u)); cola = [];
+      const htmls = await enTandas(lote, 5, u => bajarHtml(u));
+      htmls.forEach(h => { for (const l of linksDe(h, base)) { if (rutaProd.test(l)) productos.add(l); else if (nivel < 2 && rutaCat.test(l) && !vistas.has(l)) cola.push(l); } });
+      cola = [...new Set(cola)];
+    }
+    res.json({ productos: [...productos], paginasRevisadas: vistas.size });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+function leerProductoWeb(html, url, base) {
+  const texto = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const cm = texto.match(/\bArt\s*\.?\s*:?\s*([A-Z0-9][A-Z0-9\-._]{2,24})/i);
+  if (!cm) return null;
+  const codigo = cm[1].toUpperCase();
+  const abs = s => { try { return new URL(String(s).replace(/&amp;/g, '&'), base).href; } catch (e) { return ''; } };
+  const imgs = [];
+  const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
+  if (og) imgs.push(abs(og[1]));
+  const re = /(?:src|data-src|data-lazy-src|href)\s*=\s*["']([^"']+\.(?:webp|jpe?g|png)(?:\?[^"']*)?)["']/gi; let m;
+  while ((m = re.exec(html))) { const u = abs(m[1]); if (u && /\/media\//i.test(u) && u.toLowerCase().includes(codigo.toLowerCase())) imgs.push(u); }
+  const nm = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) || html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  const nombre = nm ? nm[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 150) : '';
+  const imagenes = [...new Set(imgs.filter(Boolean))].filter(u => !/logo/i.test(u)).slice(0, 8);
+  return { codigo, nombre, url, imagenes };
+}
+
+router.post('/:id/fotos-web/leer', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb(); const prov = await proveedorDeOrg(db, req);
+      const base = baseWebSegura((req.body || {}).url);
+      const urls = (Array.isArray((req.body || {}).urls) ? req.body.urls : []).map(String).filter(u => { try { return new URL(u).hostname === base.hostname; } catch (e) { return false; } }).slice(0, 12);
+      let guardadas = 0, sinCodigo = 0, sinFoto = 0;
+      const rs = await enTandas(urls, 4, async u => leerProductoWeb(await bajarHtml(u), u, base));
+      for (const p of rs) {
+        if (!p) { sinCodigo++; continue; }
+        if (!p.imagenes.length) { sinFoto++; continue; }
+        await db.collection('proveedor_fotos_web').updateOne({ proveedorId: prov._id, codigoClave: codigoClave(p.codigo) }, { $set: { orgId: prov.orgId || req.orgId, proveedorId: prov._id, codigo: p.codigo, codigoClave: codigoClave(p.codigo), nombre: p.nombre, url: p.url, imagenes: p.imagenes, at: new Date() } }, { upsert: true });
+        guardadas++;
+      }
+      return { guardadas, sinCodigo, sinFoto };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/:id/fotos-web/resumen', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb(); const prov = await proveedorDeOrg(db, req);
+      const fotos = await db.collection('proveedor_fotos_web').find({ proveedorId: prov._id }).project({ codigoClave: 1 }).toArray();
+      const claves = new Set(fotos.map(f => f.codigoClave));
+      const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: prov._id, activo: { $ne: false } }, filtroOrg(req))).project({ codigoExterno: 1, sku: 1 }).toArray();
+      const con = prods.filter(p => claves.has(codigoClave(p.codigoExterno || p.sku))).length;
+      return { guardadas: fotos.length, productos: prods.length, productosConFoto: con, productosSinFoto: prods.length - con };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 module.exports = router;
-module.exports._interno = { parseNumero, aplicarMargen, filasDeArchivo, filasTodasLasHojas, resolverColumna, letraDeIdx };
+module.exports._interno = { parseNumero, aplicarMargen, filasDeArchivo, filasTodasLasHojas, leerProductoWeb, linksDe, resolverColumna, letraDeIdx };
