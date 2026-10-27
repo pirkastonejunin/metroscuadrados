@@ -29,6 +29,13 @@ const err = (status, message) => Object.assign(new Error(message), { status });
 const oid = v => { try { return v ? new ObjectId(String(v)) : null; } catch (e) { return null; } };
 const K = s => String(s == null ? '' : s).trim().toUpperCase();
 
+// Texto de datos técnicos (una línea por dato, "Medidas 122 x 18 cm") → HTML para la descripción de Tiendanube.
+function descripcionHtml(texto) {
+  const et = /^(Medidas?|Espesor|N[º°o]\.? de piezas[^:]{0,20}?(?= \d)|Piezas por m2|Peso|Rendimiento|Colocaci[oó]n|Terminaci[oó]n|Aplicable en|Formato|Acabado|Material)\s*:?\s*/i;
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const li = String(texto || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => { const m = l.match(et); return '<li>' + (m ? '<strong>' + esc(m[1]) + ':</strong> ' + esc(l.slice(m[0].length)) : esc(l)) + '</li>'; });
+  return li.length ? '<ul>' + li.join('') + '</ul>' : '';
+}
 async function productosTienda() {
   const storeId = process.env.TIENDA_REAL_STORE_ID;
   if (!storeId) throw err(400, 'Falta configurar la tienda de Tiendanube (TIENDA_REAL_STORE_ID).');
@@ -40,7 +47,7 @@ async function productosTienda() {
     const nombreP = cotizador.nombreLocalizado(p.name);
     for (const v of (p.variants || [])) {
       const vals = (v.values || []).map(x => cotizador.nombreLocalizado(x)).filter(Boolean).join(' ');
-      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, nFotos: Array.isArray(p.images) ? p.images.length : null, precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
+      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, nFotos: Array.isArray(p.images) ? p.images.length : null, nDesc: cotizador.nombreLocalizado(p.description).replace(/<[^>]+>/g, '').trim().length, precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
     }
   }
   return filas;
@@ -290,7 +297,7 @@ async function fotosPorCodigo(db, provId, req) {
     for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null });
   }
   // Fotos traídas de la página web del proveedor (links guardados por código); el portal tiene prioridad si trae las suyas
-  try { (await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1 }).toArray()).forEach(x => { if (x.imagenes && x.imagenes.length && !m.has(K(x.codigoClave))) m.set(K(x.codigoClave), { imagenes: x.imagenes, pesoCaja: null }); }); } catch (e) { /* sin fotos web */ }
+  try { (await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1, descripcion: 1 }).toArray()).forEach(x => { const k = K(x.codigoClave); const e = m.get(k); if (e) { if (!e.descripcion && x.descripcion) e.descripcion = x.descripcion; } else if ((x.imagenes && x.imagenes.length) || x.descripcion) m.set(k, { imagenes: x.imagenes || [], pesoCaja: null, descripcion: x.descripcion || '' }); }); } catch (e) { /* sin fotos web */ }
   cachePortal.set(k, { t: Date.now(), m, portal: !!(prov && prov.portal && prov.portal.tipo) }); return m;
 }
 
@@ -307,25 +314,27 @@ router.get('/fotos-existentes/proveedores', auth, async (req, res) => {
 });
 async function fotosExistentes(db, req, proveedorId) {
   const provId = oid(proveedorId); if (!provId) throw err(400, 'Elegí el proveedor.');
-  const fotos = new Map((await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1 }).toArray()).map(x => [x.codigoClave, x.imagenes || []]));
+  const web = new Map((await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1, descripcion: 1 }).toArray()).map(x => [x.codigoClave, x]));
   const filas = await productosTienda(); const porSku = new Map(); filas.forEach(f => { if (f.sku) porSku.set(K(f.sku), f); });
   const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: provId, activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1, skuTiendanube: 1 }).toArray();
-  const out = []; const vistos = new Set(); let yaTienenFotos = 0, noEstanEnTienda = 0, sinFotoWeb = 0;
+  const out = []; const vistos = new Set(); let yaCompletos = 0, noEstanEnTienda = 0, sinDatosWeb = 0;
   for (const p of prods) {
-    const imgs = fotos.get(K(p.codigoExterno || p.sku)) || [];
-    if (!imgs.length) { sinFotoWeb++; continue; }
+    const w = web.get(K(p.codigoExterno || p.sku));
+    if (!w || (!(w.imagenes || []).length && !w.descripcion)) { sinDatosWeb++; continue; }
     const t = porSku.get(K(p.skuTiendanube || p.sku));
     if (!t) { noEstanEnTienda++; continue; }
     if (vistos.has(t.productId)) continue; vistos.add(t.productId);
-    if (t.nFotos > 0) { yaTienenFotos++; continue; }
-    out.push({ productoId: String(p._id), sku: p.sku, nombre: p.nombre, tnProductId: t.productId, imagenes: imgs });
+    const poneFotos = !(t.nFotos > 0) && (w.imagenes || []).length > 0, poneDesc = !(t.nDesc > 0) && !!w.descripcion;
+    if (!poneFotos && !poneDesc) { yaCompletos++; continue; }
+    out.push({ productoId: String(p._id), sku: p.sku, nombre: p.nombre, tnProductId: t.productId, imagenes: poneFotos ? w.imagenes : [], descripcion: poneDesc ? w.descripcion : '' });
   }
-  return { out, yaTienenFotos, noEstanEnTienda, sinFotoWeb };
+  return { out, yaCompletos, noEstanEnTienda, sinDatosWeb };
 }
 router.get('/fotos-existentes/candidatos', auth, async (req, res) => {
   try {
     const db = await getDb(); const r = await fotosExistentes(db, req, req.query.proveedorId);
-    res.json({ total: r.out.length, productoIds: r.out.map(x => x.productoId), muestra: r.out.slice(0, 15).map(x => ({ sku: x.sku, nombre: x.nombre, fotos: x.imagenes.length })), yaTienenFotos: r.yaTienenFotos, noEstanEnTienda: r.noEstanEnTienda, sinFotoWeb: r.sinFotoWeb });
+    res.json({ total: r.out.length, conFotos: r.out.filter(x => x.imagenes.length).length, conDescripcion: r.out.filter(x => x.descripcion).length, productoIds: r.out.map(x => x.productoId),
+      muestra: r.out.slice(0, 15).map(x => ({ sku: x.sku, nombre: x.nombre, fotos: x.imagenes.length, descripcion: !!x.descripcion })), yaCompletos: r.yaCompletos, noEstanEnTienda: r.noEstanEnTienda, sinDatosWeb: r.sinDatosWeb });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 router.post('/fotos-existentes/subir', auth, async (req, res) => {
@@ -335,13 +344,18 @@ router.post('/fotos-existentes/subir', auth, async (req, res) => {
     const r = await fotosExistentes(db, req, b.proveedorId);
     const resultados = [];
     for (const x of r.out.filter(x => pedidos.has(x.productoId))) {
-      let subidas = 0, motivo = '';
+      let subidas = 0, desc = false; const motivos = [];
+      const falla = rr => 'Tiendanube respondió ' + rr.status + ': ' + (typeof rr.data === 'string' ? rr.data : JSON.stringify(rr.data)).slice(0, 120);
       for (let i = 0; i < x.imagenes.length; i++) {
         const rr = await tnFetch(store, '/products/' + Number(x.tnProductId) + '/images', { method: 'POST', body: JSON.stringify({ src: x.imagenes[i], position: i + 1 }) });
-        if (rr.ok) subidas++; else { motivo = 'Tiendanube respondió ' + rr.status + ': ' + (typeof rr.data === 'string' ? rr.data : JSON.stringify(rr.data)).slice(0, 120); }
+        if (rr.ok) subidas++; else motivos.push(falla(rr));
         await sleep(400);
       }
-      resultados.push({ sku: x.sku, ok: subidas > 0, subidas, motivo });
+      if (x.descripcion) {
+        const html = descripcionHtml(x.descripcion);
+        if (html) { const rr = await tnFetch(store, '/products/' + Number(x.tnProductId), { method: 'PUT', body: JSON.stringify({ description: { es: html } }) }); if (rr.ok) desc = true; else motivos.push(falla(rr)); await sleep(400); }
+      }
+      resultados.push({ sku: x.sku, ok: subidas > 0 || desc, subidas, descripcion: desc, motivo: motivos[0] || '' });
     }
     res.json({ resultados });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -373,11 +387,12 @@ router.post('/publicar', auth, async (req, res) => {
         if (require('./productos').sinBultoPorM2(p)) { resultados.push({ sku: p.sku, ok: false, motivo: 'es por m² y no tiene los m² por caja cargados' }); continue; }
         const precio = lista ? precioResuelto(p, lista, cot).precio : null;
         if (!(precio > 0)) { resultados.push({ sku: p.sku, ok: false, motivo: 'no tiene precio en la lista elegida' }); continue; }
-        let imagenes = [], pesoCaja = null;
-        if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); const d = m.get(K(p.codigoExterno)); if (d) { imagenes = d.imagenes; pesoCaja = d.pesoCaja; } } catch (e) { /* sin fotos */ } }
+        let imagenes = [], pesoCaja = null, descWeb = '';
+        if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); const d = m.get(K(p.codigoExterno)); if (d) { imagenes = d.imagenes; pesoCaja = d.pesoCaja; descWeb = d.descripcion || ''; } } catch (e) { /* sin fotos */ } }
         const cat = mapa[p.rubro || ''];
         const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: Math.max(0, Math.floor(stock.get(String(p._id)) || 0)), weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
         if (p.descripcion) body.description = { es: String(p.descripcion) };
+        else if (descWeb) body.description = { es: descripcionHtml(descWeb) };
         if (p.marca) body.brand = p.marca;
         if (cat) body.categories = [cat];
         if (imagenes.length) body.images = imagenes.map(src => ({ src }));

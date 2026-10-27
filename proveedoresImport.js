@@ -912,6 +912,13 @@ function leerProductoWeb(html, url, base) {
   const cm = texto.match(/\bArt\s*\.?\s*:?\s*([A-Z0-9][A-Z0-9\-._]{2,24})/i);
   if (!cm) return null;
   const codigo = cm[1].toUpperCase();
+  // Datos técnicos del producto (medidas, espesor, piezas por m², dónde se aplica…): el texto que sigue al "Art.:" hasta "Inspiración" / "Productos relacionados".
+  let resto = texto.slice(texto.indexOf(cm[0]) + cm[0].length).replace(/^\s*[A-Z0-9\-._]*/i, m0 => m0.toUpperCase() === codigo ? '' : m0);
+  const corte = resto.search(/Inspiraci[oó]n|Productos relacionados|Compart[ií]|Puntos de venta|Newsletter|Suscrib/i);
+  if (corte >= 0) resto = resto.slice(0, corte);
+  const etiquetas = /\b(Medidas?|Espesor|N[º°o]\.? de piezas[^:]{0,20}|Piezas por m2|Peso|Rendimiento|Colocaci[oó]n|Terminaci[oó]n|Aplicable en|Formato|Acabado|Material)\b/gi;
+  resto = resto.replace(etiquetas, m0 => '\n' + m0).replace(/\s+\n/g, '\n').trim();
+  const descripcion = resto.length >= 8 ? resto.slice(0, 1500) : '';
   const abs = s => { try { return new URL(String(s).replace(/&amp;/g, '&'), base).href; } catch (e) { return ''; } };
   const imgs = [];
   const og = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
@@ -921,7 +928,7 @@ function leerProductoWeb(html, url, base) {
   const nm = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) || html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   const nombre = nm ? nm[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 150) : '';
   const imagenes = [...new Set(imgs.filter(Boolean))].filter(u => !/logo/i.test(u)).slice(0, 8);
-  return { codigo, nombre, url, imagenes };
+  return { codigo, nombre, url, imagenes, descripcion };
 }
 
 router.post('/:id/fotos-web/leer', authAdmin, async (req, res) => {
@@ -934,8 +941,8 @@ router.post('/:id/fotos-web/leer', authAdmin, async (req, res) => {
       const rs = await enTandas(urls, 4, async u => leerProductoWeb(await bajarHtml(u), u, base));
       for (const p of rs) {
         if (!p) { sinCodigo++; continue; }
-        if (!p.imagenes.length) { sinFoto++; continue; }
-        await db.collection('proveedor_fotos_web').updateOne({ proveedorId: prov._id, codigoClave: codigoClave(p.codigo) }, { $set: { orgId: prov.orgId || req.orgId, proveedorId: prov._id, codigo: p.codigo, codigoClave: codigoClave(p.codigo), nombre: p.nombre, url: p.url, imagenes: p.imagenes, at: new Date() } }, { upsert: true });
+        if (!p.imagenes.length && !p.descripcion) { sinFoto++; continue; }
+        await db.collection('proveedor_fotos_web').updateOne({ proveedorId: prov._id, codigoClave: codigoClave(p.codigo) }, { $set: { orgId: prov.orgId || req.orgId, proveedorId: prov._id, codigo: p.codigo, codigoClave: codigoClave(p.codigo), nombre: p.nombre, url: p.url, imagenes: p.imagenes, descripcion: p.descripcion || '', at: new Date() } }, { upsert: true });
         guardadas++;
       }
       return { guardadas, sinCodigo, sinFoto };
@@ -948,13 +955,14 @@ router.get('/:id/fotos-web/resumen', authAdmin, async (req, res) => {
   try {
     const out = await conReintento(async () => {
       const db = await getDb(); const prov = await proveedorDeOrg(db, req);
-      const fotos = await db.collection('proveedor_fotos_web').find({ proveedorId: prov._id }).project({ codigoClave: 1, codigo: 1, nombre: 1 }).toArray();
+      const fotos = await db.collection('proveedor_fotos_web').find({ proveedorId: prov._id })    .project({ codigoClave: 1, codigo: 1, nombre: 1, descripcion: 1 }).toArray();
       const claves = new Set(fotos.map(f => f.codigoClave));
       const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: prov._id, activo: { $ne: false } }, filtroOrg(req))).project({ codigoExterno: 1, sku: 1, nombre: 1 }).toArray();
       const con = prods.filter(p => claves.has(codigoClave(p.codigoExterno || p.sku))).length;
       const nuestras = new Set(prods.map(p => codigoClave(p.codigoExterno || p.sku)));
       const sinFoto = prods.filter(p => !claves.has(codigoClave(p.codigoExterno || p.sku)));
       return { guardadas: fotos.length, productos: prods.length, productosConFoto: con, productosSinFoto: prods.length - con,
+        conDescripcion: fotos.filter(f => f.descripcion).length, ejemploDescripcion: (fotos.find(f => f.descripcion) || {}).descripcion || '',
         sinFotoMuestra: sinFoto.slice(0, 80).map(p => ({ codigo: p.codigoExterno || p.sku || '', nombre: p.nombre || '' })),
         webSinProducto: fotos.filter(f => !nuestras.has(f.codigoClave)).slice(0, 80).map(f => ({ codigo: f.codigo, nombre: f.nombre })) };
     });
