@@ -317,7 +317,7 @@ router.post('/publicar', auth, async (req, res) => {
         let imagenes = [], pesoCaja = null;
         if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); const d = m.get(K(p.codigoExterno)); if (d) { imagenes = d.imagenes; pesoCaja = d.pesoCaja; } } catch (e) { /* sin fotos */ } }
         const cat = mapa[p.rubro || ''];
-        const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: stock.get(String(p._id)) || 0, weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
+        const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: Math.max(0, Math.floor(stock.get(String(p._id)) || 0)), weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
         if (p.descripcion) body.description = { es: String(p.descripcion) };
         if (p.marca) body.brand = p.marca;
         if (cat) body.categories = [cat];
