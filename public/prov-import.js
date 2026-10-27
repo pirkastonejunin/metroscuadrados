@@ -203,6 +203,7 @@
     var body = {
       matchPor: document.getElementById('pimpMatch').value,
       columnas: { codigo: document.getElementById('pimpCCodigo').value, precio: document.getElementById('pimpCPrecio').value, stock: document.getElementById('pimpCStock').value, nombre: document.getElementById('pimpCNombre').value },
+      todasLasHojas: document.getElementById('pimpTodas').checked,
       hoja: document.getElementById('pimpHoja').value, filaEncabezado: document.getElementById('pimpFila').value,
       moneda: document.getElementById('pimpMoneda').value,
       descuentos: document.getElementById('pimpDesc').value.split(/[,;\s]+/).filter(Boolean).map(function (x) { return x.replace(',', '.'); }),
