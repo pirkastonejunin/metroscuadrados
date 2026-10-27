@@ -36,6 +36,13 @@ function descripcionHtml(texto) {
   const li = String(texto || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => { const m = l.match(et); return '<li>' + (m ? '<strong>' + esc(m[1]) + ':</strong> ' + esc(l.slice(m[0].length)) : esc(l)) + '</li>'; });
   return li.length ? '<ul>' + li.join('') + '</ul>' : '';
 }
+// "Nº de piezas por m2: 11" (de la descripción de la ficha) → 11. 0 si no figura.
+function piezasPorM2(desc) {
+  const t = String(desc || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
+  const m = t.match(/piezas\s+por\s+m(?:2|²)\s*:?\s*(\d+(?:[.,]\d+)?)/i);
+  const n = m ? parseFloat(m[1].replace(',', '.')) : 0;
+  return n > 0 && n < 5000 ? n : 0;
+}
 async function productosTienda() {
   const storeId = process.env.TIENDA_REAL_STORE_ID;
   if (!storeId) throw err(400, 'Falta configurar la tienda de Tiendanube (TIENDA_REAL_STORE_ID).');
@@ -47,7 +54,7 @@ async function productosTienda() {
     const nombreP = cotizador.nombreLocalizado(p.name);
     for (const v of (p.variants || [])) {
       const vals = (v.values || []).map(x => cotizador.nombreLocalizado(x)).filter(Boolean).join(' ');
-      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, nFotos: Array.isArray(p.images) ? p.images.length : null, nDesc: cotizador.nombreLocalizado(p.description).replace(/<[^>]+>/g, '').trim().length, precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
+      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, nFotos: Array.isArray(p.images) ? p.images.length : null, nDesc: cotizador.nombreLocalizado(p.description).replace(/<[^>]+>/g, '').trim().length, piezasM2: piezasPorM2(cotizador.nombreLocalizado(p.description)), handle: cotizador.nombreLocalizado(p.handle) || '', precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
     }
   }
   return filas;
@@ -282,6 +289,40 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     else stock = await stockDisponible(db, prods.slice(0, limite).map(p => p._id));
     const { precioResuelto: pr } = { precioResuelto };
     res.json({ total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---- Calculadora m² en la ficha: rendimiento (m² que cubre cada unidad de venta) para productos que se venden por pieza/malla ----
+// La ficha de la tienda muestra "precio por unidad" y "precio por m²" solo si el producto tiene rendimiento cargado.
+// Se calcula como 1 / "Nº de piezas por m2" de la descripción (ej. 11 mallas por m² → 0,0909 m² por malla).
+router.get('/rendimientos/candidatos', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig();
+    const hechos = new Set((await db.collection('rendimientos').find({ store_id: store.store_id }).project({ product_id: 1 }).toArray()).map(r => String(r.product_id)));
+    const vistos = new Set(), items = []; let yaConfigurados = 0, sinDato = 0;
+    for (const f of await productosTienda()) {
+      const id = String(f.productId); if (vistos.has(id)) continue; vistos.add(id);
+      if (hechos.has(id)) { yaConfigurados++; continue; }
+      if (!(f.piezasM2 > 0)) { sinDato++; continue; }
+      const cob = 1 / f.piezasM2;
+      items.push({ productId: f.productId, nombre: f.nombre, sku: f.sku, publicado: f.publicado, precio: f.precio, piezasM2: f.piezasM2, cobertura: cob, precioM2: f.precio ? f.precio / cob : null });
+    }
+    res.json({ total: items.length, items, yaConfigurados, sinDato });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/rendimientos/aplicar', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig();
+    const ids = new Set((Array.isArray(req.body.productIds) ? req.body.productIds : []).map(String)); if (!ids.size) throw err(400, 'No hay productos elegidos.');
+    const envase = String(req.body.envase || 'malla').trim().slice(0, 20) || 'malla';
+    const vistos = new Set(); let n = 0;
+    for (const f of await productosTienda()) {
+      const id = String(f.productId); if (!ids.has(id) || vistos.has(id) || !(f.piezasM2 > 0)) continue; vistos.add(id);
+      const doc = { store_id: store.store_id, product_id: parseInt(id, 10), tipo: 'm2', cobertura: 1 / f.piezasM2, envase };
+      if (f.handle) doc.handle = String(f.handle).toLowerCase();
+      await db.collection('rendimientos').updateOne({ _id: store.store_id + '_' + id }, { $set: doc }, { upsert: true }); n++;
+    }
+    res.json({ ok: true, aplicados: n });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

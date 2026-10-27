@@ -210,6 +210,12 @@
         <div class="err" id="errB"></div>
       </div>
       <div id="resB"></div>
+      <div class="card" id="cardRend">
+        <div style="font-weight:700;margin-bottom:6px">Calculadora m² en la ficha (rendimiento)</div>
+        <div class="muted" style="margin-bottom:8px">Para productos que se venden por pieza o malla: lee “Nº de piezas por m2” de la ficha y carga el rendimiento (1 ÷ piezas por m²) para que la tienda muestre el <b>precio por unidad</b> y el <b>precio por m²</b>. Solo toca productos que todavía no tienen rendimiento.</div>
+        <div class="row"><div><label>Nombre de la unidad</label><input id="rdEnv" value="malla" style="width:120px"></div><div><button class="btn secondary" onclick="rdBuscar()">Buscar productos</button></div></div>
+        <div id="rdRes" style="margin-top:10px"></div>
+      </div>
       <div class="card" id="cardFotosEx">
         <div style="font-weight:700;margin-bottom:6px">Fotos y descripciones para productos que ya están en Tiendanube</div>
         <div class="muted" style="margin-bottom:8px">Agrega las fotos y la descripción traídas de la página del proveedor (se traen desde el proveedor → importar lista → “Fotos desde la página web”) a los productos que ya subiste y no tienen fotos o no tienen descripción. Nunca pisa lo que ya tienen. No cambia precios, stock ni si están publicados.</div>
@@ -433,6 +439,23 @@ async function feSubir(){
   }
   prog.innerHTML = '<span class="ok-msg">' + ok + ' productos completados (' + fotos + ' fotos, ' + descs + ' descripciones).</span>' + (fallos.length ? '<div class="err" style="font-size:12px">No se pudo en ' + fallos.length + ': ' + fallos.slice(0, 10).map(x => esc(x.sku) + ' (' + esc(x.motivo || 'sin respuesta') + ')').join('; ') + '</div>' : '');
   btn.disabled = false;
+}
+let RD = [];
+async function rdBuscar(){
+  const out = document.getElementById('rdRes'); out.innerHTML = '<span class="muted">Revisando la tienda… (lee Tiendanube)</span>';
+  try{ const r = await fetch('/api/tiendanube-vinculo/rendimientos/candidatos', {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); RD = d.items;
+    out.innerHTML = '<div><b>' + N(d.total) + '</b> productos para configurar <span class="muted">(' + N(d.yaConfigurados) + ' ya tienen rendimiento, ' + N(d.sinDato) + ' no traen “piezas por m2” en la ficha)</span></div>'
+      + (d.total ? '<div style="max-height:320px;overflow:auto;margin:8px 0"><table><tr><th><input type="checkbox" checked onclick="document.querySelectorAll(\'.rdc\').forEach(c=>c.checked=this.checked)"></th><th>Producto</th><th>Piezas/m²</th><th>m² por unidad</th><th>Precio unidad</th><th>Precio m²</th></tr>'
+        + d.items.map((x,i) => '<tr><td><input type="checkbox" class="rdc" data-i="' + i + '" checked></td><td>' + esc(x.nombre) + '</td><td>' + x.piezasM2 + '</td><td>' + x.cobertura.toFixed(4) + '</td><td>' + (x.precio ? '$' + N(Math.round(x.precio)) : '') + '</td><td>' + (x.precioM2 ? '$' + N(Math.round(x.precioM2)) : '') + '</td></tr>').join('') + '</table></div><button class="btn" id="rdBtn" onclick="rdAplicar()">Cargar rendimiento a los elegidos</button> <span id="rdProg"></span>' : '');
+  }catch(e){ out.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+}
+async function rdAplicar(){
+  const ids = []; document.querySelectorAll('.rdc').forEach(c => { if (c.checked) ids.push(RD[+c.dataset.i].productId); }); if (!ids.length) return;
+  if (!confirm('Se carga el rendimiento a ' + ids.length + ' productos. ¿Seguimos?')) return;
+  const b = document.getElementById('rdBtn'), pr = document.getElementById('rdProg'); b.disabled = true;
+  try{ const r = await fetch('/api/tiendanube-vinculo/rendimientos/aplicar', {method:'POST', headers: H(), body: JSON.stringify({productIds: ids, envase: document.getElementById('rdEnv').value})}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); pr.innerHTML = '<span class="ok-msg">' + d.aplicados + ' productos listos. Se ve en la ficha al refrescar (Cmd+Shift+R).</span>'; }
+  catch(e){ pr.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+  b.disabled = false;
 }
 feCargarProv();
 function marcarTodos(on){ document.querySelectorAll('.pb').forEach(c => { c.checked = on && !c.dataset.sp; }); }
