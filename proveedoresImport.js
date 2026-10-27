@@ -894,13 +894,13 @@ router.post('/:id/fotos-web/descubrir', authAdmin, async (req, res) => {
   try {
     const db = await getDb(); await proveedorDeOrg(db, req);
     const base = baseWebSegura((req.body || {}).url);
-    const rutaProd = /\/producto\/[^/]+\/$/, rutaCat = /\/(tienda|categoria-producto|categoria|productos?|shop)\/[^/]+(\/[^/]+)?\/$/;
+    const rutaProd = /\/producto\/[^/]+\/$/, rutaCat = /\/(tienda|categoria-producto|categoria|productos?|shop)\/[^/]+(\/[^/]+){0,3}\/$/, rutaPag = /\/page\/\d+\/$/;
     const productos = new Set(), vistas = new Set();
     let cola = [base.origin + '/'];
-    for (let nivel = 0; nivel < 3 && cola.length && vistas.size < 80; nivel++) {
-      const lote = cola.filter(u => !vistas.has(u)).slice(0, 80 - vistas.size); lote.forEach(u => vistas.add(u)); cola = [];
+    for (let nivel = 0; nivel < 5 && cola.length && vistas.size < 220; nivel++) {
+      const lote = cola.filter(u => !vistas.has(u)).slice(0, 220 - vistas.size); lote.forEach(u => vistas.add(u)); cola = [];
       const htmls = await enTandas(lote, 5, u => bajarHtml(u));
-      htmls.forEach(h => { for (const l of linksDe(h, base)) { if (rutaProd.test(l)) productos.add(l); else if (nivel < 2 && rutaCat.test(l) && !vistas.has(l)) cola.push(l); } });
+      htmls.forEach(h => { for (const l of linksDe(h, base)) { if (rutaProd.test(l)) productos.add(l); else if (nivel < 4 && (rutaCat.test(l) || rutaPag.test(l)) && !vistas.has(l)) cola.push(l); } });
       cola = [...new Set(cola)];
     }
     res.json({ productos: [...productos], paginasRevisadas: vistas.size });
