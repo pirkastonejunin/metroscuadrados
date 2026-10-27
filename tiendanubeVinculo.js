@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const { tokensNombre, parecido } = require('./similitud');
 const cotizador = require('./cotizador');
 const portales = require('./portalesProveedores');
@@ -40,7 +40,7 @@ async function productosTienda() {
     const nombreP = cotizador.nombreLocalizado(p.name);
     for (const v of (p.variants || [])) {
       const vals = (v.values || []).map(x => cotizador.nombreLocalizado(x)).filter(Boolean).join(' ');
-      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
+      filas.push({ publicado: p.published !== false, stock: v.stock == null ? null : Number(v.stock), promo: v.promotional_price != null && v.promotional_price !== '' ? parseFloat(v.promotional_price) : null, sku: String(v.sku || '').trim(), nombre: (nombreP + (vals ? ' ' + vals : '')).trim(), productId: p.id, variantId: v.id, nFotos: Array.isArray(p.images) ? p.images.length : null, precio: parseFloat(v.price), url: p.canonical_url || ((store.domain && cotizador.nombreLocalizado(p.handle)) ? `https://${store.domain}/productos/${cotizador.nombreLocalizado(p.handle)}` : null) });
     }
   }
   return filas;
@@ -295,6 +295,58 @@ async function fotosPorCodigo(db, provId, req) {
 }
 
 // "Este producto nunca va a Tiendanube": sale de la lista de candidatos (y se puede volver a traer con "Ver descartados").
+// Fotos para productos que YA están en Tiendanube (27/10/2026): les agrega las fotos traídas de la web del proveedor
+// (proveedor_fotos_web). Solo toca productos de la tienda que no tienen ninguna foto; no cambia precio, stock ni publicación.
+router.get('/fotos-existentes/proveedores', auth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const ids = await db.collection('proveedor_fotos_web').distinct('proveedorId');
+    const provs = ids.length ? await db.collection('proveedores').find(Object.assign({ _id: { $in: ids } }, filtroOrgClientes(req))).project({ razonSocial: 1, nombre: 1 }).toArray() : [];
+    res.json(provs.map(p => ({ _id: String(p._id), nombre: p.razonSocial || p.nombre || '' })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+async function fotosExistentes(db, req, proveedorId) {
+  const provId = oid(proveedorId); if (!provId) throw err(400, 'Elegí el proveedor.');
+  const fotos = new Map((await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1 }).toArray()).map(x => [x.codigoClave, x.imagenes || []]));
+  const filas = await productosTienda(); const porSku = new Map(); filas.forEach(f => { if (f.sku) porSku.set(K(f.sku), f); });
+  const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: provId, activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1, skuTiendanube: 1 }).toArray();
+  const out = []; const vistos = new Set(); let yaTienenFotos = 0, noEstanEnTienda = 0, sinFotoWeb = 0;
+  for (const p of prods) {
+    const imgs = fotos.get(K(p.codigoExterno || p.sku)) || [];
+    if (!imgs.length) { sinFotoWeb++; continue; }
+    const t = porSku.get(K(p.skuTiendanube || p.sku));
+    if (!t) { noEstanEnTienda++; continue; }
+    if (vistos.has(t.productId)) continue; vistos.add(t.productId);
+    if (t.nFotos > 0) { yaTienenFotos++; continue; }
+    out.push({ productoId: String(p._id), sku: p.sku, nombre: p.nombre, tnProductId: t.productId, imagenes: imgs });
+  }
+  return { out, yaTienenFotos, noEstanEnTienda, sinFotoWeb };
+}
+router.get('/fotos-existentes/candidatos', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const r = await fotosExistentes(db, req, req.query.proveedorId);
+    res.json({ total: r.out.length, productoIds: r.out.map(x => x.productoId), muestra: r.out.slice(0, 15).map(x => ({ sku: x.sku, nombre: x.nombre, fotos: x.imagenes.length })), yaTienenFotos: r.yaTienenFotos, noEstanEnTienda: r.noEstanEnTienda, sinFotoWeb: r.sinFotoWeb });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/fotos-existentes/subir', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig();
+    const b = req.body || {}; const pedidos = new Set((Array.isArray(b.productoIds) ? b.productoIds : []).map(String).slice(0, 8));
+    const r = await fotosExistentes(db, req, b.proveedorId);
+    const resultados = [];
+    for (const x of r.out.filter(x => pedidos.has(x.productoId))) {
+      let subidas = 0, motivo = '';
+      for (let i = 0; i < x.imagenes.length; i++) {
+        const rr = await tnFetch(store, '/products/' + Number(x.tnProductId) + '/images', { method: 'POST', body: JSON.stringify({ src: x.imagenes[i], position: i + 1 }) });
+        if (rr.ok) subidas++; else { motivo = 'Tiendanube respondió ' + rr.status + ': ' + (typeof rr.data === 'string' ? rr.data : JSON.stringify(rr.data)).slice(0, 120); }
+        await sleep(400);
+      }
+      resultados.push({ sku: x.sku, ok: subidas > 0, subidas, motivo });
+    }
+    res.json({ resultados });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.post('/publicar/descartar', auth, async (req, res) => {
   try {
     const db = await getDb();

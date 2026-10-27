@@ -210,6 +210,12 @@
         <div class="err" id="errB"></div>
       </div>
       <div id="resB"></div>
+      <div class="card" id="cardFotosEx">
+        <div style="font-weight:700;margin-bottom:6px">Fotos para productos que ya están en Tiendanube</div>
+        <div class="muted" style="margin-bottom:8px">Agrega las fotos traídas de la página del proveedor (se traen desde el proveedor → importar lista → “Fotos desde la página web”) a los productos que ya subiste y no tienen ninguna foto. No cambia precios, stock ni si están publicados.</div>
+        <div class="row"><div style="min-width:220px"><label>Proveedor</label><select id="feProv"></select></div><div><button class="btn secondary" onclick="feBuscar()">Buscar</button></div></div>
+        <div id="feRes" style="margin-top:10px"></div>
+      </div>
     </div>
   </main>
 </div>
@@ -398,6 +404,37 @@ async function cargarCandidatos(){
       + (d.hayMas ? '<div style="text-align:center;margin:12px"><button class="btn secondary" onclick="LIM=Math.min(3000,LIM+600);cargarCandidatos()">Mostrar más</button></div>' : '');
   }catch(e){ out.innerHTML = ''; err.textContent = e.message; }
 }
+let FE_IDS = [];
+async function feCargarProv(){
+  try{ const r = await fetch('/api/tiendanube-vinculo/fotos-existentes/proveedores', {headers: H()}); const d = await r.json(); const s = document.getElementById('feProv');
+    s.innerHTML = r.ok && d.length ? d.map(p => '<option value="' + p._id + '">' + esc(p.nombre) + '</option>').join('') : '<option value="">Todavía no hay fotos traídas de ningún proveedor</option>'; }catch(e){}
+}
+async function feBuscar(){
+  const out = document.getElementById('feRes'), pid = document.getElementById('feProv').value; if (!pid) { out.innerHTML = '<span class="err">Primero traé las fotos desde la página del proveedor.</span>'; return; }
+  out.innerHTML = '<span class="muted">Revisando la tienda… (lee Tiendanube)</span>';
+  try{
+    const r = await fetch('/api/tiendanube-vinculo/fotos-existentes/candidatos?proveedorId=' + pid, {headers: H()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    FE_IDS = d.productoIds;
+    out.innerHTML = '<div><b>' + N(d.total) + '</b> productos de la tienda sin fotos y con fotos disponibles. <span class="muted">(' + N(d.yaTienenFotos) + ' ya tienen fotos, ' + N(d.noEstanEnTienda) + ' no están en la tienda, ' + N(d.sinFotoWeb) + ' sin foto en la página)</span></div>'
+      + (d.muestra.length ? '<div class="muted" style="font-size:12px;margin:6px 0">' + d.muestra.map(x => esc(x.sku) + ' ' + esc(x.nombre)).join(' · ') + (d.total > d.muestra.length ? ' …' : '') + '</div>' : '')
+      + (d.total ? '<button class="btn" id="feBtn" onclick="feSubir()">Subir fotos a estos ' + N(d.total) + ' productos</button>' : '') + '<div id="feProg" style="margin-top:8px"></div>';
+  }catch(e){ out.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
+}
+async function feSubir(){
+  const pid = document.getElementById('feProv').value, prog = document.getElementById('feProg'), btn = document.getElementById('feBtn');
+  if (!confirm('Se van a subir fotos a ' + FE_IDS.length + ' productos de Tiendanube. ¿Seguimos?')) return;
+  btn.disabled = true; let ok = 0, fotos = 0; const fallos = [];
+  for (let i = 0; i < FE_IDS.length; i += 4) {
+    prog.innerHTML = '<span class="muted">Subiendo… ' + ok + ' de ' + FE_IDS.length + '. No cierres esta pantalla.</span>';
+    try{
+      const r = await fetch('/api/tiendanube-vinculo/fotos-existentes/subir', {method:'POST', headers: H(), body: JSON.stringify({proveedorId: pid, productoIds: FE_IDS.slice(i, i + 4)})}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+      d.resultados.forEach(x => { if (x.ok) { ok++; fotos += x.subidas; } else fallos.push(x); });
+    }catch(e){ fallos.push({sku: '(tanda)', motivo: e.message}); break; }
+  }
+  prog.innerHTML = '<span class="ok-msg">' + ok + ' productos con fotos nuevas (' + fotos + ' fotos).</span>' + (fallos.length ? '<div class="err" style="font-size:12px">No se pudo en ' + fallos.length + ': ' + fallos.slice(0, 10).map(x => esc(x.sku) + ' (' + esc(x.motivo || 'sin respuesta') + ')').join('; ') + '</div>' : '');
+  btn.disabled = false;
+}
+feCargarProv();
 function marcarTodos(on){ document.querySelectorAll('.pb').forEach(c => { c.checked = on && !c.dataset.sp; }); }
 async function descartar(si){
   const ids = []; document.querySelectorAll('.pb').forEach(c => { if (c.checked) ids.push(CAND[+c.dataset.i]._id); });
