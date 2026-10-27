@@ -2025,6 +2025,7 @@ async function abrirEntregar(id){
           <thead><tr><th>Producto</th><th>Pendiente</th><th>A entregar ahora</th></tr></thead>
           <tbody>${filasItems}</tbody>
         </table>
+        <div style="margin-top:10px"><label>Observaciones del remito (opcional)</label><textarea id="entObs" rows="2" maxlength="1000" placeholder="Ej: entrega en obra, dejar con el encargado, horario…" style="width:100%"></textarea></div>
         <div class="err" id="ntErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarEntregar('${id}')">Confirmar y generar remito</button>
       </div>
@@ -2071,7 +2072,7 @@ async function confirmarEntregar(id){
   });
   if (!items.length) { document.getElementById('ntErr').textContent = 'Elegí al menos un ítem para entregar'; return; }
   try{
-    const body = Object.assign({ items }, depositoId ? {depositoId} : {});
+    const body = Object.assign({ items, observaciones: (document.getElementById('entObs') || {}).value || '' }, depositoId ? {depositoId} : {});
     const r = await fetch(BASE + '/' + id + '/entregar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');

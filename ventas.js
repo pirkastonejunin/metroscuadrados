@@ -503,7 +503,7 @@ async function proximoNumeroRemito(db, orgId) {
 // `venta.items` y cuánto se entrega AHORA de ese ítem (puede ser menos
 // que lo pendiente). Si se omite, se entrega todo lo pendiente de todos
 // los ítems (comportamiento de antes, y el que usa "entrega inmediata").
-async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
+async function generarRemitoDeVenta(db, req, venta, depositoId, entregas, observaciones) {
   const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
   if (!deposito) throw err(404, 'Depósito no encontrado');
 
@@ -556,6 +556,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas) {
     depositoNombre: deposito.nombre,
     items: itemsAEntregar.map(it => ({ productoId: it.productoId, sku: it.sku, nombre: it.nombre, cantidad: it.cantidad })),
     fecha: ahora,
+    observaciones: String(observaciones || '').trim().slice(0, 1000),
     usuarioNombre: (req.usuario && req.usuario.nombre) || venta.usuarioNombre,
     orgId: req.orgId,
     createdAt: ahora
@@ -1409,6 +1410,7 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
         <thead><tr><th>Código</th><th>Producto</th><th class="num">Cantidad</th><th class="num">Bultos</th></tr></thead>
         <tbody>${filas || '<tr><td colspan="4" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
+      ${remito.observaciones ? `<p style="margin-top:14px"><strong>Observaciones:</strong> ${escHtml(remito.observaciones).replace(/\n/g, '<br>')}</p>` : ''}
       <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
@@ -1905,7 +1907,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
 
       const entregas = itemsBody ? itemsBody.map(it => ({ index: it.index, cantidad: it.cantidad })) : null;
       try {
-        await generarRemitoDeVenta(db, req, venta, depositoId, entregas);
+        await generarRemitoDeVenta(db, req, venta, depositoId, entregas, req.body && req.body.observaciones);
       } catch (e) {
         // Si el remito falla, no dejar comprometido lo que recién se reservó (quedaba stock "comprometido" sin explicación).
         if (!venta.stockComprometido) {
