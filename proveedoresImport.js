@@ -184,7 +184,11 @@ function filasTodasLasHojas(wb) {
       };
       if (elegido) {
         if (elegido.tipo === 'm2') {
-          porM2 = true; const v = num(cols.m2Caja); const pz = v > 0 ? null : piezasDe();
+          porM2 = true;
+          // m² por caja: columna propia, o texto tipo "48 uni = 1,12 mt2" en la columna de unidades por caja
+          let v = num(cols.m2Caja);
+          if (!(v > 0) && cols.uniCaja >= 0) { const tm = String(f[cols.uniCaja] == null ? '' : f[cols.uniCaja]).match(/=\s*(\d+(?:[.,]\d+)?)\s*(?:mt2|m2|mts|m\u00b2)/i); if (tm) v = parseFloat(tm[1].replace(',', '.')); }
+          const pz = v > 0 ? null : piezasDe();
           bulto = v > 0 ? v : (pz ? 1 / pz : null);
         } else if (elegido.tipo === 'caja' || elegido.tipo === 'panel') {
           const v = num(elegido.tipo === 'caja' ? cols.m2Caja : cols.m2Panel);
