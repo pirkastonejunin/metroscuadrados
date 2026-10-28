@@ -2302,6 +2302,9 @@ router.servirLinkPublico = async (req, res) => {
     fake.params = { id: String(link.docId), index: String(link.index == null ? '' : link.index) };
     fake.orgId = link.orgId; fake.usuario = { nombre: '', rol: {} }; fake.query = {};
     res.set('X-Robots-Tag', 'noindex, nofollow');
+    // Quien recibe el link es el cliente: sin los botones de Compartir / WhatsApp (son de uso interno). Imprimir se deja.
+    const enviar = res.send.bind(res);
+    res.send = (html) => enviar(typeof html === 'string' ? html.replace(/<button onclick="compartirDocumento\(\)">Compartir<\/button>\s*/g, '').replace(/<button onclick="whatsappDocumento\(\)">WhatsApp<\/button>\s*/g, '') : html);
     await handler(fake, res);
   } catch (e) { res.status(500).send('No se pudo generar el documento'); }
 };
