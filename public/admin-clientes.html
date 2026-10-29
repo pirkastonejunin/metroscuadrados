@@ -1111,6 +1111,34 @@ function opcionesCuentaCobroVentaCC(tipoValor){
   return bancosTesoreriaCacheCC.map(b => `<option value="banco:${b._id}">${escapeHtml(b.nombre)}</option>`).join('')
     || '<option value="">No hay ningún banco habilitado</option>';
 }
+// Planes de tarjeta (mismos que en Cobranza): banco/tarjeta + cuotas, con su recargo y costo.
+let planesCobroCacheCC = null;
+async function cargarPlanesCobroCC(){
+  if (planesCobroCacheCC === null) {
+    try { const r = await fetch('/api/tesoreria/tarjetas-planes', {headers: headersAuth()}); planesCobroCacheCC = r.ok ? await r.json() : []; }
+    catch(e){ planesCobroCacheCC = []; }
+  }
+  const sel = document.getElementById('cvccTarjetaPlan'); if (!sel) return;
+  const previo = sel.value;
+  const vigentes = planesCobroCacheCC.filter(p => !p.vigenteHasta || p.vigenteHasta >= new Date(Date.now()-3*3600000).toISOString().slice(0,10));
+  sel.innerHTML = '<option value="">Sin plan (sin costo ni recargo)</option>' + vigentes.map(p => `<option value="${p._id}">${escapeHtml(p.tarjeta)} — ${escapeHtml(p.nombre)}${p.costoPorcentaje ? ' (costo ' + p.costoPorcentaje + '%)' : ''}${p.recargoPorcentaje ? ' · recargo ' + p.recargoPorcentaje + '%' : ''}</option>`).join('');
+  if (previo && vigentes.some(p => p._id === previo)) sel.value = previo;
+}
+function resumenPlanTarjetaCC(){
+  const sel = document.getElementById('cvccTarjetaPlan'); if (!sel) return;
+  const plan = (planesCobroCacheCC || []).find(p => p._id === sel.value);
+  const recW = document.getElementById('cvccRecargoWrap'), out = document.getElementById('cvccPlanResumen');
+  if (!plan) { recW.style.display = 'none'; out.textContent = ''; return; }
+  const conRecargo = (plan.recargoPorcentaje || 0) > 0;
+  recW.style.display = conRecargo ? 'flex' : 'none';
+  const ley = plan.leyenda ? `<div style="margin-bottom:2px"><b>${escapeHtml(plan.leyenda)}</b>${plan.vigenteHasta ? ' · vigente hasta ' + plan.vigenteHasta.split('-').reverse().join('/') : ''}</div>` : '';
+  const monto = Number(document.getElementById('cvccMonto').value) || 0;
+  const aplica = conRecargo && document.getElementById('cvccAplicarRecargo').checked;
+  const recargo = Math.round(monto * (aplica ? plan.recargoPorcentaje : 0)) / 100;
+  const cargo = Math.round((monto + recargo) * 100) / 100;
+  const costo = Math.round(cargo * (plan.costoPorcentaje || 0)) / 100;
+  out.innerHTML = ley + (monto > 0 ? `El cliente paga con tarjeta <b>${money(cargo)}</b>${recargo > 0 ? ` (incluye recargo ${money(recargo)})` : ''} · costo del plan ${money(costo)} · entra al banco <b>${money(cargo - costo)}</b>` : '');
+}
 function actualizarTipoValorCobroVentaCC(){
   const tipoValor = document.getElementById('cvccTipoValor').value;
   const esCheque = tipoValor === 'cheque';
@@ -1118,6 +1146,7 @@ function actualizarTipoValorCobroVentaCC(){
   document.getElementById('cvccCuentaWrap').classList.toggle('hidden', esCheque);
   document.getElementById('cvccChequeWrap').classList.toggle('hidden', !esCheque);
   document.getElementById('cvccTarjetaWrap').classList.toggle('hidden', !esTarjeta);
+  if (esTarjeta) cargarPlanesCobroCC().then(resumenPlanTarjetaCC);
   if (!esCheque) {
     document.getElementById('cvccCuentaLabel').textContent = tipoValor === 'efectivo' ? '¿A qué caja va? *' : '¿A qué banco va? *';
     document.getElementById('cvccCuenta').innerHTML = opcionesCuentaCobroVentaCC(tipoValor);
@@ -1136,7 +1165,7 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
         <input type="hidden" id="cvccClienteId" value="${clienteId}">
         <div class="grid2">
           <div><label>Tipo de valor</label><select id="cvccTipoValor" onchange="actualizarTipoValorCobroVentaCC()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
-          <div><label>Monto * (podés poner menos para un cobro parcial)</label><input id="cvccMonto" type="number" min="0.01" step="0.01" value="${saldoPendiente > 0 ? saldoPendiente : ''}"></div>
+          <div><label>Monto * (podés poner menos para un cobro parcial)</label><input id="cvccMonto" oninput="resumenPlanTarjetaCC()" type="number" min="0.01" step="0.01" value="${saldoPendiente > 0 ? saldoPendiente : ''}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div><label>Fecha</label><input id="cvccFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
@@ -1153,13 +1182,19 @@ async function abrirCobroVentaDesdeCC(ventaId, numero, saldoPendiente, moneda, c
           <div><label>Fecha de emisión</label><input id="cvccChequeFechaEmision" type="date"></div>
           <div><label>Fecha de vencimiento *</label><input id="cvccChequeVencimiento" type="date"></div>
         </div>
-        <div class="grid2 hidden" id="cvccTarjetaWrap" style="margin-top:10px">
+        <div class="hidden" id="cvccTarjetaWrap" style="margin-top:10px">
+          <div style="margin-bottom:10px"><label>Plan de tarjeta (banco / cuotas)</label>
+            <select id="cvccTarjetaPlan" onchange="resumenPlanTarjetaCC()"><option value="">Sin plan (sin costo ni recargo)</option></select>
+            <label style="display:none;align-items:center;gap:6px;font-weight:500;margin-top:6px" id="cvccRecargoWrap"><input type="checkbox" id="cvccAplicarRecargo" style="width:auto" checked onchange="resumenPlanTarjetaCC()"> Cobrarle el recargo al cliente</label>
+            <div class="muted" id="cvccPlanResumen" style="margin-top:4px"></div></div>
+          <div class="grid2">
           <div><label>Entidad</label><input id="cvccTarjetaEntidad"></div>
           <div><label>Tipo</label><select id="cvccTarjetaTipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select></div>
           <div><label>Cuotas</label><input id="cvccTarjetaCuotas" type="number" min="1" value="1"></div>
           <div><label>Lote *</label><input id="cvccTarjetaLote"></div>
           <div><label>Cupón *</label><input id="cvccTarjetaCupon"></div>
           <div><label>Código de autorización</label><input id="cvccTarjetaCodigoAutorizacion"></div>
+          </div>
         </div>
         <div class="err" id="cvccErr"></div>
         <button class="btn" style="margin-top:10px" onclick="confirmarCobroVentaCC()">${ventaId ? 'Registrar cobro' : 'Registrar recibo'}</button>
@@ -1222,6 +1257,8 @@ async function confirmarCobroVentaCC(){
       body.tarjetaCodigoAutorizacion = document.getElementById('cvccTarjetaCodigoAutorizacion').value.trim();
       if (!body.tarjetaLote) { errEl.textContent = 'Falta el número de lote'; return; }
       if (!body.tarjetaCupon) { errEl.textContent = 'Falta el número de cupón'; return; }
+      body.tarjetaPlanId = document.getElementById('cvccTarjetaPlan').value || undefined;
+      body.aplicarRecargo = document.getElementById('cvccAplicarRecargo').checked;
     }
   }
   try{
