@@ -488,6 +488,64 @@ router.put('/resultados/config', authInforme('informe_resultados'), async (req, 
 });
 
 const NOMBRES_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+// Productos vendidos sin costo cargado en el período (los que hacen subir "ventas sin costo" del Estado de resultados),
+// con lo vendido de cada uno, para poder cargarles el costo desde el propio informe.
+router.get('/resultados/sin-costo', authInforme('informe_resultados'), async (req, res) => {
+  try {
+    const hoy = fechaAR(new Date());
+    const desdeS = req.query.desde || hoy.slice(0, 4) + '-01-01';
+    const hastaS = req.query.hasta || hoy;
+    if (!validarFecha(desdeS) || !validarFecha(hastaS)) throw err(400, 'Las fechas tienen que tener el formato AAAA-MM-DD.');
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const cotDoc = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+      const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
+      const ventas = await db.collection('ventas').find({ orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: { $gte: inicioDia(desdeS), $lte: finDia(hastaS) } }).limit(50000).toArray();
+      const ids = new Set();
+      ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
+      const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ sku: 1, nombre: 1, costo: 1, moneda: 1, rubro: 1 }).toArray() : [];
+      const pm = new Map(prods.map(p => [String(p._id), p]));
+      const grupos = new Map();
+      ventas.forEach(v => {
+        const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
+        const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
+        (v.items || []).forEach(it => {
+          const p = it.productoId ? pm.get(String(it.productoId)) : null;
+          if (p && p.costo != null && !(p.moneda === 'USD' && !(cotVigente || (v.moneda === 'USD' && Number(v.cotizacionDolar))))) return; // tiene costo
+          const clave = p ? String(p._id) : 'libre:' + String(it.sku || it.descripcion || it.nombre || it.producto || '').toLowerCase();
+          let g = grupos.get(clave);
+          if (!g) {
+            g = { productoId: p ? String(p._id) : null, sku: (p && p.sku) || it.sku || '', nombre: (p && p.nombre) || it.descripcion || it.nombre || it.producto || '(sin descripción)', rubro: (p && p.rubro) || '', moneda: (p && p.moneda) || 'ARS', vendido: 0, cantidad: 0 };
+            grupos.set(clave, g);
+          }
+          g.vendido += Number(it.subtotal || 0) * usd * nc;
+          g.cantidad += Number(it.cantidad || 0) * nc;
+        });
+      });
+      const lista = [...grupos.values()].map(g => Object.assign(g, { vendido: Math.round(g.vendido * 100) / 100 })).sort((a, b) => b.vendido - a.vendido);
+      return { desde: desdeS, hasta: hastaS, productos: lista.filter(g => g.productoId), libres: lista.filter(g => !g.productoId) };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Carga el costo de un producto desde el informe (solo toca costo y, si se manda, moneda).
+router.put('/resultados/sin-costo/:productoId', authInforme('informe_resultados'), async (req, res) => {
+  try {
+    const id = toObjectId(req.params.productoId);
+    if (!id) throw err(400, 'id inválido');
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const costo = Number(req.body && req.body.costo);
+    if (req.body == null || req.body.costo === '' || !Number.isFinite(costo) || costo < 0) throw err(400, 'El costo tiene que ser un número mayor o igual a 0.');
+    const set = { costo: Math.round(costo * 100) / 100, updatedAt: new Date() };
+    if (req.body.moneda === 'USD' || req.body.moneda === 'ARS') set.moneda = req.body.moneda;
+    const r = await conReintento(async () => (await getDb()).collection('productos_catalogo').updateOne({ _id: id, orgId: req.orgId }, { $set: set }));
+    if (!r.matchedCount) throw err(404, 'Producto no encontrado');
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/resultados', authInforme('informe_resultados'), async (req, res) => {
   try {
     const d = await armarResultados(req);

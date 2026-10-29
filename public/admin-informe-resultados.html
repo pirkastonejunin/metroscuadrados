@@ -101,7 +101,7 @@
       <button data-iconizado="1" class="btn secondary" onclick="exportar()" title="Descargar este estado de resultados en Excel">Exportar a Excel</button>
       <span class="tb-info" title="Ventas netas: ventas del período sin IVA, restando notas de crédito. Costo de mercadería: cantidad vendida por el costo actual de cada producto (aproximado: si el costo cambió, usa el de hoy). Gastos: gastos cargados sin IVA, por concepto; las compras de mercadería no son gasto, ya están en el costo. Resultado = ventas netas - costo - gastos; no incluye impuesto a las ganancias ni intereses.">i</span>
     </div>
-    <div id="err"></div><div id="cfgPanel" class="hidden aviso" style="background:var(--card);border:1px solid var(--border)"></div><div id="aviso"></div>
+    <div id="err"></div><div id="cfgPanel" class="hidden aviso" style="background:var(--card);border:1px solid var(--border)"></div><div id="aviso"></div><div id="sinCostoPanel" class="hidden aviso" style="background:var(--card);border:1px solid var(--border)"></div>
     <div class="kpis">
       <div class="kpi"><div class="et">Ventas netas</div><div class="val" id="kVen">$ —</div></div>
       <div class="kpi" title="Ventas netas menos costo de mercadería vendida"><div class="et">Margen bruto</div><div class="val" id="kMar">—</div></div>
@@ -182,6 +182,27 @@ function params(extra){
 }
 const cls = n => n > 0 ? 'pos' : (n < 0 ? 'neg' : '');
 
+// Productos vendidos sin costo: lista con lo vendido de cada uno y un campo para cargar el costo ahí mismo.
+async function panelSinCosto(){
+  const el = $('sinCostoPanel'); el.classList.remove('hidden'); el.innerHTML = 'Buscando productos sin costo…';
+  try{
+    const r = await fetch(BASE + '/resultados/sin-costo?' + params(), {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const fila = p => `<tr id="sc_${p.productoId}"><td>${escapeHtml(p.sku)}</td><td>${escapeHtml(p.nombre)}<div class="muted" style="font-size:11px">${escapeHtml(p.rubro)}</div></td><td class="n">${Number(p.cantidad).toLocaleString('es-AR')}</td><td class="n">${pesos(p.vendido)}</td>
+      <td style="white-space:nowrap"><select id="scm_${p.productoId}" style="width:62px"><option ${p.moneda!=='USD'?'selected':''}>ARS</option><option ${p.moneda==='USD'?'selected':''}>USD</option></select> <input id="scc_${p.productoId}" type="number" min="0" step="0.01" placeholder="costo" style="width:110px" onkeydown="if(event.key==='Enter')guardarCostoSC('${p.productoId}')"> <button class="btn" onclick="guardarCostoSC('${p.productoId}')">Guardar</button></td></tr>`;
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:8px"><b>Productos vendidos sin costo (${d.productos.length})</b><button class="btn secondary" style="margin-left:auto" onclick="$('sinCostoPanel').classList.add('hidden')">Cerrar</button></div>
+      <div class="muted" style="margin:4px 0 8px">Ordenados por lo vendido. Cargá el costo por unidad de venta (sin IVA) y tocá Guardar; al terminar, volvé a consultar el informe para ver el costo actualizado.</div>
+      ${d.productos.length ? `<div style="overflow:auto;max-height:55vh"><table style="width:100%"><thead><tr><th>SKU</th><th>Producto</th><th class="n">Cant.</th><th class="n">Vendido</th><th>Costo</th></tr></thead><tbody>${d.productos.map(fila).join('')}</tbody></table></div>` : '<div>No hay productos del catálogo sin costo en este período.</div>'}
+      ${d.libres.length ? `<div class="muted" style="margin-top:8px"><b>Ítems sin producto del catálogo (${d.libres.length})</b>: se cargaron como texto libre, así que no tienen dónde guardar un costo. Para que cuenten, hay que venderlos con un producto del catálogo. ${d.libres.slice(0,15).map(l => escapeHtml(l.nombre) + ' (' + pesos(l.vendido) + ')').join(' · ')}${d.libres.length > 15 ? ' …' : ''}</div>` : ''}`;
+  }catch(e){ el.innerHTML = '<div class="err">' + escapeHtml(e.message) + '</div>'; }
+}
+async function guardarCostoSC(id){
+  const v = $('scc_' + id).value; if (v === '') { alert('Escribí el costo'); return; }
+  const r = await fetch(BASE + '/resultados/sin-costo/' + id, {method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({costo: v, moneda: $('scm_' + id).value})});
+  const d = await r.json().catch(()=>({}));
+  if (!r.ok) { alert(d.error || 'No se pudo guardar'); return; }
+  const tr = $('sc_' + id); if (tr) { tr.style.opacity = .45; tr.querySelector('td:last-child').innerHTML = '✓ guardado'; }
+}
+
 async function cargar(){
   $('err').innerHTML = ''; $('aviso').innerHTML = '';
   let d;
@@ -194,7 +215,8 @@ async function cargar(){
   $('kMar').innerHTML = pesos(T.margenBruto) + ' <span class="muted" style="font-weight:700">' + pct(T.margenPct) + '</span>';
   $('kGas').textContent = pesos(T.gastosTotal);
   $('kRes').innerHTML = pesos(T.resultado) + ' <span style="font-size:.8rem;font-weight:700;color:#aeb2b8">' + pct(T.resultadoPct) + '</span>';
-  if (T.sinCosto) $('aviso').innerHTML = '<div class="aviso">Hay ' + pesos(T.sinCosto) + ' vendidos en productos <b>sin costo cargado</b>: no entran en el costo y el margen puede estar sobrestimado. Cargá el costo en la ficha del producto.</div>';
+  if (T.sinCosto) $('aviso').innerHTML = '<div class="aviso">Hay ' + pesos(T.sinCosto) + ' vendidos en productos <b>sin costo cargado</b>: no entran en el costo y el margen puede estar sobrestimado. Cargá el costo en la ficha del producto. <button class="btn secondary" style="margin-left:6px" onclick="panelSinCosto()">Ver y cargar costos</button></div>';
+  else $('sinCostoPanel').classList.add('hidden');
   const M = d.meses, col = (f, c) => M.map(m => '<td class="n ' + (c ? c(m) : '') + '">' + f(m) + '</td>').join('') + '<td class="n tot ' + (c ? c(T) : '') + '">' + f(T) + '</td>';
   $('tHead').innerHTML = '<tr><th></th>' + M.map(m => '<th class="n">' + etMes(m.mes) + '</th>').join('') + '<th class="n tot">Total</th></tr>';
   let h = '<tr class="sub"><td>Ventas netas</td>' + col(m => pesos(m.ventasNetas)) + '</tr>';
