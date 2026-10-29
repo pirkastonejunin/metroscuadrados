@@ -1552,7 +1552,7 @@ async function cargarPagos(){
       <td>${linkProveedor(p.proveedorId, p.proveedorNombre)}</td>
       <td>${p.importado ? '<span class="muted" title="Historial de Dux (sin forma de pago)">Dux</span>' : (TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor)}</td>
       <td>${money(p.monto)}</td>
-      <td class="muted">${p.importado ? (p.montoSinAplicar > 0 ? 'A cuenta: ' + money(p.montoSinAplicar) + ' sin aplicar' : 'Aplicado') : (p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}</td>
+      <td class="muted">${p.importado ? (p.montoSinAplicar > 0 ? 'A cuenta: ' + money(p.montoSinAplicar) + ' sin aplicar' : 'Aplicado') : (p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}${(!p.importado && p.montoSinAplicar > 0.009 && !p.anulado) ? ` <b style="color:#b45309">A cuenta sin aplicar: ${money(p.montoSinAplicar)}</b>` : ''}${(p.montoSinAplicar > 0.009 && !p.anulado) ? ` <button class="btn secondary" style="padding:2px 8px;font-size:12px" onclick="abrirAplicarPago(${pagosCache.indexOf(p)})">Aplicar</button>` : ''}${(!p.importado && !p.anulado && !(p.aplicaciones||[]).length) ? ` <button class="btn secondary" style="padding:2px 8px;font-size:12px" onclick="anularPagoACuenta(${pagosCache.indexOf(p)})">Anular</button>` : ''}</td>
       <td class="muted">${escapeHtml(p.nota||'')}</td>
     </tr>
   `).join('');
@@ -1649,7 +1649,7 @@ function abrirPagoCuenta(){
         </div>
         <div style="margin-top:10px"><label>Nota</label><input id="pcNota" placeholder="Opcional"></div>
 
-        <div class="section-title">Aplicar a compras pendientes</div>
+        <div class="section-title">Aplicar a compras pendientes <span class="muted" style="font-weight:400;font-size:12px">(opcional: si no elegís ninguna, el pago queda a cuenta del proveedor y lo aplicás después desde Pagos)</span></div>
         <div id="pcCompras"><p class="muted">Elegí un proveedor para ver sus compras pendientes.</p></div>
         <div class="muted" id="pcRepartido" style="margin-top:8px"></div>
 
@@ -1731,7 +1731,7 @@ function actualizarRepartidoPagoCuenta(){
   if (!el) return;
   const diff = Math.round((monto - repartido) * 100) / 100;
   if (diff === 0 && monto > 0) el.innerHTML = `<span style="color:var(--ok)">Repartido: ${money(repartido)} de ${money(monto)} ✓</span>`;
-  else el.innerHTML = `Repartido: ${money(repartido)} de ${money(monto)}${diff !== 0 ? ' — faltan ' + money(diff) : ''}`;
+  else el.innerHTML = `Repartido: ${money(repartido)} de ${money(monto)}${diff > 0 ? ' — quedan ' + money(diff) + ' a cuenta (sin aplicar)' : (diff < 0 ? ' — te pasaste por ' + money(-diff) : '')}`;
 }
 
 function juntarAplicacionesPagoCuenta(){
@@ -1745,6 +1745,61 @@ function juntarAplicacionesPagoCuenta(){
   return aplicaciones;
 }
 
+// Aplicar después un pago que quedó a cuenta (sin compra, o aplicado en parte) a una o más compras con saldo del mismo proveedor.
+let apPago = null, apCompras = [];
+async function abrirAplicarPago(i){
+  apPago = pagosCache[i]; if (!apPago) return;
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg"><div class="modal wide">
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>Aplicar pago a compras</h2>
+      <p class="muted">${escapeHtml(apPago.proveedorNombre || '')} — pago del ${fechaCorta(apPago.fecha)} por ${money(apPago.monto)}. Sin aplicar: <b>${money(apPago.montoSinAplicar)}</b></p>
+      <div id="apCompras"><p class="muted">Cargando…</p></div>
+      <div class="muted" id="apResumen" style="margin-top:8px"></div>
+      <div class="err" id="apErr"></div>
+      <button class="btn" style="margin-top:10px" onclick="confirmarAplicarPago()">Aplicar</button>
+    </div></div>`;
+  const r = await fetch(BASE + '?sucursal=1&proveedorId=' + apPago.proveedorId, {headers: headersPc()});
+  apCompras = (r.ok ? await r.json() : []).filter(c => c.estado !== 'anulada' && c.saldoPendiente > 0);
+  const cont = document.getElementById('apCompras');
+  if (!apCompras.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene compras con saldo pendiente en esta sucursal.</p>'; return; }
+  cont.innerHTML = apCompras.map((c, k) => `
+    <div class="fila-pago-cuenta" data-k="${k}" data-saldo="${c.saldoPendiente}">
+      <input type="checkbox" onchange="apFila(this)">
+      <div class="info">${c.numero ? 'Compra #' + c.numero : 'Compra'}${c.comprobanteNumero ? ' · ' + (c.puntoVenta ? c.puntoVenta + '-' : '') + c.comprobanteNumero : ''} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
+      <input type="number" min="0" step="0.01" value="0" disabled oninput="apResumen()">
+    </div>`).join('');
+  apResumen();
+}
+function apSuma(){ let t = 0; document.querySelectorAll('#apCompras .fila-pago-cuenta').forEach(f => { if (f.querySelector('input[type="checkbox"]').checked) t += Number(f.querySelector('input[type="number"]').value) || 0; }); return Math.round(t * 100) / 100; }
+function apFila(cb){
+  const f = cb.closest('.fila-pago-cuenta'), inp = f.querySelector('input[type="number"]'); inp.disabled = !cb.checked;
+  inp.value = cb.checked ? Math.max(0, Math.min(Number(f.dataset.saldo), Math.round(((apPago.montoSinAplicar || 0) - apSuma()) * 100) / 100)) : 0;
+  apResumen();
+}
+function apResumen(){ const el = document.getElementById('apResumen'); if (el) el.textContent = `Aplicando ${money(apSuma())} de ${money(apPago.montoSinAplicar)} sin aplicar.`; }
+async function confirmarAplicarPago(){
+  const err = document.getElementById('apErr'); err.textContent = '';
+  const aplicaciones = [];
+  document.querySelectorAll('#apCompras .fila-pago-cuenta').forEach(f => { const m = Number(f.querySelector('input[type="number"]').value) || 0; if (f.querySelector('input[type="checkbox"]').checked && m > 0) aplicaciones.push({ compraId: apCompras[Number(f.dataset.k)]._id, monto: m }); });
+  if (!aplicaciones.length) { err.textContent = 'Elegí al menos una compra y el monto a aplicar'; return; }
+  if (apSuma() > (apPago.montoSinAplicar || 0) + 0.01) { err.textContent = 'Estás aplicando más de lo que queda sin aplicar de este pago'; return; }
+  try{
+    const r = await fetchUnico(BASE + '/pagos-cuenta/' + apPago._id + '/aplicar', {method:'POST', headers: headersPc(true), body: JSON.stringify({ aplicaciones })});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cerrarModal(); await cargarPagos(); await cargarSaldosProveedores(); await cargarCompras();
+  }catch(e){ err.textContent = e.message; }
+}
+async function anularPagoACuenta(i){
+  const p = pagosCache[i]; if (!p) return;
+  if (!confirm(`¿Anular el pago a cuenta de ${money(p.monto)} a ${p.proveedorNombre || 'el proveedor'}? Se devuelve la plata a la caja/banco.`)) return;
+  try{
+    const r = await fetch(BASE + '/pagos-cuenta/' + p._id + '/anular', {method:'POST', headers: headersPc(true), body: JSON.stringify({})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    await cargarPagos(); await cargarSaldosProveedores();
+  }catch(e){ alert(e.message); }
+}
+
 async function confirmarPagoCuenta(){
   const tipoValor = document.getElementById('pcTipoValor').value;
   const proveedorId = document.getElementById('pcProveedor').value;
@@ -1753,9 +1808,11 @@ async function confirmarPagoCuenta(){
   document.getElementById('pcErr').textContent = '';
   if (!proveedorId) { document.getElementById('pcErr').textContent = 'Elegí un proveedor'; return; }
   if (!monto || monto <= 0) { document.getElementById('pcErr').textContent = 'El monto tiene que ser mayor a 0'; return; }
-  if (!aplicaciones.length) { document.getElementById('pcErr').textContent = 'Elegí a qué compra(s) aplicar el pago'; return; }
   const sumaAplicado = Math.round(aplicaciones.reduce((a,x) => a + x.monto, 0) * 100) / 100;
-  if (Math.abs(sumaAplicado - monto) > 0.01) { document.getElementById('pcErr').textContent = `Lo repartido (${money(sumaAplicado)}) no coincide con el monto del pago (${money(monto)})`; return; }
+  if (sumaAplicado > monto + 0.01) { document.getElementById('pcErr').textContent = `Lo repartido (${money(sumaAplicado)}) supera el monto del pago (${money(monto)})`; return; }
+  // Sin compra elegida (o aplicando solo una parte) el pago se guarda igual: lo que sobra queda a cuenta del proveedor.
+  const sinAplicar = Math.round((monto - sumaAplicado) * 100) / 100;
+  if (sinAplicar > 0.01 && !confirm(`Se registra el pago de ${money(monto)}. ${money(sinAplicar)} quedan A CUENTA del proveedor, sin aplicar a una compra (después los aplicás desde Pagos → Aplicar). ¿Seguimos?`)) return;
 
   const body = {
     proveedorId, monto, aplicaciones,

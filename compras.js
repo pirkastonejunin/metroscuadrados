@@ -753,7 +753,7 @@ router.get('/saldos-proveedores', authAdmin, async (req, res) => {
       gastos.forEach(g => lista.push(g));
       // Pagos a cuenta del historial de Dux que todavía no se imputaron a una factura (se descuentan del saldo).
       const aCuenta = await db.collection('compras_pagos').aggregate([
-        { $match: Object.assign({ importado: true, montoSinAplicar: { $gt: 0 } }, fo) },
+        { $match: Object.assign({ montoSinAplicar: { $gt: 0 }, anulado: { $ne: true } }, fo) },
         { $group: { _id: '$proveedorId', proveedorNombre: { $first: '$proveedorNombre' }, aCuenta: { $sum: '$montoSinAplicar' } } }
       ]).toArray();
       // Ajustes manuales de saldo: el neto por proveedor suma a lo que debemos (si es +) o cuenta como pago a cuenta (si es −).
@@ -1503,9 +1503,9 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   }
   // Doble clic: el mismo pago (mismo proveedor, monto, forma, caja y compras) en los últimos 20 segundos se rechaza.
   const repetido = await db.collection('compras_pagos').findOne(Object.assign({
-    proveedorId, monto: montoTotal, tipoValor, createdAt: { $gte: new Date(Date.now() - 20000) },
-    'aplicaciones.compraId': { $all: aplicaciones.map(a => a.compraId) }, aplicaciones: { $size: aplicaciones.length }
-  }, cuentaId ? { cuentaId } : {}, filtroOrg(req)));
+    proveedorId, monto: montoTotal, tipoValor, createdAt: { $gte: new Date(Date.now() - 20000) }, anulado: { $ne: true },
+    aplicaciones: { $size: aplicaciones.length }
+  }, aplicaciones.length ? { 'aplicaciones.compraId': { $all: aplicaciones.map(a => a.compraId) } } : {}, cuentaId ? { cuentaId } : {}, filtroOrg(req)));
   if (repetido) throw err(409, 'Este pago ya se registró hace unos segundos (¿doble clic?). Revisá la pestaña Pagos antes de cargarlo de nuevo.');
 
   if (tipoValor === 'cheque') {
@@ -1565,7 +1565,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   }
   const pagoCuenta = Object.assign({
     _id: pagoCuentaId, proveedorId, proveedorNombre, fecha, tipoValor, monto: montoTotal, nota, usuarioNombre,
-    aplicaciones: aplicacionesGuardadas, orgId: req.orgId || (compras[0] && compras[0].orgId) || null, createdAt: ahora
+    aplicaciones: aplicacionesGuardadas, montoSinAplicar: Math.max(0, Math.round((montoTotal - aplicacionesGuardadas.reduce((a, x) => a + x.monto, 0)) * 100) / 100), orgId: req.orgId || (compras[0] && compras[0].orgId) || null, createdAt: ahora
   }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, movimientoId ? { movimientoId } : {}, chequeId ? { chequeId } : {}, chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {}, tarjetaDatos || {});
   const r = await db.collection('compras_pagos').insertOne(pagoCuenta);
   pagoCuenta._id = r.insertedId;
@@ -1694,7 +1694,7 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
     const datosPago = normalizarDatosPago(body, fecha);
 
     const aplicacionesRaw = Array.isArray(body.aplicaciones) ? body.aplicaciones : [];
-    if (!aplicacionesRaw.length) throw err(400, 'Elegí a qué compra(s) aplicar el pago.');
+    // Se puede guardar sin elegir compra (o aplicando solo una parte): lo que no se aplica queda "a cuenta" del proveedor y se aplica después.
     const aplicaciones = aplicacionesRaw.map(a => {
       const compraId = toObjectId(a.compraId);
       const montoAplicado = normalizarMontoNoNegativo(a.monto, 'El monto aplicado a una compra');
@@ -1703,7 +1703,7 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
       return { compraId, monto: montoAplicado };
     });
     const sumaAplicaciones = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
-    if (Math.abs(sumaAplicaciones - monto) > 0.01) throw err(400, `Lo repartido entre las compras (${sumaAplicaciones}) no coincide con el monto del pago (${monto}).`);
+    if (sumaAplicaciones > monto + 0.01) throw err(400, `Lo repartido entre las compras (${sumaAplicaciones}) supera el monto del pago (${monto}).`);
 
     const resultado = await conReintento(async () => {
       const db = await getDb();
@@ -1719,6 +1719,100 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
       return pagoCuenta;
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Aplicar DESPUÉS un pago que quedó "a cuenta" (sin compra elegida, o aplicado solo en parte): se reparte entre compras con saldo del mismo proveedor.
+router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
+  try {
+    const pid = toObjectId(req.params.id);
+    if (!pid) throw err(400, 'Pago inválido');
+    const raw = Array.isArray((req.body || {}).aplicaciones) ? req.body.aplicaciones : [];
+    if (!raw.length) throw err(400, 'Elegí a qué compra(s) aplicar el pago.');
+    const aplicaciones = raw.map(a => {
+      const compraId = toObjectId(a.compraId); const monto = normalizarMontoNoNegativo(a.monto, 'El monto aplicado a una compra');
+      if (!compraId) throw err(400, 'Una de las compras elegidas es inválida');
+      if (monto <= 0) throw err(400, 'El monto aplicado a cada compra tiene que ser mayor a 0');
+      return { compraId, monto };
+    });
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const pc = await db.collection('compras_pagos').findOne(Object.assign({ _id: pid }, await filtroOrgConCompartidos(db, req)));
+      if (!pc) throw err(404, 'Pago no encontrado');
+      if (pc.anulado) throw err(400, 'Ese pago está anulado.');
+      const libre = Math.round((pc.montoSinAplicar || 0) * 100) / 100;
+      if (!(libre > 0.009)) throw err(400, 'Ese pago ya está aplicado por completo.');
+      const suma = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
+      if (suma > libre + 0.01) throw err(400, `Lo que querés aplicar (${suma}) supera lo que queda sin aplicar de este pago (${libre}).`);
+      const compras = [];
+      for (const a of aplicaciones) {
+        const c = await db.collection('compras').findOne({ _id: a.compraId });
+        if (!c) throw err(404, 'Una de las compras elegidas no existe.');
+        if (c.estado === 'anulada') throw err(400, `La compra #${c.numero} está anulada.`);
+        if (String(c.proveedorId) !== String(pc.proveedorId)) throw err(400, `La compra #${c.numero} no es de este proveedor.`);
+        if (a.monto > c.saldoPendiente + 0.01) throw err(400, `El monto aplicado a la compra #${c.numero} (${a.monto}) es mayor que su saldo pendiente (${c.saldoPendiente}).`);
+        compras.push(c);
+      }
+      // Se reserva primero lo que se va a aplicar (si dos personas aplican a la vez, el segundo falla en vez de aplicar de más).
+      const reserva = await db.collection('compras_pagos').updateOne({ _id: pid, anulado: { $ne: true }, montoSinAplicar: { $gte: suma - 0.005 } }, { $inc: { montoSinAplicar: -suma } });
+      if (!reserva.modifiedCount) throw err(409, 'Ese pago cambió mientras lo aplicabas. Refrescá y probá de nuevo.');
+      const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+      const guardadas = [];
+      for (let i = 0; i < aplicaciones.length; i++) {
+        const a = aplicaciones[i], c = compras[i];
+        const linea = Object.assign({ tipoValor: pc.tipoValor || 'efectivo', monto: a.monto, fecha: pc.fecha, nota: pc.nota || '', usuarioNombre, pagoCuentaId: pc._id, aplicadoDespues: true },
+          pc.cuentaTipo ? { cuentaTipo: pc.cuentaTipo, cuentaId: pc.cuentaId } : {}, pc.movimientoId ? { movimientoId: pc.movimientoId } : {}, pc.chequeId ? { chequeId: pc.chequeId } : {},
+          pc.chequeIds ? { chequeIds: pc.chequeIds, chequesNumeros: pc.chequesNumeros || [] } : {});
+        const totalPagado = (c.totalPagado || 0) + a.monto;
+        await db.collection('compras').updateOne({ _id: c._id }, { $push: { pagos: linea }, $set: { totalPagado, saldoPendiente: Math.max(0, c.total - totalPagado), updatedAt: new Date() } });
+        guardadas.push({ compraId: c._id, compraNumero: c.numero, monto: a.monto });
+      }
+      await db.collection('compras_pagos').updateOne({ _id: pid }, { $push: { aplicaciones: { $each: guardadas } } });
+      return db.collection('compras_pagos').findOne({ _id: pid });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Anular un pago a cuenta que todavía no se aplicó a ninguna compra (si ya se aplicó, se anula desde la compra, como siempre).
+router.post('/pagos-cuenta/:id/anular', authAdmin, async (req, res) => {
+  try {
+    const pid = toObjectId(req.params.id);
+    if (!pid) throw err(400, 'Pago inválido');
+    const motivo = normalizarTexto(req.body && req.body.motivo);
+    const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const pc = await db.collection('compras_pagos').findOne(Object.assign({ _id: pid }, filtroOrg(req)));
+      if (!pc) throw err(404, 'Pago no encontrado');
+      if (pc.anulado) throw err(400, 'Ese pago ya está anulado.');
+      if ((pc.aplicaciones || []).length) throw err(400, 'Ese pago ya se aplicó a una compra: anulalo desde esa compra.');
+      let cheques = [];
+      if (pc.tipoValor === 'cheque') {
+        const ch = pc.chequeId ? await db.collection('cheques').findOne({ _id: pc.chequeId }) : null;
+        if (ch && ch.estado !== 'emitido') throw err(400, `El cheque Nº ${ch.numero || ''} ya está "${ch.estado}": no se puede anular el pago. Resolvelo primero desde Cheques.`);
+        if (ch) cheques = [ch];
+      } else if (pc.tipoValor === 'cheque_tercero') {
+        cheques = await db.collection('cheques').find({ _id: { $in: pc.chequeIds || [] } }).toArray();
+        const mal = cheques.find(c => c.estado !== 'endosado');
+        if (mal) throw err(400, `El cheque Nº ${mal.numero || ''} está "${mal.estado}" (no sigue endosado al proveedor): no se puede anular el pago.`);
+      }
+      const m = await db.collection('compras_pagos').updateOne({ _id: pid, anulado: { $ne: true } }, { $set: { anulado: true, anuladoEn: new Date(), anuladoPor: usuarioNombre, anuladoMotivo: motivo } });
+      if (!m.modifiedCount) throw err(409, 'Ese pago ya se estaba anulando.');
+      const ahora = new Date();
+      try {
+        if (pc.tipoValor !== 'cheque' && pc.tipoValor !== 'cheque_tercero') {
+          await require('./tesoreria').revertirEgresoPago(db, req, { movimientoId: pc.movimientoId || null, cuentaTipo: pc.cuentaTipo, cuentaId: pc.cuentaId, monto: pc.monto, origen: 'compra', motivo: `Pago a cuenta — ${pc.proveedorNombre || ''}`, fecha: pc.fecha, motivoAnulacion: motivo });
+        }
+        if (pc.tipoValor === 'cheque' && cheques.length) await db.collection('cheques').updateOne({ _id: cheques[0]._id }, { $set: { estado: 'anulado', anuladoEn: ahora, anuladoMotivo: motivo || 'Pago anulado', updatedAt: ahora } });
+        if (pc.tipoValor === 'cheque_tercero' && cheques.length) await db.collection('cheques').updateMany({ _id: { $in: cheques.map(c => c._id) }, estado: 'endosado' }, { $set: { estado: 'en_cartera', endosadoA: null, endosadoProveedorId: null, endosadoFecha: null, updatedAt: ahora } });
+      } catch (e) {
+        await db.collection('compras_pagos').updateOne({ _id: pid }, { $unset: { anulado: '', anuladoEn: '', anuladoPor: '', anuladoMotivo: '' } });
+        throw e;
+      }
+      return db.collection('compras_pagos').findOne({ _id: pid });
+    });
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
