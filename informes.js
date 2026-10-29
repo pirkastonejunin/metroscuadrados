@@ -405,13 +405,20 @@ function agruparGastos(conceptos) {
   return { otros: conceptos.filter(c => !c.startsWith(PREF_SUELDOS)), sueldos: conceptos.filter(c => c.startsWith(PREF_SUELDOS)).sort((a, b) => pos(a) - pos(b)) };
 }
 
+async function orgIdsDelUsuario(db, u) {
+  const orgs = u.rol.protegido ? await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()
+    : (u.orgIds || []).map(toObjectId).filter(Boolean).map(_id => ({ _id }));
+  return orgs.map(o => o._id);
+}
+
 async function armarResultados(req) {
   const hoy = fechaAR(new Date());
   const desdeS = req.query.desde || hoy.slice(0, 4) + '-01-01';
   const hastaS = req.query.hasta || hoy;
   if (!validarFecha(desdeS) || !validarFecha(hastaS)) throw err(400, 'Las fechas tienen que tener el formato AAAA-MM-DD.');
   if (desdeS > hastaS) throw err(400, 'La fecha "desde" no puede ser posterior a "hasta".');
-  const todas = req.query.alcance === 'todas';
+  // Con "Todas las organizaciones" elegido arriba no hay una sucursal puntual (req.orgId null): se suman todas las del usuario.
+  const todas = req.query.alcance === 'todas' || !req.orgId;
   return conReintento(async () => {
     const db = await getDb();
     let orgIds;
@@ -496,12 +503,12 @@ router.get('/resultados/sin-costo', authInforme('informe_resultados'), async (re
     const desdeS = req.query.desde || hoy.slice(0, 4) + '-01-01';
     const hastaS = req.query.hasta || hoy;
     if (!validarFecha(desdeS) || !validarFecha(hastaS)) throw err(400, 'Las fechas tienen que tener el formato AAAA-MM-DD.');
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const out = await conReintento(async () => {
       const db = await getDb();
-      const cotDoc = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' });
+      const orgIds = (req.query.alcance === 'todas' || !req.orgId) ? await orgIdsDelUsuario(db, req.usuario) : [req.orgId];
+      const cotDoc = await db.collection('config_general').findOne({ orgId: req.orgId || orgIds[0], clave: 'cotizacionDolar' });
       const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
-      const ventas = await db.collection('ventas').find({ orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: { $gte: inicioDia(desdeS), $lte: finDia(hastaS) } }).limit(50000).toArray();
+      const ventas = await db.collection('ventas').find({ orgId: { $in: orgIds }, estado: { $ne: 'anulada' }, fecha: { $gte: inicioDia(desdeS), $lte: finDia(hastaS) } }).limit(50000).toArray();
       const ids = new Set();
       ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
       const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ sku: 1, nombre: 1, costo: 1, moneda: 1, rubro: 1 }).toArray() : [];
@@ -535,12 +542,11 @@ router.put('/resultados/sin-costo/:productoId', authInforme('informe_resultados'
   try {
     const id = toObjectId(req.params.productoId);
     if (!id) throw err(400, 'id inválido');
-    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
     const costo = Number(req.body && req.body.costo);
     if (req.body == null || req.body.costo === '' || !Number.isFinite(costo) || costo < 0) throw err(400, 'El costo tiene que ser un número mayor o igual a 0.');
     const set = { costo: Math.round(costo * 100) / 100, updatedAt: new Date() };
     if (req.body.moneda === 'USD' || req.body.moneda === 'ARS') set.moneda = req.body.moneda;
-    const r = await conReintento(async () => (await getDb()).collection('productos_catalogo').updateOne({ _id: id, orgId: req.orgId }, { $set: set }));
+    const r = await conReintento(async () => { const db = await getDb(); const orgIds = req.orgId ? [req.orgId] : await orgIdsDelUsuario(db, req.usuario); return db.collection('productos_catalogo').updateOne({ _id: id, orgId: { $in: orgIds } }, { $set: set }); });
     if (!r.matchedCount) throw err(404, 'Producto no encontrado');
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
