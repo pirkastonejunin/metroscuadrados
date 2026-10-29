@@ -200,13 +200,16 @@
     <section id="tab-listas" class="hidden">
       <div class="card">
         <div class="row">
-          <p class="muted" style="flex:1;min-width:200px;margin:0">El precio de cada lista se recalcula siempre con el costo actual de cada producto — no queda congelado.</p>
+          <p class="muted" style="flex:1;min-width:200px;margin:0">Acá se arman todas las listas (mayorista, público, colocado…), por % o $ sobre el costo o cargando el precio de cada artículo. Se recalculan con el costo actual y se mandan solas a la ficha de cada producto en Productos.</p>
+          <button class="btn secondary" id="btnSincListas" onclick="sincronizarListasProductos()">Sincronizar con Productos</button>
           <button class="btn btn-crear-org" onclick="abrirNuevaLista()">+ Nueva lista</button>
         </div>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-weight:500"><input type="checkbox" style="width:auto" id="cfgSincCosto" checked onchange="guardarCfgSincCosto()"> Mantener el costo de la ficha de cada producto igual al costo de receta</label>
+        <div class="muted" id="sincListasMsg" style="margin-top:6px"></div>
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>Lista</th><th>% sobre costo</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th>Lista</th><th>Cálculo</th><th>Lista en Productos</th><th>Estado</th><th></th></tr></thead>
           <tbody id="listasBody"></tbody>
         </table>
       </div>
@@ -849,41 +852,90 @@ function exportarFormulacion(){
 }
 
 // ---------------- LISTAS DE PRECIO ----------------
+// Las listas se arman acá y se mandan solas a la ficha de cada producto (costo y precio de cada lista en Productos).
 let LISTAS_PRECIO = [];
+let LISTAS_PRODUCTOS = [];
+function descCalculoLista(l){
+  if (l.tipo === 'monto') return '+ ' + money(l.monto) + ' sobre el costo';
+  if (l.tipo === 'manual') return 'Manual (precio por artículo)';
+  return '+' + Number(l.porcentaje).toLocaleString('es-AR') + '% sobre el costo';
+}
 async function cargarListasPrecio(){
-  const r = await fetch(BASE + '/listas-precio', {headers: headersAuth()});
+  const [r, rp, rc] = await Promise.all([
+    fetch(BASE + '/listas-precio', {headers: headersAuth()}),
+    fetch('/api/productos/listas-precio', {headers: headersAuth()}).catch(() => null),
+    fetch(BASE + '/config-listas', {headers: headersAuth()}).catch(() => null)
+  ]);
   LISTAS_PRECIO = r.ok ? await r.json() : [];
+  LISTAS_PRODUCTOS = rp && rp.ok ? await rp.json() : [];
+  if (rc && rc.ok) { const c = await rc.json(); const el = document.getElementById('cfgSincCosto'); if (el) el.checked = c.sincronizaCosto; }
   renderListasPrecio();
+}
+function nombreListaProductos(l){
+  const d = LISTAS_PRODUCTOS.find(x => x._id === l.listaProductosId);
+  return d ? d.nombre : (l.sincronizar === false ? 'No se envía a Productos' : 'Se crea / busca por nombre');
 }
 function renderListasPrecio(){
   document.getElementById('listasBody').innerHTML = LISTAS_PRECIO.map(l => `
     <tr>
       <td><strong>${escapeHtml(l.nombre)}</strong></td>
-      <td>+${Number(l.porcentaje).toLocaleString('es-AR')}%</td>
+      <td>${escapeHtml(descCalculoLista(l))}</td>
+      <td class="muted">${l.sincronizar === false ? '—' : '↔ ' + escapeHtml(nombreListaProductos(l))}</td>
       <td><span class="pill ${l.activa===false?'inactivo':'activo'}">${l.activa===false?'Inactiva':'Activa'}</span></td>
       <td style="white-space:nowrap">
-        <button class="btn small" onclick="verListaPrecio('${l._id}')">Ver / Exportar</button>
+        <button class="btn small" onclick="verListaPrecio('${l._id}')">Precios por artículo</button>
         <button class="btn small secondary" onclick="editarListaPrecio('${l._id}')">Editar</button>
         <button class="btn small danger" onclick="eliminarListaPrecio('${l._id}')">Borrar</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="4" class="muted">Todavía no hay listas de precio creadas.</td></tr>';
+  `).join('') || '<tr><td colspan="5" class="muted">Todavía no hay listas de precio creadas.</td></tr>';
+}
+function formLista(l){
+  l = l || { tipo: 'porcentaje', porcentaje: '', monto: '', sincronizar: true, listaProductosId: null };
+  const tipo = l.tipo || 'porcentaje';
+  return `
+    <div class="campo-edit"><label>Nombre</label><input id="flNombre" value="${escapeHtml(l.nombre||'')}" placeholder="Ej: Mayorista, Consumidor final, Colocado"></div>
+    <div class="campo-edit"><label>Cómo se calcula</label>
+      <select id="flTipo" onchange="actualizarTipoLista()">
+        <option value="porcentaje" ${tipo==='porcentaje'?'selected':''}>% sobre el costo</option>
+        <option value="monto" ${tipo==='monto'?'selected':''}>$ fijo sobre el costo</option>
+        <option value="manual" ${tipo==='manual'?'selected':''}>Manual: cargo el precio de cada artículo</option>
+      </select></div>
+    <div class="campo-edit" id="flPctWrap"><label>% sobre el costo</label><input id="flPorcentaje" type="number" step="0.01" value="${l.porcentaje===undefined?'':l.porcentaje}" placeholder="Ej: 30"></div>
+    <div class="campo-edit" id="flMontoWrap"><label>$ sobre el costo (se suma al costo de cada artículo)</label><input id="flMonto" type="number" step="0.01" value="${l.monto===undefined?'':l.monto}" placeholder="Ej: 5000"></div>
+    <div class="campo-edit"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:auto" id="flSincronizar" ${l.sincronizar===false?'':'checked'}> Mandar esta lista a la ficha de los productos</label>
+      <select id="flListaProd" style="margin-top:6px"><option value="">Lista de Productos: buscar por nombre o crear</option>${LISTAS_PRODUCTOS.map(d => `<option value="${d._id}" ${d._id===l.listaProductosId?'selected':''}>${escapeHtml(d.nombre)}${d.predeterminada?' (Consumidor Final)':''}</option>`).join('')}</select>
+      <div class="muted" style="font-size:12px;margin-top:4px">Los precios de esta lista se cargan solos en la lista de Productos elegida (en Consumidor Final también actualizan el precio de la ficha). Si el precio de un artículo lo cargás a mano acá, ese valor es el que se manda.</div></div>
+    ${l._id ? `<div class="campo-edit"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:auto" id="flActiva" ${l.activa===false?'':'checked'}> Lista activa</label></div>` : ''}
+    <div class="err" id="flErr"></div>`;
+}
+function actualizarTipoLista(){
+  const t = document.getElementById('flTipo').value;
+  document.getElementById('flPctWrap').style.display = t === 'porcentaje' ? '' : 'none';
+  document.getElementById('flMontoWrap').style.display = t === 'monto' ? '' : 'none';
+}
+function leerFormLista(){
+  return {
+    nombre: document.getElementById('flNombre').value.trim(),
+    tipo: document.getElementById('flTipo').value,
+    porcentaje: document.getElementById('flPorcentaje').value,
+    monto: document.getElementById('flMonto').value,
+    sincronizar: document.getElementById('flSincronizar').checked,
+    listaProductosId: document.getElementById('flListaProd').value || null
+  };
 }
 function abrirNuevaLista(){
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Nueva lista de precio</h2>
-    <div class="campo-edit"><label>Nombre</label><input id="flNombre" placeholder="Ej: Mayorista, Consumidor final"></div>
-    <div class="campo-edit"><label>% sobre el costo</label><input id="flPorcentaje" type="number" step="0.01" placeholder="Ej: 30"></div>
-    <div class="err" id="flErr"></div>
+    ${formLista(null)}
     <button class="btn" onclick="guardarNuevaLista()">Guardar</button>
   `);
+  actualizarTipoLista();
 }
 async function guardarNuevaLista(){
-  const nombre = document.getElementById('flNombre').value.trim();
-  const porcentaje = document.getElementById('flPorcentaje').value;
   try{
-    const r = await fetch(BASE + '/listas-precio', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({nombre, porcentaje})});
+    const r = await fetch(BASE + '/listas-precio', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(leerFormLista())});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
@@ -896,19 +948,15 @@ function editarListaPrecio(id){
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Editar lista de precio</h2>
-    <div class="campo-edit"><label>Nombre</label><input id="flNombre" value="${escapeHtml(l.nombre)}"></div>
-    <div class="campo-edit"><label>% sobre el costo</label><input id="flPorcentaje" type="number" step="0.01" value="${l.porcentaje}"></div>
-    <div class="campo-edit"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:auto" id="flActiva" ${l.activa===false?'':'checked'}> Lista activa</label></div>
-    <div class="err" id="flErr"></div>
+    ${formLista(l)}
     <button class="btn" onclick="guardarEdicionLista('${id}')">Guardar</button>
   `);
+  actualizarTipoLista();
 }
 async function guardarEdicionLista(id){
-  const nombre = document.getElementById('flNombre').value.trim();
-  const porcentaje = document.getElementById('flPorcentaje').value;
-  const activa = document.getElementById('flActiva').checked;
+  const body = leerFormLista(); body.activa = document.getElementById('flActiva').checked;
   try{
-    const r = await fetch(BASE + '/listas-precio/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({nombre, porcentaje, activa})});
+    const r = await fetch(BASE + '/listas-precio/' + id, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     cerrarModal();
@@ -916,9 +964,23 @@ async function guardarEdicionLista(id){
   }catch(e){ document.getElementById('flErr').textContent = e.message; }
 }
 async function eliminarListaPrecio(id){
-  if (!confirm('¿Borrar esta lista de precio? No se puede deshacer.')) return;
+  if (!confirm('¿Borrar esta lista de precio? No se puede deshacer. Los precios que ya se mandaron a Productos quedan como están.')) return;
   const r = await fetch(BASE + '/listas-precio/' + id, {method:'DELETE', headers: headersAuth()});
   if (r.ok) await cargarListasPrecio();
+}
+async function sincronizarListasProductos(){
+  const btn = document.getElementById('btnSincListas'); const out = document.getElementById('sincListasMsg');
+  btn.disabled = true; out.textContent = 'Sincronizando…';
+  try{
+    const r = await fetch(BASE + '/listas-precio/sincronizar-productos', {method:'POST', headers: headersAuthJson()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    out.textContent = `Listo: ${d.productos} fichas revisadas, ${d.costos} costos y ${d.precios} precios actualizados` + (d.listasCreadas ? `, ${d.listasCreadas} lista(s) creadas en Productos` : '') + (d.sinFicha ? `. ${d.sinFicha} productos de Producción no tienen ficha en Productos (cargales SKU y usá "Sincronizar con Productos").` : '.');
+    await cargarListasPrecio();
+  }catch(e){ out.textContent = e.message; }
+  btn.disabled = false;
+}
+async function guardarCfgSincCosto(){
+  await fetch(BASE + '/config-listas', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({sincronizaCosto: document.getElementById('cfgSincCosto').checked})});
 }
 async function verListaPrecio(id){
   const r = await fetch(BASE + '/listas-precio/' + id + '/detalle', {headers: headersAuth()});
@@ -928,21 +990,22 @@ async function verListaPrecio(id){
   const fechaLista = new Date().toLocaleDateString('es-AR');
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2>${escapeHtml(data.lista.nombre)} <span class="muted" style="font-weight:600;font-size:13px">(+${Number(data.lista.porcentaje).toLocaleString('es-AR')}% sobre costo)</span></h2>
-    <div class="muted" style="font-size:13px;margin-bottom:8px">Fecha: ${fechaLista}</div>
+    <h2>${escapeHtml(data.lista.nombre)} <span class="muted" style="font-weight:600;font-size:13px">(${escapeHtml(descCalculoLista(data.lista))})</span></h2>
+    <div class="muted" style="font-size:13px;margin-bottom:8px">Fecha: ${fechaLista}. Para fijar el precio de un artículo escribilo y tocá Guardar; para volver al cálculo de la lista, tocá "Quitar".</div>
+    <div style="overflow:auto;max-height:60vh">
     <table>
-      <thead><tr><th>Producto</th><th>Unidades/caja</th><th>Rinde/caja</th><th>Precio de lista</th></tr></thead>
+      <thead><tr><th>Producto</th><th>Costo</th><th>Precio de lista</th><th>Precio manual</th></tr></thead>
       <tbody>
         ${data.productos.map(p => `
-          <tr>
-            <td>${escapeHtml(p.nombre)}</td>
-            <td class="muted">${p.unidadesPorPaquete ? Number(p.unidadesPorPaquete).toLocaleString('es-AR') : '—'}</td>
-            <td class="muted">${p.rendimientoPorPaquete ? Number(p.rendimientoPorPaquete).toLocaleString('es-AR') + ' ' + (p.tipoCosteo==='m2'?'m²':'u') : '—'}</td>
-            <td><strong>${money(p.precio)}</strong></td>
+          <tr id="lp_${p.productoId}">
+            <td>${escapeHtml(p.nombre)}${p.sku ? ' <span class="muted">' + escapeHtml(p.sku) + '</span>' : ''}</td>
+            <td class="muted">${money(p.costoActual)}</td>
+            <td><strong id="lpp_${p.productoId}">${p.precio == null ? '—' : money(p.precio)}</strong>${p.manual ? ' <span class="pill activo" title="Precio cargado a mano">manual</span>' : ''}</td>
+            <td style="white-space:nowrap"><input id="lpi_${p.productoId}" type="number" step="0.01" min="0" style="width:110px" value="${p.manual ? Number(p.precio).toFixed(2) : ''}" placeholder="$"> <button class="btn small" onclick="guardarPrecioManualLista('${id}','${p.productoId}')">Guardar</button> ${p.manual ? `<button class="btn small secondary" onclick="quitarPrecioManualLista('${id}','${p.productoId}')">Quitar</button>` : ''}</td>
           </tr>
         `).join('') || '<tr><td colspan="4" class="muted">No hay productos activos todavía.</td></tr>'}
       </tbody>
-    </table>
+    </table></div>
     <div class="muted" style="font-size:12px;font-style:italic;margin-top:10px">Los precios pueden variar sin previo aviso.</div>
     <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn secondary" onclick="exportarListaPrecio()">Exportar CSV</button>
@@ -950,6 +1013,18 @@ async function verListaPrecio(id){
       <button class="btn secondary" onclick="exportarListaExcel('${id}')">Exportar Excel</button>
     </div>
   `, 'wide');
+}
+async function guardarPrecioManualLista(id, productoId){
+  const v = document.getElementById('lpi_' + productoId).value;
+  if (v === '') { alert('Escribí el precio'); return; }
+  const r = await fetch(BASE + '/listas-precio/' + id + '/precio/' + productoId, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({precio: v})});
+  const d = await r.json().catch(()=>({})); if (!r.ok) { alert(d.error || 'No se pudo guardar'); return; }
+  verListaPrecio(id);
+}
+async function quitarPrecioManualLista(id, productoId){
+  const r = await fetch(BASE + '/listas-precio/' + id + '/precio/' + productoId, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({precio: null})});
+  if (!r.ok) { alert('No se pudo quitar'); return; }
+  verListaPrecio(id);
 }
 function exportarListaPrecio(){
   const data = window.LISTA_DETALLE_ACTUAL;
@@ -960,7 +1035,7 @@ function exportarListaPrecio(){
     [],
     ['Producto', 'Unidades por caja', 'Rinde por caja', 'Precio de lista']
   ];
-  data.productos.forEach(p => filasCsv.push([
+  data.productos.filter(p => p.precio != null).forEach(p => filasCsv.push([
     p.nombre,
     p.unidadesPorPaquete || '',
     p.rendimientoPorPaquete ? p.rendimientoPorPaquete + (p.tipoCosteo==='m2'?' m²':' u') : '',
