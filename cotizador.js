@@ -2345,6 +2345,51 @@ router.get('/pdf/:id', async (req, res) => {
   }
 });
 
+// Link público al PDF de una cotización (para copiar / mandar al cliente):
+// /api/cotizador/pdf/:id pide login, así que el cliente no lo puede abrir.
+// Este crea (o reutiliza) un token y el cliente entra por GET /c/:token, sin
+// sesión, solo al PDF de ESA cotización (con la vista que se eligió).
+router.post('/link-publico/:id', async (req, res) => {
+  try {
+    const store = await getStoreFromQuery(req);
+    const col = await getCotizacionesCollection();
+    let oid;
+    try { oid = new ObjectId(req.params.id); } catch (e) { return res.status(400).json({ error: 'id inválido' }); }
+    const doc = await col.findOne({ _id: oid, store_id: store.store_id });
+    if (!doc) return res.status(404).json({ error: 'No encontrada.' });
+    const vista = (req.query.vista || (req.body && req.body.vista)) === 'simple' ? 'simple' : '';
+    const db = await getDb();
+    const filtro = { tipo: 'cotizacion', docId: oid, storeId: store.store_id, vista };
+    let link = await db.collection('links_publicos').findOne(filtro);
+    if (!link) {
+      link = Object.assign({ token: require('crypto').randomBytes(24).toString('hex'), createdAt: new Date(), creadoPor: (req.usuario && req.usuario.nombre) || '' }, filtro);
+      await db.collection('links_publicos').insertOne(link);
+    }
+    res.json({ token: link.token });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// Sin sesión: se monta en server.js como GET /c/:token.
+router.servirLinkPublico = async (req, res) => {
+  try {
+    const token = String(req.params.token || '');
+    if (!/^[0-9a-f]{48}$/.test(token)) return res.status(404).send('Link inválido');
+    const db = await getDb();
+    const link = await db.collection('links_publicos').findOne({ token, tipo: 'cotizacion' });
+    if (!link) return res.status(404).send('Link inválido o vencido');
+    const layer = router.stack.find((l) => l.route && l.route.path === '/pdf/:id' && l.route.methods.get);
+    if (!layer) return res.status(404).send('Documento no disponible');
+    const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+    const fake = Object.create(req);
+    fake.params = { id: String(link.docId) };
+    fake.query = { store_id: String(link.storeId), vista: link.vista || '' };
+    res.set('X-Robots-Tag', 'noindex, nofollow');
+    await handler(fake, res);
+  } catch (e) { if (!res.headersSent) res.status(500).send('No se pudo generar el PDF'); }
+};
+
 // Empuja precios a la tienda REAL de Tiendanube (2/10/2026, pedido de
 // Mato: "ponele un botón para cuando quiero que mi tiendanube se
 // sincronice con esa lista lo pueda hacer" — la lista con fórmula

@@ -742,16 +742,34 @@ function urlPdfCotizacion(id, vistaSimple){
 // ya le agrega el header x-admin-token a cualquier fetch() normal, así que
 // alcanza con pedir el PDF por fetch y abrir el blob resultante, en vez de
 // abrir la URL de la API directo.
+// Abre una pestaña en blanco ANTES del fetch (dentro del click) y después le
+// carga el PDF: si se abre recién tras el await, el navegador (sobre todo en
+// celulares) la bloquea como pop-up y parece que "no genera el PDF".
+function abrirPdfBlob(w, blob){
+  const url = URL.createObjectURL(blob);
+  if (w && !w.closed){ w.location.href = url; return; }
+  const a = document.createElement('a');
+  a.href = url; a.download = 'presupuesto.pdf';
+  document.body.appendChild(a); a.click(); a.remove();
+}
 async function abrirPdfCotizador(id, vistaSimple){
+  const w = window.open('', '_blank');
   try{
     const r = await fetch('/api/cotizador/pdf/' + id + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : ''));
     if (!r.ok){
       const d = await r.json().catch(()=>({}));
       throw new Error(d.error || 'No se pudo generar el PDF');
     }
-    const blob = await r.blob();
-    window.open(URL.createObjectURL(blob), '_blank');
-  }catch(e){ alert(e.message); }
+    abrirPdfBlob(w, await r.blob());
+  }catch(e){ if (w) w.close(); alert(e.message); }
+}
+
+// Link público (sin login) al PDF, para copiar o mandar al cliente.
+async function linkPublicoPdf(id, vistaSimple){
+  const r = await fetch('/api/cotizador/link-publico/' + id + '?store_id=' + encodeURIComponent(storeId) + (vistaSimple ? '&vista=simple' : ''), { method: 'POST' });
+  const d = await r.json().catch(()=>({}));
+  if (!r.ok || !d.token) throw new Error(d.error || 'No se pudo generar el link');
+  return location.origin + '/c/' + d.token;
 }
 
 // Comparte el PDF del presupuesto (no un link al sistema, para que el
@@ -790,17 +808,36 @@ async function compartirWhatsapp(id, data, vistaSimple){
     // notebooks): se abre el PDF ya descargado (como blob, no la URL de la
     // API directo — esa sigue pidiendo login) para que lo guarden/adjunten
     // a mano, y se abre WhatsApp aparte con el mensaje.
-    window.open(URL.createObjectURL(blob), '_blank');
-    window.open('https://wa.me/' + waTel(data.clienteTelefono) + '?text=' + encodeURIComponent(textoBase + ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'), '_blank');
+    // Se manda el link público al PDF dentro del mensaje: el cliente lo abre
+    // sin tener que adjuntar nada a mano.
+    let linkPdf = '';
+    try{ linkPdf = await linkPublicoPdf(id, vistaSimple); }catch(err){ /* seguimos sin link */ }
+    if (!linkPdf) abrirPdfBlob(null, blob);
+    const urlWa = 'https://wa.me/' + waTel(data.clienteTelefono) + '?text=' + encodeURIComponent(textoBase + (linkPdf ? ' Podés ver el PDF acá: ' + linkPdf : ' Te descargué el PDF del presupuesto recién — adjuntalo en este chat.'));
+    if (!window.open(urlWa, '_blank')) location.href = urlWa;
   }
 }
 
 async function copiarLink(id, btnCopiadoMsgEl, vistaSimple){
   try{
-    await navigator.clipboard.writeText(urlPdfCotizacion(id, vistaSimple));
+    const promesa = linkPublicoPdf(id, vistaSimple);
+    let copiado = false;
+    // ClipboardItem con promesa: Safari/iOS solo deja copiar si la escritura
+    // arranca dentro del click, antes de esperar al servidor.
+    if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write){
+      try{
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': promesa.then((u) => new Blob([u], { type: 'text/plain' })) })]);
+        copiado = true;
+      }catch(e){ /* probamos el método clásico */ }
+    }
+    const url = await promesa;
+    if (!copiado){
+      try{ await navigator.clipboard.writeText(url); copiado = true; }catch(e){ /* sin permiso */ }
+    }
+    if (!copiado){ window.prompt('Copiá el link del PDF:', url); return; }
     btnCopiadoMsgEl.classList.remove('hidden');
     setTimeout(() => btnCopiadoMsgEl.classList.add('hidden'), 2000);
-  }catch(e){ /* portapapeles no disponible */ }
+  }catch(e){ alert(e.message || 'No se pudo generar el link'); }
 }
 
 function escapeHtml(s){
