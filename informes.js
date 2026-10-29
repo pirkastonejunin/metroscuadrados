@@ -269,18 +269,53 @@ async function colocacionComoGasto(db, orgId) {
   return d ? d.valor === true : true; // por defecto se muestra: los colocadores se liquidan desde Sueldos
 }
 
-async function resultadosOrg(db, orgId, d0, d1) {
+// Precio de transferencia Fábrica -> sucursales (29/10/2026, pedido de Mato): lo que Fábrica produce y vende otra sucursal es,
+// para esa sucursal, una compra a Fábrica al precio de la lista mayorista. Solo se refleja en el Estado de resultados (sin
+// comprobantes nuevos): la sucursal que vende toma como costo el precio mayorista (sin IVA) y Fábrica lo muestra como venta
+// interna, con su costo de producción. Sumando sucursales ("todas") se compensa y no se duplica.
+// Config global: config_general { clave: 'resultadosTransferenciaFabrica', valor: { activo, fabricaOrgId, listaId } }.
+async function transferenciaFabrica(db) {
+  const d = await db.collection('config_general').findOne({ clave: 'resultadosTransferenciaFabrica', orgId: { $exists: false } });
+  const v = d && d.valor;
+  if (!v || !v.activo || !v.fabricaOrgId || !v.listaId) return null;
+  const lista = await db.collection('productos_listas_precio').findOne({ _id: toObjectId(v.listaId) });
+  if (!lista) return null;
+  let incluyeIva = true;
+  try { const cfg = await require('./fiscalEmision').getConfig(db, toObjectId(v.fabricaOrgId)); incluyeIva = typeof lista.incluyeIva === 'boolean' ? lista.incluyeIva : cfg.preciosIncluyenIvaDefecto !== false; } catch (e) { if (typeof lista.incluyeIva === 'boolean') incluyeIva = lista.incluyeIva; }
+  let ivaDef = 21;
+  try { const cfg = await require('./fiscalEmision').getConfig(db, toObjectId(v.fabricaOrgId)); if (cfg.ivaDefecto !== undefined) ivaDef = Number(cfg.ivaDefecto); } catch (e) { /* 21 */ }
+  return { fabricaOrgId: String(v.fabricaOrgId), lista, incluyeIva, ivaDef };
+}
+// Precio mayorista SIN IVA por unidad de venta de un producto de producción (null si no tiene precio en esa lista).
+function precioMayoristaNeto(tf, p, cotizacion) {
+  if (!tf || !p) return null;
+  let precio;
+  try { precio = require('./productos').precioResuelto(p, tf.lista, cotizacion).precio; } catch (e) { return null; }
+  if (precio == null || !(Number(precio) > 0)) return null;
+  const iva = (p.porcentajeIva !== undefined && p.porcentajeIva !== null && p.porcentajeIva !== '') ? Number(p.porcentajeIva) : tf.ivaDef;
+  return tf.incluyeIva ? Number(precio) / (1 + (isFinite(iva) ? iva : 21) / 100) : Number(precio);
+}
+
+async function resultadosOrg(db, orgId, d0, d1, tf) {
   const meses = {};
-  const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, gastos: {} });
+  const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, internoVenta: 0, internoCompra: 0, intPorOrg: {}, gastos: {} });
   const sueldosGasto = await sueldosProduccionGasto(db, orgId);
   const colocacionGasto = await colocacionComoGasto(db, orgId);
   const cotDoc = await db.collection('config_general').findOne({ orgId, clave: 'cotizacionDolar' });
   const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
 
   const ventas = await db.collection('ventas').find({ orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+  const esFabrica = !!tf && String(orgId) === tf.fabricaOrgId;
+  const esCompradora = !!tf && !esFabrica;
+  // Fábrica: además de lo suyo, ve como venta interna lo que las otras sucursales vendieron de sus productos de producción.
+  let ventasOtras = [];
+  if (esFabrica) {
+    const otras = (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id).filter(id => String(id) !== String(orgId));
+    if (otras.length) ventasOtras = await db.collection('ventas').find({ orgId: { $in: otras }, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+  }
   const ids = new Set();
-  ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
-  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1, tipoProducto: 1, costoProductoId: 1 }).toArray() : [];
+  ventas.concat(ventasOtras).forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
+  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1, tipoProducto: 1, costoProductoId: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, porcentajeIva: 1 }).toArray() : [];
   const pm = new Map(prods.map(p => [String(p._id), p]));
   // Mano de obra por unidad de cada producto con receta (jornales x costo del jornal), solo si los sueldos de
   // producción se muestran como gasto: hay que sacarla del costo de la mercadería para no contarla dos veces.
@@ -295,6 +330,20 @@ async function resultadosOrg(db, orgId, d0, d1) {
       recetas.forEach(r => manoObraPorReceta.set(String(r._id), (r.receta || []).reduce((a, f) => { const i = im.get(String(f.insumoId)); return a + (i && i.unidad === 'jornal' ? Number(f.cantidad || 0) * Number(i.costoActual || 0) : 0); }, 0)));
     }
   }
+  // Costo de una línea vendida (cantidad x costo del producto). `interna` = línea de otra sucursal que Fábrica le vendió a precio mayorista.
+  const costoDeLinea = (m, v, it, p, nc, neto, sub, items, ventaInterna) => {
+    let costoU = null;
+    if (p && p.costo != null) costoU = p.moneda === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? p.costo * (cotVigente || Number(v.cotizacionDolar)) : null) : Number(p.costo);
+    const cant = Number(it.cantidad || 0);
+    if (costoU == null) { m.sinCosto += ventaInterna != null ? ventaInterna : neto * (sub > 0 ? Number(it.subtotal || 0) / sub : (items.length ? 1 / items.length : 0)); return; }
+    let costoEf = costoU;
+    if (sueldosGasto && p) {
+      const mo = p.costoProductoId ? (manoObraPorReceta.get(String(p.costoProductoId)) || 0) : 0;
+      if (mo > 0) { costoEf = Math.max(0, costoU - mo); m.manoObra += cant * (costoU - costoEf) * nc; }
+      else if (p.tipoProducto === 'produccion' && !p.costoProductoId) m.sinReceta += cant * costoU * nc;
+    }
+    m.costo += cant * costoEf * nc;
+  };
   ventas.forEach(v => {
     const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
     const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
@@ -306,17 +355,27 @@ async function resultadosOrg(db, orgId, d0, d1) {
     const items = v.items || [], sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
     items.forEach(it => {
       const p = it.productoId ? pm.get(String(it.productoId)) : null;
-      let costoU = null;
-      if (p && p.costo != null) costoU = p.moneda === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? p.costo * (cotVigente || Number(v.cotizacionDolar)) : null) : Number(p.costo);
-      if (costoU == null) { m.sinCosto += neto * (sub > 0 ? Number(it.subtotal || 0) / sub : (items.length ? 1 / items.length : 0)); return; }
-      let costoEf = costoU;
-      const cant = Number(it.cantidad || 0);
-      if (sueldosGasto && p) {
-        const mo = p.costoProductoId ? (manoObraPorReceta.get(String(p.costoProductoId)) || 0) : 0;
-        if (mo > 0) { costoEf = Math.max(0, costoU - mo); m.manoObra += cant * (costoU - costoEf) * nc; }
-        else if (p.tipoProducto === 'produccion' && !p.costoProductoId) m.sinReceta += cant * costoU * nc;
+      // Sucursal que vende un producto de Fábrica: su costo es el precio mayorista al que se lo compra a Fábrica.
+      if (esCompradora && p && p.tipoProducto === 'produccion') {
+        const mn = precioMayoristaNeto(tf, p, cotVigente);
+        if (mn != null) { const c = Number(it.cantidad || 0) * mn * nc; m.costo += c; m.internoCompra += c; return; }
       }
-      m.costo += cant * costoEf * nc;
+      costoDeLinea(m, v, it, p, nc, neto, sub, items, null);
+    });
+  });
+  // Fábrica: ventas internas (lo que vendieron las otras sucursales de sus productos de producción, a precio mayorista).
+  ventasOtras.forEach(v => {
+    const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
+    const m = mes(mesDe(v.fecha));
+    (v.items || []).forEach(it => {
+      const p = it.productoId ? pm.get(String(it.productoId)) : null;
+      if (!p || p.tipoProducto !== 'produccion') return;
+      const mn = precioMayoristaNeto(tf, p, cotVigente);
+      if (mn == null) return;
+      const monto = Number(it.cantidad || 0) * mn * nc;
+      m.ventas += monto; m.internoVenta += monto;
+      const k = String(v.orgId); m.intPorOrg[k] = (m.intPorOrg[k] || 0) + monto;
+      costoDeLinea(m, v, it, p, nc, monto, 0, [], monto);
     });
   });
 
@@ -431,12 +490,25 @@ async function armarResultados(req) {
       if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
       orgIds = [req.orgId];
     }
-    const partes = await Promise.all(orgIds.map(id => resultadosOrg(db, id, inicioDia(desdeS), finDia(hastaS))));
+    const tf = await transferenciaFabrica(db);
+    const partes = await Promise.all(orgIds.map(id => resultadosOrg(db, id, inicioDia(desdeS), finDia(hastaS), tf)));
     const claves = mesesEntre(desdeS, hastaS);
     const conceptos = new Set();
     const cols = claves.map(k => {
-      const c = { mes: k, ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, gastos: {} };
-      partes.forEach(p => { const m = p[k]; if (!m) return; c.ventas += m.ventas; c.costo += m.costo; c.sinCosto += m.sinCosto; c.enCosto += m.enCosto; c.manoObra += m.manoObra; c.sinReceta += m.sinReceta; Object.keys(m.gastos).forEach(g => { conceptos.add(g); c.gastos[g] = (c.gastos[g] || 0) + m.gastos[g]; }); });
+      const c = { mes: k, ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, internoVenta: 0, internoCompra: 0, gastos: {} };
+      partes.forEach(p => { const m = p[k]; if (!m) return; c.ventas += m.ventas; c.costo += m.costo; c.sinCosto += m.sinCosto; c.enCosto += m.enCosto; c.manoObra += m.manoObra; c.sinReceta += m.sinReceta; c.internoVenta += m.internoVenta; c.internoCompra += m.internoCompra; Object.keys(m.gastos).forEach(g => { conceptos.add(g); c.gastos[g] = (c.gastos[g] || 0) + m.gastos[g]; }); });
+      // Sumando Fábrica y las sucursales que le compran, la venta interna y la compra interna son lo mismo: se compensan (no se cuenta dos veces).
+      if (tf) {
+        const idxF = orgIds.findIndex(id => String(id) === tf.fabricaOrgId);
+        if (idxF >= 0) {
+          const mF = partes[idxF][k];
+          orgIds.forEach((id, i) => {
+            if (i === idxF) return;
+            const ventaF = mF ? (mF.intPorOrg[String(id)] || 0) : 0, compraB = partes[i][k] ? partes[i][k].internoCompra : 0;
+            c.ventas -= ventaF; c.internoVenta -= ventaF; c.costo -= compraB; c.internoCompra -= compraB;
+          });
+        }
+      }
       return c;
     });
     const listaConceptos = [...conceptos].sort((a, b) => a.localeCompare(b, 'es'));
@@ -445,12 +517,12 @@ async function armarResultados(req) {
       const margen = c.ventas - c.costo;
       return { mes: c.mes, ventasNetas: r2(c.ventas), costo: r2(c.costo), margenBruto: r2(margen), margenPct: c.ventas ? r2(margen / c.ventas * 100) : null,
         gastos: Object.fromEntries(listaConceptos.map(g => [g, r2(c.gastos[g] || 0)])), gastosTotal: r2(gastosTotal),
-        resultado: r2(margen - gastosTotal), resultadoPct: c.ventas ? r2((margen - gastosTotal) / c.ventas * 100) : null, sinCosto: r2(c.sinCosto), enCosto: r2(c.enCosto), manoObraDescontada: r2(c.manoObra), sinReceta: r2(c.sinReceta) };
+        resultado: r2(margen - gastosTotal), resultadoPct: c.ventas ? r2((margen - gastosTotal) / c.ventas * 100) : null, sinCosto: r2(c.sinCosto), enCosto: r2(c.enCosto), manoObraDescontada: r2(c.manoObra), sinReceta: r2(c.sinReceta), ventasInternas: r2(c.internoVenta), comprasInternas: r2(c.internoCompra) };
     };
     const total = fin(cols.reduce((a, c) => {
-      a.ventas += c.ventas; a.costo += c.costo; a.sinCosto += c.sinCosto; a.enCosto += c.enCosto; a.manoObra += c.manoObra; a.sinReceta += c.sinReceta;
+      a.ventas += c.ventas; a.costo += c.costo; a.internoVenta += c.internoVenta; a.internoCompra += c.internoCompra; a.sinCosto += c.sinCosto; a.enCosto += c.enCosto; a.manoObra += c.manoObra; a.sinReceta += c.sinReceta;
       Object.keys(c.gastos).forEach(g => { a.gastos[g] = (a.gastos[g] || 0) + c.gastos[g]; }); return a;
-    }, { mes: 'total', ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, gastos: {} }));
+    }, { mes: 'total', ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, internoVenta: 0, internoCompra: 0, gastos: {} }));
     return { desde: desdeS, hasta: hastaS, alcance: todas ? 'todas' : 'actual', sucursales: orgIds.length, conceptos: listaConceptos, conceptosOtros: agruparGastos(listaConceptos).otros, conceptosSueldos: agruparGastos(listaConceptos).sueldos, meses: cols.map(fin), total };
   });
 }
@@ -491,6 +563,39 @@ router.put('/resultados/config', authInforme('informe_resultados'), async (req, 
       if (cog !== null) await guardar('resultadosColocacionGasto', cog);
     });
     res.json({ enCosto: valor, sueldosProduccionGasto: spg, colocacionGasto: cog });
+  } catch (e) { responder(res, e); }
+});
+
+// Configuración del precio de transferencia Fábrica -> sucursales (ver transferenciaFabrica).
+router.get('/resultados/transferencia', authInforme('informe_resultados'), async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const d = await db.collection('config_general').findOne({ clave: 'resultadosTransferenciaFabrica', orgId: { $exists: false } });
+      const [orgs, listas] = await Promise.all([
+        db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray(),
+        db.collection('productos_listas_precio').find({ activa: { $ne: false } }).project({ nombre: 1 }).toArray()
+      ]);
+      return { config: (d && d.valor) || { activo: false, fabricaOrgId: '', listaId: '' },
+        organizaciones: orgs.map(o => ({ _id: String(o._id), nombre: o.nombre || String(o._id) })),
+        listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre || String(l._id) })) };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+router.put('/resultados/transferencia', authInforme('informe_resultados'), async (req, res) => {
+  try {
+    if (!req.usuario.rol.protegido) throw err(403, 'Solo un administrador puede cambiar esta configuración.');
+    const b = req.body || {};
+    const activo = b.activo === true;
+    const fabricaOrgId = String(b.fabricaOrgId || ''), listaId = String(b.listaId || '');
+    if (activo && (!toObjectId(fabricaOrgId) || !toObjectId(listaId))) throw err(400, 'Elegí la sucursal Fábrica y la lista mayorista.');
+    await conReintento(async () => {
+      const db = await getDb(); const ahora = new Date();
+      await db.collection('config_general').updateOne({ clave: 'resultadosTransferenciaFabrica', orgId: { $exists: false } },
+        { $set: { valor: { activo, fabricaOrgId, listaId }, updatedAt: ahora }, $setOnInsert: { clave: 'resultadosTransferenciaFabrica', createdAt: ahora } }, { upsert: true });
+    });
+    res.json({ ok: true });
   } catch (e) { responder(res, e); }
 });
 
@@ -562,7 +667,7 @@ router.get('/resultados', authInforme('informe_resultados'), async (req, res) =>
     const aoa = [enc,
       fila('Ventas netas (sin IVA)', m => m.ventasNetas), fila('Costo de mercadería vendida', m => -m.costo), fila('Margen bruto', m => m.margenBruto),
       fila('Margen bruto %', m => m.margenPct == null ? '' : m.margenPct), [], ['Gastos']
-    ].concat(d.conceptosOtros.map(c => fila('  ' + c, m => -m.gastos[c])), d.conceptosSueldos.length ? [fila('  Sueldos y cargas', m => -d.conceptosSueldos.reduce((a, c) => a + (m.gastos[c] || 0), 0))].concat(d.conceptosSueldos.map(c => fila('      ' + c.slice(PREF_SUELDOS.length), m => -m.gastos[c]))) : [], [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Informativo: gastos ya contados de producción (no se restan de nuevo)', m => -m.enCosto), fila('Informativo: ventas sin costo cargado', m => m.sinCosto)], (d.total.manoObraDescontada || d.total.sinReceta) ? [fila('Informativo: mano de obra de receta descontada del costo de lo vendido', m => -m.manoObraDescontada), fila('Informativo: costo de productos de producción sin receta vinculada (no se les descontó mano de obra)', m => m.sinReceta)] : []);
+    ].concat(d.conceptosOtros.map(c => fila('  ' + c, m => -m.gastos[c])), d.conceptosSueldos.length ? [fila('  Sueldos y cargas', m => -d.conceptosSueldos.reduce((a, c) => a + (m.gastos[c] || 0), 0))].concat(d.conceptosSueldos.map(c => fila('      ' + c.slice(PREF_SUELDOS.length), m => -m.gastos[c]))) : [], [fila('Total gastos', m => -m.gastosTotal), [], fila('RESULTADO', m => m.resultado), fila('Resultado %', m => m.resultadoPct == null ? '' : m.resultadoPct), [], fila('Informativo: gastos ya contados de producción (no se restan de nuevo)', m => -m.enCosto), fila('Informativo: ventas sin costo cargado', m => m.sinCosto)], (d.total.ventasInternas || d.total.comprasInternas) ? [fila('Informativo: ventas internas de Fábrica a otras sucursales (incluidas en ventas netas)', m => m.ventasInternas), fila('Informativo: compras internas a Fábrica (incluidas en el costo)', m => m.comprasInternas)] : [], (d.total.manoObraDescontada || d.total.sinReceta) ? [fila('Informativo: mano de obra de receta descontada del costo de lo vendido', m => -m.manoObraDescontada), fila('Informativo: costo de productos de producción sin receta vinculada (no se les descontó mano de obra)', m => m.sinReceta)] : []);
     const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 38 }].concat(enc.slice(1).map(() => ({ wch: 15 })));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Estado de resultados');
     res.setHeader('Content-Disposition', 'attachment; filename="estado-de-resultados-' + d.desde + '_' + d.hasta + '.xlsx"');
