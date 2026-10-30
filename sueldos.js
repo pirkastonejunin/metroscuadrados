@@ -635,10 +635,13 @@ router.post('/pagar-lote', authSueldosLectura, async (req, res) => {
     const out = await conReintento(async () => {
       const db = await getDb();
       // Con "Todas las sucursales", cada empleado se paga en la sucursal que tiene asignada (los movimientos de caja quedan en esa sucursal).
+      // Viendo "todas las sucursales" el sistema pone como req.orgId la sucursal con la que se opera (para guardar), pero acá cada
+      // empleado se paga en SU sucursal: se ignora esa y se usa la del empleado.
+      const sucReq = req.vistaTodas ? null : req.orgId;
       const orgDe = new Map();
-      if (!req.orgId) (await db.collection('empleados').find({ _id: { $in: items.map(i => toObjectId(i.empleadoId)).filter(Boolean) } }).project({ orgId: 1 }).toArray()).forEach(e => orgDe.set(String(e._id), e.orgId));
+      if (!sucReq) (await db.collection('empleados').find({ _id: { $in: items.map(i => toObjectId(i.empleadoId)).filter(Boolean) } }).project({ orgId: 1 }).toArray()).forEach(e => orgDe.set(String(e._id), e.orgId));
       const grupos = new Map();
-      for (const it of items) { const o = req.orgId || orgDe.get(String(it.empleadoId)) || null; const k = String(o); if (!grupos.has(k)) grupos.set(k, { org: o, items: [] }); grupos.get(k).items.push(it); }
+      for (const it of items) { const o = sucReq || orgDe.get(String(it.empleadoId)) || null; const k = String(o); if (!grupos.has(k)) grupos.set(k, { org: o, items: [] }); grupos.get(k).items.push(it); }
       const todos = [];
       for (const g of grupos.values()) {
       if (!g.org) { g.items.forEach(it => todos.push({ empleadoId: String(it.empleadoId), nombre: String(it.empleadoId), ok: false, error: 'El empleado no tiene sucursal asignada.' })); continue; }
