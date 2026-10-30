@@ -1344,11 +1344,11 @@ function precioDeLista(lista, producto, costoTotal) {
   const ov = (lista.precios || []).find(x => String(x.productoId) === String(producto._id));
   if (ov) {
     // Celda propia del artículo: un % sobre su costo, o un precio en $ (las cargas viejas son solo precio).
-    if (ov.modo === 'porcentaje' && Number.isFinite(Number(ov.valor))) return { precio: costoTotal * (1 + Number(ov.valor) / 100), manual: true };
+    if (ov.modo === 'porcentaje' && Number.isFinite(Number(ov.valor)) && costoTotal != null) return { precio: costoTotal * (1 + Number(ov.valor) / 100), manual: true };
     const v = ov.modo === 'precio' ? ov.valor : ov.precio;
     if (Number.isFinite(Number(v))) return { precio: Number(v), manual: true };
   }
-  if (lista.tipo === 'manual') return { precio: null, manual: false };
+  if (lista.tipo === 'manual' || costoTotal == null) return { precio: null, manual: false };
   if (lista.tipo === 'monto') return { precio: costoTotal + (Number(lista.monto) || 0), manual: false };
   return { precio: costoTotal * (1 + (Number(lista.porcentaje) || 0) / 100), manual: false };
 }
@@ -1422,6 +1422,28 @@ async function sincronizarListasConProductos(db, req) {
     if (Object.keys(set).length) { set.updatedAt = ahora; await db.collection('productos_catalogo').updateOne({ _id: f._id }, { $set: set }); }
     out.productos++;
   }
+  // Artículos de Productos agregados a la tabla (no son de producción): se les mandan solo los precios; su costo no se toca.
+  const ex = await idsExtras(db, req);
+  if (ex.length && destinos.length) {
+    const fx = await db.collection('productos_catalogo').find({ _id: { $in: ex }, activo: { $ne: false } }).toArray();
+    for (const f of fx) {
+      const costo = f.costo != null ? costoEnPesosFicha(f) : null;
+      let precios = Array.isArray(f.preciosPorLista) ? f.preciosPorLista.slice() : [], cambio = false; const set = {};
+      for (const { lista, dest } of destinos) {
+        const { precio } = precioDeLista(lista, f, costo);
+        if (precio == null) continue;
+        const nuevo = r2c(precio), idx = precios.findIndex(x => String(x.listaId) === String(dest._id));
+        if (idx < 0 || Math.abs(Number(precios[idx].precio) - nuevo) > 0.005) { if (idx >= 0) precios[idx] = { listaId: dest._id, precio: nuevo }; else precios.push({ listaId: dest._id, precio: nuevo }); cambio = true; out.precios++; }
+        if (dest.predeterminada && (f.precio == null || Math.abs(Number(f.precio) - nuevo) > 0.005)) set.precio = nuevo;
+        if (dest.alcance === 'seleccion' && !(dest.productosIds || []).some(x => String(x) === String(f._id))) {
+          await lp.updateOne({ _id: dest._id }, { $addToSet: { productosIds: f._id } }); dest.productosIds = (dest.productosIds || []).concat([f._id]);
+        }
+      }
+      if (cambio) set.preciosPorLista = precios;
+      if (Object.keys(set).length) { set.updatedAt = ahora; await db.collection('productos_catalogo').updateOne({ _id: f._id }, { $set: set }); }
+      out.productos++;
+    }
+  }
   return out;
 }
 
@@ -1451,6 +1473,14 @@ function nombreProlijo(n) {
     return baja.charAt(0).toUpperCase() + baja.slice(1);
   }).join(' ');
 }
+// Artículos de Productos que no son de producción pero se venden en estas listas (ej. mayorista): se agregan a la tabla.
+// Su costo es el de su ficha (Productos es la fuente); desde acá solo se les cargan los precios de cada lista.
+// Costo en pesos de una ficha de Productos (en dólares se pasa con la cotización vigente de esta sucursal).
+function costoEnPesosFicha(f) { return f.moneda === 'USD' ? null : Number(f.costo); }
+async function idsExtras(db, req) {
+  const d = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'produccionListasExtras' });
+  return ((d && d.valor) || []).map(toObjectId).filter(Boolean);
+}
 async function armarMatriz(req) {
   return conReintento(async () => {
     const db = await getDb();
@@ -1459,16 +1489,22 @@ async function armarMatriz(req) {
       db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray()
     ]);
     const insumosPorId = await traerInsumosDeProductos(db, req, cps);
-    const productos = cps.map(p => {
-      const costo = calcularCostoProducto(p, insumosPorId).costoTotal;
+    const fila = (id, nombre, sku, rubro, costo, extra) => {
       const celdas = {};
       listas.forEach(l => {
-        const ov = (l.precios || []).find(x => String(x.productoId) === String(p._id));
-        const { precio } = precioDeLista(l, p, costo);
+        const ov = (l.precios || []).find(x => String(x.productoId) === String(id));
+        const { precio } = precioDeLista(l, { _id: id }, costo);
         celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
       });
-      return { productoId: String(p._id), nombre: nombreProlijo(p.nombre), sku: p.sku || '', rubro: p.rubroLista || '', costo, celdas };
-    });
+      return { productoId: String(id), nombre: nombreProlijo(nombre), sku: sku || '', rubro: rubro || '', costo, extra, celdas };
+    };
+    const productos = cps.map(p => fila(p._id, p.nombre, p.sku, p.rubroLista, calcularCostoProducto(p, insumosPorId).costoTotal, false));
+    const ex = await idsExtras(db, req);
+    if (ex.length) {
+      const fichas = await db.collection('productos_catalogo').find({ _id: { $in: ex }, activo: { $ne: false } }).toArray();
+      fichas.forEach(f => productos.push(fila(f._id, f.nombre, f.sku, f.rubroLista, f.costo != null ? costoEnPesosFicha(f) : null, true)));
+      productos.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    }
     return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
   });
 }
@@ -1534,6 +1570,45 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
     pdf.end();
   } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ error: e.message }); }
 });
+// Buscar artículos de Productos (que no sean de producción ni estén ya en la tabla) para sumarlos.
+router.get('/matriz-listas/buscar', authAdmin, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const ex = await idsExtras(db, req);
+      const r = new RegExp(esc, 'i');
+      return db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, costoProductoId: { $in: [null] }, _id: { $nin: ex }, $or: [{ nombre: r }, { sku: r }] }, filtroOrg(req)))
+        .project({ nombre: 1, sku: 1, costo: 1, moneda: 1 }).limit(20).toArray();
+    });
+    res.json(out.map(f => ({ productoId: String(f._id), nombre: nombreProlijo(f.nombre), sku: f.sku || '', costo: f.costo != null ? f.costo : null, moneda: f.moneda || 'ARS' })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/matriz-listas/extras', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId((req.body || {}).productoId); if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const f = await db.collection('productos_catalogo').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!f) throw err(404, 'Producto no encontrado');
+      await db.collection('config_general').updateOne({ orgId: req.orgId, clave: 'produccionListasExtras' }, { $addToSet: { valor: id }, $setOnInsert: { orgId: req.orgId, clave: 'produccionListasExtras', createdAt: new Date() }, $set: { updatedAt: new Date() } }, { upsert: true });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/matriz-listas/extras/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      await db.collection('config_general').updateOne({ orgId: req.orgId, clave: 'produccionListasExtras' }, { $pull: { valor: id } });
+      await db.collection('costos_listas_precio').updateMany(Object.assign({}, filtroOrg(req)), { $pull: { precios: { productoId: id } } });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.put('/matriz-listas', authAdmin, async (req, res) => {
   try {
     const cambios = Array.isArray((req.body || {}).cambios) ? req.body.cambios : [];
@@ -1546,7 +1621,9 @@ router.put('/matriz-listas', authAdmin, async (req, res) => {
         for (const r of rubros) {
           const pid = toObjectId(r.productoId); if (!pid) continue;
           const nombre = String(r.rubro || '').trim().slice(0, 60);
-          await col.updateOne(Object.assign({ _id: pid }, filtroOrg(req)), nombre ? { $set: { rubroLista: nombre } } : { $unset: { rubroLista: '' } });
+          const upd = nombre ? { $set: { rubroLista: nombre } } : { $unset: { rubroLista: '' } };
+          const r1 = await col.updateOne(Object.assign({ _id: pid }, filtroOrg(req)), upd);
+          if (!r1.matchedCount) await (await getDb()).collection('productos_catalogo').updateOne({ _id: pid }, upd);
         }
       });
     }

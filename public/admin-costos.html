@@ -217,6 +217,7 @@
         <div class="row" style="align-items:center;gap:8px">
           <h3 style="margin:0;flex:1">Tabla de precios</h3>
           <input id="mtBuscar" placeholder="Buscar producto o SKU" oninput="renderMatriz()" style="max-width:220px">
+          <button class="btn secondary" onclick="abrirAgregarExtras()">+ Artículo de Productos</button>
           <button class="btn secondary" onclick="abrirImprimirListas()">Imprimir PDF</button>
           <button class="btn" id="btnMtGuardar" onclick="guardarMatriz()" disabled>Guardar cambios</button>
         </div>
@@ -1000,8 +1001,8 @@ let MATRIZ = null;
 const MT_CAMBIOS = {};
 const MT_RUBROS = {}; // productoId -> rubro editado (solo para imprimir) // 'listaId|productoId' -> {listaId, productoId, modo, valor}
 function mtPrecio(costo, lista, modo, valor){
-  if (valor !== '' && valor !== null && valor !== undefined && !isNaN(Number(valor))) return modo === 'porcentaje' ? costo * (1 + Number(valor) / 100) : Number(valor);
-  if (lista.tipo === 'manual') return null;
+  if (valor !== '' && valor !== null && valor !== undefined && !isNaN(Number(valor))) { if (modo === 'porcentaje') return costo == null ? null : costo * (1 + Number(valor) / 100); return Number(valor); }
+  if (lista.tipo === 'manual' || costo == null) return null;
   if (lista.tipo === 'monto') return costo + (Number(lista.monto) || 0);
   return costo * (1 + (Number(lista.porcentaje) || 0) / 100);
 }
@@ -1023,7 +1024,7 @@ function renderMatriz(){
   t.innerHTML = '<thead><tr><th style="position:sticky;top:0;background:var(--card,#fff)">Producto</th><th style="position:sticky;top:0;background:var(--card,#fff)">Rubro <span class="muted" style="font-weight:400;font-size:11px">(solo para imprimir)</span></th><th style="position:sticky;top:0;background:var(--card,#fff)">Costo</th>' +
     MATRIZ.listas.map(l => `<th style="position:sticky;top:0;background:var(--card,#fff);min-width:150px">${escapeHtml(l.nombre)}<div class="muted" style="font-weight:400;font-size:11px">${escapeHtml(descCalculoLista(l))}</div>
       <div style="display:flex;gap:4px;margin-top:4px"><input id="mtAll_${l._id}" type="number" step="0.01" placeholder="%" style="width:62px"><button class="btn small secondary" onclick="mtAplicarTodos('${l._id}')" title="Poner este % en todos los productos de la columna">A todos</button></div></th>`).join('') + '</tr></thead><tbody>' +
-    filas.map(p => `<tr><td>${escapeHtml(p.nombre)}${p.sku ? ' <span class="muted">' + escapeHtml(p.sku) + '</span>' : ''}</td><td><input list="mtRubros" id="mtr_${p.productoId}" value="${escapeHtml(MT_RUBROS[p.productoId] !== undefined ? MT_RUBROS[p.productoId] : (p.rubro || ''))}" placeholder="Rubro" style="width:120px" oninput="mtRubro('${p.productoId}')"></td><td class="muted">${money(p.costo)}</td>` +
+    filas.map(p => `<tr><td>${escapeHtml(p.nombre)}${p.sku ? ' <span class="muted">' + escapeHtml(p.sku) + '</span>' : ''}${p.extra ? ' <span class="pill activo" title="Artículo de Productos (no es de producción): su costo sale de su ficha">Productos</span> <a href="#" class="muted" onclick="quitarExtra(\'' + p.productoId + '\');return false" title="Sacar de esta tabla">✕</a>' : ''}</td><td><input list="mtRubros" id="mtr_${p.productoId}" value="${escapeHtml(MT_RUBROS[p.productoId] !== undefined ? MT_RUBROS[p.productoId] : (p.rubro || ''))}" placeholder="Rubro" style="width:120px" oninput="mtRubro('${p.productoId}')"></td><td class="muted">${p.costo == null ? 'sin costo' : money(p.costo)}</td>` +
       MATRIZ.listas.map(l => {
         const k = l._id + '|' + p.productoId, c = MT_CAMBIOS[k] || p.celdas[l._id] || {modo:'', valor:null};
         const modo = c.modo === 'porcentaje' ? 'porcentaje' : 'precio';
@@ -1054,6 +1055,37 @@ function mtAplicarTodos(listaId){
   });
   document.getElementById('btnMtGuardar').disabled = false;
   renderMatriz();
+}
+function abrirAgregarExtras(){
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Agregar artículo de Productos</h2>
+    <div class="muted" style="margin-bottom:8px">Para artículos que no son de producción pero se venden en estas listas (por ejemplo mayorista). Su costo es el de su ficha en Productos; acá cargás el precio de cada lista.</div>
+    <input id="exBuscar" placeholder="Buscar por nombre o SKU" oninput="buscarExtras()" style="width:100%">
+    <div id="exRes" style="margin-top:8px;max-height:50vh;overflow:auto"></div>
+  `);
+  setTimeout(() => { const i = document.getElementById('exBuscar'); if (i) i.focus(); }, 50);
+}
+let EX_TIMER = null;
+function buscarExtras(){
+  clearTimeout(EX_TIMER);
+  EX_TIMER = setTimeout(async () => {
+    const q = document.getElementById('exBuscar').value.trim(), el = document.getElementById('exRes');
+    if (q.length < 2) { el.innerHTML = ''; return; }
+    const r = await fetch(BASE + '/matriz-listas/buscar?q=' + encodeURIComponent(q), {headers: headersAuth()});
+    const d = r.ok ? await r.json() : [];
+    el.innerHTML = d.map(f => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border,#eee)"><div style="flex:1">${escapeHtml(f.nombre)} <span class="muted">${escapeHtml(f.sku)}</span><div class="muted" style="font-size:12px">${f.costo == null ? 'Sin costo cargado' : 'Costo ' + (f.moneda === 'USD' ? 'US$ ' : '$ ') + Number(f.costo).toLocaleString('es-AR')}</div></div><button class="btn small" onclick="agregarExtra('${f.productoId}')">Agregar</button></div>`).join('') || '<div class="muted">No se encontraron artículos (los de producción ya están en la tabla).</div>';
+  }, 300);
+}
+async function agregarExtra(id){
+  const r = await fetch(BASE + '/matriz-listas/extras', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({productoId: id})});
+  if (!r.ok) { const d = await r.json().catch(()=>({})); alert(d.error || 'No se pudo agregar'); return; }
+  cerrarModal(); await cargarMatriz();
+}
+async function quitarExtra(id){
+  if (!confirm('¿Sacar este artículo de la tabla? Sus precios cargados acá se borran; la ficha en Productos no se toca.')) return;
+  const r = await fetch(BASE + '/matriz-listas/extras/' + id, {method:'DELETE', headers: headersAuth()});
+  if (r.ok) await cargarMatriz();
 }
 function abrirImprimirListas(){
   if (!MATRIZ || !MATRIZ.listas.length) { alert('Primero creá al menos una lista.'); return; }
