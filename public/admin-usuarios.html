@@ -541,6 +541,7 @@ function camposDatosNegocioOrg(o){
     <div class="campo-edit"><label>CUIT</label><input id="orgCuit" value="${escapeHtml(o.cuit||'')}"></div>
     <div class="campo-edit"><label>Dirección</label><input id="orgDireccion" value="${escapeHtml(o.direccion||'')}"></div>
     <div class="campo-edit"><label>Teléfono</label><input id="orgTelefono" value="${escapeHtml(o.telefono||'')}"></div>
+    <div class="campo-edit"><label>Email</label><input id="orgEmail" type="email" value="${escapeHtml(o.email||'')}"></div>
     <div class="campo-edit"><label>Condición frente al IVA</label><select id="orgCondicionIva">${opcionesCondicionIvaOrg(o.condicionIva)}</select></div>
     <div class="campo-edit"><label>Inicio de actividad (opcional)</label><input id="orgInicioActividad" placeholder="ej: 01/10/2014" value="${escapeHtml(o.inicioActividad||'')}"></div>
     <div class="campo-edit"><label>Ingresos brutos (opcional)</label><input id="orgIngresosBrutos" placeholder="Número de inscripción en IIBB" value="${escapeHtml(o.ingresosBrutos||'')}"></div>
@@ -570,6 +571,7 @@ function leerDatosNegocioOrg(){
     cuit: document.getElementById('orgCuit').value.trim(),
     direccion: document.getElementById('orgDireccion').value.trim(),
     telefono: document.getElementById('orgTelefono').value.trim(),
+    email: document.getElementById('orgEmail').value.trim(),
     condicionIva: document.getElementById('orgCondicionIva').value || null,
     logoBase64: document.getElementById('orgLogoBase64').value || null,
     inicioActividad: document.getElementById('orgInicioActividad').value.trim(),

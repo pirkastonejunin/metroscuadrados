@@ -1532,6 +1532,8 @@ router.get('/matriz-listas', authAdmin, async (req, res) => {
 router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
   try {
     const m = await armarMatriz(req);
+    const orgDoc = await conReintento(async () => (await getDb()).collection('organizaciones').findOne({ _id: req.orgId }, { projection: { telefono: 1, email: 1, direccion: 1 } })) || {};
+    const contacto = [orgDoc.direccion, orgDoc.telefono ? 'Tel: ' + orgDoc.telefono : '', orgDoc.email].filter(Boolean).join('   ·   ');
     const ids = String(req.query.listas || '').split(',').filter(Boolean);
     const listas = m.listas.filter(l => ids.includes(l._id));
     if (!listas.length) throw err(400, 'Elegí al menos una lista.');
@@ -1549,7 +1551,9 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
     const encabezado = () => {
       dibujarMarcaCostos(pdf);
       pdf.fontSize(16).fillColor('#000').text('Lista de precios', L, pdf.y, { align: 'left' });
-      pdf.moveDown(0.2); pdf.fontSize(10).fillColor('#555').text('Fecha: ' + fecha); pdf.fillColor('#000'); pdf.moveDown(0.6);
+      pdf.moveDown(0.2); pdf.fontSize(10).fillColor('#555').text('Fecha: ' + fecha);
+      if (contacto) pdf.fontSize(9).text(contacto, L, pdf.y, { width: anchoTot });
+      pdf.fillColor('#000'); pdf.moveDown(0.6);
       const y0 = pdf.y; pdf.fontSize(9).fillColor('#555');
       pdf.text('Producto', L, y0, { width: wProd });
       pdf.text('Precio', xUni, y0, { width: wUni - 4 });
@@ -1586,7 +1590,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
         pdf.y = y0 + alto;
       });
     });
-    pdf.moveDown(0.8); pdf.fontSize(9).fillColor('#777').text(LEYENDA_LISTA_PRECIO, L, pdf.y, { width: anchoTot });
+    pdf.moveDown(0.8); pdf.fontSize(9).fillColor('#777').text(LEYENDA_LISTA_PRECIO + (contacto ? '\n' + contacto : ''), L, pdf.y, { width: anchoTot });
     pdf.end();
   } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ error: e.message }); }
 });

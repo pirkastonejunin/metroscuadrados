@@ -519,6 +519,7 @@ function normalizarDatosNegocio(body, set) {
   if (body.cuit !== undefined) set.cuit = normalizarTexto(body.cuit);
   if (body.direccion !== undefined) set.direccion = normalizarTexto(body.direccion);
   if (body.telefono !== undefined) set.telefono = normalizarTexto(body.telefono);
+  if (body.email !== undefined) set.email = normalizarTexto(body.email);
   if (body.condicionIva !== undefined) {
     const v = normalizarTexto(body.condicionIva).toLowerCase();
     if (v && !CONDICION_IVA_OPCIONES.includes(v)) throw err(400, `Condición de IVA inválida (opciones: ${CONDICION_IVA_OPCIONES.join(', ')})`);
