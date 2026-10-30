@@ -1482,7 +1482,7 @@ async function idsExtras(db, req) {
   return ((d && d.valor) || []).map(toObjectId).filter(Boolean);
 }
 // Unidad a la que corresponde el precio (para la lista impresa): la de la ficha de Productos; si no, la del costeo (m² o unidad).
-const ETIQUETA_UNIDAD = { m2: 'por m²', ml: 'por metro', unidad: 'por unidad', kg: 'por kg', litro: 'por litro', paquete: 'por paquete', jornal: 'por jornal' };
+const ETIQUETA_UNIDAD = { m2: 'por m2', ml: 'por metro', unidad: 'por unidad', kg: 'por kg', litro: 'por litro', paquete: 'por paquete', jornal: 'por jornal' };
 function etiquetaUnidad(unidad, tipoUnidad, tipoCosteo) {
   let u = unidad;
   if (!u && tipoUnidad === 'superficie') u = 'm2';
@@ -1494,7 +1494,7 @@ function etiquetaBulto(unidad, tipoUnidad, tipoCosteo, cant) {
   const n = Number(cant); if (!Number.isFinite(n) || n <= 0) return '';
   const u = unidad || (tipoUnidad === 'superficie' ? 'm2' : tipoUnidad === 'longitud' ? 'ml' : (tipoCosteo === 'm2' ? 'm2' : 'unidad'));
   const num = (Math.round(n * 1000) / 1000).toLocaleString('es-AR');
-  return num + ({ m2: ' m²', ml: ' m', kg: ' kg', litro: ' lt' }[u] || ' un.') + ' x bulto';
+  return num + ({ m2: ' m2', ml: ' m', kg: ' kg', litro: ' lt' }[u] || ' un.') + ' x bulto';
 }
 async function armarMatriz(req) {
   return conReintento(async () => {
@@ -1539,28 +1539,37 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
     if (!listas.length) throw err(400, 'Elegí al menos una lista.');
     const productos = m.productos.filter(p => listas.some(l => p.celdas[l._id].precio != null));
     const horizontal = listas.length > 3;
-    const pdf = new PDFDocument({ margin: 40, size: 'A4', layout: horizontal ? 'landscape' : 'portrait' });
+    const pdf = new PDFDocument({ margin: 40, size: 'A4', layout: horizontal ? 'landscape' : 'portrait', bufferPages: true });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="lista-de-precios.pdf"');
     pdf.pipe(res);
+    const OSCURO = '#1f2937', ACENTO = '#b08d57', CLARO = '#f6f3ee';
     const L = 40, R = pdf.page.width - 40, anchoTot = R - L;
     const wPrecio = Math.min(110, Math.floor((anchoTot * 0.6) / listas.length));
     const wUni = 58, wBul = 80, xPrecio0 = R - wPrecio * listas.length, xBul = xPrecio0 - wBul, xUni = xBul - wUni, wProd = xUni - L - 8;
     const fecha = new Date().toLocaleDateString('es-AR');
-    const fondo = () => pdf.page.height - pdf.page.margins.bottom;
+    const PIE = 56; // espacio reservado abajo para el pie de página
+    const fondo = () => pdf.page.height - PIE;
     const encabezado = () => {
-      dibujarMarcaCostos(pdf);
-      pdf.fontSize(16).fillColor('#000').text('Lista de precios', L, pdf.y, { align: 'left' });
-      pdf.moveDown(0.2); pdf.fontSize(10).fillColor('#555').text('Fecha: ' + fecha);
-      if (contacto) pdf.fontSize(9).text(contacto, L, pdf.y, { width: anchoTot });
-      pdf.fillColor('#000'); pdf.moveDown(0.6);
-      const y0 = pdf.y; pdf.fontSize(9).fillColor('#555');
-      pdf.text('Producto', L, y0, { width: wProd });
-      pdf.text('Precio', xUni, y0, { width: wUni - 4 });
-      pdf.text('Bulto', xBul, y0, { width: wBul - 4 });
-      listas.forEach((l, i) => pdf.text(l.nombre, xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }));
-      pdf.fillColor('#000'); pdf.y = y0 + 16;
-      pdf.moveTo(L, pdf.y).lineTo(R, pdf.y).strokeColor('#ddd').stroke(); pdf.moveDown(0.3);
+      const y0 = 34;
+      let logo = false;
+      try { pdf.image(LOGO_PNG_PATH, L, y0, { height: 38 }); logo = true; } catch (e) { logo = false; }
+      if (!logo) pdf.font('Helvetica-Bold').fontSize(18).fillColor(OSCURO).text('PIEDRA NEGRA', L, y0 + 8, { characterSpacing: 1.5, lineBreak: false });
+      pdf.font('Helvetica-Bold').fontSize(17).fillColor(OSCURO).text('LISTA DE PRECIOS', L, y0 + 2, { width: anchoTot, align: 'right', characterSpacing: 1 });
+      pdf.font('Helvetica').fontSize(9).fillColor('#666').text('Vigente al ' + fecha, L, y0 + 24, { width: anchoTot, align: 'right' });
+      let y = y0 + 48;
+      pdf.rect(L, y, anchoTot, 2.5).fill(OSCURO); pdf.rect(L, y + 2.5, 70, 1.5).fill(ACENTO);
+      y += 10;
+      if (contacto) { pdf.fontSize(8.5).fillColor('#555').text(contacto, L, y, { width: anchoTot, align: 'center' }); y += 16; }
+      y += 4;
+      // cabecera de la tabla
+      pdf.rect(L, y, anchoTot, 20).fill(OSCURO);
+      pdf.font('Helvetica-Bold').fontSize(9).fillColor('#fff');
+      pdf.text('PRODUCTO', L + 6, y + 6, { width: wProd - 6, lineBreak: false });
+      pdf.text('PRECIO', xUni, y + 6, { width: wUni - 4, lineBreak: false });
+      pdf.text('BULTO', xBul, y + 6, { width: wBul - 4, lineBreak: false });
+      listas.forEach((l, i) => pdf.text(String(l.nombre).toUpperCase(), xPrecio0 + i * wPrecio, y + 6, { width: wPrecio - 8, align: 'right', lineBreak: false }));
+      pdf.font('Helvetica').fillColor('#000'); pdf.y = y + 24;
     };
     encabezado();
     const porRubros = req.query.rubros !== '0' && productos.some(p => p.rubro);
@@ -1573,24 +1582,40 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
     } else grupos.push({ titulo: '', items: productos });
     grupos.forEach(g => {
       if (g.titulo) {
-        if (pdf.y + 50 > fondo()) { pdf.addPage(); encabezado(); }
-        pdf.moveDown(0.5);
+        if (pdf.y + 56 > fondo()) { pdf.addPage(); encabezado(); }
+        pdf.y += 6;
         const yt = pdf.y;
-        pdf.rect(L, yt - 2, anchoTot, 16).fill('#f0eeea'); pdf.fillColor('#000').fontSize(10).font('Helvetica-Bold').text(g.titulo.toUpperCase(), L + 4, yt + 1, { width: anchoTot - 8 }); pdf.font('Helvetica');
-        pdf.y = yt + 18;
+        pdf.rect(L, yt, anchoTot, 18).fill(CLARO); pdf.rect(L, yt, 4, 18).fill(ACENTO);
+        pdf.fillColor(OSCURO).font('Helvetica-Bold').fontSize(10).text(g.titulo.toUpperCase(), L + 12, yt + 5, { width: anchoTot - 16, characterSpacing: 0.8, lineBreak: false });
+        pdf.font('Helvetica').fillColor('#000'); pdf.y = yt + 22;
       }
-      g.items.forEach(p => {
+      g.items.forEach((p, n) => {
         pdf.fontSize(10);
-        const alto = Math.max(16, pdf.heightOfString(p.nombre, { width: wProd }) + 4);
+        const alto = Math.max(18, pdf.heightOfString(p.nombre, { width: wProd - 6 }) + 8);
         if (pdf.y + alto > fondo()) { pdf.addPage(); encabezado(); }
         const y0 = pdf.y;
-        pdf.fontSize(10).fillColor('#000').text(p.nombre, L, y0, { width: wProd });
-        pdf.fontSize(9).fillColor('#555').text(p.unidadTxt || '', xUni, y0 + 1, { width: wUni - 4 }); pdf.text(p.bultoTxt || '', xBul, y0 + 1, { width: wBul - 4 }); pdf.fontSize(10).fillColor('#000');
-        listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }); });
+        if (n % 2 === 1) pdf.rect(L, y0, anchoTot, alto).fill('#faf9f7');
+        pdf.fontSize(10).fillColor('#111').text(p.nombre, L + 6, y0 + 4, { width: wProd - 6 });
+        pdf.fontSize(8.5).fillColor('#666').text(p.unidadTxt || '', xUni, y0 + 5, { width: wUni - 4, lineBreak: false });
+        pdf.text(p.bultoTxt || '', xBul, y0 + 5, { width: wBul - 4, lineBreak: false });
+        pdf.font('Helvetica-Bold').fontSize(10).fillColor('#000');
+        listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0 + 4, { width: wPrecio - 8, align: 'right', lineBreak: false }); });
+        pdf.font('Helvetica');
+        pdf.moveTo(L, y0 + alto).lineTo(R, y0 + alto).lineWidth(0.4).strokeColor('#e5e2dc').stroke();
         pdf.y = y0 + alto;
       });
     });
-    pdf.moveDown(0.8); pdf.fontSize(9).fillColor('#777').text(LEYENDA_LISTA_PRECIO + (contacto ? '\n' + contacto : ''), L, pdf.y, { width: anchoTot });
+    // Pie en todas las páginas: leyenda + contacto + nº de página.
+    const rango = pdf.bufferedPageRange();
+    for (let i = 0; i < rango.count; i++) {
+      pdf.switchToPage(rango.start + i);
+      const yp = pdf.page.height - PIE + 14;
+      pdf.page.margins.bottom = 0;
+      pdf.moveTo(L, yp - 6).lineTo(R, yp - 6).lineWidth(0.8).strokeColor(ACENTO).stroke();
+      pdf.font('Helvetica-Bold').fontSize(8.5).fillColor(OSCURO).text(LEYENDA_LISTA_PRECIO, L, yp, { width: anchoTot - 60, lineBreak: false });
+      if (contacto) pdf.font('Helvetica').fontSize(8).fillColor('#777').text(contacto, L, yp + 12, { width: anchoTot - 60, lineBreak: false });
+      pdf.font('Helvetica').fontSize(8).fillColor('#777').text('Página ' + (i + 1) + ' de ' + rango.count, R - 80, yp, { width: 80, align: 'right', lineBreak: false });
+    }
     pdf.end();
   } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1803,7 +1828,7 @@ router.get('/listas-precio/:id/detalle', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
-const LEYENDA_LISTA_PRECIO = 'Los precios pueden variar sin previo aviso.';
+const LEYENDA_LISTA_PRECIO = 'Los precios no incluyen IVA y pueden variar sin previo aviso.';
 
 // PDF brandeado de la lista de precio: logo, fecha, tabla (sin costo interno)
 // y la leyenda legal al pie.
