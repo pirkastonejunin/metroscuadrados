@@ -1149,6 +1149,11 @@ function actualizarPreviewLetra(){
     else { letra = letraFiscalParaClienteFrontend(cliente); }
   }
   preview.textContent = `Letra: ${letra}`;
+  // Aviso: la letra sale de la CATEGORÍA FISCAL del cliente, no del CUIT. Si tiene CUIT pero la categoría no es RI/monotributo, sale B.
+  if (letra === 'B' && cliente && String(cliente.cuit || '').replace(/\D/g, '').length === 11 && cliente.categoriaFiscal !== 'exterior') {
+    const cat = (CATEGORIA_FISCAL_OPCIONES.find(o => o.v === cliente.categoriaFiscal) || {}).l || cliente.categoriaFiscal || 'sin categoría';
+    preview.innerHTML = `Letra: B <span style="color:var(--warn,#b45309);font-weight:700">— ojo: el cliente tiene CUIT pero figura como «${escapeHtml(cat)}». Si es Responsable Inscripto o Monotributista, cambiale la categoría fiscal en Clientes (o en Clientes → «Revisar categorías (ARCA)») y recargá esta pantalla.</span>`;
+  }
   mostrarProximoNumero(tipoComprobante, letra);
 }
 
