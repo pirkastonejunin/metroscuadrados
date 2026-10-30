@@ -598,8 +598,40 @@ function comboClienteHtml(prefix, seleccionadoId){
         onblur="cerrarOpcionesClienteCombo('${prefix}')" onkeydown="navegarOpcionesClienteCombo(event,'${prefix}')">
       <input type="hidden" id="${prefix}Cliente" value="${seleccionadoId||''}">
       <div class="producto-buscar-opciones hidden" id="${prefix}ClienteOpciones"></div>
+      <a href="#" style="font-size:12px" onclick="abrirNuevoClientePresupuesto('${prefix}');return false">+ Crear cliente nuevo</a>
     </div>
   `;
+}
+// Alta rápida de cliente desde el presupuesto (sin salir de la pantalla). Datos mínimos; el resto se completa después en Clientes.
+function abrirNuevoClientePresupuesto(prefix){
+  const q = (document.getElementById(prefix + 'Buscar') || {}).value || '';
+  const bg = document.createElement('div'); bg.id = 'ncpBg'; bg.className = 'modal-bg'; bg.style.zIndex = '200';
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  bg.innerHTML = `<div class="modal"><h2>Nuevo cliente</h2>
+    <label>Nombre y apellido / Razón social *</label><input id="ncpNombre" value="${escapeHtml(q.trim())}" autocomplete="off">
+    <div class="grid2" style="margin-top:10px"><div><label>Teléfono</label><input id="ncpTel" inputmode="tel"></div><div><label>CUIT (opcional)</label><input id="ncpCuit" inputmode="numeric"></div></div>
+    <div class="err" id="ncpErr"></div>
+    <button class="btn" id="ncpBtn" style="margin-top:10px;width:100%" onclick="guardarNuevoClientePresupuesto('${prefix}')">Guardar y usar en el presupuesto</button></div>`;
+  document.body.appendChild(bg);
+  document.getElementById('ncpNombre').focus();
+}
+async function guardarNuevoClientePresupuesto(prefix){
+  const err = document.getElementById('ncpErr'), btn = document.getElementById('ncpBtn'); err.textContent = '';
+  const nombre = document.getElementById('ncpNombre').value.trim(), cuit = document.getElementById('ncpCuit').value.replace(/\D/g, '');
+  if (!nombre) { err.textContent = 'Poné el nombre del cliente'; return; }
+  if (cuit && cuit.length !== 11) { err.textContent = 'El CUIT tiene 11 dígitos'; return; }
+  btn.disabled = true;
+  try{
+    const body = { apellidoRazonSocial: nombre, categoriaFiscal: cuit ? 'responsable_inscripto' : 'consumidor_final', telefono: document.getElementById('ncpTel').value.trim() };
+    if (cuit) { body.cuit = cuit.slice(0,2) + '-' + cuit.slice(2,10) + '-' + cuit.slice(10); body.categoriaFiscal = 'consumidor_final'; }
+    const r = await fetch('/api/clientes', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo crear el cliente');
+    clientesCache.push(d);
+    clientesCache.sort((a,b) => (a.apellidoRazonSocial||'').localeCompare(b.apellidoRazonSocial||'', 'es'));
+    document.getElementById(prefix + 'Cliente').value = d._id;
+    document.getElementById(prefix + 'Buscar').value = textoCliente(d);
+    document.getElementById('ncpBg').remove();
+  }catch(e){ err.textContent = e.message; btn.disabled = false; }
 }
 function renderOpcionesClienteCombo(input, prefix, query){
   const cont = document.getElementById(prefix + 'ClienteOpciones');
@@ -607,6 +639,7 @@ function renderOpcionesClienteCombo(input, prefix, query){
   cont.innerHTML = resultados.length
     ? resultados.map(c => `<div class="opcion" data-id="${c._id}" onmousedown="elegirClienteCombo(this,'${prefix}')">${escapeHtml(textoCliente(c))}</div>`).join('')
     : `<div class="sin-resultados">${clientesCache.length ? 'Sin resultados para esa búsqueda' : 'No hay clientes cargados'}</div>`;
+  cont.innerHTML += `<div class="opcion" style="color:var(--accent,#0a6);font-weight:700" onmousedown="abrirNuevoClientePresupuesto('${prefix}')">+ Crear cliente nuevo${query && query.trim() ? ' «' + escapeHtml(query.trim()) + '»' : ''}</div>`;
   cont.classList.remove('hidden');
 }
 function escribirClienteCombo(input, prefix){
