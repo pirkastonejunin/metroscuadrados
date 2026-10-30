@@ -1490,6 +1490,12 @@ function etiquetaUnidad(unidad, tipoUnidad, tipoCosteo) {
   if (!u) u = tipoCosteo === 'm2' ? 'm2' : 'unidad';
   return ETIQUETA_UNIDAD[u] || ('por ' + u);
 }
+function etiquetaBulto(unidad, tipoUnidad, tipoCosteo, cant) {
+  const n = Number(cant); if (!Number.isFinite(n) || n <= 0) return '';
+  const u = unidad || (tipoUnidad === 'superficie' ? 'm2' : tipoUnidad === 'longitud' ? 'ml' : (tipoCosteo === 'm2' ? 'm2' : 'unidad'));
+  const num = (Math.round(n * 1000) / 1000).toLocaleString('es-AR');
+  return num + ({ m2: ' m²', ml: ' m', kg: ' kg', litro: ' lt' }[u] || ' un.') + ' x bulto';
+}
 async function armarMatriz(req) {
   return conReintento(async () => {
     const db = await getDb();
@@ -1498,22 +1504,22 @@ async function armarMatriz(req) {
       db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray()
     ]);
     const insumosPorId = await traerInsumosDeProductos(db, req, cps);
-    const fila = (id, nombre, sku, rubro, costo, extra, unidadTxt) => {
+    const fila = (id, nombre, sku, rubro, costo, extra, unidadTxt, bultoTxt) => {
       const celdas = {};
       listas.forEach(l => {
         const ov = (l.precios || []).find(x => String(x.productoId) === String(id));
         const { precio } = precioDeLista(l, { _id: id }, costo);
         celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
       });
-      return { productoId: String(id), nombre: nombreProlijo(nombre), sku: sku || '', rubro: rubro || '', costo, extra, unidadTxt: unidadTxt || '', celdas };
+      return { productoId: String(id), nombre: nombreProlijo(nombre), sku: sku || '', rubro: rubro || '', costo, extra, unidadTxt: unidadTxt || '', bultoTxt: bultoTxt || '', celdas };
     };
-    const fichasProd = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) } }, filtroOrg(req))).project({ costoProductoId: 1, unidad: 1, tipoUnidad: 1 }).toArray();
+    const fichasProd = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) } }, filtroOrg(req))).project({ costoProductoId: 1, unidad: 1, tipoUnidad: 1, unidadesPorBulto: 1 }).toArray();
     const fichaDeCp = new Map(fichasProd.map(f => [String(f.costoProductoId), f]));
-    const productos = cps.map(p => { const f = fichaDeCp.get(String(p._id)) || {}; return fila(p._id, p.nombre, p.sku, p.rubroLista, calcularCostoProducto(p, insumosPorId).costoTotal, false, etiquetaUnidad(f.unidad, f.tipoUnidad, p.tipoCosteo)); });
+    const productos = cps.map(p => { const f = fichaDeCp.get(String(p._id)) || {}; return fila(p._id, p.nombre, p.sku, p.rubroLista, calcularCostoProducto(p, insumosPorId).costoTotal, false, etiquetaUnidad(f.unidad, f.tipoUnidad, p.tipoCosteo), etiquetaBulto(f.unidad, f.tipoUnidad, p.tipoCosteo, f.unidadesPorBulto || p.rendimientoPorPaquete || p.unidadesPorPaquete)); });
     const ex = await idsExtras(db, req);
     if (ex.length) {
       const fichas = await db.collection('productos_catalogo').find({ _id: { $in: ex }, activo: { $ne: false } }).toArray();
-      fichas.forEach(f => productos.push(fila(f._id, f.nombre, f.sku, f.rubroLista, f.costo != null ? costoEnPesosFicha(f) : null, true, etiquetaUnidad(f.unidad, f.tipoUnidad, null))));
+      fichas.forEach(f => productos.push(fila(f._id, f.nombre, f.sku, f.rubroLista, f.costo != null ? costoEnPesosFicha(f) : null, true, etiquetaUnidad(f.unidad, f.tipoUnidad, null), etiquetaBulto(f.unidad, f.tipoUnidad, null, f.unidadesPorBulto))));
       productos.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     }
     return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
@@ -1537,7 +1543,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
     pdf.pipe(res);
     const L = 40, R = pdf.page.width - 40, anchoTot = R - L;
     const wPrecio = Math.min(110, Math.floor((anchoTot * 0.6) / listas.length));
-    const wUni = 62, xPrecio0 = R - wPrecio * listas.length, xUni = xPrecio0 - wUni, wProd = xUni - L - 8;
+    const wUni = 58, wBul = 80, xPrecio0 = R - wPrecio * listas.length, xBul = xPrecio0 - wBul, xUni = xBul - wUni, wProd = xUni - L - 8;
     const fecha = new Date().toLocaleDateString('es-AR');
     const fondo = () => pdf.page.height - pdf.page.margins.bottom;
     const encabezado = () => {
@@ -1547,6 +1553,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
       const y0 = pdf.y; pdf.fontSize(9).fillColor('#555');
       pdf.text('Producto', L, y0, { width: wProd });
       pdf.text('Precio', xUni, y0, { width: wUni - 4 });
+      pdf.text('Bulto', xBul, y0, { width: wBul - 4 });
       listas.forEach((l, i) => pdf.text(l.nombre, xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }));
       pdf.fillColor('#000'); pdf.y = y0 + 16;
       pdf.moveTo(L, pdf.y).lineTo(R, pdf.y).strokeColor('#ddd').stroke(); pdf.moveDown(0.3);
@@ -1574,7 +1581,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
         if (pdf.y + alto > fondo()) { pdf.addPage(); encabezado(); }
         const y0 = pdf.y;
         pdf.fontSize(10).fillColor('#000').text(p.nombre, L, y0, { width: wProd });
-        pdf.fontSize(9).fillColor('#555').text(p.unidadTxt || '', xUni, y0 + 1, { width: wUni - 4 }); pdf.fontSize(10).fillColor('#000');
+        pdf.fontSize(9).fillColor('#555').text(p.unidadTxt || '', xUni, y0 + 1, { width: wUni - 4 }); pdf.text(p.bultoTxt || '', xBul, y0 + 1, { width: wBul - 4 }); pdf.fontSize(10).fillColor('#000');
         listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }); });
         pdf.y = y0 + alto;
       });
