@@ -1657,6 +1657,42 @@ router.put('/matriz-listas', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Ajuste general por % (30/10/2026, pedido de Mato: "aumentar la lista un 5% y que me recalcule todo"). Sube (o baja, con negativo) el
+// PRECIO final de las listas elegidas: lista por % → sube su % de ganancia; precios y % propios de cada artículo → igual; lista en $ fijo →
+// se fijan los precios actuales ya ajustados por artículo (un monto fijo no escala solo). Con `simular: true` solo informa, no guarda.
+router.post('/matriz-listas/ajuste-porcentaje', authAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const pct = Number(b.porcentaje);
+    if (!Number.isFinite(pct) || pct === 0 || pct <= -90 || pct > 1000) throw err(400, 'Poné un porcentaje distinto de 0 (por ejemplo 5 para subir 5%, -3 para bajar 3%).');
+    const ids = (Array.isArray(b.listaIds) ? b.listaIds : []).map(String);
+    if (!ids.length) throw err(400, 'Elegí al menos una lista.');
+    const f = 1 + pct / 100;
+    const m = await armarMatriz(req);
+    const resumen = [];
+    await conReintento(async () => {
+      const db = await getDb(); const col = db.collection('costos_listas_precio');
+      resumen.length = 0;
+      for (const l of m.listas.filter(x => ids.includes(x._id))) {
+        const doc = await col.findOne(Object.assign({ _id: toObjectId(l._id) }, filtroOrg(req)));
+        if (!doc) continue;
+        const nuevaPct = v => Math.round(((1 + Number(v) / 100) * f - 1) * 100 * 10000) / 10000;
+        let precios = (doc.precios || []).map(o => o.modo === 'porcentaje' ? Object.assign({}, o, { valor: nuevaPct(o.valor) })
+          : Object.assign({}, o, { valor: r2c((o.modo === 'precio' ? o.valor : o.precio) * f), precio: r2c((o.modo === 'precio' ? o.valor : o.precio) * f), modo: 'precio' }));
+        const set = { precios, updatedAt: new Date() };
+        let fijados = 0;
+        if (doc.tipo === 'monto') {
+          const conOv = new Set(precios.map(o => String(o.productoId)));
+          m.productos.forEach(p => { const c = p.celdas[l._id]; if (c && c.precio != null && !conOv.has(p.productoId)) { precios.push({ productoId: toObjectId(p.productoId), modo: 'precio', valor: r2c(c.precio * f), precio: r2c(c.precio * f) }); fijados++; } });
+        } else if (doc.tipo === 'manual') { /* solo precios propios */ } else { set.porcentaje = nuevaPct(doc.porcentaje || 0); }
+        resumen.push({ lista: doc.nombre, tipo: doc.tipo || 'porcentaje', articulos: doc.tipo === 'monto' ? fijados + (doc.precios || []).length : m.productos.filter(p => p.celdas[l._id] && p.celdas[l._id].precio != null).length, nuevoPorcentaje: set.porcentaje != null ? set.porcentaje : null });
+        if (!b.simular) await col.updateOne({ _id: doc._id }, { $set: set });
+      }
+    });
+    res.json({ ok: true, simulado: !!b.simular, porcentaje: pct, listas: resumen });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // A pedido: "Sincronizar con Productos".
 router.post('/listas-precio/sincronizar-productos', authAdmin, async (req, res) => {
   try {

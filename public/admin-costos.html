@@ -218,6 +218,7 @@
           <h3 style="margin:0;flex:1">Tabla de precios</h3>
           <input id="mtBuscar" placeholder="Buscar producto o SKU" oninput="renderMatriz()" style="max-width:220px">
           <button class="btn secondary" onclick="abrirAgregarExtras()">+ Artículo de Productos</button>
+          <button class="btn secondary" onclick="abrirAjustePorcentaje()">Ajustar precios por %</button>
           <button class="btn secondary" onclick="abrirImprimirListas()">Imprimir PDF</button>
           <button class="btn" id="btnMtGuardar" onclick="guardarMatriz()" disabled>Guardar cambios</button>
         </div>
@@ -1099,6 +1100,37 @@ function abrirImprimirListas(){
     <div class="err" id="impErr"></div>
     <button class="btn" style="margin-top:10px" onclick="generarPdfListas()">Generar PDF</button>
   `);
+}
+function abrirAjustePorcentaje(){
+  if (!MATRIZ || !MATRIZ.listas.length) { alert('Primero creá al menos una lista.'); return; }
+  if (Object.keys(MT_CAMBIOS).length || Object.keys(MT_RUBROS).length) { alert('Tenés cambios sin guardar: tocá "Guardar cambios" primero.'); return; }
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Ajustar precios por %</h2>
+    <div class="muted" style="margin-bottom:8px">Sube (o baja, con un número negativo) el <b>precio final</b> de las listas que elijas. Ej: 5 = aumentar 5%. Incluye los precios y % propios de cada artículo.</div>
+    <label>Porcentaje de ajuste</label><input id="ajPct" type="number" step="0.01" placeholder="Ej: 5" style="max-width:140px">
+    <div style="margin-top:10px;font-weight:600">Listas a ajustar</div>
+    ${MATRIZ.listas.map(l => `<label style="display:flex;align-items:center;gap:8px;margin:4px 0;font-weight:500"><input type="checkbox" style="width:auto" class="chkAjLista" value="${l._id}" checked> ${escapeHtml(l.nombre)} <span class="muted">(${l.tipo === 'monto' ? 'costo + $ fijo' : l.tipo === 'manual' ? 'manual' : 'costo + ' + l.porcentaje + '%'})</span></label>`).join('')}
+    <div class="muted" style="margin-top:8px">Las listas de "$ fijo" no escalan solas: sus precios actuales quedan fijados por artículo ya ajustados. Después los precios pasan solos a Productos.</div>
+    <div class="err" id="ajErr"></div><div id="ajRes" style="margin-top:6px"></div>
+    <button class="btn" id="ajBtn" style="margin-top:10px" onclick="aplicarAjustePorcentaje()">Ajustar</button>
+  `);
+}
+async function aplicarAjustePorcentaje(){
+  const err = document.getElementById('ajErr'), btn = document.getElementById('ajBtn'); err.textContent = '';
+  const pct = Number(document.getElementById('ajPct').value);
+  const ids = [...document.querySelectorAll('.chkAjLista:checked')].map(i => i.value);
+  if (!Number.isFinite(pct) || !pct) { err.textContent = 'Poné un porcentaje distinto de 0.'; return; }
+  if (!ids.length) { err.textContent = 'Elegí al menos una lista.'; return; }
+  const nombres = MATRIZ.listas.filter(l => ids.includes(l._id)).map(l => l.nombre).join(', ');
+  if (!confirm((pct > 0 ? 'Aumentar ' : 'Bajar ') + Math.abs(pct) + '% los precios de: ' + nombres + '?')) return;
+  btn.disabled = true; btn.textContent = 'Ajustando…';
+  try{
+    const r = await fetch(BASE + '/matriz-listas/ajuste-porcentaje', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({porcentaje: pct, listaIds: ids})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo ajustar');
+    cerrarModal(); await cargarMatriz();
+    document.getElementById('mtMsg').textContent = 'Listo: ' + d.listas.length + ' lista(s) ajustadas ' + (pct > 0 ? '+' : '') + pct + '%. Los precios pasan a Productos en unos segundos.';
+  }catch(e){ err.textContent = e.message; btn.disabled = false; btn.textContent = 'Ajustar'; }
 }
 async function generarPdfListas(){
   const ids = [...document.querySelectorAll('.chkImpLista:checked')].map(i => i.value);
