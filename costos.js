@@ -1481,6 +1481,15 @@ async function idsExtras(db, req) {
   const d = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'produccionListasExtras' });
   return ((d && d.valor) || []).map(toObjectId).filter(Boolean);
 }
+// Unidad a la que corresponde el precio (para la lista impresa): la de la ficha de Productos; si no, la del costeo (m² o unidad).
+const ETIQUETA_UNIDAD = { m2: 'por m²', ml: 'por metro', unidad: 'por unidad', kg: 'por kg', litro: 'por litro', paquete: 'por paquete', jornal: 'por jornal' };
+function etiquetaUnidad(unidad, tipoUnidad, tipoCosteo) {
+  let u = unidad;
+  if (!u && tipoUnidad === 'superficie') u = 'm2';
+  if (!u && tipoUnidad === 'longitud') u = 'ml';
+  if (!u) u = tipoCosteo === 'm2' ? 'm2' : 'unidad';
+  return ETIQUETA_UNIDAD[u] || ('por ' + u);
+}
 async function armarMatriz(req) {
   return conReintento(async () => {
     const db = await getDb();
@@ -1489,20 +1498,22 @@ async function armarMatriz(req) {
       db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray()
     ]);
     const insumosPorId = await traerInsumosDeProductos(db, req, cps);
-    const fila = (id, nombre, sku, rubro, costo, extra) => {
+    const fila = (id, nombre, sku, rubro, costo, extra, unidadTxt) => {
       const celdas = {};
       listas.forEach(l => {
         const ov = (l.precios || []).find(x => String(x.productoId) === String(id));
         const { precio } = precioDeLista(l, { _id: id }, costo);
         celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
       });
-      return { productoId: String(id), nombre: nombreProlijo(nombre), sku: sku || '', rubro: rubro || '', costo, extra, celdas };
+      return { productoId: String(id), nombre: nombreProlijo(nombre), sku: sku || '', rubro: rubro || '', costo, extra, unidadTxt: unidadTxt || '', celdas };
     };
-    const productos = cps.map(p => fila(p._id, p.nombre, p.sku, p.rubroLista, calcularCostoProducto(p, insumosPorId).costoTotal, false));
+    const fichasProd = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) } }, filtroOrg(req))).project({ costoProductoId: 1, unidad: 1, tipoUnidad: 1 }).toArray();
+    const fichaDeCp = new Map(fichasProd.map(f => [String(f.costoProductoId), f]));
+    const productos = cps.map(p => { const f = fichaDeCp.get(String(p._id)) || {}; return fila(p._id, p.nombre, p.sku, p.rubroLista, calcularCostoProducto(p, insumosPorId).costoTotal, false, etiquetaUnidad(f.unidad, f.tipoUnidad, p.tipoCosteo)); });
     const ex = await idsExtras(db, req);
     if (ex.length) {
       const fichas = await db.collection('productos_catalogo').find({ _id: { $in: ex }, activo: { $ne: false } }).toArray();
-      fichas.forEach(f => productos.push(fila(f._id, f.nombre, f.sku, f.rubroLista, f.costo != null ? costoEnPesosFicha(f) : null, true)));
+      fichas.forEach(f => productos.push(fila(f._id, f.nombre, f.sku, f.rubroLista, f.costo != null ? costoEnPesosFicha(f) : null, true, etiquetaUnidad(f.unidad, f.tipoUnidad, null))));
       productos.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     }
     return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
@@ -1526,7 +1537,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
     pdf.pipe(res);
     const L = 40, R = pdf.page.width - 40, anchoTot = R - L;
     const wPrecio = Math.min(110, Math.floor((anchoTot * 0.6) / listas.length));
-    const xPrecio0 = R - wPrecio * listas.length, wProd = xPrecio0 - L - 8;
+    const wUni = 62, xPrecio0 = R - wPrecio * listas.length, xUni = xPrecio0 - wUni, wProd = xUni - L - 8;
     const fecha = new Date().toLocaleDateString('es-AR');
     const fondo = () => pdf.page.height - pdf.page.margins.bottom;
     const encabezado = () => {
@@ -1535,6 +1546,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
       pdf.moveDown(0.2); pdf.fontSize(10).fillColor('#555').text('Fecha: ' + fecha); pdf.fillColor('#000'); pdf.moveDown(0.6);
       const y0 = pdf.y; pdf.fontSize(9).fillColor('#555');
       pdf.text('Producto', L, y0, { width: wProd });
+      pdf.text('Precio', xUni, y0, { width: wUni - 4 });
       listas.forEach((l, i) => pdf.text(l.nombre, xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }));
       pdf.fillColor('#000'); pdf.y = y0 + 16;
       pdf.moveTo(L, pdf.y).lineTo(R, pdf.y).strokeColor('#ddd').stroke(); pdf.moveDown(0.3);
@@ -1562,6 +1574,7 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
         if (pdf.y + alto > fondo()) { pdf.addPage(); encabezado(); }
         const y0 = pdf.y;
         pdf.fontSize(10).fillColor('#000').text(p.nombre, L, y0, { width: wProd });
+        pdf.fontSize(9).fillColor('#555').text(p.unidadTxt || '', xUni, y0 + 1, { width: wUni - 4 }); pdf.fontSize(10).fillColor('#000');
         listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }); });
         pdf.y = y0 + alto;
       });
