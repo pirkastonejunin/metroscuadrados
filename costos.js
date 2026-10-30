@@ -1454,7 +1454,7 @@ async function armarMatriz(req) {
         const { precio } = precioDeLista(l, p, costo);
         celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
       });
-      return { productoId: String(p._id), nombre: p.nombre, sku: p.sku || '', costo, celdas };
+      return { productoId: String(p._id), nombre: p.nombre, sku: p.sku || '', rubro: p.rubroLista || '', costo, celdas };
     });
     return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
   });
@@ -1491,14 +1491,31 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
       pdf.moveTo(L, pdf.y).lineTo(R, pdf.y).strokeColor('#ddd').stroke(); pdf.moveDown(0.3);
     };
     encabezado();
-    productos.forEach(p => {
-      pdf.fontSize(10);
-      const alto = Math.max(16, pdf.heightOfString(p.nombre, { width: wProd }) + 4);
-      if (pdf.y + alto > fondo()) { pdf.addPage(); encabezado(); }
-      const y0 = pdf.y;
-      pdf.fontSize(10).fillColor('#000').text(p.nombre, L, y0, { width: wProd });
-      listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }); });
-      pdf.y = y0 + alto;
+    const porRubros = req.query.rubros !== '0' && productos.some(p => p.rubro);
+    const grupos = [];
+    if (porRubros) {
+      const mapa = new Map();
+      productos.forEach(p => { const k = p.rubro || ''; if (!mapa.has(k)) mapa.set(k, []); mapa.get(k).push(p); });
+      [...mapa.keys()].filter(k => k).sort((a, b) => a.localeCompare(b, 'es')).forEach(k => grupos.push({ titulo: k, items: mapa.get(k) }));
+      if (mapa.has('')) grupos.push({ titulo: 'Otros', items: mapa.get('') });
+    } else grupos.push({ titulo: '', items: productos });
+    grupos.forEach(g => {
+      if (g.titulo) {
+        if (pdf.y + 50 > fondo()) { pdf.addPage(); encabezado(); }
+        pdf.moveDown(0.5);
+        const yt = pdf.y;
+        pdf.rect(L, yt - 2, anchoTot, 16).fill('#f0eeea'); pdf.fillColor('#000').fontSize(10).font('Helvetica-Bold').text(g.titulo.toUpperCase(), L + 4, yt + 1, { width: anchoTot - 8 }); pdf.font('Helvetica');
+        pdf.y = yt + 18;
+      }
+      g.items.forEach(p => {
+        pdf.fontSize(10);
+        const alto = Math.max(16, pdf.heightOfString(p.nombre, { width: wProd }) + 4);
+        if (pdf.y + alto > fondo()) { pdf.addPage(); encabezado(); }
+        const y0 = pdf.y;
+        pdf.fontSize(10).fillColor('#000').text(p.nombre, L, y0, { width: wProd });
+        listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }); });
+        pdf.y = y0 + alto;
+      });
     });
     pdf.moveDown(0.8); pdf.fontSize(9).fillColor('#777').text(LEYENDA_LISTA_PRECIO, L, pdf.y, { width: anchoTot });
     pdf.end();
@@ -1507,7 +1524,19 @@ router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
 router.put('/matriz-listas', authAdmin, async (req, res) => {
   try {
     const cambios = Array.isArray((req.body || {}).cambios) ? req.body.cambios : [];
-    if (!cambios.length) throw err(400, 'No hay cambios para guardar.');
+    const rubros = Array.isArray((req.body || {}).rubros) ? req.body.rubros : [];
+    if (!cambios.length && !rubros.length) throw err(400, 'No hay cambios para guardar.');
+    if (rubros.length) {
+      // Rubro solo para ordenar/dividir la lista impresa (no cambia nada en Productos).
+      await conReintento(async () => {
+        const col = (await getDb()).collection('costos_productos');
+        for (const r of rubros) {
+          const pid = toObjectId(r.productoId); if (!pid) continue;
+          const nombre = String(r.rubro || '').trim().slice(0, 60);
+          await col.updateOne(Object.assign({ _id: pid }, filtroOrg(req)), nombre ? { $set: { rubroLista: nombre } } : { $unset: { rubroLista: '' } });
+        }
+      });
+    }
     if (cambios.length > 20000) throw err(400, 'Demasiados cambios juntos.');
     let guardados = 0;
     await conReintento(async () => {

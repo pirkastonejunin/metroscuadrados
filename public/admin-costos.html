@@ -222,6 +222,7 @@
         </div>
         <div class="muted" style="margin:6px 0 8px">Cada celda: escribí un <b>%</b> sobre el costo o un <b>$</b> (precio final) para ese artículo. Vacía = se usa el cálculo general de la lista. "Aplicar a todos" pone el mismo % en toda la columna. Al guardar, los precios pasan solos a Productos.</div>
         <div id="mtMsg" class="muted"></div>
+        <datalist id="mtRubros"></datalist>
         <div style="overflow:auto;max-height:70vh"><table id="mtTabla"></table></div>
       </div>
     </section>
@@ -996,7 +997,8 @@ async function guardarCfgSincCosto(){
 }
 // ---------------- TABLA DE PRECIOS (todos los productos x todas las listas) ----------------
 let MATRIZ = null;
-const MT_CAMBIOS = {}; // 'listaId|productoId' -> {listaId, productoId, modo, valor}
+const MT_CAMBIOS = {};
+const MT_RUBROS = {}; // productoId -> rubro editado (solo para imprimir) // 'listaId|productoId' -> {listaId, productoId, modo, valor}
 function mtPrecio(costo, lista, modo, valor){
   if (valor !== '' && valor !== null && valor !== undefined && !isNaN(Number(valor))) return modo === 'porcentaje' ? costo * (1 + Number(valor) / 100) : Number(valor);
   if (lista.tipo === 'manual') return null;
@@ -1008,18 +1010,20 @@ async function cargarMatriz(){
   if (!r.ok) { document.getElementById('mtMsg').textContent = 'No se pudo cargar la tabla de precios.'; return; }
   MATRIZ = await r.json();
   Object.keys(MT_CAMBIOS).forEach(k => delete MT_CAMBIOS[k]);
+  Object.keys(MT_RUBROS).forEach(k => delete MT_RUBROS[k]);
   document.getElementById('btnMtGuardar').disabled = true;
   renderMatriz();
 }
 function renderMatriz(){
   const t = document.getElementById('mtTabla'); if (!MATRIZ) { t.innerHTML = ''; return; }
+  const dl = document.getElementById('mtRubros'); if (dl) dl.innerHTML = [...new Set(MATRIZ.productos.map(p => p.rubro).filter(Boolean).concat(Object.values(MT_RUBROS).filter(Boolean)))].sort().map(r => '<option value="' + escapeHtml(r) + '">').join('');
   const q = (document.getElementById('mtBuscar').value || '').toLowerCase().trim();
   const filas = MATRIZ.productos.filter(p => !q || p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
   if (!MATRIZ.listas.length) { t.innerHTML = '<tr><td class="muted">Primero creá al menos una lista (botón "+ Nueva lista").</td></tr>'; return; }
-  t.innerHTML = '<thead><tr><th style="position:sticky;top:0;background:var(--card,#fff)">Producto</th><th style="position:sticky;top:0;background:var(--card,#fff)">Costo</th>' +
+  t.innerHTML = '<thead><tr><th style="position:sticky;top:0;background:var(--card,#fff)">Producto</th><th style="position:sticky;top:0;background:var(--card,#fff)">Rubro <span class="muted" style="font-weight:400;font-size:11px">(solo para imprimir)</span></th><th style="position:sticky;top:0;background:var(--card,#fff)">Costo</th>' +
     MATRIZ.listas.map(l => `<th style="position:sticky;top:0;background:var(--card,#fff);min-width:150px">${escapeHtml(l.nombre)}<div class="muted" style="font-weight:400;font-size:11px">${escapeHtml(descCalculoLista(l))}</div>
       <div style="display:flex;gap:4px;margin-top:4px"><input id="mtAll_${l._id}" type="number" step="0.01" placeholder="%" style="width:62px"><button class="btn small secondary" onclick="mtAplicarTodos('${l._id}')" title="Poner este % en todos los productos de la columna">A todos</button></div></th>`).join('') + '</tr></thead><tbody>' +
-    filas.map(p => `<tr><td>${escapeHtml(p.nombre)}${p.sku ? ' <span class="muted">' + escapeHtml(p.sku) + '</span>' : ''}</td><td class="muted">${money(p.costo)}</td>` +
+    filas.map(p => `<tr><td>${escapeHtml(p.nombre)}${p.sku ? ' <span class="muted">' + escapeHtml(p.sku) + '</span>' : ''}</td><td><input list="mtRubros" id="mtr_${p.productoId}" value="${escapeHtml(MT_RUBROS[p.productoId] !== undefined ? MT_RUBROS[p.productoId] : (p.rubro || ''))}" placeholder="Rubro" style="width:120px" oninput="mtRubro('${p.productoId}')"></td><td class="muted">${money(p.costo)}</td>` +
       MATRIZ.listas.map(l => {
         const k = l._id + '|' + p.productoId, c = MT_CAMBIOS[k] || p.celdas[l._id] || {modo:'', valor:null};
         const modo = c.modo === 'porcentaje' ? 'porcentaje' : 'precio';
@@ -1027,6 +1031,10 @@ function renderMatriz(){
         const pr = mtPrecio(p.costo, l, modo, v);
         return `<td style="white-space:nowrap"><input id="mtv_${k}" type="number" step="0.01" min="0" value="${v}" style="width:80px" oninput="mtCambio('${l._id}','${p.productoId}')"><select id="mtm_${k}" onchange="mtCambio('${l._id}','${p.productoId}')" style="width:48px"><option value="porcentaje" ${modo==='porcentaje'?'selected':''}>%</option><option value="precio" ${modo==='precio'?'selected':''}>$</option></select><div id="mtp_${k}" style="font-size:12px"><b>${pr == null ? '—' : money(pr)}</b></div></td>`;
       }).join('') + '</tr>').join('') + '</tbody>';
+}
+function mtRubro(productoId){
+  MT_RUBROS[productoId] = document.getElementById('mtr_' + productoId).value;
+  document.getElementById('btnMtGuardar').disabled = false;
 }
 function mtCambio(listaId, productoId){
   const k = listaId + '|' + productoId;
@@ -1049,12 +1057,13 @@ function mtAplicarTodos(listaId){
 }
 function abrirImprimirListas(){
   if (!MATRIZ || !MATRIZ.listas.length) { alert('Primero creá al menos una lista.'); return; }
-  if (Object.keys(MT_CAMBIOS).length) { alert('Tenés cambios sin guardar: tocá "Guardar cambios" primero para que salgan en el PDF.'); return; }
+  if (Object.keys(MT_CAMBIOS).length || Object.keys(MT_RUBROS).length) { alert('Tenés cambios sin guardar: tocá "Guardar cambios" primero para que salgan en el PDF.'); return; }
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Imprimir lista de precios</h2>
     <div class="muted" style="margin-bottom:8px">Elegí las listas que querés en el PDF. Sale una columna de precios por lista (sin costos).</div>
     ${MATRIZ.listas.map(l => `<label style="display:flex;align-items:center;gap:8px;margin:4px 0;font-weight:500"><input type="checkbox" style="width:auto" class="chkImpLista" value="${l._id}" checked> ${escapeHtml(l.nombre)}</label>`).join('')}
+    <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;font-weight:500"><input type="checkbox" style="width:auto" id="impRubros" checked> Dividir por rubros</label>
     <div class="err" id="impErr"></div>
     <button class="btn" style="margin-top:10px" onclick="generarPdfListas()">Generar PDF</button>
   `);
@@ -1064,7 +1073,7 @@ async function generarPdfListas(){
   if (!ids.length) { document.getElementById('impErr').textContent = 'Elegí al menos una lista.'; return; }
   const w = window.open('', '_blank');
   try{
-    const r = await fetch(BASE + '/matriz-listas/pdf?listas=' + ids.join(','), {headers: headersAuth()});
+    const r = await fetch(BASE + '/matriz-listas/pdf?listas=' + ids.join(',') + (document.getElementById('impRubros').checked ? '' : '&rubros=0'), {headers: headersAuth()});
     if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || 'No se pudo generar el PDF'); }
     const url = URL.createObjectURL(await r.blob());
     if (w && !w.closed) w.location.href = url; else { const a = document.createElement('a'); a.href = url; a.download = 'lista-de-precios.pdf'; document.body.appendChild(a); a.click(); a.remove(); }
@@ -1072,11 +1081,13 @@ async function generarPdfListas(){
   }catch(e){ if (w) w.close(); document.getElementById('impErr').textContent = e.message; }
 }
 async function guardarMatriz(){
-  const cambios = Object.values(MT_CAMBIOS); if (!cambios.length) return;
+  const cambios = Object.values(MT_CAMBIOS);
+  const rubros = Object.keys(MT_RUBROS).map(productoId => ({ productoId, rubro: MT_RUBROS[productoId] }));
+  if (!cambios.length && !rubros.length) return;
   const btn = document.getElementById('btnMtGuardar'), msg = document.getElementById('mtMsg');
   btn.disabled = true; msg.textContent = 'Guardando…';
   try{
-    const r = await fetch(BASE + '/matriz-listas', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({cambios})});
+    const r = await fetch(BASE + '/matriz-listas', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({cambios, rubros})});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     msg.textContent = 'Guardado (' + d.guardados + ' precios). En unos segundos pasan a la ficha de los productos.';
     await cargarMatriz();
