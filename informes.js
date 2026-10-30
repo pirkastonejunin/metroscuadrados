@@ -81,6 +81,19 @@ function etiquetaComprobante(v) {
 // ---------------------------------------------------------------------------
 // Opciones para los filtros
 // ---------------------------------------------------------------------------
+// Un mismo vendedor puede estar escrito distinto en las ventas importadas de Dux ("VELAZQUEZ, CARLOS") y en las cargadas en el
+// sistema ("Carlos Velázquez"): mismas palabras en cualquier orden, con o sin tildes/mayúsculas = mismo vendedor.
+const claveVendedor = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
+function mejorNombreVendedor(nombres) {
+  const lindo = nombres.filter(n => !n.includes(',') && n !== n.toUpperCase());
+  return (lindo[0] || nombres.find(n => !n.includes(',')) || nombres[0]);
+}
+function agruparVendedores(distintos) {
+  const por = new Map();
+  distintos.filter(Boolean).forEach(n => { const k = claveVendedor(n); if (!k) return; if (!por.has(k)) por.set(k, []); por.get(k).push(n); });
+  return por; // clave -> [variantes]
+}
+
 router.get('/ventas/opciones', authInforme('informe_ventas'), async (req, res) => {
   try {
     const out = await conReintento(async () => {
@@ -93,7 +106,7 @@ router.get('/ventas/opciones', authInforme('informe_ventas'), async (req, res) =
         db.collection('productos_catalogo').distinct('rubro', Object.assign({ rubro: { $nin: [null, ''] } }, org))
       ]);
       return {
-        vendedores: vendedores.sort((a, b) => a.localeCompare(b, 'es')),
+        vendedores: [...agruparVendedores(vendedores).values()].map(v => mejorNombreVendedor(v)).sort((a, b) => a.localeCompare(b, 'es')),
         clientes: clientes.map(c => ({ _id: String(c._id), nombre: c.nombre || '(sin nombre)' })),
         productos: productos.map(p => ({ _id: String(p._id), nombre: p.nombre || '', sku: p.sku || '' })),
         rubros: rubros.sort((a, b) => a.localeCompare(b, 'es'))
@@ -129,7 +142,8 @@ async function armarInformeVentas(req) {
     const match = Object.assign({}, filtroOrg(req), { fecha: { $gte: inicioDia(desdeS), $lte: finDia(hastaS) } });
     if (!incluirAnuladas) match.estado = { $ne: 'anulada' };
     if (clienteId) match.clienteId = clienteId;
-    if (vendedor) match.vendedor = vendedor;
+    const porVend = agruparVendedores(await db.collection('ventas').distinct('vendedor', Object.assign({ vendedor: { $nin: [null, ''] } }, filtroOrg(req))));
+    if (vendedor) match.vendedor = { $in: (porVend.get(claveVendedor(vendedor)) || [vendedor]).concat([vendedor]) };
     if (productoId) match['items.productoId'] = productoId;
     const ventas = await db.collection('ventas').find(match).sort({ fecha: 1, numero: 1 }).limit(20000).toArray();
 
@@ -168,7 +182,7 @@ async function armarInformeVentas(req) {
       });
       filas = [...por.values()].map(f => Object.assign(f, { m2: r2(f.m2), importe: r2(f.importe) }));
     } else {
-      const clave = { cliente: l => l.v.clienteNombre || '(sin cliente)', vendedor: l => l.v.vendedor || '(sin vendedor)', producto: l => l.producto, rubro: l => l.rubro }[agrupar];
+      const clave = { cliente: l => l.v.clienteNombre || '(sin cliente)', vendedor: l => (l.v.vendedor ? mejorNombreVendedor(porVend.get(claveVendedor(l.v.vendedor)) || [l.v.vendedor]) : '(sin vendedor)'), producto: l => l.producto, rubro: l => l.rubro }[agrupar];
       const por = new Map();
       lineas.forEach(l => {
         const k = clave(l);
