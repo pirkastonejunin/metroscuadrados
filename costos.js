@@ -1438,29 +1438,71 @@ function programarSincronizacion(req) {
 }
 // Tabla de precios: todos los productos en filas y una columna por lista; cada celda es un % sobre el costo o un precio en $
 // (vacía = se usa el cálculo general de la lista).
-router.get('/matriz-listas', authAdmin, async (req, res) => {
-  try {
-    const out = await conReintento(async () => {
-      const db = await getDb();
-      const [listas, cps] = await Promise.all([
-        db.collection('costos_listas_precio').find(Object.assign({ activa: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray(),
-        db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray()
-      ]);
-      const insumosPorId = await traerInsumosDeProductos(db, req, cps);
-      const productos = cps.map(p => {
-        const costo = calcularCostoProducto(p, insumosPorId).costoTotal;
-        const celdas = {};
-        listas.forEach(l => {
-          const ov = (l.precios || []).find(x => String(x.productoId) === String(p._id));
-          const { precio } = precioDeLista(l, p, costo);
-          celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
-        });
-        return { productoId: String(p._id), nombre: p.nombre, sku: p.sku || '', costo, celdas };
+async function armarMatriz(req) {
+  return conReintento(async () => {
+    const db = await getDb();
+    const [listas, cps] = await Promise.all([
+      db.collection('costos_listas_precio').find(Object.assign({ activa: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray(),
+      db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray()
+    ]);
+    const insumosPorId = await traerInsumosDeProductos(db, req, cps);
+    const productos = cps.map(p => {
+      const costo = calcularCostoProducto(p, insumosPorId).costoTotal;
+      const celdas = {};
+      listas.forEach(l => {
+        const ov = (l.precios || []).find(x => String(x.productoId) === String(p._id));
+        const { precio } = precioDeLista(l, p, costo);
+        celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
       });
-      return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
+      return { productoId: String(p._id), nombre: p.nombre, sku: p.sku || '', costo, celdas };
     });
-    res.json(out);
-  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+    return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
+  });
+}
+router.get('/matriz-listas', authAdmin, async (req, res) => {
+  try { res.json(await armarMatriz(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// PDF imprimible con las listas elegidas (?listas=id1,id2): una columna de precios por lista, sin costos internos.
+router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
+  try {
+    const m = await armarMatriz(req);
+    const ids = String(req.query.listas || '').split(',').filter(Boolean);
+    const listas = m.listas.filter(l => ids.includes(l._id));
+    if (!listas.length) throw err(400, 'Elegí al menos una lista.');
+    const productos = m.productos.filter(p => listas.some(l => p.celdas[l._id].precio != null));
+    const horizontal = listas.length > 3;
+    const pdf = new PDFDocument({ margin: 40, size: 'A4', layout: horizontal ? 'landscape' : 'portrait' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="lista-de-precios.pdf"');
+    pdf.pipe(res);
+    const L = 40, R = pdf.page.width - 40, anchoTot = R - L;
+    const wPrecio = Math.min(110, Math.floor((anchoTot * 0.6) / listas.length));
+    const xPrecio0 = R - wPrecio * listas.length, wProd = xPrecio0 - L - 8;
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const fondo = () => pdf.page.height - pdf.page.margins.bottom;
+    const encabezado = () => {
+      dibujarMarcaCostos(pdf);
+      pdf.fontSize(16).fillColor('#000').text('Lista de precios', L, pdf.y, { align: 'left' });
+      pdf.moveDown(0.2); pdf.fontSize(10).fillColor('#555').text('Fecha: ' + fecha); pdf.fillColor('#000'); pdf.moveDown(0.6);
+      const y0 = pdf.y; pdf.fontSize(9).fillColor('#555');
+      pdf.text('Producto', L, y0, { width: wProd });
+      listas.forEach((l, i) => pdf.text(l.nombre, xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }));
+      pdf.fillColor('#000'); pdf.y = y0 + 16;
+      pdf.moveTo(L, pdf.y).lineTo(R, pdf.y).strokeColor('#ddd').stroke(); pdf.moveDown(0.3);
+    };
+    encabezado();
+    productos.forEach(p => {
+      pdf.fontSize(10);
+      const alto = Math.max(16, pdf.heightOfString(p.nombre, { width: wProd }) + 4);
+      if (pdf.y + alto > fondo()) { pdf.addPage(); encabezado(); }
+      const y0 = pdf.y;
+      pdf.fontSize(10).fillColor('#000').text(p.nombre, L, y0, { width: wProd });
+      listas.forEach((l, i) => { const pr = p.celdas[l._id].precio; pdf.text(pr == null ? '—' : moneyPdfCostos(pr), xPrecio0 + i * wPrecio, y0, { width: wPrecio - 4, align: 'right' }); });
+      pdf.y = y0 + alto;
+    });
+    pdf.moveDown(0.8); pdf.fontSize(9).fillColor('#777').text(LEYENDA_LISTA_PRECIO, L, pdf.y, { width: anchoTot });
+    pdf.end();
+  } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ error: e.message }); }
 });
 router.put('/matriz-listas', authAdmin, async (req, res) => {
   try {

@@ -217,6 +217,7 @@
         <div class="row" style="align-items:center;gap:8px">
           <h3 style="margin:0;flex:1">Tabla de precios</h3>
           <input id="mtBuscar" placeholder="Buscar producto o SKU" oninput="renderMatriz()" style="max-width:220px">
+          <button class="btn secondary" onclick="abrirImprimirListas()">Imprimir PDF</button>
           <button class="btn" id="btnMtGuardar" onclick="guardarMatriz()" disabled>Guardar cambios</button>
         </div>
         <div class="muted" style="margin:6px 0 8px">Cada celda: escribí un <b>%</b> sobre el costo o un <b>$</b> (precio final) para ese artículo. Vacía = se usa el cálculo general de la lista. "Aplicar a todos" pone el mismo % en toda la columna. Al guardar, los precios pasan solos a Productos.</div>
@@ -1045,6 +1046,30 @@ function mtAplicarTodos(listaId){
   });
   document.getElementById('btnMtGuardar').disabled = false;
   renderMatriz();
+}
+function abrirImprimirListas(){
+  if (!MATRIZ || !MATRIZ.listas.length) { alert('Primero creá al menos una lista.'); return; }
+  if (Object.keys(MT_CAMBIOS).length) { alert('Tenés cambios sin guardar: tocá "Guardar cambios" primero para que salgan en el PDF.'); return; }
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Imprimir lista de precios</h2>
+    <div class="muted" style="margin-bottom:8px">Elegí las listas que querés en el PDF. Sale una columna de precios por lista (sin costos).</div>
+    ${MATRIZ.listas.map(l => `<label style="display:flex;align-items:center;gap:8px;margin:4px 0;font-weight:500"><input type="checkbox" style="width:auto" class="chkImpLista" value="${l._id}" checked> ${escapeHtml(l.nombre)}</label>`).join('')}
+    <div class="err" id="impErr"></div>
+    <button class="btn" style="margin-top:10px" onclick="generarPdfListas()">Generar PDF</button>
+  `);
+}
+async function generarPdfListas(){
+  const ids = [...document.querySelectorAll('.chkImpLista:checked')].map(i => i.value);
+  if (!ids.length) { document.getElementById('impErr').textContent = 'Elegí al menos una lista.'; return; }
+  const w = window.open('', '_blank');
+  try{
+    const r = await fetch(BASE + '/matriz-listas/pdf?listas=' + ids.join(','), {headers: headersAuth()});
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || 'No se pudo generar el PDF'); }
+    const url = URL.createObjectURL(await r.blob());
+    if (w && !w.closed) w.location.href = url; else { const a = document.createElement('a'); a.href = url; a.download = 'lista-de-precios.pdf'; document.body.appendChild(a); a.click(); a.remove(); }
+    cerrarModal();
+  }catch(e){ if (w) w.close(); document.getElementById('impErr').textContent = e.message; }
 }
 async function guardarMatriz(){
   const cambios = Object.values(MT_CAMBIOS); if (!cambios.length) return;
