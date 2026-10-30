@@ -356,11 +356,15 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
 
       // ---- Recordatorios propios (campanita → "+"): los pendientes que ya llegaron a su hora ----
       {
+        // Los propios aparecen cuando llega su hora; los que te asignó otra persona aparecen apenas se crean (sin importar la sucursal).
         const recs = await db.collection('recordatorios')
-          .find(Object.assign({ usuarioId: req.usuario._id, hecho: { $ne: true }, fechaHora: { $lte: ahora } }, filtroOrg(req)))
+          .find({ usuarioId: req.usuario._id, hecho: { $ne: true }, $or: [Object.assign({ fechaHora: { $lte: ahora } }, filtroOrg(req)), { asignadoPorId: { $exists: true, $ne: null } }] })
           .sort({ fechaHora: 1 }).limit(50).toArray();
         for (const r of recs) {
-          items.push({ tipo: 'recordatorio', id: String(r._id), titulo: r.titulo, subtitulo: r.nota || 'Recordatorio', fecha: r.fechaHora, etiquetaFecha: 'Era para el' });
+          const asignada = !!r.asignadoPorId;
+          items.push({ tipo: 'recordatorio', id: String(r._id), titulo: r.titulo,
+            subtitulo: asignada ? ('Tarea de ' + (r.asignadoPorNombre || 'otro usuario') + (r.nota ? ' — ' + r.nota : '')) : (r.nota || 'Recordatorio'),
+            fecha: r.fechaHora, etiquetaFecha: asignada && r.fechaHora > ahora ? 'Para el' : 'Era para el' });
         }
       }
 
@@ -451,6 +455,13 @@ function parseFechaHoraLocal(str) {
   const t = String(str || '').trim();
   return new Date(/Z$|[+-]\d{2}:\d{2}$/.test(t) ? t : t + '-03:00');
 }
+// Usuarios a los que se les puede asignar una tarea (activos).
+router.get('/usuarios-asignables', authUsuario, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('usuarios').find({ activo: { $ne: false } }).project({ nombre: 1, usuario: 1 }).sort({ nombre: 1 }).toArray());
+    res.json(lista.map(u => ({ _id: String(u._id), nombre: u.nombre || u.usuario || '', yo: String(u._id) === String(req.usuario._id) })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.post('/recordatorios', authUsuario, resolverOrg, async (req, res) => {
   try {
     const b = req.body || {};
@@ -461,16 +472,27 @@ router.post('/recordatorios', authUsuario, resolverOrg, async (req, res) => {
     const nota = String(b.nota || '').trim();
     const out = await conReintento(async () => {
       const db = await getDb();
+      // Asignada a otro usuario: le aparece en SU campanita y el evento va a SU calendario.
+      let destino = { _id: req.usuario._id, nombre: req.usuario.nombre || '', vendedorId: req.usuario.vendedorId || null };
+      let asignada = false;
+      if (b.asignadoAId && String(b.asignadoAId) !== String(req.usuario._id)) {
+        let aid; try { aid = new ObjectId(String(b.asignadoAId)); } catch (e) { const er = new Error('Usuario inválido.'); er.status = 400; throw er; }
+        const u = await db.collection('usuarios').findOne({ _id: aid, activo: { $ne: false } });
+        if (!u) { const er = new Error('Ese usuario no existe o está inactivo.'); er.status = 400; throw er; }
+        destino = { _id: u._id, nombre: u.nombre || u.usuario || '', vendedorId: u.vendedorId || null };
+        asignada = true;
+      }
       let calendarId = null;
-      if (req.usuario.vendedorId) {
-        let vid = req.usuario.vendedorId; try { vid = new ObjectId(String(vid)); } catch (e) { /* queda como vino */ }
+      if (destino.vendedorId) {
+        let vid = destino.vendedorId; try { vid = new ObjectId(String(vid)); } catch (e) { /* queda como vino */ }
         const v = await db.collection('visitas_vendedores').findOne({ _id: vid });
         calendarId = (v && v.googleCalendarId) || null;
       }
-      const doc = { orgId: req.orgId || null, usuarioId: req.usuario._id, usuarioNombre: req.usuario.nombre || '', titulo, nota, fechaHora: fecha, hecho: false, googleEventId: null, calendarId, createdAt: new Date() };
+      const doc = { orgId: req.orgId || null, usuarioId: destino._id, usuarioNombre: destino.nombre, titulo, nota, fechaHora: fecha, hecho: false, googleEventId: null, calendarId, createdAt: new Date() };
+      if (asignada) { doc.asignadoPorId = req.usuario._id; doc.asignadoPorNombre = req.usuario.nombre || ''; }
       doc.googleEventId = await googleCalendar.upsertEvento(null, { titulo: '🔔 ' + titulo, descripcion: nota, inicio: fecha, fin: new Date(fecha.getTime() + 30 * 60000) }, calendarId);
       const r = await db.collection('recordatorios').insertOne(doc);
-      return { id: String(r.insertedId), enCalendario: !!doc.googleEventId, calendarioConectado: googleCalendar.habilitado() };
+      return { id: String(r.insertedId), enCalendario: !!doc.googleEventId, calendarioConectado: googleCalendar.habilitado(), asignadoA: asignada ? destino.nombre : null };
     });
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

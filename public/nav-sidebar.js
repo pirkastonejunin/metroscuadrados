@@ -306,7 +306,7 @@
       .pn-bell-add { background: var(--accent, #555); color: #fff; border: none; border-radius: 6px; width: 26px; height: 26px; font-size: 18px; line-height: 1; cursor: pointer; padding: 0; }
       .pn-bell-form { display: none; padding: 10px 14px; border-bottom: 1px solid var(--border, #ddd); background: var(--bg, #f7f7f7); }
       .pn-bell-form.pn-abierto { display: block; }
-      .pn-bell-form input, .pn-bell-form textarea { width: 100%; box-sizing: border-box; margin: 3px 0 6px; padding: 7px 8px; border: 1px solid var(--border, #ccc); border-radius: 6px; font: inherit; font-size: 13px; }
+      .pn-bell-form input, .pn-bell-form textarea, .pn-bell-form select { width: 100%; box-sizing: border-box; margin: 3px 0 6px; padding: 7px 8px; border: 1px solid var(--border, #ccc); border-radius: 6px; font: inherit; font-size: 13px; }
       .pn-bell-form button.pn-guardar { background: var(--accent, #555); color: #fff; border: none; border-radius: 6px; padding: 7px 12px; font-weight: 700; font-size: 13px; cursor: pointer; }
       .pn-bell-form .pn-msg { font-size: 12px; margin-top: 6px; }
       .pn-bell-hecho { margin-top: 6px; background: transparent; border: 1px solid var(--border, #ccc); border-radius: 6px; font-size: 12px; padding: 3px 8px; cursor: pointer; color: var(--text, inherit); }
@@ -431,7 +431,7 @@
     const box = document.createElement('div');
     box.className = 'pn-extras';
     box.innerHTML = '<span class="pn-dolar" style="display:none" title="Dólar oficial Banco Nación (venta)"><small>Dólar</small><span class="pn-dolar-v">—</span></span>' +
-      (enInicio ? '' : '<div class="pn-bell"><button type="button" data-iconizado="1" class="pn-bell-btn" aria-label="Notificaciones" title="Notificaciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="pn-bell-badge" style="display:none">0</span></button><div class="pn-bell-panel"><div class="pn-bell-head"><span>Notificaciones</span><button type="button" data-iconizado="1" class="pn-bell-add" title="Agregar recordatorio" aria-label="Agregar recordatorio">+</button></div><div class="pn-bell-form"><label style="font-size:12px;font-weight:700">Recordatorio</label><input class="pn-r-titulo" placeholder="¿Qué querés recordar?"><input class="pn-r-fecha" type="datetime-local"><textarea class="pn-r-nota" rows="2" placeholder="Nota (opcional)"></textarea><button type="button" data-iconizado="1" class="pn-guardar">Guardar y agendar</button><div class="pn-msg"></div></div><div class="pn-bell-body"></div></div></div>');
+      (enInicio ? '' : '<div class="pn-bell"><button type="button" data-iconizado="1" class="pn-bell-btn" aria-label="Notificaciones" title="Notificaciones"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="pn-bell-badge" style="display:none">0</span></button><div class="pn-bell-panel"><div class="pn-bell-head"><span>Notificaciones</span><button type="button" data-iconizado="1" class="pn-bell-add" title="Agregar recordatorio" aria-label="Agregar recordatorio">+</button></div><div class="pn-bell-form"><label style="font-size:12px;font-weight:700">Recordatorio</label><input class="pn-r-titulo" placeholder="¿Qué querés recordar?"><input class="pn-r-fecha" type="datetime-local"><select class="pn-r-para" title="¿Para quién?"><option value="">Para mí</option></select><textarea class="pn-r-nota" rows="2" placeholder="Nota (opcional)"></textarea><button type="button" data-iconizado="1" class="pn-guardar">Guardar y agendar</button><div class="pn-msg"></div></div><div class="pn-bell-body"></div></div></div>');
     wrap.parentElement.insertBefore(box, wrap);
     const dolarEl = box.querySelector('.pn-dolar');
     fetch('/api/productos/config/cotizacion-dolar', { headers: hdrs }).then(r => r.ok ? r.json() : null).then(function (d) {
@@ -515,6 +515,13 @@
       const f = form.querySelector('.pn-r-fecha');
       if (!f.value) { const d = new Date(Date.now() + 3600000); d.setMinutes(0, 0, 0); f.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
       form.querySelector('.pn-r-titulo').focus();
+      const sel = form.querySelector('.pn-r-para');
+      if (!sel.dataset.cargado) {
+        sel.dataset.cargado = '1';
+        fetch('/api/notificaciones/usuarios-asignables', { headers: hdrs }).then(r => r.ok ? r.json() : []).then(function (us) {
+          us.filter(u => !u.yo).forEach(function (u) { const o = document.createElement('option'); o.value = u._id; o.textContent = 'Asignar a ' + u.nombre; sel.appendChild(o); });
+        }).catch(function () { sel.dataset.cargado = ''; });
+      }
     });
     form.addEventListener('click', function (e) { e.stopPropagation(); });
     form.querySelector('.pn-guardar').addEventListener('click', function () {
@@ -522,10 +529,11 @@
       msg.style.color = '#c53030';
       if (!titulo) { msg.textContent = 'Poné un título.'; return; }
       if (!fechaHora) { msg.textContent = 'Elegí fecha y hora.'; return; }
-      fetch('/api/notificaciones/recordatorios', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs), body: JSON.stringify({ titulo, fechaHora, nota }) })
+      fetch('/api/notificaciones/recordatorios', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, hdrs), body: JSON.stringify({ titulo, fechaHora, nota, asignadoAId: form.querySelector('.pn-r-para').value || undefined }) })
         .then(r => r.json().then(d => ({ ok: r.ok, d }))).then(function (x) {
           if (!x.ok) { msg.textContent = x.d.error || 'No se pudo guardar'; return; }
           msg.style.color = '#2f855a';
+          if (x.d.asignadoA) { msg.textContent = '✓ Tarea asignada a ' + x.d.asignadoA + ': le aparece en su campanita.'; form.querySelector('.pn-r-titulo').value = ''; form.querySelector('.pn-r-nota').value = ''; form.querySelector('.pn-r-para').value = ''; cargar(); return; }
           msg.textContent = x.d.enCalendario ? '✓ Guardado y agendado en el calendario.' : (x.d.calendarioConectado ? '✓ Guardado (no se pudo crear el evento en el calendario).' : '✓ Guardado. El calendario de Google no está conectado, así que no se creó el evento.');
           form.querySelector('.pn-r-titulo').value = ''; form.querySelector('.pn-r-nota').value = '';
           cargar();
