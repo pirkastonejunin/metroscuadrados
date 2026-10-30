@@ -1438,6 +1438,19 @@ function programarSincronizacion(req) {
 }
 // Tabla de precios: todos los productos en filas y una columna por lista; cada celda es un % sobre el costo o un precio en $
 // (vacía = se usa el cálculo general de la lista).
+// Nombre prolijo para mostrar/imprimir (no cambia el dato guardado): "PIEDRA laja 10X20" -> "Piedra Laja 10x20".
+const PALABRAS_MENORES = new Set(['de', 'del', 'la', 'las', 'el', 'los', 'y', 'e', 'con', 'para', 'en', 'por', 'a', 'sin', 'x']);
+function nombreProlijo(n) {
+  const txt = String(n || '').trim().replace(/\s+/g, ' ');
+  const todoMayus = txt === txt.toUpperCase();
+  return txt.split(' ').map((w, i) => {
+    if (/\d/.test(w)) return w.toLowerCase().replace(/^(\d+(?:[.,]\d+)?)x/, '$1x');
+    const baja = w.toLowerCase();
+    if (i > 0 && PALABRAS_MENORES.has(baja)) return baja;
+    if (!todoMayus && w.length <= 3 && w === w.toUpperCase()) return w; // siglas (PVC, MDF) cuando el nombre no viene todo en mayúsculas
+    return baja.charAt(0).toUpperCase() + baja.slice(1);
+  }).join(' ');
+}
 async function armarMatriz(req) {
   return conReintento(async () => {
     const db = await getDb();
@@ -1454,7 +1467,7 @@ async function armarMatriz(req) {
         const { precio } = precioDeLista(l, p, costo);
         celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
       });
-      return { productoId: String(p._id), nombre: p.nombre, sku: p.sku || '', rubro: p.rubroLista || '', costo, celdas };
+      return { productoId: String(p._id), nombre: nombreProlijo(p.nombre), sku: p.sku || '', rubro: p.rubroLista || '', costo, celdas };
     });
     return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
   });
