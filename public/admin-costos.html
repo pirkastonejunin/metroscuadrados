@@ -213,6 +213,16 @@
           <tbody id="listasBody"></tbody>
         </table>
       </div>
+      <div class="card">
+        <div class="row" style="align-items:center;gap:8px">
+          <h3 style="margin:0;flex:1">Tabla de precios</h3>
+          <input id="mtBuscar" placeholder="Buscar producto o SKU" oninput="renderMatriz()" style="max-width:220px">
+          <button class="btn" id="btnMtGuardar" onclick="guardarMatriz()" disabled>Guardar cambios</button>
+        </div>
+        <div class="muted" style="margin:6px 0 8px">Cada celda: escribí un <b>%</b> sobre el costo o un <b>$</b> (precio final) para ese artículo. Vacía = se usa el cálculo general de la lista. "Aplicar a todos" pone el mismo % en toda la columna. Al guardar, los precios pasan solos a Productos.</div>
+        <div id="mtMsg" class="muted"></div>
+        <div style="overflow:auto;max-height:70vh"><table id="mtTabla"></table></div>
+      </div>
     </section>
 
   </main>
@@ -870,6 +880,7 @@ async function cargarListasPrecio(){
   LISTAS_PRODUCTOS = rp && rp.ok ? await rp.json() : [];
   if (rc && rc.ok) { const c = await rc.json(); const el = document.getElementById('cfgSincCosto'); if (el) el.checked = c.sincronizaCosto; }
   renderListasPrecio();
+  cargarMatriz();
 }
 function nombreListaProductos(l){
   const d = LISTAS_PRODUCTOS.find(x => x._id === l.listaProductosId);
@@ -981,6 +992,70 @@ async function sincronizarListasProductos(){
 }
 async function guardarCfgSincCosto(){
   await fetch(BASE + '/config-listas', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({sincronizaCosto: document.getElementById('cfgSincCosto').checked})});
+}
+// ---------------- TABLA DE PRECIOS (todos los productos x todas las listas) ----------------
+let MATRIZ = null;
+const MT_CAMBIOS = {}; // 'listaId|productoId' -> {listaId, productoId, modo, valor}
+function mtPrecio(costo, lista, modo, valor){
+  if (valor !== '' && valor !== null && valor !== undefined && !isNaN(Number(valor))) return modo === 'porcentaje' ? costo * (1 + Number(valor) / 100) : Number(valor);
+  if (lista.tipo === 'manual') return null;
+  if (lista.tipo === 'monto') return costo + (Number(lista.monto) || 0);
+  return costo * (1 + (Number(lista.porcentaje) || 0) / 100);
+}
+async function cargarMatriz(){
+  const r = await fetch(BASE + '/matriz-listas', {headers: headersAuth()});
+  if (!r.ok) { document.getElementById('mtMsg').textContent = 'No se pudo cargar la tabla de precios.'; return; }
+  MATRIZ = await r.json();
+  Object.keys(MT_CAMBIOS).forEach(k => delete MT_CAMBIOS[k]);
+  document.getElementById('btnMtGuardar').disabled = true;
+  renderMatriz();
+}
+function renderMatriz(){
+  const t = document.getElementById('mtTabla'); if (!MATRIZ) { t.innerHTML = ''; return; }
+  const q = (document.getElementById('mtBuscar').value || '').toLowerCase().trim();
+  const filas = MATRIZ.productos.filter(p => !q || p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  if (!MATRIZ.listas.length) { t.innerHTML = '<tr><td class="muted">Primero creá al menos una lista (botón "+ Nueva lista").</td></tr>'; return; }
+  t.innerHTML = '<thead><tr><th style="position:sticky;top:0;background:var(--card,#fff)">Producto</th><th style="position:sticky;top:0;background:var(--card,#fff)">Costo</th>' +
+    MATRIZ.listas.map(l => `<th style="position:sticky;top:0;background:var(--card,#fff);min-width:150px">${escapeHtml(l.nombre)}<div class="muted" style="font-weight:400;font-size:11px">${escapeHtml(descCalculoLista(l))}</div>
+      <div style="display:flex;gap:4px;margin-top:4px"><input id="mtAll_${l._id}" type="number" step="0.01" placeholder="%" style="width:62px"><button class="btn small secondary" onclick="mtAplicarTodos('${l._id}')" title="Poner este % en todos los productos de la columna">A todos</button></div></th>`).join('') + '</tr></thead><tbody>' +
+    filas.map(p => `<tr><td>${escapeHtml(p.nombre)}${p.sku ? ' <span class="muted">' + escapeHtml(p.sku) + '</span>' : ''}</td><td class="muted">${money(p.costo)}</td>` +
+      MATRIZ.listas.map(l => {
+        const k = l._id + '|' + p.productoId, c = MT_CAMBIOS[k] || p.celdas[l._id] || {modo:'', valor:null};
+        const modo = c.modo === 'porcentaje' ? 'porcentaje' : 'precio';
+        const v = (c.valor === null || c.valor === undefined) ? '' : c.valor;
+        const pr = mtPrecio(p.costo, l, modo, v);
+        return `<td style="white-space:nowrap"><input id="mtv_${k}" type="number" step="0.01" min="0" value="${v}" style="width:80px" oninput="mtCambio('${l._id}','${p.productoId}')"><select id="mtm_${k}" onchange="mtCambio('${l._id}','${p.productoId}')" style="width:48px"><option value="porcentaje" ${modo==='porcentaje'?'selected':''}>%</option><option value="precio" ${modo==='precio'?'selected':''}>$</option></select><div id="mtp_${k}" style="font-size:12px"><b>${pr == null ? '—' : money(pr)}</b></div></td>`;
+      }).join('') + '</tr>').join('') + '</tbody>';
+}
+function mtCambio(listaId, productoId){
+  const k = listaId + '|' + productoId;
+  const v = document.getElementById('mtv_' + k).value, modo = document.getElementById('mtm_' + k).value;
+  MT_CAMBIOS[k] = { listaId, productoId, modo, valor: v === '' ? null : Number(v) };
+  const p = MATRIZ.productos.find(x => x.productoId === productoId), l = MATRIZ.listas.find(x => x._id === listaId);
+  const pr = mtPrecio(p.costo, l, modo, v);
+  document.getElementById('mtp_' + k).innerHTML = '<b>' + (pr == null ? '—' : money(pr)) + '</b>';
+  document.getElementById('btnMtGuardar').disabled = false;
+}
+function mtAplicarTodos(listaId){
+  const v = document.getElementById('mtAll_' + listaId).value;
+  if (v === '') { alert('Escribí el % a aplicar'); return; }
+  const q = (document.getElementById('mtBuscar').value || '').toLowerCase().trim();
+  MATRIZ.productos.filter(p => !q || p.nombre.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)).forEach(p => {
+    MT_CAMBIOS[listaId + '|' + p.productoId] = { listaId, productoId: p.productoId, modo: 'porcentaje', valor: Number(v) };
+  });
+  document.getElementById('btnMtGuardar').disabled = false;
+  renderMatriz();
+}
+async function guardarMatriz(){
+  const cambios = Object.values(MT_CAMBIOS); if (!cambios.length) return;
+  const btn = document.getElementById('btnMtGuardar'), msg = document.getElementById('mtMsg');
+  btn.disabled = true; msg.textContent = 'Guardando…';
+  try{
+    const r = await fetch(BASE + '/matriz-listas', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({cambios})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    msg.textContent = 'Guardado (' + d.guardados + ' precios). En unos segundos pasan a la ficha de los productos.';
+    await cargarMatriz();
+  }catch(e){ msg.textContent = e.message; btn.disabled = false; }
 }
 async function verListaPrecio(id){
   const r = await fetch(BASE + '/listas-precio/' + id + '/detalle', {headers: headersAuth()});

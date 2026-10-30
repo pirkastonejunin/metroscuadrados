@@ -243,7 +243,7 @@ const authProduccion = [authUsuario, requiereModuloAlguno('fabrica', 'costos'), 
 const authAdmin = [authUsuario, requiereModulo('costos'), fijarOrgProduccion];
 // Vínculo Producción -> Productos: cualquier cambio en insumos, recetas o listas dispara la sincronización (ver programarSincronizacion).
 router.use((req, res, next) => {
-  if (req.method !== 'GET' && /^\/(insumos|productos|listas-precio)(\/|$)/.test(req.path) && !/sincronizar-productos/.test(req.path)) {
+  if (req.method !== 'GET' && /^\/(insumos|productos|listas-precio|matriz-listas)(\/|$)/.test(req.path) && !/sincronizar-productos/.test(req.path)) {
     res.on('finish', () => { if (res.statusCode < 400 && req.orgId) programarSincronizacion(req); });
   }
   next();
@@ -1342,7 +1342,12 @@ const r2c = n => Math.round((Number(n) || 0) * 100) / 100;
 // (% o $ fijo sobre el costo). En una lista "manual" sin precio cargado para el artículo, el precio queda vacío (null).
 function precioDeLista(lista, producto, costoTotal) {
   const ov = (lista.precios || []).find(x => String(x.productoId) === String(producto._id));
-  if (ov && Number.isFinite(Number(ov.precio))) return { precio: Number(ov.precio), manual: true };
+  if (ov) {
+    // Celda propia del artículo: un % sobre su costo, o un precio en $ (las cargas viejas son solo precio).
+    if (ov.modo === 'porcentaje' && Number.isFinite(Number(ov.valor))) return { precio: costoTotal * (1 + Number(ov.valor) / 100), manual: true };
+    const v = ov.modo === 'precio' ? ov.valor : ov.precio;
+    if (Number.isFinite(Number(v))) return { precio: Number(v), manual: true };
+  }
   if (lista.tipo === 'manual') return { precio: null, manual: false };
   if (lista.tipo === 'monto') return { precio: costoTotal + (Number(lista.monto) || 0), manual: false };
   return { precio: costoTotal * (1 + (Number(lista.porcentaje) || 0) / 100), manual: false };
@@ -1431,6 +1436,66 @@ function programarSincronizacion(req) {
     catch (e) { console.error('sincronizarListasConProductos:', e.message); }
   }, 2500));
 }
+// Tabla de precios: todos los productos en filas y una columna por lista; cada celda es un % sobre el costo o un precio en $
+// (vacía = se usa el cálculo general de la lista).
+router.get('/matriz-listas', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const [listas, cps] = await Promise.all([
+        db.collection('costos_listas_precio').find(Object.assign({ activa: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray(),
+        db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).sort({ nombre: 1 }).toArray()
+      ]);
+      const insumosPorId = await traerInsumosDeProductos(db, req, cps);
+      const productos = cps.map(p => {
+        const costo = calcularCostoProducto(p, insumosPorId).costoTotal;
+        const celdas = {};
+        listas.forEach(l => {
+          const ov = (l.precios || []).find(x => String(x.productoId) === String(p._id));
+          const { precio } = precioDeLista(l, p, costo);
+          celdas[String(l._id)] = { modo: ov ? (ov.modo === 'porcentaje' ? 'porcentaje' : 'precio') : '', valor: ov ? (ov.modo === 'porcentaje' ? ov.valor : (ov.modo === 'precio' ? ov.valor : ov.precio)) : null, precio };
+        });
+        return { productoId: String(p._id), nombre: p.nombre, sku: p.sku || '', costo, celdas };
+      });
+      return { listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre, tipo: l.tipo || 'porcentaje', porcentaje: l.porcentaje || 0, monto: l.monto || 0 })), productos };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/matriz-listas', authAdmin, async (req, res) => {
+  try {
+    const cambios = Array.isArray((req.body || {}).cambios) ? req.body.cambios : [];
+    if (!cambios.length) throw err(400, 'No hay cambios para guardar.');
+    if (cambios.length > 20000) throw err(400, 'Demasiados cambios juntos.');
+    let guardados = 0;
+    await conReintento(async () => {
+      const db = await getDb(); const col = db.collection('costos_listas_precio');
+      const porLista = new Map();
+      cambios.forEach(c => { const lid = String(c.listaId); if (!porLista.has(lid)) porLista.set(lid, []); porLista.get(lid).push(c); });
+      guardados = 0;
+      for (const [lid, lst] of porLista) {
+        const lista = await col.findOne(Object.assign({ _id: toObjectId(lid) }, filtroOrg(req)));
+        if (!lista) throw err(404, 'Una de las listas ya no existe.');
+        let precios = (lista.precios || []).slice();
+        for (const c of lst) {
+          const pid = toObjectId(c.productoId); if (!pid) continue;
+          precios = precios.filter(x => String(x.productoId) !== String(pid));
+          const vacio = c.valor === null || c.valor === undefined || c.valor === '';
+          if (!vacio) {
+            const v = Number(c.valor);
+            if (!Number.isFinite(v) || v < 0 && c.modo !== 'porcentaje') throw err(400, 'Hay un valor que no es un número válido.');
+            if (c.modo === 'porcentaje') precios.push({ productoId: pid, modo: 'porcentaje', valor: v });
+            else precios.push({ productoId: pid, modo: 'precio', valor: r2c(v), precio: r2c(v) });
+          }
+          guardados++;
+        }
+        await col.updateOne({ _id: lista._id }, { $set: { precios, updatedAt: new Date() } });
+      }
+    });
+    res.json({ ok: true, guardados });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // A pedido: "Sincronizar con Productos".
 router.post('/listas-precio/sincronizar-productos', authAdmin, async (req, res) => {
   try {
