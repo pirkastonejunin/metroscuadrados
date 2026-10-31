@@ -203,7 +203,17 @@ const COLUMNAS_COMPRAS_EXPORT = [
   { clave: 'observaciones', titulo: 'Observaciones' }
 ];
 
-const authAdmin = [authUsuario, resolverOrg, requiereModulo('compras')];
+// Viendo "todas las sucursales", resolverOrg deja como orgId la sucursal con la que se opera (para guardar). Pero al actuar sobre UNA compra
+// (recibir, anular, pagar, imputar a obra...) hay que trabajar en la sucursal de esa compra, si no sale "Compra no encontrada".
+async function orgDeLaCompra(req, res, next) {
+  try {
+    if (!req.vistaTodas || req.method === 'GET' || !req.params || !/^[0-9a-f]{24}$/i.test(String(req.params.id || ''))) return next();
+    const c = await (await getDb()).collection('compras').findOne({ _id: toObjectId(req.params.id) }, { projection: { orgId: 1 } });
+    if (c && c.orgId) req.orgId = c.orgId;
+    next();
+  } catch (e) { next(e); }
+}
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('compras'), orgDeLaCompra];
 
 function normalizarCantidadPositiva(v, etiqueta) {
   const n = Number(v);
