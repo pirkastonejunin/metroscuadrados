@@ -42,11 +42,11 @@ const TAM_FRAGMENTO = 1200, SOLAPE = 150;
 // Definición base de los asesores. El tope y el "activo" se pueden cambiar desde la pantalla (se guardan en asesores_config).
 const ASESORES = {
   ventas: {
-    key: 'ventas', nombre: 'Asesor de ventas', carpeta: 'Ventas', topeUsdMes: 15,
+    key: 'ventas', nombre: 'Asesor de ventas', carpeta: 'Ventas', topeUsdMes: 15, mensajeCliente: true,
     rol: 'Sos el asesor de ventas de un grupo de venta de cerámicos y materiales de construcción de Argentina. Ayudás al vendedor a ofrecer mejor, resolver dudas de obra y priorizar a quién llamar. Respondés en español rioplatense, claro y breve. Usás SOLO la información de contexto que se te da; si no alcanza para responder con seguridad, decilo y sugerí consultar. No inventás precios, stock ni datos técnicos.'
   },
   vl: {
-    key: 'vl', nombre: 'Asesor de VL', carpeta: 'VL', topeUsdMes: 10,
+    key: 'vl', nombre: 'Asesor de VL', carpeta: 'VL', topeUsdMes: 10, mensajeCliente: true,
     rol: 'Sos el asesor de la VL (rol comercial que saca visitas a obras y las convierte en ventas). Ayudás a ordenar a quién contactar, qué visitas quedaron sin presupuesto o sin cierre y cómo mejorar la conversión. Respondés en español rioplatense, claro y breve. Usás SOLO la información de contexto que se te da; si no alcanza, decilo.'
   },
   administrador: {
@@ -327,6 +327,20 @@ async function gastoDelMes(db, key) {
   const r = await db.collection('ia_uso').aggregate([{ $match: { uso: 'asesor:' + key, at: { $gte: ia._interno.inicioMes() } } }, { $group: { _id: null, total: { $sum: '$costoUsd' }, llamadas: { $sum: 1 } } }]).toArray();
   return { usd: r[0] ? r[0].total : 0, llamadas: r[0] ? r[0].llamadas : 0 };
 }
+// Mensaje modelo para el cliente (pedido de Mato, 2/11/2026): los asesores comerciales, además de explicarle al vendedor,
+// proponen un texto listo para mandar por WhatsApp. Va separado de la explicación con una marca fija para poder mostrarlo aparte.
+const MARCA_MENSAJE = '=== MENSAJE PARA EL CLIENTE ===';
+const INSTRUCCION_MENSAJE = '\n\nMensaje para el cliente: si la consulta es para responderle o contactar a un cliente, después de tu respuesta escribí en una línea sola exactamente ' + MARCA_MENSAJE + ' y debajo un mensaje listo para enviar por WhatsApp. Reglas del mensaje: en español rioplatense, cordial y breve (2 a 5 líneas), escrito como lo mandaría el vendedor (primera persona, sin saludos largos); *negrita* de WhatsApp con un solo asterisco solo si hace falta; sin citas [n], sin listas largas ni datos internos; usá solo información del contexto, sin inventar precios, stock ni plazos (si hace falta un dato que no tenés, dejalo entre corchetes para completar, por ejemplo [precio]). Si la consulta es solo una duda interna del vendedor y no hay nada para mandarle al cliente, no escribas la marca ni el mensaje.';
+// Separa { respuesta, mensajeCliente } y deja el mensaje en formato WhatsApp (sin citas, negrita simple).
+function separarMensajeCliente(texto) {
+  const t = String(texto || '');
+  const i = t.search(/={3,}\s*MENSAJE PARA EL CLIENTE\s*={3,}/i);
+  if (i < 0) return { respuesta: t.trim(), mensajeCliente: '' };
+  const respuesta = t.slice(0, i).trim();
+  const msg = t.slice(i).replace(/^={3,}\s*MENSAJE PARA EL CLIENTE\s*={3,}/i, '')
+    .replace(/\s*\[\d{1,2}\]/g, '').replace(/\*\*(.+?)\*\*/g, '*$1*').trim().replace(/^["“”]+|["“”]+$/g, '').trim();
+  return { respuesta, mensajeCliente: msg };
+}
 // Pregunta a un asesor con su conocimiento. Respeta el tope propio del asesor.
 async function preguntar(db, key, pregunta, orgId) {
   const cfg = await configDe(db, key); if (!cfg) throw err(404, 'Asesor desconocido.');
@@ -336,11 +350,12 @@ async function preguntar(db, key, pregunta, orgId) {
   const frs = await buscar(db, key, p, 6);
   const contexto = frs.length ? frs.map((f, i) => `[${i + 1}] (${f.archivo})\n${f.texto}`).join('\n\n---\n\n') : '(No se encontró información cargada sobre esto.)';
   const r = await ia.generar({
-    uso: 'asesor:' + key, orgId: orgId || null, temperatura: 0.2, maxTokens: 900,
-    sistema: cfg.rol + '\n\nFormato de la respuesta: ordenada y fácil de leer en pantalla. Párrafos cortos separados por una línea en blanco; si hay pasos o varias opciones, una lista (con "- " o "1. "); **negrita** solo para lo clave (productos, cantidades, advertencias). Sin títulos largos ni relleno. Empezá por la respuesta directa.\n\nInformación de contexto cargada por la empresa (cursos, fichas, normas). Citá el número [n] del fragmento cuando te apoyes en uno:\n\n' + contexto,
+    uso: 'asesor:' + key, orgId: orgId || null, temperatura: 0.2, maxTokens: cfg.mensajeCliente ? 1200 : 900,
+    sistema: cfg.rol + '\n\nFormato de la respuesta: ordenada y fácil de leer en pantalla. Párrafos cortos separados por una línea en blanco; si hay pasos o varias opciones, una lista (con "- " o "1. "); **negrita** solo para lo clave (productos, cantidades, advertencias). Sin títulos largos ni relleno. Empezá por la respuesta directa.' + (cfg.mensajeCliente ? INSTRUCCION_MENSAJE : '') + '\n\nInformación de contexto cargada por la empresa (cursos, fichas, normas). Citá el número [n] del fragmento cuando te apoyes en uno:\n\n' + contexto,
     mensajes: [{ role: 'user', text: p }]
   });
-  return { respuesta: r.texto, fuentes: Array.from(new Set(frs.map(f => f.archivo))), fragmentosUsados: frs.length, costoUsd: r.costoUsd, modelo: r.modelo };
+  const partes = cfg.mensajeCliente ? separarMensajeCliente(r.texto) : { respuesta: String(r.texto || '').trim(), mensajeCliente: '' };
+  return { respuesta: partes.respuesta, mensajeCliente: partes.mensajeCliente, fuentes: Array.from(new Set(frs.map(f => f.archivo))), fragmentosUsados: frs.length, costoUsd: r.costoUsd, modelo: r.modelo };
 }
 
 // ---------------------------------------------------------------------------
@@ -401,4 +416,4 @@ module.exports.ASESORES = ASESORES;
 module.exports.buscar = buscar;
 module.exports.preguntar = preguntar;
 module.exports.configDe = configDe;
-module.exports._interno = { partirEnFragmentos, normalizarTexto, planillaATexto, extraerTexto, sincronizar, _setDriveParaTests, mensajeDrive };
+module.exports._interno = { separarMensajeCliente, partirEnFragmentos, normalizarTexto, planillaATexto, extraerTexto, sincronizar, _setDriveParaTests, mensajeDrive };

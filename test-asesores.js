@@ -19,6 +19,16 @@ const gigante = 'x'.repeat(5000);
 const partesGigante = A.partirEnFragmentos(gigante);
 assert(partesGigante.length >= 4 && partesGigante.every(f => f.length <= 1360), 'un párrafo sin cortes igual se parte (1200 + hasta 150 de solape)');
 
+// ---- 1b. Mensaje modelo para el cliente ----
+const sep = A.separarMensajeCliente('Usá pegamento **flexible** [1].\n\n- Doble encolado\n\n=== MENSAJE PARA EL CLIENTE ===\n"Hola Juan! Para tu patio te recomiendo un **pegamento flexible** [1] con doble encolado. ¿Querés que te arme el presupuesto?"');
+assert.strictEqual(sep.respuesta, 'Usá pegamento **flexible** [1].\n\n- Doble encolado', 'la explicación queda sin el mensaje');
+assert.strictEqual(sep.mensajeCliente, 'Hola Juan! Para tu patio te recomiendo un *pegamento flexible* con doble encolado. ¿Querés que te arme el presupuesto?', 'sin comillas, sin citas [n] y con negrita de WhatsApp');
+const sinMsg = A.separarMensajeCliente('Solo una duda interna.');
+assert.strictEqual(sinMsg.mensajeCliente, '');
+assert.strictEqual(sinMsg.respuesta, 'Solo una duda interna.');
+assert.strictEqual(A.separarMensajeCliente('Texto\n===  mensaje para el cliente  ===\nHola').mensajeCliente, 'Hola', 'tolera mayúsculas y espacios en la marca');
+assert.strictEqual(A.separarMensajeCliente(null).respuesta, '');
+
 // ---- 2. Planilla a texto ----
 const wb = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Producto', 'Rinde'], ['Pegamento X', '5 m2']]), 'Rendimientos');

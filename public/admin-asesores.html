@@ -92,6 +92,10 @@
   .resp p{margin:10px 0;} .resp ul,.resp ol{margin:8px 0;padding-left:22px;} .resp li{margin:5px 0;}
   .resp h4{margin:14px 0 4px;font-size:14px;} .resp strong{font-weight:800;}
   .cita{display:inline-block;min-width:16px;padding:0 5px;margin:0 1px;border-radius:99px;background:var(--info-soft);color:var(--info);font-size:11px;font-weight:800;text-align:center;vertical-align:baseline;}
+  .msg{margin:0 16px 14px;border:1px solid var(--ok);border-radius:12px;background:var(--ok-soft);padding:10px 12px;}
+  .msg .msg-t{font-size:12px;font-weight:800;color:var(--ok);margin-bottom:6px;}
+  .msg textarea{width:100%;resize:vertical;min-height:70px;background:var(--card);line-height:1.5;font-size:14px;}
+  .msg .msg-b{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
   .pie{border-top:1px solid var(--border);background:var(--bg);padding:9px 14px;font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
   .chip{display:inline-block;padding:2px 9px;border-radius:99px;background:var(--card);border:1px solid var(--border);color:var(--text);font-weight:600;}
   .chip.vacio{color:var(--danger);border-color:var(--danger-soft);background:var(--danger-soft);}
@@ -277,12 +281,24 @@ function mdSeguro(texto){
 }
 // Las últimas consultas quedan una debajo de otra (la más nueva arriba) para poder comparar respuestas.
 const HIST = [];
+function autoAlto(t){ t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 360) + 'px'; }
+async function copiarMsg(i){
+  const t = document.getElementById('msg' + i), b = document.getElementById('msgCopiar' + i); if (!t) return;
+  try { await navigator.clipboard.writeText(t.value); } catch (e) { t.select(); document.execCommand('copy'); }
+  if (b) { b.textContent = '¡Copiado!'; setTimeout(() => { b.textContent = 'Copiar'; }, 1800); }
+}
+// Sin número: WhatsApp deja elegir el contacto y ya trae el texto escrito.
+function abrirWhatsApp(i){ const t = document.getElementById('msg' + i); if (t) window.open('https://wa.me/?text=' + encodeURIComponent(t.value), '_blank', 'noopener'); }
 function pintarHist(){
-  document.getElementById('pResp').innerHTML = HIST.map(h => `<div class="qa">
+  document.getElementById('pResp').innerHTML = HIST.map((h, i) => `<div class="qa">
       <div class="q"><span>${escapeHtml(h.pregunta)}</span><span class="quien">${escapeHtml(h.asesor)}</span></div>
       <div class="resp">${mdSeguro(h.respuesta)}</div>
+      ${h.mensajeCliente ? `<div class="msg"><div class="msg-t">Mensaje para enviar al cliente (podés editarlo antes de mandarlo)</div>
+        <textarea id="msg${i}" oninput="HIST[${i}].mensajeCliente=this.value;autoAlto(this)">${escapeHtml(h.mensajeCliente)}</textarea>
+        <div class="msg-b"><button type="button" class="btn small" id="msgCopiar${i}" onclick="copiarMsg(${i})">Copiar</button><button type="button" class="btn small secondary" onclick="abrirWhatsApp(${i})">Abrir en WhatsApp</button></div></div>` : ''}
       <div class="pie">${h.fuentes.length ? 'Se apoyó en: ' + h.fuentes.map(f => '<span class="chip">' + escapeHtml(f) + '</span>').join('') : '<span class="chip vacio">No encontró información cargada sobre esto</span>'}<span style="margin-left:auto">costo aprox. US$ ${(h.costoUsd || 0).toFixed(4)}</span></div>
     </div>`).join('') + (HIST.length > 1 ? '<div style="margin-top:8px"><a href="#" class="muted" onclick="HIST.length=0;pintarHist();return false">Limpiar consultas</a></div>' : '');
+  document.querySelectorAll('#pResp .msg textarea').forEach(autoAlto);
 }
 async function preguntar(){
   const err = document.getElementById('pErr'), btn = document.getElementById('btnPreg'); err.textContent = '';
@@ -292,7 +308,7 @@ async function preguntar(){
   try{
     const r = await fetch(BASE + '/preguntar', {method:'POST', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({asesor: sel.value, pregunta})});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    HIST.unshift({ pregunta, asesor: sel.options[sel.selectedIndex].text, respuesta: d.respuesta, fuentes: d.fuentes || [], costoUsd: d.costoUsd });
+    HIST.unshift({ pregunta, asesor: sel.options[sel.selectedIndex].text, respuesta: d.respuesta, mensajeCliente: d.mensajeCliente || '', fuentes: d.fuentes || [], costoUsd: d.costoUsd });
     HIST.length = Math.min(HIST.length, 5);
     pintarHist(); document.getElementById('pTexto').value = '';
     cargar();
