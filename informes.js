@@ -310,6 +310,21 @@ function precioMayoristaNeto(tf, p, cotizacion) {
   return tf.incluyeIva ? Number(precio) / (1 + (isFinite(iva) ? iva : 21) / 100) : Number(precio);
 }
 
+
+// Nombre vigente de un concepto de gasto: el del catálogo (por id o por nombre sin distinguir mayúsculas/acentos), para que
+// "Alquiler" y "ALQUILER" (o un concepto renombrado/unificado después de cargar el gasto) no salgan como renglones separados.
+const _ck = n => String(n || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+async function nombreConceptoFn(db) {
+  const cat = await db.collection('gastos_conceptos').find({}).project({ nombre: 1, activo: 1, compartido: 1 }).toArray();
+  const porId = new Map(cat.map(c => [String(c._id), c.nombre])), porClave = new Map();
+  cat.sort((a, b) => ((b.activo !== false) - (a.activo !== false)) || ((b.compartido === true) - (a.compartido === true))).forEach(c => { const k = _ck(c.nombre); if (k && !porClave.has(k)) porClave.set(k, c.nombre); });
+  const vistos = new Map();   // sin catálogo: el primer nombre que aparece representa a las variantes de mayúsculas/acentos
+  return it => {
+    const c = (it.conceptoId && porId.get(String(it.conceptoId))) || porClave.get(_ck(it.conceptoNombre)); if (c) return c;
+    const n = it.conceptoNombre || 'Sin concepto', k = _ck(n); if (!vistos.has(k)) vistos.set(k, n); return vistos.get(k);
+  };
+}
+
 async function resultadosOrg(db, orgId, d0, d1, tf) {
   const meses = {};
   const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, internoVenta: 0, internoCompra: 0, intPorOrg: {}, gastos: {} });
@@ -397,6 +412,7 @@ async function resultadosOrg(db, orgId, d0, d1, tf) {
   });
 
   const excl = new Set(await conceptosEnCosto(db, orgId));
+  const nomConcepto = await nombreConceptoFn(db);
   const gastos = await db.collection('gastos').find({ orgId, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
   gastos.forEach(g => {
     const signo = /^nota_credito/.test(g.tipoComprobante) ? -1 : 1;
@@ -408,8 +424,8 @@ async function resultadosOrg(db, orgId, d0, d1, tf) {
     const usd = g.moneda === 'USD' && Number(g.cotizacionDolar) > 0 ? Number(g.cotizacionDolar) : 1;
     const m = mes(mesDe(g.fecha));
     items.forEach(it => {
-      const c = it.conceptoNombre || 'Sin concepto', monto = signo * Number(it.subtotal || 0) * factor * usd;
-      if (excl.has(c)) m.enCosto += monto; else m.gastos[c] = (m.gastos[c] || 0) + monto;
+      const c = nomConcepto(it), monto = signo * Number(it.subtotal || 0) * factor * usd;
+      if (excl.has(c) || excl.has(it.conceptoNombre)) m.enCosto += monto; else m.gastos[c] = (m.gastos[c] || 0) + monto;
     });
   });
 
@@ -550,7 +566,7 @@ router.get('/resultados/config', authInforme('informe_resultados'), async (req, 
     const out = await conReintento(async () => {
       const db = await getDb();
       const [catalogo, usados, excluidos, spg, cog] = await Promise.all([
-        db.collection('gastos_conceptos').find({ $or: [{ orgId: req.orgId }, { compartido: true }] }).project({ nombre: 1 }).toArray(),
+        db.collection('gastos_conceptos').find({ activo: { $ne: false }, $or: [{ orgId: req.orgId }, { compartido: true }] }).project({ nombre: 1 }).toArray(),
         db.collection('gastos').distinct('items.conceptoNombre', { orgId: req.orgId }),
         conceptosEnCosto(db, req.orgId),
         sueldosProduccionGasto(db, req.orgId),
@@ -799,12 +815,13 @@ async function detalleResultados(req) {
         ops.forEach(o => { if (enR(o.fecha)) push(o.fecha, o.orgId, 'Operación con financiera', num(o), -(Number(o.ganancia) || 0)); (o.rechazos || []).forEach(x => { if (enR(x.fecha)) push(x.fecha, o.orgId, 'Cheque devuelto a la financiera', num(o), Number(x.ganancia) || 0); }); });
       } else {
         const excl = new Set((await Promise.all(orgIds.map(o => conceptosEnCosto(db, o)))).flat());
+        const nomConcepto = await nombreConceptoFn(db);
         const gastos = await db.collection('gastos').find({ orgId: { $in: orgIds }, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
         gastos.forEach(g => {
           const signo = /^nota_credito/.test(g.tipoComprobante) ? -1 : 1, items = g.items || [], sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
           let conDesc = sub; if (g.descuentoPorcentaje) conDesc -= conDesc * (g.descuentoPorcentaje / 100); if (g.descuentoMonto) conDesc -= g.descuentoMonto;
           const factor = sub > 0 ? Math.max(0, conDesc) / sub : 1, usd = g.moneda === 'USD' && Number(g.cotizacionDolar) > 0 ? Number(g.cotizacionDolar) : 1;
-          items.forEach(it => { if ((it.conceptoNombre || 'Sin concepto') !== concepto) return; push(g.fecha, g.orgId, (g.proveedorNombre || 'Sin proveedor') + (it.descripcion ? ' · ' + it.descripcion : ''), String(g.tipoComprobante || 'gasto').replace(/_/g, ' ') + ' ' + (g.numeroComprobante || num(g)), signo * Number(it.subtotal || 0) * factor * usd); });
+          items.forEach(it => { if (nomConcepto(it) !== concepto) return; push(g.fecha, g.orgId, (g.proveedorNombre || 'Sin proveedor') + (it.descripcion ? ' · ' + it.descripcion : ''), String(g.tipoComprobante || 'gasto').replace(/_/g, ' ') + ' ' + (g.numeroComprobante || num(g)), signo * Number(it.subtotal || 0) * factor * usd); });
         });
       }
     } else throw err(400, 'Tipo de detalle no válido.');

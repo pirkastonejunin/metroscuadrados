@@ -304,6 +304,60 @@ router.post('/config/conceptos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Uso de cada concepto (cantidad de renglones de gasto y monto) para identificar a cuáles unificar.
+router.get('/config/conceptos/uso', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const r = await db.collection('gastos').aggregate([{ $match: { estado: { $ne: 'anulada' } } }, { $unwind: '$items' },
+        { $group: { _id: { id: '$items.conceptoId', n: '$items.conceptoNombre' }, items: { $sum: 1 }, monto: { $sum: '$items.subtotal' } } }]).toArray();
+      const porId = {}, porNombre = {};
+      r.forEach(x => { if (x._id.id) { const k = String(x._id.id); porId[k] = { items: (porId[k] ? porId[k].items : 0) + x.items, monto: (porId[k] ? porId[k].monto : 0) + x.monto }; } else { const k = claveConcepto(x._id.n); porNombre[k] = { items: (porNombre[k] ? porNombre[k].items : 0) + x.items, monto: (porNombre[k] ? porNombre[k].monto : 0) + x.monto }; } });
+      return { porId, porNombre };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Unifica varios conceptos en uno (solo administrador): todos los renglones de gasto ya cargados con esos conceptos pasan al concepto destino
+// (existente, o uno nuevo con ese nombre) y los conceptos de origen se dan de baja.
+router.post('/config/conceptos/unificar', authAdmin, async (req, res) => {
+  try {
+    if (!(req.usuario && req.usuario.rol && req.usuario.rol.protegido)) throw err(403, 'Solo el administrador puede unificar conceptos de gasto.');
+    const b = req.body || {};
+    const origenIds = (Array.isArray(b.origenIds) ? b.origenIds : []).map(toObjectId).filter(Boolean);
+    if (!origenIds.length) throw err(400, 'Elegí al menos un concepto para unificar.');
+    const r = await conReintento(async () => {
+      const db = await getDb();
+      let destino = null;
+      if (b.destinoId) { destino = await db.collection('gastos_conceptos').findOne({ _id: toObjectId(b.destinoId) }); if (!destino) throw err(404, 'No existe el concepto destino.'); }
+      else if (normalizarTexto(b.nuevoNombre)) destino = await crearConceptoInterno(db, req, b.nuevoNombre);
+      else throw err(400, 'Falta el concepto destino o el nombre del nuevo.');
+      if (destino.activo === false) { await db.collection('gastos_conceptos').updateOne({ _id: destino._id }, { $set: { activo: true, updatedAt: new Date() } }); }
+      const origenes = await db.collection('gastos_conceptos').find({ _id: { $in: origenIds.filter(i => String(i) !== String(destino._id)) } }).toArray();
+      if (!origenes.length) throw err(400, 'Los conceptos elegidos ya son el destino.');
+      const ids = origenes.map(o => o._id), claves = new Set(origenes.map(o => claveConcepto(o.nombre)));
+      // Renglones que apuntan por id, o que solo guardan el nombre (cargas viejas / importadas sin id).
+      const gastos = await db.collection('gastos').find({ $or: [{ 'items.conceptoId': { $in: ids } }, { 'items.conceptoId': null }] }).project({ items: 1 }).toArray();
+      let renglones = 0, gastosTocados = 0;
+      for (const g of gastos) {
+        let cambio = false;
+        const items = (g.items || []).map(it => {
+          const porId = it.conceptoId && ids.some(i => String(i) === String(it.conceptoId));
+          const porNombre = !it.conceptoId && claves.has(claveConcepto(it.conceptoNombre));
+          if (!porId && !porNombre) return it;
+          cambio = true; renglones++;
+          return Object.assign({}, it, { conceptoId: destino._id, conceptoNombre: destino.nombre });
+        });
+        if (cambio) { await db.collection('gastos').updateOne({ _id: g._id }, { $set: { items, updatedAt: new Date() } }); gastosTocados++; }
+      }
+      await db.collection('gastos_conceptos').updateMany({ _id: { $in: ids } }, { $set: { activo: false, unificadoEn: destino._id, updatedAt: new Date() } });
+      return { destino: destino.nombre, conceptosUnificados: origenes.length, renglones, gastos: gastosTocados };
+    });
+    res.json(r);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);

@@ -192,10 +192,11 @@
           <div style="flex:1"><label>Nuevo concepto</label><input id="cgNombre" placeholder="Ej: Alquiler" onkeydown="if(event.key==='Enter')crearConceptoGasto()"></div>
           <div><button class="btn" onclick="crearConceptoGasto()">Agregar</button></div>
         </div>
+        <div class="row" style="margin-bottom:8px;align-items:center"><button class="btn secondary" onclick="unificarConceptosGasto()">Unificar seleccionados en uno…</button><span class="muted">Tildá los conceptos que son lo mismo (p. ej. todos los de una factura de luz) y elegí a cuál pasan; los gastos ya cargados se actualizan.</span></div>
         <div class="err" id="conceptosGastoErr"></div>
         <table>
-          <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="conceptosGastoBody"><tr><td colspan="3" class="muted">Cargando...</td></tr></tbody>
+          <thead><tr><th style="width:28px"></th><th>Nombre</th><th>Uso</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="conceptosGastoBody"><tr><td colspan="5" class="muted">Cargando...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -310,7 +311,8 @@ document.getElementById('basesTabs').addEventListener('click', e => { const b = 
 // Conceptos de gasto — mismo patrón de alta/baja (soft-delete) que
 // Rubros, pero contra el router de Gastos (BASE_GASTOS), no Productos.
 // -------------------------------------------------------------------
-let conceptosGastoCache = [];
+let conceptosGastoCache = [], conceptosUso = {porId:{},porNombre:{}};
+const claveCG = n => String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
 async function cargarConceptosGasto(){
   const body = document.getElementById('conceptosGastoBody');
   try{
@@ -318,6 +320,7 @@ async function cargarConceptosGasto(){
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
     conceptosGastoCache = data;
+    try{ const ru = await fetch(BASE_GASTOS + '/config/conceptos/uso', {headers: headersAuthJson()}); conceptosUso = ru.ok ? await ru.json() : {porId:{},porNombre:{}}; }catch(x){ conceptosUso = {porId:{},porNombre:{}}; }
     renderConceptosGasto();
   }catch(e){
     body.innerHTML = `<tr><td colspan="3" class="err">${escapeHtml(e.message)}</td></tr>`;
@@ -326,19 +329,40 @@ async function cargarConceptosGasto(){
 
 function renderConceptosGasto(){
   const body = document.getElementById('conceptosGastoBody');
-  if (!conceptosGastoCache.length) { body.innerHTML = '<tr><td colspan="3" class="muted">Todavía no hay conceptos de gasto cargados.</td></tr>'; return; }
-  body.innerHTML = conceptosGastoCache.map(c => `
+  if (!conceptosGastoCache.length) { body.innerHTML = '<tr><td colspan="5" class="muted">Todavía no hay conceptos de gasto cargados.</td></tr>'; return; }
+  body.innerHTML = conceptosGastoCache.map(c => { const u = (conceptosUso.porId||{})[c._id] || (conceptosUso.porNombre||{})[claveCG(c.nombre)]; return `
     <tr>
+      <td><input type="checkbox" class="cgSel" value="${c._id}" style="width:auto"></td>
       <td>
         <input value="${escapeHtml(c.nombre)}" style="width:auto;min-width:220px" id="cgn_${c._id}" onkeydown="if(event.key==='Enter')guardarNombreConceptoGasto('${c._id}')">
       </td>
+      <td class="muted">${u ? u.items + ' renglón(es) · $ ' + Math.round(u.monto).toLocaleString('es-AR') : '–'}</td>
       <td><span class="pill ${c.activo!==false?'activo':'inactivo'}">${c.activo!==false?'Activo':'Inactivo'}</span></td>
       <td style="white-space:nowrap">
         <button class="btn small secondary" onclick="guardarNombreConceptoGasto('${c._id}')">Guardar nombre</button>
         <button class="btn small secondary" onclick="toggleActivoConceptoGasto('${c._id}', ${c.activo===false})">${c.activo===false?'Activar':'Desactivar'}</button>
       </td>
     </tr>
-  `).join('');
+  `; }).join('');
+}
+
+async function unificarConceptosGasto(){
+  const err = document.getElementById('conceptosGastoErr'); err.textContent = '';
+  const ids = [...document.querySelectorAll('.cgSel:checked')].map(x => x.value);
+  if (ids.length < 1) { err.textContent = 'Tildá al menos un concepto de la lista.'; return; }
+  const nombres = ids.map(id => (conceptosGastoCache.find(c => c._id === id) || {}).nombre).filter(Boolean);
+  const sug = nombres.length === 1 ? '' : '';
+  const destino = prompt('Los ' + ids.length + ' conceptos tildados (' + nombres.join(', ') + ') pasan a un solo concepto.\n\nEscribí el nombre del concepto destino (si no existe, se crea). Ej: Luz', sug);
+  if (!destino || !destino.trim()) return;
+  const existente = conceptosGastoCache.find(c => claveCG(c.nombre) === claveCG(destino) && c.activo !== false);
+  if (!confirm('Se van a pasar todos los gastos ya cargados de esos conceptos a "' + (existente ? existente.nombre : destino.trim()) + '". ¿Seguimos?')) return;
+  try{
+    const body = existente ? {origenIds: ids, destinoId: existente._id} : {origenIds: ids, nuevoNombre: destino.trim()};
+    const r = await fetch(BASE_GASTOS + '/config/conceptos/unificar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    err.style.color = '#1b7f3b'; err.textContent = 'Listo: ' + data.conceptosUnificados + ' concepto(s) unificados en "' + data.destino + '" (' + data.renglones + ' renglones de ' + data.gastos + ' gastos actualizados).';
+    await cargarConceptosGasto();
+  }catch(e){ err.style.color = ''; err.textContent = e.message; }
 }
 
 async function crearConceptoGasto(){
