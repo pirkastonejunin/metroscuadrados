@@ -693,6 +693,24 @@ app.post('/api/bulto/:productId', async (req, res) => {
 // Endpoint PUBLICO liviano para la grilla de categoria: devuelve
 // handle + rendimiento de todos los productos configurados de la
 // tienda, sin golpear la API de Tiendanube (todo sale del cache).
+const _catalogoTnCache = new Map();
+async function catalogoTiendaCache(store) {
+  const c = _catalogoTnCache.get(store.store_id);
+  if (c && Date.now() - c.t < 600000) return c.datos;
+  const datos = [];
+  for (let page = 1; page < 60; page++) {
+    const r = await fetch(API_BASE + '/' + store.store_id + '/products?per_page=200&page=' + page + '&fields=id,handle,description', { headers: apiHeaders(store.access_token) });
+    const pagina = await r.json();
+    if (!Array.isArray(pagina) || !pagina.length) break;
+    pagina.forEach((p) => {
+      const h = p.handle && typeof p.handle === 'object' ? (p.handle.es || Object.values(p.handle)[0] || '') : String(p.handle || '');
+      datos.push({ id: p.id, handle: h.toLowerCase(), piezasM2: piezasPorM2Desc(p.description) });
+    });
+    if (pagina.length < 200) break;
+  }
+  _catalogoTnCache.set(store.store_id, { t: Date.now(), datos });
+  return datos;
+}
 app.get('/public/catalogo-precios', async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   try {
@@ -706,6 +724,21 @@ app.get('/public/catalogo-precios', async (req, res) => {
     const productos = rendimientos
       .filter((r) => r.handle && r.tipo !== 'unidad')
       .map((r) => ({ handle: String(r.handle).toLowerCase(), coberturaCaja: parseFloat(r.cobertura), tipoUnidad: r.tipo, envase: r.envase || 'caja' }));
+
+    // La grilla antes solo mostraba el precio por m2 de los productos con rendimiento guardado Y con handle guardado. Se completa con
+    // lo que se puede deducir de la tienda (cache de 10 min): (a) rendimientos guardados sin handle, (b) productos cuya descripción dice
+    // "Nº de piezas por m2: N" (la ficha ya los calculaba, pero nunca se guardaban, así que la grilla no los veía).
+    try {
+      const tn = await catalogoTiendaCache(store);
+      const yaEstan = new Set(productos.map((x) => x.handle));
+      const porId = new Map(rendimientos.map((r) => [String(r.product_id), r]));
+      tn.forEach((t) => {
+        if (!t.handle || yaEstan.has(t.handle)) return;
+        const r = porId.get(String(t.id));
+        if (r && r.tipo !== 'unidad' && parseFloat(r.cobertura) > 0) { productos.push({ handle: t.handle, coberturaCaja: parseFloat(r.cobertura), tipoUnidad: r.tipo, envase: r.envase || 'caja' }); yaEstan.add(t.handle); }
+        else if (!r && t.piezasM2 > 0) { productos.push({ handle: t.handle, coberturaCaja: 1 / t.piezasM2, tipoUnidad: 'm2', envase: 'malla' }); yaEstan.add(t.handle); }
+      });
+    } catch (e) { /* si Tiendanube no responde, se devuelve lo guardado */ }
 
     res.json({ productos });
   } catch (err) {
