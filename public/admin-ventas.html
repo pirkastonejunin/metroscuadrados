@@ -849,7 +849,7 @@ async function abrirNuevaVenta(prefill){
           <div>
             <label>Cliente *</label>
             <div class="row" style="gap:6px">
-              ${comboClienteHtml('nv', prefill ? prefill.clienteId : '', 'actualizarPreviewLetra')}
+              ${comboClienteHtml('nv', prefill ? prefill.clienteId : '', 'alElegirClienteVenta')}
               <button type="button" class="btn secondary small" onclick="abrirNuevoClienteDesdeVenta()">+ Nuevo</button>
               <button type="button" class="btn secondary small" id="nvFichaCliente" onclick="abrirFichaClienteDesdeVenta()" title="Abrir la ficha del cliente para ver o modificar sus datos">Ver ficha</button>
             </div>
@@ -1127,6 +1127,23 @@ function ventaEsFiscalUI(){
   if (t.value === 'comprobante_x') return false;
   const c = document.getElementById('nvEsFiscal');
   return !!(c && c.checked);
+}
+// Al elegir el cliente en una venta NUEVA se carga su lista de precio por defecto (la de su ficha; en las fichas importadas de Dux puede venir
+// como nombre y no como id) y se recalculan los precios de las líneas. En una venta que se está editando no se toca nada.
+function alElegirClienteVenta(){
+  try {
+    if (!edicionEnCurso) {
+      const c = clientesCache.find(x => String(x._id) === String(document.getElementById('nvCliente').value));
+      const v = c && String(c.listaPrecioPorDefecto || '').trim();
+      const sel = document.getElementById('nvListaPrecio');
+      if (v && sel) {
+        const n = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const l = listasPrecioCache.filter(x => x.activa !== false).find(x => String(x._id) === v) || listasPrecioCache.filter(x => x.activa !== false).find(x => n(x.nombre) === n(v));
+        if (l && sel.value !== String(l._id)) { sel.value = String(l._id); recalcularPreciosPorListaVenta(); }
+      }
+    }
+  } catch (e) { /* si algo falla, queda la lista que ya estaba elegida */ }
+  actualizarPreviewLetra();
 }
 function actualizarPreviewLetra(){
   try { actualizarTotalesVenta(); } catch(e){}

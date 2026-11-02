@@ -294,7 +294,7 @@ router.get('/clientes', authAdmin, async (req, res) => {
       // front pueda mostrar en el momento qué letra (A/B) le va a tocar a
       // una Factura o a una Nota de Crédito/Débito fiscal antes de guardar.
       return db.collection('clientes')
-        .find(match, { projection: { apellidoRazonSocial: 1, nombre: 1, tipoCliente: 1, cuit: 1, categoriaFiscal: 1 } })
+        .find(match, { projection: { apellidoRazonSocial: 1, nombre: 1, tipoCliente: 1, cuit: 1, categoriaFiscal: 1, listaPrecioPorDefecto: 1 } })
         .sort({ apellidoRazonSocial: 1 }).toArray();
     });
     res.json(lista);
