@@ -212,7 +212,8 @@
     { key: 'bases', href: '/admin-config-bases.html', modulo: 'productos', label: 'Bases y catálogos', icon: ICONOS.bases },
     { key: 'integraciones', href: '/admin-integraciones.html', modulo: 'usuarios', label: 'Integraciones', icon: ICONOS.usuarios },
     { key: 'correo', href: '/admin-correo.html', modulo: 'usuarios', label: 'Correo a clientes', icon: ICONOS.usuarios },
-    { key: 'propuestas', href: '/admin-propuestas.html', modulo: 'usuarios', label: 'Propuestas de mejora (asistente)', icon: ICONOS.usuarios }
+    { key: 'propuestas', href: '/admin-propuestas.html', modulo: 'usuarios', label: 'Propuestas de mejora (asistente)', icon: ICONOS.usuarios },
+    { key: 'asesores', href: '/admin-asesores.html', modulo: 'usuarios', label: 'Asesores IA (conocimiento en Drive)', icon: ICONOS.usuarios }
   ];
 
   function tieneModulo(rol, claveCombinada) {

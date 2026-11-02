@@ -120,6 +120,8 @@ app.use('/api/sueldos', require('./sueldos'));
 // Asistente IA del sistema + propuestas de mejora (17/10/2026, pedido de Mato).
 app.use('/api/asistente', require('./asistente'));
 app.use('/api/ia', require('./ia'));
+// Asesores con IA (2/11/2026, pedido de Mato): conocimiento desde Google Drive y asesores de ventas, VL y administrador.
+app.use('/api/asesores', require('./asesores'));
 
 // Fiscal (5/10/2026): conexión con ARCA, facturación electrónica, libros de IVA.
 const fiscalRouter = require('./fiscal');

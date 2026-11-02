@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es">
+<head><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asesores IA - Piedra Negra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/nav-sidebar.js"></script>
+<script src="/btn-iconos.js"></script>
+<script src="/menu-acciones.js"></script>
+<style>
+  :root{
+    --bg:#f3f4f6; --card:#ffffff; --text:#171a1f; --muted:#6b7280;
+    --border:#e5e7eb; --accent:#ff5a36; --accent-soft:#ffe7de; --accent-ink:#ffffff;
+    --ok:#1f8a5f; --ok-soft:#e1f5ea;
+    --danger:#c53030; --danger-soft:#fbe4e1;
+    --info:#1d4ed8; --info-soft:#dbeafe;
+    --shadow:0 1px 2px rgba(17,20,24,.04), 0 8px 20px -12px rgba(17,20,24,.12);
+  }
+  *{box-sizing:border-box;}
+  body{font-family:"Manrope",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;-webkit-font-smoothing:antialiased;}
+  header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;}
+  header .brand{display:flex;align-items:center;gap:10px;min-width:0;}
+  header h1{font-size:15px;margin:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  header button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 13px;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600;flex-shrink:0;}
+  header button:hover{border-color:var(--danger);color:var(--danger);}
+  main{padding:20px;max-width:1200px;margin:0 auto;}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;font-weight:600;}
+  input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;width:100%;background:var(--bg);color:var(--text);font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);}
+  .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;display:inline-block;text-decoration:none;}
+  .btn:hover{filter:brightness(0.94);}
+  .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  .btn.small{padding:5px 10px;font-size:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  tr:hover td{background:var(--bg);}
+  .muted{color:var(--muted);font-size:12px;}
+  .hidden{display:none !important;}
+  .err{color:var(--danger);font-size:13px;margin:6px 0;}
+  #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;}
+  #loginScreen .card{width:300px;text-align:center;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+      --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+      --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+      --info:#7fa8ff; --info-soft:#1c2a4a;
+      --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#121316; --card:#1c1e22; --text:#f4f5f6; --muted:#9aa0a8;
+    --border:#2c2f34; --accent:#ff7a56; --accent-soft:#3a241f; --accent-ink:#121316;
+    --ok:#5fd39a; --ok-soft:#173328; --danger:#ff8080; --danger-soft:#3a1f1f;
+    --info:#7fa8ff; --info-soft:#1c2a4a;
+    --shadow:0 1px 2px rgba(0,0,0,.2), 0 8px 20px -12px rgba(0,0,0,.5);
+  }
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px;}
+  .kpi{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:var(--shadow);}
+  .kpi .v{font-size:22px;font-weight:800;margin-top:4px;}
+  .num{text-align:right;white-space:nowrap;}
+  .modal-bg{position:fixed;inset:0;background:rgba(17,20,24,.45);z-index:500;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow-y:auto;}
+  .modal{background:var(--card);border-radius:14px;width:min(900px,100%);padding:18px 20px;position:relative;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .modal .close-x{position:absolute;top:10px;right:14px;cursor:pointer;font-size:18px;}
+  .fila-ch{display:grid;grid-template-columns:1fr 1fr 1.2fr 1.2fr 1fr 1fr 34px;gap:6px;margin-bottom:6px;align-items:end;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);}
+  .pill.ok{background:var(--ok-soft);color:var(--ok);} .pill.mal{background:var(--danger-soft);color:var(--danger);}
+  .sub td{background:var(--bg);}
+  .integ{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;}
+  .integ .card{margin:0;display:flex;flex-direction:column;gap:8px;}
+  .integ h3{margin:0;font-size:15px;display:flex;align-items:center;gap:8px;justify-content:space-between;}
+  .pill.parcial{background:#fff4d6;color:#8a6100;}
+  .vars{display:flex;flex-wrap:wrap;gap:6px;}
+  .vars .pill{font-family:ui-monospace,Menlo,monospace;font-weight:600;}
+  .suc{font-size:12px;display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px dashed var(--border);}
+</style>
+  .estado-ok{color:var(--ok);font-weight:700;} .estado-mal{color:var(--danger);font-weight:700;}
+  .barra{height:8px;border-radius:99px;background:var(--border);overflow:hidden;margin-top:6px;} .barra>div{height:100%;background:var(--accent);}
+  .ases{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;margin-bottom:16px;}
+  .ases .card{margin:0;display:flex;flex-direction:column;gap:6px;}
+  .resp{white-space:pre-wrap;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:10px;font-size:14px;line-height:1.5;}
+  .pill.aviso{background:#fff4d6;color:#8a6100;}
+</style>
+</head>
+<body>
+<div id="loginScreen" class="hidden">
+  <div class="card">
+    <h2 style="margin-top:0;margin-bottom:14px">Asesores IA</h2>
+    <label>Usuario</label>
+    <input id="loginUser" autocapitalize="off" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()">
+    <label style="margin-top:8px">Contraseña</label>
+    <input type="password" id="loginPass" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%;margin-top:8px" onclick="login()">Entrar</button>
+  </div>
+</div>
+<div id="sinAccesoScreen" class="hidden">
+  <div class="card" style="max-width:340px;margin:80px auto;text-align:center">
+    <h2 style="margin-top:0">Sin acceso</h2>
+    <p class="muted">Esta pantalla es solo para administradores.</p>
+    <button class="btn secondary" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><h1>Asesores IA</h1></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted" id="topbarUser" style="font-size:12px;font-weight:600;white-space:nowrap"></span>
+      <button onclick="logout()">Cerrar sesión</button>
+    </div>
+  </header>
+  <main>
+    <div class="card" id="cardSync">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div>
+          <h3 style="margin:0 0 4px;font-size:15px">Conocimiento en Google Drive</h3>
+          <div class="muted">Subí cursos, fichas, PDFs y planillas a la carpeta <b>Asesores IA</b> de Drive: <b>Ventas</b>, <b>VL</b>, <b>Administrador</b> o <b>Compartido</b> (la leen todos). Lo que subas a la carpeta de un asesor se lo asigna a él. Se actualiza solo cada noche.</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="btnSync" onclick="sincronizar(false)">Actualizar ahora</button>
+          <button class="btn secondary" onclick="sincronizar(true)" title="Vuelve a leer todos los archivos, aunque no hayan cambiado">Releer todo</button>
+        </div>
+      </div>
+      <div id="syncEstado" style="margin-top:10px;font-size:13px">Cargando…</div>
+      <div class="err" id="syncErr"></div>
+    </div>
+
+    <div class="ases" id="asesores"></div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px;font-size:15px">Probar un asesor</h3>
+      <div class="muted" style="margin-bottom:8px">Hacele una pregunta para comprobar que está leyendo lo que cargaste. En esta etapa los asesores solo responden; todavía no crean tareas.</div>
+      <div class="row">
+        <div style="width:220px"><label>Asesor</label><select id="pAsesor"></select></div>
+        <div style="flex:1;min-width:240px"><label>Pregunta</label><input id="pTexto" placeholder="Ej: ¿qué pegamento conviene para porcelanato grande en exterior?" onkeydown="if(event.key==='Enter')preguntar()"></div>
+        <button class="btn" id="btnPreg" onclick="preguntar()">Preguntar</button>
+      </div>
+      <div class="err" id="pErr"></div>
+      <div id="pResp"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 8px;font-size:15px">Archivos leídos</h3>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>Carpeta</th><th>Archivo</th><th>Estado</th><th class="num">Fragmentos</th><th>Última lectura</th></tr></thead>
+        <tbody id="archivosBody"><tr><td colspan="5" class="muted">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+  </main>
+</div>
+<div id="modalRoot"></div>
+<script>
+const BASE = '/api/asesores';
+let TOKEN = localStorage.getItem('obras_admin_token') || '';
+let ORG = localStorage.getItem('obras_org_activo') || '';
+function headersAuth(extra){ const h = Object.assign({'x-admin-token':TOKEN}, extra||{}); if (ORG) h['x-org-id'] = ORG; return h; }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function login(){
+  document.getElementById('loginErr').textContent = '';
+  try{
+    const r = await fetch('/api/usuarios/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({usuario: document.getElementById('loginUser').value, password: document.getElementById('loginPass').value})});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    TOKEN = data.token; localStorage.setItem('obras_admin_token', TOKEN); await iniciarApp();
+  }catch(e){ document.getElementById('loginErr').textContent = e.message; }
+}
+function logout(){ localStorage.removeItem('obras_admin_token'); location.reload(); }
+function resolverOrgActiva(me){
+  const orgs = me.organizaciones || [];
+  if (orgs.some(o => o._id === ORG) || (me.puedeVerTodas && ORG === 'todas')) return;
+  const def = orgs.find(o => o.nombre === 'Piedra Negra');
+  ORG = orgs.length === 1 ? orgs[0]._id : (def ? def._id : (orgs[0] ? orgs[0]._id : (me.puedeVerTodas ? 'todas' : '')));
+  if (ORG) localStorage.setItem('obras_org_activo', ORG);
+}
+async function iniciarApp(){
+  let me;
+  try{
+    const r = await fetch('/api/usuarios/me', {headers: headersAuth()});
+    if (!r.ok) { localStorage.removeItem('obras_admin_token'); TOKEN=''; document.getElementById('loginScreen').classList.remove('hidden'); return; }
+    me = await r.json();
+    if (!(me.rol && me.rol.protegido)) { document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.remove('hidden'); return; }
+  }catch(e){ document.getElementById('loginErr').textContent = 'No se pudo validar la sesión.'; return; }
+  resolverOrgActiva(me);
+  PiedraSidebar.render(me, 'asesores', { ocultarOrg: true });
+  document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('sinAccesoScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
+  await cargar();
+}
+const NOMBRE_CARPETA = { ventas: 'Ventas', vl: 'VL', administrador: 'Administrador', compartido: 'Compartido' };
+const ETIQ_ESTADO = { ok: ['Leído', 'ok'], error: ['Error', 'mal'], sin_texto: ['Sin texto', 'aviso'], no_soportado: ['No soportado', 'aviso'], sin_espacio: ['Sin espacio', 'mal'] };
+const fechaHora = (d) => d ? new Date(d).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+let ESTADO = null;
+async function cargar(){
+  try{
+    const r = await fetch(BASE + '/estado', {headers: headersAuth()});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    ESTADO = d; pintar(d);
+  }catch(e){ document.getElementById('syncEstado').innerHTML = '<span class="estado-mal">' + escapeHtml(e.message) + '</span>'; }
+}
+function pintar(d){
+  const s = d.sync, esp = d.espacio, pct = esp.topeMB ? Math.min(100, Math.round(esp.usadoMB / esp.topeMB * 100)) : 0;
+  let linea;
+  if (!d.driveConfigurado) linea = '<span class="estado-mal">Falta configurar la cuenta de servicio de Google (GOOGLE_SERVICE_ACCOUNT_KEY) en Render.</span>';
+  else if (s && s.corriendo) linea = 'Sincronizando…';
+  else if (s && s.error) linea = '<span class="estado-mal">Último intento con error: ' + escapeHtml(s.error) + '</span>' + (s.okAt ? ' · última vez que anduvo: ' + fechaHora(s.okAt) : '');
+  else if (s && s.okAt) { const r = s.resumen || {}; linea = '<span class="estado-ok">Al día</span> · última lectura ' + fechaHora(s.okAt) + ' · ' + (r.archivos || 0) + ' archivos (' + (r.leidos || 0) + ' nuevos o cambiados, ' + (r.sinCambios || 0) + ' sin cambios' + (r.errores ? ', ' + r.errores + ' con problema' : '') + (r.borrados ? ', ' + r.borrados + ' borrados de Drive' : '') + ')'; }
+  else linea = 'Todavía no se sincronizó. Tocá "Actualizar ahora".';
+  linea += '<div style="margin-top:8px">Espacio usado por el conocimiento: <b>' + esp.usadoMB + ' MB</b> de ' + esp.topeMB + ' MB · ' + esp.fragmentos + ' fragmentos<div class="barra"><div style="width:' + pct + '%"></div></div></div>';
+  if (s && s.resumen && s.resumen.porAmbito) {
+    const sinCarpeta = Object.entries(s.resumen.porAmbito).filter(([k, v]) => !v.carpeta).map(([k]) => NOMBRE_CARPETA[k]);
+    if (sinCarpeta.length) linea += '<div class="muted" style="margin-top:6px">No se encontró en Drive la carpeta: ' + sinCarpeta.join(', ') + '.</div>';
+  }
+  document.getElementById('syncEstado').innerHTML = linea;
+  document.getElementById('asesores').innerHTML = d.asesores.map(a => `<div class="card">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>${escapeHtml(a.nombre)}</b><span class="pill ${a.activo ? 'ok' : 'mal'}">${a.activo ? 'Activo' : 'Desactivado'}</span></div>
+      <div class="muted">Carpeta de Drive: ${escapeHtml(a.carpeta)} · ${a.archivos} archivo(s) propios + ${d.compartido.archivos} compartidos</div>
+      <div style="font-size:13px">Gasto del mes: <b>US$ ${a.gastoUsd.toFixed(2)}</b> de US$ ${a.topeUsdMes} · ${a.llamadas} consulta(s)</div>
+      <div class="row" style="align-items:center;margin-top:4px">
+        <div style="width:110px"><label>Tope mensual (US$)</label><input type="number" min="0" step="1" value="${a.topeUsdMes}" onchange="guardarConfig('${a.key}', {topeUsdMes: this.value})"></div>
+        <label style="display:flex;gap:6px;align-items:center;margin:16px 0 0"><input type="checkbox" style="width:auto" ${a.activo ? 'checked' : ''} onchange="guardarConfig('${a.key}', {activo: this.checked})"> Activo</label>
+      </div></div>`).join('');
+  const sel = document.getElementById('pAsesor'), actual = sel.value;
+  sel.innerHTML = d.asesores.map(a => `<option value="${a.key}">${escapeHtml(a.nombre)}</option>`).join(''); if (actual) sel.value = actual;
+  document.getElementById('archivosBody').innerHTML = d.archivos.length ? d.archivos.map(a => {
+    const [txt, cls] = ETIQ_ESTADO[a.estado] || [a.estado, 'aviso'];
+    return `<tr><td>${escapeHtml(NOMBRE_CARPETA[a.ambito] || a.ambito)}</td><td>${escapeHtml(a.nombre)}${a.error ? '<div class="muted">' + escapeHtml(a.error) + '</div>' : ''}</td><td><span class="pill ${cls}">${txt}</span></td><td class="num">${a.fragmentos || 0}</td><td>${fechaHora(a.syncAt)}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="muted">Todavía no hay archivos leídos.</td></tr>';
+}
+async function sincronizar(forzar){
+  const btn = document.getElementById('btnSync'), err = document.getElementById('syncErr'); err.textContent = '';
+  btn.disabled = true; btn.textContent = 'Sincronizando…';
+  try{
+    const r = await fetch(BASE + '/sincronizar', {method:'POST', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({forzar: !!forzar})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+  }catch(e){ err.textContent = e.message; }
+  btn.disabled = false; btn.textContent = 'Actualizar ahora'; await cargar();
+}
+async function guardarConfig(key, body){
+  try{
+    const r = await fetch(BASE + '/config/' + key, {method:'PUT', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify(body)});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    await cargar();
+  }catch(e){ alert(e.message); await cargar(); }
+}
+async function preguntar(){
+  const err = document.getElementById('pErr'), out = document.getElementById('pResp'), btn = document.getElementById('btnPreg'); err.textContent = ''; out.innerHTML = '';
+  const pregunta = document.getElementById('pTexto').value.trim(); if (!pregunta) { err.textContent = 'Escribí una pregunta.'; return; }
+  btn.disabled = true; btn.textContent = 'Pensando…';
+  try{
+    const r = await fetch(BASE + '/preguntar', {method:'POST', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({asesor: document.getElementById('pAsesor').value, pregunta})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    out.innerHTML = '<div class="resp">' + escapeHtml(d.respuesta) + '</div><div class="muted" style="margin-top:6px">' + (d.fuentes.length ? 'Fuentes: ' + d.fuentes.map(escapeHtml).join(', ') : 'No encontró información cargada sobre esto.') + ' · costo aprox. US$ ' + (d.costoUsd || 0).toFixed(4) + '</div>';
+    cargar();
+  }catch(e){ err.textContent = e.message; }
+  btn.disabled = false; btn.textContent = 'Preguntar';
+}
+if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
+</script>
+</body>
+</html>
