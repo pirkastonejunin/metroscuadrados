@@ -70,6 +70,7 @@ app.use('/api/stock', stockRouter);
 const ventasRouter = require('./ventas');
 app.use('/api/ventas-import-dux', require('./ventasImportDux'));
 app.use('/api/presupuestos-import-dux', require('./presupuestosImportDux'));
+app.use('/api/crm-import-historico', require('./crmImportHistorico'));
 app.use('/api/unificar-vendedores', require('./unificarVendedores'));
 app.use('/api/compras-import-dux', require('./comprasImportDux'));
 app.use('/api/cobros-import-dux', require('./cobrosImportDux'));

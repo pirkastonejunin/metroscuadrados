@@ -44,7 +44,7 @@
 </head>
 <body><div class="wrap">
 <div class="hero"><div><h1>CRM</h1><p>Todo el recorrido del cliente: lo que entra por WhatsApp y anuncios, lo que decidís seguir, y cuánto termina comprando cada campaña.</p></div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="b" onclick="nuevaOp()">+ Nueva oportunidad</button><button class="b" onclick="sync(false)">↻ Sincronizar Azuite</button></div></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="b" onclick="nuevaOp()">+ Nueva oportunidad</button><button class="b" onclick="sync(false)">↻ Sincronizar Azuite</button><button class="b sec" onclick="importarHistorico()">⬆ Importar histórico (Excel)</button></div></div>
 <div id="msg" class="err"></div><div id="azRes" class="muted"></div>
 <div class="kpis" id="kpis"></div>
 <div class="tabs" id="tabs"><button data-t="e" class="on">📥 Entrantes</button><button data-t="o">🎯 Oportunidades</button><button data-t="c">📣 Campañas</button></div>
@@ -159,6 +159,43 @@ async function cargarO(){
         <div class="meta"><span class="pill ${o.estado}">${EST_OP[o.estado]||o.estado}</span>${o.origen?`<span class="pill ads">${esc(o.origen)}</span>`:''}<span>👤 ${esc(o.vendedorNombre||'Sin vendedor')}</span>${pa?`<span class="pill ${venc?'venc':''}">${venc?'⚠ ':'📅 '}${new Date(pa.fecha).toLocaleDateString('es-AR')} · ${TIPOS[pa.tipo]||pa.tipo}</span>`:'<span>Sin próxima acción</span>'}</div></div>
       <div class="acc"><button class="b sec mini" onclick="abrirOp('${o._id}')">Ver</button></div></div>`; }).join('') || '<div class="vacio"><span>🎯</span>No hay oportunidades con ese filtro.</div>';
   }catch(e){ err(e); }
+}
+
+// ---- Importar histórico (Excel "Base Comercial") ----
+let IHB64 = '';
+function importarHistorico(){
+  IHB64 = '';
+  modal('⬆ Importar histórico comercial (Excel)', `<p class="muted" style="margin-top:0">Subí el Excel "Base Comercial" (hojas PRESUPUESTOS, VENTAS, BOT y COMERCIOS). Cada contacto queda como una oportunidad de la sucursal elegida arriba, con su estado, producto, observaciones y movimientos. Primero ves un resumen y recién después se carga.</p>
+    <input type="file" id="ihArchivo" accept=".xlsx,.xls" onchange="ihLeer()"><div id="ihRes" style="margin-top:10px"></div><div class="err" id="ihErr"></div>
+    <div style="margin-top:12px"><button class="b" id="ihBtn" style="display:none" onclick="ihAplicar()">Importar</button></div>`);
+}
+function ihLeer(){
+  const f = $('ihArchivo').files[0]; if (!f) return;
+  const rd = new FileReader(); rd.onload = () => { IHB64 = String(rd.result).split(',')[1]; ihPreview(); }; rd.readAsDataURL(f);
+}
+async function ihPreview(){
+  $('ihErr').textContent = ''; $('ihRes').innerHTML = '<p class="muted">Analizando…</p>'; $('ihBtn').style.display = 'none';
+  try{
+    const d = await api('/api/crm-import-historico/preview', {method:'POST', headers:H(J), body:JSON.stringify({archivoBase64:IHB64})});
+    const est = Object.keys(d.porEstado).map(k=>`<li>${esc(k)}: <b>${d.porEstado[k]}</b></li>`).join('');
+    const vend = d.vendedores.map(v=>`<li>${esc(v.nombre)}: ${v.contactos}${v.vinculado?' → ✔ '+esc(v.vinculado):' <span class="muted">(queda como texto)</span>'}</li>`).join('');
+    $('ihRes').innerHTML = `<ul style="margin:6px 0;padding-left:18px"><li>Se carga en: <b>${esc(d.sucursalDestino)}</b></li>
+      <li>${d.filasLeidas} filas leídas (${Object.keys(d.porHoja).map(k=>esc(k)+' '+d.porHoja[k]).join(' · ')}) = <b>${d.contactos}</b> contactos distintos</li>
+      <li><b>${d.aImportar}</b> nuevos, ${d.yaCargados} ya cargados (no se duplican)</li>
+      <li>${d.sinTelefono} sin teléfono · ${d.conProximaAccion} con próxima acción futura</li></ul>
+      <div class="muted">Por estado:</div><ul style="margin:4px 0;padding-left:18px">${est}</ul>
+      <div class="muted">Vendedor/a:</div><ul style="margin:4px 0;padding-left:18px">${vend}</ul>
+      ${d.cantErrores?`<div class="err">${d.cantErrores} filas con error (no se importan).</div>`:''}`;
+    if (d.aImportar){ $('ihBtn').textContent = 'Importar ' + d.aImportar + ' oportunidades a ' + d.sucursalDestino; $('ihBtn').style.display = ''; }
+  }catch(e){ $('ihRes').innerHTML = ''; $('ihErr').textContent = e.message; }
+}
+async function ihAplicar(){
+  $('ihBtn').disabled = true; $('ihErr').textContent = '';
+  try{
+    const d = await api('/api/crm-import-historico/aplicar', {method:'POST', headers:H(J), body:JSON.stringify({archivoBase64:IHB64})});
+    $('ihRes').innerHTML = `<p style="color:var(--ok);font-weight:700">Listo: ${d.insertados} oportunidades cargadas (${d.yaCargados} ya estaban).</p>`; $('ihBtn').style.display = 'none';
+    kpis(); cargarO();
+  }catch(e){ $('ihErr').textContent = e.message; $('ihBtn').disabled = false; }
 }
 function nuevaOp(){
   modal('Nueva oportunidad', `<div class="g2"><div><label>Cliente</label><input type="text" id="nC"></div><div><label>Teléfono</label><input type="text" id="nT"></div><div><label>Email</label><input type="text" id="nE"></div><div><label>Vendedor</label>${selVend('nV')}</div><div class="full"><label>¿Cómo llegó?</label><input type="text" id="nO" placeholder="Showroom, recomendación, Instagram…"></div><div class="full"><label>Notas</label><textarea id="nNo" rows="3"></textarea></div></div><div style="margin-top:10px">${formPA(null,'n')}</div><div class="err" id="nErr"></div><div style="margin-top:12px"><button class="b" onclick="guardarNueva()">Crear</button></div>`);
