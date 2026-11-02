@@ -347,6 +347,8 @@ async function resultadosOrg(db, orgId, d0, d1, tf) {
   }
   // Costo de una línea vendida (cantidad x costo del producto). `interna` = línea de otra sucursal que Fábrica le vendió a precio mayorista.
   const costoDeLinea = (m, v, it, p, nc, neto, sub, items, ventaInterna) => {
+    // Línea sin producto del catálogo pero con costo propio (p. ej. importada de Dux): se usa ese costo.
+    if (!p) { const cp = Number(it.costoTotal) > 0 ? Number(it.costoTotal) : (Number(it.costoUnitario) > 0 ? Number(it.costoUnitario) * Number(it.cantidad || 0) : 0); if (cp > 0 && ventaInterna == null) { m.costo += cp * nc * (v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1); return; } }
     let costoU = null;
     if (p && p.costo != null) costoU = p.moneda === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? p.costo * (cotVigente || Number(v.cotizacionDolar)) : null) : Number(p.costo);
     const cant = Number(it.cantidad || 0);
@@ -663,6 +665,7 @@ router.get('/resultados/sin-costo', authInforme('informe_resultados'), async (re
         const usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
         (v.items || []).forEach(it => {
           const p = it.productoId ? pm.get(String(it.productoId)) : null;
+          if (!p && (Number(it.costoTotal) > 0 || Number(it.costoUnitario) > 0)) return; // trae su propio costo
           if (p && p.costo != null && !(p.moneda === 'USD' && !(cotVigente || (v.moneda === 'USD' && Number(v.cotizacionDolar))))) return; // tiene costo
           const clave = p ? String(p._id) : 'libre:' + String(it.sku || it.descripcion || it.nombre || it.producto || '').toLowerCase();
           let g = grupos.get(clave);
