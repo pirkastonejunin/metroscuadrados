@@ -327,6 +327,7 @@ async function resultadosOrg(db, orgId, d0, d1, tf) {
     const otras = (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id).filter(id => String(id) !== String(orgId));
     if (otras.length) ventasOtras = await db.collection('ventas').find({ orgId: { $in: otras }, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
   }
+  await vincularItemsLibres(db, ventas.concat(ventasOtras));
   const ids = new Set();
   ventas.concat(ventasOtras).forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
   const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1, tipoProducto: 1, costoProductoId: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, porcentajeIva: 1 }).toArray() : [];
@@ -616,6 +617,29 @@ router.put('/resultados/transferencia', authInforme('informe_resultados'), async
 const NOMBRES_MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 // Productos vendidos sin costo cargado en el período (los que hacen subir "ventas sin costo" del Estado de resultados),
 // con lo vendido de cada uno, para poder cargarles el costo desde el propio informe.
+
+// Líneas de venta que quedaron sin vínculo con el catálogo (p. ej. importadas de Dux con un código que no coincidía):
+// se buscan por SKU y, si no, por nombre normalizado, para poder calcular su costo. Solo en memoria, no toca la venta.
+const _nz = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+async function vincularItemsLibres(db, ventas) {
+  const libres = [];
+  ventas.forEach(v => (v.items || []).forEach(it => { if (!it.productoId) libres.push(it); }));
+  if (!libres.length) return;
+  const cat = await db.collection('productos_catalogo').find({}).project({ sku: 1, nombre: 1, activo: 1 }).toArray();
+  const porSku = new Map(), porNombre = new Map();
+  cat.sort((a, b) => (a.activo === false) - (b.activo === false)).forEach(p => {
+    const k = String(p.sku || '').trim().toLowerCase(); if (k && !porSku.has(k)) porSku.set(k, p._id);
+    const n = _nz(p.nombre); if (n && !porNombre.has(n)) porNombre.set(n, p._id);
+  });
+  libres.forEach(it => {
+    let id = null;
+    const k = String(it.sku || '').trim().toLowerCase();
+    if (k) id = porSku.get(k) || null;
+    if (!id) for (const t of [it.nombre, it.nombreDux, it.descripcion, it.producto]) { const n = _nz(t); if (n && porNombre.has(n)) { id = porNombre.get(n); break; } }
+    if (id) it.productoId = id;
+  });
+}
+
 router.get('/resultados/sin-costo', authInforme('informe_resultados'), async (req, res) => {
   try {
     const hoy = fechaAR(new Date());
@@ -628,6 +652,7 @@ router.get('/resultados/sin-costo', authInforme('informe_resultados'), async (re
       const cotDoc = await db.collection('config_general').findOne({ orgId: req.orgId || orgIds[0], clave: 'cotizacionDolar' });
       const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
       const ventas = await db.collection('ventas').find({ orgId: { $in: orgIds }, estado: { $ne: 'anulada' }, fecha: { $gte: inicioDia(desdeS), $lte: finDia(hastaS) } }).limit(50000).toArray();
+      await vincularItemsLibres(db, ventas);
       const ids = new Set();
       ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
       const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ sku: 1, nombre: 1, costo: 1, moneda: 1, rubro: 1 }).toArray() : [];
