@@ -989,10 +989,49 @@ async function sincronizarListasProductos(){
   try{
     const r = await fetch(BASE + '/listas-precio/sincronizar-productos', {method:'POST', headers: headersAuthJson()});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    out.textContent = `Listo: ${d.productos} fichas revisadas, ${d.costos} costos y ${d.precios} precios actualizados` + (d.listasCreadas ? `, ${d.listasCreadas} lista(s) creadas en Productos` : '') + (d.sinFicha ? `. ${d.sinFicha} productos de Producción no tienen ficha en Productos (cargales SKU y usá "Sincronizar con Productos").` : '.');
+    out.innerHTML = escapeHtml(`Listo: ${d.productos} fichas revisadas, ${d.costos} costos y ${d.precios} precios actualizados` + (d.autoVinculados ? `, ${d.autoVinculados} productos vinculados solos con su ficha` : '') + (d.listasCreadas ? `, ${d.listasCreadas} lista(s) creadas en Productos` : '') + '.')
+      + (d.sinFicha ? ` <b style="color:#b45309">${d.sinFicha} productos de Producción no están vinculados a una ficha de Productos, por eso sus precios no llegan a Ventas.</b> <a href="#" onclick="abrirVinculos();return false">Vincular ahora</a>` : '');
     await cargarListasPrecio();
   }catch(e){ out.textContent = e.message; }
   btn.disabled = false;
+}
+// Vincular a mano los productos de Producción que no encontraron su ficha en Productos (sugiere las más parecidas).
+let VINCULOS = [];
+async function abrirVinculos(){
+  modal('<span class="close-x" onclick="cerrarModal()">✕</span><h2>Vincular con Productos</h2><div class="muted" id="vinMsg">Buscando fichas parecidas…</div><div id="vinLista"></div>', 'wide');
+  try{
+    const r = await fetch(BASE + '/vinculos-pendientes', {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    VINCULOS = d; renderVinculos();
+  }catch(e){ document.getElementById('vinMsg').textContent = e.message; }
+}
+function renderVinculos(){
+  const msg = document.getElementById('vinMsg'), box = document.getElementById('vinLista'); if (!box) return;
+  msg.textContent = VINCULOS.length ? 'Elegí la ficha que corresponde a cada producto y tocá "Vincular". Si no está en las sugerencias, buscala con el cuadro de abajo.' : 'Listo: no quedan productos sin vincular. Tocá "Sincronizar con Productos" para pasar los precios.';
+  box.innerHTML = VINCULOS.map((v, i) => `<div style="border-top:1px solid var(--borde,#e5e2dc);padding:8px 0">
+    <div><b>${escapeHtml(v.nombre)}</b> <span class="muted">${v.sku ? 'SKU ' + escapeHtml(v.sku) : 'sin SKU'}</span></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;align-items:center">
+      <select id="vinSel${i}" style="flex:1;min-width:220px"><option value="">${v.candidatos.length ? 'Elegí una ficha…' : 'Sin sugerencias: buscala →'}</option>${v.candidatos.map(c => `<option value="${c.fichaId}">${escapeHtml((c.sku ? c.sku + ' — ' : '') + c.nombre)} (${c.parecido}%)</option>`).join('')}</select>
+      <button class="btn small" onclick="vincularUno(${i})">Vincular</button>
+      <input id="vinQ${i}" placeholder="Buscar ficha…" style="width:150px" oninput="buscarFichaVinculo(${i})">
+    </div></div>`).join('');
+}
+let _vinT = null;
+function buscarFichaVinculo(i){
+  clearTimeout(_vinT);
+  _vinT = setTimeout(async () => {
+    const q = document.getElementById('vinQ' + i).value.trim(); if (q.length < 2) return;
+    const r = await fetch(BASE + '/vinculos-buscar?q=' + encodeURIComponent(q), {headers: headersAuth()}); const d = await r.json().catch(() => []); if (!Array.isArray(d)) return;
+    const sel = document.getElementById('vinSel' + i);
+    sel.innerHTML = '<option value="">' + (d.length ? 'Elegí una ficha…' : 'Sin resultados') + '</option>' + d.map(c => `<option value="${c.fichaId}">${escapeHtml((c.sku ? c.sku + ' — ' : '') + c.nombre)}</option>`).join('');
+  }, 300);
+}
+async function vincularUno(i){
+  const v = VINCULOS[i], fichaId = document.getElementById('vinSel' + i).value; if (!fichaId) { alert('Elegí primero una ficha.'); return; }
+  try{
+    const r = await fetch(BASE + '/vincular-ficha', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({cpId: v.cpId, fichaId})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo vincular');
+    VINCULOS.splice(i, 1); renderVinculos();
+  }catch(e){ alert(e.message); }
 }
 async function guardarCfgSincCosto(){
   await fetch(BASE + '/config-listas', {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({sincronizaCosto: document.getElementById('cfgSincCosto').checked})});

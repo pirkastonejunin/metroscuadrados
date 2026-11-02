@@ -1365,6 +1365,76 @@ function precioDeLista(lista, producto, costoTotal) {
 //     botón "Sincronizar con Productos". Solo escribe lo que cambió.
 //   - Solo toca fichas vinculadas a un producto de Producción (costoProductoId).
 // ---------------------------------------------------------------------
+const sim = require('./similitud');
+// Enlaza productos de Producción con su ficha de Productos cuando coincide el SKU (sin importar mayúsculas) o el nombre (exacto, uno solo).
+async function autovincularConFichas(db, req, cps, fichasEnlazadas) {
+  const sinFicha = cps.filter(c => !fichasEnlazadas.some(f => String(f.costoProductoId) === String(c._id)));
+  if (!sinFicha.length) return 0;
+  const libres = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, costoProductoId: { $in: [null] } }, filtroOrg(req))).project({ sku: 1, nombre: 1 }).toArray();
+  const porSku = new Map(), porNombre = new Map();
+  libres.forEach(f => {
+    const k = String(f.sku || '').trim().toUpperCase(); if (k) { if (!porSku.has(k)) porSku.set(k, []); porSku.get(k).push(f); }
+    const n = sim.norm(f.nombre); if (n) { if (!porNombre.has(n)) porNombre.set(n, []); porNombre.get(n).push(f); }
+  });
+  let n = 0; const usadas = new Set();
+  for (const c of sinFicha) {
+    const k = String(c.sku || '').trim().toUpperCase();
+    let cand = k ? (porSku.get(k) || []) : [];
+    if (cand.length !== 1) cand = porNombre.get(sim.norm(c.nombre)) || [];
+    cand = cand.filter(f => !usadas.has(String(f._id)));
+    if (cand.length !== 1) continue;
+    usadas.add(String(cand[0]._id));
+    await db.collection('productos_catalogo').updateOne({ _id: cand[0]._id }, { $set: { costoProductoId: c._id, updatedAt: new Date() } });
+    if (!c.sku && cand[0].sku) await db.collection('costos_productos').updateOne({ _id: c._id }, { $set: { sku: String(cand[0].sku).trim().toUpperCase() } });
+    n++;
+  }
+  return n;
+}
+// Pendientes de vincular a mano, con las fichas más parecidas de sugerencia.
+router.get('/vinculos-pendientes', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const cps = await db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ nombre: 1, sku: 1 }).toArray();
+      const enlazadas = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) } }, filtroOrg(req))).project({ costoProductoId: 1 }).toArray();
+      const ya = new Set(enlazadas.map(f => String(f.costoProductoId)));
+      const pend = cps.filter(c => !ya.has(String(c._id)));
+      const libres = (await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, costoProductoId: { $in: [null] } }, filtroOrg(req))).project({ sku: 1, nombre: 1 }).toArray()).map(f => ({ f, t: sim.tokensNombre(f.nombre) }));
+      return pend.map(c => {
+        const t = sim.tokensNombre(c.nombre);
+        const cand = libres.map(x => ({ x, s: sim.parecido(t, x.t) })).filter(y => y.s >= 0.3).sort((a, b) => b.s - a.s).slice(0, 5)
+          .map(y => ({ fichaId: String(y.x.f._id), sku: y.x.f.sku || '', nombre: y.x.f.nombre || '', parecido: Math.round(y.s * 100) }));
+        return { cpId: String(c._id), nombre: c.nombre, sku: c.sku || '', candidatos: cand };
+      }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.get('/vinculos-buscar', authAdmin, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim(); if (q.length < 2) return res.json([]);
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const out = await conReintento(async () => (await getDb()).collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, costoProductoId: { $in: [null] }, $or: [{ nombre: rx }, { sku: rx }] }, filtroOrg(req))).project({ sku: 1, nombre: 1 }).limit(15).toArray());
+    res.json(out.map(f => ({ fichaId: String(f._id), sku: f.sku || '', nombre: f.nombre || '' })));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/vincular-ficha', authAdmin, async (req, res) => {
+  try {
+    const cpId = toObjectId((req.body || {}).cpId), fichaId = toObjectId((req.body || {}).fichaId);
+    if (!cpId || !fichaId) throw err(400, 'Faltan datos para vincular.');
+    await conReintento(async () => {
+      const db = await getDb();
+      const cp = await db.collection('costos_productos').findOne(Object.assign({ _id: cpId }, filtroOrg(req)));
+      const f = await db.collection('productos_catalogo').findOne(Object.assign({ _id: fichaId }, filtroOrg(req)));
+      if (!cp || !f) throw err(404, 'No se encontró el producto o la ficha.');
+      if (f.costoProductoId && String(f.costoProductoId) !== String(cpId)) throw err(400, 'Esa ficha ya está vinculada a otro producto de Producción.');
+      await db.collection('productos_catalogo').updateOne({ _id: fichaId }, { $set: { costoProductoId: cpId, updatedAt: new Date() } });
+      if (!cp.sku && f.sku) await db.collection('costos_productos').updateOne({ _id: cpId }, { $set: { sku: String(f.sku).trim().toUpperCase() } });
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 async function sincronizarListasConProductos(db, req) {
   const out = { productos: 0, costos: 0, precios: 0, listasCreadas: 0, sinFicha: 0 };
   const cfg = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'produccionSincronizaCosto' });
@@ -1372,7 +1442,12 @@ async function sincronizarListasConProductos(db, req) {
   const cps = await db.collection('costos_productos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray();
   if (!cps.length) return out;
   const insumosPorId = await traerInsumosDeProductos(db, req, cps);
-  const fichas = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) }, activo: { $ne: false } }, filtroOrg(req))).toArray();
+  let fichas = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) }, activo: { $ne: false } }, filtroOrg(req))).toArray();
+  // Productos de Producción sin ficha enlazada: se enlazan solos por SKU o por nombre igual (si hay uno solo); el resto queda para "Vincular".
+  if (cps.some(c => !fichas.some(f => String(f.costoProductoId) === String(c._id)))) {
+    out.autoVinculados = await autovincularConFichas(db, req, cps, fichas);
+    if (out.autoVinculados) fichas = await db.collection('productos_catalogo').find(Object.assign({ costoProductoId: { $in: cps.map(c => c._id) }, activo: { $ne: false } }, filtroOrg(req))).toArray();
+  }
   const fichaDe = new Map(); fichas.forEach(f => fichaDe.set(String(f.costoProductoId), f));
   out.sinFicha = cps.filter(c => !fichaDe.has(String(c._id))).length;
   const costoDe = new Map(cps.map(c => [String(c._id), calcularCostoProducto(c, insumosPorId).costoTotal]));
