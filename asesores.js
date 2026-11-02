@@ -337,7 +337,7 @@ async function preguntar(db, key, pregunta, orgId) {
   const contexto = frs.length ? frs.map((f, i) => `[${i + 1}] (${f.archivo})\n${f.texto}`).join('\n\n---\n\n') : '(No se encontró información cargada sobre esto.)';
   const r = await ia.generar({
     uso: 'asesor:' + key, orgId: orgId || null, temperatura: 0.2, maxTokens: 900,
-    sistema: cfg.rol + '\n\nInformación de contexto cargada por la empresa (cursos, fichas, normas). Citá el número [n] del fragmento cuando te apoyes en uno:\n\n' + contexto,
+    sistema: cfg.rol + '\n\nFormato de la respuesta: ordenada y fácil de leer en pantalla. Párrafos cortos separados por una línea en blanco; si hay pasos o varias opciones, una lista (con "- " o "1. "); **negrita** solo para lo clave (productos, cantidades, advertencias). Sin títulos largos ni relleno. Empezá por la respuesta directa.\n\nInformación de contexto cargada por la empresa (cursos, fichas, normas). Citá el número [n] del fragmento cuando te apoyes en uno:\n\n' + contexto,
     mensajes: [{ role: 'user', text: p }]
   });
   return { respuesta: r.texto, fuentes: Array.from(new Set(frs.map(f => f.archivo))), fragmentosUsados: frs.length, costoUsd: r.costoUsd, modelo: r.modelo };
