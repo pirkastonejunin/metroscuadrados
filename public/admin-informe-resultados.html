@@ -30,6 +30,8 @@
   input:focus,select:focus{outline:none;border-color:var(--accent);}
   .btn{background:var(--accent);color:var(--accent-ink);border:none;padding:9px 15px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;}
   .btn.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+  td.click{cursor:pointer;} td.click:hover{background:rgba(37,99,235,.10);text-decoration:underline;}
+  #detOverlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;display:flex;align-items:center;justify-content:center;padding:16px;} #detBox{background:var(--card);border-radius:14px;max-width:960px;width:100%;max-height:86vh;overflow:auto;padding:16px;box-shadow:var(--shadow);}
   .muted{color:var(--muted);font-size:12px;} .hidden{display:none !important;} .err{color:var(--danger);font-size:13px;margin:6px 0;}
   #loginScreen{display:flex;align-items:center;justify-content:center;height:100vh;padding:16px;} #loginScreen .card{width:300px;text-align:center;}
   .tb-filtros{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
@@ -203,6 +205,28 @@ async function guardarCostoSC(id){
   const tr = $('sc_' + id); if (tr) { tr.style.opacity = .45; tr.querySelector('td:last-child').innerHTML = '✓ guardado'; }
 }
 
+
+// Detalle de un renglón: al tocar un importe se abre la lista de lo que lo compone (ventas, costo por producto, gastos).
+async function verDetalle(tipo, concepto, mes){
+  let ov = $('detOverlay'); if (ov) ov.remove();
+  ov = document.createElement('div'); ov.id = 'detOverlay'; ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = '<div id="detBox"><div class="muted">Cargando detalle…</div></div>'; document.body.appendChild(ov);
+  const tit = (tipo === 'ventas' ? 'Ventas netas' : tipo === 'costo' ? 'Costo de mercadería vendida' : concepto) + ' · ' + (mes === 'total' ? 'total del período' : etMes(mes));
+  try{
+    const q = params({tipo, concepto, mes});
+    const r = await fetch(BASE + '/resultados/detalle?' + q, {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+    const esCosto = tipo === 'costo', multi = new Set(d.filas.map(f => f.sucursal)).size > 1;
+    let h = '<div style="display:flex;align-items:center;gap:8px"><b style="font-size:1.05rem">' + escapeHtml(tit) + '</b><button class="btn secondary" style="margin-left:auto" onclick="$(\'detOverlay\').remove()">Cerrar</button></div>';
+    h += '<div class="muted" style="margin:4px 0 8px">' + d.cantidad + ' renglones · suma ' + pesos(d.total) + (d.truncado ? ' · se muestran los 1.000 mayores' : '') + (d.nota ? '<br>' + escapeHtml(d.nota) : '') + '</div>';
+    if (!d.filas.length) h += '<div class="muted">No hay movimientos para este renglón.</div>';
+    else {
+      h += '<table class="t" style="width:100%;font-size:13px"><thead><tr>' + (esCosto ? '' : '<th>Fecha</th>') + (multi ? '<th>Sucursal</th>' : '') + '<th>Detalle</th><th>' + (esCosto ? 'Código' : 'Comprobante') + '</th>' + (esCosto ? '<th class="n">Cantidad</th><th>Origen del costo</th>' : '') + '<th class="n">Importe</th></tr></thead><tbody>';
+      h += d.filas.map(f => '<tr>' + (esCosto ? '' : '<td>' + escapeHtml(f.fecha) + '</td>') + (multi ? '<td>' + escapeHtml(f.sucursal) + '</td>' : '') + '<td>' + escapeHtml(f.detalle) + '</td><td>' + escapeHtml(f.ref) + '</td>' + (esCosto ? '<td class="n">' + f.cantidad + '</td><td>' + escapeHtml(f.fuente || '') + '</td>' : '') + '<td class="n">' + pesos(f.monto) + '</td></tr>').join('');
+      h += '</tbody></table>';
+    }
+    $('detBox').innerHTML = h;
+  }catch(e){ $('detBox').innerHTML = '<div class="err">No se pudo cargar el detalle: ' + escapeHtml(e.message) + '</div><button class="btn secondary" onclick="$(\'detOverlay\').remove()">Cerrar</button>'; }
+}
 async function cargar(){
   $('err').innerHTML = ''; $('aviso').innerHTML = '';
   let d;
@@ -217,18 +241,18 @@ async function cargar(){
   $('kRes').innerHTML = pesos(T.resultado) + ' <span style="font-size:.8rem;font-weight:700;color:#aeb2b8">' + pct(T.resultadoPct) + '</span>';
   if (T.sinCosto) $('aviso').innerHTML = '<div class="aviso">Hay ' + pesos(T.sinCosto) + ' vendidos en productos <b>sin costo cargado</b>: no entran en el costo y el margen puede estar sobrestimado. Cargá el costo en la ficha del producto. <button class="btn secondary" style="margin-left:6px" onclick="panelSinCosto()">Ver y cargar costos</button></div>';
   else $('sinCostoPanel').classList.add('hidden');
-  const M = d.meses, col = (f, c) => M.map(m => '<td class="n ' + (c ? c(m) : '') + '">' + f(m) + '</td>').join('') + '<td class="n tot ' + (c ? c(T) : '') + '">' + f(T) + '</td>';
+  const M = d.meses, col = (f, c, dr) => { const dk = (m, k) => dr ? ' click\" title=\"Ver detalle\" onclick=\"verDetalle(\'' + dr[0] + '\',' + escapeHtml(JSON.stringify(dr[1] || '')) + ',\'' + k + '\')' : ''; return M.map(m => '<td class=\"n ' + (c ? c(m) : '') + dk(m, m.mes) + '\">' + f(m) + '</td>').join('') + '<td class=\"n tot ' + (c ? c(T) : '') + dk(T, 'total') + '\">' + f(T) + '</td>'; };
   $('tHead').innerHTML = '<tr><th></th>' + M.map(m => '<th class="n">' + etMes(m.mes) + '</th>').join('') + '<th class="n tot">Total</th></tr>';
-  let h = '<tr class="sub"><td>Ventas netas</td>' + col(m => pesos(m.ventasNetas)) + '</tr>';
-  h += '<tr class="ind"><td>(-) Costo de mercadería vendida</td>' + col(m => pesos(-m.costo), m => m.costo ? 'neg' : '') + '</tr>';
+  let h = '<tr class="sub"><td>Ventas netas</td>' + col(m => pesos(m.ventasNetas), null, ['ventas']) + '</tr>';
+  h += '<tr class="ind"><td>(-) Costo de mercadería vendida</td>' + col(m => pesos(-m.costo), m => m.costo ? 'neg' : '', ['costo']) + '</tr>';
   h += '<tr class="sub"><td>Margen bruto</td>' + col(m => pesos(m.margenBruto), m => cls(m.margenBruto)) + '</tr>';
   h += '<tr class="pct"><td>% sobre ventas</td>' + col(m => pct(m.margenPct)) + '</tr>';
   h += '<tr class="sec"><td colspan="' + (M.length + 2) + '">Gastos</td></tr>';
   const otros = d.conceptosOtros || d.conceptos, sueldos = d.conceptosSueldos || [], PREF = 'Sueldos y cargas · ';
-  h += (otros.length || sueldos.length) ? otros.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
+  h += (otros.length || sueldos.length) ? otros.map(c => '<tr class="ind"><td>' + escapeHtml(c) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–', null, ['gasto', c]) + '</tr>').join('') : '<tr class="ind"><td colspan="' + (M.length + 2) + '">No hay gastos cargados en el período.</td></tr>';
   if (sueldos.length) {
     h += '<tr class="ind grp" onclick="toggleSueldos()" title="Tocá para abrir o cerrar el detalle por sector" style="cursor:pointer"><td><span class="flecha" id="flechaSueldos">' + (SUELDOS_ABIERTO ? '▾' : '▸') + '</span> <b>Sueldos y cargas</b></td>' + col(m => { const t = sueldos.reduce((a, c) => a + (m.gastos[c] || 0), 0); return t ? pesos(-t) : '–'; }) + '</tr>';
-    h += sueldos.map(c => '<tr class="ind sueldo-sub"' + (SUELDOS_ABIERTO ? '' : ' style="display:none"') + '><td style="padding-left:54px">' + escapeHtml(c.slice(PREF.length)) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–') + '</tr>').join('');
+    h += sueldos.map(c => '<tr class="ind sueldo-sub"' + (SUELDOS_ABIERTO ? '' : ' style="display:none"') + '><td style="padding-left:54px">' + escapeHtml(c.slice(PREF.length)) + '</td>' + col(m => m.gastos[c] ? pesos(-m.gastos[c]) : '–', null, ['gasto', c]) + '</tr>').join('');
   }
   h += '<tr class="sub"><td>Total gastos</td>' + col(m => pesos(-m.gastosTotal), m => m.gastosTotal ? 'neg' : '') + '</tr>';
   if (T.enCosto) h += '<tr class="pct" title="Estos importes ya están contados: dentro del costo de producción de los productos o en el módulo Sueldos (sector Producción). Se muestran para que los veas, pero no se restan de nuevo."><td>Ya contados en el costo o en Sueldos (no se restan)</td>' + col(m => m.enCosto ? pesos(-m.enCosto) : '–') + '</tr>';

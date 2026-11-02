@@ -699,6 +699,124 @@ router.put('/resultados/sin-costo/:productoId', authInforme('informe_resultados'
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Detalle de un renglón del Estado de resultados (tipo: ventas | costo | gasto) para un mes o el total del período.
+const SECTORES_DET = { 'Obra': 'obra', 'Producción': 'produccion', 'Administración': 'administracion', 'Ventas': 'ventas', 'Logística': 'logistica', 'Otros': 'otro' };
+async function detalleResultados(req) {
+  const hoy = fechaAR(new Date());
+  const desdeS = req.query.desde || hoy.slice(0, 4) + '-01-01', hastaS = req.query.hasta || hoy;
+  if (!validarFecha(desdeS) || !validarFecha(hastaS)) throw err(400, 'Las fechas tienen que tener el formato AAAA-MM-DD.');
+  const tipo = String(req.query.tipo || ''), concepto = String(req.query.concepto || ''), mesQ = String(req.query.mes || 'total');
+  let dS = desdeS, hS = hastaS;
+  if (/^\d{4}-\d{2}$/.test(mesQ)) {
+    const ult = new Date(Number(mesQ.slice(0, 4)), Number(mesQ.slice(5, 7)), 0).getDate();
+    if (mesQ + '-01' > dS) dS = mesQ + '-01';
+    if (mesQ + '-' + String(ult).padStart(2, '0') < hS) hS = mesQ + '-' + String(ult).padStart(2, '0');
+  }
+  const d0 = inicioDia(dS), d1 = finDia(hS);
+  const todas = req.query.alcance === 'todas' || !req.orgId;
+  return conReintento(async () => {
+    const db = await getDb();
+    let orgIds;
+    if (todas) orgIds = await orgIdsDelUsuario(db, req.usuario); else orgIds = [req.orgId];
+    const orgs = await db.collection('organizaciones').find({ _id: { $in: orgIds } }).project({ nombre: 1 }).toArray();
+    const orgNom = new Map(orgs.map(o => [String(o._id), o.nombre || '']));
+    const filas = [];
+    const push = (fecha, orgId, detalle, ref, monto, extra) => filas.push(Object.assign({ fecha: fecha instanceof Date ? fechaAR(fecha) : String(fecha || '').slice(0, 10), sucursal: orgNom.get(String(orgId)) || '', detalle, ref: ref || '', monto: r2(monto) }, extra || {}));
+    const num = x => (x.numero != null ? '#' + x.numero : '');
+    let nota = '';
+    if (tipo === 'ventas' || tipo === 'costo') {
+      const ventas = await db.collection('ventas').find({ orgId: { $in: orgIds }, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+      if (tipo === 'ventas') {
+        ventas.forEach(v => {
+          const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1, usd = v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1;
+          const iva = (v.esFiscal && v.cae && v.fiscal) ? Number(v.fiscal.iva || 0) * ((v.fiscalMoneda === 'DOL' && Number(v.fiscalCotiz) > 0) ? Number(v.fiscalCotiz) : 1) : 0;
+          push(v.fecha, v.orgId, v.clienteNombre || 'Consumidor final', (String(v.tipoComprobante || 'venta').replace(/_/g, ' ')) + ' ' + num(v), (Number(v.total || 0) * usd - iva) * nc);
+        });
+        nota = 'Ventas netas de IVA. Las ventas internas de Fábrica a otras sucursales se compensan en el informe.';
+      } else {
+        await vincularItemsLibres(db, ventas);
+        const ids = new Set(); ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
+        const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ sku: 1, nombre: 1, costo: 1, moneda: 1 }).toArray() : [];
+        const pm = new Map(prods.map(p => [String(p._id), p]));
+        const cotDoc = await db.collection('config_general').findOne({ orgId: orgIds[0], clave: 'cotizacionDolar' });
+        const cot = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
+        const grupos = new Map();
+        ventas.forEach(v => {
+          const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1;
+          (v.items || []).forEach(it => {
+            const p = it.productoId ? pm.get(String(it.productoId)) : null, cant = Number(it.cantidad || 0);
+            let costo = null, fuente = '';
+            if (p && p.costo != null) { costo = p.moneda === 'USD' ? ((cot || Number(v.cotizacionDolar)) ? p.costo * (cot || Number(v.cotizacionDolar)) * cant : null) : Number(p.costo) * cant; fuente = 'costo del producto'; }
+            else if (Number(it.costoTotal) > 0 || Number(it.costoUnitario) > 0) { costo = Number(it.costoTotal) > 0 ? Number(it.costoTotal) : Number(it.costoUnitario) * cant; fuente = 'costo de la venta (Dux)'; }
+            const k = (p ? String(p._id) : 'l:' + String(it.sku || it.nombre || '').toLowerCase()) + '|' + String(v.orgId);
+            let g = grupos.get(k);
+            if (!g) { g = { sucursal: orgNom.get(String(v.orgId)) || '', detalle: (p && p.nombre) || it.nombre || it.descripcion || '(sin descripción)', ref: (p && p.sku) || it.sku || '', cantidad: 0, monto: 0, fuente, sinCosto: false }; grupos.set(k, g); }
+            g.cantidad += cant * nc;
+            if (costo == null) g.sinCosto = true; else g.monto += costo * nc;
+          });
+        });
+        [...grupos.values()].forEach(g => filas.push({ fecha: '', sucursal: g.sucursal, detalle: g.detalle, ref: g.ref, cantidad: Math.round(g.cantidad * 100) / 100, monto: r2(g.monto), fuente: g.sinCosto ? 'sin costo cargado' : g.fuente }));
+        nota = 'Costo = cantidad vendida × costo del producto. El informe además descuenta la mano de obra de recetas (si los sueldos de producción están como gasto) y usa precio mayorista en las compras internas a Fábrica: esos ajustes figuran aparte.';
+      }
+    } else if (tipo === 'gasto') {
+      const periodos = mesesEntre(dS, hS);
+      const PREF = 'Sueldos y cargas · ';
+      if (concepto.startsWith(PREF)) {
+        const sect = concepto.slice(PREF.length);
+        if (sect === 'Cargas sociales y aportes') {
+          const f931 = await db.collection('sueldos_f931').find({ estado: { $ne: 'anulado' }, periodo: { $in: periodos }, 'reparto.orgId': { $in: orgIds } }).toArray();
+          f931.forEach(f => (f.reparto || []).filter(r => orgIds.some(o => String(o) === String(r.orgId))).forEach(r => push(f.periodo, r.orgId, 'F.931 ' + f.periodo, '', Number(r.monto || 0))));
+        } else if (sect === 'Obra (colocadores)') {
+          const obras = await db.collection('obras').aggregate([
+            { $match: { orgId: { $in: orgIds }, 'tareas.estado': 'terminada' } }, { $unwind: '$tareas' },
+            { $match: { 'tareas.estado': 'terminada', 'tareas.colocadorId': { $ne: null }, 'tareas.fechaFinReal': { $gte: d0, $lte: d1 } } },
+            { $project: { orgId: 1, nombre: 1, cliente: 1, fin: '$tareas.fechaFinReal', colocador: '$tareas.colocadorNombre', monto: { $multiply: [{ $ifNull: ['$tareas.m2Presupuestados', 0] }, { $ifNull: ['$tareas.costoPorM2Aplicado', 0] }] } } }
+          ]).toArray();
+          obras.forEach(o => push(o.fin, o.orgId, (o.colocador || 'Colocador') + ' · ' + (o.nombre || o.cliente || 'Obra'), '', Number(o.monto || 0)));
+          const esp = await db.collection('sueldos_tareas_especiales').find({ orgId: { $in: orgIds }, estado: 'terminada', fechaFin: { $gte: d0, $lte: d1 } }).toArray();
+          esp.forEach(o => push(o.fechaFin, o.orgId, 'Trabajo especial · ' + (o.colocadorNombre || o.descripcion || ''), '', Number(o.monto || 0)));
+        } else {
+          const sec = SECTORES_DET[sect.split(' ')[0]] || SECTORES_DET[sect];
+          const liqs = await db.collection('sueldos_liquidaciones').find({ orgId: { $in: orgIds }, periodo: { $in: periodos }, sector: sec }).toArray();
+          const f931 = await db.collection('sueldos_f931').find({ estado: { $ne: 'anulado' }, periodo: { $in: periodos } }).project({ periodo: 1, 'reparto.orgId': 1 }).toArray();
+          const conF = new Set(f931.filter(f => (f.reparto || []).some(r => orgIds.some(o => String(o) === String(r.orgId)))).map(f => f.periodo));
+          liqs.forEach(l => push(l.periodo, l.orgId, l.empleadoNombre || 'Empleado', 'liquidación ' + l.periodo, Number(l.costoEmpresa || 0) - (conF.has(l.periodo) ? Number(l.cargasSociales || 0) : 0)));
+        }
+      } else if (concepto === 'Costo financiero · Tarjetas' || concepto === 'Recargos financieros cobrados') {
+        const rec = concepto === 'Recargos financieros cobrados';
+        const enR = f => { const t = new Date(f).getTime(); return t >= d0.getTime() && t <= d1.getTime(); };
+        const vs = await db.collection('ventas').find({ orgId: { $in: orgIds }, estado: { $ne: 'anulada' }, 'pagos.tarjetaPlanId': { $exists: true } }).project({ pagos: 1, numero: 1, orgId: 1, clienteNombre: 1 }).limit(50000).toArray();
+        vs.forEach(v => (v.pagos || []).forEach(p => { if (p.anulado || !p.tarjetaPlanId || !enR(p.fecha)) return; const m = rec ? -(Number(p.tarjetaRecargo) || 0) : (Number(p.tarjetaCostoFinanciero) || 0); if (m) push(p.fecha, v.orgId, (v.clienteNombre || 'Venta') + ' · tarjeta', 'venta ' + num(v), m); }));
+        const cc = await db.collection('cuenta_corriente_movimientos').find({ orgId: { $in: orgIds }, origen: 'cobro_cuenta', anulado: { $ne: true }, fecha: { $gte: d0, $lte: d1 }, $or: [{ tarjetaPlanId: { $exists: true } }, { 'valores.tarjetaPlanId': { $exists: true } }] }).limit(50000).toArray();
+        cc.forEach(c => (Array.isArray(c.valores) ? c.valores : [c]).forEach(x => { if (!x.tarjetaPlanId) return; const m = rec ? -(Number(x.tarjetaRecargo) || 0) : (Number(x.tarjetaCostoFinanciero) || 0); if (m) push(c.fecha, c.orgId, (c.clienteNombre || 'Cobro de cuenta') + ' · tarjeta', 'cobro cta. cte.', m); }));
+      } else if (concepto.startsWith('Costo financiero · Mercado Pago')) {
+        const imp = /impuestos/.test(concepto);
+        const mp = await db.collection('mp_cobros').find({ orgId: { $in: orgIds }, estado: 'acreditado', acreditadoEn: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+        mp.forEach(c => { const m = Number(imp ? c.impuestos : c.comision) || 0; if (m) push(c.acreditadoEn, c.orgId, 'Cobro Mercado Pago', String(c.paymentId || c.referencia || ''), m); });
+      } else if (concepto === 'Ganancia financiera') {
+        const enR = f => { const t = new Date(f).getTime(); return t >= d0.getTime() && t <= d1.getTime(); };
+        const ops = await db.collection('financiera_operaciones').find({ orgId: { $in: orgIds }, anulada: { $ne: true } }).limit(50000).toArray();
+        ops.forEach(o => { if (enR(o.fecha)) push(o.fecha, o.orgId, 'Operación con financiera', num(o), -(Number(o.ganancia) || 0)); (o.rechazos || []).forEach(x => { if (enR(x.fecha)) push(x.fecha, o.orgId, 'Cheque devuelto a la financiera', num(o), Number(x.ganancia) || 0); }); });
+      } else {
+        const excl = new Set((await Promise.all(orgIds.map(o => conceptosEnCosto(db, o)))).flat());
+        const gastos = await db.collection('gastos').find({ orgId: { $in: orgIds }, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+        gastos.forEach(g => {
+          const signo = /^nota_credito/.test(g.tipoComprobante) ? -1 : 1, items = g.items || [], sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
+          let conDesc = sub; if (g.descuentoPorcentaje) conDesc -= conDesc * (g.descuentoPorcentaje / 100); if (g.descuentoMonto) conDesc -= g.descuentoMonto;
+          const factor = sub > 0 ? Math.max(0, conDesc) / sub : 1, usd = g.moneda === 'USD' && Number(g.cotizacionDolar) > 0 ? Number(g.cotizacionDolar) : 1;
+          items.forEach(it => { if ((it.conceptoNombre || 'Sin concepto') !== concepto) return; push(g.fecha, g.orgId, (g.proveedorNombre || 'Sin proveedor') + (it.descripcion ? ' · ' + it.descripcion : ''), String(g.tipoComprobante || 'gasto').replace(/_/g, ' ') + ' ' + (g.numeroComprobante || num(g)), signo * Number(it.subtotal || 0) * factor * usd); });
+        });
+      }
+    } else throw err(400, 'Tipo de detalle no válido.');
+    filas.sort((a, b) => Math.abs(b.monto) - Math.abs(a.monto));
+    const total = r2(filas.reduce((a, f) => a + f.monto, 0));
+    return { tipo, concepto, mes: mesQ, desde: dS, hasta: hS, total, cantidad: filas.length, filas: filas.slice(0, 1000), truncado: filas.length > 1000, nota };
+  });
+}
+router.get('/resultados/detalle', authInforme('informe_resultados'), async (req, res) => {
+  try { res.json(await detalleResultados(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/resultados', authInforme('informe_resultados'), async (req, res) => {
   try {
     const d = await armarResultados(req);
