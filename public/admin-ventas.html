@@ -1141,8 +1141,12 @@ function alElegirClienteVenta(){
         const l = listasPrecioCache.filter(x => x.activa !== false).find(x => String(x._id) === v) || listasPrecioCache.filter(x => x.activa !== false).find(x => n(x.nombre) === n(v));
         if (l && sel.value !== String(l._id)) { sel.value = String(l._id); recalcularPreciosPorListaVenta(); }
       }
+      // Tipo de comprobante por defecto de la ficha (comprobante de venta -> Comprobante X, factura -> Fiscal). No pisa notas de crédito/débito.
+      const tc = c && { comprobante_venta: 'comprobante_x', factura: 'fiscal' }[c.tipoComprobantePorDefecto];
+      const selTc = document.getElementById('nvTipoComprobante');
+      if (tc && selTc && (selTc.value === 'comprobante_x' || selTc.value === 'fiscal') && selTc.value !== tc) { selTc.value = tc; actualizarVisibilidadDeposito(); actualizarTotalesVenta(); }
     }
-  } catch (e) { /* si algo falla, queda la lista que ya estaba elegida */ }
+  } catch (e) { /* si algo falla, queda lo que ya estaba elegido */ }
   actualizarPreviewLetra();
 }
 function actualizarPreviewLetra(){
