@@ -34,6 +34,7 @@ const COL_ARCHIVOS = 'asesores_archivos';
 const COL_FRAGMENTOS = 'asesores_fragmentos';
 const COL_CONFIG = 'asesores_config';
 const SYNC_ID = 'asesoresDriveSync';
+const AMBITO_TIENDA = 'tienda'; // productos de la tienda online (Tiendanube): los leen todos los asesores
 const NOMBRE_RAIZ = 'Asesores IA';
 const MAX_ARCHIVO_BYTES = 15 * 1024 * 1024;
 const MAX_ARCHIVOS_POR_CARPETA = 300;
@@ -229,7 +230,8 @@ async function sincronizar(db, opciones) {
   const porNombre = new Map(subcarpetas.map(c => [String(c.name).trim().toLowerCase(), c.id]));
   const ambitos = CLAVES.map(k => ({ ambito: k, nombre: ASESORES[k].carpeta })).concat([{ ambito: 'compartido', nombre: 'Compartido' }]);
 
-  const usadoRes = await db.collection(COL_FRAGMENTOS).aggregate([{ $group: { _id: null, b: { $sum: '$bytes' } } }]).toArray();
+  // El espacio del conocimiento de Drive se mide aparte del de la tienda online (que tiene su propio tope).
+  const usadoRes = await db.collection(COL_FRAGMENTOS).aggregate([{ $match: { ambito: { $ne: AMBITO_TIENDA } } }, { $group: { _id: null, b: { $sum: '$bytes' } } }]).toArray();
   let usadoBytes = usadoRes[0] ? usadoRes[0].b : 0;
   const tope = maxBytesTexto();
 
@@ -282,29 +284,145 @@ async function sincronizar(db, opciones) {
   return resumen;
 }
 
+// ---------------------------------------------------------------------------
+// Tienda online (pedido de Mato, 2/11/2026): los asesores también conocen los productos publicados en piedranegra.com.ar
+// (Tiendanube). Se leen por la API de la tienda que el sistema ya tiene conectada (TIENDA_REAL_STORE_ID) y se guardan como
+// fragmentos de ámbito "tienda": nombre, marca, categorías, descripción y LINK. NO se guardan precios ni stock: esos
+// salen del sistema (precios finales, stock "disponible / consultar") y no de la tienda.
+//   ASESORES_TIENDA_MAX_MB   tope de texto de la tienda (default 10)
+//   ASESORES_TIENDA_DOMINIO  dominio para armar links si la API no trae la URL (default piedranegra.com.ar)
+// ---------------------------------------------------------------------------
+let tiendaOverride = null;
+const tiendaConfigurada = () => !!(tiendaOverride || process.env.TIENDA_REAL_STORE_ID);
+function _setTiendaParaTests(o) { tiendaOverride = o; }
+const tiendaMaxBytes = () => Math.round((Number(process.env.ASESORES_TIENDA_MAX_MB) || 10) * 1048576);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const ENTIDADES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú', Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú', ntilde: 'ñ', Ntilde: 'Ñ', uuml: 'ü', Uuml: 'Ü', iexcl: '¡', iquest: '¿', ordm: 'º', ordf: 'ª', deg: '°', sup2: '²', sup3: '³', times: '×', ndash: '–', mdash: '—', hellip: '…', bull: '•', laquo: '«', raquo: '»' };
+// Descripción de Tiendanube (HTML) → texto plano con saltos de línea y viñetas.
+function htmlATexto(html) {
+  return normalizarTexto(String(html || '')
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|h[1-6]|tr|ul|ol)>/gi, '\n\n').replace(/<li[^>]*>/gi, '\n- ').replace(/<\/(td|th)>/gi, ' | ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#(\d{1,5});/g, (m, n) => { try { return String.fromCodePoint(Number(n)); } catch (e) { return ' '; } })
+    .replace(/&#x([0-9a-f]{1,5});/gi, (m, n) => { try { return String.fromCodePoint(parseInt(n, 16)); } catch (e) { return ' '; } })
+    .replace(/&([a-zA-Z0-9]+);/g, (m, n) => (n in ENTIDADES ? ENTIDADES[n] : ' '))
+    .replace(/[ \t]{2,}/g, ' '));
+}
+const locTexto = (c) => (!c ? '' : (typeof c === 'string' ? c : (c.es || Object.values(c)[0] || '')));
+// Un producto de Tiendanube → { nombre, url, cuerpo } (sin precios ni stock).
+function textoProductoTienda(p, dominio) {
+  const nombre = String(locTexto(p.name)).trim(); if (!nombre) return null;
+  const handle = locTexto(p.handle);
+  const url = p.canonical_url || ((dominio && handle) ? 'https://' + dominio + '/productos/' + handle : '');
+  const cats = (p.categories || []).map(c => String(locTexto(c.name)).trim()).filter(Boolean);
+  const marca = String(locTexto(p.brand)).trim();
+  const desc = htmlATexto(locTexto(p.description)).slice(0, 4000);
+  const cuerpo = [marca ? 'Marca: ' + marca : '', cats.length ? 'Categorías: ' + cats.join(', ') : '', desc].filter(Boolean).join('\n\n');
+  return { nombre, url, cuerpo };
+}
+// Todos los productos de la tienda (páginas de 200), con reintento si Tiendanube pide ir más despacio (429).
+async function traerProductosTienda() {
+  if (tiendaOverride) return { dominio: tiendaOverride.dominio, productos: await tiendaOverride.traer() };
+  const cotizador = require('./cotizador');
+  const store = await cotizador.getStoreById(process.env.TIENDA_REAL_STORE_ID);
+  if (!store || !store.access_token) throw err(400, 'La tienda de Tiendanube no tiene un token de acceso válido.');
+  const campos = 'id,name,handle,description,categories,brand,published,canonical_url,updated_at';
+  const productos = [];
+  for (let page = 1; page <= 100; page++) {
+    let r, intentos = 0;
+    for (;;) {
+      r = await fetch(cotizador.API_BASE + '/' + store.store_id + '/products?per_page=200&page=' + page + '&fields=' + campos, { headers: cotizador.apiHeaders(store.access_token) });
+      if (r.status === 429 && intentos < 4) { intentos++; await sleep(1500 * intentos); continue; }
+      break;
+    }
+    if (r.status === 404 && page > 1) break; // Tiendanube responde 404 cuando la página pasa del final
+    if (!r.ok) throw err(502, 'Tiendanube respondió ' + r.status + (r.status === 401 ? ' (el token de la tienda no es válido)' : ''));
+    const pagina = await r.json().catch(() => null);
+    if (!Array.isArray(pagina) || !pagina.length) break;
+    productos.push(...pagina);
+    if (pagina.length < 200) break;
+  }
+  return { dominio: process.env.ASESORES_TIENDA_DOMINIO || store.domain || 'piedranegra.com.ar', productos };
+}
+// Sincroniza los productos publicados. Solo relee los que cambiaron (updated_at) y olvida los que ya no están publicados.
+async function sincronizarTienda(db, opciones) {
+  opciones = opciones || {}; const t0 = Date.now();
+  await asegurarIndices(db);
+  const { dominio, productos } = await traerProductosTienda();
+  const resumen = { productos: 0, nuevos: 0, sinCambios: 0, borrados: 0, omitidosPorEspacio: 0, sinNombre: 0 };
+  const usadoRes = await db.collection(COL_FRAGMENTOS).aggregate([{ $match: { ambito: AMBITO_TIENDA } }, { $group: { _id: null, b: { $sum: '$bytes' } } }]).toArray();
+  let usadoBytes = usadoRes[0] ? usadoRes[0].b : 0;
+  const tope = tiendaMaxBytes();
+  const previos = new Map((await db.collection(COL_ARCHIVOS).find({ ambito: AMBITO_TIENDA }).project({ fileId: 1, modifiedTime: 1, estado: 1, bytes: 1 }).toArray()).map(a => [a.fileId, a]));
+  const vistos = new Set();
+  let delIds = [], insFr = [], upsArch = [];
+  const volcar = async () => { // se graba de a lotes para no hacer miles de idas y vueltas a la base
+    if (delIds.length) await db.collection(COL_FRAGMENTOS).deleteMany({ fileId: { $in: delIds } });
+    if (insFr.length) await db.collection(COL_FRAGMENTOS).insertMany(insFr);
+    if (upsArch.length) await db.collection(COL_ARCHIVOS).bulkWrite(upsArch.map(a => ({ updateOne: { filter: { fileId: a.fileId }, update: { $set: a }, upsert: true } })));
+    delIds = []; insFr = []; upsArch = [];
+    if (typeof opciones.latido === 'function') await opciones.latido();
+  };
+  for (const p of productos) {
+    if (p.published === false) continue;
+    const t = textoProductoTienda(p, dominio); if (!t) { resumen.sinNombre++; continue; }
+    const fileId = 'tn:' + p.id; vistos.add(fileId); resumen.productos++;
+    const previo = previos.get(fileId), mod = String(p.updated_at || '');
+    if (previo && !opciones.forzar && previo.modifiedTime === mod && previo.estado === 'ok') { resumen.sinCambios++; continue; }
+    const cabecera = 'Producto: ' + t.nombre + (t.url ? ' — ' + t.url : '');
+    const trozos = (t.cuerpo ? partirEnFragmentos(t.cuerpo) : ['(La tienda no tiene descripción cargada para este producto.)']).map(x => cabecera + '\n' + x);
+    const bytesNuevos = trozos.reduce((s, x) => s + Buffer.byteLength(x, 'utf8'), 0), bytesViejos = previo ? (previo.bytes || 0) : 0;
+    if (usadoBytes - bytesViejos + bytesNuevos > tope) { resumen.omitidosPorEspacio++; continue; } // el producto viejo, si estaba, se conserva
+    if (previo) delIds.push(fileId);
+    trozos.forEach((x, i) => insFr.push({ fileId, archivo: t.nombre, ambito: AMBITO_TIENDA, n: i, texto: x, bytes: Buffer.byteLength(x, 'utf8') }));
+    upsArch.push({ fileId, nombre: t.nombre, mimeType: 'tiendanube/producto', modifiedTime: mod, ambito: AMBITO_TIENDA, url: t.url, estado: 'ok', error: null, fragmentos: trozos.length, chars: t.cuerpo.length, bytes: bytesNuevos, syncAt: new Date() });
+    usadoBytes = usadoBytes - bytesViejos + bytesNuevos; resumen.nuevos++;
+    if (insFr.length >= 400) await volcar();
+  }
+  await volcar();
+  if (productos.length) { // si la tienda devolvió vacío (error de la API) no se borra nada
+    const ids = Array.from(previos.keys()).filter(id => !vistos.has(id));
+    if (ids.length) { await db.collection(COL_FRAGMENTOS).deleteMany({ fileId: { $in: ids } }); await db.collection(COL_ARCHIVOS).deleteMany({ fileId: { $in: ids } }); resumen.borrados = ids.length; }
+  }
+  resumen.ms = Date.now() - t0;
+  return resumen;
+}
+
 async function guardarEstadoSync(db, set) { await db.collection('configuracion').updateOne({ _id: SYNC_ID }, { $set: set }, { upsert: true }); }
-// Corre una sincronización dejando el resultado guardado. Un solo proceso a la vez (candado de 15 min).
-async function sincronizarYRegistrar(db, opciones) {
+// Un solo proceso a la vez (candado de 15 min, que se renueva mientras la sincronización avanza).
+async function tomarCandado(db) {
   const hace15 = new Date(Date.now() - 15 * 60000);
   const r = await db.collection('configuracion').updateOne({ _id: SYNC_ID, $or: [{ corriendoDesde: { $exists: false } }, { corriendoDesde: null }, { corriendoDesde: { $lt: hace15 } }] }, { $set: { corriendoDesde: new Date() } }, { upsert: true }).catch(e => { if (e && e.code === 11000) return { modifiedCount: 0, upsertedCount: 0 }; throw e; });
   if (!r.modifiedCount && !r.upsertedCount) throw err(409, 'Ya hay una sincronización en curso. Esperá unos minutos.');
-  try {
-    const resumen = await sincronizar(db, opciones);
-    await guardarEstadoSync(db, { okAt: new Date(), error: null, errorAt: null, resumen, corriendoDesde: null });
-    return resumen;
-  } catch (e) {
-    await guardarEstadoSync(db, { error: e.message, errorAt: new Date(), corriendoDesde: null }).catch(() => {});
-    throw e;
-  }
 }
+// Corre Drive y la tienda (cada una por su lado: si una falla, la otra igual se actualiza) y deja el resultado guardado.
+// Hay que haber tomado el candado antes (tomarCandado).
+async function ejecutarSincronizacion(db, opciones) {
+  opciones = Object.assign({}, opciones, { latido: () => guardarEstadoSync(db, { corriendoDesde: new Date() }) });
+  const out = { drive: null, driveError: null, tienda: null, tiendaError: null };
+  try {
+    if (driveHabilitado()) {
+      try { out.drive = await sincronizar(db, opciones); await guardarEstadoSync(db, { okAt: new Date(), error: null, errorAt: null, resumen: out.drive }); }
+      catch (e) { out.driveError = e.message; await guardarEstadoSync(db, { error: e.message, errorAt: new Date() }).catch(() => {}); }
+    }
+    if (tiendaConfigurada()) {
+      try { out.tienda = await sincronizarTienda(db, opciones); await guardarEstadoSync(db, { tiendaOkAt: new Date(), tiendaError: null, tiendaErrorAt: null, tiendaResumen: out.tienda }); }
+      catch (e) { out.tiendaError = e.message; await guardarEstadoSync(db, { tiendaError: e.message, tiendaErrorAt: new Date() }).catch(() => {}); }
+    }
+  } finally { await guardarEstadoSync(db, { corriendoDesde: null }).catch(() => {}); }
+  return out;
+}
+async function sincronizarYRegistrar(db, opciones) { await tomarCandado(db); return ejecutarSincronizacion(db, opciones); }
 const horaAR = () => new Date(Date.now() - 3 * 3600000).getUTCHours();
 // Una vez por día, a la hora configurada (default 3 de la mañana). Se revisa cada 30 min y también al abrir la pantalla.
 async function sincronizacionNocturna(db) {
-  if (!driveHabilitado()) return;
+  if (!driveHabilitado() && !tiendaConfigurada()) return;
   const ult = await db.collection('configuracion').findOne({ _id: SYNC_ID });
-  const pasaron = ult && ult.okAt ? (Date.now() - new Date(ult.okAt).getTime()) : Infinity;
-  if (pasaron < 20 * 3600000) return;
-  if (ult && ult.okAt && horaAR() < (Number(process.env.ASESORES_SYNC_HORA) || 3)) return;
+  const ultima = ult ? Math.max(ult.okAt ? new Date(ult.okAt).getTime() : 0, ult.tiendaOkAt ? new Date(ult.tiendaOkAt).getTime() : 0) : 0;
+  if (Date.now() - ultima < 20 * 3600000) return;
+  if (ultima && horaAR() < (Number(process.env.ASESORES_SYNC_HORA) || 3)) return;
   try { await sincronizarYRegistrar(db); } catch (e) { if (e.status !== 409) console.error('[asesores] sincronización nocturna:', e.message); }
 }
 if (process.env.MONGODB_URI && process.env.NODE_ENV !== 'test') setInterval(async () => { try { await sincronizacionNocturna(await getDb()); } catch (e) { /* sin base o sin Drive: se reintenta */ } }, 30 * 60 * 1000).unref();
@@ -312,11 +430,14 @@ if (process.env.MONGODB_URI && process.env.NODE_ENV !== 'test') setInterval(asyn
 // ---------------------------------------------------------------------------
 // Búsqueda y consulta (la usan la pantalla de prueba y, desde la etapa 2, cada asesor)
 // ---------------------------------------------------------------------------
-// Fragmentos más relevantes para la consulta, de la carpeta del asesor y de Compartido.
-async function buscar(db, asesorKey, consulta, k) {
+// Fragmentos más relevantes para la consulta: los de la carpeta del asesor y de Compartido (k) más los productos de la tienda
+// online (hasta 3, en una búsqueda aparte para que los productos no desplacen a los cursos y viceversa).
+async function buscar(db, asesorKey, consulta, k, kTienda) {
   const q = String(consulta || '').trim(); if (!q) return [];
-  const filtro = { $text: { $search: q }, ambito: { $in: [asesorKey, 'compartido'] } };
-  return db.collection(COL_FRAGMENTOS).find(filtro, { projection: { score: { $meta: 'textScore' }, texto: 1, archivo: 1, ambito: 1, n: 1 } }).sort({ score: { $meta: 'textScore' } }).limit(k || 6).toArray();
+  const proy = { projection: { score: { $meta: 'textScore' }, texto: 1, archivo: 1, ambito: 1, n: 1 } };
+  const por = (ambito, n) => db.collection(COL_FRAGMENTOS).find({ $text: { $search: q }, ambito }, proy).sort({ score: { $meta: 'textScore' } }).limit(n).toArray();
+  const [conocimiento, tienda] = await Promise.all([por({ $in: [asesorKey, 'compartido'] }, k || 5), por(AMBITO_TIENDA, kTienda == null ? 3 : kTienda)]);
+  return conocimiento.concat(tienda);
 }
 async function configDe(db, key) {
   const base = ASESORES[key]; if (!base) return null;
@@ -330,7 +451,8 @@ async function gastoDelMes(db, key) {
 // Mensaje modelo para el cliente (pedido de Mato, 2/11/2026): los asesores comerciales, además de explicarle al vendedor,
 // proponen un texto listo para mandar por WhatsApp. Va separado de la explicación con una marca fija para poder mostrarlo aparte.
 const MARCA_MENSAJE = '=== MENSAJE PARA EL CLIENTE ===';
-const INSTRUCCION_MENSAJE = '\n\nMensaje para el cliente: si la consulta es para responderle o contactar a un cliente, después de tu respuesta escribí en una línea sola exactamente ' + MARCA_MENSAJE + ' y debajo un mensaje listo para enviar por WhatsApp. Reglas del mensaje: en español rioplatense, cordial y breve (2 a 5 líneas), escrito como lo mandaría el vendedor (primera persona, sin saludos largos); *negrita* de WhatsApp con un solo asterisco solo si hace falta; sin citas [n], sin listas largas ni datos internos; usá solo información del contexto, sin inventar precios, stock ni plazos (si hace falta un dato que no tenés, dejalo entre corchetes para completar, por ejemplo [precio]). Si la consulta es solo una duda interna del vendedor y no hay nada para mandarle al cliente, no escribas la marca ni el mensaje.';
+const INSTRUCCION_MENSAJE = '\n\nMensaje para el cliente: si la consulta es para responderle o contactar a un cliente, después de tu respuesta escribí en una línea sola exactamente ' + MARCA_MENSAJE + ' y debajo un mensaje listo para enviar por WhatsApp. Reglas del mensaje: en español rioplatense, cordial y breve (2 a 5 líneas), escrito como lo mandaría el vendedor (primera persona, sin saludos largos); *negrita* de WhatsApp con un solo asterisco solo si hace falta; sin citas [n], sin listas largas ni datos internos; usá solo información del contexto, sin inventar precios, stock ni plazos (si hace falta un dato que no tenés, dejalo entre corchetes para completar, por ejemplo [precio]); si en el contexto está el link de la tienda online del producto que recomendás, podés incluirlo. Si la consulta es solo una duda interna del vendedor y no hay nada para mandarle al cliente, no escribas la marca ni el mensaje.';
+const INSTRUCCION_TIENDA = '\n\nLos fragmentos marcados "Tienda online" son descripciones públicas de productos de piedranegra.com.ar, con su link. Sirven para saber qué productos existen, sus características y compartir el link (copiado tal cual del contexto, nunca inventes uno). NO tienen precios ni stock confiables: si piden precio o disponibilidad, decí que hay que consultarlo en el sistema.';
 // Separa { respuesta, mensajeCliente } y deja el mensaje en formato WhatsApp (sin citas, negrita simple).
 function separarMensajeCliente(texto) {
   const t = String(texto || '');
@@ -347,15 +469,16 @@ async function preguntar(db, key, pregunta, orgId) {
   if (!cfg.activo) throw err(409, 'Este asesor está desactivado.');
   const p = String(pregunta || '').trim(); if (!p) throw err(400, 'Escribí una pregunta.');
   if (cfg.topeUsdMes > 0) { const g = await gastoDelMes(db, key); if (g.usd >= cfg.topeUsdMes) throw err(429, 'El asesor llegó a su tope mensual (US$ ' + cfg.topeUsdMes + ').', { tope: true }); }
-  const frs = await buscar(db, key, p, 6);
-  const contexto = frs.length ? frs.map((f, i) => `[${i + 1}] (${f.archivo})\n${f.texto}`).join('\n\n---\n\n') : '(No se encontró información cargada sobre esto.)';
+  const frs = await buscar(db, key, p, 5, 3);
+  const hayTienda = frs.some(f => f.ambito === AMBITO_TIENDA);
+  const contexto = frs.length ? frs.map((f, i) => `[${i + 1}] (${f.ambito === AMBITO_TIENDA ? 'Tienda online' : f.archivo})\n${f.texto}`).join('\n\n---\n\n') : '(No se encontró información cargada sobre esto.)';
   const r = await ia.generar({
     uso: 'asesor:' + key, orgId: orgId || null, temperatura: 0.2, maxTokens: cfg.mensajeCliente ? 1200 : 900,
-    sistema: cfg.rol + '\n\nFormato de la respuesta: ordenada y fácil de leer en pantalla. Párrafos cortos separados por una línea en blanco; si hay pasos o varias opciones, una lista (con "- " o "1. "); **negrita** solo para lo clave (productos, cantidades, advertencias). Sin títulos largos ni relleno. Empezá por la respuesta directa.' + (cfg.mensajeCliente ? INSTRUCCION_MENSAJE : '') + '\n\nInformación de contexto cargada por la empresa (cursos, fichas, normas). Citá el número [n] del fragmento cuando te apoyes en uno:\n\n' + contexto,
+    sistema: cfg.rol + '\n\nFormato de la respuesta: ordenada y fácil de leer en pantalla. Párrafos cortos separados por una línea en blanco; si hay pasos o varias opciones, una lista (con "- " o "1. "); **negrita** solo para lo clave (productos, cantidades, advertencias). Sin títulos largos ni relleno. Empezá por la respuesta directa.' + (cfg.mensajeCliente ? INSTRUCCION_MENSAJE : '') + (hayTienda ? INSTRUCCION_TIENDA : '') + '\n\nInformación de contexto cargada por la empresa (cursos, fichas, normas). Citá el número [n] del fragmento cuando te apoyes en uno:\n\n' + contexto,
     mensajes: [{ role: 'user', text: p }]
   });
   const partes = cfg.mensajeCliente ? separarMensajeCliente(r.texto) : { respuesta: String(r.texto || '').trim(), mensajeCliente: '' };
-  return { respuesta: partes.respuesta, mensajeCliente: partes.mensajeCliente, fuentes: Array.from(new Set(frs.map(f => f.archivo))), fragmentosUsados: frs.length, costoUsd: r.costoUsd, modelo: r.modelo };
+  return { respuesta: partes.respuesta, mensajeCliente: partes.mensajeCliente, fuentes: Array.from(new Set(frs.map(f => (f.ambito === AMBITO_TIENDA ? 'Tienda: ' : '') + f.archivo))), fragmentosUsados: frs.length, costoUsd: r.costoUsd, modelo: r.modelo };
 }
 
 // ---------------------------------------------------------------------------
@@ -367,11 +490,15 @@ router.get('/estado', authUsuario, soloAdmin, async (req, res) => {
   try {
     const db = await getDb();
     sincronizacionNocturna(db).catch(() => {}); // si pasó más de un día, se actualiza en segundo plano
-    const [ult, archivos, uso] = await Promise.all([
+    const [ult, archivos, usoPorAmbito, productosTienda] = await Promise.all([
       db.collection('configuracion').findOne({ _id: SYNC_ID }),
-      db.collection(COL_ARCHIVOS).find({}).project({ _id: 0 }).sort({ ambito: 1, nombre: 1 }).toArray(),
-      db.collection(COL_FRAGMENTOS).aggregate([{ $group: { _id: null, bytes: { $sum: '$bytes' }, n: { $sum: 1 } } }]).toArray()
+      db.collection(COL_ARCHIVOS).find({ ambito: { $ne: AMBITO_TIENDA } }).project({ _id: 0 }).sort({ ambito: 1, nombre: 1 }).toArray(), // los productos de la tienda no se listan uno por uno
+      db.collection(COL_FRAGMENTOS).aggregate([{ $group: { _id: '$ambito', bytes: { $sum: '$bytes' }, n: { $sum: 1 } } }]).toArray(),
+      db.collection(COL_ARCHIVOS).countDocuments({ ambito: AMBITO_TIENDA })
     ]);
+    const sumar = (filas) => filas.reduce((s, f) => ({ bytes: s.bytes + (f.bytes || 0), n: s.n + (f.n || 0) }), { bytes: 0, n: 0 });
+    const uso = [sumar(usoPorAmbito.filter(f => f._id !== AMBITO_TIENDA))], usoTienda = sumar(usoPorAmbito.filter(f => f._id === AMBITO_TIENDA));
+    const mb = (b) => Math.round((b / 1048576) * 10) / 10;
     const asesores = [];
     for (const k of CLAVES) {
       const cfg = await configDe(db, k); const g = await gastoDelMes(db, k);
@@ -380,7 +507,11 @@ router.get('/estado', authUsuario, soloAdmin, async (req, res) => {
     res.json({
       driveConfigurado: driveHabilitado(),
       sync: ult ? { okAt: ult.okAt || null, error: ult.error || null, errorAt: ult.errorAt || null, corriendo: !!(ult.corriendoDesde && Date.now() - new Date(ult.corriendoDesde).getTime() < 15 * 60000), resumen: ult.resumen || null } : null,
-      espacio: { usadoMB: Math.round(((uso[0] ? uso[0].bytes : 0) / 1048576) * 10) / 10, topeMB: Math.round(maxBytesTexto() / 1048576), fragmentos: uso[0] ? uso[0].n : 0 },
+      espacio: { usadoMB: mb(uso[0].bytes), topeMB: Math.round(maxBytesTexto() / 1048576), fragmentos: uso[0].n },
+      tienda: {
+        configurada: tiendaConfigurada(), productos: productosTienda, fragmentos: usoTienda.n, usadoMB: mb(usoTienda.bytes), topeMB: Math.round(tiendaMaxBytes() / 1048576),
+        okAt: (ult && ult.tiendaOkAt) || null, error: (ult && ult.tiendaError) || null, resumen: (ult && ult.tiendaResumen) || null
+      },
       asesores, compartido: { archivos: archivos.filter(a => a.ambito === 'compartido').length }, archivos
     });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -388,8 +519,11 @@ router.get('/estado', authUsuario, soloAdmin, async (req, res) => {
 
 router.post('/sincronizar', authUsuario, soloAdmin, async (req, res) => {
   try {
-    if (!driveHabilitado()) return res.status(400).json({ error: 'Falta GOOGLE_SERVICE_ACCOUNT_KEY en el servidor (la misma cuenta de servicio del Calendar).' });
-    res.json({ ok: true, resumen: await sincronizarYRegistrar(await getDb(), { forzar: !!(req.body && req.body.forzar) }) });
+    if (!driveHabilitado() && !tiendaConfigurada()) return res.status(400).json({ error: 'Falta GOOGLE_SERVICE_ACCOUNT_KEY (la misma cuenta de servicio del Calendar) y TIENDA_REAL_STORE_ID en el servidor.' });
+    const db = await getDb(); await tomarCandado(db); // 409 si ya hay una en curso
+    // Se responde enseguida y se sigue en segundo plano: la primera lectura de la tienda puede tardar varios minutos. La pantalla consulta /estado.
+    res.json({ ok: true, iniciado: true });
+    ejecutarSincronizacion(db, { forzar: !!(req.body && req.body.forzar) }).catch(e => console.error('[asesores] sincronización:', e.message));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -416,4 +550,4 @@ module.exports.ASESORES = ASESORES;
 module.exports.buscar = buscar;
 module.exports.preguntar = preguntar;
 module.exports.configDe = configDe;
-module.exports._interno = { separarMensajeCliente, partirEnFragmentos, normalizarTexto, planillaATexto, extraerTexto, sincronizar, _setDriveParaTests, mensajeDrive };
+module.exports._interno = { sincronizarTienda, htmlATexto, textoProductoTienda, _setTiendaParaTests, separarMensajeCliente, partirEnFragmentos, normalizarTexto, planillaATexto, extraerTexto, sincronizar, _setDriveParaTests, mensajeDrive };

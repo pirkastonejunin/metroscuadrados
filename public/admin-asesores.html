@@ -134,7 +134,7 @@
       <div class="row" style="justify-content:space-between;align-items:center">
         <div>
           <h3 style="margin:0 0 4px;font-size:15px">Conocimiento en Google Drive</h3>
-          <div class="muted">Subí cursos, fichas, PDFs y planillas a la carpeta <b>Asesores IA</b> de Drive: <b>Ventas</b>, <b>VL</b>, <b>Administrador</b> o <b>Compartido</b> (la leen todos). Lo que subas a la carpeta de un asesor se lo asigna a él. Se actualiza solo cada noche.</div>
+          <div class="muted">Subí cursos, fichas, PDFs y planillas a la carpeta <b>Asesores IA</b> de Drive: <b>Ventas</b>, <b>VL</b>, <b>Administrador</b> o <b>Compartido</b> (la leen todos). Lo que subas a la carpeta de un asesor se lo asigna a él. Además, los asesores conocen los productos publicados en la <b>tienda online</b> (piedranegra.com.ar): nombre, descripción y link, <b>sin precios</b> (esos salen del sistema). Todo se actualiza solo cada noche.</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn" id="btnSync" onclick="sincronizar(false)">Actualizar ahora</button>
@@ -218,19 +218,29 @@ async function cargar(){
   }catch(e){ document.getElementById('syncEstado').innerHTML = '<span class="estado-mal">' + escapeHtml(e.message) + '</span>'; }
 }
 function pintar(d){
-  const s = d.sync, esp = d.espacio, pct = esp.topeMB ? Math.min(100, Math.round(esp.usadoMB / esp.topeMB * 100)) : 0;
-  let linea;
-  if (!d.driveConfigurado) linea = '<span class="estado-mal">Falta configurar la cuenta de servicio de Google (GOOGLE_SERVICE_ACCOUNT_KEY) en Render.</span>';
-  else if (s && s.corriendo) linea = 'Sincronizando…';
-  else if (s && s.error) linea = '<span class="estado-mal">Último intento con error: ' + escapeHtml(s.error) + '</span>' + (s.okAt ? ' · última vez que anduvo: ' + fechaHora(s.okAt) : '');
-  else if (s && s.okAt) { const r = s.resumen || {}; linea = '<span class="estado-ok">Al día</span> · última lectura ' + fechaHora(s.okAt) + ' · ' + (r.archivos || 0) + ' archivos (' + (r.leidos || 0) + ' nuevos o cambiados, ' + (r.sinCambios || 0) + ' sin cambios' + (r.errores ? ', ' + r.errores + ' con problema' : '') + (r.borrados ? ', ' + r.borrados + ' borrados de Drive' : '') + ')'; }
-  else linea = 'Todavía no se sincronizó. Tocá "Actualizar ahora".';
-  linea += '<div style="margin-top:8px">Espacio usado por el conocimiento: <b>' + esp.usadoMB + ' MB</b> de ' + esp.topeMB + ' MB · ' + esp.fragmentos + ' fragmentos<div class="barra"><div style="width:' + pct + '%"></div></div></div>';
-  if (s && s.resumen && s.resumen.porAmbito) {
+  const s = d.sync, esp = d.espacio, t = d.tienda || {}, pct = esp.topeMB ? Math.min(100, Math.round(esp.usadoMB / esp.topeMB * 100)) : 0;
+  const corriendo = !!(s && s.corriendo);
+  let drive;
+  if (!d.driveConfigurado) drive = 'Drive: <span class="estado-mal">falta configurar la cuenta de servicio de Google (GOOGLE_SERVICE_ACCOUNT_KEY) en Render.</span>';
+  else if (s && s.error) drive = 'Drive: <span class="estado-mal">último intento con error: ' + escapeHtml(s.error) + '</span>' + (s.okAt ? ' · última vez que anduvo: ' + fechaHora(s.okAt) : '');
+  else if (s && s.okAt) { const r = s.resumen || {}; drive = 'Drive: <span class="estado-ok">al día</span> · última lectura ' + fechaHora(s.okAt) + ' · ' + (r.archivos || 0) + ' archivos (' + (r.leidos || 0) + ' nuevos o cambiados, ' + (r.sinCambios || 0) + ' sin cambios' + (r.errores ? ', ' + r.errores + ' con problema' : '') + (r.borrados ? ', ' + r.borrados + ' borrados de Drive' : '') + ')'; }
+  else drive = 'Drive: todavía no se sincronizó.';
+  let tienda;
+  if (!t.configurada) tienda = 'Tienda online: <span class="estado-mal">falta configurar TIENDA_REAL_STORE_ID en Render.</span>';
+  else if (t.error) tienda = 'Tienda online: <span class="estado-mal">error: ' + escapeHtml(t.error) + '</span>' + (t.okAt ? ' · última vez que anduvo: ' + fechaHora(t.okAt) : '');
+  else if (t.okAt) { const r = t.resumen || {}; tienda = 'Tienda online (piedranegra.com.ar): <span class="estado-ok">al día</span> · <b>' + t.productos + '</b> productos publicados · última lectura ' + fechaHora(t.okAt) + (r.nuevos ? ' · ' + r.nuevos + ' nuevos o cambiados' : '') + (r.omitidosPorEspacio ? ' · <span class="estado-mal">' + r.omitidosPorEspacio + ' sin lugar por el tope de espacio</span>' : ''); }
+  else tienda = 'Tienda online (piedranegra.com.ar): todavía no se leyó.';
+  let linea = corriendo ? '<b>Sincronizando…</b> la primera lectura de la tienda puede tardar unos minutos. Podés dejar esta pantalla abierta.' : drive + '<div style="margin-top:4px">' + tienda + '</div>';
+  linea += '<div style="margin-top:8px">Espacio usado por el conocimiento de Drive: <b>' + esp.usadoMB + ' MB</b> de ' + esp.topeMB + ' MB · ' + esp.fragmentos + ' fragmentos<div class="barra"><div style="width:' + pct + '%"></div></div></div>';
+  if (t.configurada && t.productos) linea += '<div class="muted" style="margin-top:4px">Tienda online: ' + t.usadoMB + ' MB de ' + t.topeMB + ' MB (aparte del conocimiento de Drive).</div>';
+  if (!corriendo && s && s.resumen && s.resumen.porAmbito) {
     const sinCarpeta = Object.entries(s.resumen.porAmbito).filter(([k, v]) => !v.carpeta).map(([k]) => NOMBRE_CARPETA[k]);
     if (sinCarpeta.length) linea += '<div class="muted" style="margin-top:6px">No se encontró en Drive la carpeta: ' + sinCarpeta.join(', ') + '.</div>';
   }
   document.getElementById('syncEstado').innerHTML = linea;
+  // La sincronización corre en segundo plano en el servidor: mientras siga corriendo se vuelve a consultar sola.
+  const btnSync = document.getElementById('btnSync'); if (btnSync) { btnSync.disabled = corriendo; btnSync.textContent = corriendo ? 'Sincronizando…' : 'Actualizar ahora'; }
+  clearTimeout(window._tPoll); if (corriendo) window._tPoll = setTimeout(cargar, 4000);
   document.getElementById('asesores').innerHTML = d.asesores.map(a => `<div class="card">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>${escapeHtml(a.nombre)}</b><span class="pill ${a.activo ? 'ok' : 'mal'}">${a.activo ? 'Activo' : 'Desactivado'}</span></div>
       <div class="muted">Carpeta de Drive: ${escapeHtml(a.carpeta)} · ${a.archivos} archivo(s) propios + ${d.compartido.archivos} compartidos</div>
@@ -253,7 +263,7 @@ async function sincronizar(forzar){
     const r = await fetch(BASE + '/sincronizar', {method:'POST', headers: headersAuth({'Content-Type':'application/json'}), body: JSON.stringify({forzar: !!forzar})});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
   }catch(e){ err.textContent = e.message; }
-  btn.disabled = false; btn.textContent = 'Actualizar ahora'; await cargar();
+  await cargar(); // el servidor ya marcó "corriendo": cargar() sigue consultando solo hasta que termine
 }
 async function guardarConfig(key, body){
   try{

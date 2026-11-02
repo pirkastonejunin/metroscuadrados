@@ -71,14 +71,17 @@ function coincide(doc, filtro) {
   return Object.entries(filtro).every(([k, v]) => {
     if (v && typeof v === 'object' && '$nin' in v) return !v.$nin.includes(doc[k]);
     if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(doc[k]);
+    if (v && typeof v === 'object' && '$ne' in v) return doc[k] !== v.$ne;
     return doc[k] === v;
   });
 }
 function coleccion() {
   const docs = [];
-  return {
+  const col = {
     docs,
     createIndex: async () => 'ok',
+    countDocuments: async (f) => docs.filter(d => coincide(d, f || {})).length,
+    bulkWrite: async (ops) => { for (const o of ops) await col.updateOne(o.updateOne.filter, o.updateOne.update); },
     findOne: async (f) => docs.find(d => coincide(d, f)) || null,
     find: (f) => ({ project: () => ({ toArray: async () => docs.filter(d => coincide(d, f)) }) }),
     insertMany: async (arr) => { docs.push(...arr.map(x => Object.assign({}, x))); },
@@ -89,6 +92,7 @@ function coleccion() {
       return sel.length ? [{ _id: null, b: sel.reduce((s, d) => s + (d.bytes || 0), 0) }] : [];
     } })
   };
+  return col;
 }
 const cols = {}; const db = { collection: (n) => cols[n] || (cols[n] = coleccion()) };
 
@@ -138,6 +142,61 @@ const cols = {}; const db = { collection: (n) => cols[n] || (cols[n] = coleccion
   assert.strictEqual(r.omitidosPorEspacio, 1);
   assert.strictEqual(cols.asesores_archivos.docs.find(a => a.fileId === 'big').estado, 'sin_espacio');
   assert(!cols.asesores_fragmentos.docs.some(f => f.fileId === 'big'));
+
+  // ---- Tienda online (Tiendanube) ----
+  const htmlT = A.htmlATexto('<p>Pegamento &aacute;gil&nbsp;flexible</p><ul><li>Rinde 5 m&#178;</li><li>Uso en <b>exterior</b></li></ul><script>alert(1)</script><br>Fin&eacute;');
+  assert(/Pegamento ágil flexible/.test(htmlT) && /- Rinde 5 m²/.test(htmlT) && /- Uso en exterior/.test(htmlT) && /Finé/.test(htmlT), 'HTML → texto con tildes, viñetas y sin etiquetas');
+  assert(!/script|alert|<|>/.test(htmlT), 'sin scripts ni etiquetas');
+
+  const prod = (id, nombre, extra) => Object.assign({ id, name: { es: nombre }, handle: { es: nombre.toLowerCase().replace(/\s+/g, '-') }, description: { es: '<p>Porcelanato de alto tránsito apto exterior.</p>' }, categories: [{ name: { es: 'Pisos' } }], brand: 'Marca X', published: true, updated_at: 'U1', variants: [{ price: '99999', sku: 'SKU1' }] }, extra || {});
+  const t1 = A.textoProductoTienda(prod(1, 'Porcelanato Gris 60x120'), 'piedranegra.com.ar');
+  assert.strictEqual(t1.url, 'https://piedranegra.com.ar/productos/porcelanato-gris-60x120');
+  assert(/Marca: Marca X/.test(t1.cuerpo) && /Categorías: Pisos/.test(t1.cuerpo) && /alto tránsito/.test(t1.cuerpo));
+  assert(!/99999/.test(t1.cuerpo), 'no se guardan precios de la tienda');
+  assert.strictEqual(A.textoProductoTienda({ name: {} }, 'x'), null, 'sin nombre no sirve');
+  assert.strictEqual(A.textoProductoTienda(prod(2, 'Con URL', { canonical_url: 'https://piedranegra.com.ar/productos/con-url/' }), 'otro.com').url, 'https://piedranegra.com.ar/productos/con-url/', 'usa la URL canónica de la API');
+
+  let catalogo = [prod(1, 'Porcelanato Gris 60x120'), prod(2, 'Oculto', { published: false }), { id: 3, name: {} }, prod(4, 'Pegamento Flexible')];
+  A._setTiendaParaTests({ dominio: 'piedranegra.com.ar', traer: async () => catalogo });
+  const frTienda = () => cols.asesores_fragmentos.docs.filter(f => f.ambito === 'tienda');
+  let rt = await A.sincronizarTienda(db, {});
+  assert.strictEqual(rt.productos, 2, 'cuenta solo los publicados con nombre');
+  assert.strictEqual(rt.nuevos, 2); assert.strictEqual(rt.sinNombre, 1);
+  assert(frTienda().every(f => /^Producto: .+ — https:\/\/piedranegra\.com\.ar\/productos\//.test(f.texto)), 'cada fragmento lleva nombre y link');
+  assert(!cols.asesores_archivos.docs.some(a => a.fileId === 'tn:2'), 'el producto despublicado no entra');
+  const kbAntes = cols.asesores_archivos.docs.filter(a => a.ambito !== 'tienda').length;
+
+  rt = await A.sincronizarTienda(db, {});
+  assert.strictEqual(rt.sinCambios, 2, 'sin cambios no se vuelve a procesar');
+
+  catalogo[0] = prod(1, 'Porcelanato Gris 60x120', { updated_at: 'U2', description: { es: '<p>Descripción nueva.</p>' } });
+  rt = await A.sincronizarTienda(db, {});
+  assert.strictEqual(rt.nuevos, 1);
+  const f1 = frTienda().filter(f => f.fileId === 'tn:1');
+  assert(f1.length >= 1 && f1.every(f => /Descripción nueva/.test(f.texto) && !/alto tránsito/.test(f.texto)), 'se reemplazó la descripción vieja');
+
+  // Drive y tienda no se pisan: la sincronización de Drive no toca la tienda, y la de la tienda no toca Drive
+  await A.sincronizar(db, { forzar: true });
+  assert.strictEqual(frTienda().filter(f => f.fileId === 'tn:4').length >= 1, true, 'Drive no borra productos de la tienda');
+  assert.strictEqual(cols.asesores_archivos.docs.filter(a => a.ambito !== 'tienda').length >= kbAntes - 1, true, 'la tienda no borra conocimiento de Drive');
+
+  // Si la tienda devuelve vacío (falla de la API) no se borra nada; si un producto desaparece, se olvida
+  catalogo = [];
+  rt = await A.sincronizarTienda(db, {});
+  assert.strictEqual(rt.borrados, 0); assert(frTienda().length > 0, 'lista vacía no borra todo');
+  catalogo = [prod(1, 'Porcelanato Gris 60x120', { updated_at: 'U2', description: { es: '<p>Descripción nueva.</p>' } })];
+  rt = await A.sincronizarTienda(db, {});
+  assert.strictEqual(rt.borrados, 1, 'el producto que ya no está publicado se olvida');
+  assert(!frTienda().some(f => f.fileId === 'tn:4'));
+
+  // Tope de espacio propio de la tienda
+  process.env.ASESORES_TIENDA_MAX_MB = '0.0001';
+  catalogo = [prod(1, 'Porcelanato Gris 60x120', { updated_at: 'U2', description: { es: '<p>Descripción nueva.</p>' } }), prod(9, 'Producto Nuevo Largo', { description: { es: '<p>' + 'texto largo '.repeat(100) + '</p>' } })];
+  rt = await A.sincronizarTienda(db, {});
+  assert.strictEqual(rt.omitidosPorEspacio >= 1, true, 'lo que no entra en el tope se informa');
+  assert(!cols.asesores_archivos.docs.some(a => a.fileId === 'tn:9'));
+  delete process.env.ASESORES_TIENDA_MAX_MB;
+  A._setTiendaParaTests(null);
 
   // Mensajes de error de Drive entendibles
   assert(/Drive API no está habilitada/.test(A.mensajeDrive({ code: 403, message: 'Google Drive API has not been used in project 123 before or it is disabled' })));
