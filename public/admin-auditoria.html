@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es"><head><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Historial de cambios</title>
+<style>
+body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#f6f7f9;color:#1b1f24;margin:0;padding:20px}
+.card{max-width:1100px;margin:0 auto 14px;background:#fff;border:1px solid #e3e6ea;border-radius:14px;padding:20px}
+h1{font-size:20px;margin:0 0 6px} .muted{color:#667085;font-size:13px}
+.filtros{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:12px} .filtros label{display:block;font-size:12px;font-weight:700;color:#667085;margin-bottom:3px}
+select,input,button{padding:8px 10px;border:1px solid #cfd4da;border-radius:8px;font-size:14px;background:#fff} button{background:#1b1f24;color:#fff;border:0;font-weight:700;cursor:pointer}
+table{width:100%;border-collapse:collapse;margin-top:10px} td,th{padding:7px 5px;border-bottom:1px solid #eee;font-size:13px;text-align:left;vertical-align:top}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#eef1f5} .del{background:#fde7e7;color:#b42318} .post{background:#e3f6ea;color:#067647} .put{background:#fff4d6;color:#8a5a00}
+pre{white-space:pre-wrap;word-break:break-word;background:#f6f7f9;border-radius:8px;padding:8px;font-size:11.5px;margin:6px 0 0;max-height:240px;overflow:auto}
+.err{color:#b42318;margin-top:8px} .pag{display:flex;gap:8px;align-items:center;margin-top:10px}
+</style></head><body>
+<div class="card">
+  <h1>Historial de cambios</h1>
+  <p class="muted">Cada alta, cambio, pago o anulación que se hizo en el sistema: quién, cuándo, en qué sucursal y con qué datos. No guarda contraseñas, claves ni fotos. Se conservan unos 18 meses.</p>
+  <div class="filtros">
+    <div><label>Usuario</label><select id="fU" onchange="irA(0)"><option value="">Todos</option></select></div>
+    <div><label>Módulo</label><select id="fM" onchange="irA(0)"><option value="">Todos</option></select></div>
+    <div><label>Desde</label><input type="date" id="fD" onchange="irA(0)"></div>
+    <div><label>Hasta</label><input type="date" id="fH" onchange="irA(0)"></div>
+    <div><label>Buscar (Nº, nombre, acción)</label><input id="fQ" placeholder="Ej: 123 o anular" onkeydown="if(event.key==='Enter')irA(0)"></div>
+    <button onclick="irA(0)">Buscar</button>
+  </div>
+  <div class="err" id="err"></div>
+</div>
+<div class="card"><div id="resumen" class="muted"></div><div id="tabla"></div><div class="pag" id="pag"></div></div>
+<script>
+const TOKEN = localStorage.getItem('obras_admin_token') || '';
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+let pagina = 0, filtrosCargados = false;
+function accion(f){
+  const r = f.ruta.replace(/^\/api\/[^/]+/, '').replace(/\/:id/g, '').replace(/^\//, '');
+  const verbo = f.metodo === 'DELETE' ? 'Borró / anuló' : f.metodo === 'PUT' || f.metodo === 'PATCH' ? 'Modificó' : (r ? 'Hizo' : 'Creó');
+  return verbo + (r ? ' · ' + r : '');
+}
+async function irA(p){
+  pagina = p; const err = document.getElementById('err'); err.textContent = '';
+  if (!TOKEN){ err.textContent = 'Entrá primero al sistema con tu usuario Administrador.'; return; }
+  const q = new URLSearchParams({pagina: p});
+  [['usuario','fU'],['modulo','fM'],['desde','fD'],['hasta','fH'],['q','fQ']].forEach(([k,id]) => { const v = document.getElementById(id).value.trim(); if (v) q.set(k, v); });
+  try{
+    const r = await fetch('/api/auditoria?' + q, {headers: {'x-admin-token': TOKEN}});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    if (!filtrosCargados){ filtrosCargados = true;
+      document.getElementById('fU').innerHTML += d.usuarios.map(u => `<option>${esc(u)}</option>`).join('');
+      document.getElementById('fM').innerHTML += d.modulos.map(u => `<option>${esc(u)}</option>`).join(''); }
+    document.getElementById('resumen').textContent = d.total + ' movimiento(s)' + (d.total > d.porPagina ? ' — mostrando ' + (p*d.porPagina+1) + ' a ' + Math.min(d.total,(p+1)*d.porPagina) : '');
+    document.getElementById('tabla').innerHTML = d.filas.length ? '<table><tr><th>Fecha</th><th>Usuario</th><th>Sucursal</th><th>Módulo</th><th>Qué hizo</th><th>Registro</th></tr>' + d.filas.map((f,i) =>
+      `<tr><td style="white-space:nowrap">${esc(fmt(f.fecha))}</td><td>${esc(f.usuarioNombre)}<div class="muted">${esc(f.rol)}</div></td><td>${esc(f.sucursal)}</td><td>${esc(f.modulo)}</td>
+      <td><span class="pill ${f.metodo==='DELETE'?'del':f.metodo==='POST'?'post':'put'}">${esc(f.metodo)}</span> ${esc(accion(f))}${f.datos ? `<div><a href="#" onclick="var e=document.getElementById('d${i}');e.hidden=!e.hidden;return false">ver datos enviados</a><pre id="d${i}" hidden>${esc(JSON.stringify(f.datos,null,1))}</pre></div>` : ''}</td>
+      <td>${f.numero!=null?'Nº '+esc(f.numero)+' ':''}${esc(f.nombre||'')}<div class="muted" style="font-family:ui-monospace,monospace;font-size:11px">${esc(f.entidadId||'')}</div></td></tr>`).join('') + '</table>' : '<div class="muted" style="margin-top:10px">No hay movimientos con esos filtros.</div>';
+    const ult = Math.ceil(d.total / d.porPagina) - 1;
+    document.getElementById('pag').innerHTML = ult > 0 ? `<button ${p<=0?'disabled':''} onclick="irA(${p-1})">‹ Anterior</button><span class="muted">Página ${p+1} de ${ult+1}</span><button ${p>=ult?'disabled':''} onclick="irA(${p+1})">Siguiente ›</button>` : '';
+  }catch(e){ err.textContent = e.message; }
+}
+irA(0);
+</script></body></html>
