@@ -1012,30 +1012,26 @@ router.get('/vendedores', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Tarjetas de arriba del listado (3/11/2026, pedido de Mato): responden a los MISMOS filtros que la lista (cliente, estado, vendedor,
+// fechas). Sin fechas, miran el mes en curso. Las anuladas no suman salvo que se filtre justamente por "anulada"; las notas de crédito restan.
 router.get('/resumen', authAdmin, async (req, res) => {
   try {
+    const match = Object.assign({}, filtroOrg(req));
+    if (req.query.clienteId) { const cid = toObjectId(req.query.clienteId); if (!cid) throw err(400, 'clienteId inválido'); match.clienteId = cid; }
+    if (req.query.estado) { if (!ESTADOS_VALIDOS.includes(req.query.estado)) throw err(400, 'Estado inválido'); match.estado = req.query.estado; } else match.estado = { $ne: 'anulada' };
+    if (req.query.vendedor) match.vendedor = normalizarTexto(req.query.vendedor);
+    const porDefecto = !req.query.desde && !req.query.hasta;
     const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
-    const [y, m] = hoy.split('-');
-    const desdeDia = new Date(hoy + 'T00:00:00-03:00');
-    const desdeMes = new Date(`${y}-${m}-01T00:00:00-03:00`);
-    const ventas = await conReintento(async () => {
-      const db = await getDb();
-      return db.collection('ventas')
-        .find(Object.assign({ estado: { $ne: 'anulada' }, fecha: { $gte: desdeMes } }, req.query.vendedor ? { vendedor: normalizarTexto(req.query.vendedor) } : {}, filtroOrg(req)))
-        .project({ fecha: 1, total: 1, moneda: 1, tipoComprobante: 1 }).toArray();
-    });
-    const vacio = () => ({ cantidad: 0, monto: {} });
-    const out = { dia: vacio(), mes: vacio(), hoy };
+    if (porDefecto) match.fecha = { $gte: new Date(hoy.slice(0, 7) + '-01T00:00:00-03:00') };
+    else { match.fecha = {}; if (req.query.desde) match.fecha.$gte = new Date(req.query.desde); if (req.query.hasta) match.fecha.$lte = new Date(req.query.hasta + 'T23:59:59'); }
+    const ventas = await conReintento(async () => (await getDb()).collection('ventas').find(match).project({ total: 1, totalCobrado: 1, saldoPendiente: 1, moneda: 1, tipoComprobante: 1 }).toArray());
+    const out = { porDefecto, cantidad: 0, vendido: {}, cobrado: {}, porCobrar: {} };
+    const suma = (o, mon, n) => { o[mon] = Math.round(((o[mon] || 0) + n) * 100) / 100; };
     for (const v of ventas) {
       const mon = v.moneda || 'ARS';
-      const signo = v.tipoComprobante === 'nota_credito' ? -1 : 1;
-      const esNota = v.tipoComprobante === 'nota_credito' || v.tipoComprobante === 'nota_debito';
-      const buckets = [out.mes];
-      if (new Date(v.fecha) >= desdeDia) buckets.push(out.dia);
-      for (const b of buckets) {
-        b.monto[mon] = (b.monto[mon] || 0) + signo * (Number(v.total) || 0);
-        if (!esNota) b.cantidad += 1;
-      }
+      const esNC = v.tipoComprobante === 'nota_credito', esNota = esNC || v.tipoComprobante === 'nota_debito';
+      suma(out.vendido, mon, (esNC ? -1 : 1) * (Number(v.total) || 0));
+      if (!esNota) { out.cantidad += 1; suma(out.cobrado, mon, Number(v.totalCobrado) || 0); suma(out.porCobrar, mon, Math.max(0, Number(v.saldoPendiente) || 0)); }
     }
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

@@ -189,10 +189,10 @@
       </div>
     </div>
     <div id="resumenVentas" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
-      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Vendido hoy</div><div id="rvDiaMonto" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
-      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Ventas de hoy</div><div id="rvDiaCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
-      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Vendido en el mes</div><div id="rvMesMonto" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
-      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase">Ventas del mes</div><div id="rvMesCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase"><span id="rvVendidoT">Vendido</span></div><div id="rvVendido" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase"><span id="rvCantT">Ventas</span></div><div id="rvCant" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase"><span id="rvCobradoT">Cobrado</span></div><div id="rvCobrado" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
+      <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase"><span id="rvPorCobrarT">Por cobrar</span></div><div id="rvPorCobrar" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
     </div>
     <div class="card">
       <table>
@@ -520,16 +520,22 @@ async function cargarVendedoresFiltro(){
     sel.value = actual;
   }catch(e){}
 }
+function periodoTexto(){
+  const d = document.getElementById('fvDesde').value, hh = document.getElementById('fvHasta').value;
+  const f = x => x.split('-').reverse().join('/');
+  if (!d && !hh) return 'este mes';
+  return d && hh ? f(d) + ' al ' + f(hh) : d ? 'desde ' + f(d) : 'hasta ' + f(hh);
+}
 async function cargarResumenVentas(){
   try{
-    const vf = document.getElementById('fvVendedor').value;
-    const r = await fetch(BASE + '/resumen' + (vf ? '?vendedor=' + encodeURIComponent(vf) : ''), {headers: headersAuth()});
+    const r = await fetch(BASE + '/resumen' + exportarFiltros(), {headers: headersAuth()});
     if (!r.ok) return;
-    const d = await r.json();
-    document.getElementById('rvDiaMonto').textContent = montoResumen(d.dia.monto);
-    document.getElementById('rvDiaCant').textContent = d.dia.cantidad;
-    document.getElementById('rvMesMonto').textContent = montoResumen(d.mes.monto);
-    document.getElementById('rvMesCant').textContent = d.mes.cantidad;
+    const d = await r.json(), p = ' · ' + periodoTexto();
+    document.getElementById('rvVendido').textContent = montoResumen(d.vendido);
+    document.getElementById('rvCant').textContent = d.cantidad;
+    document.getElementById('rvCobrado').textContent = montoResumen(d.cobrado);
+    document.getElementById('rvPorCobrar').textContent = montoResumen(d.porCobrar);
+    [['rvVendidoT','Vendido'],['rvCantT','Ventas'],['rvCobradoT','Cobrado'],['rvPorCobrarT','Por cobrar']].forEach(([id,t]) => { document.getElementById(id).textContent = t + p; });
   }catch(e){}
 }
 async function cargarVentas(){
