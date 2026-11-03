@@ -745,14 +745,17 @@ function cerrarPopupPagoProveedor(){
 
 let cuentaCorrienteProveedorCache = null;
 async function repararUnificados(){
+  // Pasa a ESTE proveedor todo lo que figura a nombre de los otros registros con su mismo nombre (aunque estén inactivos o ya "unificados").
   try{
-    const r = await fetch('/api/unificar-proveedores/reparar/preview', {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    if (!d.items.length) { alert('No hay nada para reparar.'); return; }
-    const resumen = d.items.slice(0, 12).map(x => '• ' + x.nombre + (x.sinDestino ? ' (sin proveedor principal activo: se saltea)' : ' → ' + x.ganadorNombre) + ': ' + Object.entries(x.conteo).map(([k, v]) => v + ' en ' + k).join(', ')).join('\n');
-    if (!confirm('Se van a pasar estos comprobantes de proveedores ya unificados a su proveedor principal:\n\n' + resumen + (d.items.length > 12 ? '\n… y ' + (d.items.length - 12) + ' más' : '') + '\n\n¿Seguro?')) return;
-    const r2 = await fetch('/api/unificar-proveedores/reparar', {method:'POST', headers: headersAuthJson(), body: '{}'}); const d2 = await r2.json(); if (!r2.ok) throw new Error(d2.error || 'Error');
-    alert('Listo. Se pasaron: ' + (Object.entries(d2.movidos).map(([k, v]) => v + ' en ' + k).join(', ') || 'nada') + '.');
-    const m = document.querySelector('#modalRoot'); const idp = (window._ccProvCtx || {}).id; if (idp) cargarCuentaCorrienteProveedorTab(idp);
+    const ctx = window._ccProvCtx || {}; const data = cuentaCorrienteProveedorCache || {};
+    const otros = {}; (data.noIncluidos || []).filter(n => n.motivo === 'otro_proveedor' && n.proveedorId).forEach(n => { (otros[n.proveedorId] = otros[n.proveedorId] || []).push(n); });
+    const ids = Object.keys(otros); if (!ids.length) { alert('No hay nada para pasar.'); return; }
+    const cant = ids.reduce((a, k) => a + otros[k].length, 0), nombre = (data.proveedor && data.proveedor.razonSocial) || 'este proveedor';
+    if (!confirm('Se van a pasar a "' + nombre + '" (este proveedor) ' + cant + ' comprobante(s) de ' + ids.length + ' registro(s) duplicado(s), con sus pagos, órdenes y saldo inicial.\n\nLos duplicados quedan inactivos y la sucursal de origen queda compartida con este proveedor.\n\n¿Es el mismo proveedor y querés unificarlos?')) return;
+    const r = await fetch('/api/unificar-proveedores/unificar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ganadorId: ctx.id, perdedorIds: ids})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    alert('Listo. Se pasaron: ' + (Object.entries(d.movidos || {}).map(([k, v]) => v + ' en ' + k).join(', ') || 'nada') + '.');
+    cargarCuentaCorrienteProveedorTab(ctx.id);
   }catch(e){ alert(e.message); }
 }
 async function cargarCuentaCorrienteProveedorTab(id){
@@ -799,7 +802,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
       ${(data.noIncluidos || []).length ? `<div style="background:#fff4d6;border:1px solid #f0d78a;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13px">
         <b>⚠ Hay ${data.noIncluidos.length} comprobante(s) con el nombre de este proveedor que NO están en esta cuenta corriente:</b>
         <table style="margin-top:6px"><tbody>${data.noIncluidos.slice(0, 15).map(n => `<tr><td>${fechaCorta(n.fecha)}</td><td>${n.tipo === 'gasto' ? 'Gasto' : 'Compra'} #${escapeHtml(n.numero)}</td><td>${escapeHtml(n.comprobante)}</td><td>${money(n.total)}</td><td>${n.motivo === 'otra_sucursal' ? 'Cargada en otra sucursal' + (n.sucursal ? ' (' + escapeHtml(n.sucursal) + ')' : '') : 'Cargada a <b>otro registro</b> de proveedor con el mismo nombre' + (n.otroRegistro ? ' <span class="muted">(' + (n.otroRegistro.inexistente ? 'ese registro ya no existe' : [n.otroRegistro.activo ? 'activo' : '<b>inactivo</b>', n.otroRegistro.unificadoEn ? '<b>ya unificado en otro</b>' : '', n.otroRegistro.sucursal ? escapeHtml(n.otroRegistro.sucursal) : '', n.otroRegistro.cuit ? 'CUIT ' + escapeHtml(n.otroRegistro.cuit) : ''].filter(Boolean).join(' · ')) + ')</span>' : '')}</td></tr>`).join('')}</tbody></table>
-        <div class="muted" style="margin-top:6px">${data.noIncluidos.some(n => n.otroRegistro && n.otroRegistro.unificadoEn) ? '<div style="margin:6px 0"><button class="btn small" onclick="repararUnificados()">Pasar estos comprobantes al proveedor principal</button></div>' : ''}${data.noIncluidos.some(n => n.motivo === 'otro_proveedor') ? 'Si es el mismo proveedor, usá <b>Unificar duplicados</b> (arriba, en la lista de Proveedores) para juntar sus cuentas. ' : ''}${data.noIncluidos.some(n => n.motivo === 'otra_sucursal') ? 'Para ver las de otra sucursal, cambiá el selector de arriba a "Todas las sucursales".' : ''}</div></div>` : ''}
+        <div class="muted" style="margin-top:6px">${data.noIncluidos.some(n => n.motivo === 'otro_proveedor') ? '<div style="margin:6px 0"><button class="btn small" onclick="repararUnificados()">Unificar los otros registros con este proveedor</button></div>' : ''}${data.noIncluidos.some(n => n.motivo === 'otro_proveedor') ? 'Si es el mismo proveedor, usá <b>Unificar duplicados</b> (arriba, en la lista de Proveedores) para juntar sus cuentas. ' : ''}${data.noIncluidos.some(n => n.motivo === 'otra_sucursal') ? 'Para ver las de otra sucursal, cambiá el selector de arriba a "Todas las sucursales".' : ''}</div></div>` : ''}
       <table>
         <thead><tr><th>Fecha</th><th>Comprobante</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>

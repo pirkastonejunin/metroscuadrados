@@ -30,5 +30,11 @@ const { ObjectId } = require('mongodb');
   const cc = (await (await fetch('http://localhost:4481/api/proveedores/' + A + '/cuenta-corriente', { headers: { 'x-org-id': 'todas' } })).json());
   assert.deepStrictEqual(cc.movimientos.filter(m => m.origen === 'compra').map(m => m.docNumero).sort(), [1, 2, 3]); assert.strictEqual(cc.saldo, 10 + 20 + 30 - 5);
   assert.strictEqual((await J('GET', '/reparar/preview')).data.items.filter(x => !x.sinDestino).length, 0, 'idempotente');
+  // Caso real de Mato: el registro duplicado figura "unificado" en uno que ya no existe, y sus compras siguen a su nombre → se unifican explícitamente hacia el proveedor que se está mirando.
+  const D = (await db.collection('proveedores').insertOne({ razonSocial: 'Misiones Deco S.R.L.', activo: false, unificadoEn: new ObjectId(), orgId: factory })).insertedId;
+  await db.collection('compras').insertOne({ numero: 9, proveedorId: D, proveedorNombre: 'Misiones Deco S.R.L.', orgId: factory, total: 7, estado: 'pendiente', fecha: new Date() });
+  const u = await fetch('http://localhost:4481/api/unificar-proveedores/unificar', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ganadorId: String(A), perdedorIds: [String(D)] }) }); const ud = await u.json();
+  assert.strictEqual(u.status, 200, JSON.stringify(ud)); assert.strictEqual(ud.movidos.compras, 1);
+  assert.strictEqual(String((await db.collection('compras').findOne({ numero: 9 })).proveedorId), String(A));
   console.log('TODO OK'); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });
