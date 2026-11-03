@@ -115,6 +115,8 @@ async function getDb() {
   await asegurarIndices(db);
   return db;
 }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 async function conReintento(fn) {
   try {
     return await fn();
@@ -524,8 +526,7 @@ router.post('/', authAdmin, async (req, res) => {
       }
       : null;
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const cliente = await cargarClienteParaOperar(db, req, clienteId);
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       let origenVisita = null;
@@ -584,7 +585,7 @@ router.post('/', authAdmin, async (req, res) => {
       presupuesto._id = r.insertedId;
       if (origenVisita) await espejarEnVisita(db, presupuesto);
       return presupuesto;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -599,8 +600,7 @@ router.put('/:id', authAdmin, async (req, res) => {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const body = req.body || {};
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       await liberarPresupuestosDeVentasAnuladas(db, Object.assign({ _id: id }, filtroOrg(req))).catch(() => {});
       const actual = await db.collection('presupuestos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Presupuesto no encontrado');
@@ -673,7 +673,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       // Si ya se convirtió en venta, la venta también recibe los planes sugeridos para el cobro.
       if (body.planesTarjetaIds !== undefined && nuevo.convertidoEnVentaId) await db.collection('ventas').updateOne({ _id: nuevo.convertidoEnVentaId }, { $set: { planesSugeridosIds: nuevo.planesTarjetaIds || [] } });
       return nuevo;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -698,8 +698,7 @@ router.post('/:id/estado', authAdmin, async (req, res) => {
     }
     const nota = normalizarTexto(body.nota);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const actual = await db.collection('presupuestos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Presupuesto no encontrado');
       if (actual.convertidoEnVentaId) throw err(400, 'Este presupuesto ya se convirtió en una venta — no se puede cambiar su estado.');
@@ -736,7 +735,7 @@ router.post('/:id/estado', authAdmin, async (req, res) => {
         await db.collection('visitas').updateOne({ _id: actual.origenVisita.visitaId }, { $set: { presupuestoComercialEstado: estado } });
       }
       return db.collection('presupuestos').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -756,8 +755,7 @@ router.post('/:id/vincular-venta', authAdmin, async (req, res) => {
     if (!ventaId) throw err(400, 'Falta ventaId');
     const ventaNumero = req.body && req.body.ventaNumero ? Number(req.body.ventaNumero) : null;
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const actual = await db.collection('presupuestos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!actual) throw err(404, 'Presupuesto no encontrado');
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: ventaId }, filtroOrg(req)));
@@ -781,7 +779,7 @@ router.post('/:id/vincular-venta', authAdmin, async (req, res) => {
       // Los planes de tarjeta que se le ofrecieron al cliente quedan en la venta: al cobrar con Point / link se sugiere el que corresponda.
       if ((actual.planesTarjetaIds || []).length) await db.collection('ventas').updateOne({ _id: ventaId }, { $set: { planesSugeridosIds: actual.planesTarjetaIds } });
       return db.collection('presupuestos').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

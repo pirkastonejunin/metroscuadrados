@@ -786,8 +786,11 @@ async function conciliarCobro(db, cfg, cobro) {
     if (!doc) return db.collection('mp_cobros').findOne({ _id: cobro._id });
     try {
       await completarDescuentos(cfg, info);
-      await registrarCobroEnVenta(db, cfg, doc, info);
-      await db.collection('mp_cobros').updateOne({ _id: cobro._id }, { $set: { estado: 'acreditado', paymentId: info.paymentId, montoAcreditado: info.monto, comision: info.comision || 0, financiacion: info.financiacion || 0, impuestos: info.impuestos || 0, neto: info.neto != null ? info.neto : null, acreditadoEn: new Date() } });
+      // Caja/banco, pago en la venta, cuenta corriente y marca de "acreditado": todo junto o nada (si falla queda en "error" y se reintenta).
+      await require('./transaccion').correr(db.client, db, async (dbt) => {
+        await registrarCobroEnVenta(dbt, cfg, doc, info);
+        await dbt.collection('mp_cobros').updateOne({ _id: cobro._id }, { $set: { estado: 'acreditado', paymentId: info.paymentId, montoAcreditado: info.monto, comision: info.comision || 0, financiacion: info.financiacion || 0, impuestos: info.impuestos || 0, neto: info.neto != null ? info.neto : null, acreditadoEn: new Date() } });
+      });
     } catch (e) {
       await db.collection('mp_cobros').updateOne({ _id: cobro._id }, { $set: { estado: 'error', error: e.message } });
     }

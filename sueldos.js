@@ -79,6 +79,8 @@ async function conReintento(fn) {
   try { return await fn(); }
   catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); }
 }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 function toObjectId(id) { try { return id ? new ObjectId(String(id)) : null; } catch (e) { return null; } }
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 function responder(res, e) { res.status(e.status || 500).json({ error: e.message || 'Error' }); }
@@ -456,12 +458,11 @@ router.post('/liquidaciones', authSueldosDoc, async (req, res) => {
   try {
     const b = req.body || {};
     const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
-    const liq = await conReintento(async () => {
-      const db = await getDb();
+    const liq = await conReintento(() => enTransaccion(async (db) => {
       const emp = await db.collection('empleados').findOne(Object.assign({ _id: empId }, filtroOrg(req)));
       if (!emp) throw err(404, 'Empleado no encontrado.');
       return guardarLiquidacion(db, req, b, emp);
-    });
+    }));
     res.json(liq);
   } catch (e) { responder(res, e); }
 });
@@ -504,14 +505,13 @@ router.post('/liquidaciones/copiar', authSueldosLectura, async (req, res) => {
 router.delete('/liquidaciones/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
-    await conReintento(async () => {
-      const db = await getDb();
+    await conReintento(() => enTransaccion(async (db) => {
       const liq = await db.collection('sueldos_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!liq) throw err(404, 'Liquidación no encontrada.');
       if ((liq.totalPagado || 0) > 0) throw err(400, 'Esta liquidación ya tiene pagos registrados, no se puede borrar.');
       await liberarAdelantos(db, id);
       await db.collection('sueldos_liquidaciones').deleteOne({ _id: id });
-    });
+    }));
     res.json({ ok: true });
   } catch (e) { responder(res, e); }
 });
@@ -658,7 +658,8 @@ router.post('/pagar-lote', authSueldosLectura, async (req, res) => {
           if (com > f.comisionDisponible + 0.005) throw err(400, 'La comisión supera lo disponible (' + f.comisionDisponible + ').');
           const total = r2(fijo + com);
           if (!(total > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
-          const col = db.collection('sueldos_liquidaciones');
+          await enTransaccion(async (dbt) => {
+          const col = dbt.collection('sueldos_liquidaciones');
           let l = await col.findOne({ _id: toObjectId(f.liquidacionId) });
           // Comisión nueva (ventas desde el pago anterior): pasa a la liquidación aunque se pague de menos;
           // lo que no se pague queda como saldo de comisión para el próximo pago.
@@ -672,7 +673,8 @@ router.post('/pagar-lote', authSueldosLectura, async (req, res) => {
             await col.updateOne({ _id: l._id }, { $set: { comisionHasta: f._interno.comHasta } });
           }
           l.frecuenciaPago = f.frecuencia;
-          await registrarPago(db, req2, l, { monto: total, montoComision: com, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota: texto(b.nota) });
+          await registrarPago(dbt, req2, l, { monto: total, montoComision: com, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota: texto(b.nota) });
+          });
           resultados.push({ empleadoId: f.empleadoId, nombre, ok: true, monto: total });
         } catch (e) {
           if (!e.status) throw e;
@@ -696,8 +698,7 @@ async function anularPagoLiquidacion(req, res, coleccion, origen, motivoDe, tota
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const idx = Number(req.params.idx);
     const motivo = texto((req.body || {}).motivo);
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const l = await db.collection(coleccion).findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!l) throw err(404, 'Liquidación no encontrada.');
       const p = (l.pagos || [])[idx];
@@ -706,18 +707,14 @@ async function anularPagoLiquidacion(req, res, coleccion, origen, motivoDe, tota
       // Se marca primero (condicional) para que un doble clic no revierta la caja dos veces.
       const marca = await db.collection(coleccion).updateOne({ _id: id, ['pagos.' + idx + '.anulado']: { $ne: true } }, { $set: { ['pagos.' + idx + '.anulado']: true, ['pagos.' + idx + '.anuladoEn']: new Date(), ['pagos.' + idx + '.anuladoPor']: (req.usuario && req.usuario.nombre) || '', ['pagos.' + idx + '.anuladoMotivo']: motivo } });
       if (!marca.modifiedCount) throw err(409, 'Ese pago ya se estaba anulando.');
-      try {
-        await tesoreria.revertirEgresoPago(db, req, { movimientoId: p.movimientoId || null, cuentaTipo: p.cuentaTipo, cuentaId: p.cuentaId, monto: p.monto, origen, motivo: motivoDe(l), fecha: p.fecha, motivoAnulacion: motivo });
-      } catch (e) {
-        await db.collection(coleccion).updateOne({ _id: id }, { $unset: { ['pagos.' + idx + '.anulado']: '', ['pagos.' + idx + '.anuladoEn']: '', ['pagos.' + idx + '.anuladoPor']: '', ['pagos.' + idx + '.anuladoMotivo']: '' } });
-        throw e;
-      }
+      // Todo en una transacción: si la reversa de caja falla, la marca de anulado también se deshace.
+      await tesoreria.revertirEgresoPago(db, req, { movimientoId: p.movimientoId || null, cuentaTipo: p.cuentaTipo, cuentaId: p.cuentaId, monto: p.monto, origen, motivo: motivoDe(l), fecha: p.fecha, motivoAnulacion: motivo });
       const pagos = (l.pagos || []).map((x, i) => i === idx ? Object.assign({}, x, { anulado: true }) : x);
       const totalPagado = r2(pagos.filter(x => !x.anulado).reduce((s, x) => s + x.monto, 0));
       const estado = estadoPago({ neto: totalDe(l), totalPagado });
       await db.collection(coleccion).updateOne({ _id: id }, { $set: { totalPagado, [campoEstado]: estado, updatedAt: new Date() } });
       return { ok: true, totalPagado, estado };
-    });
+    }));
     res.json(out);
   } catch (e) { responder(res, e); }
 }
@@ -731,12 +728,11 @@ router.post('/liquidaciones/:id/pagos', authSueldosDoc, async (req, res) => {
     const m = monto(b.monto, 'El monto');
     if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
     const fecha = fechaDe(b.fecha), nota = texto(b.nota);
-    const liq = await conReintento(async () => {
-      const db = await getDb();
+    const liq = await conReintento(() => enTransaccion(async (db) => {
       const l = await db.collection('sueldos_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!l) throw err(404, 'Liquidación no encontrada.');
       return registrarPago(db, req, l, { monto: m, fecha, cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, nota });
-    });
+    }));
     res.json(liq);
   } catch (e) { responder(res, e); }
 });
@@ -776,15 +772,14 @@ router.post('/adelantos', authSueldosDoc, async (req, res) => {
     const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
     const m = monto(b.monto, 'El monto'); if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
     const fecha = fechaDe(b.fecha), nota = texto(b.nota);
-    const doc = await conReintento(async () => {
-      const db = await getDb();
+    const doc = await conReintento(() => enTransaccion(async (db) => {
       const emp = await db.collection('empleados').findOne(Object.assign({ _id: empId }, filtroOrg(req)));
       if (!emp) throw err(404, 'Empleado no encontrado.');
       await egresoDeCuenta(db, req, { cuentaTipo: b.cuentaTipo, cuentaId: b.cuentaId, monto: m, motivo: 'Adelanto de sueldo ' + emp.nombre, observaciones: nota, origen: 'sueldo_adelanto', fecha });
       const d = { empleadoId: empId, empleadoNombre: emp.nombre, monto: m, fecha, nota, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), estado: 'pendiente', liquidacionId: null, usuarioNombre: (req.usuario && req.usuario.nombre) || '', orgId: req.orgId, createdAt: new Date() };
       const r = await db.collection('sueldos_adelantos').insertOne(d);
       return Object.assign(d, { _id: r.insertedId });
-    });
+    }));
     res.json(doc);
   } catch (e) { responder(res, e); }
 });
@@ -792,14 +787,13 @@ router.post('/adelantos', authSueldosDoc, async (req, res) => {
 router.delete('/adelantos/:id', authSueldosDoc, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
-    await conReintento(async () => {
-      const db = await getDb();
+    await conReintento(() => enTransaccion(async (db) => {
       const a = await db.collection('sueldos_adelantos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!a) throw err(404, 'Adelanto no encontrado.');
       if (a.estado !== 'pendiente') throw err(400, 'Este adelanto ya se descontó en una liquidación, no se puede anular.');
       await egresoDeCuenta(db, req, { cuentaTipo: a.cuentaTipo, cuentaId: a.cuentaId, monto: a.monto, motivo: 'Anulación adelanto de sueldo ' + a.empleadoNombre, origen: 'sueldo_adelanto_anulado', fecha: new Date(), tipo: 'ingreso' });
       await db.collection('sueldos_adelantos').deleteOne({ _id: id });
-    });
+    }));
     res.json({ ok: true });
   } catch (e) { responder(res, e); }
 });
@@ -935,8 +929,7 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
       corte = new Date(hastaISO + 'T23:59:59.999-03:00');
     }
     const soloCol = b.colocadorId ? String(b.colocadorId) : null;
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const filas = await armarColocadores(db, req, periodo);
       let n = 0, tareasN = 0, total = 0;
       for (const f of filas) {
@@ -951,7 +944,7 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
         n++; tareasN += docs.length; total = r2(total + suma);
       }
       return { liquidados: n, tareas: tareasN, total };
-    });
+    }));
     res.json(out);
   } catch (e) { responder(res, e); }
 });
@@ -962,8 +955,7 @@ router.post('/colocadores/liquidaciones/:id/pagos', authSueldosDoc, async (req, 
     const b = req.body || {};
     const m = monto(b.monto, 'El monto'); if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
     const fecha = fechaDe(b.fecha), nota = texto(b.nota);
-    const l = await conReintento(async () => {
-      const db = await getDb();
+    const l = await conReintento(() => enTransaccion(async (db) => {
       const l = await db.collection('sueldos_colocadores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!l) throw err(404, 'Liquidación no encontrada.');
       const saldo = r2(l.total - (l.totalPagado || 0));
@@ -974,7 +966,7 @@ router.post('/colocadores/liquidaciones/:id/pagos', authSueldosDoc, async (req, 
       l.estado = estadoPago({ neto: l.total, totalPagado: l.totalPagado });
       await db.collection('sueldos_colocadores').updateOne({ _id: id }, { $set: { pagos: l.pagos, totalPagado: l.totalPagado, estado: l.estado, updatedAt: new Date() } });
       return l;
-    });
+    }));
     res.json(l);
   } catch (e) { responder(res, e); }
 });
@@ -1086,8 +1078,7 @@ router.post('/colocadores/especiales/:id/pagos', authSueldosDoc, async (req, res
     const b = req.body || {};
     const m = monto(b.monto, 'El monto'); if (!(m > 0)) throw err(400, 'El monto tiene que ser mayor a 0.');
     const fecha = fechaDe(b.fecha), nota = texto(b.nota);
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const e = await db.collection('sueldos_tareas_especiales').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!e) throw err(404, 'Trabajo no encontrado.');
       const saldo = r2(e.monto - (e.totalPagado || 0));
@@ -1097,7 +1088,7 @@ router.post('/colocadores/especiales/:id/pagos', authSueldosDoc, async (req, res
       const totalPagado = r2((e.totalPagado || 0) + m);
       await db.collection('sueldos_tareas_especiales').updateOne({ _id: id }, { $push: { pagos: pago }, $set: { totalPagado, estadoPago: estadoPago({ neto: e.monto, totalPagado }), updatedAt: new Date() } });
       return db.collection('sueldos_tareas_especiales').findOne({ _id: id });
-    });
+    }));
     res.json(out);
   } catch (e) { responder(res, e); }
 });
@@ -1145,8 +1136,7 @@ router.post('/mover-sucursal', authSueldosLectura, async (req, res) => {
     const protegido = req.usuario && req.usuario.rol && req.usuario.rol.protegido;
     if (!protegido && !((req.usuario && req.usuario.orgIds) || []).some(o => String(o) === String(nuevo))) throw err(403, 'No tenés acceso a esa sucursal.');
     const mover = b.moverHistorial !== false;
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       if (!(await db.collection('organizaciones').findOne({ _id: nuevo }))) throw err(404, 'Sucursal no encontrada.');
       const ahora = new Date();
       const extraMov = [];
@@ -1182,7 +1172,7 @@ router.post('/mover-sucursal', authSueldosLectura, async (req, res) => {
       }
       if (ors.length) r.movimientos = (await db.collection('tesoreria_movimientos').updateMany({ $or: ors, orgId: { $ne: nuevo } }, { $set: { orgId: nuevo } })).modifiedCount;
       return r;
-    });
+    }));
     res.json(out);
   } catch (e) { responder(res, e); }
 });
@@ -1285,8 +1275,7 @@ router.post('/f931', authSueldosLectura, async (req, res) => {
     conceptos.forEach(c => { if (!c.nombre) { const k = CONCEPTOS_F931.find(x => x.codigo === c.codigo); c.nombre = k ? k.nombre : (c.codigo || 'Concepto'); } });
     const total = r2(conceptos.reduce((s, c) => s + c.monto, 0));
     const vep = texto(b.vep), transaccion = texto(b.transaccion);
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       if (vep && await db.collection('sueldos_f931').findOne({ vep, estado: { $ne: 'anulado' } })) throw err(409, 'Ya cargaste un F.931 con ese número de VEP.');
       // Reparto: si vino editado se valida que sume el total; si no, se calcula con los porcentajes fijos.
       let reparto;
@@ -1307,7 +1296,7 @@ router.post('/f931', authSueldosLectura, async (req, res) => {
       const doc = { periodo, fecha, vep, transaccion, conceptos, total, reparto, cuentaTipo: b.cuentaTipo, cuentaId: toObjectId(b.cuentaId), movimientoId: mov && mov._id, orgPagadoraId: req.orgId, estado: 'activo', nota: texto(b.nota), usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date() };
       const ins = await db.collection('sueldos_f931').insertOne(doc);
       return { _id: String(ins.insertedId), total, reparto: reparto.map(r => Object.assign({}, r, { orgId: String(r.orgId) })), fecha: dd };
-    });
+    }));
     res.json(out);
   } catch (e) { responder(res, e); }
 });
@@ -1315,21 +1304,15 @@ router.post('/f931/:id/anular', authSueldosLectura, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const motivo = texto((req.body || {}).motivo);
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const f = await db.collection('sueldos_f931').findOne({ _id: id });
       if (!f) throw err(404, 'F.931 no encontrado.');
       if (f.estado === 'anulado') throw err(400, 'Ese F.931 ya está anulado.');
       const marca = await db.collection('sueldos_f931').updateOne({ _id: id, estado: { $ne: 'anulado' } }, { $set: { estado: 'anulado', anuladoEn: new Date(), anuladoPor: (req.usuario && req.usuario.nombre) || '', anuladoMotivo: motivo } });
       if (!marca.modifiedCount) throw err(409, 'Ese F.931 ya se estaba anulando.');
-      try {
-        await tesoreria.revertirEgresoPago(db, Object.assign({}, req, { orgId: f.orgPagadoraId || req.orgId }), { movimientoId: f.movimientoId || null, cuentaTipo: f.cuentaTipo, cuentaId: f.cuentaId, monto: f.total, origen: 'f931', motivo: 'Cargas sociales F.931 ' + f.periodo, fecha: f.fecha, motivoAnulacion: motivo });
-      } catch (e) {
-        await db.collection('sueldos_f931').updateOne({ _id: id }, { $set: { estado: 'activo' }, $unset: { anuladoEn: '', anuladoPor: '', anuladoMotivo: '' } });
-        throw e;
-      }
+      await tesoreria.revertirEgresoPago(db, Object.assign({}, req, { orgId: f.orgPagadoraId || req.orgId }), { movimientoId: f.movimientoId || null, cuentaTipo: f.cuentaTipo, cuentaId: f.cuentaId, monto: f.total, origen: 'f931', motivo: 'Cargas sociales F.931 ' + f.periodo, fecha: f.fecha, motivoAnulacion: motivo });
       return { ok: true };
-    });
+    }));
     res.json(out);
   } catch (e) { responder(res, e); }
 });

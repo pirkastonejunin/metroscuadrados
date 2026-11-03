@@ -105,6 +105,8 @@ async function getDb() {
   asegurarIndices(db).catch(() => {});
   return db;
 }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 async function conReintento(fn) {
   try {
     return await fn();
@@ -796,8 +798,7 @@ router.post('/movimientos', authAdmin, async (req, res) => {
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = normalizarFecha(body.fecha);
 
-    const doc = await conReintento(async () => {
-      const db = await getDb();
+    const doc = await conReintento(() => enTransaccion(async (db) => {
       const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
       if (!producto) throw err(404, 'Producto no encontrado');
       const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
@@ -819,7 +820,7 @@ router.post('/movimientos', authAdmin, async (req, res) => {
       const r = await db.collection('stock_movimientos').insertOne(nuevo);
       await aplicarAlStockActual(db, req, productoId, depositoId, tipo, cantidad);
       return Object.assign({ _id: r.insertedId }, nuevo);
-    });
+    }));
     res.json(doc);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -850,8 +851,7 @@ router.post('/ajustar', authAdmin, async (req, res) => {
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = normalizarFecha(body.fecha);
 
-    const doc = await conReintento(async () => {
-      const db = await getDb();
+    const doc = await conReintento(() => enTransaccion(async (db) => {
       const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
       if (!producto) throw err(404, 'Producto no encontrado');
       const deposito = await db.collection('depositos').findOne(Object.assign({ _id: depositoId }, filtroOrg(req)));
@@ -878,7 +878,7 @@ router.post('/ajustar', authAdmin, async (req, res) => {
       const r = await db.collection('stock_movimientos').insertOne(nuevo);
       await aplicarAlStockActual(db, req, productoId, depositoId, tipo, cantidadMovimiento);
       return Object.assign({ _id: r.insertedId }, nuevo, { cantidadAnterior, cantidadNueva: cantidadReal });
-    });
+    }));
     res.json(doc);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -948,14 +948,11 @@ router.post('/transferencias', authAdmin, async (req, res) => {
     const observaciones = normalizarTexto(body.observaciones);
     const fecha = normalizarFecha(body.fecha);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
       if (!producto) throw err(404, 'Producto no encontrado');
-      const [origen, destino] = await Promise.all([
-        db.collection('depositos').findOne(Object.assign({ _id: depositoOrigenId }, filtroOrg(req))),
-        db.collection('depositos').findOne(Object.assign({ _id: depositoDestinoId }, filtroOrg(req)))
-      ]);
+      const origen = await db.collection('depositos').findOne(Object.assign({ _id: depositoOrigenId }, filtroOrg(req)));
+      const destino = await db.collection('depositos').findOne(Object.assign({ _id: depositoDestinoId }, filtroOrg(req)));
       if (!origen) throw err(404, 'Depósito de origen no encontrado');
       if (!destino) throw err(404, 'Depósito de destino no encontrado');
 
@@ -981,7 +978,7 @@ router.post('/transferencias', authAdmin, async (req, res) => {
         egreso: Object.assign({ _id: rEgreso.insertedId }, egreso),
         ingreso: Object.assign({ _id: rIngreso.insertedId }, ingreso)
       };
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

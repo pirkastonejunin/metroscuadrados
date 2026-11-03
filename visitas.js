@@ -77,6 +77,8 @@ async function getDb() {
   return mongoClient.db(DB_NAME);
 }
 
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 async function conReintento(fn) {
   try {
     return await fn();
@@ -1476,8 +1478,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSelecc
   const visitaId = toObjectId(visitaIdStr);
   if (!visitaId) throw err(400, 'id inválido');
 
-  return conReintento(async () => {
-    const db = await getDb();
+  return conReintento(() => enTransaccion(async (db) => {
     const visita = await db.collection('visitas').findOne(Object.assign({ _id: visitaId }, orgFiltro || {}));
     if (!visita) throw err(404, 'Visita no encontrada');
     if (visita.estado === 'vendido' || visita.estado === 'instalado') throw err(400, 'Esta visita ya fue confirmada');
@@ -1621,7 +1622,7 @@ async function confirmarVisita(visitaIdStr, confirmadaPor, cotizacionesIdsSelecc
     } catch (e) { console.error('Aprobar presupuesto comercial:', e.message); }
 
     return { visita: await db.collection('visitas').findOne({ _id: visita._id }), obra: obraDoc };
-  });
+  }));
 }
 
 // ---------------------------------------------------------------------

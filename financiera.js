@@ -33,6 +33,8 @@ async function getDb() {
   }
   return mongoClient.db(DB_NAME);
 }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 async function conReintento(fn) { try { return await fn(); } catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); } }
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
 function err(status, message) { const e = new Error(message); e.status = status; return e; }
@@ -118,8 +120,7 @@ router.post('/operaciones', authOperar, async (req, res) => {
     const fecha = fechaDe(b.fecha);
     const t = leerTasa(b);
     const calc = calcularOperacion(b.cheques, t.valor, fecha, b.efectivoPactado, t.modo);
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const ultima = await db.collection('financiera_operaciones').find(filtroOrg(req)).sort({ numero: -1 }).limit(1).toArray();
       const numero = (ultima[0] && ultima[0].numero || 0) + 1;
       const ahora = new Date();
@@ -144,7 +145,7 @@ router.post('/operaciones', authOperar, async (req, res) => {
       await db.collection('financiera_operaciones').updateOne({ _id: insertedId }, { $set: { items: op.items } });
       op._id = insertedId;
       return op;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -159,8 +160,7 @@ router.put('/operaciones/:id', authOperar, async (req, res) => {
     const fecha = fechaDe(b.fecha);
     const t = leerTasa(b);
     const calc = calcularOperacion(b.cheques, t.valor, fecha, b.efectivoPactado, t.modo);
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const op = await db.collection('financiera_operaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!op) throw err(404, 'Operación no encontrada');
       if (op.anulada) throw err(400, 'Esta operación está anulada.');
@@ -209,7 +209,7 @@ router.put('/operaciones/:id', authOperar, async (req, res) => {
         fecha, tasaModo: t.modo, tasaValor: t.valor, tasaMensual: t.modo === 'mensual' ? t.valor : null, nominal: calc.nominal, efectivoSugerido: calc.efectivoSugerido, efectivoPactado: calc.efectivoPactado, ganancia: calc.ganancia,
         items, observaciones: txt(b.observaciones), updatedAt: ahora } });
       return { ok: true };
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -219,8 +219,7 @@ router.post('/operaciones/:id/anular', authOperar, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const op = await db.collection('financiera_operaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!op) throw err(404, 'Operación no encontrada');
       if (op.anulada) throw err(400, 'Esta operación ya está anulada.');
@@ -231,7 +230,7 @@ router.post('/operaciones/:id/anular', authOperar, async (req, res) => {
       await db.collection('cheques').updateMany({ _id: { $in: cheques.map(c => c._id) } }, { $set: { estado: 'anulado', updatedAt: new Date() } });
       await db.collection('financiera_operaciones').updateOne({ _id: id }, { $set: { anulada: true, anuladaEn: new Date(), updatedAt: new Date() } });
       return { ok: true };
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -247,8 +246,7 @@ router.post('/pagos', authOperar, async (req, res) => {
     const cuentaId = toObjectId(b.cuentaId);
     if (!cuentaId) throw err(400, 'Elegí de qué caja sale el efectivo.');
     const fecha = fechaDe(b.fecha);
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const mov = await aplicarMovimientoCuenta(db, req, {
         cuentaTipo, cuentaId, tipo: 'egreso', monto: r2(monto), moneda: 'ARS', motivo: 'Pago a financiera',
         observaciones: txt(b.nota), origen: 'financiera', fecha
@@ -258,7 +256,7 @@ router.post('/pagos', authOperar, async (req, res) => {
       const r = await db.collection('financiera_pagos').insertOne(pago);
       pago._id = r.insertedId;
       return pago;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -267,8 +265,7 @@ router.post('/pagos/:id/anular', authOperar, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const pago = await db.collection('financiera_pagos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!pago) throw err(404, 'Pago no encontrado');
       if (pago.anulado) throw err(400, 'Este pago ya está anulado.');
@@ -278,7 +275,7 @@ router.post('/pagos/:id/anular', authOperar, async (req, res) => {
       });
       await db.collection('financiera_pagos').updateOne({ _id: id }, { $set: { anulado: true, anuladoEn: new Date() } });
       return { ok: true };
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -290,8 +287,7 @@ router.post('/cheques/:id/rechazo', authOperar, async (req, res) => {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const motivo = txt(req.body && req.body.motivo);
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const cheque = await db.collection('cheques').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!cheque || !cheque.origenFinanciera) throw err(404, 'Ese cheque no viene de la financiera.');
       if (['depositado', 'cobrado'].includes(cheque.estado)) throw err(400, `El cheque está "${cheque.estado}": primero rechazalo en Tesorería para revertir el depósito.`);
@@ -308,7 +304,7 @@ router.post('/cheques/:id/rechazo', authOperar, async (req, res) => {
       }
       await db.collection('financiera_operaciones').updateOne({ _id: op._id }, { $push: { rechazos: rechazo }, $set: { updatedAt: ahora } });
       return rechazo;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -478,14 +474,13 @@ router.post('/prestamos/:id/eliminar', authOperar, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    await conReintento(async () => {
-      const db = await getDb();
+    await conReintento(() => enTransaccion(async (db) => {
       const p = await db.collection('prestamos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!p) throw err(404, 'Préstamo no encontrado');
       if (await db.collection('prestamo_liquidaciones').findOne({ prestamoId: id, anulada: { $ne: true } })) throw err(400, 'Tiene liquidaciones cargadas: anulalas primero (o marcá el préstamo como cancelado).');
       await db.collection('prestamo_liquidaciones').deleteMany({ prestamoId: id });
       await db.collection('prestamos').deleteOne({ _id: id });
-    });
+    }));
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -581,15 +576,14 @@ router.post('/prestamos/liquidaciones/:id/pagar', authOperar, async (req, res) =
     const b = req.body || {};
     const cuentaTipo = txt(b.cuentaTipo).toLowerCase(), cuentaId = toObjectId(b.cuentaId);
     if (!cuentaId || !['caja', 'banco'].includes(cuentaTipo)) throw err(400, 'Elegí de qué caja o banco sale el pago.');
-    await conReintento(async () => {
-      const db = await getDb();
+    await conReintento(() => enTransaccion(async (db) => {
       const liq = await db.collection('prestamo_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!liq) throw err(404, 'Liquidación no encontrada');
       if (liq.anulada) throw err(400, 'Esta liquidación está anulada.');
       if (liq.pagada) throw err(400, 'Esta liquidación ya está pagada.');
       const prestamo = await db.collection('prestamos').findOne({ _id: liq.prestamoId });
       await pagarLiquidacion(db, req, prestamo, liq, { cuentaTipo, cuentaId, fecha: fechaDe(b.fecha), nota: b.nota });
-    });
+    }));
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -600,8 +594,7 @@ router.post('/prestamos/liquidaciones/:id/anular', authOperar, async (req, res) 
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    await conReintento(async () => {
-      const db = await getDb();
+    await conReintento(() => enTransaccion(async (db) => {
       const liq = await db.collection('prestamo_liquidaciones').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!liq) throw err(404, 'Liquidación no encontrada');
       if (liq.anulada) throw err(400, 'Esta liquidación ya está anulada.');
@@ -611,7 +604,7 @@ router.post('/prestamos/liquidaciones/:id/anular', authOperar, async (req, res) 
       }
       if (liq.gastoId) await db.collection('gastos').updateOne({ _id: liq.gastoId }, { $set: { estado: 'anulada', anuladaEn: new Date(), anuladaPor: (req.usuario && req.usuario.nombre) || '', anuladaMotivo: 'Anulación de la liquidación del préstamo', updatedAt: new Date() } });
       await db.collection('prestamo_liquidaciones').updateOne({ _id: id }, { $set: { anulada: true, anuladaEn: new Date() } });
-    });
+    }));
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

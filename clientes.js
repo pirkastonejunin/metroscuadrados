@@ -90,6 +90,8 @@ async function getDb() {
   asegurarIndices(db).catch(() => {});
   return db;
 }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 async function conReintento(fn) {
   try {
     return await fn();
@@ -629,8 +631,7 @@ router.post('/:id/imputar', authAdmin, async (req, res) => {
       porVenta.set(String(vid), r2c((porVenta.get(String(vid)) || 0) + m));
     }
     if (!porVenta.size) throw err(400, 'Indicá a qué facturas y por cuánto.');
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
       if (!cliente) throw err(404, 'Cliente no encontrado');
       const movs = db.collection('cuenta_corriente_movimientos');
@@ -656,22 +657,15 @@ router.post('/:id/imputar', authAdmin, async (req, res) => {
       const previo = mov.imputado == null ? null : mov.imputado;
       const claim = await movs.updateOne({ _id: movId, imputado: previo }, { $push: { imputaciones: { $each: nuevas } }, $set: { imputado: r2c((mov.imputado || 0) + total) } });
       if (!claim.matchedCount) throw err(409, 'El cobro cambió mientras imputabas: abrilo de nuevo.');
-      const hechas = [];
-      try {
-        for (const imp of nuevas) {
-          const v = ventas.find(x => String(x._id) === String(imp.ventaId));
-          const r = await db.collection('ventas').updateOne({ _id: v._id, updatedAt: v.updatedAt },
-            { $push: { imputaciones: { impId: imp.impId, movId, monto: imp.monto, fecha: ahora, usuario } }, $set: { totalCobrado: r2c((v.totalCobrado || 0) + imp.monto), saldoPendiente: r2c(Math.max(0, (v.saldoPendiente || 0) - imp.monto)), updatedAt: ahora } });
-          if (!r.matchedCount) throw err(409, `La factura ${imp.comprobante} cambió mientras imputabas: probá de nuevo.`);
-          hechas.push(imp);
-        }
-      } catch (e) {
-        for (const imp of hechas) await revertirImputacionEnVenta(db, imp).catch(() => {});
-        await movs.updateOne({ _id: movId }, { $pull: { imputaciones: { impId: { $in: nuevas.map(n => n.impId) } } }, $set: { imputado: mov.imputado || 0 } });
-        throw e;
+      // Todo en una transacción: si una factura falla, no queda ninguna imputación a medias.
+      for (const imp of nuevas) {
+        const v = ventas.find(x => String(x._id) === String(imp.ventaId));
+        const r = await db.collection('ventas').updateOne({ _id: v._id, updatedAt: v.updatedAt },
+          { $push: { imputaciones: { impId: imp.impId, movId, monto: imp.monto, fecha: ahora, usuario } }, $set: { totalCobrado: r2c((v.totalCobrado || 0) + imp.monto), saldoPendiente: r2c(Math.max(0, (v.saldoPendiente || 0) - imp.monto)), updatedAt: ahora } });
+        if (!r.matchedCount) throw err(409, `La factura ${imp.comprobante} cambió mientras imputabas: probá de nuevo.`);
       }
       return { ok: true, imputado: total, sinImputar: r2c(disp - total) };
-    });
+    }));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -680,8 +674,7 @@ router.post('/:id/desimputar', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
     const movId = toObjectId(req.body && req.body.movimientoId); const idx = Number(req.body && req.body.idx);
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
       if (!cliente) throw err(404, 'Cliente no encontrado');
       const movs = db.collection('cuenta_corriente_movimientos');
@@ -692,7 +685,7 @@ router.post('/:id/desimputar', authAdmin, async (req, res) => {
       if (!r.matchedCount) throw err(409, 'Esa imputación ya se había quitado.');
       await revertirImputacionEnVenta(db, imp);
       return { ok: true };
-    });
+    }));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
