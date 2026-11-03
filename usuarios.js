@@ -193,10 +193,16 @@ function hmac(data) {
   const secret = process.env.OBRAS_TOKEN_SECRET || 'cambiar-este-secreto';
   return crypto.createHmac('sha256', secret).update('usuario.' + data).digest('hex');
 }
-function crearToken(usuarioId) {
-  const payload = `${usuarioId}.${Date.now()}`;
+// Sesiones (auditoría 3/11/2026, etapa 4): cada login crea una sesión en la colección `sesiones` (dura 30 días y se renueva sola
+// mientras se use). El token lleva el id de la sesión, así se puede cerrar desde otro lado ("cerrar sesión en ese celular").
+// Los tokens viejos (sin sesión, de antes de este cambio) siguen valiendo hasta LEGACY_HASTA, para no sacar a todos de golpe.
+const SESION_DIAS = 30;
+const LEGACY_HASTA = new Date('2026-11-17T00:00:00-03:00');
+function crearToken(usuarioId, sesionId) {
+  const payload = `${usuarioId}.${Date.now()}.${sesionId}`;
   return Buffer.from(payload).toString('base64') + '.' + hmac(payload);
 }
+// Devuelve { usuarioId, issuedAt, sid } (sid null en tokens viejos) o null si la firma no cierra.
 function verificarToken(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const idx = token.lastIndexOf('.');
@@ -205,12 +211,32 @@ function verificarToken(token) {
   let payload;
   try { payload = Buffer.from(payloadB64, 'base64').toString('utf8'); } catch (e) { return null; }
   if (hmac(payload) !== firma) return null;
-  const [usuarioId, issuedAtStr] = payload.split('.');
+  const [usuarioId, issuedAtStr, sid] = payload.split('.');
   const issuedAt = Number(issuedAtStr);
   if (!usuarioId || !issuedAt) return null;
-  const CIENTO_OCHENTA_DIAS_MS = 180 * 24 * 60 * 60 * 1000;
-  if (Date.now() - issuedAt > CIENTO_OCHENTA_DIAS_MS) return null; // token vencido
-  return usuarioId;
+  if (!sid) {
+    const CIENTO_OCHENTA_DIAS_MS = 180 * 24 * 60 * 60 * 1000;
+    if (Date.now() - issuedAt > CIENTO_OCHENTA_DIAS_MS || Date.now() > LEGACY_HASTA.getTime()) return null; // token viejo: vencido
+  }
+  return { usuarioId, issuedAt, sid: sid || null };
+}
+let indicesSesionesListos = false;
+function asegurarIndicesSesiones(db) {
+  if (indicesSesionesListos) return; indicesSesionesListos = true;
+  db.collection('sesiones').createIndex({ expira: 1 }, { expireAfterSeconds: 7 * 86400, name: 'ttl_expira' }).catch(() => {});
+  db.collection('sesiones').createIndex({ usuarioId: 1, ultimoUso: -1 }).catch(() => {});
+}
+function dispositivoDe(req) {
+  const ua = String(req.headers['user-agent'] || '');
+  const so = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'Otro dispositivo';
+  const nav = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return (nav ? nav + ' en ' : '') + so;
+}
+async function crearSesion(db, req, usuarioId) {
+  asegurarIndicesSesiones(db);
+  const ahora = new Date();
+  const r = await db.collection('sesiones').insertOne({ usuarioId, creada: ahora, ultimoUso: ahora, expira: new Date(ahora.getTime() + SESION_DIAS * 864e5), dispositivo: dispositivoDe(req), ip: ipDe(req), revocada: false });
+  return r.insertedId;
 }
 
 // ---------------------------------------------------------------------
@@ -283,11 +309,22 @@ async function usuarioConRol(db, usuarioId) {
 async function authUsuario(req, res, next) {
   try {
     const token = req.headers['x-admin-token'];
-    const usuarioId = verificarToken(token);
-    if (!usuarioId) return res.status(401).json({ error: 'Sesión inválida o vencida, iniciá sesión de nuevo' });
+    const tk = verificarToken(token);
+    if (!tk) return res.status(401).json({ error: 'Sesión inválida o vencida, iniciá sesión de nuevo' });
+    const usuarioId = tk.usuarioId;
     const db = await getDb();
     const datos = await conReintento(() => usuarioConRol(db, usuarioId));
     if (!datos || !datos.usuario.activo) return res.status(401).json({ error: 'Usuario inactivo o inexistente' });
+    // "Cerrar todas las sesiones" deja una marca: lo anterior a ella no vale (incluye los tokens viejos sin sesión).
+    if (datos.usuario.sesionesDesde && tk.issuedAt < new Date(datos.usuario.sesionesDesde).getTime()) return res.status(401).json({ error: 'Sesión cerrada, iniciá sesión de nuevo' });
+    if (tk.sid) {
+      const sesion = await conReintento(() => db.collection('sesiones').findOne({ _id: toObjectId(tk.sid), usuarioId: datos.usuario._id }));
+      const ahora = Date.now();
+      if (!sesion || sesion.revocada || new Date(sesion.expira).getTime() < ahora) return res.status(401).json({ error: 'Sesión cerrada o vencida, iniciá sesión de nuevo' });
+      // Se renueva con el uso (a lo sumo una vez cada 10 minutos, para no escribir en cada pedido).
+      if (ahora - new Date(sesion.ultimoUso).getTime() > 10 * 60 * 1000) db.collection('sesiones').updateOne({ _id: sesion._id }, { $set: { ultimoUso: new Date(ahora), expira: new Date(ahora + SESION_DIAS * 864e5), ip: ipDe(req) } }).catch(() => {});
+      req.sesionId = String(sesion._id);
+    }
     if (!datos.rol) return res.status(401).json({ error: 'Este usuario no tiene un rol asignado — pedile a un administrador que le asigne uno' });
     req.usuario = {
       _id: datos.usuario._id,
@@ -484,7 +521,60 @@ router.post('/login', async (req, res) => {
       throw err(401, 'Usuario o contraseña incorrectos');
     }
     claves.forEach(k => { if (k.startsWith('u:')) loginFallos.delete(k); });
-    res.json({ ok: true, token: crearToken(doc._id.toString()) });
+    const sid = await conReintento(() => crearSesion(db, req, doc._id));
+    res.json({ ok: true, token: crearToken(doc._id.toString(), String(sid)) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---------------------------------------------------------------------
+// Sesiones abiertas: cada uno ve y cierra las suyas; el administrador (módulo usuarios) las de cualquiera.
+// ---------------------------------------------------------------------
+function puedeVerSesionesDe(req, usuarioId) { return String(usuarioId) === String(req.usuario._id) || tieneModulo(req.usuario, 'usuarios'); }
+router.get('/sesiones', authUsuario, async (req, res) => {
+  try {
+    const uid = req.query.usuarioId ? toObjectId(req.query.usuarioId) : req.usuario._id;
+    if (!uid) throw err(400, 'usuarioId inválido');
+    if (!puedeVerSesionesDe(req, uid)) throw err(403, 'Solo podés ver tus propias sesiones.');
+    const db = await getDb();
+    const lista = await conReintento(() => db.collection('sesiones').find({ usuarioId: uid, revocada: { $ne: true }, expira: { $gt: new Date() } }).sort({ ultimoUso: -1 }).toArray());
+    res.json({ sesiones: lista.map(x => ({ _id: x._id, dispositivo: x.dispositivo || '', ip: x.ip || '', creada: x.creada, ultimoUso: x.ultimoUso, expira: x.expira, actual: String(x._id) === req.sesionId })), sinSesionActual: !req.sesionId, vencenSesionesViejas: LEGACY_HASTA });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/sesiones/cerrar-todas', authUsuario, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const uid = b.usuarioId ? toObjectId(b.usuarioId) : req.usuario._id;
+    if (!uid) throw err(400, 'usuarioId inválido');
+    if (!puedeVerSesionesDe(req, uid)) throw err(403, 'Solo podés cerrar tus propias sesiones.');
+    const propia = String(uid) === String(req.usuario._id);
+    const conservar = propia && b.conservarActual && req.sesionId ? toObjectId(req.sesionId) : null; // si el token es viejo (sin sesión) no se puede conservar
+    const db = await getDb();
+    const n = await conReintento(async () => {
+      const filtro = Object.assign({ usuarioId: uid, revocada: { $ne: true } }, conservar ? { _id: { $ne: conservar } } : {});
+      const r = await db.collection('sesiones').updateMany(filtro, { $set: { revocada: true, revocadaEn: new Date(), revocadaPor: req.usuario.nombre } });
+      // La marca cubre también los tokens viejos; si se conserva la actual, la marca queda justo antes de su último uso.
+      await db.collection('usuarios').updateOne({ _id: uid }, { $set: { sesionesDesde: conservar ? new Date(Date.now() - 1000) : new Date() } });
+      return r.modifiedCount;
+    });
+    res.json({ ok: true, cerradas: n, conservadaActual: !!conservar });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/sesiones/:sid/cerrar', authUsuario, async (req, res) => {
+  try {
+    const sid = toObjectId(req.params.sid); if (!sid) throw err(400, 'id inválido');
+    const db = await getDb();
+    const s = await conReintento(() => db.collection('sesiones').findOne({ _id: sid }));
+    if (!s) throw err(404, 'Sesión no encontrada.');
+    if (!puedeVerSesionesDe(req, s.usuarioId)) throw err(403, 'No podés cerrar esa sesión.');
+    await conReintento(() => db.collection('sesiones').updateOne({ _id: sid }, { $set: { revocada: true, revocadaEn: new Date(), revocadaPor: req.usuario.nombre } }));
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// "Cerrar sesión" desde el menú: además de borrar el token del navegador, anula la sesión en el servidor.
+router.post('/logout', authUsuario, async (req, res) => {
+  try {
+    if (req.sesionId) { const db = await getDb(); await conReintento(() => db.collection('sesiones').updateOne({ _id: toObjectId(req.sesionId) }, { $set: { revocada: true, revocadaEn: new Date(), revocadaPor: req.usuario.nombre } })); }
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -502,7 +592,7 @@ router.get('/me', authUsuario, async (req, res) => {
       organizaciones = await conReintento(() => db.collection('organizaciones').find({ _id: { $in: ids } }).sort({ nombre: 1 }).toArray());
     }
     res.json({
-      usuario: { nombre: req.usuario.nombre, usuario: req.usuario.usuario, vendedorId: req.usuario.vendedorId, orgIds: req.usuario.orgIds },
+      usuario: { _id: String(req.usuario._id), nombre: req.usuario.nombre, usuario: req.usuario.usuario, vendedorId: req.usuario.vendedorId, orgIds: req.usuario.orgIds },
       rol: req.usuario.rol,
       modulos: MODULOS,
       organizaciones,
@@ -872,7 +962,11 @@ router.put('/:id', authAdmin, async (req, res) => {
         }
       }
 
+      // Si se cambió la contraseña o se desactivó al usuario, se cierran todas sus sesiones abiertas.
+      const cierraSesiones = (set.passwordHash !== undefined) || (activo !== undefined && !nuevoActivo);
+      if (cierraSesiones) set.sesionesDesde = new Date();
       await db.collection('usuarios').updateOne({ _id: id }, { $set: set });
+      if (cierraSesiones) await db.collection('sesiones').updateMany({ usuarioId: id, revocada: { $ne: true } }, { $set: { revocada: true, revocadaEn: new Date(), revocadaPor: (req.usuario && req.usuario.nombre) || '' } });
       return db.collection('usuarios').findOne({ _id: id }, { projection: { passwordHash: 0 } });
     });
     res.json(resultado);

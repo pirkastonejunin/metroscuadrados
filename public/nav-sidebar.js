@@ -216,6 +216,7 @@
     { key: 'consistencia', href: '/admin-consistencia.html', modulo: 'usuarios', label: 'Revisión de consistencia de datos', icon: ICONOS.usuarios },
     { key: 'backups', href: '/admin-backups.html', modulo: 'usuarios', label: 'Copias de seguridad', icon: ICONOS.usuarios },
     { key: 'auditoria', href: '/admin-auditoria.html', modulo: 'usuarios', label: 'Historial de cambios', icon: ICONOS.usuarios },
+    { key: 'sesiones', href: '/admin-sesiones.html', siempre: true, label: 'Mis sesiones', icon: ICONOS.usuarios },
     { key: 'asesores', href: '/admin-asesores.html', modulo: 'usuarios', label: 'Asesores IA (conocimiento en Drive)', icon: ICONOS.usuarios }
   ];
 
@@ -227,6 +228,7 @@
     return requeridos.every(k => modulos.includes(k));
   }
   function itemVisible(item, me) {
+    if (item.siempre) return true;
     if (item.soloAdmin) return !!(me.rol && me.rol.protegido);
     if (item.requiereVendedor) return !!(me.usuario && me.usuario.vendedorId) || !!(me.rol && me.rol.protegido);
     if (item.moduloAlguno) return !!(me.rol && me.rol.protegido) || item.moduloAlguno.some(k => tieneModulo(me.rol, k));
@@ -365,6 +367,8 @@
   }
 
   function cerrarSesionPN() {
+    // Además de borrar el token del navegador, anula la sesión en el servidor (mejor esfuerzo).
+    try { const t = localStorage.getItem(TOKEN_KEY); if (t) fetch('/api/usuarios/logout', { method: 'POST', keepalive: true, headers: { 'x-admin-token': t, 'Content-Type': 'application/json' }, body: '{}' }).catch(function () {}); } catch (e) {}
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(ORG_KEY);
     location.href = '/inicio.html';
