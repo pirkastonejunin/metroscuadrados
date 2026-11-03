@@ -44,7 +44,7 @@
 
 const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
-const { authUsuario, requiereModulo, resolverOrg, filtroOrg } = require('./usuarios');
+const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 const { exportarXlsx, exportarPlantillaXlsx, parsearXlsxBase64 } = require('./importExport');
 
 const router = express.Router();
@@ -72,8 +72,8 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
-    mongoClient = null;
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
+        mongoClient = null;
     return await fn();
   }
 }
@@ -203,20 +203,133 @@ function validarProveedor(body) {
   };
 }
 
+// Las credenciales del portal (cifradas) nunca salen al navegador.
+function sinSecretos(p) {
+  if (!p || !p.portal) return p;
+  const portal = { tipo: p.portal.tipo, usuario: p.portal.usuario, tieneClave: !!p.portal.claveCifrada };
+  return Object.assign({}, p, { portal });
+}
+
 router.get('/', authAdmin, async (req, res) => {
   try {
     const soloActivos = req.query.incluirInactivos !== '1';
-    const match = Object.assign({}, filtroOrg(req));
+    const match = Object.assign({}, filtroOrgClientes(req));
     if (soloActivos) match.activo = { $ne: false };
     if (req.query.q) {
       const re = new RegExp(String(req.query.q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      match.$or = [{ razonSocial: re }, { nombreFantasia: re }, { codigo: re }, { cuit: re }, { numeroDocumento: re }];
+      match.$and = [{ $or: [{ razonSocial: re }, { nombreFantasia: re }, { codigo: re }, { cuit: re }, { numeroDocumento: re }] }];
     }
     const proveedores = await conReintento(async () => {
       const db = await getDb();
       return db.collection('proveedores').find(match).sort({ razonSocial: 1 }).toArray();
     });
-    res.json(proveedores);
+    res.json(proveedores.map(sinSecretos));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Saldo de cada proveedor (el MISMO que muestra su cuenta corriente: saldo inicial Dux + compras y gastos propios + ajustes − pagos),
+// para las tarjetas de totales y la columna Saldo de la lista. Positivo = le debemos; negativo = a favor nuestro.
+router.get('/resumen-saldos', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const compartidos = req.orgId ? (await db.collection('proveedores').find({ $or: [{ orgIdsCompartidas: req.orgId }, { orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }] }).project({ _id: 1 }).toArray()).map(x => x._id) : [];
+      const fo = req.orgId ? (compartidos.length ? { $or: [{ orgId: req.orgId }, { proveedorId: { $in: compartidos } }] } : { orgId: req.orgId }) : {};
+      const mapa = new Map();
+      const suma = (id, v) => { if (!id) return; const k = String(id); mapa.set(k, (mapa.get(k) || 0) + v); };
+      const esNC = { $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } };
+      const signo = { $cond: [esNC, -1, 1] };
+      const [iniciales, compras, gastos, pagosGasto, pagos, ajustes] = await Promise.all([
+        db.collection('proveedores_saldos_iniciales').aggregate([{ $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        db.collection('compras').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, fo) }, { $unwind: '$pagos' }, { $match: { 'pagos.anulado': { $ne: true } } }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray(),
+        db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true }, anulado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        db.collection('proveedores_ajustes').aggregate([{ $match: fo }, { $group: { _id: '$proveedorId', t: { $sum: { $cond: [{ $eq: ['$tipo', 'debito'] }, '$monto', { $multiply: ['$monto', -1] }] } } } }]).toArray()
+      ]);
+      iniciales.forEach(x => suma(x._id, x.t)); compras.forEach(x => suma(x._id, x.t)); gastos.forEach(x => suma(x._id, x.t));
+      pagosGasto.forEach(x => suma(x._id, -x.t)); pagos.forEach(x => suma(x._id, -x.t)); ajustes.forEach(x => suma(x._id, x.t));
+      const provs = await db.collection('proveedores').find(Object.assign({}, filtroOrgClientes(req))).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const saldos = {}; let deuda = 0, aFavor = 0, conDeuda = 0, mayor = null;
+      provs.forEach(pr => {
+        const s = r2(mapa.get(String(pr._id)) || 0); saldos[String(pr._id)] = s;
+        if (s > 0.5) { deuda += s; conDeuda++; if (!mayor || s > mayor.saldo) mayor = { proveedorId: String(pr._id), nombre: pr.razonSocial || pr.nombreFantasia || '', saldo: s }; }
+        else if (s < -0.5) aFavor += -s;
+      });
+      return { activos: provs.length, conDeuda, deuda: r2(deuda), aFavor: r2(aFavor), mayor, saldos };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Conciliación con Dux: por proveedor, el saldo que se trajo de Dux (saldo inicial) contra lo que da el historial importado
+// (compras + gastos − notas de crédito − pagos). Sirve para ver si el signo del saldo de Dux quedó invertido o si hay diferencias puntuales.
+// Nombre del comprobante para la cuenta corriente: "Factura A 0001-00001234" (si tiene tipo y número); si no, el texto de siempre.
+const TIPO_COMP_LABEL = { factura_a: 'Factura A', factura_b: 'Factura B', factura_c: 'Factura C', factura_m: 'Factura M', nota_credito_a: 'Nota de Crédito A', nota_credito_b: 'Nota de Crédito B', nota_credito_c: 'Nota de Crédito C', nota_credito_m: 'Nota de Crédito M', nota_debito_a: 'Nota de Débito A', nota_debito_b: 'Nota de Débito B', nota_debito_c: 'Nota de Débito C', nota_debito_m: 'Nota de Débito M', recibo: 'Recibo', ticket: 'Ticket', otro: 'Comprobante' };
+function nombreComprobante(d) {
+  if (!d || !d.comprobanteNumero || /^[A-Z]-\d/.test(String(d.comprobanteNumero))) return null; // los importados de Dux ya traen su número completo (A-00012-00027691)
+  const tipo = TIPO_COMP_LABEL[d.tipoComprobante] || (d.tipoComprobante ? String(d.tipoComprobante).replace(/_/g, ' ') : 'Comprobante');
+  return tipo + ' ' + (d.puntoVenta ? d.puntoVenta + '-' : '') + d.comprobanteNumero;
+}
+
+// Número de comprobante completo (tipo + punto de venta + número), o el original de Dux tal cual vino.
+function comprobanteCompleto(d) {
+  if (!d) return '';
+  const n = nombreComprobante(d);
+  if (n) return n;
+  return String(d.comprobanteNumero || d.numeroOriginal || '').replace(/^S\/N$/, '');
+}
+
+// Los saldos iniciales cargados de Dux antes de la corrección tenían el signo al revés (Dux: negativo = le debemos). Se invierten una sola vez.
+router.post('/corregir-signo-dux', authAdmin, async (req, res) => {
+  try {
+    const n = await conReintento(async () => {
+      const db = await getDb();
+      const r = await db.collection('proveedores_saldos_iniciales').updateMany({ origen: 'dux', signoCorregido: { $ne: true } }, [{ $set: { monto: { $multiply: ['$monto', -1] }, signoCorregido: true } }]);
+      return r.modifiedCount;
+    });
+    res.json({ corregidos: n });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.get('/conciliacion-dux', authAdmin, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const compartidos = req.orgId ? (await db.collection('proveedores').find({ $or: [{ orgIdsCompartidas: req.orgId }, { orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }] }).project({ _id: 1 }).toArray()).map(x => x._id) : [];
+      const fo = req.orgId ? (compartidos.length ? { $or: [{ orgId: req.orgId }, { proveedorId: { $in: compartidos } }] } : { orgId: req.orgId }) : {};
+      const signo = { $cond: [{ $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } }, -1, 1] };
+      const agg = (col, extra, valor) => db.collection(col).aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, extra, fo) }, { $group: { _id: '$proveedorId', t: { $sum: valor }, n: { $sum: 1 } } }]).toArray();
+      const [ini, compras, gastos, pagos, pagosGasto] = await Promise.all([
+        db.collection('proveedores_saldos_iniciales').aggregate([{ $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
+        agg('compras', { importado: true }, { $multiply: ['$total', signo] }),
+        agg('gastos', { importado: true }, { $multiply: ['$total', signo] }),
+        db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: true }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' }, n: { $sum: 1 } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: true }, fo) }, { $unwind: '$pagos' }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray()
+      ]);
+      const m = new Map(); const get = (id) => { const k = String(id); if (!m.has(k)) m.set(k, { dux: 0, compras: 0, gastos: 0, pagos: 0 }); return m.get(k); };
+      ini.forEach(x => { if (x._id) get(x._id).dux += x.t; }); compras.forEach(x => { if (x._id) get(x._id).compras += x.t; }); gastos.forEach(x => { if (x._id) get(x._id).gastos += x.t; });
+      pagos.forEach(x => { if (x._id) get(x._id).pagos += x.t; }); pagosGasto.forEach(x => { if (x._id) get(x._id).pagos += x.t; });
+      const provs = await db.collection('proveedores').find(filtroOrgClientes(req)).project({ razonSocial: 1, nombreFantasia: 1 }).toArray();
+      const nombre = new Map(provs.map(pr => [String(pr._id), pr.razonSocial || pr.nombreFantasia || '']));
+      const r2 = (n) => Math.round(n * 100) / 100;
+      const filas = [];
+      for (const [k, v] of m) {
+        if (!nombre.has(k)) continue;
+        const calc = r2(v.compras + v.gastos - v.pagos), dux = r2(v.dux);
+        if (Math.abs(calc) < 0.5 && Math.abs(dux) < 0.5) continue;
+        const diff = r2(dux - calc);
+        const estado = Math.abs(diff) < 1 ? 'cuadra' : (Math.abs(dux + calc) < 1 ? 'invertido' : 'difiere');
+        filas.push({ proveedorId: k, nombre: nombre.get(k), dux, compras: r2(v.compras), gastos: r2(v.gastos), pagos: r2(v.pagos), calculado: calc, diferencia: diff, estado });
+      }
+      filas.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+      const cnt = { cuadra: 0, invertido: 0, difiere: 0 }; filas.forEach(f => cnt[f.estado]++);
+      const ambos = filas.filter(f => Math.abs(f.dux) >= 1 && Math.abs(f.calculado) >= 1);
+      const mismoSigno = ambos.filter(f => (f.dux > 0) === (f.calculado > 0)).length;
+      return { proveedores: filas.length, cuadran: cnt.cuadra, invertidos: cnt.invertido, difieren: cnt.difiere, conAmbos: ambos.length, mismoSigno, signoOpuesto: ambos.length - mismoSigno,
+        totalDux: r2(filas.reduce((a, f) => a + f.dux, 0)), totalCalculado: r2(filas.reduce((a, f) => a + f.calculado, 0)), filas };
+    });
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -226,7 +339,7 @@ router.get('/', authAdmin, async (req, res) => {
 
 router.get('/export', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({ activo: { $ne: false } }, filtroOrg(req));
+    const match = Object.assign({ activo: { $ne: false } }, filtroOrgClientes(req));
     const proveedores = await conReintento(async () => {
       const db = await getDb();
       return db.collection('proveedores').find(match).sort({ razonSocial: 1 }).toArray();
@@ -321,7 +434,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       return r && r.value !== undefined ? r.value : r;
     });
     if (!doc) throw err(404, 'Proveedor no encontrado');
-    res.json(doc);
+    res.json(sinSecretos(doc));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -334,6 +447,48 @@ router.delete('/:id', authAdmin, async (req, res) => {
       const match = Object.assign({ _id: id }, filtroOrg(req));
       const r = await db.collection('proveedores').updateOne(match, { $set: { activo: false, updatedAt: new Date() } });
       if (!r.matchedCount) throw err(404, 'Proveedor no encontrado');
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Ajuste manual de saldo del proveedor: un movimiento propio (colección proveedores_ajustes) que suma (débito: le debemos más) o resta
+// (crédito: le debemos menos) a su cuenta corriente, con motivo y sucursal. Se puede quitar si se cargó por error.
+router.post('/:id/ajuste-saldo', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const tipo = b.tipo === 'credito' ? 'credito' : (b.tipo === 'debito' ? 'debito' : '');
+    if (!tipo) throw err(400, 'Elegí si el ajuste aumenta o disminuye lo que le debemos.');
+    const monto = Math.round(Number(b.monto) * 100) / 100;
+    if (!(monto > 0)) throw err(400, 'El monto del ajuste tiene que ser mayor a 0.');
+    const motivo = normalizarTexto(b.motivo);
+    if (!motivo) throw err(400, 'Escribí el motivo del ajuste.');
+    if (!req.orgId) throw err(400, 'Elegí con qué sucursal operás para registrar el ajuste.');
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(b.fecha || '')) ? new Date(b.fecha + 'T12:00:00-03:00') : new Date();
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!prov) throw err(404, 'Proveedor no encontrado');
+      const doc = { proveedorId: id, proveedorNombre: prov.razonSocial || prov.nombreFantasia || '', orgId: req.orgId, tipo, monto, fecha, motivo,
+        usuarioNombre: (req.usuario && req.usuario.nombre) || '', createdAt: new Date() };
+      const r = await db.collection('proveedores_ajustes').insertOne(doc);
+      return Object.assign({ _id: r.insertedId }, doc);
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.delete('/:id/ajuste-saldo/:ajusteId', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id), aid = toObjectId(req.params.ajusteId);
+    if (!id || !aid) throw err(400, 'id inválido');
+    await conReintento(async () => {
+      const db = await getDb();
+      const prov = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!prov) throw err(404, 'Proveedor no encontrado');
+      const r = await db.collection('proveedores_ajustes').deleteOne({ _id: aid, proveedorId: id });
+      if (!r.deletedCount) throw err(404, 'Ajuste no encontrado');
     });
     res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -363,71 +518,138 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    const limite = Math.min(Number(req.query.limite) || 300, 1000);
+    const limite = Math.min(Number(req.query.limite) || 1000, 2000);
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
       if (!proveedor) throw err(404, 'Proveedor no encontrado');
 
-      // Unifica fichas duplicadas del mismo proveedor (mismo nombre o mismo CUIT,
-      // típico de importaciones) y acepta proveedorId guardado como texto u ObjectId.
-      const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const or = [{ _id: id }];
-      if (proveedor.nombre) or.push({ nombre: { $regex: '^\\s*' + esc(String(proveedor.nombre).trim()) + '\\s*$', $options: 'i' } });
-      if (proveedor.cuit) or.push({ cuit: proveedor.cuit });
-      const hermanos = await db.collection('proveedores').find(Object.assign({ $or: or }, filtroOrg(req)), { projection: { _id: 1 } }).toArray();
-      const idsObj = hermanos.map(h => h._id);
-      if (!idsObj.some(x => String(x) === String(id))) idsObj.push(id);
-      const idsTodos = idsObj.concat(idsObj.map(x => String(x)));
-      const filtroProv = { proveedorId: { $in: idsTodos } };
-      const [compras, gastos, pagosCompra] = await Promise.all([
-        db.collection('compras').find(Object.assign({}, filtroProv, { estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
-        db.collection('gastos').find(Object.assign({}, filtroProv, { estado: { $ne: 'anulada' } }, filtroOrg(req))).toArray(),
-        db.collection('compras_pagos').find(Object.assign({}, filtroProv, filtroOrg(req))).toArray()
+      // Un proveedor compartido entre sucursales (unificado) muestra toda su cuenta, de todas las sucursales que lo usan.
+      const fOrg = (proveedor.orgIdsCompartidas || []).length ? { orgId: { $in: [proveedor.orgId].concat(proveedor.orgIdsCompartidas) } } : filtroOrg(req);
+      // Reparación: pagos hechos en modo "todas las sucursales" quedaron sin sucursal y no aparecían; se la ponemos según la compra a la que se aplicaron.
+      const huerfanos = await db.collection('compras_pagos').find({ proveedorId: id, $or: [{ orgId: null }, { orgId: { $exists: false } }] }).toArray();
+      for (const hp of huerfanos) {
+        const cid = hp.aplicaciones && hp.aplicaciones[0] && hp.aplicaciones[0].compraId;
+        const cmp = cid ? await db.collection('compras').findOne({ _id: cid }, { projection: { orgId: 1 } }) : null;
+        const oid = (cmp && cmp.orgId) || proveedor.orgId;
+        if (oid) await db.collection('compras_pagos').updateOne({ _id: hp._id }, { $set: { orgId: oid } });
+      }
+      const [compras, gastos, pagosCompra, saldosIni, ajustes] = await Promise.all([
+        db.collection('compras').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
+        db.collection('gastos').find(Object.assign({ proveedorId: id, estado: { $ne: 'anulada' } }, fOrg)).toArray(),
+        db.collection('compras_pagos').find(Object.assign({ proveedorId: id, anulado: { $ne: true } }, fOrg)).toArray(),
+        db.collection('proveedores_saldos_iniciales').find({ proveedorId: id }).toArray(),
+        db.collection('proveedores_ajustes').find(Object.assign({ proveedorId: id }, fOrg)).toArray()
       ]);
 
       const movimientos = [];
+      // Saldo inicial de Dux (importado aparte): es la base del saldo. Las compras, gastos y pagos importados de Dux
+      // se muestran como historial pero NO suman al saldo (ya están dentro del saldo inicial).
+      for (const si of saldosIni) {
+        if (!si.monto) continue;
+        movimientos.push({ tipo: si.monto > 0 ? 'debito' : 'credito', monto: Math.abs(si.monto), fecha: si.fecha, concepto: 'Saldo inicial Dux', origen: 'saldo_inicial_dux', docId: si._id, moneda: 'ARS' });
+      }
+      for (const a of ajustes) {
+        movimientos.push({ tipo: a.tipo, monto: a.monto, fecha: a.fecha, concepto: 'Ajuste de saldo — ' + a.motivo, origen: 'ajuste', docId: a._id, nota: a.usuarioNombre ? 'Cargó ' + a.usuarioNombre : '', moneda: 'ARS' });
+      }
       for (const c of compras) {
         movimientos.push({
-          tipo: 'debito', monto: c.total, fecha: c.fecha,
-          concepto: `Compra #${c.numero}`, origen: 'compra',
-          docId: c._id, docNumero: c.numero, docEstado: c.estado,
-          tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal,
+          tipo: /^nota_credito/.test(c.tipoComprobante || '') ? 'credito' : 'debito', monto: c.total, fecha: c.fecha,
+          concepto: nombreComprobante(c) || (/^nota_(credito|debito)/.test(c.tipoComprobante || '') ? `${/^nota_credito/.test(c.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${c.numeroOriginal || ''} (Dux)` : c.numeroOriginal ? `Compra ${c.numeroOriginal} (Dux)` : `Compra #${c.numero}`), origen: 'compra',
+          docId: c._id, docNumero: c.numero, docEstado: c.estado, importado: !!c.importado,
+          tipoComprobante: c.tipoComprobante, puntoVenta: c.puntoVenta, comprobanteNumero: c.comprobanteNumero, esFiscal: c.esFiscal, comprobanteCompleto: comprobanteCompleto(c),
           items: c.items, observaciones: c.observaciones, moneda: c.moneda,
           totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
         });
       }
+      const nombreCompraPorId = new Map(compras.map(c => [String(c._id), nombreComprobante(c)]).filter(x => x[1]));
       for (const p of pagosCompra) {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
-          concepto: `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => '#' + a.compraNumero).join(', ') : ''}`,
-          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor
+          concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => nombreCompraPorId.get(String(a.compraId)) || '#' + a.compraNumero).join(', ') : ''}`,
+          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado
         });
       }
       for (const g of gastos) {
         movimientos.push({
-          tipo: 'debito', monto: g.total, fecha: g.fecha,
-          concepto: `Gasto #${g.numero}`, origen: 'gasto',
-          docId: g._id, docNumero: g.numero, docEstado: g.estado,
-          tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal,
+          tipo: /^nota_credito/.test(g.tipoComprobante || '') ? 'credito' : 'debito', monto: g.total, fecha: g.fecha,
+          concepto: nombreComprobante(g) || (/^nota_(credito|debito)/.test(g.tipoComprobante || '') ? `${/^nota_credito/.test(g.tipoComprobante) ? 'Nota de crédito' : 'Nota de débito'} ${g.numeroOriginal || ''} (Dux)` : g.numeroOriginal ? `Gasto ${g.numeroOriginal} (Dux)` : `Gasto #${g.numero}`), origen: 'gasto',
+          docId: g._id, docNumero: g.numero, docEstado: g.estado, importado: !!g.importado,
+          tipoComprobante: g.tipoComprobante, puntoVenta: g.puntoVenta, comprobanteNumero: g.comprobanteNumero, esFiscal: g.esFiscal, comprobanteCompleto: comprobanteCompleto(g),
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
           totalPagado: g.totalPagado, saldoPendiente: g.saldoPendiente
         });
-        for (const p of (g.pagos || [])) {
+        for (const p of (g.pagos || []).filter(x => !x.anulado)) {
           movimientos.push({
             tipo: 'credito', monto: p.monto, fecha: p.fecha,
-            concepto: `Pago — Gasto #${g.numero}`, origen: 'pago_gasto',
+            concepto: `Pago — ${nombreComprobante(g) || 'Gasto #' + g.numero}`, origen: 'pago_gasto',
             docId: g._id, nota: p.nota, tipoValor: p.tipoValor
           });
         }
       }
 
       movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-      const saldo = Math.round(movimientos.reduce((acc, m) => acc + (m.tipo === 'debito' ? m.monto : -m.monto), 0) * 100) / 100;
+      const saldo = Math.round(movimientos.filter(m => !m.importado).reduce((acc, m) => acc + (m.tipo === 'debito' ? m.monto : -m.monto), 0) * 100) / 100;
 
-      return { proveedor, saldo, fichasUnificadas: idsObj.length, totalMovimientos: movimientos.length, movimientos: movimientos.slice(0, limite) };
+      return { proveedor, saldo, movimientos: movimientos.slice(0, limite) };
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Pestañas de la ficha del proveedor (7/10/2026, pedido de Mato): productos
+// comprados y órdenes de compra.
+async function proveedorDeLaOrg(db, req) {
+  const id = toObjectId(req.params.id);
+  if (!id) throw err(400, 'id inválido');
+  const proveedor = await db.collection('proveedores').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+  if (!proveedor) throw err(404, 'Proveedor no encontrado');
+  return proveedor;
+}
+
+// Productos comprados: agrupados por producto a partir de las compras no
+// anuladas (cantidad total, monto, último precio y última compra).
+router.get('/:id/productos', authAdmin, async (req, res) => {
+  try {
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeLaOrg(db, req);
+      const compras = await db.collection('compras')
+        .find(Object.assign({ proveedorId: prov._id, estado: { $ne: 'anulada' } }, filtroOrg(req)))
+        .project({ fecha: 1, moneda: 1, items: 1 }).sort({ fecha: -1 }).limit(1000).toArray();
+      const mapa = new Map();
+      for (const c of compras) {
+        for (const it of (c.items || [])) {
+          const clave = String(it.productoId || it.sku || it.nombre);
+          let p = mapa.get(clave);
+          if (!p) {
+            p = { productoId: it.productoId || null, sku: it.sku || '', nombre: it.nombre || '', cantidad: 0, monto: {}, compras: 0,
+              ultimaCompra: c.fecha, ultimoPrecio: Number(it.precioUnitario) || 0, ultimaMoneda: c.moneda || 'ARS' };
+            mapa.set(clave, p);
+          }
+          const mon = c.moneda || 'ARS';
+          p.cantidad += Number(it.cantidad) || 0;
+          p.monto[mon] = (p.monto[mon] || 0) + (Number(it.subtotal) || 0);
+          p.compras += 1;
+        }
+      }
+      return { compras: compras.length, productos: [...mapa.values()].sort((a, b) => new Date(b.ultimaCompra) - new Date(a.ultimaCompra)) };
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+router.get('/:id/ordenes', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const prov = await proveedorDeLaOrg(db, req);
+      return db.collection('ordenes_compra')
+        .find(Object.assign({ proveedorId: prov._id }, filtroOrg(req)))
+        .project({ numero: 1, fecha: 1, moneda: 1, total: 1, estado: 1, estadoRecepcion: 1, observaciones: 1 })
+        .sort({ fecha: -1, numero: -1 }).limit(300).toArray();
+    });
+    res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
