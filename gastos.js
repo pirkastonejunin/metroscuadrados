@@ -105,6 +105,8 @@ async function conReintento(fn) {
 }
 
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(db.client, db, fn); }
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 
@@ -581,8 +583,7 @@ async function crearGastoDesdeBody(req, body) {
     const comprobante = normalizarComprobante(body);
     const impuestosCbte = normalizarImpuestosComprobante(body);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const proveedor = await cargarProveedorParaOperar(db, req, proveedorId);
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
       // Evita cargar el mismo comprobante dos veces para el mismo
@@ -652,7 +653,7 @@ async function crearGastoDesdeBody(req, body) {
       await registrarRetencionesSufridas(db, req, { origen: 'gasto', retenciones: impuestosCbte.retenciones, fecha, moneda,
         referencia: { gastoId: gasto._id, gastoNumero: gasto.numero, proveedorId: gasto.proveedorId, proveedorNombre: gasto.proveedorNombre } });
       return gasto;
-    });
+    }));
     return resultado;
 }
 router.crearGastoDesdeBody = crearGastoDesdeBody;
@@ -671,8 +672,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const motivo = normalizarTexto(req.body && req.body.motivo);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const gasto = await db.collection('gastos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!gasto) throw err(404, 'Gasto no encontrado');
       if (gasto.estado === 'anulada') throw err(400, 'Este gasto ya está anulado.');
@@ -684,7 +684,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
         { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
       );
       return db.collection('gastos').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -703,8 +703,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
     if (!id || !Number.isInteger(idx) || idx < 0) throw err(400, 'Pago inválido');
     const motivo = normalizarTexto(req.body && req.body.motivo);
     const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const gasto = await db.collection('gastos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!gasto) throw err(404, 'Gasto no encontrado');
       const p = (gasto.pagos || [])[idx];
@@ -736,7 +735,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
       const totalPagado = Math.round(gasto.pagos.filter((x, k) => k !== idx && !x.anulado).reduce((a, x) => a + x.monto, 0) * 100) / 100;
       await db.collection('gastos').updateOne({ _id: id }, { $set: { totalPagado, saldoPendiente: Math.max(0, Math.round((gasto.total - totalPagado) * 100) / 100), updatedAt: ahora } });
       return db.collection('gastos').findOne({ _id: id });
-    });
+    }));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -794,8 +793,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
       };
     }
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const gasto = await db.collection('gastos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!gasto) throw err(404, 'Gasto no encontrado');
       if (gasto.estado === 'anulada') throw err(400, 'Este gasto está anulado, no se le pueden registrar pagos.');
@@ -854,7 +852,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
           { $set: { estado: 'endosado', endosadoA: gasto.proveedorNombre || 'Proveedor', endosadoProveedorId: gasto.proveedorId || null, endosadoFecha: fecha, updatedAt: new Date() } });
       }
       return db.collection('gastos').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

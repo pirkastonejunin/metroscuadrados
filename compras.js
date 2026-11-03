@@ -113,6 +113,8 @@ async function conReintento(fn) {
 }
 
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
+// Operaciones que mueven plata o stock: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(db.client, db, fn); }
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 function normalizarTexto(v) { return (v === undefined || v === null) ? '' : String(v).trim(); }
 
@@ -945,8 +947,7 @@ router.post('/ordenes/:id/recibir', authAdmin, async (req, res) => {
     if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a ingresar el stock.');
     if (!Array.isArray(body.items) || !body.items.length) throw err(400, 'Elegí al menos un ítem para recibir');
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const orden = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!orden) throw err(404, 'Orden de compra no encontrada');
       if (orden.estado === 'anulada') throw err(400, 'Esa orden está anulada, no se puede recibir mercadería.');
@@ -994,7 +995,7 @@ router.post('/ordenes/:id/recibir', authAdmin, async (req, res) => {
         items: itemsActualizados, estadoRecepcion: nuevoEstadoRecepcion, updatedAt: new Date()
       } });
       return db.collection('ordenes_compra').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1048,8 +1049,7 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
     const impuestosCbte = normalizarImpuestosComprobante(body);
     if (!Array.isArray(body.items) || !body.items.length) throw err(400, 'Elegí al menos un ítem de la orden para convertir');
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const orden = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!orden) throw err(404, 'Orden de compra no encontrada');
       if (orden.estado === 'anulada') throw err(400, 'Esa orden está anulada, no se puede convertir');
@@ -1206,7 +1206,7 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
       } });
 
       return compra;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1246,8 +1246,7 @@ router.post('/', authAdmin, async (req, res) => {
     const comprobante = normalizarComprobante(body);
     const impuestosCbte = normalizarImpuestosComprobante(body);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const proveedor = await cargarProveedorParaOperar(db, req, proveedorId);
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
       // Evita cargar el mismo comprobante dos veces para el mismo
@@ -1344,7 +1343,7 @@ router.post('/', authAdmin, async (req, res) => {
         compra.recibidaEn = ahora;
       }
       return compra;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1358,8 +1357,7 @@ router.post('/:id/recibir', authAdmin, async (req, res) => {
     const depositoId = toObjectId(req.body && req.body.depositoId);
     if (!depositoId) throw err(400, 'Elegí a qué depósito le vas a ingresar el stock.');
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra está anulada.');
@@ -1373,7 +1371,7 @@ router.post('/:id/recibir', authAdmin, async (req, res) => {
         { $set: { estado: 'recibida', depositoId, stockIngresado: true, stockIngresadoEn: ahora, recibidaEn: ahora, updatedAt: ahora } }
       );
       return db.collection('compras').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1387,8 +1385,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const motivo = normalizarTexto(req.body && req.body.motivo);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra ya está anulada.');
@@ -1405,7 +1402,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
           obraId: null, obraNumero: null, obraCliente: null, obraAnteriorNumero: compra.obraNumero || null } }
       );
       return db.collection('compras').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1593,8 +1590,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
     if (!id || !Number.isInteger(idx) || idx < 0) throw err(400, 'Pago inválido');
     const motivo = normalizarTexto(req.body && req.body.motivo);
     const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       const p = (compra.pagos || [])[idx];
@@ -1651,7 +1647,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
         await db.collection('compras').updateOne({ _id: c._id }, { $set: { pagos, totalPagado, saldoPendiente: Math.max(0, Math.round((c.total - totalPagado) * 100) / 100), updatedAt: ahora } });
       }
       return db.collection('compras').findOne({ _id: id });
-    });
+    }));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1669,8 +1665,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     const fecha = fechaPago(body.fecha);
     const datosPago = normalizarDatosPago(body, fecha);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra está anulada, no se le pueden registrar pagos.');
@@ -1682,7 +1677,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
         motivoMovimiento: `Pago compra Nº ${compra.numero}`
       }, datosPago));
       return compras[0];
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1714,8 +1709,7 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
     const sumaAplicaciones = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
     if (sumaAplicaciones > monto + 0.01) throw err(400, `Lo repartido entre las compras (${sumaAplicaciones}) supera el monto del pago (${monto}).`);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const proveedor = await cargarProveedorParaOperar(db, req, proveedorId);
       if (!proveedor) throw err(400, 'El proveedor no existe (o no pertenece a esta organización)');
       const proveedorNombre = proveedor.razonSocial || proveedor.nombreFantasia || '';
@@ -1726,7 +1720,7 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
         motivoMovimiento: `Pago a cuenta — ${proveedorNombre}`
       }, datosPago));
       return pagoCuenta;
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1744,8 +1738,7 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
       if (monto <= 0) throw err(400, 'El monto aplicado a cada compra tiene que ser mayor a 0');
       return { compraId, monto };
     });
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const pc = await db.collection('compras_pagos').findOne(Object.assign({ _id: pid }, await filtroOrgConCompartidos(db, req)));
       if (!pc) throw err(404, 'Pago no encontrado');
       if (pc.anulado) throw err(400, 'Ese pago está anulado.');
@@ -1778,7 +1771,7 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
       }
       await db.collection('compras_pagos').updateOne({ _id: pid }, { $push: { aplicaciones: { $each: guardadas } } });
       return db.collection('compras_pagos').findOne({ _id: pid });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1790,8 +1783,7 @@ router.post('/pagos-cuenta/:id/anular', authAdmin, async (req, res) => {
     if (!pid) throw err(400, 'Pago inválido');
     const motivo = normalizarTexto(req.body && req.body.motivo);
     const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
-    const out = await conReintento(async () => {
-      const db = await getDb();
+    const out = await conReintento(() => enTransaccion(async (db) => {
       const pc = await db.collection('compras_pagos').findOne(Object.assign({ _id: pid }, filtroOrg(req)));
       if (!pc) throw err(404, 'Pago no encontrado');
       if (pc.anulado) throw err(400, 'Ese pago ya está anulado.');
@@ -1820,7 +1812,7 @@ router.post('/pagos-cuenta/:id/anular', authAdmin, async (req, res) => {
         throw e;
       }
       return db.collection('compras_pagos').findOne({ _id: pid });
-    });
+    }));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
