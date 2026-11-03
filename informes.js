@@ -325,11 +325,11 @@ async function nombreConceptoFn(db) {
   };
 }
 
-async function resultadosOrg(db, orgId, d0, d1, tf) {
+async function resultadosOrg(db, orgId, d0, d1, tf, ovr) {
   const meses = {};
   const mes = k => meses[k] || (meses[k] = { ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, internoVenta: 0, internoCompra: 0, intPorOrg: {}, gastos: {} });
-  const sueldosGasto = await sueldosProduccionGasto(db, orgId);
-  const colocacionGasto = await colocacionComoGasto(db, orgId);
+  const sueldosGasto = ovr && ovr.sueldosGasto != null ? ovr.sueldosGasto : await sueldosProduccionGasto(db, orgId);
+  const colocacionGasto = ovr && ovr.colocacionGasto != null ? ovr.colocacionGasto : await colocacionComoGasto(db, orgId);
   const cotDoc = await db.collection('config_general').findOne({ orgId, clave: 'cotizacionDolar' });
   const cotVigente = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
 
@@ -524,7 +524,11 @@ async function armarResultados(req) {
       orgIds = [req.orgId];
     }
     const tf = await transferenciaFabrica(db);
-    const partes = await Promise.all(orgIds.map(id => resultadosOrg(db, id, inicioDia(desdeS), finDia(hastaS), tf)));
+    // La opción de mostrar los sueldos de producción / la colocación como gasto se guarda por sucursal: al sumar varias, si alguna la tiene
+    // activada rige para todas (si no, los sueldos de producción de unas sucursales quedaban como gasto y los de otras como "ya contados").
+    let ovr = null;
+    if (orgIds.length > 1) ovr = { sueldosGasto: (await Promise.all(orgIds.map(id => sueldosProduccionGasto(db, id)))).some(Boolean), colocacionGasto: (await Promise.all(orgIds.map(id => colocacionComoGasto(db, id)))).some(Boolean) };
+    const partes = await Promise.all(orgIds.map(id => resultadosOrg(db, id, inicioDia(desdeS), finDia(hastaS), tf, ovr)));
     const claves = mesesEntre(desdeS, hastaS);
     const conceptos = new Set();
     const cols = claves.map(k => {
