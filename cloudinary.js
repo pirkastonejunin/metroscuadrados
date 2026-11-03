@@ -26,4 +26,21 @@ async function dataUrlParaPdf(u) {
     return 'data:image/jpeg;base64,' + Buffer.from(await r.arrayBuffer()).toString('base64');
   } catch (e) { return null; }
 }
-module.exports = { config, firma, esLinkPropio, dataUrlParaPdf };
+// Sube cualquier archivo (foto, audio, video, PDF, Word…) con un nombre al azar imposible de adivinar. Devuelve { url, tipo }.
+// Fotos → image, audio/video → video, el resto → raw (los PDF como "image" suelen venir bloqueados en la cuenta).
+async function subirArchivo(buf, mime, carpeta) {
+  const c = config(); if (!c) throw new Error('Cloudinary no está configurado.');
+  const m = String(mime || '').toLowerCase();
+  const tipo = /^image\/(jpeg|png|webp|gif)$/.test(m) ? 'image' : /^(audio|video)\//.test(m) ? 'video' : 'raw';
+  const publicId = (carpeta || 'piedranegra/whatsapp') + '/' + crypto.randomBytes(18).toString('hex');
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = crypto.createHash('sha1').update('public_id=' + publicId + '&timestamp=' + timestamp + c.apiSecret).digest('hex');
+  const fd = new FormData();
+  fd.append('file', new Blob([buf], { type: m || 'application/octet-stream' }), 'archivo');
+  fd.append('api_key', c.apiKey); fd.append('timestamp', String(timestamp)); fd.append('public_id', publicId); fd.append('signature', signature);
+  const r = await fetch('https://api.cloudinary.com/v1_1/' + c.cloudName + '/' + tipo + '/upload', { method: 'POST', body: fd });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.secure_url) throw new Error((d.error && d.error.message) || ('Cloudinary respondió ' + r.status));
+  return { url: d.secure_url, tipo };
+}
+module.exports = { config, firma, esLinkPropio, dataUrlParaPdf, subirArchivo };

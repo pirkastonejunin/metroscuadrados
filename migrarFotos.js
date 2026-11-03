@@ -39,7 +39,13 @@ async function contar(db) {
     ]).toArray();
     if (r[0]) { fotos += r[0].n; bytes += r[0].b; }
   }
-  return { fotos, mb: Math.round(bytes / 1048576 * 10) / 10 };
+  // Archivos de WhatsApp guardados dentro de la base (los que tienen `data` y todavía no tienen link).
+  const w = await db.collection('wa_media').aggregate([
+    { $match: { data: { $exists: true }, url: { $exists: false } } },
+    { $group: { _id: null, n: { $sum: 1 }, b: { $sum: { $ifNull: ['$bytes', 0] } } } }
+  ]).toArray();
+  const archivos = w[0] ? w[0].n : 0, bytesArch = w[0] ? w[0].b : 0;
+  return { fotos: fotos + archivos, mb: Math.round((bytes + bytesArch) / 1048576 * 10) / 10, fotosSolas: fotos, archivosWhatsapp: archivos };
 }
 
 async function subir(dataUrl) {
@@ -84,6 +90,18 @@ router.post('/lote', authUsuario, soloAdmin, async (req, res) => {
         if (huboError) idsFallidos.push(doc._id); // se saltea en este lote; las que fallan se reintentan en la próxima corrida
         else if (!avanzo) break;
       }
+    }
+    // Archivos de WhatsApp (fotos, audios, PDF… de clientes): se suben y en la base queda solo el link.
+    const falloW = [];
+    while (migradas + errores.length < POR_LOTE && Date.now() - t0 < 40000) {
+      const doc = await db.collection('wa_media').findOne({ data: { $exists: true }, url: { $exists: false }, _id: { $nin: falloW } });
+      if (!doc) break;
+      try {
+        const buf = doc.data && doc.data.buffer ? Buffer.from(doc.data.buffer) : Buffer.from(doc.data);
+        const { url, tipo } = await cloudinary.subirArchivo(buf, doc.mime);
+        const r = await db.collection('wa_media').updateOne({ _id: doc._id, url: { $exists: false } }, { $set: { url, tipo, creado: doc.at || new Date() }, $unset: { data: '', at: '' } });
+        if (r.modifiedCount) migradas++;
+      } catch (e) { errores.push(e.message); falloW.push(doc._id); }
     }
     res.json(Object.assign({ migradas, errores }, await contar(db)));
   } catch (e) { mongoClient = null; res.status(500).json({ error: e.message }); }

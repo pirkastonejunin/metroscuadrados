@@ -17,6 +17,7 @@ const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereAlgunModulo, resolverOrg, filtroOrg } = require('./usuarios');
 const leads = require('./leads');
 const ia = require('./ia');
+const cloudinary = require('./cloudinary');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -243,10 +244,32 @@ async function traerMediaDeMeta(id) {
   const buf = Buffer.from(await r.arrayBuffer()); if (buf.length > MEDIA_MAX_VER) throw new Error('El archivo es muy grande para verlo acá.');
   return { buf, mime: String(m.mime_type || r.headers.get('content-type') || '').split(';')[0] };
 }
+// Guarda la copia del archivo: en Cloudinary si está conectado (en la base queda solo el link); si no, o si falla, dentro de la base como antes.
+async function guardarMedia(db, id, orgId, mime, buf) {
+  try {
+    if (cloudinary.config() && buf.length <= MEDIA_MAX_VER) {
+      const { url, tipo } = await cloudinary.subirArchivo(buf, mime);
+      await db.collection('wa_media').updateOne({ _id: id }, { $set: { orgId, mime, url, tipo, bytes: buf.length, creado: new Date() }, $unset: { data: '', at: '' } }, { upsert: true });
+      return;
+    }
+  } catch (e) { console.error('[wa_media] Cloudinary falló, se guarda en la base:', e.message); }
+  if (buf.length <= MEDIA_MAX_COPIA) await db.collection('wa_media').updateOne({ _id: id }, { $set: { orgId, mime, data: buf, bytes: buf.length, at: new Date() } }, { upsert: true }).catch(() => {});
+}
+// Lee la copia guardada (de Cloudinary o de la base). Devuelve { data, mime } o null.
+async function leerMedia(db, id) {
+  const c = await db.collection('wa_media').findOne({ _id: id }); if (!c) return null;
+  if (c.url) {
+    if (!/^https:\/\/res\.cloudinary\.com\//.test(c.url)) return null;
+    const r = await fetch(c.url).catch(() => null); if (!r || !r.ok) return null;
+    return { data: Buffer.from(await r.arrayBuffer()), mime: c.mime };
+  }
+  if (c.data) return { data: c.data.buffer ? Buffer.from(c.data.buffer) : Buffer.from(c.data), mime: c.mime };
+  return null;
+}
 async function guardarCopiaMedia(db, orgId, archivo) {
   if (!process.env.WA_TOKEN || !archivo) return null;
   const { buf, mime } = await traerMediaDeMeta(archivo.id);
-  if (buf.length <= MEDIA_MAX_COPIA) await db.collection('wa_media').updateOne({ _id: archivo.id }, { $set: { orgId, mime, data: buf, bytes: buf.length, at: new Date() } }, { upsert: true }).catch(() => {});
+  await guardarMedia(db, archivo.id, orgId, mime, buf);
   return { buf, mime };
 }
 
@@ -477,7 +500,7 @@ router.get('/media/:id', auth, async (req, res) => { // el CRM pide el archivo c
   try { const id = String(req.params.id); if (!/^[\w.-]{4,200}$/.test(id)) return res.status(400).json({ error: 'Archivo inválido.' });
     const db = await getDb(); const m = await db.collection(COL_M).findOne(Object.assign({ 'archivo.id': id }, filtroOrg(req))); if (!m) return res.status(404).json({ error: 'Archivo no encontrado.' });
     let data = null, mime = m.archivo.mime || '';
-    const c = await db.collection('wa_media').findOne({ _id: id }); if (c && c.data) { data = c.data.buffer ? Buffer.from(c.data.buffer) : Buffer.from(c.data); mime = c.mime || mime; }
+    const c = await leerMedia(db, id); if (c && c.data) { data = c.data; mime = c.mime || mime; }
     if (!data) { if (!process.env.WA_TOKEN) return res.status(503).json({ error: 'Todavía no hay conexión con WhatsApp: el archivo se va a poder ver cuando esté conectado.' });
       let r; try { r = await guardarCopiaMedia(db, m.orgId, m.archivo); } catch (e) { return res.status(e.vencido ? 410 : 502).json({ error: e.message }); } data = r.buf; mime = r.mime || mime; }
     if (!/^(image\/(jpeg|png|webp|gif)|audio\/(ogg|mpeg|mp4|aac|amr|wav|x-m4a)|video\/(mp4|3gpp|webm|quicktime)|application\/pdf)$/.test(mime)) mime = 'application/octet-stream'; // nunca se sirve HTML/SVG de un cliente
@@ -672,7 +695,7 @@ router.post('/conversaciones/:id/enviar-archivo', auth, async (req, res) => { //
     if (!c.demo && !(await ventanaConv(db, c._id)).abierta) return res.status(409).json({ error: MSJ_VENTANA, ventanaCerrada: true });
     const env = c.demo ? { id: 'demo-' + crypto.randomBytes(6).toString('hex'), prueba: true } : await enviarMedia(c.tel, buf, nombre, mime, tipo, texto);
     const aid = env.mediaId || env.id; // para verlo en el chat: copia propia (hasta 6 MB) y, si no hay, se pide a Meta
-    if (buf.length <= MEDIA_MAX_COPIA) await db.collection('wa_media').updateOne({ _id: aid }, { $set: { orgId: c.orgId, mime, data: buf, bytes: buf.length, at: new Date() } }, { upsert: true }).catch(() => {});
+    await guardarMedia(db, aid, c.orgId, mime, buf);
     const etiqueta = tipo === 'document' ? '📎 ' + nombre : tipo === 'video' ? '🎬 Video' : '';
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo, texto: (etiqueta + (texto ? (etiqueta ? '\n' : '') + texto : '')).trim(), archivo: { id: aid, tipo, mime, nombre }, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
