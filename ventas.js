@@ -162,6 +162,8 @@ async function conReintento(fn) {
 }
 
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
+// Venta, anulación, entrega o cobro: todo o nada (ver transaccion.js).
+async function enTransaccion(fn) { const db = await getDb(); return require('./transaccion').correr(mongoClient, db, fn); }
 
 // Nombre completo del cliente para mostrar/imprimir: "Apellido Nombre" (apellido/razón social + nombre). Si el comprobante se
 // guardó antes con solo el apellido, al imprimir se vuelve a armar desde la ficha del cliente.
@@ -1523,8 +1525,7 @@ router.post('/', authAdmin, async (req, res) => {
     const comprobanteOrigenNumero = (comprobanteOrigenId && body.comprobanteOrigenNumero) ? Number(body.comprobanteOrigenNumero) || null : null;
     const comprobanteOrigenTipo = (comprobanteOrigenId && body.comprobanteOrigenTipo) ? normalizarTexto(body.comprobanteOrigenTipo) : null;
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const cliente = await cargarClienteParaOperar(db, req, clienteId);
       if (!cliente) throw err(400, 'El cliente no existe (o no pertenece a esta organización)');
       let comprobanteOrigenLetra = null;
@@ -1718,7 +1719,7 @@ router.post('/', authAdmin, async (req, res) => {
         }
       }
       return venta;
-    });
+    }));
     const ventaFinal = await autorizarAlGuardar(req, resultado);
     res.json(ventaFinal);
     // Mail al cliente con el comprobante (una factura fiscal solo sale si ya tiene CAE; ver correo.js).
@@ -1761,8 +1762,7 @@ router.put('/:id', authAdmin, async (req, res) => {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const body = req.body || {};
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const venta = await buscarVentaOperable(db, req, id);
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.tipoComprobante !== 'comprobante_x' || venta.esFiscal) throw err(400, 'Solo se pueden editar las ventas no fiscales (comprobante X). Un comprobante fiscal se corrige con una nota de crédito.');
@@ -1857,7 +1857,7 @@ router.put('/:id', authAdmin, async (req, res) => {
         await db.collection('ventas').updateOne({ _id: id }, { $set: Object.assign({}, set, { editadaEn: ahora }), $push: { ediciones: { at: ahora, usuario: usuarioNombre, cambios } } });
       }
       return db.collection('ventas').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1876,8 +1876,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
     const depositoIdBody = (req.body && req.body.depositoId) ? toObjectId(req.body.depositoId) : null;
     const itemsBody = (req.body && Array.isArray(req.body.items)) ? req.body.items : null;
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const venta = await buscarVentaOperable(db, req, id);
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito') {
@@ -1921,7 +1920,7 @@ router.post('/:id/entregar', authAdmin, async (req, res) => {
         throw e;
       }
       return db.collection('ventas').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1934,8 +1933,7 @@ router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const items = req.body && Array.isArray(req.body.items) ? req.body.items : null;
     if (!items) throw err(400, 'Faltan los ítems.');
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const venta = await buscarVentaOperable(db, req, id);
       if (!venta) throw err(404, 'Venta no encontrada');
       if (!venta.importado) throw err(400, 'Solo se puede corregir la entrega de ventas migradas de Dux.');
@@ -1952,7 +1950,7 @@ router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
       const estado = ent <= 0 ? 'pendiente' : (ent >= total - 1e-9 ? 'entregada' : 'parcialmente_entregada');
       await db.collection('ventas').updateOne({ _id: id }, { $set: { items: nuevos, estado, entregaCorregida: true, updatedAt: new Date() } });
       return db.collection('ventas').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1968,8 +1966,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const motivo = normalizarTexto(req.body && req.body.motivo);
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta ya está anulada.');
@@ -2017,7 +2014,7 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
         { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
       );
       return db.collection('ventas').findOne({ _id: id });
-    });
+    }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -2136,8 +2133,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
       };
     }
 
-    const resultado = await conReintento(async () => {
-      const db = await getDb();
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
       const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!venta) throw err(404, 'Venta no encontrada');
       if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada, no se le pueden registrar cobros.');
@@ -2197,7 +2193,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
       });
 
       return db.collection('ventas').findOne({ _id: id });
-    });
+    }));
     return resultado;
   }
 }
