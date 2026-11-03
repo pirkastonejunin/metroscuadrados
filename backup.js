@@ -93,7 +93,7 @@ async function ejecutarCopia({ origen = 'auto', usuario = '' } = {}) {
       if (!acumBytes) return;
       const comprimido = await gzip(Buffer.from(acum.join(''), 'utf8'));
       const cifrado = cifrar(comprimido, key, sal);
-      const nombre = `copia-${tag}-${unico}-${String(partes.length + 1).padStart(3, '0')}.bin`;
+      const nombre = `copia-${tag}-${unico}-${String(partes.length + 1).padStart(3, '0')}.txt`;
       const sub = await subirParte(c, nombre, cifrado);
       partes.push({ n: partes.length + 1, publicId: sub.publicId, url: sub.url, bytes: cifrado.length, sha256: crypto.createHash('sha256').update(cifrado).digest('hex') });
       crudos += acumBytes; subidos += cifrado.length; acum = []; acumBytes = 0;

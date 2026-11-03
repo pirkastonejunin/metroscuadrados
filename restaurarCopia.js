@@ -9,8 +9,8 @@ const { restaurar } = require('./backup');
 (async () => {
   const [carpeta, nombreBase] = process.argv.slice(2);
   if (!carpeta || !process.env.BACKUP_CLAVE || !process.env.MONGODB_URI) { console.error('Uso: BACKUP_CLAVE=… MONGODB_URI=… node restaurarCopia.js <carpeta> [nombre_base_nueva]'); process.exit(1); }
-  const partes = fs.readdirSync(carpeta).filter(f => f.endsWith('.bin')).sort().map(f => fs.readFileSync(path.join(carpeta, f)));
-  if (!partes.length) { console.error('No hay archivos .bin en la carpeta.'); process.exit(1); }
+  const partes = fs.readdirSync(carpeta).filter(f => /\.(bin|txt)$/.test(f)).sort().map(f => fs.readFileSync(path.join(carpeta, f)));
+  if (!partes.length) { console.error('No hay archivos .txt en la carpeta.'); process.exit(1); }
   const destino = nombreBase || 'restaurada_' + new Date().toISOString().slice(0, 10).replace(/-/g, '');
   if (destino === 'calculadora_m2') { console.error('Por seguridad no se restaura sobre la base en uso (calculadora_m2). Elegí otro nombre.'); process.exit(1); }
   const c = await new MongoClient(process.env.MONGODB_URI).connect();

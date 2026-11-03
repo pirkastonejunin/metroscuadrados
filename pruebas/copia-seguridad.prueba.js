@@ -55,7 +55,7 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
     assert.ok(r.partes > 2, 'varias partes: ' + r.partes);
     copia1 = await db.collection('backups_copias').findOne({ estado: 'ok' });
     assert.strictEqual(copia1.partes.length, r.partes); assert.strictEqual(copia1.colecciones.clientes_t, 60); assert.strictEqual(copia1.origen, 'manual');
-    for (const [pid, buf] of nube.archivos) { assert.ok(!buf.toString('latin1').includes('Cliente'), 'la parte no debe ser legible'); assert.ok(pid.startsWith('backups-sistema/copia-')); }
+    for (const [pid, buf] of nube.archivos) { assert.ok(!buf.toString('latin1').includes('Cliente'), 'la parte no debe ser legible'); assert.ok(pid.startsWith('backups-sistema/copia-') && pid.endsWith('.txt'), 'extensión que Cloudinary acepta'); }
     for (const p of copia1.partes) assert.strictEqual(crypto.createHash('sha256').update(nube.archivos.get(p.publicId)).digest('hex'), p.sha256);
   });
   const partesEnOrden = () => copia1.partes.slice().sort((a, b) => a.n - b.n).map(p => nube.archivos.get(p.publicId));
