@@ -156,8 +156,6 @@
         </div>
         <div class="row" style="gap:8px">
           <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'gastos.xlsx')">Exportar</button>
-          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirImportarDux()">Importar de Dux</button>
-          <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirImportarNotasDux()" title="Notas de crédito y débito de gastos">Notas Dux</button>
             <button class="btn" onclick="abrirNuevoGasto()">+ Nuevo gasto</button>
         </div>
       </div>
@@ -1042,8 +1040,6 @@ async function descargarBlob(url, nombreArchivo){
 </script>
 
 <script>
-// Importar historial de gastos de Dux (9/10/2026)
-let impDuxB64 = null;
 function nombreComp(x){
   if (x.tipoComprobante && x.comprobanteNumero && TIPO_COMPROBANTE_LABEL[x.tipoComprobante] && !/^[A-Z]-\d/.test(x.comprobanteNumero)) {
     return escapeHtml(TIPO_COMPROBANTE_LABEL[x.tipoComprobante] + ' ' + (x.puntoVenta ? x.puntoVenta + '-' : '') + x.comprobanteNumero) + (x.numeroOriginal ? ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '');
@@ -1051,119 +1047,6 @@ function nombreComp(x){
   return nroImportado(x);
 }
 function nroImportado(x){ return x.numeroOriginal ? escapeHtml(x.numeroOriginal) + ' <span class="muted" style="font-size:11px" title="Histórico importado de Dux">Dux</span>' : '#' + x.numero; }
-let impDuxOrgs = [];
-function hImp(){ const sel = document.getElementById('impDuxOrg'); const h = headersAuthJson(); if (sel && sel.value) h['x-org-id'] = sel.value; return h; }
-async function abrirImportarDux(){
-  impDuxB64 = null;
-  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg">
-      <div class="modal">
-        <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Importar historial de gastos de Dux</h2>
-        <p class="muted">Subí el archivo "Listado de Comprobantes de Servicios" de Dux (.xls o .xlsx). Se carga como historial: sin movimientos de stock ni de caja/banco. Lo pagado y el saldo se toman de Dux. Si lo subís dos veces, no duplica.</p>
-        <label>Sucursal donde se cargan</label>
-        <select id="impDuxOrg" onchange="previewImportDux()">${impDuxOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
-        <input type="file" id="impDuxArchivo" accept=".xls,.xlsx" onchange="previewImportDux()" style="margin-top:8px">
-        <div class="err" id="impDuxErr"></div>
-        <div id="impDuxResumen"></div>
-        <button class="btn" id="impDuxBtn" style="margin-top:10px;display:none" onclick="aplicarImportDux()">Importar</button>
-      </div>
-    </div>`;
-}
-function leerB64(file){ return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); }); }
-async function previewImportDux(){
-  const file = document.getElementById('impDuxArchivo').files[0];
-  const errEl = document.getElementById('impDuxErr'); errEl.textContent = '';
-  document.getElementById('impDuxResumen').innerHTML = ''; document.getElementById('impDuxBtn').style.display = 'none';
-  if (!file) return;
-  document.getElementById('impDuxResumen').innerHTML = '<p class="muted">Analizando…</p>';
-  try{
-    impDuxB64 = await leerB64(file);
-    const r = await fetch('/api/compras-import-dux/gastos/preview', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error al analizar');
-    const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-';
-    const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
-    document.getElementById('impDuxResumen').innerHTML = `
-      <ul style="line-height:1.7;padding-left:18px">
-        <li><b>${d.aImportar}</b> gastos para importar de ${d.filasLeidas} leídos (${d.yaImportadas} ya estaban cargados)</li>
-        <li>Período: ${f(d.desde)} a ${f(d.hasta)} — Total: <b>${m(d.totalImporte)}</b></li>
-        <li>Con saldo pendiente: ${d.conSaldo} por <b>${m(d.totalSaldo)}</b>${d.anuladas ? ' — ' + d.anuladas + ' anuladas en Dux' : ''}</li>
-        <li>Se cargan en la sucursal activa: <b>${escapeHtml(d.sucursalDestino || '-')}</b></li>
-        <li>Proveedores: ${d.proveedoresExistentes} ya existen, <b>${d.proveedoresNuevos}</b> se van a crear${d.proveedoresAmbiguos ? ', ' + d.proveedoresAmbiguos + ' coinciden con más de uno (quedan sin vincular)' : ''}</li>
-        ${d.conceptosNuevos ? '<li>Conceptos de gasto nuevos a crear: <b>' + d.conceptosNuevos + '</b></li>' : ''}
-        ${d.sueldosReclasificados ? '<li>' + d.sueldosReclasificados + ' comprobantes de sueldos y cargas se clasifican como <b>Sueldos y cargas · sector</b> (Obra, Producción, Ventas, Otros, Cargas sociales) para que el Estado de resultados los tome como sueldos' + '</li>' : ''}
-      </ul>
-      ${d.errores.length ? '<p class="err">' + d.errores.length + ' fila(s) con error (se saltean):</p><ul class="muted">' + d.errores.slice(0,10).map(e => '<li>Fila ' + e.fila + ': ' + escapeHtml(e.motivo) + '</li>').join('') + '</ul>' : ''}`;
-    if (d.aImportar > 0) document.getElementById('impDuxBtn').style.display = '';
-  }catch(e){ errEl.textContent = e.message; document.getElementById('impDuxResumen').innerHTML = ''; }
-}
-async function aplicarImportDux(){
-  const btn = document.getElementById('impDuxBtn'); const errEl = document.getElementById('impDuxErr');
-  if (btn.disabled || !impDuxB64) return;
-  btn.disabled = true; btn.textContent = 'Importando…'; errEl.textContent = '';
-  try{
-    const r = await fetch('/api/compras-import-dux/gastos/aplicar', {method:'POST', headers: hImp(), body: JSON.stringify({archivoBase64: impDuxB64, orgId: (document.getElementById('impDuxOrg')||{}).value || undefined})});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Error al importar');
-    document.getElementById('impDuxResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} gastos importados${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
-    btn.style.display = 'none';
-    if (typeof cargarGastos === 'function') cargarGastos();
-  }catch(e){ errEl.textContent = e.message; btn.disabled = false; btn.textContent = 'Importar'; }
-}
-
-// ---- Notas de crédito / débito de Dux ----
-let impNtB64 = null;
-async function abrirImportarNotasDux(){
-  impNtB64 = null;
-  try{ const r = await fetch('/api/usuarios/me', {headers: headersAuth()}); if (r.ok) impDuxOrgs = (await r.json()).organizaciones || []; }catch(e){}
-  document.getElementById('modalRoot').innerHTML = `
-    <div class="modal-bg">
-      <div class="modal">
-        <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Importar notas de crédito y débito de gastos de Dux</h2>
-        <p class="muted">Subí el archivo "Listado de Nota Crédito Débito de Gasto" de Dux. Se cargan como historial (sin stock, caja ni saldo): las notas de crédito restan en los informes y en la cuenta del proveedor, las de débito suman. Si lo subís dos veces, no duplica.</p>
-        <label>Sucursal donde se cargan</label>
-        <select id="impNtOrg" onchange="previewNotasDuxC()">${impDuxOrgs.map(o => `<option value="${o._id}" ${o._id === ORG ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
-        <input type="file" id="impNtArchivo" accept=".xls,.xlsx" onchange="previewNotasDuxC()" style="margin-top:8px">
-        <div class="err" id="impNtErr"></div>
-        <div id="impNtResumen"></div>
-        <button class="btn" id="impNtBtn" style="margin-top:10px;display:none" onclick="aplicarNotasDuxC()">Importar notas</button>
-      </div>
-    </div>`;
-}
-function hNt(){ const h = headersAuthJson(); const s = document.getElementById('impNtOrg'); if (s && s.value) h['x-org-id'] = s.value; return h; }
-async function previewNotasDuxC(){
-  const file = document.getElementById('impNtArchivo').files[0]; const errEl = document.getElementById('impNtErr'); errEl.textContent = '';
-  const out = document.getElementById('impNtResumen'); out.innerHTML = ''; document.getElementById('impNtBtn').style.display = 'none';
-  if (!file) return; out.innerHTML = '<p class="muted">Analizando…</p>';
-  try{
-    if (!impNtB64 || impNtB64.file !== file) impNtB64 = {file, b64: await new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ko(new Error('No se pudo leer el archivo')); r.readAsDataURL(file); })};
-    const r = await fetch('/api/compras-import-dux/gastos/notas/preview', {method:'POST', headers: hNt(), body: JSON.stringify({archivoBase64: impNtB64.b64, orgId: document.getElementById('impNtOrg').value})});
-    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al analizar');
-    const f = x => x ? new Date(x).toLocaleDateString('es-AR', {timeZone:'UTC'}) : '-'; const m = n => '$' + Number(n).toLocaleString('es-AR', {maximumFractionDigits:0});
-    out.innerHTML = `<ul style="line-height:1.7;padding-left:18px">
-      <li><b>${d.aImportar}</b> notas para importar de ${d.filas} leídas (${d.yaCargadas} ya estaban cargadas)</li>
-      <li>Período: ${f(d.desde)} a ${f(d.hasta)}</li>
-      <li>Créditos: ${d.creditos} por <b>${m(d.totalCreditos)}</b> (restan) — Débitos: ${d.debitos} por <b>${m(d.totalDebitos)}</b> (suman)${d.anuladas ? ' — ' + d.anuladas + ' anuladas en Dux' : ''}</li>
-      <li>Se cargan en la sucursal: <b>${escapeHtml(d.sucursalDestino || '-')}</b></li>
-      <li>Proveedores: ${d.proveedoresExistentes} ya existen, <b>${d.proveedoresNuevos}</b> se van a crear${d.proveedoresAmbiguos ? ', ' + d.proveedoresAmbiguos + ' ambiguos (quedan sin vincular)' : ''}</li></ul>`
-      + (d.errores.length ? '<p class="err">' + d.errores.length + ' fila(s) con error</p>' : '');
-    if (d.aImportar > 0) document.getElementById('impNtBtn').style.display = '';
-  }catch(e){ out.innerHTML = ''; errEl.textContent = e.message; }
-}
-async function aplicarNotasDuxC(){
-  const btn = document.getElementById('impNtBtn'), errEl = document.getElementById('impNtErr');
-  if (btn.disabled || !impNtB64) return; btn.disabled = true; errEl.textContent = '';
-  try{
-    const r = await fetch('/api/compras-import-dux/gastos/notas/aplicar', {method:'POST', headers: hNt(), body: JSON.stringify({archivoBase64: impNtB64.b64, orgId: document.getElementById('impNtOrg').value})});
-    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al importar');
-    document.getElementById('impNtResumen').innerHTML = `<p class="ok-msg">Listo: ${d.insertadas} notas importadas${d.proveedoresCreados ? ' y ' + d.proveedoresCreados + ' proveedores creados' : ''}.</p>`;
-    btn.style.display = 'none'; if (typeof cargarGastos === 'function') cargarGastos();
-  }catch(e){ errEl.textContent = e.message; }
-  btn.disabled = false;
-}
 </script>
 </body>
 </html>

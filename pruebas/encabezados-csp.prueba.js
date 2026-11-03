@@ -10,7 +10,7 @@ const { chromium } = require('playwright');
   for (const f of fs.readdirSync(path.join(REPO, 'public')).filter(x => x.endsWith('.html')).sort()) {
     const p = await ctx.newPage(); const viol = [];
     p.on('console', m => { const t = m.text(); if (/Content Security Policy|Refused to/i.test(t)) viol.push(t.slice(0, 200)); });
-    p.on('pageerror', e => { if (/Content Security/i.test(String(e))) viol.push(String(e).slice(0, 200)); });
+    p.on('pageerror', e => { if (/Content Security|ReferenceError|SyntaxError|is not defined/i.test(String(e))) viol.push(String(e).slice(0, 200)); });
     try { await p.goto('http://localhost:4533/' + f, { waitUntil: 'load', timeout: 15000 }); await p.waitForTimeout(600); } catch (e) { viol.push('goto: ' + e.message.slice(0, 100)); }
     if (viol.length) { problemas++; console.log('✘', f, [...new Set(viol)].slice(0, 3)); }
     await p.close();

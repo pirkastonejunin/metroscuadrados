@@ -28,12 +28,11 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
     for (const [m, u] of [['GET', '/api/stores'], ['GET', '/api/products?store_id=1234'], ['POST', '/api/bulto/1?store_id=1234'], ['POST', '/api/bulto-cache/1?store_id=1234'], ['GET', '/admin/sincronizar-campos?store_id=1234'], ['GET', '/admin/crear-campo?store_id=1234'], ['GET', '/admin/activar-script?store_id=1234'], ['POST', '/admin/set-domain']])
       assert.strictEqual((await req(m, u, m === 'GET' ? null : {})).status, 401, m + ' ' + u);
   });
-  await caso('normalizador pide login', async () => { assert.strictEqual((await req('GET', '/api/normalizador/config')).status, 401); assert.strictEqual((await req('PUT', '/api/normalizador/config', { margenes: {} })).status, 401); });
+  await caso('normalizador e importadores de Dux ya no existen', async () => { for (const u of ['/api/normalizador/config', '/api/ventas-import-dux/preview', '/api/stock-import-dux/preview']) assert.notStrictEqual((await req('GET', u)).status, 200, u); assert.strictEqual((await fetch(B + '/normalizador.html')).status, 404); assert.strictEqual((await fetch(B + '/admin.html')).status, 404); assert.strictEqual((await fetch(B + '/instalada.html')).status, 200); });
   let token;
   await caso('login correcto funciona y con sesión se accede', async () => {
     const r = await req('POST', '/api/usuarios/login', { usuario: 'admin', password: 'clave-admin' }); assert.strictEqual(r.status, 200, JSON.stringify(r.data)); token = r.data.token;
     assert.strictEqual((await req('GET', '/api/stores', null, { 'x-admin-token': token })).status, 200);
-    assert.strictEqual((await req('GET', '/api/normalizador/config', null, { 'x-admin-token': token })).status, 200);
     assert.strictEqual((await req('GET', '/api/cotizador/historial?store_id=1234', null, { 'x-admin-token': token })).status, 200);
   });
   await caso('públicas siguen abiertas', async () => { const r = await fetch(B + '/public/catalogo-precios?store_id=1234'); assert.notStrictEqual(r.status, 401); });

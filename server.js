@@ -33,8 +33,6 @@ app.use('/api', auditoria.middleware); // historial de cambios: quién hizo qué
 const cotizadorRouter = require('./cotizador');
 app.use('/api/cotizador', cotizadorRouter);
 
-const normalizadorRouter = require('./normalizador');
-app.use('/api/normalizador', normalizadorRouter);
 
 const obrasRouter = require('./obras');
 app.use('/api/obras', obrasRouter);
@@ -72,18 +70,9 @@ const stockRouter = require('./stock');
 app.use('/api/stock', stockRouter);
 
 const ventasRouter = require('./ventas');
-app.use('/api/ventas-import-dux', require('./ventasImportDux'));
-app.use('/api/presupuestos-import-dux', require('./presupuestosImportDux'));
 app.use('/api/crm-import-historico', require('./crmImportHistorico'));
 app.use('/api/unificar-vendedores', require('./unificarVendedores'));
-app.use('/api/compras-import-dux', require('./comprasImportDux'));
-app.use('/api/cobros-import-dux', require('./cobrosImportDux'));
-app.use('/api/saldos-import-dux', require('./saldosImportDux'));
-app.use('/api/stock-import-dux', require('./stockImportDux'));
-app.use('/api/cheques-import-dux', require('./chequesImportDux'));
 app.use('/api/estado-migracion', require('./estadoMigracion'));
-app.use('/api/fichas-import-dux', require('./fichasImportDux'));
-app.use('/api/fichas-import-dux', require('./fichasClientesDux'));
 app.use('/api/unificar-clientes', require('./unificarClientes'));
 app.use('/api/unificar-proveedores', require('./unificarProveedores'));
 app.use('/api/unificar-catalogo', require('./unificarCatalogo'));
@@ -371,7 +360,7 @@ app.get('/auth/callback', async (req, res) => {
       }
     }
 
-    res.redirect('/admin.html?store_id=' + storeId + '&instalado=1');
+    res.redirect('/instalada.html?store_id=' + storeId);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -399,7 +388,7 @@ app.get('/admin/activar-script', authTN, async (req, res) => {
   }
 });
 
-// ---------- Lista de tiendas instaladas (para el selector en admin.html) ----------
+// ---------- Lista de tiendas instaladas (se conserva por compatibilidad) ----------
 
 app.get('/api/stores', authTN, async (req, res) => {
   try {
@@ -482,7 +471,7 @@ async function fetchAllProducts(storeId, accessToken) {
 // ---------- Campo personalizado en la ficha de Tiendanube ----------
 // Crea (una vez por tienda) un campo "Rendimiento por caja" que aparece
 // en la ficha del producto dentro del admin de Tiendanube, para que
-// quien carga el producto pueda completarlo ahi sin entrar a /admin.html.
+// quien carga el producto pueda completarlo ahi sin entrar al panel viejo.
 
 const NOMBRE_CAMPO = 'Rendimiento por caja';
 
