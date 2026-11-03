@@ -119,6 +119,8 @@ app.use('/api/tablero', tableroRouter);
 app.use('/api/facturacion', require('./facturacion'));
 app.use('/api/informes', require('./informes'));
 app.use('/api/consistencia', require('./consistencia'));
+const backupRouter = require('./backup');
+app.use('/api/backups', backupRouter); // copia diaria cifrada a Cloudinary (ver backup.js)
 app.use('/api/sueldos', require('./sueldos'));
 // Asistente IA del sistema + propuestas de mejora (17/10/2026, pedido de Mato).
 app.use('/api/asistente', require('./asistente'));
@@ -957,6 +959,7 @@ app.get('/public/bulto/:productId', async (req, res) => {
 
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => console.log('Corriendo en puerto ' + PORT));
+backupRouter.iniciarProgramador(); // copia diaria de la base (solo actúa si BACKUP_CLAVE y Cloudinary están configurados)
 
 // Limpieza única (8/10/2026, pedido de Mato): se sacó la tienda online y la importación de fotos
 // de Tiendanube; se borran de la base las fotos importadas y las fichas de tienda para liberar

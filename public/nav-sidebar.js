@@ -214,6 +214,7 @@
     { key: 'correo', href: '/admin-correo.html', modulo: 'usuarios', label: 'Correo a clientes', icon: ICONOS.usuarios },
     { key: 'propuestas', href: '/admin-propuestas.html', modulo: 'usuarios', label: 'Propuestas de mejora (asistente)', icon: ICONOS.usuarios },
     { key: 'consistencia', href: '/admin-consistencia.html', modulo: 'usuarios', label: 'Revisión de consistencia de datos', icon: ICONOS.usuarios },
+    { key: 'backups', href: '/admin-backups.html', modulo: 'usuarios', label: 'Copias de seguridad', icon: ICONOS.usuarios },
     { key: 'asesores', href: '/admin-asesores.html', modulo: 'usuarios', label: 'Asesores IA (conocimiento en Drive)', icon: ICONOS.usuarios }
   ];
 

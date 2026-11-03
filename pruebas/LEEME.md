@@ -8,6 +8,7 @@
 Qué cubren:
 - `transacciones-*`: que Ventas, Compras, Gastos, Tesorería, Sueldos, Stock, Financiera y Clientes guarden todo o nada (se fuerza un error a mitad de la operación y se verifica que no quede nada suelto).
 - `seguridad-*`: sesiones firmadas, accesos por módulo y sucursal, límite de intentos de login.
+- `copia-seguridad`: la copia diaria cifrada: se exporta, se sube (con Cloudinary simulado que valida la firma), se restaura en otra base y se compara todo; también falla bien, no se pisa y conserva solo 14.
 - `encabezados-csp`: abre todas las pantallas en un navegador y verifica que la política de seguridad no bloquee nada.
 - `estado-resultados-detalle`, `unificar-conceptos-gasto`, `imputar-cobros`: lógica de informes y cuenta corriente.
 
