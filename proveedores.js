@@ -603,6 +603,11 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
         const nomOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
         const arma = (lista, tipo, ya) => lista.filter(d => !ya.has(String(d._id))).map(d => ({ tipo, numero: d.numero, fecha: d.fecha, total: d.total, comprobante: nombreComprobante(d) || '', sucursal: nomOrg.get(String(d.orgId)) || '', motivo: String(d.proveedorId) === String(id) ? 'otra_sucursal' : 'otro_proveedor', proveedorId: d.proveedorId }));
         noIncluidos = arma(otrasC, 'compra', yaCompras).concat(arma(otrosG, 'gasto', yaGastos)).sort((x, y) => new Date(y.fecha) - new Date(x.fecha));
+        // Estado del otro registro del proveedor (¿inactivo?, ¿ya unificado en otro?, ¿de qué sucursal?).
+        const otrosIds = [...new Set(noIncluidos.filter(n => n.motivo === 'otro_proveedor' && n.proveedorId).map(n => String(n.proveedorId)))].map(toObjectId).filter(Boolean);
+        const otros = otrosIds.length ? await db.collection('proveedores').find({ _id: { $in: otrosIds } }).project({ razonSocial: 1, activo: 1, unificadoEn: 1, orgId: 1, cuit: 1 }).toArray() : [];
+        const infoOtro = new Map(otros.map(o => [String(o._id), { activo: o.activo !== false, unificadoEn: o.unificadoEn ? String(o.unificadoEn) : null, sucursal: nomOrg.get(String(o.orgId)) || '', cuit: o.cuit || '' }]));
+        noIncluidos.forEach(n => { if (n.motivo === 'otro_proveedor') { n.otroRegistro = infoOtro.get(String(n.proveedorId)) || { inexistente: true }; } });
       }
       return { proveedor, saldo, movimientos: movimientos.slice(0, limite), noIncluidos };
     });

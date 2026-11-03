@@ -17,12 +17,14 @@ const { ObjectId } = require('mongodb');
     Object.assign({}, base, { numero: 4, proveedorId: h.ids.provAcme, orgId: otraOrg }),              // otra sucursal
     Object.assign({}, base, { numero: 5, proveedorId: dup, orgId: h.ids.org, estado: 'anulada' }),    // anulada: no cuenta
   ]);
+  await db.collection('proveedores').updateOne({ _id: dup }, { $set: { activo: false, unificadoEn: h.ids.provAcme } });
   const call = async (org) => (await fetch('http://localhost:4471/api/proveedores/' + h.ids.provAcme + '/cuenta-corriente', { headers: org ? { 'x-org-id': String(org) } : {} })).json();
   const d = await call(h.ids.org);
   assert.deepStrictEqual(d.movimientos.map(m => m.docNumero).sort(), [1, 2], 'en la cuenta solo entran las de este registro y sucursal');
   const por = Object.fromEntries(d.noIncluidos.map(n => [n.numero, n.motivo]));
   assert.deepStrictEqual(por, { 3: 'otro_proveedor', 4: 'otra_sucursal' }, JSON.stringify(d.noIncluidos));
   assert.strictEqual(d.noIncluidos.find(n => n.numero === 4).sucursal, 'Pirka');
+  const o3 = d.noIncluidos.find(n => n.numero === 3).otroRegistro; assert.strictEqual(o3.activo, false); assert.strictEqual(o3.unificadoEn, String(h.ids.provAcme));
   const t = await call('todas'); assert.deepStrictEqual(t.movimientos.map(m => m.docNumero).sort(), [1, 2, 4]); assert.deepStrictEqual(t.noIncluidos.map(n => n.numero), [3]);
   console.log('TODO OK'); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });
