@@ -25,6 +25,7 @@ app.use((req, res, next) => { compartido.listo.then(() => next(), () => next());
 // grandes.
 app.use(express.json({ limit: '30mb', verify: (req, res, buf) => { if (req.url && (req.url.startsWith('/api/leads/azuite/webhook') || req.url.startsWith('/api/bot/webhook'))) req.rawBody = buf; } })); // rawBody: el webhook de Azuite se firma sobre el cuerpo crudo
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api', require('./antiRepetido')); // mismo POST repetido (en curso o recién terminado) → misma respuesta, no se guarda dos veces
 
 const cotizadorRouter = require('./cotizador');
 app.use('/api/cotizador', cotizadorRouter);
@@ -116,6 +117,7 @@ app.use('/api/tablero', tableroRouter);
 // Tablero de facturación por sucursal (7/10/2026, pedido de Mato).
 app.use('/api/facturacion', require('./facturacion'));
 app.use('/api/informes', require('./informes'));
+app.use('/api/consistencia', require('./consistencia'));
 app.use('/api/sueldos', require('./sueldos'));
 // Asistente IA del sistema + propuestas de mejora (17/10/2026, pedido de Mato).
 app.use('/api/asistente', require('./asistente'));

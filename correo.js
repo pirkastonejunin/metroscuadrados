@@ -35,7 +35,7 @@ async function getDb() {
   }
   return mongoClient.db(DB_NAME);
 }
-async function conReintento(fn) { try { return await fn(); } catch (e) { if (e && e.status) throw e; mongoClient = null; return await fn(); } }
+async function conReintento(fn) { try { return await fn(); } catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); } }
 function err(status, message) { const e = new Error(message); e.status = status; return e; }
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

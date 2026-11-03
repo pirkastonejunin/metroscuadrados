@@ -124,9 +124,8 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
-    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
-    mongoClient = null; // fuerza reconexión, mismo patrón que el resto de la app
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
+        mongoClient = null; // fuerza reconexión, mismo patrón que el resto de la app
     return await fn();
   }
 }
@@ -358,6 +357,25 @@ function resolverOrg(req, res, next) {
   }
   req.orgId = toObjectId(elegido);
   next();
+}
+
+// Vista "Todas las sucursales" (auditoría 3/11/2026): al guardar, resolverOrg usa la sucursal elegida para operar. En las acciones
+// sobre un registro que YA existe (editar, anular, cobrar, entregar…) hay que operar en la sucursal de ese registro; si no, sale
+// "no encontrado" cuando el registro es de otra sucursal. `colDe` = nombre de la colección, o función (req) → colección o null.
+function orgDelRegistro(colDe) {
+  return async (req, res, next) => {
+    try {
+      if (!req.vistaTodas || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+      const id = req.params && req.params.id;
+      if (!/^[0-9a-f]{24}$/i.test(String(id || ''))) return next();
+      const col = typeof colDe === 'function' ? colDe(req) : colDe;
+      if (!col) return next();
+      const db = await getDb();
+      const d = await db.collection(col).findOne({ _id: toObjectId(id) }, { projection: { orgId: 1 } });
+      if (d && d.orgId) { req.orgId = d.orgId; req.orgOperar = d.orgId; }
+      next();
+    } catch (e) { next(e); }
+  };
 }
 function filtroOrg(req) {
   return req.orgId ? { orgId: req.orgId } : {};
@@ -931,6 +949,7 @@ module.exports.tieneModulo = tieneModulo;
 module.exports.MODULOS = MODULOS;
 module.exports.resolverOrg = resolverOrg;
 module.exports.filtroOrg = filtroOrg;
+module.exports.orgDelRegistro = orgDelRegistro;
 module.exports.filtroOrgClientes = filtroOrgClientes;
 // Cliente para operar en la sucursal actual: si es de la sucursal o ya está compartido con ella, se devuelve tal cual. Si es de OTRA sucursal
 // a la que el usuario tiene acceso, se comparte con la actual (un mismo cliente que opera en varias sucursales es UNA sola ficha y un solo saldo).

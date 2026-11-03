@@ -118,9 +118,8 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
-    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
-    mongoClient = null;
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
+        mongoClient = null;
     return await fn();
   }
 }
@@ -158,7 +157,7 @@ const ESTADO_LABEL = {
   rechazado: 'Rechazado'
 };
 
-const authAdmin = [authUsuario, resolverOrg, requiereModulo('ventas')];
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('ventas'), require('./usuarios').orgDelRegistro(req => (req.route && String(req.route.path).startsWith('/:id')) ? 'presupuestos' : null)];
 
 // -----------------------------------------------------------------------
 // Ítems — versión liviana de normalizarItems (ventas.js): NO valida ni

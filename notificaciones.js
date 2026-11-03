@@ -71,7 +71,7 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
     try { if (mongoClient) await mongoClient.close(); } catch (_) {}
     mongoClient = null;
     return await fn();

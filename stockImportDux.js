@@ -28,7 +28,7 @@ async function getDb() {
   }
   return mongoClient.db(DB_NAME);
 }
-async function conReintento(fn) { try { return await fn(); } catch (e) { if (e.status) throw e; mongoClient = null; return await fn(); } }
+async function conReintento(fn) { try { return await fn(); } catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); } }
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const round3 = (n) => Math.round((Number(n) || 0) * 1000) / 1000;

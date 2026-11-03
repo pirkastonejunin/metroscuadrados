@@ -56,7 +56,7 @@ async function getDb() {
   return mongoClient.db(DB_NAME);
 }
 async function conReintento(fn) {
-  try { return await fn(); } catch (e) { if (e.status) throw e; mongoClient = null; return await fn(); }
+  try { return await fn(); } catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); }
 }
 function err(status, message) { return Object.assign(new Error(message), { status }); }
 function oid(v) { try { return v ? new ObjectId(String(v)) : null; } catch (e) { return null; } }

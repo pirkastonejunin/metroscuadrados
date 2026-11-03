@@ -64,7 +64,7 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (err) {
+  } catch (err) { if (!require('./reintento').reintentable(err)) throw err;
     mongoClient = null; // fuerza reconexion, mismo patron que server.js/cotizador.js
     return await fn();
   }

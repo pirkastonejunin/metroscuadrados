@@ -155,9 +155,8 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
-    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
-    mongoClient = null;
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
+        mongoClient = null;
     return await fn();
   }
 }
@@ -251,7 +250,7 @@ const COLUMNAS_VENTAS_EXPORT = [
 const MONEDAS_VALIDAS = ['ARS', 'USD'];
 const TIPOS_VALOR_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
 
-const authAdmin = [authUsuario, resolverOrg, requiereModulo('ventas')];
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('ventas'), require('./usuarios').orgDelRegistro(req => (req.route && String(req.route.path).startsWith('/:id')) ? 'ventas' : null)];
 // En "vista todas" las acciones se hacen con la sucursal de operación elegida arriba; si la venta es de OTRA sucursal
 // no se encontraba ("Venta no encontrada"). Acá se busca por id y se opera con la sucursal propia de la venta.
 async function buscarVentaOperable(db, req, id) {

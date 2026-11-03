@@ -147,9 +147,8 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
-    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
-    mongoClient = null;
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
+        mongoClient = null;
     return await fn();
   }
 }
@@ -173,7 +172,8 @@ const ESTADOS_CHEQUE_PROPIO = ['emitido', 'pagado', 'rechazado', 'anulado'];
 const TIPOS_VALOR_COBRO_CUENTA_VALIDOS = ['efectivo', 'cheque', 'cuenta', 'tarjeta'];
 
 const authConfig = [authUsuario, resolverOrg, requiereModulo('usuarios')];
-const authOperar = [authUsuario, resolverOrg, requiereModulo('tesoreria')];
+const COL_POR_RUTA = { '/movimientos/:id': 'tesoreria_movimientos', '/cobranzas/:id': 'cuenta_corriente_movimientos', '/cheques/:id': 'cheques' };
+const authOperar = [authUsuario, resolverOrg, requiereModulo('tesoreria'), require('./usuarios').orgDelRegistro(req => { const r = String((req.route && req.route.path) || ''); const k = Object.keys(COL_POR_RUTA).find(x => r.startsWith(x)); return k ? COL_POR_RUTA[k] : null; })];
 
 // Una cuenta (caja o banco) está habilitada para este request si está
 // activa, y si está habilitada para la sucursal actual (o no tiene

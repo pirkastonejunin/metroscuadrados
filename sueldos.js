@@ -77,7 +77,7 @@ async function getDb() {
 }
 async function conReintento(fn) {
   try { return await fn(); }
-  catch (e) { if (e && e.status) throw e; mongoClient = null; return await fn(); }
+  catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); }
 }
 function toObjectId(id) { try { return id ? new ObjectId(String(id)) : null; } catch (e) { return null; } }
 function err(status, message) { return Object.assign(new Error(message), { status }); }

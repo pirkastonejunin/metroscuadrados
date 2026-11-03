@@ -98,9 +98,8 @@ async function getDb() {
 async function conReintento(fn) {
   try {
     return await fn();
-  } catch (e) {
-    if (e && e.status) throw e; // un rechazo de negocio (400/404…) no se reintenta: si ya había escrito algo, lo duplicaría
-    mongoClient = null;
+  } catch (e) { if (!require('./reintento').reintentable(e)) throw e;
+        mongoClient = null;
     return await fn();
   }
 }
@@ -178,7 +177,7 @@ const COLUMNAS_GASTOS_EXPORT = [
   { clave: 'observaciones', titulo: 'Observaciones' }
 ];
 
-const authAdmin = [authUsuario, resolverOrg, requiereModulo('gastos')];
+const authAdmin = [authUsuario, resolverOrg, requiereModulo('gastos'), require('./usuarios').orgDelRegistro(req => (req.route && String(req.route.path).startsWith('/:id')) ? 'gastos' : null)];
 
 function normalizarCantidadPositiva(v, etiqueta) {
   const n = Number(v);

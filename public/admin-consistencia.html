@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es"><head><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Revisión de consistencia</title>
+<style>
+body{font-family:-apple-system,"Segoe UI",Roboto,sans-serif;background:#f6f7f9;color:#1b1f24;margin:0;padding:20px}
+.card{max-width:900px;margin:0 auto 14px;background:#fff;border:1px solid #e3e6ea;border-radius:14px;padding:20px}
+h1{font-size:20px;margin:0 0 6px} h2{font-size:16px;margin:0 0 4px} .muted{color:#667085;font-size:13px}
+table{width:100%;border-collapse:collapse;margin-top:10px} td,th{padding:7px 4px;border-bottom:1px solid #eee;font-size:13px;text-align:left;vertical-align:top}
+.ok{color:#067647;font-weight:700} .mal{color:#b42318;font-weight:700} .err{color:#b42318;margin-top:8px}
+select,button{padding:8px 12px;border:1px solid #cfd4da;border-radius:8px;font-size:14px;background:#fff} button{background:#1b1f24;color:#fff;border:0;font-weight:700;cursor:pointer}
+.ids{font-family:ui-monospace,monospace;font-size:11px;color:#667085;word-break:break-all}
+</style></head><body>
+<div class="card">
+  <h1>Revisión de consistencia de datos</h1>
+  <p class="muted">Busca en todas las sucursales registros repetidos o que quedaron a medio guardar. No corrige nada: te muestra qué revisar.</p>
+  <div><select id="dias"><option value="30">Últimos 30 días</option><option value="180" selected>Últimos 6 meses</option><option value="365">Último año</option><option value="1095">Últimos 3 años</option></select> <button onclick="cargar()">Revisar</button></div>
+  <div class="err" id="err"></div>
+</div>
+<div id="cont"></div>
+<script>
+const TOKEN = localStorage.getItem('obras_admin_token') || '';
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function cargar(){
+  const cont = document.getElementById('cont'), err = document.getElementById('err'); err.textContent = '';
+  if (!TOKEN){ err.textContent = 'Entrá primero al sistema con tu usuario Administrador.'; return; }
+  cont.innerHTML = '<div class="card muted">Revisando…</div>';
+  try{
+    const r = await fetch('/api/consistencia?dias=' + document.getElementById('dias').value, {headers: {'x-admin-token': TOKEN}});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    cont.innerHTML = `<div class="card">${d.problemas ? '<span class="mal">' + d.problemas + ' caso(s) para revisar</span>' : '<span class="ok">Todo en orden</span>'} <span class="muted">desde el ${esc(d.desde)}</span></div>` +
+      d.revisiones.map(rv => `<div class="card"><h2>${rv.cantidad ? '⚠️' : '✓'} ${esc(rv.titulo)} — ${rv.cantidad}</h2><div class="muted">${esc(rv.explicacion)}</div>` +
+        (rv.cantidad ? `<table><tr><th>Sucursal</th><th>Fecha</th><th>Detalle</th><th>Id interno</th></tr>${rv.filas.map(f => `<tr><td>${esc(f.sucursal)}</td><td>${esc(f.fecha||'')}</td><td>${esc(f.detalle)}${f.cantidad ? ' (' + f.cantidad + ' veces)' : ''}</td><td class="ids">${(f.ids||[]).map(esc).join('<br>')}</td></tr>`).join('')}</table>${rv.cantidad > rv.filas.length ? '<div class="muted">Se muestran los primeros ' + rv.filas.length + '.</div>' : ''}` : '') + '</div>').join('');
+  }catch(e){ cont.innerHTML = ''; err.textContent = e.message; }
+}
+cargar();
+</script></body></html>

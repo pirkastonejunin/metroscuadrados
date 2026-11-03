@@ -33,7 +33,7 @@ async function getDb() {
   }
   return mongoClient.db(DB_NAME);
 }
-async function conReintento(fn) { try { return await fn(); } catch (e) { if (e && e.status) throw e; mongoClient = null; return await fn(); } }
+async function conReintento(fn) { try { return await fn(); } catch (e) { if (!require('./reintento').reintentable(e)) throw e; mongoClient = null; return await fn(); } }
 function toObjectId(id) { try { return new ObjectId(id); } catch (e) { return null; } }
 function err(status, message) { const e = new Error(message); e.status = status; return e; }
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
