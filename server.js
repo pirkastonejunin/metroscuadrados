@@ -17,6 +17,7 @@ const app = express();
 // diferencia entre notarse trabado o no. No tiene contras: el browser
 // descomprime solo, es estándar en cualquier API.
 app.use(compression());
+app.use(require('./seguridadHeaders')); // HSTS, nosniff, CSP, anti-clickjacking (ver seguridadHeaders.js)
 app.use((req, res, next) => { compartido.listo.then(() => next(), () => next()); });
 // Límite subido a 30mb (30/9/2026): el import de módulos (Productos,
 // Clientes, etc.) manda el Excel como base64 dentro del JSON, y el
