@@ -1004,6 +1004,14 @@ router.post('/:id/convertir-fiscal', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Vendedores que figuran en las ventas de la sucursal (para el filtro del listado): incluye a los de ventas migradas que ya no son usuarios.
+router.get('/vendedores', authAdmin, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => (await getDb()).collection('ventas').distinct('vendedor', Object.assign({ vendedor: { $nin: [null, ''] } }, filtroOrg(req))));
+    res.json(lista.filter(v => typeof v === 'string' && v.trim()).sort((x, y) => x.localeCompare(y, 'es')));
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/resumen', authAdmin, async (req, res) => {
   try {
     const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }).format(new Date());
@@ -1013,7 +1021,7 @@ router.get('/resumen', authAdmin, async (req, res) => {
     const ventas = await conReintento(async () => {
       const db = await getDb();
       return db.collection('ventas')
-        .find(Object.assign({ estado: { $ne: 'anulada' }, fecha: { $gte: desdeMes } }, filtroOrg(req)))
+        .find(Object.assign({ estado: { $ne: 'anulada' }, fecha: { $gte: desdeMes } }, req.query.vendedor ? { vendedor: normalizarTexto(req.query.vendedor) } : {}, filtroOrg(req)))
         .project({ fecha: 1, total: 1, moneda: 1, tipoComprobante: 1 }).toArray();
     });
     const vacio = () => ({ cantidad: 0, monto: {} });
@@ -1045,6 +1053,7 @@ router.get('/', authAdmin, async (req, res) => {
       if (!ESTADOS_VALIDOS.includes(req.query.estado)) throw err(400, 'Estado inválido');
       match.estado = req.query.estado;
     }
+    if (req.query.vendedor) match.vendedor = normalizarTexto(req.query.vendedor); // filtro por vendedor (3/11/2026)
     if (req.query.desde || req.query.hasta) {
       match.fecha = {};
       if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);
@@ -1069,6 +1078,7 @@ router.get('/export', authAdmin, async (req, res) => {
       if (cid) match.clienteId = cid;
     }
     if (req.query.estado && ESTADOS_VALIDOS.includes(req.query.estado)) match.estado = req.query.estado;
+    if (req.query.vendedor) match.vendedor = normalizarTexto(req.query.vendedor);
     if (req.query.desde || req.query.hasta) {
       match.fecha = {};
       if (req.query.desde) match.fecha.$gte = new Date(req.query.desde);

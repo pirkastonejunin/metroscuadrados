@@ -168,6 +168,10 @@
               <option value="anulada">Anulada</option>
             </select>
           </div>
+          <div style="min-width:170px">
+            <label>Vendedor</label>
+            <select id="fvVendedor" onchange="cargarVentas()"><option value="">Todos</option></select>
+          </div>
           <div style="min-width:140px">
             <label>Desde</label>
             <input id="fvDesde" type="date" onchange="cargarVentas()">
@@ -178,7 +182,7 @@
           </div>
         </div>
         <div class="row" style="gap:8px">
-          <button class="btn secondary" onclick="descargarBlob(BASE + '/export', 'ventas.xlsx')">Exportar</button>
+          <button class="btn secondary" onclick="descargarBlob(BASE + '/export' + exportarFiltros(), 'ventas.xlsx')">Exportar</button>
           <button class="btn secondary dux-migracion" style="display:none" data-migracion="dux" onclick="abrirImportarDux()">Importar historial Dux</button>
           <button class="btn" onclick="abrirNuevaVenta()">+ Nueva venta</button>
         </div>
@@ -502,9 +506,24 @@ function montoResumen(m){
   if (!mons.length) return money(0);
   return mons.map(k => (k === 'ARS' ? '' : k + ' ') + money(m[k])).join(' + ');
 }
+// El Excel respeta los mismos filtros que el listado.
+function exportarFiltros(){
+  const p = new URLSearchParams();
+  [['clienteId','fvCliente'],['estado','fvEstado'],['vendedor','fvVendedor'],['desde','fvDesde'],['hasta','fvHasta']].forEach(([k,id]) => { const v = document.getElementById(id).value; if (v) p.set(k, v); });
+  const q = p.toString(); return q ? '?' + q : '';
+}
+async function cargarVendedoresFiltro(){
+  try{
+    const r = await fetch(BASE + '/vendedores', {headers: headersAuth()}); if (!r.ok) return;
+    const sel = document.getElementById('fvVendedor'), actual = sel.value;
+    sel.innerHTML = '<option value="">Todos</option>' + (await r.json()).map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    sel.value = actual;
+  }catch(e){}
+}
 async function cargarResumenVentas(){
   try{
-    const r = await fetch(BASE + '/resumen', {headers: headersAuth()});
+    const vf = document.getElementById('fvVendedor').value;
+    const r = await fetch(BASE + '/resumen' + (vf ? '?vendedor=' + encodeURIComponent(vf) : ''), {headers: headersAuth()});
     if (!r.ok) return;
     const d = await r.json();
     document.getElementById('rvDiaMonto').textContent = montoResumen(d.dia.monto);
@@ -514,10 +533,11 @@ async function cargarResumenVentas(){
   }catch(e){}
 }
 async function cargarVentas(){
-  cargarResumenVentas();
+  cargarResumenVentas(); cargarVendedoresFiltro();
   const params = new URLSearchParams();
   if (document.getElementById('fvCliente').value) params.set('clienteId', document.getElementById('fvCliente').value);
   if (document.getElementById('fvEstado').value) params.set('estado', document.getElementById('fvEstado').value);
+  if (document.getElementById('fvVendedor').value) params.set('vendedor', document.getElementById('fvVendedor').value);
   if (document.getElementById('fvDesde').value) params.set('desde', document.getElementById('fvDesde').value);
   if (document.getElementById('fvHasta').value) params.set('hasta', document.getElementById('fvHasta').value);
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
