@@ -591,7 +591,20 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       movimientos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
       const saldo = Math.round(movimientos.filter(m => !m.importado).reduce((acc, m) => acc + (m.tipo === 'debito' ? m.monto : -m.monto), 0) * 100) / 100;
 
-      return { proveedor, saldo, movimientos: movimientos.slice(0, limite) };
+      // Aviso: comprobantes del MISMO nombre de proveedor que no entraron en esta cuenta (cargados a otro registro del proveedor o en otra sucursal).
+      const esc = x => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const nombres = [proveedor.razonSocial, proveedor.nombreFantasia].filter(Boolean).map(x => new RegExp('^\\s*' + esc(String(x).trim()) + '\\s*$', 'i'));
+      let noIncluidos = [];
+      if (nombres.length) {
+        const yaCompras = new Set(compras.map(c => String(c._id))), yaGastos = new Set(gastos.map(g => String(g._id)));
+        const q = { proveedorNombre: { $in: nombres }, estado: { $ne: 'anulada' } };
+        const proy = { numero: 1, total: 1, fecha: 1, proveedorId: 1, orgId: 1, tipoComprobante: 1, puntoVenta: 1, comprobanteNumero: 1 };
+        const [otrasC, otrosG, orgs] = await Promise.all([db.collection('compras').find(q).project(proy).limit(200).toArray(), db.collection('gastos').find(q).project(proy).limit(200).toArray(), db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()]);
+        const nomOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
+        const arma = (lista, tipo, ya) => lista.filter(d => !ya.has(String(d._id))).map(d => ({ tipo, numero: d.numero, fecha: d.fecha, total: d.total, comprobante: nombreComprobante(d) || '', sucursal: nomOrg.get(String(d.orgId)) || '', motivo: String(d.proveedorId) === String(id) ? 'otra_sucursal' : 'otro_proveedor', proveedorId: d.proveedorId }));
+        noIncluidos = arma(otrasC, 'compra', yaCompras).concat(arma(otrosG, 'gasto', yaGastos)).sort((x, y) => new Date(y.fecha) - new Date(x.fecha));
+      }
+      return { proveedor, saldo, movimientos: movimientos.slice(0, limite), noIncluidos };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

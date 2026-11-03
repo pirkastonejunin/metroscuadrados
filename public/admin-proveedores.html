@@ -785,6 +785,10 @@ async function cargarCuentaCorrienteProveedorTab(id){
           </div>
         </div>
       </div>
+      ${(data.noIncluidos || []).length ? `<div style="background:#fff4d6;border:1px solid #f0d78a;border-radius:10px;padding:10px 12px;margin:0 0 12px;font-size:13px">
+        <b>⚠ Hay ${data.noIncluidos.length} comprobante(s) con el nombre de este proveedor que NO están en esta cuenta corriente:</b>
+        <table style="margin-top:6px"><tbody>${data.noIncluidos.slice(0, 15).map(n => `<tr><td>${fechaCorta(n.fecha)}</td><td>${n.tipo === 'gasto' ? 'Gasto' : 'Compra'} #${escapeHtml(n.numero)}</td><td>${escapeHtml(n.comprobante)}</td><td>${money(n.total)}</td><td>${n.motivo === 'otra_sucursal' ? 'Cargada en otra sucursal' + (n.sucursal ? ' (' + escapeHtml(n.sucursal) + ')' : '') : 'Cargada a <b>otro registro</b> de proveedor con el mismo nombre'}</td></tr>`).join('')}</tbody></table>
+        <div class="muted" style="margin-top:6px">${data.noIncluidos.some(n => n.motivo === 'otro_proveedor') ? 'Si es el mismo proveedor, usá <b>Unificar duplicados</b> (arriba, en la lista de Proveedores) para juntar sus cuentas. ' : ''}${data.noIncluidos.some(n => n.motivo === 'otra_sucursal') ? 'Para ver las de otra sucursal, cambiá el selector de arriba a "Todas las sucursales".' : ''}</div></div>` : ''}
       <table>
         <thead><tr><th>Fecha</th><th>Comprobante</th><th>Concepto</th><th>Origen</th><th>Débito</th><th>Crédito</th><th>Saldo</th><th></th></tr></thead>
         <tbody>
