@@ -34,6 +34,9 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 
 const router = express.Router();
+// Solo usuarios con sesión y acceso a Productos o Costos (auditoría 3/11/2026: estaba abierto sin login).
+const { authUsuario, requiereAlgunModulo } = require('./usuarios');
+router.use(authUsuario, requiereAlgunModulo('productos', 'costos'));
 
 const DB_NAME = 'calculadora_m2';
 const LISTAS = ['colocado', 'contado', 'lista', 'mayorista', 'tiendanube'];

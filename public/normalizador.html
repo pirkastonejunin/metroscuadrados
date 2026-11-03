@@ -485,9 +485,11 @@ function toggleDescCompuesta() {
 }
 
 async function api(path, opts) {
+  let tk = ''; try { tk = localStorage.getItem('obras_admin_token') || ''; } catch (e) {}
   const r = await fetch('/api/normalizador' + path, Object.assign({
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json', 'x-admin-token': tk }
   }, opts));
+  if (r.status === 401) throw new Error('Iniciá sesión en el sistema (por ejemplo en /admin-productos.html) y volvé a abrir esta pantalla.');
   const data = await r.json();
   if (!r.ok) throw new Error(data.error || 'Error de red');
   return data;

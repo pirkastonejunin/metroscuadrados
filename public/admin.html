@@ -94,6 +94,37 @@
       unidad: 'Unidad (venta directa, sin cálculo)'
     };
 
+    // Sesión del sistema (auditoría 3/11/2026): estas rutas ahora piden login con acceso a Productos.
+    let TOKEN_ADM = '';
+    try { TOKEN_ADM = localStorage.getItem('obras_admin_token') || ''; } catch (e) {}
+    (function () {
+      const original = window.fetch.bind(window);
+      window.fetch = function (input, init) {
+        init = Object.assign({}, init);
+        if (TOKEN_ADM) init.headers = Object.assign({}, init.headers, { 'x-admin-token': TOKEN_ADM });
+        return original(input, init).then(function (r) { if (r.status === 401 && !String(input).includes('/api/usuarios/login')) mostrarLoginAdm(); return r; });
+      };
+    })();
+    function mostrarLoginAdm(msg) {
+      if (document.getElementById('admLogin')) { if (msg) document.getElementById('admLoginMsg').textContent = msg; return; }
+      const d = document.createElement('div'); d.id = 'admLogin';
+      d.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.97);z-index:999;display:flex;align-items:center;justify-content:center;font-family:sans-serif';
+      d.innerHTML = '<div style="width:300px;border:1px solid #ddd;border-radius:12px;padding:20px"><h3 style="margin-top:0">Iniciá sesión</h3><p style="font-size:13px;color:#666">Con tu usuario del sistema Piedra Negra.</p>'
+        + '<input id="admU" placeholder="Usuario" autocomplete="username" style="width:100%;margin-bottom:8px;padding:8px;box-sizing:border-box">'
+        + '<input id="admP" type="password" placeholder="Contraseña" autocomplete="current-password" style="width:100%;margin-bottom:8px;padding:8px;box-sizing:border-box" onkeydown="if(event.key===\'Enter\')loginAdm()">'
+        + '<div id="admLoginMsg" style="color:#c0392b;font-size:13px;min-height:16px"></div><button onclick="loginAdm()" style="width:100%;padding:9px">Entrar</button></div>';
+      document.body.appendChild(d);
+      if (msg) document.getElementById('admLoginMsg').textContent = msg;
+    }
+    async function loginAdm() {
+      try {
+        const r = await fetch('/api/usuarios/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ usuario: document.getElementById('admU').value, password: document.getElementById('admP').value }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+        TOKEN_ADM = d.token; try { localStorage.setItem('obras_admin_token', TOKEN_ADM); } catch (e) {}
+        location.reload();
+      } catch (e) { document.getElementById('admLoginMsg').textContent = e.message; }
+    }
+
     let productosActuales = [];
     let storeIdActual = new URLSearchParams(window.location.search).get('store_id') || '';
 
@@ -294,6 +325,7 @@
     }
 
     (async function iniciar() {
+      if (!TOKEN_ADM) { mostrarLoginAdm(); return; }
       await cargarTiendas();
       await cargar();
     })();

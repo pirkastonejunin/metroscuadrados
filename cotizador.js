@@ -45,7 +45,10 @@ const router = express.Router();
 const authCotizadorSiEsTiendaReal = (req, res, next) => {
   const storeId = req.query.store_id || (req.body && req.body.store_id);
   const storeReal = process.env.TIENDA_REAL_STORE_ID;
-  if (storeId && storeReal && String(storeId) === String(storeReal)) {
+  // Se compara el número ya convertido igual que lo convierte getStoreById (parseInt): antes "1234x" o "01234" pasaban
+  // la comparación de texto sin login y después parseInt los llevaba a la tienda real (auditoría 3/11/2026).
+  const nro = parseInt(Array.isArray(storeId) ? storeId[0] : storeId, 10);
+  if (storeId && storeReal && nro === parseInt(storeReal, 10)) {
     return authUsuario(req, res, (authErr) => {
       if (authErr) return next(authErr);
       requiereModulo('cotizador')(req, res, next);
@@ -53,6 +56,7 @@ const authCotizadorSiEsTiendaReal = (req, res, next) => {
   }
   next();
 };
+if (!process.env.TIENDA_REAL_STORE_ID) console.error('[seguridad] Falta TIENDA_REAL_STORE_ID: el cotizador no pide login para ninguna tienda.');
 router.use(authCotizadorSiEsTiendaReal);
 
 // Logo de Piedra Negra (PNG con fondo transparente), para el encabezado del

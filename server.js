@@ -304,6 +304,10 @@ async function getStoreFromRequest(req) {
 
 // ---------- OAuth ----------
 
+// Rutas de la app de la calculadora (Tiendanube): piden sesión del sistema con acceso a Productos (auditoría 3/11/2026: estaban abiertas
+// y con el número de la tienda cualquiera podía cambiar productos de la tienda real). Quedan abiertas solo /install, /auth/callback y /public/*.
+const authTN = [usuariosRouter.authUsuario, usuariosRouter.requiereAlgunModulo('productos')];
+
 app.get('/install', (req, res) => {
   const url = 'https://www.tiendanube.com/apps/' + process.env.CLIENT_ID + '/authorize';
   res.redirect(url);
@@ -366,7 +370,7 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // Por si una tienda ya se instalo antes de tener SCRIPT_ID configurado
-app.get('/admin/activar-script', async (req, res) => {
+app.get('/admin/activar-script', authTN, async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
     if (!process.env.SCRIPT_ID) {
@@ -389,7 +393,7 @@ app.get('/admin/activar-script', async (req, res) => {
 
 // ---------- Lista de tiendas instaladas (para el selector en admin.html) ----------
 
-app.get('/api/stores', async (req, res) => {
+app.get('/api/stores', authTN, async (req, res) => {
   try {
     const stores = await listStores();
     res.json(stores);
@@ -400,7 +404,7 @@ app.get('/api/stores', async (req, res) => {
 
 // Diagnostico: permite corregir a mano el dominio de una tienda si
 // la deteccion automatica fallo al instalar.
-app.post('/admin/set-domain', async (req, res) => {
+app.post('/admin/set-domain', authTN, async (req, res) => {
   try {
     const { store_id, domain } = req.body;
     if (!store_id || !domain) {
@@ -538,7 +542,7 @@ async function leerCampoPersonalizado(store, productId) {
 }
 
 // Endpoint para crear el campo a mano si hiciera falta
-app.get('/admin/crear-campo', async (req, res) => {
+app.get('/admin/crear-campo', authTN, async (req, res) => {
   try {
     const store = await getStoreFromRequest(req);
     const fieldId = await getOrCreateCustomFieldId(store);
@@ -550,7 +554,7 @@ app.get('/admin/crear-campo', async (req, res) => {
 
 // Recorre todos los productos y baja el valor del campo personalizado
 // "Rendimiento por caja" de los que lo tengan cargado en Tiendanube.
-app.get('/admin/sincronizar-campos', async (req, res) => {
+app.get('/admin/sincronizar-campos', authTN, async (req, res) => {
   try {
     const store = await getStoreFromRequest(req);
     const fieldId = await getOrCreateCustomFieldId(store);
@@ -607,7 +611,7 @@ app.get('/admin/sincronizar-campos', async (req, res) => {
 
 // ---------- Productos ----------
 
-app.get('/api/products', async (req, res) => {
+app.get('/api/products', authTN, async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
     const products = await fetchAllProducts(store_id, access_token);
@@ -644,7 +648,7 @@ app.get('/api/products', async (req, res) => {
 // sin sincronizar con Tiendanube (evita miles de llamadas a su API
 // cuando se importan catalogos grandes por Excel). El boton "Guardar"
 // individual de la tabla si sincroniza ambos lados.
-app.post('/api/bulto-cache/:productId', async (req, res) => {
+app.post('/api/bulto-cache/:productId', authTN, async (req, res) => {
   try {
     const storeId = req.query.store_id;
     if (!storeId) return res.status(400).json({ error: 'Falta store_id' });
@@ -668,7 +672,7 @@ app.post('/api/bulto-cache/:productId', async (req, res) => {
   }
 });
 
-app.post('/api/bulto/:productId', async (req, res) => {
+app.post('/api/bulto/:productId', authTN, async (req, res) => {
   try {
     const { store_id, access_token } = await getStoreFromRequest(req);
     const productId = req.params.productId;

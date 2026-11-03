@@ -189,6 +189,7 @@ function verificarPassword(password, almacenado) {
 // firma para que un token de usuario nunca valide como token de colocador
 // ni viceversa aunque compartan el mismo OBRAS_TOKEN_SECRET.
 // ---------------------------------------------------------------------
+if (!process.env.OBRAS_TOKEN_SECRET) console.error('[seguridad] Falta OBRAS_TOKEN_SECRET en las variables de entorno: las sesiones se firman con una clave por defecto. Cargala en Render.');
 function hmac(data) {
   const secret = process.env.OBRAS_TOKEN_SECRET || 'cambiar-este-secreto';
   return crypto.createHmac('sha256', secret).update('usuario.' + data).digest('hex');
@@ -437,16 +438,34 @@ async function usuariosConAccesoAUsuarios(db, excluirUsuarioId) {
 // ("obras_admin_token") que ya usaban los tres paneles, así no hace falta
 // tocar esa parte del resto del frontend.
 // ---------------------------------------------------------------------
+// Límite de intentos (auditoría 3/11/2026): 10 fallidos en 15 minutos por usuario o por IP bloquean el login 15 minutos.
+// En memoria del proceso: se reinicia con cada despliegue, alcanza para frenar pruebas masivas de contraseñas.
+const LOGIN_VENTANA_MS = 15 * 60 * 1000, LOGIN_MAX_FALLOS = 10;
+const loginFallos = new Map();
+function ipDe(req) { return String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim(); }
+function loginBloqueado(claves) {
+  const ahora = Date.now();
+  return claves.some(k => { const f = loginFallos.get(k); if (f && ahora - f.desde > LOGIN_VENTANA_MS) { loginFallos.delete(k); return false; } return !!(f && f.n >= LOGIN_MAX_FALLOS); });
+}
+function registrarFallo(claves) {
+  const ahora = Date.now();
+  claves.forEach(k => { const f = loginFallos.get(k); if (!f || ahora - f.desde > LOGIN_VENTANA_MS) loginFallos.set(k, { n: 1, desde: ahora }); else f.n++; });
+  if (loginFallos.size > 5000) { for (const [k, f] of loginFallos) if (ahora - f.desde > LOGIN_VENTANA_MS) loginFallos.delete(k); }
+}
 router.post('/login', async (req, res) => {
   try {
     const { usuario, password } = req.body || {};
     if (!usuario || !password) throw err(400, 'Ingresá usuario y contraseña');
+    const claves = ['u:' + String(usuario).trim().toLowerCase(), 'ip:' + ipDe(req)];
+    if (loginBloqueado(claves)) throw err(429, 'Demasiados intentos fallidos. Esperá 15 minutos y probá de nuevo.');
     const db = await getDb();
     await conReintento(() => asegurarBootstrap(db));
     const doc = await conReintento(() => db.collection('usuarios').findOne({ usuario: String(usuario).trim().toLowerCase() }));
     if (!doc || !doc.activo || !verificarPassword(password, doc.passwordHash)) {
+      registrarFallo(claves);
       throw err(401, 'Usuario o contraseña incorrectos');
     }
+    claves.forEach(k => { if (k.startsWith('u:')) loginFallos.delete(k); });
     res.json({ ok: true, token: crearToken(doc._id.toString()) });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

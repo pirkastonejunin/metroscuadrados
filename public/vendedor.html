@@ -117,6 +117,7 @@
 
 <script>
 const BASE = '/api/visitas'; // coincide con app.use('/api/visitas', visitasRouter) en server.js
+function escHtmlV(t){ return String(t==null?'':t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let TOKEN = localStorage.getItem('obras_admin_token') || ''; // misma clave que admin-visitas.html/admin-obras.html: un solo login para toda la app
 let VENDEDOR_ID = '';
 let VENDEDOR_NOMBRE = '';
@@ -294,17 +295,17 @@ async function mostrarListaVisitas(){
     filtroHtml = `<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--muted);font-weight:600">Vendedor</label>
       <select onchange="FILTRO_VENDEDOR=this.value;mostrarListaVisitas()" style="width:100%;padding:8px;border-radius:8px">
         <option value="">Todos (${VISITAS.length})</option>
-        ${vendedores.map(x => `<option value="${x.id}" ${x.id===FILTRO_VENDEDOR?'selected':''}>${x.nombre}${x.id && x.id===MI_VENDEDOR_ID ? ' (yo)' : ''} (${VISITAS.filter(v => (v.vendedorId||'')===x.id).length})</option>`).join('')}
+        ${vendedores.map(x => `<option value="${x.id}" ${x.id===FILTRO_VENDEDOR?'selected':''}>${escHtmlV(x.nombre)}${x.id && x.id===MI_VENDEDOR_ID ? ' (yo)' : ''} (${VISITAS.filter(v => (v.vendedorId||'')===x.id).length})</option>`).join('')}
       </select></div>`;
   }
   pant.innerHTML = fechasHtml + filtroHtml + lista.map(v => `
     <div class="card" onclick="${ADMIN_MODE ? `VENDEDOR_ID='${v.vendedorId||''}';` : ''}mostrarDetalleVisita('${v._id}')" style="cursor:pointer">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div class="visita-titulo">${v.cliente.nombre}</div>
+        <div class="visita-titulo">${escHtmlV(v.cliente.nombre)}</div>
         <span class="pill ${v.estado}">${ESTADOS[v.estado]||v.estado}</span>
       </div>
       ${ADMIN_MODE ? `<div class="muted">Vendedor: ${v.vendedorNombre||'(sin asignar)'}</div>` : ''}
-      <div class="muted">${v.cliente.direccion||''}</div>
+      <div class="muted">${escHtmlV(v.cliente.direccion||'')}</div>
       <div class="muted">${fmtFecha(v.fechaHora)}</div>
     </div>
   `).join('');
@@ -335,11 +336,11 @@ async function mostrarDetalleVisita(id){
     if (v.presupuesto.tipo === 'manual'){
       const formasPagoHtml = (v.presupuesto.formasPago && v.presupuesto.formasPago.length)
         ? '<div class="muted" style="margin-top:6px">' +
-          v.presupuesto.formasPago.map(fp => `${fp.nombre}: $${Number(fp.total||0).toLocaleString('es-AR')}`).join(' · ') +
+          v.presupuesto.formasPago.map(fp => `${escHtmlV(fp.nombre)}: $${Number(fp.total||0).toLocaleString('es-AR')}`).join(' · ') +
           '</div>'
         : '';
       resumen = `<b>Presupuesto (a mano)</b><br>` +
-        v.presupuesto.items.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
+        v.presupuesto.items.map(it=>`${escHtmlV(it.tipoTrabajo)}${escHtmlV(it.descripcion?' ('+it.descripcion+')':'')}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
         `<br><b>Total: $${(v.presupuesto.total||0).toLocaleString('es-AR')}</b>` + formasPagoHtml +
         (v.presupuestoComercialNumero ? `<div class="muted" style="margin-top:6px">Es el presupuesto comercial Nº ${String(v.presupuestoComercialNumero).padStart(5,'0')}${v.presupuestoComercialCongelado ? ' — ya está aprobado/cerrado en el panel comercial, los cambios nuevos no lo modifican' : ' — editándolo se actualiza esta visita'}.</div>` : '') +
         (v.presupuestoComercialError ? `<div class="err" style="margin-top:6px">No se pudo vincular con el panel comercial: ${v.presupuestoComercialError}</div>` : '') +
@@ -362,7 +363,7 @@ async function mostrarDetalleVisita(id){
         .join('<br>');
       const extraHtml = tieneExtra
         ? '<div class="muted" style="margin-top:6px"><b>Agregado a mano:</b><br>' +
-          itemsExtra.map(it=>`${it.tipoTrabajo}${it.descripcion?' ('+it.descripcion+')':''}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
+          itemsExtra.map(it=>`${escHtmlV(it.tipoTrabajo)}${escHtmlV(it.descripcion?' ('+it.descripcion+')':'')}: ${it.cantidad} × $${(it.valor||0).toLocaleString('es-AR')} = $${(it.total||0).toLocaleString('es-AR')}`).join('<br>') +
           '</div>'
         : '';
       const primeraCot = cotizaciones[0] || {};
@@ -398,13 +399,13 @@ async function mostrarDetalleVisita(id){
     <a class="back-link" href="javascript:void(0)" onclick="mostrarListaVisitas()">&larr; Volver a mis visitas</a>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div class="visita-titulo">${v.cliente.nombre}</div>
+        <div class="visita-titulo">${escHtmlV(v.cliente.nombre)}</div>
         <span class="pill ${v.estado}">${ESTADOS[v.estado]||v.estado}</span>
       </div>
-      <div class="muted">${v.cliente.direccion||''} ${v.cliente.localidad?'· '+v.cliente.localidad:''}</div>
-      <div class="muted">${v.cliente.telefono||''}</div>
+      <div class="muted">${escHtmlV(v.cliente.direccion||'')} ${escHtmlV(v.cliente.localidad?'· '+v.cliente.localidad:'')}</div>
+      <div class="muted">${escHtmlV(v.cliente.telefono||'')}</div>
       <div class="muted">${fmtFecha(v.fechaHora)}</div>
-      ${v.notasEmpleada ? `<div class="muted">Nota del local: ${v.notasEmpleada}</div>` : ''}
+      ${v.notasEmpleada ? `<div class="muted">Nota del local: ${escHtmlV(v.notasEmpleada)}</div>` : ''}
     </div>
     <div class="card">
       <b>Fotos del lugar</b>
@@ -609,8 +610,8 @@ async function mostrarVincularCotizacion(visitaId){
     if (!res.ok) throw new Error(historial.error || 'No se pudo leer el historial del cotizador');
     cont.innerHTML = historial.slice(0, 8).map(c => `
       <div class="cotizacion-opcion">
-        <b>${c.cliente || '(sin cliente)'}</b> — $${(c.total||0).toLocaleString('es-AR')}<br>
-        <span class="muted">${c.tipoObraNombre||''} · ${new Date(c.fecha).toLocaleDateString('es-AR')}</span>
+        <b>${escHtmlV(c.cliente || '(sin cliente)')}</b> — $${(c.total||0).toLocaleString('es-AR')}<br>
+        <span class="muted">${escHtmlV(c.tipoObraNombre||'')} · ${new Date(c.fecha).toLocaleDateString('es-AR')}</span>
         <button class="btn small" style="margin-top:6px" onclick="vincularCotizacion('${visitaId}','${c._id}')">Usar esta</button>
       </div>
     `).join('') || '<p class="muted">No hay cotizaciones guardadas todavía.</p>';
@@ -633,7 +634,7 @@ function escAttr(s){
   return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function filaItemManual(it, onRemoveFn){
-  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${t.nombre}"${it && it.tipoTrabajo===t.nombre ? ' selected' : ''}>${t.nombre}</option>`).join('');
+  const opciones = TIPOS_TRABAJO.map(t=>`<option value="${escHtmlV(t.nombre)}"${it && it.tipoTrabajo===t.nombre ? ' selected' : ''}>${escHtmlV(t.nombre)}</option>`).join('');
   const descripcion = it ? escAttr(it.descripcion) : '';
   const cantidad = it ? escAttr(it.cantidad) : '';
   const valor = it ? escAttr(it.valor) : '';
@@ -641,7 +642,7 @@ function filaItemManual(it, onRemoveFn){
   const removeCallback = onRemoveFn || 'actualizarTotalGeneralManual';
   return `<div class="item-row" style="flex-wrap:wrap">
     <select class="itTipo" style="flex:2;min-width:120px">${opciones}</select>
-    <input class="itDescripcion" placeholder="Descripción" value="${descripcion}" style="flex:2;min-width:120px">
+    <input class="itDescripcion" placeholder="Descripción" value="${escHtmlV(descripcion)}" style="flex:2;min-width:120px">
     <input class="itCantidad" type="number" step="0.01" placeholder="m²" value="${cantidad}" style="flex:1;min-width:70px" oninput="actualizarTotalItem(this)">
     <input class="itValor" type="number" step="0.01" placeholder="Precio unit." value="${valor}" style="flex:1;min-width:80px" oninput="actualizarTotalItem(this)">
     <span class="muted itTotal" style="flex:1;min-width:70px;align-self:center">Total: $${total}</span>

@@ -371,10 +371,10 @@ function filaObra(o){
   return `
     <tr>
       <td>#${o.numero}</td>
-      <td>${o.cliente.nombre}</td>
-      <td>${o.cliente.direccion||''}</td>
+      <td>${escapeHtml(o.cliente.nombre)}</td>
+      <td>${escapeHtml(o.cliente.direccion||'')}</td>
       <td>${o.fechaVenta ? new Date(o.fechaVenta).toLocaleDateString('es-AR') : ''}</td>
-      <td>${(o.tareas||[]).map(t=>t.tipoTrabajo).join(', ') || '<span class="muted">Sin productos</span>'}</td>
+      <td>${escapeHtml((o.tareas||[]).map(t=>t.tipoTrabajo).join(', ')) || '<span class="muted">Sin productos</span>'}</td>
       <td><span class="pill ${o.estado}">${ESTADOS_OBRA[o.estado]||o.estado}</span></td>
       <td><button class="btn small secondary" onclick="abrirObra('${o._id}')">Ver</button></td>
     </tr>`;
@@ -428,7 +428,7 @@ function abrirNuevaObra(){
   `);
 }
 function filaTareaNueva(){
-  const opciones = TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('');
+  const opciones = TIPOS.map(t=>`<option value="${escapeHtml(t.nombre)}">${escapeHtml(t.nombre)}</option>`).join('');
   return `<div class="costo-row">
     <select class="tTipo" style="flex:2">${opciones}</select>
     <input class="tM2" type="number" step="0.01" placeholder="m²" style="flex:1">
@@ -531,7 +531,7 @@ async function abrirObra(id){
     return `
     <div class="tarea-seccion">
       <div class="row" style="justify-content:space-between">
-        <div><b>${t.tipoTrabajo}</b></div>
+        <div><b>${escapeHtml(t.tipoTrabajo)}</b></div>
         <button class="btn small danger" onclick="borrarTarea('${o._id}','${t._id}')">Eliminar</button>
       </div>
 
@@ -579,7 +579,7 @@ async function abrirObra(id){
         <div><label>Colocador asignado</label>
           <select onchange="asignarColocadorObra('${o._id}',this.value)">
             <option value="">Sin asignar</option>
-            ${COLOCADORES.map(c=>`<option value="${c._id}" ${colocadorComunId===c._id?'selected':''}>${c.nombre}</option>`).join('')}
+            ${COLOCADORES.map(c=>`<option value="${c._id}" ${colocadorComunId===c._id?'selected':''}>${escapeHtml(c.nombre)}</option>`).join('')}
           </select>
         </div>
         <div><label>Estado general</label>
@@ -620,8 +620,8 @@ async function abrirObra(id){
 
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2>Obra #${o.numero} — ${o.cliente.nombre}</h2>
-    <div class="muted">${o.cliente.direccion||''} ${o.cliente.localidad?'· '+o.cliente.localidad:''} ${o.cliente.telefono?'· '+o.cliente.telefono:''}</div>
+    <h2>Obra #${o.numero} — ${escapeHtml(o.cliente.nombre)}</h2>
+    <div class="muted">${escapeHtml(o.cliente.direccion||'')} ${escapeHtml(o.cliente.localidad?'· '+o.cliente.localidad:'')} ${escapeHtml(o.cliente.telefono?'· '+o.cliente.telefono:'')}</div>
     <div class="muted">Venta: ${o.fechaVenta?new Date(o.fechaVenta).toLocaleDateString('es-AR'):''} ${o.vendedor?'· Vendedor: '+o.vendedor:''}${o.precioVentaCliente?' · Presupuestado: $'+o.precioVentaCliente.toLocaleString('es-AR'):''}</div>
     ${o.visitaId ? '<div class="muted">Generada automáticamente desde una visita confirmada</div>' : ''}
     ${fotosHtml}
@@ -631,7 +631,7 @@ async function abrirObra(id){
     <div id="rentabObra" style="margin:14px 0"><div class="muted">Calculando rentabilidad…</div></div>
     <div style="margin:14px 0">${tareasHtml}</div>
     <div class="row">
-      <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${t.nombre}">${t.nombre}</option>`).join('')}</select>
+      <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${escapeHtml(t.nombre)}">${escapeHtml(t.nombre)}</option>`).join('')}</select>
       <input id="nuevaTareaM2" type="number" step="0.01" placeholder="m²" style="flex:1">
       <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar producto</button>
     </div>

@@ -194,7 +194,8 @@ function render(){
       (doc.tipoObraNombre ? ' de ' + doc.tipoObraNombre : '') + ' — Total ' + money(doc.total) + '.';
     const pdfUrl = urlPdf();
     try{
-      const res = await fetch(pdfUrl);
+      let tk2 = ''; try { tk2 = localStorage.getItem('obras_admin_token') || ''; } catch (e) {}
+      const res = await fetch(pdfUrl, { headers: tk2 ? { 'x-admin-token': tk2 } : {} });
       if (!res.ok) throw new Error('pdf-fetch-failed');
       const blob = await res.blob();
       const file = new File([blob], 'presupuesto.pdf', { type: 'application/pdf' });
@@ -226,7 +227,8 @@ async function cargar(){
     return;
   }
   try{
-    const res = await fetch('/api/cotizador/historial/' + cotId + '?store_id=' + encodeURIComponent(storeId));
+    let tk = ''; try { tk = localStorage.getItem('obras_admin_token') || ''; } catch (e) {}
+    const res = await fetch('/api/cotizador/historial/' + cotId + '?store_id=' + encodeURIComponent(storeId), { headers: tk ? { 'x-admin-token': tk } : {} });
     doc = await res.json();
     if (!res.ok) throw new Error(doc.error || 'No se pudo cargar el presupuesto.');
     render();
