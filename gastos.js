@@ -358,6 +358,24 @@ router.post('/config/conceptos/unificar', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Borra de verdad los conceptos sin ningún gasto cargado (solo administrador). Con simular:true solo devuelve la lista.
+router.post('/config/conceptos/depurar', authAdmin, async (req, res) => {
+  try {
+    if (!(req.usuario && req.usuario.rol && req.usuario.rol.protegido)) throw err(403, 'Solo el administrador puede borrar conceptos de gasto.');
+    const simular = !!(req.body && req.body.simular);
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const usados = await db.collection('gastos').aggregate([{ $unwind: '$items' }, { $group: { _id: { id: '$items.conceptoId', n: '$items.conceptoNombre' } } }]).toArray();
+      const ids = new Set(usados.filter(u => u._id.id).map(u => String(u._id.id))), claves = new Set(usados.map(u => claveConcepto(u._id.n)));
+      const todos = await db.collection('gastos_conceptos').find({}).project({ nombre: 1 }).toArray();
+      const vacios = todos.filter(c => !ids.has(String(c._id)) && !claves.has(claveConcepto(c.nombre)));
+      if (!simular && vacios.length) await db.collection('gastos_conceptos').deleteMany({ _id: { $in: vacios.map(c => c._id) } });
+      return { cantidad: vacios.length, nombres: vacios.map(c => c.nombre).sort((a, b) => String(a).localeCompare(String(b), 'es')), simulado: simular };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.put('/config/conceptos/:id', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id);

@@ -192,7 +192,7 @@
           <div style="flex:1"><label>Nuevo concepto</label><input id="cgNombre" placeholder="Ej: Alquiler" onkeydown="if(event.key==='Enter')crearConceptoGasto()"></div>
           <div><button class="btn" onclick="crearConceptoGasto()">Agregar</button></div>
         </div>
-        <div class="row" style="margin-bottom:8px;align-items:center"><button class="btn secondary" onclick="unificarConceptosGasto()">Unificar seleccionados en uno…</button><span class="muted">Tildá los conceptos que son lo mismo (p. ej. todos los de una factura de luz) y elegí a cuál pasan; los gastos ya cargados se actualizan.</span></div>
+        <div class="row" style="margin-bottom:8px;align-items:center"><button class="btn secondary" onclick="unificarConceptosGasto()">Unificar seleccionados en uno…</button><button class="btn secondary" onclick="depurarConceptosGasto()">Borrar los que no tienen movimientos</button><span class="muted">Tildá los conceptos que son lo mismo (p. ej. todos los de una factura de luz) y elegí a cuál pasan; los gastos ya cargados se actualizan.</span></div>
         <div class="err" id="conceptosGastoErr"></div>
         <table>
           <thead><tr><th style="width:28px"></th><th>Nombre</th><th>Uso</th><th>Estado</th><th></th></tr></thead>
@@ -363,6 +363,19 @@ async function unificarConceptosGasto(){
     err.style.color = '#1b7f3b'; err.textContent = 'Listo: ' + data.conceptosUnificados + ' concepto(s) unificados en "' + data.destino + '" (' + data.renglones + ' renglones de ' + data.gastos + ' gastos actualizados).';
     await cargarConceptosGasto();
   }catch(e){ err.style.color = ''; err.textContent = e.message; }
+}
+
+async function depurarConceptosGasto(){
+  const err = document.getElementById('conceptosGastoErr'); err.textContent = ''; err.style.color = '';
+  try{
+    const call = async simular => { const r = await fetch(BASE_GASTOS + '/config/conceptos/depurar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({simular})}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error'); return d; };
+    const p = await call(true);
+    if (!p.cantidad) { err.style.color = '#1b7f3b'; err.textContent = 'No hay conceptos sin movimientos para borrar.'; return; }
+    if (!confirm('Se van a borrar ' + p.cantidad + ' concepto(s) que no tienen ningún gasto cargado:\n\n' + p.nombres.slice(0, 40).join('\n') + (p.nombres.length > 40 ? '\n… y ' + (p.nombres.length - 40) + ' más' : '') + '\n\nNo se puede deshacer. ¿Borrar?')) return;
+    const d = await call(false);
+    err.style.color = '#1b7f3b'; err.textContent = 'Listo: se borraron ' + d.cantidad + ' concepto(s) sin movimientos.';
+    await cargarConceptosGasto();
+  }catch(e){ err.textContent = e.message; }
 }
 
 async function crearConceptoGasto(){
