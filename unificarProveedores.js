@@ -194,4 +194,57 @@ router.post('/unificar-todos', auth, async (req, res) => {
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
+// ---------------------------------------------------------------------
+// Reparar unificaciones incompletas (3/11/2026): proveedores que ya figuran como unificados en otro (inactivos, con `unificadoEn`)
+// pero que todavía tienen compras, gastos, pagos u órdenes a su nombre. Se pasan al proveedor que quedó activo (siguiendo la cadena
+// si el principal fue a su vez unificado en otro). GET /reparar/preview cuenta, POST /reparar aplica.
+// ---------------------------------------------------------------------
+async function pendientesReparar(db, orgIds) {
+  const unificados = await db.collection('proveedores').find({ unificadoEn: { $exists: true, $ne: null }, activo: false, orgId: { $in: orgIds } }).project({ razonSocial: 1, unificadoEn: 1, orgId: 1, activo: 1 }).toArray();
+  if (!unificados.length) return [];
+  const ids = unificados.map(u => u._id);
+  const cols = (await db.listCollections({}, { nameOnly: true }).toArray()).map(c => c.name).filter(n => !['proveedores', 'proveedores_saldos_iniciales', 'system.indexes'].includes(n));
+  const cuenta = new Map();
+  for (const nombre of cols) {
+    const r = await db.collection(nombre).aggregate([{ $match: { proveedorId: { $in: ids } } }, { $group: { _id: '$proveedorId', n: { $sum: 1 } } }]).toArray();
+    r.forEach(x => { const k = String(x._id); const o = cuenta.get(k) || {}; o[nombre] = x.n; cuenta.set(k, o); });
+  }
+  const porId = new Map(unificados.map(u => [String(u._id), u]));
+  const out = [];
+  for (const u of unificados) {
+    const conteo = cuenta.get(String(u._id)); if (!conteo) continue;
+    let dest = u.unificadoEn, guardia = 0, final = null;
+    while (dest && guardia++ < 10) {
+      const d = porId.get(String(dest)) || await db.collection('proveedores').findOne({ _id: dest }, { projection: { razonSocial: 1, unificadoEn: 1, activo: 1, orgId: 1 } });
+      if (!d) break;
+      if (d.activo !== false) { final = d; break; }
+      dest = d.unificadoEn;
+    }
+    out.push({ perdedorId: u._id, nombre: u.razonSocial, ganadorId: final ? final._id : null, ganadorNombre: final ? final.razonSocial : null, conteo });
+  }
+  return out;
+}
+router.get('/reparar/preview', auth, async (req, res) => {
+  try {
+    const lista = await conReintento(async () => { const db = await getDb(); return pendientesReparar(db, (await orgsAccesibles(db, req)).map(o => o._id)); });
+    res.json({ items: lista.map(x => ({ perdedorId: x.perdedorId, nombre: x.nombre, ganadorNombre: x.ganadorNombre, sinDestino: !x.ganadorId, conteo: x.conteo })) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/reparar', auth, async (req, res) => {
+  try {
+    const out = await conReintento(async () => {
+      const db = await getDb(); const orgIds = (await orgsAccesibles(db, req)).map(o => o._id);
+      const lista = (await pendientesReparar(db, orgIds)).filter(x => x.ganadorId);
+      const porGan = new Map(); lista.forEach(x => { const k = String(x.ganadorId); if (!porGan.has(k)) porGan.set(k, { gan: x.ganadorId, per: [] }); porGan.get(k).per.push(x.perdedorId); });
+      const items = [...porGan.values()]; if (!items.length) return { ok: true, grupos: 0, movidos: {} };
+      const r = { ok: true, grupos: 0, movidos: {} };
+      for (let i = 0; i < items.length; i += 50) {
+        const x = await unificarGrupos(db, orgIds, items.slice(i, i + 50));
+        r.grupos += x.grupos; Object.entries(x.movidos).forEach(([k, v]) => { r.movidos[k] = (r.movidos[k] || 0) + v; });
+      }
+      return r;
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 module.exports = router;
