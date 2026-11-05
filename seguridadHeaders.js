@@ -3,17 +3,18 @@
 //  - nosniff: el navegador no adivina el tipo de un archivo (evita que una subida se ejecute como script).
 //  - Referrer-Policy: no se filtran las direcciones internas a otros sitios.
 //  - CSP: solo se cargan scripts/estilos/fuentes/imágenes de los sitios que el sistema usa de verdad (propios, Google Fonts,
-//    jsDelivr para la librería de Excel, Cloudinary para fotos) y nadie puede meter el sistema en un marco ajeno (clickjacking).
+//    jsDelivr para la librería de Excel, Cloudinary para fotos, Facebook para conectar el número de WhatsApp en modo
+//    coexistencia — 5/11/2026) y nadie puede meter el sistema en un marco ajeno (clickjacking).
 //    Los scripts y estilos "en línea" siguen permitidos porque todas las pantallas los usan.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://connect.facebook.net",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
-  "connect-src 'self' https://api.cloudinary.com",
-  "frame-src 'self' blob: data:",
+  "connect-src 'self' https://api.cloudinary.com https://*.facebook.com https://graph.facebook.com",
+  "frame-src 'self' blob: data: https://*.facebook.com",
   "object-src 'self' blob: data:",
   "base-uri 'self'",
   "form-action 'self'",
