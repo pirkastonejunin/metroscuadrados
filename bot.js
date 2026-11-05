@@ -486,7 +486,11 @@ router.post('/conexion/probar', auth, soloAdmin, async (req, res) => { // consul
   try { if (!process.env.WA_TOKEN || !process.env.WA_PHONE_ID) return res.json({ ok: false, error: 'Faltan WA_TOKEN y WA_PHONE_ID en Render.' });
     const r = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '?fields=display_phone_number,verified_name,quality_rating,name_status,code_verification_status,platform_type', { headers: { Authorization: 'Bearer ' + process.env.WA_TOKEN } }, 20000);
     const d = await r.json().catch(() => ({})); if (!r.ok) return res.json({ ok: false, error: 'Meta respondió ' + r.status + ': ' + ((d.error && d.error.message) || '') });
-    res.json({ ok: true, numero: d.display_phone_number, nombre: d.verified_name, calidad: d.quality_rating, estadoNombre: d.name_status, verificacion: d.code_verification_status, plataforma: d.platform_type });
+    const h = { headers: { Authorization: 'Bearer ' + process.env.WA_TOKEN } }; const extra = {};
+    try { const r2 = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '?fields=status,is_on_biz_app,platform_type', h, 20000); const d2 = await r2.json().catch(() => ({})); if (r2.ok) { extra.estado = d2.status; extra.enAppBusiness = d2.is_on_biz_app; } } catch (_) { /* campos opcionales */ }
+    const waba = String((req.body && req.body.waba) || process.env.WA_WABA_ID || '').replace(/\D/g, ''); // diagnóstico de la coexistencia: ¿la app está suscripta a la cuenta? (solo lee)
+    if (waba) { try { const r3 = await pedir(graph() + '/' + waba + '/subscribed_apps', h, 20000); const d3 = await r3.json().catch(() => ({})); extra.suscripciones = r3.ok ? (d3.data || []).map(x => (x.whatsapp_business_api_data && x.whatsapp_business_api_data.name) || x.name || '—') : 'Meta respondió ' + r3.status + ': ' + ((d3.error && d3.error.message) || ''); } catch (_) { extra.suscripciones = 'No se pudo consultar'; } }
+    res.json(Object.assign({ ok: true, numero: d.display_phone_number, nombre: d.verified_name, calidad: d.quality_rating, estadoNombre: d.name_status, verificacion: d.code_verification_status, plataforma: d.platform_type }, extra));
   } catch (er) { res.json({ ok: false, error: er.message }); }
 });
 router.post('/conexion/mensaje-prueba', auth, soloAdmin, async (req, res) => { // manda la plantilla "hello_world" que Meta trae por defecto, a un celular propio
