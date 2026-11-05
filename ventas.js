@@ -2017,9 +2017,93 @@ router.post('/:id/anular', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       await db.collection('ventas').updateOne(
         { _id: id, cae: { $exists: false }, fiscalEstado: { $ne: 'autorizando' } },
-        { $set: { estado: 'anulada', anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
+        { $set: { estado: 'anulada', estadoAntesDeAnular: venta.estado, anuladaEn: ahora, anuladaPor: usuarioNombre, anuladaMotivo: motivo, updatedAt: ahora } }
       );
       return db.collection('ventas').findOne({ _id: id });
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Restaurar una venta anulada por error (5/11/2026, pedido de Mato: "se anuló algo que no debía anularse"). Solo Administrador.
+// Es el camino inverso exacto de /anular, todo en una transacción (o se restaura completo o no se toca nada):
+//  - stock: lo que ya se había entregado vuelve a salir del físico; lo que estaba comprometido vuelve a comprometerse;
+//  - cuenta corriente: el movimiento de la anulación queda marcado como anulado y se vuelve a cargar la deuda que se había devuelto;
+//  - la venta vuelve a su estado anterior y conserva el historial de anulaciones (quién la anuló, quién la restauró y cuándo).
+// Los cobros e imputaciones no se tocan: la anulación nunca los deshizo, así que siguen donde estaban.
+router.post('/:id/restaurar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const u = req.usuario || {};
+    if (!(u.rol && u.rol.protegido)) throw err(403, 'Solo el Administrador puede restaurar una venta anulada.');
+    const motivo = normalizarTexto(req.body && req.body.motivo);
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.estado !== 'anulada') throw err(400, 'Esta venta no está anulada.');
+      if (venta.importado) throw err(400, 'Es una venta histórica importada de Dux: no se puede restaurar desde acá.');
+      if (venta.tipoComprobante === 'nota_credito') throw err(400, 'Una Nota de Crédito anulada no se restaura: se vuelve a emitir (así se aplica de nuevo a su factura).');
+      const reqOrg = Object.assign({}, req, { orgId: venta.orgId || req.orgId });
+      const ahora = new Date();
+      const usuarioNombre = u.nombre || '';
+      const items = venta.items || [];
+
+      // --- Stock: se valida ANTES de mover nada que lo entregado pueda volver a salir del físico.
+      for (const item of items) {
+        const entregada = item.cantidadEntregada || 0;
+        if (!item.productoId || entregada <= 0) continue;
+        const producto = await db.collection('productos_catalogo').findOne({ _id: item.productoId });
+        if (producto && producto.aceptaStockNegativo) continue;
+        const actual = await db.collection('stock_actual').findOne({ productoId: item.productoId, depositoId: venta.depositoId, orgId: reqOrg.orgId });
+        if (entregada > (actual ? actual.cantidad : 0)) {
+          throw err(400, `No se puede restaurar: "${item.nombre}" ya se entregó (${entregada}) y hoy no hay esa cantidad en el depósito (físico: ${actual ? actual.cantidad : 0}). Cargá el ingreso de stock y probá de nuevo.`);
+        }
+      }
+      for (const item of items) {
+        if (!item.productoId) continue;
+        const entregada = item.cantidadEntregada || 0;
+        const pendiente = cantidadPendiente(item);
+        if (entregada > 0) {
+          await aplicarMovimientoStock(db, reqOrg, {
+            productoId: item.productoId, depositoId: venta.depositoId, tipo: 'egreso', cantidad: entregada,
+            motivo: 'Restauración de venta anulada', observaciones: `Restauración de venta ${venta.numero ? '#' + venta.numero : ''}`.trim(),
+            ventaId: venta._id, usuarioNombre, fecha: ahora
+          });
+        }
+        if (pendiente > 0 && venta.stockComprometido) {
+          await db.collection('stock_actual').updateOne(
+            { productoId: item.productoId, depositoId: venta.depositoId, orgId: reqOrg.orgId },
+            { $inc: { cantidadComprometida: pendiente }, $set: { actualizadoEn: ahora }, $setOnInsert: { productoId: item.productoId, depositoId: venta.depositoId, cantidad: 0, orgId: reqOrg.orgId } },
+            { upsert: true }
+          );
+        }
+      }
+
+      // --- Cuenta corriente: se anula el movimiento de la anulación y se vuelve a cargar la deuda (mismo patrón que anular una cobranza).
+      const movAnul = await db.collection('cuenta_corriente_movimientos').findOne(
+        { ventaId: venta._id, origen: 'venta', tipo: 'credito', concepto: /^Anulación (venta|Nota)/, anulado: { $ne: true } }, { sort: { createdAt: -1 } });
+      let avisos = [];
+      if (movAnul) {
+        await db.collection('cuenta_corriente_movimientos').updateOne({ _id: movAnul._id }, { $set: { anulado: true, anuladoEn: ahora, anuladoPor: usuarioNombre, anuladoMotivo: 'Restauración de la venta' } });
+        await registrarMovimientoCuentaCorriente(db, reqOrg, {
+          clienteId: venta.clienteId, clienteNombre: venta.clienteNombre, tipo: 'debito', monto: movAnul.monto, moneda: movAnul.moneda || venta.moneda || 'ARS',
+          concepto: `Restauración ${venta.tipoComprobante === 'nota_debito' ? 'Nota de Débito' : 'venta'} Nº ${venta.numero}`, origen: 'venta', ventaId: venta._id, observaciones: motivo,
+          fecha: ahora, extra: { restauraMovimientoId: movAnul._id }
+        });
+      } else if (venta.saldoPendiente > 0) {
+        avisos.push('No encontré el movimiento de la anulación en la cuenta corriente, así que no se volvió a cargar la deuda. Revisá el saldo del cliente.');
+      }
+
+      // --- La venta vuelve a su estado anterior.
+      const estado = venta.estadoAntesDeAnular || (venta.tipoComprobante === 'nota_debito' ? 'entregada' : estadoSegunItems(items));
+      await db.collection('ventas').updateOne({ _id: id, estado: 'anulada' }, {
+        $set: { estado, restauradaEn: ahora, restauradaPor: usuarioNombre, restauradaMotivo: motivo, updatedAt: ahora },
+        $unset: { anuladaEn: '', anuladaPor: '', anuladaMotivo: '', estadoAntesDeAnular: '' },
+        $push: { anulacionesPrevias: { anuladaEn: venta.anuladaEn || null, anuladaPor: venta.anuladaPor || '', anuladaMotivo: venta.anuladaMotivo || '', restauradaEn: ahora, restauradaPor: usuarioNombre, restauradaMotivo: motivo } }
+      });
+      const nueva = await db.collection('ventas').findOne({ _id: id });
+      return Object.assign({}, nueva, { avisos });
     }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

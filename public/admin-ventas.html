@@ -1890,6 +1890,8 @@ function verDetalle(id){
         </div>
         <div id="dvMP"></div>
         ${v.estado === 'anulada' ? `<p class="muted" style="margin-top:10px">Anulada${v.anuladaPor ? ' por ' + escapeHtml(v.anuladaPor) : ''}${v.anuladaEn ? ' — ' + fechaHora(v.anuladaEn) : ''}${v.anuladaMotivo ? ': ' + escapeHtml(v.anuladaMotivo) : ''}</p>` : ''}
+        ${(v.estado === 'anulada' && !v.importado && v.tipoComprobante !== 'nota_credito' && meCache && meCache.rol && meCache.rol.protegido) ? `<div class="row" style="margin-top:8px;align-items:center;gap:8px"><button class="btn small" onclick="restaurarVenta('${v._id}')">Restaurar venta (deshacer la anulación)</button><span class="muted" style="font-size:12px">Solo Administrador. Vuelve el stock y la deuda del cliente a como estaban.</span></div>` : ''}
+        ${(v.anulacionesPrevias && v.anulacionesPrevias.length) ? `<p class="muted" style="margin-top:8px;font-size:12px">Historial: ${v.anulacionesPrevias.map(a => 'anulada' + (a.anuladaPor ? ' por ' + escapeHtml(a.anuladaPor) : '') + (a.anuladaEn ? ' el ' + fechaHora(a.anuladaEn) : '') + ', restaurada' + (a.restauradaPor ? ' por ' + escapeHtml(a.restauradaPor) : '') + (a.restauradaEn ? ' el ' + fechaHora(a.restauradaEn) : '')).join(' · ')}</p>` : ''}
       </div>
     </div>
   `;
@@ -2498,6 +2500,23 @@ async function anularVenta(id){
     if (!r.ok) throw new Error(data.error || 'Error');
     await cargarVentas();
     verDetalle(id);
+  }catch(e){
+    alert(e.message);
+  }
+}
+
+async function restaurarVenta(id){
+  const v = ventasCache.find(x => x._id === id) || {};
+  const motivo = prompt('¿Por qué se restaura esta venta? (opcional)');
+  if (motivo === null) return;
+  if (!confirm(`¿Restaurar la ${nombreDoc(v.tipoComprobante)} #${v.numero}?\n\nSe va a deshacer la anulación: el stock vuelve a descontarse/comprometerse y la deuda vuelve a la cuenta corriente del cliente.`)) return;
+  try{
+    const r = await fetch(BASE + '/' + id + '/restaurar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas();
+    verDetalle(id);
+    if (data.avisos && data.avisos.length) alert(data.avisos.join('\n'));
   }catch(e){
     alert(e.message);
   }
