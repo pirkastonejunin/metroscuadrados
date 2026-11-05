@@ -231,6 +231,19 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml, telefono }) {
   .cmp-cliente-fila:last-child { border-bottom: none; }
   .cmp-cliente-fila > div { flex: 1; }
   .cmp-condicion-venta { margin-top: 20px; font-size: 11px; color: #333; border-top: 1px solid #999; padding-top: 8px; white-space: pre-line; }
+  /* Recibo detallado (5/11/2026) — ver recibos.js */
+  .rc-sub { font-size: 13px; margin: 14px 0 4px 0; text-transform: uppercase; letter-spacing: .04em; }
+  .rc-medios td { vertical-align: top; }
+  .rc-det span { display: inline-block; margin-right: 16px; line-height: 1.55; }
+  .rc-det em { font-style: normal; color: #555; }
+  .rc-letras { margin: 10px 0 6px 0; padding: 8px 10px; border: 1px solid #333; font-weight: bold; font-size: 12.5px; }
+  .rc-concepto { margin: 10px 0; line-height: 1.5; }
+  .rc-resumen { width: 340px; margin: 6px 0 0 0; }
+  .rc-resumen td { border: 1px solid #ddd; padding: 4px 8px; font-size: 12px; }
+  .rc-firmas { display: flex; gap: 40px; margin-top: 56px; }
+  .rc-firmas > div { flex: 1; text-align: center; font-size: 11.5px; color: #333; }
+  .rc-linea { border-top: 1px solid #333; margin-bottom: 4px; }
+  .rc-pie { margin-top: 26px; font-size: 11px; text-align: center; }
 </style>
 <!--
   Compartir (3/10/2026, pedido de Mato: "agregar boton de ver, comparti,

@@ -3,12 +3,12 @@
 //  - nosniff: el navegador no adivina el tipo de un archivo (evita que una subida se ejecute como script).
 //  - Referrer-Policy: no se filtran las direcciones internas a otros sitios.
 //  - CSP: solo se cargan scripts/estilos/fuentes/imágenes de los sitios que el sistema usa de verdad (propios, Google Fonts,
-//    jsDelivr para la librería de Excel, Cloudinary para fotos, Facebook para conectar el número de WhatsApp en modo
+//    jsDelivr para la librería de Excel, cdnjs para la de PDF de los imprimibles (html2canvas/jsPDF — faltaba y bloqueaba "PDF" y "Compartir", corregido 5/11/2026), Cloudinary para fotos, Facebook para conectar el número de WhatsApp en modo
 //    coexistencia — 5/11/2026) y nadie puede meter el sistema en un marco ajeno (clickjacking).
 //    Los scripts y estilos "en línea" siguen permitidos porque todas las pantallas los usan.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://connect.facebook.net",
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://connect.facebook.net",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",

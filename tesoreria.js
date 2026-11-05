@@ -103,6 +103,7 @@ const { registrarMovimientoCuentaCorriente } = require('./clientes');
 const { normalizarLineasImpuesto, TIPOS_RETENCION, sumarMontos, registrarRetencionesSufridas, tiposImpuestosHandler } = require('./impuestos');
 // Imprimibles (3/10/2026, pedido de Mato) — ver imprimibles.js.
 const { paginaImprimible, escapeHtml: escHtml, money: moneyImp, fechaLarga } = require('./imprimibles');
+const { armarRecibo, medioDeCobro } = require('./recibos');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -1501,69 +1502,50 @@ router.get('/recibo-cuenta/:tipo/:id', authOperar, async (req, res) => {
     if (!['movimiento', 'cheque', 'multi'].includes(tipo)) throw err(400, 'tipo inválido');
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
-    if (tipo === 'multi') {
-      const r = await conReintento(async () => {
-        const db = await getDb();
-        const m = await db.collection('cuenta_corriente_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
-        if (!m || !Array.isArray(m.valores)) throw err(404, 'No se encontró ese recibo');
-        const org = await db.collection('organizaciones').findOne({ _id: m.orgId });
-        const retenciones = await db.collection('retenciones_sufridas').find({ origen: 'cobro_cuenta', reciboId: id }).toArray();
-        return { m, org, retenciones };
-      });
-      const { m, org, retenciones } = r;
-      const LBL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', tarjeta: 'Tarjeta' };
-      const total = m.valores.reduce((t, v) => t + (Number(v.monto) || 0), 0);
-      const totalRet = retenciones.reduce((a, x) => a + (Number(x.monto) || 0), 0);
-      const fila = (v) => {
-        let det = '';
-        if (v.tipoValor === 'cheque') det = `Nº ${escHtml(v.chequeNumero || '—')}${v.chequeBanco ? ' — ' + escHtml(v.chequeBanco) : ''}${v.chequeVencimiento ? ' — vence ' + fechaLarga(v.chequeVencimiento) : ''}`;
-        else if (v.tipoValor === 'tarjeta') det = `${escHtml(v.tarjetaEntidad || '')} ${escHtml(v.tarjetaTipo || '')} — Lote ${escHtml(v.tarjetaLote || '—')} / Cupón ${escHtml(v.tarjetaCupon || '—')}`;
-        return `<tr><td>${LBL[v.tipoValor] || escHtml(v.tipoValor)}</td><td>${det}</td><td style="text-align:right">${moneyImp(v.monto, m.moneda)}</td></tr>`;
-      };
-      const bodyHtml = `
-        <h1>Recibo — Cobro a cuenta</h1>
-        <div class="datos-doc">
-          <div><strong>Recibí de:</strong> ${escHtml(m.clienteNombre || '—')}<br>
-            <strong>La suma de:</strong> ${moneyImp(total, m.moneda)}${retenciones.length ? `<br><strong>Retenciones practicadas:</strong> ${retenciones.map(x => escHtml(x.tipoNombre) + ' ' + moneyImp(x.monto, m.moneda)).join(' — ')}<br><strong>Total aplicado a la cuenta:</strong> ${moneyImp(total + totalRet, m.moneda)}` : ''}</div>
-          <div><strong>Fecha:</strong> ${fechaLarga(m.fecha)}<br><strong>Forma de pago:</strong> varios medios</div>
-        </div>
-        <table style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left">Medio</th><th style="text-align:left">Detalle</th><th style="text-align:right">Importe</th></tr></thead><tbody>${m.valores.map(fila).join('')}</tbody></table>
-        <p>En concepto de cobro a cuenta corriente, sin venta puntual asociada.${m.observaciones ? ` ${escHtml(m.observaciones)}` : ''}</p>
-        <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>`;
-      res.set('Content-Type', 'text/html; charset=utf-8');
-      return res.send(paginaImprimible({ titulo: 'Recibo — Cobro a cuenta', org: org || { nombre: 'Organización' }, bodyHtml }));
-    }
-    const resultado = await conReintento(async () => {
+    // Formato detallado (5/11/2026, pedido de Mato): datos del cliente, cada medio con su detalle (cheque: número, banco, librador,
+    // CUIT, emisión y vencimiento), retenciones, importe en letras y saldo de la cuenta corriente. Ver recibos.js.
+    const r = await conReintento(async () => {
       const db = await getDb();
-      const doc = tipo === 'cheque'
-        ? await db.collection('cheques').findOne(Object.assign({ _id: id }, filtroOrg(req)))
-        : await db.collection('tesoreria_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
-      if (!doc) throw err(404, 'No se encontró ese cobro');
-      const org = await db.collection('organizaciones').findOne({ _id: doc.orgId });
+      let doc, cc = null, medios = [], clienteId = null, clienteNombre = '', fecha, moneda, anulado = false, usuario = '', nota = '', orgId;
+      if (tipo === 'multi') {
+        doc = await db.collection('cuenta_corriente_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+        if (!doc || !Array.isArray(doc.valores)) throw err(404, 'No se encontró ese recibo');
+        for (const v of doc.valores) medios.push(await medioDeCobro(db, v));
+        clienteId = doc.clienteId; clienteNombre = doc.clienteNombre; fecha = doc.fecha; moneda = doc.moneda; anulado = !!doc.anulado; usuario = doc.usuarioNombre; nota = doc.observaciones; orgId = doc.orgId;
+      } else if (tipo === 'cheque') {
+        doc = await db.collection('cheques').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+        if (!doc) throw err(404, 'No se encontró ese cobro');
+        medios.push(await medioDeCobro(db, { tipoValor: 'cheque', monto: doc.monto, chequeId: doc._id }));
+        clienteId = doc.clienteId; clienteNombre = doc.clienteNombre; fecha = doc.fecha; moneda = doc.moneda; anulado = doc.estado === 'anulado'; usuario = doc.usuarioNombre; nota = doc.observaciones; orgId = doc.orgId;
+      } else {
+        doc = await db.collection('tesoreria_movimientos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+        if (!doc) throw err(404, 'No se encontró ese cobro');
+        cc = await db.collection('cuenta_corriente_movimientos').findOne({ reciboTipo: 'movimiento', reciboId: id });
+        clienteId = cc ? cc.clienteId : null; clienteNombre = (cc && cc.clienteNombre) || (doc.motivo || '').replace('Cobro a cuenta — ', '');
+        fecha = (cc && cc.fecha) || doc.fecha; moneda = doc.moneda; anulado = !!(cc && cc.anulado) || !!doc.anulado; usuario = (cc && cc.usuarioNombre) || doc.usuarioNombre || ''; nota = cc ? cc.observaciones : doc.observaciones; orgId = doc.orgId;
+      }
+      const org = await db.collection('organizaciones').findOne({ _id: orgId });
       const retenciones = await db.collection('retenciones_sufridas').find(Object.assign({ origen: 'cobro_cuenta', reciboId: id }, filtroOrg(req))).toArray();
-      return { doc, org, retenciones };
+      if (tipo === 'movimiento') { // el movimiento guarda lo neto (en tarjeta, descontado el costo): lo cobrado es el total menos las retenciones
+        const totalRet = retenciones.reduce((a, x) => a + (Number(x.monto) || 0), 0);
+        const mDoc = await medioDeCobro(db, Object.assign({ tipoValor: (cc && cc.tipoValor) || 'efectivo', cuentaTipo: doc.cuentaTipo, cuentaId: doc.cuentaId }, cc || {}, { monto: cc ? Math.max(0, cc.monto - totalRet) : doc.monto }));
+        if (mDoc.tipo === 'tarjeta' && doc.observaciones) mDoc.detalle.push(['Datos del cupón', doc.observaciones]); // lote, cupón y plan quedaron anotados en el movimiento
+        medios.push(mDoc);
+      }
+      let saldo = null;
+      if (clienteId) { const sd = await db.collection('cuenta_corriente_saldos').findOne({ clienteId }); saldo = sd ? Number(sd.saldo) || 0 : 0; }
+      return { org, retenciones, medios, clienteId, clienteNombre, fecha, moneda, anulado, usuario, nota, saldo, doc };
     });
-    const { doc, org, retenciones } = resultado;
-    const totalRetenciones = retenciones.reduce((a, r) => a + (Number(r.monto) || 0), 0);
-    const esMovimiento = tipo === 'movimiento';
-    const clienteNombre = doc.clienteNombre || (esMovimiento ? (doc.motivo || '').replace('Cobro a cuenta — ', '') : '');
-    const bodyHtml = `
-      <h1>Recibo — Cobro a cuenta</h1>
-      <div class="datos-doc">
-        <div>
-          <strong>Recibí de:</strong> ${escHtml(clienteNombre || '—')}<br>
-          <strong>La suma de:</strong> ${moneyImp(doc.monto, doc.moneda)}${retenciones.length ? `<br><strong>Retenciones practicadas:</strong> ${retenciones.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, doc.moneda)).join(' — ')}<br><strong>Total aplicado a la cuenta:</strong> ${moneyImp(doc.monto + totalRetenciones, doc.moneda)}` : ''}
-        </div>
-        <div>
-          <strong>Fecha:</strong> ${fechaLarga(doc.fecha)}<br>
-          <strong>Forma de pago:</strong> ${esMovimiento ? 'Ver movimiento de caja/banco' : 'Cheque Nº ' + escHtml(doc.numero || '—')}
-        </div>
-      </div>
-      <p>En concepto de cobro a cuenta corriente, sin venta puntual asociada.${doc.observaciones ? ` ${escHtml(doc.observaciones)}` : ''}</p>
-      <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>
-    `;
+    // La observación del movimiento mezcla la nota con "Incluye retenciones: …": se muestra solo la nota.
+    const nota = String(r.nota || '').replace(/(^|\s*—\s*)Incluye retenciones:.*$/, '').trim();
+    const rec = await armarRecibo(await getDb(), {
+      org: r.org || { nombre: 'Organización' }, clienteId: r.clienteId, clienteNombre: r.clienteNombre, numeroFmt: 'CC-' + String(id).slice(-6).toUpperCase(),
+      fecha: r.fecha, moneda: r.moneda, medios: r.medios, retenciones: r.retenciones, concepto: 'cobro a cuenta corriente, sin venta puntual asociada',
+      nota, usuario: r.usuario, anulado: r.anulado,
+      resumen: r.saldo === null ? [] : [[r.saldo > 0 ? 'Saldo adeudado en cuenta corriente (a hoy)' : 'Saldo a favor del cliente en cuenta corriente (a hoy)', moneyImp(Math.abs(r.saldo), r.moneda)]]
+    });
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(paginaImprimible({ titulo: 'Recibo — Cobro a cuenta', org: org || { nombre: 'Organización' }, bodyHtml }));
+    res.send(paginaImprimible({ titulo: 'Recibo — Cobro a cuenta', org: r.org || { nombre: 'Organización' }, headerHtml: rec.headerHtml, bodyHtml: rec.bodyHtml, telefono: rec.telefono }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

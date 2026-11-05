@@ -102,6 +102,7 @@ const {
   escapeHtml: escHtml, money: moneyImp, numero: numImp, fechaLarga, fechaCorta,
   CATEGORIA_FISCAL_LABEL
 } = require('./imprimibles');
+const { armarRecibo, medioDeCobro } = require('./recibos');
 
 const router = express.Router();
 const DB_NAME = 'calculadora_m2';
@@ -1445,33 +1446,27 @@ router.get('/:id/pagos/:index/recibo', authAdmin, async (req, res) => {
       return { venta, pago, org };
     });
     const { venta, pago, org } = resultado;
-    const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', cheque: 'Cheque', cuenta: 'Transferencia', tarjeta: 'Tarjeta' };
-    // Varios medios cobrados juntos: un solo recibo con todos.
-    const grupo = pago.reciboGrupo ? (venta.pagos || []).filter(p => p.reciboGrupo === pago.reciboGrupo && !p.anulado) : [pago];
-    const totalMedios = grupo.reduce((a, p) => a + p.monto, 0);
-    const totalRet = grupo.reduce((a, p) => a + (p.totalRetenciones || 0), 0);
-    const recargoTotal = grupo.reduce((a, p) => a + (p.tarjetaRecargo || 0), 0);
-    const retsTodas = grupo.reduce((a, p) => a.concat(p.retenciones || []), []);
-    const detalleMedio = p => (TIPO_VALOR_LABEL[p.tipoValor] || escHtml(p.tipoValor))
-      + (p.tipoValor === 'tarjeta' ? ` (Lote ${escHtml(p.tarjetaLote || '—')} / Cupón ${escHtml(p.tarjetaCupon || '—')})` : '');
-    const bodyHtml = `
-      <h1>Recibo — ${TITULO_DOC_RECIBO(venta)} Nº ${String(venta.numero).padStart(5, '0')}</h1>
-      <div class="datos-doc">
-        <div>
-          <strong>Recibí de:</strong> ${escHtml(await nombreClienteImpreso(venta.clienteId, venta.clienteNombre))}<br>
-          <strong>La suma de:</strong> ${moneyImp(totalMedios, venta.moneda)}${retsTodas.length ? `<br><strong>Retenciones practicadas:</strong> ${retsTodas.map(r => escHtml(r.tipoNombre) + ' ' + moneyImp(r.monto, venta.moneda)).join(' — ')}<br><strong>Total aplicado a la venta:</strong> ${moneyImp(totalMedios + totalRet, venta.moneda)}` : ''}${recargoTotal > 0 ? `<br><strong>Recargo por financiación (tarjeta):</strong> ${moneyImp(recargoTotal, venta.moneda)}<br><strong>Total cobrado con tarjeta:</strong> ${moneyImp(grupo.reduce((a, p) => a + (p.tarjetaTotalCobrado || 0), 0), venta.moneda)}` : ''}
-        </div>
-        <div>
-          <strong>Fecha:</strong> ${fechaLarga(pago.fecha)}<br>
-          ${grupo.length > 1 ? '<strong>Forma de pago:</strong> Varios medios' : `<strong>Forma de pago:</strong> ${detalleMedio(pago)}`}
-        </div>
-      </div>
-      ${grupo.length > 1 ? `<table style="width:100%;border-collapse:collapse;margin:10px 0"><thead><tr><th style="text-align:left;border-bottom:1px solid #999">Medio</th><th style="text-align:right;border-bottom:1px solid #999">Importe</th></tr></thead><tbody>${grupo.map(p => `<tr><td>${detalleMedio(p)}</td><td style="text-align:right">${moneyImp(p.monto, venta.moneda)}</td></tr>`).join('')}</tbody></table>` : ''}
-      <p>En concepto de pago de ${TITULO_DOC_RECIBO(venta, true)} Nº ${String(venta.numero).padStart(5, '0')}.${pago.nota ? ` ${escHtml(pago.nota)}` : ''}</p>
-      <p class="muted" style="margin-top:40px">Firma y aclaración: ________________________________</p>
-    `;
+    // Formato detallado (5/11/2026, pedido de Mato): datos del cliente, cada medio con su detalle (cheque: número, banco, librador,
+    // CUIT, emisión y vencimiento), importe en letras y cuánto queda por cobrar de la venta. Ver recibos.js.
+    const db = await getDb();
+    const grupo = pago.reciboGrupo ? (venta.pagos || []).filter(p => p.reciboGrupo === pago.reciboGrupo) : [pago];
+    const vigentes = grupo.filter(p => !p.anulado);
+    const anulado = vigentes.length === 0;
+    const lista = anulado ? grupo : vigentes;
+    const medios = []; for (const p of lista) medios.push(await medioDeCobro(db, p));
+    const retenciones = lista.reduce((a, p) => a.concat(p.retenciones || []), []);
+    const ultimo = Math.max(...grupo.map(p => (venta.pagos || []).indexOf(p)));
+    const cobradoHasta = (venta.pagos || []).slice(0, ultimo + 1).filter(p => !p.anulado).reduce((a, p) => a + (p.monto || 0) + (p.totalRetenciones || 0), 0);
+    const saldoLuego = Math.max(0, Math.round((venta.total - cobradoHasta - (venta.totalAcreditado || 0)) * 100) / 100);
+    const refNum = String(venta.numero).padStart(5, '0');
+    const rec = await armarRecibo(db, {
+      org: datosNegocioParaImprimir(org), clienteId: venta.clienteId, clienteNombre: venta.clienteNombre,
+      numeroFmt: `${refNum}-${String(index + 1).padStart(2, '0')}`, fecha: pago.fecha, moneda: venta.moneda, medios, retenciones,
+      concepto: `pago de ${TITULO_DOC_RECIBO(venta, true)} Nº ${refNum}`, nota: pago.nota, usuario: pago.usuarioNombre, anulado,
+      resumen: [[`${TITULO_DOC_RECIBO(venta)} Nº ${refNum} — total`, moneyImp(venta.total, venta.moneda)], ['Cobrado hasta este recibo', moneyImp(cobradoHasta, venta.moneda)], ['Saldo luego de este recibo', moneyImp(saldoLuego, venta.moneda)]]
+    });
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(paginaImprimible({ titulo: `Recibo — ${TITULO_DOC_RECIBO(venta)} Nº ${venta.numero}`, org: datosNegocioParaImprimir(org), bodyHtml }));
+    res.send(paginaImprimible({ titulo: `Recibo — ${TITULO_DOC_RECIBO(venta)} Nº ${venta.numero}`, org: datosNegocioParaImprimir(org), headerHtml: rec.headerHtml, bodyHtml: rec.bodyHtml, telefono: rec.telefono }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -2348,18 +2343,21 @@ router.post('/link-publico', authAdmin, async (req, res) => {
   try {
     const b = req.body || {};
     const tipo = String(b.tipo || '');
-    if (!['comprobante', 'remito', 'recibo'].includes(tipo)) throw err(400, 'Tipo de documento inválido.');
+    if (!['comprobante', 'remito', 'recibo', 'recibo_cuenta'].includes(tipo)) throw err(400, 'Tipo de documento inválido.');
     const id = toObjectId(b.id);
     if (!id) throw err(400, 'id inválido');
+    // Recibo de un cobro a cuenta (sin venta): el subtipo dice dónde vive (movimiento de caja/banco, cheque o recibo con varios medios).
+    const subtipo = tipo === 'recibo_cuenta' ? String(b.subtipo || '') : null;
+    if (tipo === 'recibo_cuenta' && !['movimiento', 'cheque', 'multi'].includes(subtipo)) throw err(400, 'Tipo de recibo inválido.');
     const index = tipo === 'recibo' ? Number(b.index) : null;
     if (tipo === 'recibo' && (!Number.isInteger(index) || index < 0)) throw err(400, 'índice de pago inválido');
     const resultado = await conReintento(async () => {
       const db = await getDb();
-      const col = tipo === 'remito' ? 'remitos' : 'ventas';
+      const col = tipo === 'remito' ? 'remitos' : (tipo === 'recibo_cuenta' ? (subtipo === 'cheque' ? 'cheques' : (subtipo === 'multi' ? 'cuenta_corriente_movimientos' : 'tesoreria_movimientos')) : 'ventas');
       let doc = await db.collection(col).findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!doc && req.vistaTodas) doc = await db.collection(col).findOne({ _id: id });
       if (!doc) throw err(404, 'Documento no encontrado');
-      const filtro = { tipo, docId: id, index, orgId: doc.orgId };
+      const filtro = Object.assign({ tipo, docId: id, index, orgId: doc.orgId }, subtipo ? { subtipo } : {});
       let link = await db.collection('links_publicos').findOne(filtro);
       if (!link) {
         link = Object.assign({ token: require('crypto').randomBytes(24).toString('hex'), createdAt: new Date(), creadoPor: (req.usuario && req.usuario.nombre) || '' }, filtro);
@@ -2379,12 +2377,13 @@ router.servirLinkPublico = async (req, res) => {
     const db = await getDb();
     const link = await db.collection('links_publicos').findOne({ token });
     if (!link) return res.status(404).send('Link inválido o vencido');
-    const path = link.tipo === 'comprobante' ? '/:id/comprobante' : (link.tipo === 'remito' ? '/remitos/:id/imprimir' : '/:id/pagos/:index/recibo');
-    const layer = router.stack.find(l => l.route && l.route.path === path && l.route.methods.get);
+    const esCuenta = link.tipo === 'recibo_cuenta'; // el recibo de un cobro a cuenta vive en el router de Tesorería
+    const path = esCuenta ? '/recibo-cuenta/:tipo/:id' : (link.tipo === 'comprobante' ? '/:id/comprobante' : (link.tipo === 'remito' ? '/remitos/:id/imprimir' : '/:id/pagos/:index/recibo'));
+    const layer = (esCuenta ? require('./tesoreria') : router).stack.find(l => l.route && l.route.path === path && l.route.methods.get);
     if (!layer) return res.status(404).send('Documento no disponible');
     const handler = layer.route.stack[layer.route.stack.length - 1].handle;
     const fake = Object.create(req);
-    fake.params = { id: String(link.docId), index: String(link.index == null ? '' : link.index) };
+    fake.params = esCuenta ? { tipo: link.subtipo, id: String(link.docId) } : { id: String(link.docId), index: String(link.index == null ? '' : link.index) };
     fake.orgId = link.orgId; fake.usuario = { nombre: '', rol: {} }; fake.query = {};
     res.set('X-Robots-Tag', 'noindex, nofollow');
     // Quien recibe el link es el cliente: solo el comprobante, sin ningún botón (Imprimir / Compartir / WhatsApp son de uso interno).

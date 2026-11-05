@@ -872,6 +872,7 @@ async function copiarLinkPublico(url){
   if ((m = url.match(/\/api\/ventas\/remitos\/([0-9a-f]{24})\/imprimir/))) body = { tipo: 'remito', id: m[1] };
   else if ((m = url.match(/\/api\/ventas\/([0-9a-f]{24})\/pagos\/(\d+)\/recibo/))) body = { tipo: 'recibo', id: m[1], index: Number(m[2]) };
   else if ((m = url.match(/\/api\/ventas\/([0-9a-f]{24})\/comprobante/))) body = { tipo: 'comprobante', id: m[1] };
+  else if ((m = url.match(/\/recibo-cuenta\/(movimiento|cheque|multi)\/([0-9a-f]{24})/))) body = { tipo: 'recibo_cuenta', subtipo: m[1], id: m[2] };
   else { alert('No se pudo armar el link de este documento.'); return; }
   try{
     const r = await fetch('/api/ventas/link-publico', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});

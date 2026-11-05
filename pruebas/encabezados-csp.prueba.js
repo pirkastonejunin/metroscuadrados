@@ -19,6 +19,8 @@ const { chromium } = require('playwright');
   // Conectar el número de WhatsApp en modo coexistencia (Embedded Signup) carga el SDK de Facebook y abre sus marcos: la política tiene que dejarlo.
   const csp = r.headers.get('content-security-policy') || ''; const dir = n => (csp.split(';').map(s => s.trim()).find(s => s.startsWith(n + ' ')) || '');
   if (!/https:\/\/connect\.facebook\.net/.test(dir('script-src')) || !/facebook\.com/.test(dir('frame-src')) || !/facebook\.com/.test(dir('connect-src'))) { problemas++; console.log('✘ la política bloquea el conector de Facebook (coexistencia de WhatsApp)'); }
+  // Los imprimibles (recibos, comprobantes, remitos) arman el PDF con html2canvas y jsPDF desde cdnjs: si la política los bloquea, "PDF" y "Compartir" no andan.
+  if (!/https:\/\/cdnjs\.cloudflare\.com/.test(dir('script-src'))) { problemas++; console.log('✘ la política bloquea cdnjs (generador de PDF de los imprimibles)'); }
   console.log('headers:', ['strict-transport-security', 'x-content-type-options', 'referrer-policy'].map(h => h + '=' + r.headers.get(h)).join(' | '));
   console.log(problemas ? problemas + ' pantallas con problemas' : 'ninguna pantalla viola la política'); await b.close(); srv.close(); process.exit(problemas ? 1 : 0);
 })();
