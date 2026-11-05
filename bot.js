@@ -634,6 +634,22 @@ router.post('/coexistencia/completar', auth, soloAdmin, async (req, res) => {
     await (await getDb()).collection('bot_config').updateOne({ _id: 'coexistencia' }, { $set: doc }, { upsert: true });
     res.json({ ok: pasos.every(p => p.ok), pasos, wabaId: waba, phoneId: phone }); } catch (er) { res.status(500).json({ error: er.message }); }
 });
+// Termina una coexistencia que Meta dejó a medias (número ya conectado a la app Business, pero la app nueva sin suscribir a la cuenta):
+// suscribe la app a la cuenta de WhatsApp con el token permanente y pide contactos/historial. No registra ni mueve el número.
+router.post('/coexistencia/suscribir', auth, soloAdmin, async (req, res) => {
+  try { const e = process.env; const waba = String((req.body && req.body.waba) || e.WA_WABA_ID || '').replace(/\D/g, '');
+    if (!/^\d{5,25}$/.test(waba)) return res.status(400).json({ error: 'Falta el ID de la cuenta de WhatsApp (WABA).' });
+    if (!e.WA_TOKEN || !e.WA_PHONE_ID) return res.status(400).json({ error: 'Faltan WA_TOKEN y WA_PHONE_ID en Render.' });
+    const h = { Authorization: 'Bearer ' + e.WA_TOKEN, 'content-type': 'application/json' }; const pasos = [];
+    const llamar = async (url, op) => { const r = await pedir(url, op, 30000); const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error((d.error && (d.error.error_user_msg || d.error.message)) || ('Error ' + r.status)); return d; };
+    const paso = async (nombre, fn) => { try { await fn(); pasos.push({ paso: nombre, ok: true }); return true; } catch (x) { pasos.push({ paso: nombre, ok: false, error: x.message }); return false; } };
+    const ok1 = await paso('Suscribir la app a la cuenta de WhatsApp', () => llamar(graph() + '/' + waba + '/subscribed_apps', { method: 'POST', headers: h, body: '{}' }));
+    if (ok1) { // Meta solo da contactos e historial en las primeras 24 h de la conexión: si ya pasó, avisa el error y sigue
+      await paso('Pedir los contactos de la agenda', () => llamar(graph() + '/' + e.WA_PHONE_ID + '/smb_app_data', { method: 'POST', headers: h, body: JSON.stringify({ messaging_product: 'whatsapp', sync_type: 'smb_app_state_sync' }) }));
+      await paso('Pedir el historial de chats', () => llamar(graph() + '/' + e.WA_PHONE_ID + '/smb_app_data', { method: 'POST', headers: h, body: JSON.stringify({ messaging_product: 'whatsapp', sync_type: 'history' }) })); }
+    await (await getDb()).collection('bot_config').updateOne({ _id: 'coexistencia' }, { $set: { wabaId: waba, phoneId: e.WA_PHONE_ID, at: new Date(), pasos, usuario: (req.usuario && req.usuario.nombre) || '' } }, { upsert: true });
+    res.json({ ok: ok1, pasos, wabaId: waba, phoneId: e.WA_PHONE_ID }); } catch (er) { res.status(500).json({ error: er.message }); }
+});
 // ---- consumo y costo estimado de mensajes de WhatsApp (tarifas de Meta, editables por variables de entorno) ----
 const num = (v, d) => { const n = parseFloat(v); return isFinite(n) && n >= 0 ? n : d; };
 function tarifasWA() { return { servicio: num(process.env.WA_TARIFA_SERVICIO, 0.026), utilidad: num(process.env.WA_TARIFA_UTILIDAD, 0.026), marketing: num(process.env.WA_TARIFA_MARKETING, 0.0618), cupoGratis: num(process.env.WA_CUPO_SERVICIO, 1000) }; }

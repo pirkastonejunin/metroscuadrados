@@ -79,7 +79,7 @@
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Conectar en modo coexistencia</b><span id="coxEst"></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Conecta el número de la app WhatsApp Business <b>sin sacarlo del celular</b>: seguís escribiendo desde el teléfono, todo queda en el sistema y Meta manda el historial de chats (hasta ~6 meses) y los contactos. En la ventana de Meta elegí <b>compartir el historial</b>: si lo rechazás no hay segunda oportunidad. Hace falta la app WhatsApp Business actualizada, y usar el celular al menos una vez cada 14 días.</div>
     <div id="coxChecks" class="muted" style="margin-bottom:8px"></div>
-    <button class="b" id="coxBtn" onclick="coxConectar()">Conectar con coexistencia</button> <span id="coxMsg" class="muted"></span>
+    <button class="b" id="coxBtn" onclick="coxConectar()">Conectar con coexistencia</button> <button class="b" style="background:#fff;color:inherit;border:1px solid #ccc" onclick="coxSuscribir()" title="Para cuando Meta dejó el número conectado pero la ventana da error">Terminar la conexión (suscribir la app)</button> <span id="coxMsg" class="muted"></span>
     <div id="coxRes" style="margin-top:8px"></div></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Datos para configurar en Meta</b></div><div class="pad" id="wDatos"></div></div>
   <div class="card" style="margin-top:12px"><div class="hdr"><b>Probar sin cambiar nada</b></div><div class="pad">
@@ -183,6 +183,9 @@ function wPlCopiar(i){ const p = WPL[i]; const sg = WSUG.find(x=>x.nombre===p.no
   const t = ['Nombre: '+p.nombre,'Idioma: Español (Argentina)','Categoría: '+((sg&&sg.categoria)||'Utilidad'),'Cuerpo:',p.texto,'Ejemplos de las variables: '+(p.variables.map((v,n)=>'{{'+(n+1)+'}} = '+ej[v]).join(' · ')||'sin variables')].join('\n');
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{ document.getElementById('wPlMsg').textContent = 'Copiado: pegalo en el formulario de Meta.'; }).catch(()=>{ prompt('Copiá estos datos para Meta:', t); }); }
 let COX = null, COX_IDS = null, COX_CODE = null;
+async function coxSuscribir(){ const m = document.getElementById('coxMsg'); const waba = prompt('ID de la cuenta de WhatsApp (WABA):', (COX&&COX.conexion&&COX.conexion.wabaId)||''); if (!waba) return;
+  if (!confirm('Se va a suscribir esta app a la cuenta de WhatsApp para recibir los mensajes. No cambia el número ni lo saca del celular. ¿Seguimos?')) return;
+  m.textContent='Conectando…'; try{ const d = await api('/api/bot/coexistencia/suscribir',{method:'POST',headers:H(J),body:JSON.stringify({waba})}); m.textContent = d.ok ? '✅ App suscripta.' : '⚠ No se pudo suscribir (mirá el detalle abajo).'; await coxCargar(); }catch(e){ m.textContent = e.message; } }
 async function coxCargar(){ try{ COX = await api('/api/bot/coexistencia', {headers:H()});
   const f = (ok,t)=>(ok?'✅ ':'⬜ ')+t;
   document.getElementById('coxChecks').innerHTML = [f(!!COX.appId,'META_APP_ID'), f(COX.appSecret,'META_APP_SECRET'), f(!!COX.configId,'WA_ES_CONFIG_ID (configuración de Embedded Signup'+(COX.configId?' Nº '+esc(COX.configId):'')+')')].join(' · ');
