@@ -185,7 +185,7 @@ function wPlCopiar(i){ const p = WPL[i]; const sg = WSUG.find(x=>x.nombre===p.no
 let COX = null, COX_IDS = null, COX_CODE = null;
 async function coxCargar(){ try{ COX = await api('/api/bot/coexistencia', {headers:H()});
   const f = (ok,t)=>(ok?'✅ ':'⬜ ')+t;
-  document.getElementById('coxChecks').innerHTML = [f(!!COX.appId,'META_APP_ID'), f(COX.appSecret,'META_APP_SECRET'), f(!!COX.configId,'WA_ES_CONFIG_ID (configuración de Embedded Signup)')].join(' · ');
+  document.getElementById('coxChecks').innerHTML = [f(!!COX.appId,'META_APP_ID'), f(COX.appSecret,'META_APP_SECRET'), f(!!COX.configId,'WA_ES_CONFIG_ID (configuración de Embedded Signup'+(COX.configId?' Nº '+esc(COX.configId):'')+')')].join(' · ');
   const c = COX.conexion, h = COX.historial;
   document.getElementById('coxEst').innerHTML = c ? '<span class="chip"><i class="dot"></i>Conectado el '+esc(hora(c.at))+'</span>' : '';
   document.getElementById('coxRes').innerHTML = (c ? '<div>Cuenta de WhatsApp (WABA): <b>'+esc(c.wabaId)+'</b> · Número (WA_PHONE_ID): <b>'+esc(c.phoneId)+'</b></div>'+(c.pasos||[]).map(p=>'<div>'+(p.ok?'✅':'⚠')+' '+esc(p.paso)+(p.error?': '+esc(p.error):'')+'</div>').join('') : '')
