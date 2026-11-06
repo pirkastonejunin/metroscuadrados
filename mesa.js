@@ -46,6 +46,8 @@ function etapaDe(c, m, pres) {
 }
 // Columna del tablero. "Hoy" junta todo lo que pide una acción hoy; el resto espera una fecha o al cliente.
 function columnaDe({ esp, m, prox, etapa }) {
+  // "Presupuesto enviado" se queda ahí aunque el cliente escriba o no haya fecha (6/11/2026): solo vuelve a Hoy si hay una fecha puesta a propósito y ya llegó.
+  if (etapa === 'presupuesto') return prox && prox.dias <= 0 ? 'hoy' : 'presupuesto';
   if (esp || m.recordar || m.sinDec) return 'hoy';
   if (m.esperando) return 'esperando';
   if (!prox || prox.dias <= 0) return 'hoy';
@@ -444,6 +446,10 @@ router.post('/:id/mover', auth, async (req, res) => {
     if (col === 'esperando') { u.$set['mesa.esperando'] = { desde: ahora, venceAt: venceEsperando(ahora) }; delete u.$unset['mesa.esperando']; }
     else if (col === 'hoy') Object.assign(u.$set, (await fijarProx(db, req, c, 0, 'Traída a hoy')).$set || {});
     else if (col === 'seguimiento') { const p = await fijarProx(db, req, c, 1, 'Retomar'); Object.assign(u.$set, p.$set || {}); Object.assign(u.$unset, p.$unset || {}); if (!c.mesa || !c.mesa.etapa || c.mesa.etapa === 'nuevo') u.$set['mesa.etapa'] = 'conversando'; }
+    else if (col === 'presupuesto') { // no se le pone fecha automática: queda en Presupuesto enviado hasta que se le fije una a propósito
+      u.$set['mesa.etapa'] = col; u.$unset['mesa.prox'] = '';
+      await db.collection('oportunidades').updateMany(Object.assign({ estado: 'activa' }, filtroOrg(req), { 'cliente.telefono': { $regex: c.tel10 + '$' } }), { $set: { proximaAccion: null, updatedAt: ahora } });
+    }
     else { u.$set['mesa.etapa'] = col; const p = await fijarProx(db, req, c, 2, 'Retomar'); Object.assign(u.$set, p.$set || {}); Object.assign(u.$unset, p.$unset || {}); }
     if (!Object.keys(u.$set).length) delete u.$set;
     await db.collection(COL_C).updateOne({ _id: c._id }, u);
