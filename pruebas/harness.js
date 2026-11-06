@@ -114,6 +114,7 @@ async function start(port = 4010, opciones = {}) {
   app.use('/api/costos', require(path.join(REPO, 'costos.js')));
   app.use('/api/leads', require(path.join(REPO, 'leads.js')));
   app.use('/api/bot', require(path.join(REPO, 'bot.js')));
+  app.use('/api/mesa', require(path.join(REPO, 'mesa.js')));
   app.use('/api/crm', require(path.join(REPO, 'crm.js')));
   app.use('/api/sueldos', require(path.join(REPO, 'sueldos.js')));
   app.use('/api/asistente', require(path.join(REPO, 'asistente.js')));

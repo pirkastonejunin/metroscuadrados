@@ -224,7 +224,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
   </header>
   <div class="err" id="msg"></div>
   <div class="barra" id="barra">
-    <button class="chip on" data-f="mias" title="Mías y sin asignar">Mías</button><button class="chip" data-f="todas" title="Toda la sucursal">Sucursal</button>
+    <button class="chip on" data-f="mias" title="Mías y sin asignar">Mías</button><button class="chip" data-f="todas" title="Toda la sucursal">Sucursal</button><button class="chip" id="limpiar" title="Cerrar en bloque las conversaciones viejas que nadie trabajó (solo Administrador)">🧹 Limpiar viejas</button>
     <select id="fTemp" aria-label="Temperatura"><option value="">Temperatura</option><option value="caliente">Caliente</option><option value="tibio">Tibio</option><option value="frio">Frío</option></select>
     <select id="fCamp" aria-label="Campaña"><option value="">Campaña</option></select>
     <select id="fProd" aria-label="Producto"><option value="">Producto</option></select>
@@ -251,6 +251,11 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url, opt){ const r = await fetch(url, opt); const raw = await r.text(); let d = {}; try{ d = JSON.parse(raw); }catch(e){} if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d; }
 const post = (url, body) => api(url, {method:'POST', headers:H(J), body:JSON.stringify(body||{})});
+document.addEventListener('click', async ev => { const b = ev.target.closest && ev.target.closest('#limpiar'); if (!b) return;
+  const t = prompt('Cerrar como "sin respuesta" las conversaciones SIN actividad hace más de cuántos días (y que ningún asesor atendió)?', '15'); if (t === null) return; const dias = parseInt(t, 10); if (!(dias >= 1)) return err('Poné un número de días.');
+  try{ const v = await post('/api/mesa/cierre-masivo', {dias}); if (!v.aCerrar && !v.contactos) return alert('No hay nada para cerrar con ese criterio ('+v.total+' conversaciones abiertas, '+v.atendidas+' ya atendidas por un asesor).');
+    if (!confirm('Se van a cerrar '+v.aCerrar+' conversaciones y '+v.contactos+' contactos de Azuite sin conversación (sin movimiento hace más de '+dias+' días, sin vendedor ni próxima acción). No se borra nada. ¿Seguir?')) return;
+    const r = await post('/api/mesa/cierre-masivo', {dias, confirmar:true}); toast('Cerradas: '+r.cerradas+' conversaciones y '+r.contactos+' contactos'); await cargar({forzar:true}); }catch(e){ err(e); } });
 const money = n => '$ ' + Math.round(n||0).toLocaleString('es-AR');
 const mins = m => m<1 ? 'recién' : m<60 ? m+' min' : m<1440 ? Math.floor(m/60)+' h' : Math.floor(m/1440)+' d';
 const hora = d => new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',dateStyle:'short',timeStyle:'short'});

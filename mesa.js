@@ -276,6 +276,31 @@ router.get('/evolucion', auth, async (req, res) => {
     res.json({ gastoPorCampana: [...GC.entries()].map(([campana, monto]) => ({ campana, monto: Math.round(monto) })), mesesDeMeta: [...mesesMeta], meses: meses.map(m => ({ mes: m, leads: (L.get(m) || {}).n || 0, leadsMeta: (L.get(m) || {}).meta || 0, gastoAds: Math.round(G.get(m) || 0), clientes: (L.get(m) || {}).clientes || 0, presupuestos: (P.get(m) || {}).n || 0, monto: Math.round((P.get(m) || {}).monto || 0), aprobados: (P.get(m) || {}).aprobados || 0, montoAprobado: Math.round((P.get(m) || {}).montoAprobado || 0) })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Limpieza masiva: cierra como "sin respuesta" las conversaciones viejas que nadie trabajó (ej. las que entraron de Azuite al armar el bot).
+// Sin `confirmar` solo cuenta (vista previa). No borra nada, no toca oportunidades y se puede reabrir una por una (pestaña "cerradas").
+router.post('/cierre-masivo', auth, async (req, res) => {
+  try {
+    if (!(req.usuario && req.usuario.rol && req.usuario.rol.protegido)) return res.status(403).json({ error: 'Solo el rol Administrador puede cerrar conversaciones en bloque.' });
+    const dias = Math.min(365, Math.max(1, parseInt(req.body && req.body.dias, 10) || 15)); const corte = new Date(Date.now() - dias * 86400000);
+    const db = await getDb();
+    const convs = await db.collection(COL_C).find(Object.assign({}, filtroOrg(req), { estado: { $ne: 'bot' }, interno: { $ne: true }, demo: { $ne: true }, 'mesa.cierre': { $in: [null] } })).project({ _id: 1, updatedAt: 1 }).toArray();
+    const ids = convs.map(c => c._id); const ult = new Map(); const atendidas = new Set();
+    for (let i = 0; i < ids.length; i += 500) {
+      const lote = ids.slice(i, i + 500);
+      for (const g of await db.collection(COL_M).aggregate([{ $match: { convId: { $in: lote } } }, { $group: { _id: '$convId', ult: { $max: '$at' }, asesor: { $max: { $cond: [{ $eq: ['$origen', 'asesor'] }, 1, 0] } } } }]).toArray()) { ult.set(String(g._id), g.ult); if (g.asesor) atendidas.add(String(g._id)); }
+    }
+    const aCerrar = convs.filter(c => { const u = ult.get(String(c._id)) || c.updatedAt; return !atendidas.has(String(c._id)) && u && new Date(u) < corte; });
+    // Oportunidades traídas de Azuite que no tienen conversación (solo el contacto), sin vendedor ni próxima acción y sin movimiento hace más de `dias`.
+    const telsConv = new Set((await db.collection(COL_C).find(filtroOrg(req)).project({ tel10: 1 }).toArray()).map(c => c.tel10));
+    const opsAC = (await db.collection('oportunidades').find(Object.assign({ estado: 'activa', origen: 'azuite' }, filtroOrg(req))).toArray())
+      .filter(o => !o.vendedorId && !(o.proximaAccion && o.proximaAccion.fecha) && !telsConv.has(tel10(o.cliente && o.cliente.telefono)) && new Date(o.updatedAt || o.createdAt || 0) < corte);
+    if (!(req.body && req.body.confirmar === true)) return res.json({ ok: true, vistaPrevia: true, dias, total: convs.length, aCerrar: aCerrar.length, atendidas: convs.filter(c => atendidas.has(String(c._id))).length, contactos: opsAC.length });
+    const ahora = new Date(); const q = quien(req);
+    const r = await db.collection(COL_C).updateMany({ _id: { $in: aCerrar.map(c => c._id) }, 'mesa.cierre': { $in: [null] } }, { $set: { 'mesa.cierre': { estado: 'perdida', motivo: 'sin respuesta', at: ahora, usuario: q.nombre, masivo: true } }, $push: { 'mesa.historial': { at: ahora, txt: 'Perdida: sin respuesta (cierre en bloque de conversaciones de más de ' + dias + ' días sin actividad)', usuario: q.nombre } } });
+    const ro = opsAC.length ? await db.collection('oportunidades').updateMany({ _id: { $in: opsAC.map(o => o._id) }, estado: 'activa' }, { $set: { estado: 'descartada', motivoDescarte: 'Perdida: sin respuesta (cierre en bloque de contactos de Azuite de más de ' + dias + ' días)', proximaAccion: null, updatedAt: ahora } }) : { modifiedCount: 0 };
+    res.json({ ok: true, cerradas: r.modifiedCount, contactos: ro.modifiedCount, dias });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.get('/', auth, async (req, res) => {
   try {
     const db = await getDb(); const items = await armar(db, req, { cerradas: req.query.cerradas === '1' });
