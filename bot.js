@@ -316,7 +316,7 @@ async function responder(orgId, convId) {
   const k = String(convId); if (ocupadas.has(k)) { programar(convId, orgId); return; } ocupadas.add(k);
   try {
     const db = await getDb(); const conv = await db.collection(COL_C).findOne({ _id: convId });
-    if (!conv || process.env.BOT_ACTIVO === '0' || ['humano', 'pausado'].includes(conv.estado)) return;
+    if (!conv || conv.interno || process.env.BOT_ACTIVO === '0' || ['humano', 'pausado'].includes(conv.estado)) return;
     const msgs = await db.collection(COL_M).find({ convId }).sort({ at: 1 }).toArray();
     const ultimoIn = [...msgs].reverse().find(m => m.dir === 'in'); if (!ultimoIn) return;
     if (ultimoIn.respondido) return;
@@ -434,9 +434,24 @@ async function procesarAgenda(db, orgId, v) {
     await db.collection(COL_C).updateOne({ orgId, tel10: t10, $or: [{ nombre: { $exists: false } }, { nombre: '' }, { nombre: null }] }, { $set: { nombre } });
   }
 }
+// Números internos (compañeros, proveedores, etc.): lo que escriben o se les escribe no entra al CRM, el bot no contesta y no se gasta IA.
+async function internosDe(db, orgId) {
+  const d = await db.collection('bot_config').findOne({ _id: 'internos:' + orgId });
+  return (d && d.items) || [];
+}
+function internosLimpios(arr) {
+  const out = []; const usados = new Set();
+  for (const p of Array.isArray(arr) ? arr : []) {
+    const tel = digitos(p && p.tel); if (tel.length < 8) continue; const t10 = tel.slice(-10); if (usados.has(t10)) continue; usados.add(t10);
+    out.push({ tel, tel10: t10, nombre: String((p && p.nombre) || '').trim().slice(0, 80), nota: String((p && p.nota) || '').trim().slice(0, 120) });
+  }
+  return out.slice(0, 500);
+}
 async function procesarEvento(body) {
   const orgId = orgBot(); if (!orgId) { console.error('[bot] falta BOT_ORG_ID'); return; }
   const db = await getDb();
+  const internos = new Set((await internosDe(db, orgId)).map(x => x.tel10));
+  const esInt = (tel) => internos.has(digitos(tel).slice(-10));
   for (const ent of (body && body.entry) || []) for (const ch of ent.changes || []) {
     const v = ch.value || {};
     for (const st of v.statuses || []) { // enviado / entregado / leído / falló
@@ -449,6 +464,7 @@ async function procesarEvento(body) {
     const nombres = new Map((v.contacts || []).map(c => [digitos(c.wa_id), c.profile && c.profile.name]));
     for (const m of v.messages || []) {
       if (m.type === 'reaction') continue; // una reacción no es una consulta nueva
+      if (esInt(m.from)) continue; // número interno: se ignora
       const conv = await convDe(db, orgId, m.from, nombres.get(digitos(m.from)), m.referral);
       const arch = archivoDe(m);
       const ok = await guardarMensaje(db, conv, Object.assign({ waId: m.id, dir: 'in', origen: 'cliente', tipo: m.type, texto: textoDe(m), mediaId: mediaIdDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() }, arch ? { archivo: arch } : {}));
@@ -457,6 +473,7 @@ async function procesarEvento(body) {
     }
     // mensajes que un asesor mandó desde la app del celular (coexistencia): el bot deja de contestar en esa conversación
     for (const m of v.message_echoes || []) {
+      if (esInt(m.to)) continue;
       const conv = await convDe(db, orgId, m.to, null, null);
       const ok = await guardarMensaje(db, conv, { waId: m.id, dir: 'out', origen: 'asesor', celular: true, tipo: m.type, texto: textoDe(m), at: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date() });
       if (ok) await db.collection(COL_C).updateOne({ _id: conv._id }, { $set: { estado: 'humano', humanoAt: new Date() } });
@@ -515,7 +532,7 @@ router.get('/media/:id', auth, async (req, res) => { // el CRM pide el archivo c
 // ---- API para la pantalla ----
 router.get('/conversaciones', auth, async (req, res) => {
   try {
-    const db = await getDb(); const m = Object.assign({}, filtroOrg(req)); if (req.query.estado) m.estado = req.query.estado;
+    const db = await getDb(); const m = Object.assign({ interno: { $ne: true } }, filtroOrg(req)); if (req.query.estado) m.estado = req.query.estado;
     const items = await db.collection(COL_C).find(m).sort({ updatedAt: -1 }).limit(200).toArray();
     res.json({ items, botActivo: process.env.BOT_ACTIVO !== '0', modoPrueba: !(process.env.WA_TOKEN && process.env.WA_PHONE_ID) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -605,6 +622,24 @@ router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un ases
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
+// ---- números internos (no entran al CRM ni gastan IA) ----
+router.get('/internos', auth, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return res.json({ items: [] }); res.json({ items: await internosDe(await getDb(), orgId) }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.put('/internos', auth, soloAdmin, async (req, res) => {
+  try { const orgId = orgCon(req); if (!orgId) return sinOrg(res); const items = internosLimpios(req.body && req.body.items); const db = await getDb();
+    await db.collection('bot_config').updateOne({ _id: 'internos:' + orgId }, { $set: { items, updatedAt: new Date() } }, { upsert: true });
+    const t10 = items.map(x => x.tel10); // las conversaciones que ya existían de esos números se ocultan (no se borran); las que se quitaron de la lista vuelven
+    await db.collection(COL_C).updateMany({ orgId, tel10: { $in: t10 } }, { $set: { interno: true } });
+    await db.collection(COL_C).updateMany({ orgId, interno: true, tel10: { $nin: t10 } }, { $unset: { interno: '' } });
+    res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/conversaciones/:id/interno', auth, soloAdmin, async (req, res) => { // "este número es interno": se agrega a la lista y la conversación se oculta
+  try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
+    const items = await internosDe(db, c.orgId); if (!items.some(x => x.tel10 === c.tel10)) items.push({ tel: c.tel, tel10: c.tel10, nombre: c.nombre || '', nota: '' });
+    await db.collection('bot_config').updateOne({ _id: 'internos:' + c.orgId }, { $set: { items: internosLimpios(items), updatedAt: new Date() } }, { upsert: true });
+    await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { interno: true } }); clearTimeout(timers.get(String(c._id))); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.get('/plantillas', auth, async (req, res) => {
   try { const orgId = orgCon(req); if (!orgId) return res.json({ items: [], variables: VARIABLES_PLANTILLA, sugeridas: [] });
     res.json({ items: await plantillasDe(await getDb(), orgId), variables: VARIABLES_PLANTILLA, sugeridas: PLANTILLAS_SUGERIDAS.map(p => Object.assign({ idioma: 'es_AR', ejemplos: p.variables.map(v => EJEMPLOS_VARIABLE[v]) }, p)) }); } catch (e) { res.status(500).json({ error: e.message }); }
