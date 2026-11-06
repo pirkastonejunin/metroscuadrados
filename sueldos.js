@@ -315,11 +315,23 @@ async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase)
   if (usuarios.length) {
     const d0 = desde || inicioMes(periodo), d1 = hasta || finPeriodo(periodo);
     // Con ventana propia, "desde" es el corte del pago anterior: no se cuenta dos veces.
+    // Las ventas migradas de Dux no traen usuario, solo el nombre del vendedor como texto: se atribuyen también por ese nombre
+    // (sin distinguir mayúsculas) si coincide con el del usuario vinculado, el del vendedor o el del empleado.
+    const nombres = [...new Set([...usuarios.map(u => u.nombre), vend && vend.nombre, emp.nombre].map(n => String(n || '').trim()).filter(Boolean))];
+    const reNombre = nombres.map(n => new RegExp('^\\s*' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*$', 'i'));
+    const ventana = desde ? { $gt: d0, $lte: d1 } : { $gte: d0, $lte: d1 };
     const lista = await db.collection('ventas').find({
-      orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: desde ? { $gt: d0, $lte: d1 } : { $gte: d0, $lte: d1 },
-      $or: [{ usuarioId: { $in: usuarios.map(u => u._id) } }, { usuarioId: { $exists: false }, usuarioNombre: { $in: usuarios.map(u => u.nombre) } }]
+      orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: ventana,
+      $or: [{ usuarioId: { $in: usuarios.map(u => u._id) } }, { usuarioId: { $exists: false }, usuarioNombre: { $in: usuarios.map(u => u.nombre) } }, { vendedor: { $in: reNombre } }]
     }).project({ total: 1, moneda: 1, cotizacionDolar: 1, tipoComprobante: 1, esFiscal: 1, cae: 1, fiscal: 1, fiscalMoneda: 1, fiscalCotiz: 1 }).toArray();
     lista.forEach(v => { base += netoVenta(v); if (v.tipoComprobante === 'nota_credito') nc++; else ventas++; });
+    // Ventas del período con un vendedor de nombre parecido que NO se cuentan (ej. "Carlos Pérez" vs "Pérez, Carlos"): se avisa para corregirlo.
+    try {
+      const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').trim();
+      const palabras = new Set(nombres.flatMap(n => norm(n).split(' ')).filter(w => w.length >= 3));
+      const otros = await db.collection('ventas').aggregate([{ $match: { orgId: req.orgId, estado: { $ne: 'anulada' }, fecha: ventana, vendedor: { $nin: [null, ''].concat(reNombre) } } }, { $group: { _id: '$vendedor', n: { $sum: 1 } } }]).toArray();
+      for (const o of otros) if (norm(o._id).split(' ').some(w => palabras.has(w))) avisos.push('Hay ' + o.n + ' venta(s) del período con el vendedor «' + o._id + '» que no se cuentan porque el nombre no coincide exactamente con «' + nombres.join('» / «') + '». Corregí el vendedor en esas ventas (o el nombre del usuario) y se suman.');
+    } catch (e) { /* el aviso es opcional */ }
   }
   base = Math.max(0, r2(base));
   return { vinculado: true, vendedor: vend ? vend.nombre : '', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
