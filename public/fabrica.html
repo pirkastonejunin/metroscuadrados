@@ -104,6 +104,12 @@
     </div>
 
     <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 class="titulo-seccion" style="margin:0">A fabricar (faltantes)</h2><button class="btn secondary small" onclick="cargarFaltantes()">Actualizar</button></div>
+      <p class="muted" style="margin:6px 0 10px">Lo que ya vendimos y está pendiente de entrega, menos lo que hay en stock. Tocá un producto para ver a quién se le debe.</p>
+      <div id="faltantes" class="muted">Cargando…</div>
+    </div>
+
+    <div class="card">
       <h2 class="titulo-seccion">Cargar producción</h2>
       <div id="avisoSku" class="aviso-sku hidden"></div>
       <div id="filasItems"></div>
@@ -188,6 +194,34 @@ async function iniciarApp(){
   await cargarProductos();
   await cargarDepositos();
   await cargarProduccion();
+  cargarFaltantes();
+}
+
+// ---- A fabricar: faltantes de producción teniendo en cuenta lo comprometido (6/11/2026) ----
+const nf = n => (Number(n)||0).toLocaleString('es-AR', {maximumFractionDigits: 2});
+async function cargarFaltantes(){
+  const el = document.getElementById('faltantes'); if (!el) return;
+  try{
+    const r = await fetch(BASE + '/produccion/panel?dias=1', {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'No se pudo cargar.');
+    const lista = (d.productos||[]).filter(p => p.vinculado && p.faltante > 0).sort((a,b) => (b.paquetesAFabricar||0) - (a.paquetesAFabricar||0) || b.faltante - a.faltante);
+    const sinVinc = (d.productos||[]).filter(p => !p.vinculado && !p.archivado).length;
+    let h = lista.length ? lista.map(p => `<div class="faltante-fila" style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer" onclick="verDeudas('${p.productoId}', this)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>${escapeHtml(p.nombre)}</b><span style="color:var(--danger);font-weight:800;white-space:nowrap">Faltan ${nf(p.faltante)} ${escapeHtml(p.unidadStock||p.unidad||'')}</span></div>
+        <div class="muted">${p.paquetesAFabricar ? '≈ <b>' + nf(p.paquetesAFabricar) + ' paquetes</b> para cubrirlo · ' : ''}Stock ${nf(p.stock)} · Comprometido ${nf(p.comprometido)}${p.hoy ? ' · Hoy se cargó ' + nf(p.hoy) : ''}</div>
+        <div class="detalle-deuda muted" style="margin-top:6px"></div></div>`).join('')
+      : '<div class="ok-msg" style="margin:0">✅ No hay faltantes: el stock cubre todo lo comprometido.</div>';
+    if (sinVinc) h += `<div class="muted" style="margin-top:6px">⚠ ${sinVinc} producto${sinVinc>1?'s':''} sin vincular al stock (falta SKU o no coincide): no se puede calcular su faltante.</div>`;
+    el.innerHTML = h;
+  }catch(e){ el.textContent = e.message; }
+}
+async function verDeudas(id, fila){
+  const box = fila.querySelector('.detalle-deuda'); if (box.dataset.abierto === '1'){ box.innerHTML = ''; box.dataset.abierto = ''; return; }
+  box.dataset.abierto = '1'; box.textContent = 'Buscando…';
+  try{
+    const r = await fetch(BASE + '/produccion/comprometido?productoId=' + encodeURIComponent(id), {headers: headersAuth()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const f = d.ventas || [];
+    box.innerHTML = f.length ? f.map(v => `<div style="display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--border);padding:4px 0"><span>${escapeHtml(v.clienteNombre)} <span class="muted">· ${escapeHtml(v.comprobante)}${v.sucursal ? ' · ' + escapeHtml(v.sucursal) : ''} · ${new Date(v.fecha).toLocaleDateString('es-AR')}</span></span><b>${nf(v.cantidad)}</b></div>`).join('') : 'No se encontraron ventas pendientes para este producto.';
+  }catch(e){ box.textContent = e.message; box.dataset.abierto = ''; }
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -418,6 +452,7 @@ async function ingresarAStock(){
     agregarFila();
     const cr = await fetch(BASE + '/produccion/cargas?fecha=' + encodeURIComponent(fecha), {headers: headersAuth()});
     if (cr.ok) renderCargas(await cr.json());
+    cargarFaltantes();
   }catch(e){
     document.getElementById('formErr').textContent = e.message;
   }
