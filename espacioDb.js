@@ -14,6 +14,12 @@ async function getDb() {
 router.get('/', authUsuario, async (req, res) => {
   try {
     if (!(req.usuario && req.usuario.rol && req.usuario.rol.protegido)) return res.status(403).json({ error: 'Solo Administrador' });
+    if (req.query.detalle === '1') { // informe: qué colecciones ocupan más (datos + índices), de mayor a menor
+      const db = await getDb(); const cols = await db.listCollections({}, { nameOnly: true }).toArray(); const filas = [];
+      for (const c of cols) { try { const st = await db.command({ collStats: c.name, scale: 1 }); filas.push({ coleccion: c.name, docs: st.count || 0, datosMB: Math.round((st.size || 0) / 1048576 * 10) / 10, indicesMB: Math.round((st.totalIndexSize || 0) / 1048576 * 10) / 10, totalMB: Math.round(((st.size || 0) + (st.totalIndexSize || 0)) / 1048576 * 10) / 10 }); } catch (e) { /* vistas u otras: se omiten */ } }
+      filas.sort((x, y) => y.totalMB - x.totalMB); const limiteMB = Number(process.env.DB_LIMITE_MB) || 512; const usadoMB = Math.round(filas.reduce((t, f) => t + f.totalMB, 0) * 10) / 10;
+      return res.json({ usadoMB, limiteMB, porcentaje: Math.round(usadoMB / limiteMB * 1000) / 10, colecciones: filas.slice(0, 25) });
+    }
     if (cache && Date.now() - cache.t < 5 * 60 * 1000) return res.json(cache.d);
     const s = await (await getDb()).command({ dbStats: 1, scale: 1 });
     const usadoMB = Math.round(((s.dataSize || 0) + (s.indexSize || 0)) / 1048576 * 10) / 10;

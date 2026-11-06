@@ -17,6 +17,8 @@ code{background:#f2f4f7;padding:1px 5px;border-radius:5px;font-size:12px}
   <div style="margin-top:12px"><button id="btn" onclick="ejecutar()">Hacer una copia ahora</button> <span class="muted" id="msg"></span></div>
   <div class="err" id="err"></div>
 </div>
+<div class="card"><h2>Espacio de la base</h2><p class="muted">Atlas gratis tiene un tope de 512 MB y, si se llena, deja de guardar. Acá ves cuánto se usa y qué colecciones ocupan más.</p>
+  <button onclick="espacio()">Ver el uso de espacio</button><div id="esp" class="muted" style="margin-top:10px"></div></div>
 <div class="card"><h2>Copias hechas</h2><div id="lista" class="muted">Cargando…</div></div>
 <div class="card"><h2>Cómo se recupera una copia</h2>
   <p class="muted">Las partes de una copia se bajan de Cloudinary y se restauran en una base <b>nueva</b> con <code>restaurarCopia.js</code> (nunca pisa la base en uso). Pedime ayuda cuando haga falta. <b>Guardá la clave <code>BACKUP_CLAVE</code> también fuera de Render</b> (por ejemplo en tu gestor de contraseñas): sin ella las copias no se pueden abrir.</p></div>
@@ -26,6 +28,11 @@ const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 const fmt = d => d ? new Date(d).toLocaleString('es-AR',{timeZone:'America/Argentina/Buenos_Aires',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
 const mb = b => (b/1048576).toFixed(1) + ' MB';
 let timer = null;
+async function espacio(){ const el = document.getElementById('esp'); el.textContent = 'Calculando…';
+  try{ const r = await fetch('/api/espacio-db?detalle=1', {headers: {'x-admin-token': TOKEN}}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    el.innerHTML = '<div style="color:var(--ink,#111);margin-bottom:6px"><b>'+d.usadoMB+' MB de '+d.limiteMB+' MB ('+d.porcentaje+'%)</b></div><table style="border-collapse:collapse;width:100%"><tr><th align="left">Colección</th><th align="right">Documentos</th><th align="right">Datos</th><th align="right">Índices</th><th align="right">Total</th></tr>'
+      + d.colecciones.map(c=>'<tr><td>'+esc(c.coleccion)+'</td><td align="right">'+c.docs+'</td><td align="right">'+c.datosMB+' MB</td><td align="right">'+c.indicesMB+' MB</td><td align="right"><b>'+c.totalMB+' MB</b></td></tr>').join('')+'</table>'; }
+  catch(e){ el.textContent = e.message; } }
 async function cargar(){
   const err = document.getElementById('err'); err.textContent = '';
   if (!TOKEN){ err.textContent = 'Entrá primero al sistema con tu usuario Administrador.'; return; }
