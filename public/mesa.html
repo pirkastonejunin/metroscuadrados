@@ -663,7 +663,7 @@ function siguiente(l){
 }
 function pintarCaj(l, o){
   const c = $('caj'); const keep = $('txt') ? $('txt').value : '';
-  const hdr = `<div class="chead"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div><h2>${esc(l.nombre)}</h2><div class="sb">+${esc(l.tel)}${l.producto?' · '+esc(l.producto):''}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${l.convId&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':''}${l.convId&&l.cierre?'<button class="btn sm pri" id="reab">Reabrir</button>':''}<button class="x" id="cx">Cerrar</button></div>`;
+  const hdr = `<div class="chead"><span class="av" style="background:${colorDe(l.nombre)}">${esc(iniciales(l.nombre))}</span><div><h2>${esc(l.nombre)}</h2><div class="sb">+${esc(l.tel)}${l.producto?' · '+esc(l.producto):''}${l.demo?' · ejemplo':''}</div></div><span class="sp"></span>${l.convId&&l.sinAsignar?'<button class="btn sm pri" id="tomar">Tomar</button>':''}${l.convId&&l.cierre?'<button class="btn sm pri" id="reab">Reabrir</button>':''}${l.convId&&!l.demo?'<button class="btn sm" id="interno" title="Es un compañero o proveedor: no entra más al CRM">🚫 Es interno</button>':''}<button class="x" id="cx">Cerrar</button></div>`;
   let izq;
   if (l.convId){
     const est = m => m.dir!=='out' ? '' : m.errorEnvio||m.estadoEnvio==='failed' ? ` · <span class="fallo" title="${esc((m.errorEnvio&&m.errorEnvio.texto)||'No se pudo entregar')}">⚠ No se entregó</span>` : m.estadoEnvio==='read' ? ' · <span class="leido">✓✓ Leído</span>' : m.estadoEnvio==='delivered' ? ' · ✓✓ Entregado' : m.estadoEnvio==='sent' ? ' · ✓ Enviado' : '';
@@ -688,6 +688,7 @@ function pintarCaj(l, o){
   $('cx').onclick = cerrarCaj; $('vel').onclick = cerrarCaj;
   const tx = $('txt'); if (tx){ tx.value = keep; if (!(o&&o.keep)) tx.focus(); }
   if ($('tomar')) $('tomar').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/tomar`); toast('Es tuya'); await cargar({forzar:true}); }catch(e){ err(e); } };
+  if ($('interno')) $('interno').onclick = async () => { if (!confirm('Este número pasa a la lista de internos: sus mensajes ya no entran al CRM, el bot no le contesta y no se gasta IA. La conversación se oculta (no se borra). ¿Seguir?')) return; try{ await post(`/api/bot/conversaciones/${l.convId}/interno`); toast('Número interno: ya no entra al CRM'); await cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('reab')) $('reab').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/reabrir`); toast('Reabierta'); await cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('usar')) $('usar').onclick = () => { tx.value = sugDe(l); tx.focus(); };
   if ($('analizar')) $('analizar').onclick = async () => { const b=$('analizar'); b.disabled=true; b.textContent='Analizando…'; try{ await post(`/api/bot/conversaciones/${l.convId}/asistente`); await cargar({forzar:true}); }catch(e){ err(e); b.disabled=false; b.textContent='Analizar'; } };

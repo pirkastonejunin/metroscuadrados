@@ -55,7 +55,7 @@ function columnaDe({ esp, m, prox, etapa }) {
 
 async function armar(db, req, { cerradas }) {
   const ahora = new Date(); const org = filtroOrg(req);
-  const convs = await db.collection(COL_C).find(Object.assign({}, org, { estado: { $ne: 'bot' } })).sort({ updatedAt: -1 }).limit(400).toArray();
+  const convs = await db.collection(COL_C).find(Object.assign({}, org, { estado: { $ne: 'bot' }, interno: { $ne: true } })).sort({ updatedAt: -1 }).limit(400).toArray();
   for (const c of convs) { // lo que esperaba respuesta y no la tuvo antes del cierre del día vuelve a Hoy, con un recordatorio más
     const m = c.mesa || {};
     if (m.esperando && new Date(m.esperando.venceAt) <= ahora) {
@@ -421,7 +421,7 @@ router.post('/:id/mover', auth, async (req, res) => {
 // Versión liviana para la campanita: conversaciones abiertas con 24 h o más sin decisión (no escribe nada en la base).
 async function sinDecidir24(db, req) {
   const ahora = new Date(); const corte = new Date(ahora.getTime() - HORAS_SIN_DECIDIR * 3600000);
-  const convs = await db.collection(COL_C).find(Object.assign({}, filtroOrg(req), { estado: { $ne: 'bot' }, demo: { $ne: true }, 'mesa.cierre': { $in: [null] } })).sort({ updatedAt: -1 }).limit(400).toArray();
+  const convs = await db.collection(COL_C).find(Object.assign({}, filtroOrg(req), { estado: { $ne: 'bot' }, interno: { $ne: true }, demo: { $ne: true }, 'mesa.cierre': { $in: [null] } })).sort({ updatedAt: -1 }).limit(400).toArray();
   if (!convs.length) return [];
   const ult = await db.collection(COL_M).aggregate([{ $match: { convId: { $in: convs.map(c => c._id) } } }, { $sort: { at: 1 } }, { $group: { _id: '$convId', ult: { $last: '$$ROOT' } } }]).toArray();
   const porConv = new Map(ult.map(u => [String(u._id), u.ult]));
