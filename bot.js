@@ -282,7 +282,7 @@ async function convDe(db, orgId, tel, nombre, referral) {
   const t10 = digitos(tel).slice(-10); const ahora = new Date();
   const set = { updatedAt: ahora }; if (nombre) set.nombre = nombre;
   const ins = { orgId, tel: digitos(tel), tel10: t10, estado: 'bot', datos: {}, createdAt: ahora };
-  if (referral) ins.referral = referral;
+  if (referral && referral.ctwa_clid) set.referral = referral; else if (referral) ins.referral = referral; // el último clic de anuncio queda guardado (lo usa la API de conversiones)
   const r = await db.collection(COL_C).findOneAndUpdate({ orgId, tel10: t10 }, { $set: set, $setOnInsert: ins }, { upsert: true, returnDocument: 'after' });
   return r && r.value !== undefined ? r.value : r;
 }
@@ -362,6 +362,7 @@ async function responder(orgId, convId) {
     if (set.estado === 'aceptado') set.avisoAt = new Date();
     await db.collection(COL_C).updateOne({ _id: convId }, { $set: set });
     await actualizarLead(db, Object.assign({}, conv, set), (r.etiquetas || []));
+    if (r.derivar || r.aceptoAsesor) require('./capi').enviar(db, conv, 'LeadSubmitted').catch(() => {}); // avisa a Meta (solo chats que vinieron de un anuncio)
     // Fase 2: si el bot derivó a un cliente con interés concreto, se crea la oportunidad (y el borrador de presupuesto si corresponde)
     if ((r.derivar || r.aceptoAsesor) && (await vendedorCfg(conv.orgId)).oportunidades) {
       try { const fresca = await db.collection(COL_C).findOne({ _id: convId }); const res2 = await require('./vendedorOportunidades').oportunidadDeConversacion(db, fresca, r);
@@ -620,6 +621,25 @@ router.post('/conversaciones/:id/enviar', auth, async (req, res) => { // un ases
     await guardarMensaje(db, c, { waId: env.id, dir: 'out', origen: 'asesor', tipo: 'text', texto, at: new Date(), prueba: !!env.prueba });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { estado: 'humano', humanoAt: new Date(), updatedAt: new Date() } }); res.json({ ok: true, prueba: !!env.prueba });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// ---- API de conversiones de Meta (ver capi.js) ----
+router.get('/capi', auth, soloAdmin, async (req, res) => {
+  try { const db = await getDb(); const capi = require('./capi'); const cfg = await capi.configDe(db); const orgId = orgCon(req);
+    const eventos = await db.collection('capi_eventos').find(orgId ? { orgId } : {}).sort({ at: -1 }).limit(15).toArray();
+    const conClid = await db.collection(COL_C).countDocuments(Object.assign({ 'referral.ctwa_clid': { $exists: true }, demo: { $ne: true } }, orgId ? { orgId } : {}));
+    res.json({ activo: !!cfg.activo, datasetId: cfg.datasetId || '', waba: await capi.wabaDe(db), token: process.env.META_CAPI_TOKEN ? 'META_CAPI_TOKEN' : (process.env.WA_TOKEN ? 'WA_TOKEN' : ''), codigoPrueba: cfg.codigoPrueba || '', chatsDeAnuncio: conClid,
+      eventos: eventos.map(e => ({ evento: e.evento, ok: e.ok, error: e.error || '', valor: e.valor || null, at: e.at })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/capi/preparar', auth, soloAdmin, async (req, res) => { // crea (o recupera) el conjunto de datos en Meta
+  try { res.json(await require('./capi').crearDataset(await getDb())); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.put('/capi', auth, soloAdmin, async (req, res) => {
+  try { const db = await getDb(); const b = req.body || {}; const set = { updatedAt: new Date() };
+    if (b.activo !== undefined) { const cfg = await require('./capi').configDe(db); if (b.activo && !cfg.datasetId) return res.status(409).json({ error: 'Primero tocá "Preparar" para crear el conjunto de datos en Meta.' }); set.activo = !!b.activo; }
+    if (b.codigoPrueba !== undefined) set.codigoPrueba = String(b.codigoPrueba || '').trim().slice(0, 40); // código de "Probar eventos" de Meta: los eventos se ven ahí sin afectar los anuncios
+    await db.collection('bot_config').updateOne({ _id: 'capi' }, { $set: set }, { upsert: true }); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- números internos (no entran al CRM ni gastan IA) ----

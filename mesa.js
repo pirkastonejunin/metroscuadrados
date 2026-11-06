@@ -359,6 +359,7 @@ router.post('/:id/cerrar', auth, async (req, res) => {
     const op = await db.collection('oportunidades').findOne(Object.assign({ estado: 'activa' }, filtroOrg(req), { 'cliente.telefono': { $regex: c.tel10 + '$' } }));
     if (op) await db.collection('oportunidades').updateOne({ _id: op._id }, { $set: estado === 'ganada' ? { proximaAccion: null, updatedAt: ahora } : { estado: 'descartada', motivoDescarte: 'Perdida: ' + motivo, proximaAccion: null, updatedAt: ahora } });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { 'mesa.cierre': { estado, motivo, at: ahora, usuario: q.nombre, opId: op ? op._id : null } }, $push: { 'mesa.historial': reg(req, estado === 'ganada' ? 'Venta ganada' : 'Perdida: ' + motivo) } });
+    if (estado === 'ganada') avisarGanada(db, c);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -383,6 +384,11 @@ async function fijarProx(db, req, c, dias, nota) {
     const fecha = new Date(hoyAR().getTime() + Math.max(0, dias) * 86400000);
     return { $set: { 'mesa.prox': { fecha, nota, tipo: 'seguimiento' } } };
   }
+}
+// Venta ganada de un chat que vino de un anuncio: se le informa a Meta con el monto del último presupuesto de la conversación (si lo hay).
+async function avisarGanada(db, c) {
+  try { const p = await db.collection('presupuestos').find({ 'origenBot.convId': c._id }).sort({ createdAt: -1 }).limit(1).toArray();
+    await require('./capi').enviar(db, c, 'Purchase', { valor: p[0] && p[0].total, moneda: p[0] && p[0].moneda }); } catch (e) { /* no frena el cierre */ }
 }
 async function cerrarConv(db, req, c, estado, motivo) {
   const ahora = new Date(); const q = quien(req);
@@ -418,6 +424,7 @@ router.post('/:id/decidir', auth, async (req, res) => {
     update.$push['mesa.historial'] = reg(req, txt);
     if (!Object.keys(update.$set).length) delete update.$set;
     await db.collection(COL_C).updateOne({ _id: c._id }, update);
+    if (tipo === 'ganada') avisarGanada(db, c);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -433,6 +440,7 @@ router.post('/:id/etapa', auth, async (req, res) => {
     const e = req.body && req.body.etapa; if (!['nuevo', 'conversando', 'presupuesto', 'cerrando'].includes(e)) return res.status(400).json({ error: 'Etapa inválida.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { 'mesa.etapa': e }, $push: { 'mesa.historial': reg(req, 'Etapa: ' + e) } });
+    if (e === 'presupuesto') require('./capi').enviar(db, c, 'InitiateCheckout').catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -453,6 +461,7 @@ router.post('/:id/mover', auth, async (req, res) => {
     else { u.$set['mesa.etapa'] = col; const p = await fijarProx(db, req, c, 2, 'Retomar'); Object.assign(u.$set, p.$set || {}); Object.assign(u.$unset, p.$unset || {}); }
     if (!Object.keys(u.$set).length) delete u.$set;
     await db.collection(COL_C).updateOne({ _id: c._id }, u);
+    if (col === 'presupuesto') require('./capi').enviar(db, c, 'InitiateCheckout').catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
