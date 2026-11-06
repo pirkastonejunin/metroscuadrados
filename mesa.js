@@ -291,7 +291,10 @@ router.post('/cierre-masivo', auth, async (req, res) => {
       const lote = ids.slice(i, i + 500);
       for (const g of await db.collection(COL_M).aggregate([{ $match: { convId: { $in: lote } } }, { $group: { _id: '$convId', ult: { $max: '$at' }, asesor: { $max: { $cond: [{ $eq: ['$origen', 'asesor'] }, 1, 0] } } } }]).toArray()) { ult.set(String(g._id), g.ult); if (g.asesor) atendidas.add(String(g._id)); }
     }
-    const aCerrar = convs.filter(c => { const u = ult.get(String(c._id)) || c.updatedAt; return !atendidas.has(String(c._id)) && u && new Date(u) < corte; });
+    const incluirAtendidas = !!(req.body && req.body.incluirAtendidas); // también las que algún asesor llegó a contestar (si pasaron los días sin actividad)
+    const viejas = convs.filter(c => { const u = ult.get(String(c._id)) || c.updatedAt; return u && new Date(u) < corte; });
+    const atendidasViejas = viejas.filter(c => atendidas.has(String(c._id))).length;
+    const aCerrar = viejas.filter(c => incluirAtendidas || !atendidas.has(String(c._id)));
     // Oportunidades traídas de Azuite que no tienen conversación (solo el contacto), sin vendedor ni próxima acción y sin movimiento hace más de `dias`.
     const telsConv = new Set((await db.collection(COL_C).find(Object.assign({}, filtroOrg(req), { estado: { $ne: 'bot' }, interno: { $ne: true } })).project({ tel10: 1 }).toArray()).map(c => c.tel10)); // las mismas conversaciones que muestra el tablero
     const opsTodas = (await db.collection('oportunidades').find(Object.assign({ estado: 'activa' }, filtroOrg(req))).toArray()).filter(o => !telsConv.has(tel10(o.cliente && o.cliente.telefono))); // activas sin conversación
@@ -303,7 +306,7 @@ router.post('/cierre-masivo', auth, async (req, res) => {
     const leadsAC = (await db.collection('leads_whatsapp').find(Object.assign({}, filtroOrg(req), { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).toArray())
       .filter(l => l.tel10 && !telsConv.has(l.tel10) && !telsOpAct.has(l.tel10) && !telsOp.has(l.tel10) && new Date(l.creadoOrigen || l.createdAt || 0) < corte);
     diag.leads = leadsAC.length;
-    if (!(req.body && req.body.confirmar === true)) return res.json({ ok: true, vistaPrevia: true, dias, total: convs.length, aCerrar: aCerrar.length, atendidas: convs.filter(c => atendidas.has(String(c._id))).length, contactos: opsAC.length + leadsAC.length, diag });
+    if (!(req.body && req.body.confirmar === true)) return res.json({ ok: true, vistaPrevia: true, dias, total: convs.length, aCerrar: aCerrar.length, atendidas: convs.filter(c => atendidas.has(String(c._id))).length, contactos: opsAC.length + leadsAC.length, atendidasViejas, diag });
     const ahora = new Date(); const q = quien(req);
     const r = await db.collection(COL_C).updateMany({ _id: { $in: aCerrar.map(c => c._id) }, 'mesa.cierre': { $in: [null] } }, { $set: { 'mesa.cierre': { estado: 'perdida', motivo: 'sin respuesta', at: ahora, usuario: q.nombre, masivo: true } }, $push: { 'mesa.historial': { at: ahora, txt: 'Perdida: sin respuesta (cierre en bloque de conversaciones de más de ' + dias + ' días sin actividad)', usuario: q.nombre } } });
     const ro = opsAC.length ? await db.collection('oportunidades').updateMany({ _id: { $in: opsAC.map(o => o._id) }, estado: 'activa' }, { $set: { estado: 'descartada', motivoDescarte: 'Perdida: sin respuesta (cierre en bloque de contactos de Azuite de más de ' + dias + ' días)', proximaAccion: null, updatedAt: ahora } }) : { modifiedCount: 0 };

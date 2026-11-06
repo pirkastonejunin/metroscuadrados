@@ -15,6 +15,8 @@ const assert = require('assert'); const { start } = require('./harness'); const 
   let r = await api('POST', '/api/mesa/cierre-masivo', { dias: 15 }); assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.vistaPrevia, true); assert.equal(r.data.total, 4, 'las conversaciones en estado bot no cuentan'); assert.equal(r.data.aCerrar, 2); assert.equal(r.data.atendidas, 1); assert.equal(r.data.contactos, 3, '1 oportunidad + 2 leads (viejo y sin fecha); no los nuevos ni los que tienen vendedor/conversación');
   assert.equal(await C.countDocuments({ 'mesa.cierre': { $exists: true, $ne: null } }), 0, 'la vista previa no cambia nada');
+  assert.equal(r.data.atendidasViejas, 1, 'avisa cuántas atendidas también son viejas');
+  r = await api('POST', '/api/mesa/cierre-masivo', { dias: 15, incluirAtendidas: true }); assert.equal(r.data.aCerrar, 3, 'con atendidas incluidas');
   r = await api('POST', '/api/mesa/cierre-masivo', { dias: 15, confirmar: true }); assert.equal(r.data.cerradas, 2); assert.equal(r.data.contactos, 3);
   for (const i of [leadViejo, leadSinFecha]) assert.equal((await L.findOne({ _id: i })).estado, 'Perdido'); for (const i of [leadNuevo, leadConConv]) assert.equal((await L.findOne({ _id: i })).estado, 'Nuevo');
   const OP = db.collection('oportunidades'); assert.equal((await OP.findOne({ _id: opVieja })).estado, 'descartada'); for (const i of [opNueva, opConVend, opConConv]) assert.equal((await OP.findOne({ _id: i })).estado, 'activa');
