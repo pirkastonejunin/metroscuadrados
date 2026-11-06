@@ -634,7 +634,7 @@ router.put('/internos', auth, soloAdmin, async (req, res) => {
     await db.collection(COL_C).updateMany({ orgId, interno: true, tel10: { $nin: t10 } }, { $unset: { interno: '' } });
     res.json({ ok: true, items }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
-router.post('/conversaciones/:id/interno', auth, soloAdmin, async (req, res) => { // "este número es interno": se agrega a la lista y la conversación se oculta
+router.post('/conversaciones/:id/interno', auth, async (req, res) => { // "este número es interno": se agrega a la lista y la conversación se oculta
   try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const items = await internosDe(db, c.orgId); if (!items.some(x => x.tel10 === c.tel10)) items.push({ tel: c.tel, tel10: c.tel10, nombre: c.nombre || '', nota: '' });
     await db.collection('bot_config').updateOne({ _id: 'internos:' + c.orgId }, { $set: { items: internosLimpios(items), updatedAt: new Date() } }, { upsert: true });
