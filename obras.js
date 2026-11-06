@@ -838,6 +838,120 @@ router.put('/:id', authAdmin, async (req, res) => {
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
+// ---------------------------------------------------------------------------
+// Ventas vinculadas a la obra (6/11/2026): cuando el cliente suma metros después de armada la obra y se hace
+// una venta nueva, la venta se vincula a la obra. Cada línea elegida pasa a ser una tarea nueva (con el m²
+// de la venta, el colocador de la obra y su costo por m²), así suma a los m² de la obra y, al terminarse,
+// se liquida al colocador como cualquier otra tarea. La venta queda marcada (obraId) y no se puede vincular dos veces.
+// ---------------------------------------------------------------------------
+router.get('/:id/ventas-candidatas', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+      const q = String(req.query.q || '').trim();
+      const filtro = { orgId: obra.orgId, estado: { $ne: 'anulada' }, tipoComprobante: { $ne: 'nota_credito' }, obraId: null };
+      if (q) {
+        const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        filtro.$or = [{ clienteNombre: re }, { numero: Number(q) || -1 }];
+      } else if (obra.clienteId) filtro.clienteId = obra.clienteId;
+      else filtro.clienteNombre = new RegExp(String((obra.cliente && obra.cliente.nombre) || '@@').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      const ventas = await db.collection('ventas').find(filtro).sort({ fecha: -1 }).limit(30).toArray();
+      return ventas.map(v => ({
+        _id: v._id, numero: v.numero, tipoComprobante: v.tipoComprobante, fecha: v.fecha, clienteNombre: v.clienteNombre, total: v.total, moneda: v.moneda,
+        items: (v.items || []).map((it, idx) => ({ idx, nombre: it.nombre, sku: it.sku, cantidad: it.cantidad, unidad: it.unidad || '' }))
+      }));
+    });
+    res.json(out);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+router.post('/:id/ventas', authAdmin, async (req, res) => {
+  let reclamada = null, dbRef = null;
+  try {
+    const id = toObjectId(req.params.id), ventaId = toObjectId((req.body || {}).ventaId);
+    const lineas = Array.isArray((req.body || {}).lineas) ? req.body.lineas : [];
+    if (!id || !ventaId) return res.status(400).json({ error: 'id inválido' });
+    if (!lineas.length) return res.status(400).json({ error: 'Elegí al menos un producto de la venta con su tipo de trabajo y m².' });
+    const out = await conReintento(async () => {
+      const db = await getDb(); dbRef = db;
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+      if (obra.estado === 'cancelada') throw Object.assign(new Error('La obra está cancelada.'), { status: 400 });
+      const venta = await db.collection('ventas').findOne({ _id: ventaId, orgId: obra.orgId });
+      if (!venta) throw Object.assign(new Error('Venta no encontrada'), { status: 404 });
+      if (venta.estado === 'anulada' || venta.tipoComprobante === 'nota_credito') throw Object.assign(new Error('Esa venta está anulada o es una nota de crédito.'), { status: 400 });
+      const colocadorId = ((obra.tareas || []).find(t => t.colocadorId) || {}).colocadorId || null;
+      const colocador = colocadorId ? await db.collection('obras_colocadores').findOne({ _id: colocadorId }) : null;
+      const ahora = new Date(), avisos = [], nuevas = [];
+      for (const l of lineas) {
+        const it = (venta.items || [])[Number(l.itemIdx)];
+        const m2 = Number(l.m2), tipoTrabajo = String(l.tipoTrabajo || '').trim();
+        if (!it) throw Object.assign(new Error('Producto de la venta inexistente.'), { status: 400 });
+        if (!tipoTrabajo) throw Object.assign(new Error('Falta el tipo de trabajo de "' + it.nombre + '".'), { status: 400 });
+        if (!(m2 > 0)) throw Object.assign(new Error('Los m² de "' + it.nombre + '" tienen que ser mayores a 0.'), { status: 400 });
+        let costo = null, especial = await esTipoEspecial(db, tipoTrabajo);
+        if (colocador) {
+          costo = especial ? 0 : costoVigente(colocador, tipoTrabajo);
+          if (costo === null) avisos.push(colocador.nombre + ' no tiene costo por m² para "' + tipoTrabajo + '": la tarea quedó sin colocador hasta que lo cargues.');
+        }
+        const asignado = colocador && costo !== null;
+        const t = {
+          _id: new ObjectId(), tipoTrabajo, m2Presupuestados: m2,
+          colocadorId: asignado ? colocador._id : null, costoPorM2Aplicado: asignado ? costo : null,
+          estado: 'pendiente', fechaInicio: null, fechaFinEstimada: null, fechaFinReal: null,
+          materiales: normalizarMateriales([{ tipo: it.nombre, cantidad: String(m2) }]),
+          ventaId: venta._id, ventaNumero: venta.numero
+        };
+        if (asignado && especial) t.sinCostoM2 = true;
+        nuevas.push(t);
+      }
+      // Se reclama la venta de forma atómica: dos personas no pueden vincularla a la vez.
+      const r = await db.collection('ventas').updateOne({ _id: venta._id, obraId: null }, { $set: { obraId: obra._id, obraNumero: obra.numero, updatedAt: ahora } });
+      if (!r.matchedCount) throw Object.assign(new Error('Esa venta ya está vinculada a una obra.'), { status: 409 });
+      reclamada = venta._id;
+      const obraNueva = { ...obra, tareas: [...(obra.tareas || []), ...nuevas] };
+      const set = { updatedAt: ahora };
+      if (obra.estado === 'terminada') { obraNueva.estado = 'en_curso'; set.estado = 'en_curso'; } // vuelve a estar en trabajo: hay m² sin hacer
+      await sincronizarCalendarDeObra(db, obraNueva);
+      set.googleEventId = obraNueva.googleEventId; set.googleCalendarId = obraNueva.googleCalendarId;
+      await db.collection('obras').updateOne({ _id: obra._id }, {
+        $push: { tareas: { $each: nuevas }, ventas: { ventaId: venta._id, numero: venta.numero, tipoComprobante: venta.tipoComprobante, fecha: venta.fecha, total: venta.total, vinculadaEn: ahora } },
+        $set: set
+      });
+      reclamada = null;
+      return { ok: true, tareas: nuevas.length, m2: nuevas.reduce((a, t) => a + t.m2Presupuestados, 0), avisos, reabierta: obra.estado === 'terminada' };
+    });
+    res.json(out);
+  } catch (err) {
+    if (reclamada && dbRef) { try { await dbRef.collection('ventas').updateOne({ _id: reclamada }, { $set: { obraId: null }, $unset: { obraNumero: '' } }); } catch (e) { /* mejor esfuerzo */ } }
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/ventas/:ventaId', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id), ventaId = toObjectId(req.params.ventaId);
+    if (!id || !ventaId) return res.status(400).json({ error: 'id inválido' });
+    await conReintento(async () => {
+      const db = await getDb();
+      const obra = await db.collection('obras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!obra) throw Object.assign(new Error('Obra no encontrada'), { status: 404 });
+      const tareas = (obra.tareas || []).filter(t => t.ventaId && String(t.ventaId) === String(ventaId));
+      if (tareas.some(t => t.estado !== 'pendiente')) throw Object.assign(new Error('Esa venta ya tiene trabajo empezado o terminado: no se puede desvincular.'), { status: 400 });
+      const sinTareas = (obra.tareas || []).filter(t => !(t.ventaId && String(t.ventaId) === String(ventaId)));
+      const obraNueva = { ...obra, tareas: sinTareas };
+      await sincronizarCalendarDeObra(db, obraNueva);
+      await db.collection('obras').updateOne({ _id: id }, { $set: { tareas: sinTareas, updatedAt: new Date(), googleEventId: obraNueva.googleEventId, googleCalendarId: obraNueva.googleCalendarId }, $pull: { ventas: { ventaId } } });
+      await db.collection('ventas').updateOne({ _id: ventaId, obraId: id }, { $set: { obraId: null, updatedAt: new Date() }, $unset: { obraNumero: '' } });
+    });
+    res.json({ ok: true });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 // Agregar tarea a una obra existente. Arranca con el estado que le
 // corresponda según el estado general de la obra (si la obra ya está en
 // curso o terminada, el producto nuevo entra directo en ese mismo estado,

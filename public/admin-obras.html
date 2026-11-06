@@ -531,7 +531,7 @@ async function abrirObra(id){
     return `
     <div class="tarea-seccion">
       <div class="row" style="justify-content:space-between">
-        <div><b>${escapeHtml(t.tipoTrabajo)}</b></div>
+        <div><b>${escapeHtml(t.tipoTrabajo)}</b>${t.ventaNumero ? ' <span class="muted">· venta #'+escapeHtml(String(t.ventaNumero))+'</span>' : ''}</div>
         <button class="btn small danger" onclick="borrarTarea('${o._id}','${t._id}')">Eliminar</button>
       </div>
 
@@ -630,6 +630,10 @@ async function abrirObra(id){
       <div class="err" id="fotoAdminErr"></div></div>
     <div id="rentabObra" style="margin:14px 0"><div class="muted">Calculando rentabilidad…</div></div>
     <div style="margin:14px 0">${tareasHtml}</div>
+    <div style="margin:10px 0"><label>Ventas vinculadas (metros que el cliente sumó después)</label>
+      ${(o.ventas||[]).length ? (o.ventas||[]).map(v=>`<div class="row" style="justify-content:space-between;align-items:center"><span>Venta #${escapeHtml(String(v.numero))} · ${v.fecha?new Date(v.fecha).toLocaleDateString('es-AR'):''} · $${Number(v.total||0).toLocaleString('es-AR')}</span><button class="btn small danger" onclick="desvincularVenta('${o._id}','${v.ventaId}')">Desvincular</button></div>`).join('') : '<div class="muted">Ninguna todavía.</div>'}
+      <div style="margin-top:6px"><button class="btn small secondary" onclick="sumarVenta('${o._id}')">+ Sumar una venta a esta obra</button></div>
+    </div>
     <div class="row">
       <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${escapeHtml(t.nombre)}">${escapeHtml(t.nombre)}</option>`).join('')}</select>
       <input id="nuevaTareaM2" type="number" step="0.01" placeholder="m²" style="flex:1">
@@ -841,6 +845,38 @@ async function borrarTarea(obraId, tareaId){
   }catch(e){ alert('No se pudo eliminar: ' + e.message); }
   abrirObra(obraId);
   cargarObras();
+}
+let VC = null; // ventas candidatas abiertas en el modal
+async function sumarVenta(obraId, q){
+  const obra = await api('/'+obraId);
+  const lista = await api('/'+obraId+'/ventas-candidatas'+(q?'?q='+encodeURIComponent(q):''));
+  VC = { obraId, lista, tipos: [...new Set((obra.tareas||[]).map(t=>t.tipoTrabajo))] };
+  const opcTipos = sel => '<option value="">— no suma —</option>' + TIPOS.map(t=>`<option value="${escapeHtml(t.nombre)}"${t.nombre===sel?' selected':''}>${escapeHtml(t.nombre)}</option>`).join('');
+  const adivinar = nombre => { const n = String(nombre||'').toLowerCase(); return VC.tipos.find(t => n.includes(String(t).toLowerCase())) || (VC.tipos.length===1 ? VC.tipos[0] : ''); };
+  modal(`<h3>Sumar una venta a la obra #${escapeHtml(String(obra.numero||''))}</h3>
+    <div class="muted">Cada producto que elijas pasa a ser una tarea nueva de la obra, con el colocador y el costo por m² que ya tiene. Suma a los m² de la obra y se le liquida al colocador cuando la termine.</div>
+    <div class="row" style="margin:8px 0"><input id="vcQ" placeholder="Buscar otra venta por cliente o número" value="${escapeHtml(q||'')}" style="flex:1"><button class="btn small secondary" onclick="sumarVenta('${obraId}', document.getElementById('vcQ').value)">Buscar</button></div>
+    ${lista.length ? lista.map((v,vi)=>`<div class="tarea-seccion"><b>Venta #${escapeHtml(String(v.numero))}</b> · ${escapeHtml(v.clienteNombre||'')} · ${v.fecha?new Date(v.fecha).toLocaleDateString('es-AR'):''} · $${Number(v.total||0).toLocaleString('es-AR')}
+      ${v.items.map(it=>`<div class="row" style="align-items:center;gap:6px;margin-top:4px"><span style="flex:3">${escapeHtml(it.nombre||'')} <span class="muted">(${it.cantidad} ${escapeHtml(it.unidad||'')})</span></span><select id="vt-${vi}-${it.idx}" style="flex:2">${opcTipos(adivinar(it.nombre))}</select><input id="vm-${vi}-${it.idx}" type="number" step="0.01" value="${it.cantidad}" style="flex:1" title="m² de este producto"></div>`).join('')}
+      <div style="margin-top:6px"><button class="btn small" onclick="vincularVenta(${vi})">Sumar esta venta</button></div></div>`).join('') : '<p class="muted">No hay ventas sin vincular para este cliente. Probá buscar por nombre o número.</p>'}
+    <div class="err" id="vcErr"></div>
+    <div class="row" style="margin-top:10px"><button class="btn secondary" onclick="abrirObra('${obraId}')">Volver</button></div>`);
+}
+async function vincularVenta(vi){
+  const v = VC.lista[vi], lineas = [];
+  v.items.forEach(it => {
+    const tipo = document.getElementById(`vt-${vi}-${it.idx}`).value, m2 = document.getElementById(`vm-${vi}-${it.idx}`).value;
+    if (tipo) lineas.push({ itemIdx: it.idx, tipoTrabajo: tipo, m2 });
+  });
+  try {
+    const r = await api('/'+VC.obraId+'/ventas', {method:'POST', body:{ventaId:v._id, lineas}});
+    if (r.avisos && r.avisos.length) alert(r.avisos.join('\n'));
+    abrirObra(VC.obraId); cargarObras();
+  } catch(e){ document.getElementById('vcErr').textContent = e.message; }
+}
+async function desvincularVenta(obraId, ventaId){
+  if (!confirm('¿Desvincular esta venta? Se sacan las tareas que sumó (solo si todavía no empezaron).')) return;
+  try { await api('/'+obraId+'/ventas/'+ventaId, {method:'DELETE'}); abrirObra(obraId); cargarObras(); } catch(e){ alert(e.message); }
 }
 async function agregarTarea(obraId){
   const tipoTrabajo = document.getElementById('nuevaTareaTipo').value;
