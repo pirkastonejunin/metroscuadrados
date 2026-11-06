@@ -25,5 +25,10 @@ const { start } = require('./harness');
   await hook(msg('5492364333333', 'wamid.5')); assert.equal(await db.collection('wa_mensajes').countDocuments({ waId: 'wamid.5' }), 0);
   // quitar de la lista: vuelve a aparecer
   r = await api('PUT', '/api/bot/internos', { items: [{ tel: '5492364222222' }] }); r = await api('GET', '/api/bot/conversaciones'); assert.equal(r.data.items.length, 2, 'al quitarla vuelve');
+  // conversación donde solo hay un mensaje escrito desde el celular (el cliente escribió antes de conectar el CRM): la ventana es "desconocida" y se deja escribir
+  await hook({ entry: [{ changes: [{ value: { message_echoes: [{ to: '5492364555555', id: 'wamid.6', type: 'text', text: { body: 'hola' }, timestamp: String(Math.floor(Date.now() / 1000)) }] } }] }] });
+  const solo = await db.collection('wa_conversaciones').findOne({ orgId: ORG, tel10: '2364555555' }); assert(solo, 'el eco crea la conversación');
+  r = await api('GET', `/api/bot/conversaciones/${solo._id}`); assert.equal(r.data.ventana.abierta, true); assert.equal(r.data.ventana.desconocida, true);
+  r = await api('POST', `/api/bot/conversaciones/${solo._id}/enviar`, { texto: 'seguimos' }); assert.equal(r.status, 200, JSON.stringify(r.data));
   console.log('OK'); await h.stop(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

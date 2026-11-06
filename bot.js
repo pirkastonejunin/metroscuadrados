@@ -134,7 +134,7 @@ async function enviarTexto(tel, texto) {
   const r = await pedir(graph() + '/' + process.env.WA_PHONE_ID + '/messages', { method: 'POST', headers: { Authorization: 'Bearer ' + process.env.WA_TOKEN, 'content-type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to: tel, type: 'text', text: { body: texto, preview_url: true } }) });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error('WhatsApp ' + r.status + ': ' + ((d.error && d.error.message) || ''));
+  if (!r.ok) { if (d.error && d.error.code === 131047) throw new Error('Pasaron más de 24 h desde el último mensaje del cliente: WhatsApp solo deja mandar una plantilla aprobada.'); throw new Error('WhatsApp ' + r.status + ': ' + ((d.error && d.error.message) || '')); }
   return { id: d.messages && d.messages[0] && d.messages[0].id };
 }
 // Manda un archivo (PDF) por WhatsApp: primero lo sube como media y después lo envía como documento.
@@ -188,7 +188,7 @@ function ventanaDe(ultimoClienteAt) {
 }
 async function ventanaConv(db, convId) {
   const m = await db.collection(COL_M).find({ convId, dir: 'in' }).sort({ at: -1 }).limit(1).toArray();
-  return ventanaDe(m[0] && m[0].at);
+  return m[0] ? ventanaDe(m[0].at) : { abierta: true, desconocida: true, venceAt: null, ultimoCliente: null }; // sin mensajes del cliente guardados (escribió antes de conectar el CRM): se deja intentar y decide Meta
 }
 const MSJ_VENTANA = 'Pasaron más de 24 h desde el último mensaje del cliente: WhatsApp solo deja mandar una plantilla aprobada. Elegí una plantilla o esperá a que escriba.';
 const VARIABLES_PLANTILLA = { nombre: 'Nombre del cliente', asesor: 'Nombre del asesor', producto: 'Producto que consultó' };
@@ -552,7 +552,7 @@ router.get('/conversacion-por-tel/:tel', auth, async (req, res) => {
 router.get('/conversaciones/:id', auth, async (req, res) => {
   try { const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const mensajes = await db.collection(COL_M).find({ convId: c._id }).sort({ at: 1 }).limit(500).toArray(); const ult = [...mensajes].reverse().find(m => m.dir === 'in');
-    res.json({ conversacion: c, mensajes, ventana: c.demo ? { abierta: true, demo: true } : ventanaDe(ult && ult.at), plantillas: c.demo ? [] : await plantillasDe(db, c.orgId) }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ conversacion: c, mensajes, ventana: c.demo ? { abierta: true, demo: true } : (ult ? ventanaDe(ult.at) : { abierta: true, desconocida: true, venceAt: null, ultimoCliente: null }), plantillas: c.demo ? [] : await plantillasDe(db, c.orgId) }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.post('/conversaciones/:id/estado', auth, async (req, res) => {
   try { const est = req.body && req.body.estado; if (!['bot', 'derivado', 'aceptado', 'humano', 'pausado'].includes(est)) return res.status(400).json({ error: 'Estado inválido.' });
