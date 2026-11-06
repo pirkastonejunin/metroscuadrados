@@ -293,6 +293,11 @@ router.delete('/empleados/:id', authSueldosDoc, async (req, res) => {
 // ---------------------------------------------------------------------------
 // Comisión por ventas del mes de un empleado vinculado a un vendedor
 // ---------------------------------------------------------------------------
+// Las comisiones se pagan a mes vencido: la liquidación de AAAA-MM lleva las ventas del mes anterior.
+function mesAnterior(p) {
+  const [y, m] = p.split('-').map(Number);
+  return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+}
 function inicioMes(p) { return new Date(p + '-01T00:00:00.000-03:00'); }
 // Base de comisión: total de la venta CON IVA, en pesos (la nota de crédito resta).
 function netoVenta(v) {
@@ -313,7 +318,8 @@ async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase)
   if (!usuarios.length) avisos.push('El vendedor no tiene un usuario vinculado, así que no se le pueden atribuir ventas. Vinculalo en Configuración > Usuarios > Editar > "Vendedor vinculado".');
   let base = 0, ventas = 0, nc = 0;
   if (usuarios.length) {
-    const d0 = desde || inicioMes(periodo), d1 = hasta || finPeriodo(periodo);
+    const pv = mesAnterior(periodo);
+    const d0 = desde || inicioMes(pv), d1 = hasta || finPeriodo(pv);
     // Con ventana propia, "desde" es el corte del pago anterior: no se cuenta dos veces.
     // Las ventas migradas de Dux no traen usuario, solo el nombre del vendedor como texto: se atribuyen también por ese nombre
     // (sin distinguir mayúsculas) si coincide con el del usuario vinculado, el del vendedor o el del empleado.
@@ -334,7 +340,7 @@ async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase)
     } catch (e) { /* el aviso es opcional */ }
   }
   base = Math.max(0, r2(base));
-  return { vinculado: true, vendedor: vend ? vend.nombre : '', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
+  return { vinculado: true, mesVentas: mesAnterior(periodo), vendedor: vend ? vend.nombre : '', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
 }
 // Esquema por visita (la empleada que carga las visitas):
 //   variable = visitas hechas x monto + visitas vendidas x (2 x monto) + % x ventas de mostrador que cargó
@@ -349,7 +355,8 @@ async function calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase)
   const usr = emp.usuarioId ? await db.collection('usuarios').findOne({ _id: emp.usuarioId }, { projection: { nombre: 1 } }) : null;
   if (!usr) avisos.push('El usuario vinculado ya no existe o no está elegido (solapa Empleados).');
   if (!M && !pct) avisos.push('No tiene cargado el monto por visita ni el % de ventas de mostrador (solapa Empleados).');
-  const d0 = inicioMes(periodo), d1 = hasta || finPeriodo(periodo);
+  const pv = mesAnterior(periodo);
+  const d0 = inicioMes(pv), d1 = hasta || finPeriodo(pv);
   let hechas = 0, vendidas = 0, base = 0, ventas = 0, nc = 0;
   if (usr) {
     const vis = await db.collection('visitas').find({ orgId: req.orgId, 'creadaPor.usuarioId': usr._id, fechaHora: { $gte: d0, $lte: d1 }, estado: { $in: ['presupuestada', 'vendido', 'instalado'] } }).project({ estado: 1 }).toArray();
@@ -366,7 +373,7 @@ async function calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase)
   base = Math.max(0, r2(base));
   const porVisitas = r2(hechas * M + vendidas * 2 * M), porMostrador = r2(base * pct / 100), variable = r2(porVisitas + porMostrador);
   const basico = r2(sueldoBase || 0);
-  return { vinculado: true, tipo: 'por_visita', vendedor: usr ? usr.nombre : '', pct, base, monto: Math.max(0, r2(variable - basico)), variable, basico, montoVisita: M,
+  return { vinculado: true, mesVentas: mesAnterior(periodo), tipo: 'por_visita', vendedor: usr ? usr.nombre : '', pct, base, monto: Math.max(0, r2(variable - basico)), variable, basico, montoVisita: M,
     visitas: hechas, visitasVendidas: vendidas, porVisitas, porMostrador, ventas, notasCredito: nc, avisos };
 }
 router.get('/comision', authSueldosDoc, async (req, res) => {
@@ -497,10 +504,9 @@ router.post('/liquidaciones/copiar', authSueldosLectura, async (req, res) => {
         if (tiene.has(String(emp._id))) continue;
         const prev = await db.collection('sueldos_liquidaciones').find({ orgId: req.orgId, empleadoId: emp._id, periodo: { $lt: periodo } }).sort({ periodo: -1 }).limit(1).toArray();
         const p = prev[0];
-        const com = await calcularComision(db, req, emp, periodo, undefined, undefined, p ? p.sueldo : emp.sueldoBasico); // la comisión no se copia: se recalcula con las ventas del mes
+        const com = await calcularComision(db, req, emp, periodo, undefined, undefined, p ? p.sueldo : emp.sueldoBasico); // la comisión no se copia: se recalcula con las ventas del mes anterior (mes vencido)
         // Quien cobra la comisión sumada a cada pago la va devengando con cada pago: arranca el mes en 0.
-        const conPagos = emp.frecuencia && emp.frecuencia !== 'mensual' && emp.comisionPago === 'con_sueldo';
-        const c = conPagos ? { comisiones: 0, comisionPct: com.pct, comisionBase: 0 } : { comisiones: com.monto, comisionPct: com.pct, comisionBase: com.base };
+        const c = { comisiones: com.monto, comisionPct: com.pct, comisionBase: com.base };
         await guardarLiquidacion(db, req, p
           ? Object.assign({ periodo, sueldo: p.sueldo, adicionales: p.adicionales, aguinaldo: 0, cargasSociales: p.cargasSociales, descuentos: p.descuentos }, c)
           : Object.assign({ periodo, sueldo: emp.sueldoBasico }, c), emp);
@@ -548,9 +554,9 @@ async function registrarPago(db, req, l, { monto: m, montoComision, fecha, cuent
 // Pagos del período: qué le toca cobrar a cada uno en una fecha, según su frecuencia.
 //  - Sueldo: la parte fija del neto se paga en cuotas (semanal 4, quincenal 2, mensual 1). En el último
 //    pago del mes se paga todo lo que falte, así que una quinta semana o el redondeo no dejan saldo suelto.
-//  - Comisiones: mensual -> todo junto con el sueldo. Semanal/quincenal "se suma a cada pago" -> se suma la
-//    comisión de las ventas desde el pago anterior hasta la fecha. "Todas juntas" -> se sugiere recién en
-//    el último pago del mes, con la comisión que ya tiene la liquidación.
+//  - Comisiones (a mes vencido: la liquidación lleva las ventas del mes anterior): mensual -> todo junto con
+//    el sueldo. Semanal/quincenal "en cada pago" -> en cuotas como el sueldo (el último pago lleva el resto).
+//    "Todas juntas" -> se sugiere recién en el último pago del mes.
 // ---------------------------------------------------------------------------
 function ultimoPagoDelMes(freq, periodo, fecha) {
   const mes = fecha.slice(0, 7);
@@ -589,28 +595,14 @@ async function armarPagos(db, req, periodo, fechaISO) {
     const comSaldo = Math.min(Math.max(0, r2(comTotal - comPag)), r2(saldo - fijoSaldo));
     const ultimo = ultimoPagoDelMes(freq, periodo, fechaISO);
     let comNueva = 0, comBase = 0, comHasta = null, avisos = [];
-    if (freq !== 'mensual' && modo === 'con_sueldo' && emp.comisionTipo === 'por_visita') {
-      // Esquema por visita: acumulado del mes hasta la fecha menos lo ya devengado (así el piso del básico se respeta).
-      const tope = finPeriodo(periodo), hasta = finDia < tope ? finDia : tope;
-      const c = await calcularComisionVisitas(db, req, emp, periodo, hasta, l.sueldo);
-      comNueva = Math.max(0, r2(c.monto - (l.comisiones || 0))); comBase = 0; comHasta = hasta; avisos = c.avisos;
-    } else if (freq !== 'mensual' && modo === 'con_sueldo' && emp.vendedorId) {
-      const desde = l.comisionHasta ? new Date(l.comisionHasta) : null;
-      const tope = finPeriodo(periodo);
-      const hasta = finDia < tope ? finDia : tope;
-      if (!desde || desde < hasta) {
-        const c = await calcularComision(db, req, emp, periodo, desde, hasta);
-        comNueva = c.monto; comBase = c.base; comHasta = hasta; avisos = c.avisos;
-      }
-    }
     const cuota = freq === 'mensual' || ultimo ? fijoSaldo : Math.min(fijoSaldo, r2(fijoTotal / CUOTAS[freq]));
     let comSug = 0;
     if (freq === 'mensual') comSug = comSaldo;
-    else if (modo === 'con_sueldo') comSug = r2(comSaldo + comNueva);
+    else if (modo === 'con_sueldo') comSug = ultimo ? comSaldo : Math.min(comSaldo, r2(comTotal / CUOTAS[freq]));
     else comSug = ultimo ? comSaldo : 0;
     Object.assign(f, {
       liquidacionId: String(l._id), neto: l.neto, totalPagado: l.totalPagado || 0, saldo,
-      fijoSaldo, sugeridoFijo: r2(cuota), comisionDisponible: freq !== 'mensual' && modo === 'con_sueldo' ? r2(comSaldo + comNueva) : comSaldo,
+      fijoSaldo, sugeridoFijo: r2(cuota), comisionDisponible: comSaldo,
       sugeridaComision: r2(comSug), comisionNueva: comNueva, ultimoPago: ultimo, avisos,
       saldado: saldo <= 0.005
     });

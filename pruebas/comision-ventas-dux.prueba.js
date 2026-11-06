@@ -14,7 +14,7 @@ const assert = require('assert'); const { start } = require('./harness');
     { ...base, numero: 5, total: 16000, vendedor: 'Pérez, Carlos' },                        // nombre parecido: no cuenta pero avisa
     { ...base, numero: 6, total: 500, vendedor: 'Carlos Pérez', estado: 'anulada' }         // anulada: no cuenta
   ]);
-  const r = await api('GET', `/api/sueldos/comision?empleadoId=${empId}&periodo=2026-10`); assert.equal(r.status, 200, JSON.stringify(r.data));
+  const r = await api('GET', `/api/sueldos/comision?empleadoId=${empId}&periodo=2026-11`); assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.ventas, 3, 'cuenta las 3 de Carlos (sistema + Dux)'); assert.equal(r.data.base, 7000); assert.equal(r.data.monto, 140);
   assert(r.data.avisos.some(a => /Pérez, Carlos/.test(a) && /1 venta/.test(a)), 'avisa de la de nombre parecido: ' + JSON.stringify(r.data.avisos));
   assert(!r.data.avisos.some(a => /Otro Vendedor/.test(a)), 'no avisa de vendedores que no se parecen');
