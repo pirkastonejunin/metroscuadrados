@@ -74,29 +74,32 @@
 </div>
 
 <!-- Conexión -->
-<div id="v-w" class="hidden"><style>#wPl select{width:auto!important;max-width:210px;display:inline-block}</style>
-  <div class="card"><div class="hdr"><b>🔌 Conexión de WhatsApp</b><span id="wModo"></span></div><div class="pad" id="wChecks">Cargando…</div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Conectar en modo coexistencia</b><span id="coxEst"></span></div><div class="pad">
+<div id="v-w" class="hidden" data-on="c"><style>#wPl select{width:auto!important;max-width:210px;display:inline-block}</style>
+  <style>#v-w [data-sub]{display:none}#v-w[data-on="c"] [data-sub="c"],#v-w[data-on="p"] [data-sub="p"],#v-w[data-on="a"] [data-sub="a"],#v-w[data-on="n"] [data-sub="n"],#v-w[data-on="k"] [data-sub="k"]{display:block}
+#wSub{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}#wSub button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px;font-weight:600}#wSub button.on{background:#111;color:#fff;border-color:#111}</style>
+  <div id="wSub"><button data-s="c" class="on">🔌 Conexión</button><button data-s="p">💬 Plantillas y respuestas</button><button data-s="a">📢 Anuncios (Meta)</button><button data-s="n">🚫 Números internos</button><button data-s="k">💰 Costos</button></div>
+  <div class="card" data-sub="c"><div class="hdr"><b>🔌 Conexión de WhatsApp</b><span id="wModo"></span></div><div class="pad" id="wChecks">Cargando…</div></div>
+  <div class="card" data-sub="c" style="margin-top:12px"><div class="hdr"><b>Conectar en modo coexistencia</b><span id="coxEst"></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Conecta el número de la app WhatsApp Business <b>sin sacarlo del celular</b>: seguís escribiendo desde el teléfono, todo queda en el sistema y Meta manda el historial de chats (hasta ~6 meses) y los contactos. En la ventana de Meta elegí <b>compartir el historial</b>: si lo rechazás no hay segunda oportunidad. Hace falta la app WhatsApp Business actualizada, y usar el celular al menos una vez cada 14 días.</div>
     <div id="coxChecks" class="muted" style="margin-bottom:8px"></div>
     <button class="b" id="coxBtn" onclick="coxConectar()">Conectar con coexistencia</button> <button class="b" style="background:#fff;color:inherit;border:1px solid #ccc" onclick="coxSuscribir()" title="Para cuando Meta dejó el número conectado pero la ventana da error">Terminar la conexión (suscribir la app)</button> <span id="coxMsg" class="muted"></span>
     <div id="coxRes" style="margin-top:8px"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Datos para configurar en Meta</b></div><div class="pad" id="wDatos"></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Probar sin cambiar nada</b></div><div class="pad">
+  <div class="card" data-sub="c" style="margin-top:12px"><div class="hdr"><b>Datos para configurar en Meta</b></div><div class="pad" id="wDatos"></div></div>
+  <div class="card" data-sub="c" style="margin-top:12px"><div class="hdr"><b>Probar sin cambiar nada</b></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Estas pruebas no pasan el número al sistema nuevo. Solo funcionan cuando ya cargaste WA_TOKEN y WA_PHONE_ID.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button class="b sec mini" onclick="wProbar()">Consultar el número en Meta</button><input type="text" id="wTel" placeholder="Tu celular: 549236…" style="max-width:190px"><button class="b sec mini" onclick="wMsg()">Mandarme un mensaje de prueba</button></div><div id="wProbaOut" class="muted" style="margin-top:8px"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>API de conversiones de Meta</b><button class="b sec mini" onclick="cpCargar()">Actualizar</button></div><div class="pad">
+  <div class="card" data-sub="a" style="margin-top:12px"><div class="hdr"><b>API de conversiones de Meta</b><button class="b sec mini" onclick="cpCargar()">Actualizar</button></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Le avisa a Meta qué chats que vinieron de un <b>anuncio</b> terminaron en consulta calificada, presupuesto enviado o venta ganada (con el monto del presupuesto), para que optimice los anuncios hacia clientes que compran. Solo se informan chats de anuncios; no se manda ningún dato personal, solo el identificador del clic. Si una venta ganada no tiene presupuesto con monto, no se informa.</div>
     <div id="cpEst">Cargando…</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px"><button class="b sec mini" onclick="cpPreparar()">1. Preparar (crear el conjunto de datos en Meta)</button><button class="b mini" id="cpBtn" onclick="cpActivar()">2. Activar</button><input type="text" id="cpCod" placeholder="Código de prueba (opcional)" style="max-width:210px"><button class="b sec mini" onclick="cpCodigo()">Guardar código</button></div>
     <div id="cpMsg" class="muted" style="margin-top:6px"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Números internos (compañeros, proveedores)</b></div><div class="pad">
+  <div class="card" data-sub="n" style="margin-top:12px"><div class="hdr"><b>Números internos (compañeros, proveedores)</b></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Lo que escriban estos números no entra al CRM, el bot no les contesta y no se gasta IA. También podés marcarlos desde un chat con "🚫 Es interno / proveedor".</div>
     <div id="iLista"></div><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px"><input type="text" id="iTel" placeholder="Número: 549236…" style="max-width:190px"><input type="text" id="iNom" placeholder="Nombre (opcional)" style="max-width:190px"><button class="b mini" onclick="iAgregar()">+ Agregar</button></div><div id="iMsg" class="muted" style="margin-top:6px"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlSugeridas()">Cargar las sugeridas</button> <button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
+  <div class="card" data-sub="p" style="margin-top:12px"><div class="hdr"><b>Plantillas de WhatsApp</b><span><button class="b sec mini" onclick="wPlSugeridas()">Cargar las sugeridas</button> <button class="b sec mini" onclick="wPlAgregar()">+ Agregar</button> <button class="b mini" onclick="wPlGuardar()">Guardar</button></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Después de 24 h sin que el cliente escriba, WhatsApp solo deja mandar plantillas aprobadas. Se crean y se aprueban en Meta (WhatsApp Manager → Plantillas). Acá cargás el mismo <b>nombre</b> e <b>idioma</b> para poder usarlas desde el chat. En el texto usá {{1}}, {{2}} para los datos variables.</div>
     <div id="wPl"></div><div id="wPlMsg" class="muted"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Consumo y costo de WhatsApp</b><button class="b sec mini" onclick="coCargar()">Actualizar</button></div><div class="pad">
+  <div class="card" data-sub="k" style="margin-top:12px"><div class="hdr"><b>Consumo y costo de WhatsApp</b><button class="b sec mini" onclick="coCargar()">Actualizar</button></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Meta cobra por mensaje que sale (los que manda el cliente no cuestan). Desde el 1/10/2026 las respuestas libres dentro de las 24 h también se cobran, salvo las primeras 1.000 por mes y las de chats que entraron por un anuncio (gratis 7 días). Lo que escribís desde la app del celular (si el número está en modo coexistencia) no se cobra y no se cuenta acá. Es una estimación: manda lo que figure en la facturación de Meta.</div>
     <div id="co">Cargando…</div>
     <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px"><b>Simulador</b> <span class="muted">¿cuánto costaría con este movimiento?</span>
@@ -107,10 +110,10 @@
         <label class="muted">Plantillas por mes<br><input type="number" id="coP" value="50" min="0" style="width:90px"></label>
         <label class="muted">Plantillas de marketing %<br><input type="number" id="coK" value="0" min="0" max="100" style="width:90px"></label></div>
       <div id="coSim" style="font-weight:600"></div></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Respuestas de seguimiento y rápidas</b><span><button class="b sec mini" onclick="rsAgregar('seguimiento')">+ Seguimiento</button> <button class="b sec mini" onclick="rsAgregar('rapida')">+ Rápida</button> <button class="b sec mini" onclick="rsBase()">Volver a las originales</button> <button class="b mini" onclick="rsGuardar()">Guardar</button></span></div><div class="pad">
+  <div class="card" data-sub="p" style="margin-top:12px"><div class="hdr"><b>Respuestas de seguimiento y rápidas</b><span><button class="b sec mini" onclick="rsAgregar('seguimiento')">+ Seguimiento</button> <button class="b sec mini" onclick="rsAgregar('rapida')">+ Rápida</button> <button class="b sec mini" onclick="rsBase()">Volver a las originales</button> <button class="b mini" onclick="rsGuardar()">Guardar</button></span></div><div class="pad">
     <div class="muted" style="margin-bottom:8px">Textos que el vendedor elige desde el chat del CRM (menú <b>Respuestas…</b>) y puede ajustar antes de enviar. Sirven dentro de las 24 h; pasado ese tiempo hay que usar una plantilla aprobada (arriba). Podés usar <b>{nombre}</b>, <b>{asesor}</b>, <b>{producto}</b> y <b>{presupuesto}</b> (el número, si hay uno).</div>
     <div id="rs"></div><div id="rsMsg" class="muted"></div></div></div>
-  <div class="card" style="margin-top:12px"><div class="hdr"><b>Pasos para pasar el número al sistema</b></div><div class="pad" id="wGuia"></div></div>
+  <div class="card" data-sub="c" style="margin-top:12px"><div class="hdr"><b>Pasos para pasar el número al sistema</b></div><div class="pad" id="wGuia"></div></div>
 </div>
 
 <!-- Conocimiento -->
@@ -297,6 +300,9 @@ async function seguimiento(id, dias){
 }
 async function ejemplos(alta){ if (!alta && !confirm('¿Quitar las conversaciones de ejemplo (y las oportunidades que hayas creado desde ellas)?')) return; try{ await api('/api/bot/conversaciones/ejemplos', {method: alta?'POST':'DELETE', headers:H(J), body:'{}'}); SEL=null; document.getElementById('det').innerHTML=''; await cargar(); }catch(e){ err(e); } }
 async function marcarInterno(id){ if (!confirm('Este número pasa a la lista de internos: sus mensajes ya no entran al CRM, el bot no le contesta y no se gasta IA. La conversación se oculta (no se borra). ¿Seguir?')) return; try{ await api(`/api/bot/conversaciones/${id}/interno`, {method:'POST', headers:H(J), body:'{}'}); SEL=null; document.getElementById('det').innerHTML=''; await cargar(); iCargar(); }catch(x){ err(x); } }
+function wSub(k){ const v = document.getElementById('v-w'); v.dataset.on = k; document.querySelectorAll('#wSub button').forEach(b=>b.classList.toggle('on', b.dataset.s===k)); try{ localStorage.setItem('botSub', k); }catch(e){} }
+document.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('#wSub button'); if (b) wSub(b.dataset.s); });
+try{ const g = localStorage.getItem('botSub'); if (g && /^[cpank]$/.test(g)) wSub(g); }catch(e){}
 let CPD = null;
 async function cpCargar(){ try{ CPD = await api('/api/bot/capi', {headers:H()}); const d = CPD; document.getElementById('cpCod').value = d.codigoPrueba||'';
   document.getElementById('cpEst').innerHTML = `<div>${d.activo?'🟢 <b>Activa</b>':'⚪ <b>Desactivada</b>'} · Conjunto de datos: <b>${esc(d.datasetId||'sin crear')}</b> · Cuenta WhatsApp: <b>${esc(d.waba||'—')}</b> · Token: <b>${esc(d.token||'falta')}</b> · Chats que vinieron de un anuncio: <b>${d.chatsDeAnuncio}</b></div>`
