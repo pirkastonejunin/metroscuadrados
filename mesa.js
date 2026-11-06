@@ -296,11 +296,17 @@ router.post('/cierre-masivo', auth, async (req, res) => {
     const diag = { sinConversacion: opsTodas.length, conVendedor: opsTodas.filter(o => o.vendedorId).length, conProximaAccion: opsTodas.filter(o => o.proximaAccion && o.proximaAccion.fecha).length, recientes: opsTodas.filter(o => new Date(o.updatedAt || o.createdAt || 0) >= corte).length, origenes: {} };
     for (const o of opsTodas) diag.origenes[o.origen || '(sin origen)'] = (diag.origenes[o.origen || '(sin origen)'] || 0) + 1;
     const opsAC = opsTodas.filter(o => !o.vendedorId && !(o.proximaAccion && o.proximaAccion.fecha) && !telsConv.has(tel10(o.cliente && o.cliente.telefono)) && new Date(o.updatedAt || o.createdAt || 0) < corte);
-    if (!(req.body && req.body.confirmar === true)) return res.json({ ok: true, vistaPrevia: true, dias, total: convs.length, aCerrar: aCerrar.length, atendidas: convs.filter(c => atendidas.has(String(c._id))).length, contactos: opsAC.length, diag });
+    // Leads de WhatsApp sueltos (llegaron de Azuite o de un anuncio, sin oportunidad ni conversación): son los "Nuevos" que muestra el tablero. Sin fecha cuentan como viejos.
+    const telsOp = new Set(opsTodas.map(o => tel10(o.cliente && o.cliente.telefono))); const telsOpAct = new Set((await db.collection('oportunidades').find(Object.assign({ estado: 'activa' }, filtroOrg(req))).project({ 'cliente.telefono': 1 }).toArray()).map(o => tel10(o.cliente && o.cliente.telefono)));
+    const leadsAC = (await db.collection('leads_whatsapp').find(Object.assign({}, filtroOrg(req), { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).toArray())
+      .filter(l => l.tel10 && !telsConv.has(l.tel10) && !telsOpAct.has(l.tel10) && !telsOp.has(l.tel10) && new Date(l.creadoOrigen || l.createdAt || 0) < corte);
+    diag.leads = leadsAC.length;
+    if (!(req.body && req.body.confirmar === true)) return res.json({ ok: true, vistaPrevia: true, dias, total: convs.length, aCerrar: aCerrar.length, atendidas: convs.filter(c => atendidas.has(String(c._id))).length, contactos: opsAC.length + leadsAC.length, diag });
     const ahora = new Date(); const q = quien(req);
     const r = await db.collection(COL_C).updateMany({ _id: { $in: aCerrar.map(c => c._id) }, 'mesa.cierre': { $in: [null] } }, { $set: { 'mesa.cierre': { estado: 'perdida', motivo: 'sin respuesta', at: ahora, usuario: q.nombre, masivo: true } }, $push: { 'mesa.historial': { at: ahora, txt: 'Perdida: sin respuesta (cierre en bloque de conversaciones de más de ' + dias + ' días sin actividad)', usuario: q.nombre } } });
     const ro = opsAC.length ? await db.collection('oportunidades').updateMany({ _id: { $in: opsAC.map(o => o._id) }, estado: 'activa' }, { $set: { estado: 'descartada', motivoDescarte: 'Perdida: sin respuesta (cierre en bloque de contactos de Azuite de más de ' + dias + ' días)', proximaAccion: null, updatedAt: ahora } }) : { modifiedCount: 0 };
-    res.json({ ok: true, cerradas: r.modifiedCount, contactos: ro.modifiedCount, dias });
+    const rl = leadsAC.length ? await db.collection('leads_whatsapp').updateMany({ _id: { $in: leadsAC.map(l => l._id) }, oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } }, { $set: { estado: 'Perdido', motivoCierre: 'Sin respuesta (cierre en bloque de más de ' + dias + ' días)', updatedAt: ahora } }) : { modifiedCount: 0 };
+    res.json({ ok: true, cerradas: r.modifiedCount, contactos: ro.modifiedCount + rl.modifiedCount, dias });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 router.get('/', auth, async (req, res) => {
