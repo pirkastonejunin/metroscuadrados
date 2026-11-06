@@ -398,7 +398,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       // Incluye todas las ventas pendientes de entrega, tengan o no la marca de "reservada" y sean cargadas acá o importadas de Dux.
     const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
-      const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1 }).toArray();
+      const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1, numero: 1, numeroOriginal: 1, clienteNombre: 1, estado: 1 }).toArray();
       const conPendiente = v => (v.items || []).some(it => it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0);
       const ventasSinReserva = ventas.filter(v => !v.stockComprometido && conPendiente(v)).length;
       // Lo comprometido sin depósito va contra el depósito Junín de su sucursal (15/10/2026, pedido de Mato).
@@ -442,7 +442,11 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
         for (const c of cambios) await db.collection('stock_actual').updateOne({ _id: c._id }, { $set: { cantidadComprometida: c.despues, actualizadoEn: new Date() } });
         for (const e of nuevas) await db.collection('stock_actual').updateOne({ orgId: e.orgId, productoId: e.productoId, depositoId: e.depositoId }, { $set: { cantidadComprometida: Math.round(e.cantidad * 100) / 100 }, $setOnInsert: { cantidad: 0 } }, { upsert: true });
       }
-      return { aplicado: aplicar, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
+      // Ventas pendientes con productos que no están vinculados al catálogo (típico de lo importado de Dux): por eso no suman al comprometido.
+      const sinVincular = ventas.filter(v => (v.items || []).some(it => !it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0)).slice(0, 30).map(v => ({
+        ventaId: v._id, comprobante: v.numeroOriginal || ('Nº ' + v.numero), cliente: v.clienteNombre || '', estado: v.estado,
+        items: (v.items || []).filter(it => !it.productoId).slice(0, 4).map(it => [it.sku || it.codigo || '', it.nombre || it.descripcion || it.producto || ''].filter(Boolean).join(' · ') || '(sin descripción)') }));
+      return { aplicado: aplicar, sinVincular, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

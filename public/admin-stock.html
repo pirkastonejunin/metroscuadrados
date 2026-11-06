@@ -505,11 +505,14 @@ async function recalcularComprometido(productoId){
     const h = Object.assign({'Content-Type':'application/json'}, headersAuth());
     let r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({})});
     let d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
-    if (!d.filasCorregidas) { msg.textContent = 'El comprometido ya coincide con las ventas.'; return; }
+    const sv = (d.sinVincular || []).map(v => escapeHtml(v.comprobante) + ' · ' + escapeHtml(v.cliente) + ' → ' + v.items.map(escapeHtml).join(' | ')).join('<br>');
+    const avisoSv = sv ? '<div style="margin-top:8px;color:#b45309"><b>Ventas pendientes con productos sin vincular al catálogo</b> (no pueden comprometer stock):<br>' + sv + '</div>' : '';
+    if (!d.filasCorregidas) { msg.innerHTML = 'El comprometido ya coincide con las ventas.' + avisoSv; return; }
     if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de stock (todos los productos; lo comprometido sin depósito pasa a Junín).' + (d.ventasSinReserva ? ' Hay ' + d.ventasSinReserva + ' venta(s) pendiente(s) que no estaban reservadas y se van a reservar.' : '') + ' ¿Continuar?')) return;
     r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({aplicar:true})});
     d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     cerrarModal(); cargarStockActual();
+    if (avisoSv) alert('Listo. Ojo: hay ventas pendientes con productos sin vincular al catálogo y no suman al comprometido. Volvé a tocar "Recalcular" para ver cuáles.');
   }catch(e){ msg.textContent = e.message; }
 }
 async function verComprometido(productoId, depositoId){
