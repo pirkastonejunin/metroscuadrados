@@ -779,29 +779,36 @@ router.get('/fiscal-defaults', authAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 const r2n = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 function etiquetaNota(n) { return `${n.letra || 'X'}-${String(n.numero).padStart(5, '0')}`; }
-async function aplicarNotaAFactura(db, req, nota, facturaId, montoPedido) {
+async function aplicarNotaAFactura(db, req, nota, facturaId, montoPedido, opts) {
+  opts = opts || {};
   if (nota.tipoComprobante !== 'nota_credito') throw err(400, 'Solo una Nota de Crédito se puede aplicar a una factura.');
   if (nota.estado === 'anulada') throw err(400, 'La nota está anulada.');
   const fact = await db.collection('ventas').findOne(Object.assign({ _id: facturaId }, filtroOrg(req)));
   if (!fact) throw err(404, 'El comprobante a cancelar no existe.');
   if (fact.estado === 'anulada') throw err(400, 'El comprobante está anulado.');
   if (fact.tipoComprobante === 'nota_credito') throw err(400, 'No se puede aplicar una nota de crédito a otra nota de crédito.');
-  if (String(fact.clienteId) !== String(nota.clienteId)) throw err(400, 'La nota y el comprobante son de clientes distintos.');
+  // Las ventas migradas de Dux a veces no tienen el cliente vinculado: solo se rechaza si ambos lo tienen y son distintos.
+  if (fact.clienteId && nota.clienteId && String(fact.clienteId) !== String(nota.clienteId) && !opts.otroCliente) throw err(400, 'La nota y el comprobante son de clientes distintos.');
   if ((fact.moneda || 'ARS') !== (nota.moneda || 'ARS')) throw err(400, 'La nota y el comprobante están en monedas distintas.');
   if (nota.aplicadaA && nota.aplicadaA.ventaId) throw err(400, 'Esta nota ya está aplicada a un comprobante. Desasociala primero.');
   const disponibleNota = r2n(nota.total - (nota.totalAplicado || 0));
   const saldoFact = r2n(fact.saldoPendiente != null ? fact.saldoPendiente : fact.total);
-  if (!(saldoFact > 0)) throw err(400, 'Ese comprobante no tiene saldo pendiente.');
-  let monto = montoPedido === undefined || montoPedido === null || montoPedido === '' ? Math.min(disponibleNota, saldoFact) : r2n(montoPedido);
+  // Un comprobante ya cobrado (sin saldo) también admite la nota (ej. venta de Dux cobrada y sin entregar que se anuló): el saldo queda en 0
+  // y la nota solo cancela lo acreditable (total - ya acreditado) y, si se pide, libera la mercadería comprometida.
+  const sinSaldo = !(saldoFact > 0);
+  const tope = sinSaldo ? r2n((fact.total || 0) - (fact.totalAcreditado || 0)) : saldoFact;
+  if (!(tope > 0)) throw err(400, sinSaldo ? 'Ese comprobante ya está acreditado por completo.' : 'Ese comprobante no tiene saldo pendiente.');
+  let monto = montoPedido === undefined || montoPedido === null || montoPedido === '' ? Math.min(disponibleNota, tope) : r2n(montoPedido);
   if (!(monto > 0)) throw err(400, 'No hay monto para aplicar.');
   if (monto > disponibleNota + 0.009) throw err(400, `El monto supera lo disponible de la nota (${disponibleNota}).`);
-  if (monto > saldoFact + 0.009) throw err(400, `El monto supera el saldo del comprobante (${saldoFact}).`);
+  if (monto > tope + 0.009) throw err(400, `El monto supera lo que se puede acreditar del comprobante (${tope}).`);
   const ahora = new Date();
-  const nuevoSaldo = Math.max(0, r2n(saldoFact - monto));
+  const nuevoSaldo = sinSaldo ? 0 : Math.max(0, r2n(saldoFact - monto));
   const totalAcreditado = r2n((fact.totalAcreditado || 0) + monto);
+  const cancelada = nuevoSaldo <= 0.005 && (totalAcreditado >= (fact.total || 0) - 0.01 || (fact.totalCobrado || 0) < (fact.total || 0) - 0.01);
   const upd = await db.collection('ventas').updateOne(
     { _id: fact._id, saldoPendiente: fact.saldoPendiente },
-    { $set: { saldoPendiente: nuevoSaldo, totalAcreditado, canceladaPorNota: nuevoSaldo <= 0.005, updatedAt: ahora },
+    { $set: { saldoPendiente: nuevoSaldo, totalAcreditado, canceladaPorNota: cancelada, updatedAt: ahora },
       $push: { notasAplicadas: { notaId: nota._id, numero: nota.numero, letra: nota.letra || 'X', monto, fecha: ahora } } }
   );
   if (!upd.modifiedCount) throw err(409, 'El comprobante cambió mientras se aplicaba la nota. Probá de nuevo.');
@@ -809,8 +816,8 @@ async function aplicarNotaAFactura(db, req, nota, facturaId, montoPedido) {
     $set: { aplicadaA: { ventaId: fact._id, numero: fact.numero, letra: fact.letra || 'X', tipoComprobante: fact.tipoComprobante, monto, fecha: ahora }, totalAplicado: r2n((nota.totalAplicado || 0) + monto), updatedAt: ahora },
     $unset: { desasociadaEn: '' }
   });
-  if (nota.reingresaStock === false) await ajustarCompromisoPorNota(db, nota, fact, true);
-  return { monto, saldoFactura: nuevoSaldo, cancelada: nuevoSaldo <= 0.005 };
+  if (nota.reingresaStock === false || opts.liberar) await ajustarCompromisoPorNota(db, nota, fact, true);
+  return { monto, saldoFactura: nuevoSaldo, cancelada };
 }
 // Una nota de crédito que NO reingresa mercadería (la factura no salió) cancela también lo que la factura tenía comprometido sin entregar
 // (15/10/2026, pedido de Mato). liberar=true: libera el compromiso por las cantidades de la nota; liberar=false: lo restituye.
@@ -821,9 +828,10 @@ function estadoSegunItems(items) {
   return cerrado <= 0 ? 'pendiente' : (cerrado >= total - 1e-9 ? 'entregada' : (ent > 0 || cerrado > 0 ? 'parcialmente_entregada' : 'pendiente'));
 }
 async function ajustarCompromisoPorNota(db, nota, fact, liberar) {
-  if (!fact || !fact.stockComprometido) return;
+  if (!fact) return;
   const ahora = new Date();
-  const incStock = (productoId, depositoId, delta) => db.collection('stock_actual').updateOne(
+  // Si la venta nunca marcó compromiso (ej. migrada de Dux) solo se actualizan sus ítems: el recálculo de comprometido ya la deja afuera.
+  const incStock = (productoId, depositoId, delta) => !fact.stockComprometido ? null : db.collection('stock_actual').updateOne(
     { productoId, depositoId: depositoId || null, orgId: fact.orgId }, { $inc: { cantidadComprometida: delta } });
   const items = (fact.items || []).map(i => Object.assign({}, i));
   if (liberar) {
@@ -871,7 +879,7 @@ async function desaplicarNota(db, nota) {
     const totalAcreditado = Math.max(0, r2n((fact.totalAcreditado || 0) - ap.monto));
     const saldo = Math.max(0, r2n(total - (fact.totalCobrado || 0) - totalAcreditado));
     await db.collection('ventas').updateOne({ _id: fact._id }, {
-      $set: { totalAcreditado, saldoPendiente: fact.estado === 'anulada' ? 0 : saldo, canceladaPorNota: totalAcreditado > 0 && saldo <= 0.005, updatedAt: ahora },
+      $set: { totalAcreditado, saldoPendiente: fact.estado === 'anulada' ? 0 : saldo, canceladaPorNota: totalAcreditado > 0 && saldo <= 0.005 && (totalAcreditado >= total - 0.01 || (fact.totalCobrado || 0) < total - 0.01), updatedAt: ahora },
       $pull: { notasAplicadas: { notaId: nota._id } }
     });
   }
@@ -892,11 +900,25 @@ router.get('/notas-sin-aplicar', authAdmin, async (req, res) => {
 // Comprobantes del cliente con saldo pendiente (para asociarles una nota de crédito).
 router.get('/con-saldo', authAdmin, async (req, res) => {
   try {
-    const cid = toObjectId(req.query.clienteId);
-    if (!cid) throw err(400, 'clienteId inválido');
     const db = await getDb();
-    const lista = await db.collection('ventas').find(Object.assign({ clienteId: cid, tipoComprobante: { $in: ['fiscal', 'comprobante_x', 'nota_debito'] }, estado: { $ne: 'anulada' }, saldoPendiente: { $gt: 0.005 } }, filtroOrg(req))).sort({ fecha: -1 }).limit(100).toArray();
-    res.json(lista.map(v => ({ _id: v._id, numero: v.numero, letra: v.letra || 'X', tipoComprobante: v.tipoComprobante, fecha: v.fecha, total: v.total, saldoPendiente: v.saldoPendiente, moneda: v.moneda || 'ARS' })));
+    const q = String(req.query.q || '').trim(), todos = req.query.todos === '1';
+    const filtro = Object.assign({ tipoComprobante: { $in: ['fiscal', 'comprobante_x', 'nota_debito'] }, estado: { $ne: 'anulada' } }, filtroOrg(req));
+    if (q) {
+      const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filtro.$or = [{ clienteNombre: re }, { numeroOriginal: re }].concat(Number(q) ? [{ numero: Number(q) }] : []);
+    } else {
+      const cid = toObjectId(req.query.clienteId);
+      if (!cid) throw err(400, 'clienteId inválido');
+      filtro.clienteId = cid;
+    }
+    if (!todos) filtro.saldoPendiente = { $gt: 0.005 };
+    const lista = await db.collection('ventas').find(filtro).sort({ fecha: -1 }).limit(100).toArray();
+    res.json(lista.map(v => {
+      const saldo = v.saldoPendiente != null ? v.saldoPendiente : v.total;
+      const pendEntrega = (v.items || []).some(it => (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0) && ['pendiente', 'parcialmente_entregada'].includes(v.estado);
+      return { _id: v._id, numero: v.numero, numeroOriginal: v.numeroOriginal || '', letra: v.letra || 'X', tipoComprobante: v.tipoComprobante, fecha: v.fecha, total: v.total, clienteNombre: v.clienteNombre || '',
+        saldoPendiente: saldo, acreditable: saldo > 0 ? saldo : Math.max(0, Math.round(((v.total || 0) - (v.totalAcreditado || 0)) * 100) / 100), pendienteEntrega: pendEntrega, moneda: v.moneda || 'ARS' };
+    }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 // Asocia una nota de crédito existente a una factura. body: { facturaId, monto? }
@@ -909,7 +931,7 @@ router.post('/:id/asociar', authAdmin, async (req, res) => {
       const db = await getDb();
       const nota = await db.collection('ventas').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!nota) throw err(404, 'Nota no encontrada');
-      return aplicarNotaAFactura(db, req, nota, facturaId, req.body.monto);
+      return aplicarNotaAFactura(db, req, nota, facturaId, req.body.monto, { liberar: !!req.body.liberar, otroCliente: !!req.body.otroCliente });
     });
     res.json(r);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

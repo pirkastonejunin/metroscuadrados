@@ -774,21 +774,25 @@ function prefijoComprobante(tipo){ return PREFIJO_COMPROBANTE_LABEL[tipo] || 'X'
 // 'entregada' directo (ver ventas.js) pero esa etiqueta no tiene sentido
 // para ellas ("remito generado"), así que se muestran como "Emitida".
 // Asociar una nota de crédito a una factura (15/10/2026): la factura baja su saldo y queda cancelada si la nota la cubre.
-async function abrirAsociarNota(notaId){
+async function abrirAsociarNota(notaId, q){
   const n = ventasCache.find(x => x._id === notaId); if (!n) return;
-  const r = await fetch(BASE + '/con-saldo?clienteId=' + n.clienteId, {headers: headersAuth()});
+  // Incluye comprobantes ya cobrados (ej. ventas de Dux sin entregar) y permite buscar por otro cliente o número.
+  const url = BASE + '/con-saldo?todos=1&' + (q ? 'q=' + encodeURIComponent(q) : 'clienteId=' + n.clienteId);
+  const r = await fetch(url, {headers: headersAuth()});
   const lista = r.ok ? await r.json() : [];
   const disp = Math.max(0, n.total - (n.totalAplicado || 0));
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg"><div class="modal">
       <span class="close-x" onclick="cerrarModal()">✕</span>
       <h2>Asociar nota de crédito ${escapeHtml(n.letra || 'X')}-${String(n.numero).padStart(5,'0')}</h2>
-      <p class="muted">Importe de la nota: ${money(disp)}. Elegí la factura (o comprobante) de ${escapeHtml(n.clienteNombre)} que cancela. Si la nota cubre todo su saldo, la factura queda cancelada y sin deuda.</p>
+      <p class="muted">Importe de la nota: ${money(disp)}. Elegí el comprobante de ${escapeHtml(n.clienteNombre)} que cancela. Si ya estaba cobrado, igual se puede asociar: no genera deuda, solo lo marca como acreditado.</p>
+      <div class="row" style="gap:6px;margin:6px 0"><input id="anQ" placeholder="Buscar otro cliente o número de comprobante" value="${escapeHtml(q||'')}" style="flex:1"><button class="btn small secondary" onclick="abrirAsociarNota('${notaId}', document.getElementById('anQ').value.trim())">Buscar</button></div>
       ${lista.length ? `<label>Comprobante a cancelar</label>
-      <select id="anFactura" onchange="anActualizarMonto()">${lista.map(f => `<option value="${f._id}" data-saldo="${f.saldoPendiente}">${etiquetaTipoComprobante(f.tipoComprobante)} ${escapeHtml(f.letra)}-${String(f.numero).padStart(5,'0')} · ${fechaCorta(f.fecha)} · saldo ${money(f.saldoPendiente)}</option>`).join('')}</select>
+      <select id="anFactura" onchange="anActualizarMonto()">${lista.map(f => `<option value="${f._id}" data-saldo="${f.acreditable}" data-cli="${escapeHtml(f.clienteNombre)}">${etiquetaTipoComprobante(f.tipoComprobante)} ${escapeHtml(f.letra)}-${String(f.numero).padStart(5,'0')}${f.numeroOriginal ? ' ('+escapeHtml(f.numeroOriginal)+')' : ''} · ${escapeHtml(f.clienteNombre)} · ${f.fecha ? new Date(f.fecha).toLocaleDateString('es-AR') : ''} · ${money(f.total)}${f.pendienteEntrega ? ' · SIN ENTREGAR' : ''}${f.saldoPendiente > 0 ? ' · saldo '+money(f.saldoPendiente) : ' · cobrado'}</option>`).join('')}</select>
       <label style="margin-top:8px">Monto a aplicar</label><input id="anMonto" type="number" step="0.01" min="0.01" data-disp="${disp}">
+      <label style="margin-top:8px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="anLiberar" checked style="width:auto"> La mercadería no salió: liberar lo comprometido (sale de "Comprometido" y de pendientes de entrega)</label>
       <div class="err" id="anErr"></div>
-      <button class="btn" style="margin-top:10px" onclick="asociarNota('${notaId}')">Asociar</button>` : '<p class="err">Este cliente no tiene comprobantes con saldo pendiente.</p>'}
+      <button class="btn" style="margin-top:10px" onclick="asociarNota('${notaId}')">Asociar</button>` : '<p class="err">No se encontraron comprobantes. Probá buscando por nombre de cliente o número.</p>'}
     </div></div>`;
   if (lista.length) anActualizarMonto();
 }
@@ -799,7 +803,7 @@ function anActualizarMonto(){
 }
 async function asociarNota(notaId){
   const err = document.getElementById('anErr'); err.textContent = '';
-  const body = {facturaId: document.getElementById('anFactura').value, monto: Number(document.getElementById('anMonto').value)};
+  const body = {facturaId: document.getElementById('anFactura').value, monto: Number(document.getElementById('anMonto').value), liberar: document.getElementById('anLiberar').checked, otroCliente: true};
   const r = await fetch(BASE + '/' + notaId + '/asociar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { err.textContent = d.error || 'No se pudo asociar'; return; }
