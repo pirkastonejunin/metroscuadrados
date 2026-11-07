@@ -448,6 +448,11 @@ async function calcular(db, req, prov, regla, filas) {
     }
   }
   const rubrosTn = require('./rubrosTn'); const baseRubros = await rubrosTn.cargar(db, { orgId: req.orgId });
+  // Primero la tabla guardada de este proveedor ("categoría del proveedor → rubro/subrubro"); si no está, el parecido de nombres.
+  const equivRubro = (prov && prov.equivalenciasRubro) || {};
+  const resolverRubro = texto => { const e = equivRubro[rubrosTn.clave(texto)]; if (e && e.rubro) return { rubro: e.rubro, subrubro: e.subrubro || '' }; return rubrosTn.resolver(baseRubros, texto); };
+  const categoriasProv = new Map();
+  for (const f of filas) { const t = String(f.rubroPortal || '').trim(); if (!t) continue; const k = rubrosTn.clave(t); const e = categoriasProv.get(k) || { texto: t, cant: 0 }; e.cant++; categoriasProv.set(k, e); }
   const factorDesc = regla.descuentos.reduce((a, d) => a * (1 - d / 100), 1);
   const decimales = regla.moneda === 'USD' ? 4 : 2;
   for (const f of filas) {
@@ -457,7 +462,7 @@ async function calcular(db, req, prov, regla, filas) {
       if (vistos.has(k)) continue;
       vistos.add(k);
       const n = { fila: f.fila, codigo: f.codigo, nombre: f.nombre, precioLista: f.precio, moneda: regla.moneda, precios: [], porM2: !!f.porM2, bulto: f.bulto > 0 ? f.bulto : null, marca: f.marca || '' };
-      { const rr = rubrosTn.resolver(baseRubros, f.rubroPortal); n.rubro = rr.rubro; n.subrubro = rr.subrubro; n.rubroPortal = f.rubroPortal || ''; }
+      { const rr = resolverRubro(f.rubroPortal); n.rubro = rr.rubro; n.subrubro = rr.subrubro; n.rubroPortal = f.rubroPortal || ''; }
       if (f.precio != null && f.precio > 0) {
         let costo = f.precio * factorDesc * (1 + regla.recargoPct / 100);
         if (regla.ivaIncluido) costo = costo / 1.21;
@@ -487,7 +492,7 @@ async function calcular(db, req, prov, regla, filas) {
     if (f.porUnidad && Number(p.unidadesPorBulto) > 1) c.bultoQuitar = p.unidadesPorBulto;
     if (f.piezasM2 > 0) c.piezasM2 = f.piezasM2;
     // Rubro (de las categorías de Tiendanube) y marca que trae el portal: solo se completan si el producto no los tiene
-    if (!p.rubro && f.rubroPortal) { const rr = rubrosTn.resolver(baseRubros, f.rubroPortal); if (rr.rubro) { c.rubroNuevo = rr.rubro; if (rr.subrubro && !p.subrubro) c.subrubroNuevo = rr.subrubro; } }
+    if (!p.rubro && f.rubroPortal) { const rr = resolverRubro(f.rubroPortal); if (rr.rubro) { c.rubroNuevo = rr.rubro; if (rr.subrubro && !p.subrubro) c.subrubroNuevo = rr.subrubro; } }
     if (!p.marca && f.marca) c.marcaNueva = f.marca;
     if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
 
@@ -547,6 +552,7 @@ async function calcular(db, req, prov, regla, filas) {
     preciosCambian: cambios.reduce((n, c) => n + (c.precios || []).filter(x => x.cambia).length, 0),
     stockCambia: cambios.filter(c => c.stock && c.stock.cambia).length + aCero.length,
     stockACero: aCero.length, alertas: cambios.filter(c => c.alerta).length,
+    categoriasProveedor: Array.from(categoriasProv.values()).map(e => Object.assign(e, resolverRubro(e.texto))).sort((a, b) => b.cant - a.cant),
     deposito: deposito ? deposito.nombre : null, moneda: regla.moneda, cotizacionDolar: regla.moneda === 'USD' ? cotizacion : null
   };
   return { cambios, sinMatch, duplicados, sinPrecio, aCero, resumen, deposito, listas, cotizacion };
@@ -600,6 +606,25 @@ async function prepararCalculo(req) {
   return { db, prov, regla, calc };
 }
 
+// Tabla "categoría del proveedor → rubro/subrubro del sistema" (se arma una vez y se usa en cada importación)
+router.get('/:id/rubros-opciones', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb(); await proveedorDeOrg(db, req);
+    const b = await require('./rubrosTn').cargar(db, { orgId: req.orgId });
+    const ops = [];
+    b.rubros.sort((x, y) => x.nombre.localeCompare(y.nombre)).forEach(r => { ops.push({ rubro: r.nombre, subrubro: '' }); b.subs.filter(s => String(s.rubroId) === String(r._id)).sort((x, y) => x.nombre.localeCompare(y.nombre)).forEach(s => ops.push({ rubro: r.nombre, subrubro: s.nombre })); });
+    res.json({ opciones: ops });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.put('/:id/rubros-equivalencias', authAdmin, async (req, res) => {
+  try {
+    const db = await getDb(); const prov = await proveedorDeOrg(db, req); const rt = require('./rubrosTn');
+    const mapa = (req.body || {}).mapa || {}; const eq = Object.assign({}, prov.equivalenciasRubro || {});
+    for (const texto of Object.keys(mapa)) { const k = rt.clave(texto); if (!k) continue; const v = mapa[texto] || {}; if (v.rubro) eq[k] = { rubro: String(v.rubro), subrubro: String(v.subrubro || ''), texto }; else if (v.quitar) delete eq[k]; }
+    await db.collection('proveedores').updateOne({ _id: prov._id }, { $set: { equivalenciasRubro: eq } });
+    res.json({ ok: true, guardadas: Object.keys(eq).length });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 router.post('/:id/preview', authAdmin, async (req, res) => {
   try {
     const { calc } = await conReintento(() => prepararCalculo(req));

@@ -283,12 +283,24 @@
         }).join('') + '</tbody></table></div>' + (s.sinMatch > 500 ? '<div class="muted" style="font-size:12px">Se muestran los primeros 500.</div>' : '') + '</div>' : '';
       var dup = d.duplicados.length ? '<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">' + s.duplicados + ' códigos ambiguos o repetidos (no se tocan)</summary><div style="font-size:12px;margin-top:4px">' + d.duplicados.map(function (x) { return E(x.codigo) + ': ' + x.productos.map(E).join('; '); }).join('<br>') + '</div></details>' : '';
       var cero = d.aCero.length ? '<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">' + s.stockACero + ' productos del proveedor ya no figuran: su stock pasa a 0</summary><div style="font-size:12px;margin-top:4px;max-height:140px;overflow:auto">' + d.aCero.map(function (x) { return E(x.sku) + ' – ' + E(x.nombre) + ' (' + x.anterior + ' → 0)'; }).join('<br>') + '</div></details>' : '';
+      var rubrosHtml = '';
+      if ((s.categoriasProveedor || []).length) {
+        var ro = await pedir('/' + estado.id + '/rubros-opciones').catch(function () { return { opciones: [] }; });
+        estado.rubrosCat = s.categoriasProveedor;
+        var opsR = ro.opciones.map(function (o) { return '<option value="' + E(o.rubro + '|' + o.subrubro) + '">' + E(o.rubro + (o.subrubro ? ' › ' + o.subrubro : '')) + '</option>'; }).join('');
+        var sinR = s.categoriasProveedor.filter(function (c) { return !c.rubro; }).length;
+        rubrosHtml = '<div style="margin-top:14px"><div style="font-weight:700">Rubros según el proveedor' + (sinR ? ' · <span style="color:var(--danger)">' + sinR + ' sin rubro</span>' : ' · todos asignados') + '</div>' +
+          '<div class="muted" style="font-size:12px;margin:2px 0 6px">Elegí una vez a qué rubro del sistema corresponde cada categoría del proveedor. Se guarda para este proveedor y se aplica a todos sus productos nuevos y a los que no tienen rubro.</div>' +
+          '<div style="overflow:auto;max-height:300px"><table><thead><tr><th>Categoría del proveedor</th><th style="text-align:right">Productos</th><th>Rubro en el sistema</th></tr></thead><tbody>' +
+          s.categoriasProveedor.map(function (c, i) { var sel = (c.rubro || '') + '|' + (c.subrubro || ''); return '<tr><td>' + E(c.texto) + '</td><td style="text-align:right">' + c.cant + '</td><td><select class="rc-sel" data-i="' + i + '"><option value="">— sin rubro —</option>' + opsR.replace('value="' + E(sel) + '"', 'value="' + E(sel) + '" selected') + '</select></td></tr>'; }).join('') +
+          '</tbody></table></div><div style="margin-top:8px"><button type="button" class="btn secondary" onclick="pimpGuardarRubros()">Guardar rubros y revisar de nuevo</button> <span id="pimpRubrosMsg"></span></div></div>';
+      }
       var hayAlgo = s.bultosCambian || s.costosCambian || s.preciosCambian || s.stockCambia || d.sinMatch.some(function (n) { return n.costoNuevo != null; });
       box.innerHTML = '<div class="row" style="gap:8px">' + tarjeta(s.vinculados, 'productos encontrados de ' + s.filasArchivo + ' filas') + tarjeta(s.costosCambian, 'costos cambian') + tarjeta(s.preciosCambian, 'precios cambian') + (s.bultosCambian ? tarjeta(s.bultosCambian, 'm² por caja se completan') : '') +
         (s.deposito ? tarjeta(s.stockCambia, 'stock cambia en ' + E(s.deposito)) : '') + (s.alertas ? tarjeta(s.alertas, 'para revisar (variación grande)', 'var(--danger)') : '') + '</div>' +
         (s.moneda === 'USD' ? '<div class="muted" style="font-size:12px;margin-top:6px">Lista en dólares, dólar usado: $ ' + num(s.cotizacionDolar, 2) + '</div>' : '') +
         (filas ? '<div style="overflow:auto;max-height:420px;margin-top:10px"><table><thead><tr><th>SKU</th><th>Producto</th><th style="text-align:right">Costo</th><th>Precios</th><th style="text-align:right">Stock</th></tr></thead><tbody>' + filas + '</tbody></table></div>' + (d.hayMas ? '<div class="muted" style="font-size:12px">Se muestran los 300 con más cambio; el resto también se actualiza.</div>' : '') : '<p class="muted">No hay ningún cambio para aplicar.</p>') +
-        sinMatch + dup + cero +
+        rubrosHtml + sinMatch + dup + cero +
         (hayAlgo ? '<div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><button type="button" class="btn" id="pimpBtnAplicar" onclick="pimpAplicar()">Hacer la actualización</button>' + (s.alertas ? '<label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:600"><input type="checkbox" id="pimpOmitir" style="width:auto"> No tocar los ' + s.alertas + ' marcados “revisar”</label>' : '') + '</div>' : '');
     } catch (e) { box.innerHTML = ''; err.textContent = e.message; }
     btn.disabled = !estado.archivo && !estado.modoPortal ? true : false; var btnP2 = document.getElementById('pimpBtnPortal'); if (btnP2) btnP2.disabled = false;
@@ -379,6 +391,12 @@
     } catch (e) { m.innerHTML = '<span class="err">' + E(e.message) + (creados ? ' (ya se habían creado ' + creados + ': podés volver a apretar, sigue donde quedó)' : '') + '</span>'; }
   };
 
+  window.pimpGuardarRubros = async function () {
+    var mapa = {};
+    document.querySelectorAll('.rc-sel').forEach(function (el) { var c = estado.rubrosCat[Number(el.dataset.i)]; if (!c) return; var v = el.value.split('|'); if (el.value) mapa[c.texto] = { rubro: v[0], subrubro: v[1] || '' }; else if (c.rubro) mapa[c.texto] = { quitar: true }; });
+    try { await pedir('/' + estado.id + '/rubros-equivalencias', { method: 'PUT', body: JSON.stringify({ mapa: mapa }) }); await window.pimpRevisar(); }
+    catch (e) { var m = document.getElementById('pimpRubrosMsg'); if (m) m.innerHTML = '<span class="err">' + E(e.message) + '</span>'; }
+  };
   window.pimpMarcarNuevos = function (on) { document.querySelectorAll('.pn-chk:not(:disabled)').forEach(function (c) { c.checked = on; }); };
   window.pimpAplicar = async function () {
     var err = document.getElementById('pimpErr'), box = document.getElementById('pimpPreview'), btn = document.getElementById('pimpBtnAplicar');
