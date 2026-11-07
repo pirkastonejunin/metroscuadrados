@@ -263,7 +263,10 @@ router.post('/rubros/sincronizar', auth, async (req, res) => {
     const c = await tnFetch(store, '/categories?per_page=200');
     if (!c.ok || !Array.isArray(c.data)) throw err(502, 'Tiendanube no devolvió las categorías (' + c.status + ').');
     const categorias = c.data.map(x => ({ id: x.id, nombre: cotizador.nombreLocalizado(x.name), padre: x.parent || null })).filter(x => x.nombre);
-    res.json(Object.assign({ ok: true }, await require('./rubrosTn').sincronizar(db, req.orgId, categorias)));
+    const out = await require('./rubrosTn').sincronizar(db, req.orgId, categorias);
+    const rt = require('./rubrosTn'); const b = await rt.cargar(db, { orgId: req.orgId });
+    out.soloEnSistema = b.rubros.filter(r => !r.tnCategoriaId).map(r => r.nombre);
+    res.json(Object.assign({ ok: true }, out));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -452,7 +455,9 @@ router.post('/publicar', auth, async (req, res) => {
         if (!p.rubro && datosPortal && datosPortal.rubroPortal) { const rr = rubrosTn.resolver(baseRubros, datosPortal.rubroPortal); if (rr.rubro) { p.rubro = rr.rubro; setRM.rubro = rr.rubro; if (rr.subrubro && !p.subrubro) { p.subrubro = rr.subrubro; setRM.subrubro = rr.subrubro; } } }
         if (!p.marca && datosPortal && datosPortal.marca) { p.marca = datosPortal.marca; setRM.marca = datosPortal.marca; }
         if (Object.keys(setRM).length) { setRM.updatedAt = new Date(); await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: setRM }); }
-        const cat = rubrosTn.categoriaDe(mapaBase, p.rubro, p.subrubro) || mapa[p.rubro || ''];
+        let cat = rubrosTn.categoriaDe(mapaBase, p.rubro, p.subrubro);
+        if (!cat && p.rubro) { try { cat = await rubrosTn.asegurarCategoria(db, req.orgId, baseRubros, p.rubro, p.subrubro, async (nombre, padre) => { const rc = await tnFetch(store, '/categories', { method: 'POST', body: JSON.stringify(Object.assign({ name: { es: nombre } }, padre ? { parent: padre } : {})) }); return rc.ok && rc.data && rc.data.id || null; }); } catch (e) { cat = null; } }
+        if (!cat) cat = mapa[p.rubro || ''];
         const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: Math.max(0, Math.floor(stock.get(String(p._id)) || 0)), weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
         if (p.descripcion) body.description = { es: String(p.descripcion) };
         else if (descWeb) body.description = { es: descripcionHtml(descWeb) };

@@ -57,4 +57,15 @@ async function sincronizar(db, orgId, categorias) {
   }
   return { rubrosNuevos, subrubrosNuevos: subsNuevos, vinculados, categorias: categorias.length };
 }
-module.exports = { clave, cargar, resolver, mapaCategorias, categoriaDe, sincronizar };
+// Devuelve el id de categoría de TN para rubro/subrubro; si el sistema lo tiene y Tiendanube no, lo crea en Tiendanube y lo vincula.
+// crearFn(nombre, padreId|null) → id nuevo. El sistema manda: lo que está en el sistema se refleja en la tienda.
+async function asegurarCategoria(db, orgId, base, rubro, subrubro, crearFn) {
+  const r = base.rubros.find(x => clave(x.nombre) === clave(rubro)); if (!r) return null;
+  const ahora = new Date();
+  if (!r.tnCategoriaId) { const id = await crearFn(r.nombre, null); if (!id) return null; r.tnCategoriaId = id; await db.collection('productos_rubros_base').updateOne({ _id: r._id }, { $set: { tnCategoriaId: id, updatedAt: ahora } }); }
+  const s = subrubro && base.subs.find(x => String(x.rubroId) === String(r._id) && clave(x.nombre) === clave(subrubro));
+  if (!s) return Number(r.tnCategoriaId);
+  if (!s.tnCategoriaId) { const id = await crearFn(s.nombre, Number(r.tnCategoriaId)); if (!id) return Number(r.tnCategoriaId); s.tnCategoriaId = id; await db.collection('productos_subrubros_base').updateOne({ _id: s._id }, { $set: { tnCategoriaId: id, updatedAt: ahora } }); }
+  return Number(s.tnCategoriaId);
+}
+module.exports = { asegurarCategoria, clave, cargar, resolver, mapaCategorias, categoriaDe, sincronizar };

@@ -390,7 +390,7 @@ async function traerRubros(){
   const o = document.getElementById('resRubros'); o.innerHTML = '<span class="muted">Leyendo Tiendanube…</span>';
   try{ const r = await fetch('/api/tiendanube-vinculo/rubros/sincronizar', {method:'POST', headers: H(), body:'{}'}); const d = await r.json();
     if(!r.ok) throw new Error(d.error||'Error');
-    o.innerHTML = '<span class="ok-msg">Listo: ' + d.categorias + ' categorías · ' + d.rubrosNuevos + ' rubros nuevos · ' + d.subrubrosNuevos + ' subrubros nuevos · ' + d.vinculados + ' vinculados.</span>'; cargarPublicar();
+    o.innerHTML = '<span class="ok-msg">Listo: ' + d.categorias + ' categorías · ' + d.rubrosNuevos + ' rubros nuevos · ' + d.subrubrosNuevos + ' subrubros nuevos · ' + d.vinculados + ' vinculados.</span>' + (d.soloEnSistema && d.soloEnSistema.length ? '<div class="muted" style="margin-top:4px">Rubros que están solo en el sistema (' + d.soloEnSistema.length + '): se crean en Tiendanube cuando publiques un producto de ese rubro. ' + esc(d.soloEnSistema.slice(0,25).join(', ')) + (d.soloEnSistema.length>25?'…':'') + '</div>' : ''); cargarPublicar();
   }catch(e){ o.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
 }
 async function guardarMapa(){
