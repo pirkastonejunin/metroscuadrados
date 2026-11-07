@@ -163,13 +163,42 @@ function bultoDeProducto(p) {
   for (const k of cand) { const n = numero(p[k]); if (n > 0 && n < 1000) return { campo: k, valor: n }; }
   return null;
 }
+// Descripción para Tiendanube a partir de lo que trae el catálogo (7/11/2026): texto libre si el catálogo lo tiene (descripción, detalle,
+// características…) y datos técnicos por campo (medidas, espesor, terminación, color, piezas por caja, cobertura y peso por caja…).
+// Una línea por dato ("Medidas: 60 x 60 cm"); el HTML lo arma descripcionHtml de la publicación. Los nombres de campo del catálogo no
+// están garantizados: se reconocen por palabras clave y lo que no se encuentra simplemente no se escribe (nunca se inventa).
+const RE_TEXTO_LIBRE = /^(descripcion|descripcionlarga|description|detalle|detalles|caracteristicas|observaciones|ficha|resumen|texto)$/i;
+const DATOS_TECNICOS = [
+  [/^(formato|medida|medidas|dimension|dimensiones|tamano|tamanio)$/i, 'Medidas'],
+  [/^(espesor|grosor)$/i, 'Espesor'],
+  [/^(acabado|terminacion|superficie|textura)$/i, 'Terminación'],
+  [/^(color|tono|tonalidad)$/i, 'Color'],
+  [/^(linea|coleccion|serie|diseno)$/i, 'Línea'],
+  [/^(piezasporcaja|piezascaja|cantidadporcaja|piezas|pzaporcaja)$/i, 'Piezas por caja'],
+  [/^(aplicacion|uso|ambiente|ambientes|destino)$/i, 'Aplicable en'],
+  [/^(pei|resistenciaabrasion|absorcion|rectificado|antideslizante|clasificacion|origen|calidad)$/i, null]
+];
+function limpiarTexto(v) { return String(v == null ? '' : v).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim(); }
+function descripcionDeProducto(p) {
+  const lineas = [], visto = new Set();
+  const poner = (et, v) => { const t = limpiarTexto(v); if (!t || t.length > 300 || /^(null|undefined|0|-)$/i.test(t)) return; const l = et ? et + ': ' + t : t; if (!visto.has(l.toLowerCase())) { visto.add(l.toLowerCase()); lineas.push(l); } };
+  for (const k of Object.keys(p || {})) {
+    const v = p[k]; if (v == null || typeof v === 'object') continue;
+    const kk = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '');
+    if (RE_TEXTO_LIBRE.test(kk)) { limpiarTexto(v).split('\n').map(x => x.trim()).filter(Boolean).slice(0, 12).forEach(x => poner('', x.slice(0, 300))); continue; }
+    for (const [re, et] of DATOS_TECNICOS) if (re.test(kk)) { poner(et || k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase()), v); break; }
+  }
+  const b = bultoDeProducto(p); if (b && b.valor) poner('Cobertura por caja', b.valor + ' m²');
+  const pc = numero(p.pesoCaja); if (pc) poner('Peso por caja', pc + ' kg');
+  return lineas.join('\n');
+}
 function filaDeProductoMaxipiso(p, i) {
   const precio = numero(p.precioM2) || numero(p.precio);
   const unidad = numero(p.precioM2) ? 'm²' : (p.unidadMedida || 'unidad');
   const nombre = [p.tipoProducto || p._tablaLabel, p.nombre, p.codigo, p.marca].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   const stock = Number(p.stock);
   const b = bultoDeProducto(p);
-  return { fila: i + 1, pesoCaja: numero(p.pesoCaja), porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
+  return { fila: i + 1, descripcion: descripcionDeProducto(p), pesoCaja: numero(p.pesoCaja), porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
 }
 
 async function filasMaxipiso(cred, opciones) {
@@ -202,7 +231,7 @@ async function muestraMaxipiso(cred) {
   const j = await r.json().catch(() => null);
   const lista = j && j.data && Array.isArray(j.data.productos) ? j.data.productos : [];
   const corto = v => (v && typeof v === 'object') ? JSON.stringify(v).slice(0, 200) : (typeof v === 'string' ? v.slice(0, 200) : v);
-  return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), valores: Object.fromEntries(Object.keys(p).map(k => [k, corto(p[k])])), camposImagen: camposImagen(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE), m2PorCaja: bultoDeProducto(p) }));
+  return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), valores: Object.fromEntries(Object.keys(p).map(k => [k, corto(p[k])])), camposImagen: camposImagen(p), descripcion: descripcionDeProducto(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE), m2PorCaja: bultoDeProducto(p) }));
 }
 
 // ---------------------------------------------------------------- Vigorita (WooCommerce)

@@ -335,7 +335,7 @@ async function fotosPorCodigo(db, provId, req) {
   const m = new Map();
   if (prov && prov.portal && prov.portal.tipo) {
     const filas = await portales.filasDePortal(prov.portal, prov.reglaImport || {});
-    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null });
+    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja || f.descripcion) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null, descripcion: f.descripcion || '' });
   }
   // Fotos traídas de la página web del proveedor (links guardados por código); el portal tiene prioridad si trae las suyas
   try { (await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1, descripcion: 1 }).toArray()).forEach(x => { const k = K(x.codigoClave); const e = m.get(k); if (e) { if (!e.descripcion && x.descripcion) e.descripcion = x.descripcion; } else if ((x.imagenes && x.imagenes.length) || x.descripcion) m.set(k, { imagenes: x.imagenes || [], pesoCaja: null, descripcion: x.descripcion || '' }); }); } catch (e) { /* sin fotos web */ }
