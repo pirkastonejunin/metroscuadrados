@@ -120,7 +120,7 @@ async function armar(db, req, { cerradas }) {
     if (vistos.has(t)) continue;
     const prox = o.proximaAccion && o.proximaAccion.fecha ? { fecha: o.proximaAccion.fecha, nota: o.proximaAccion.nota || '', dias: diasHasta(o.proximaAccion.fecha, ahora) } : null;
     items.push({
-      id: 'op:' + o._id, convId: null, opId: String(o._id), opNumero: o.numero, nombre: o.cliente.nombre || ('+' + digitos(o.cliente.telefono)), tel: digitos(o.cliente.telefono), estadoConv: null, demo: false,
+      historica: !!(o.importado && !(prox && prox.dias > 0)), id: 'op:' + o._id, convId: null, opId: String(o._id), opNumero: o.numero, nombre: o.cliente.nombre || ('+' + digitos(o.cliente.telefono)), tel: digitos(o.cliente.telefono), estadoConv: null, demo: false,
       asesorId: null, asesorNombre: o.vendedorNombre || '', sinAsignar: !o.vendedorId, temperatura: 'tibio', temperaturaOrigen: 'sin analizar', productos: [], producto: '', valor: 0,
       ultimo: null, esperaCliente: false, esperaMin: 0, sinLeer: 0, prox, paso: '', resumen: o.notas || '', falta: [], sugerida: '', analizadoAt: null, presupuesto: null,
       etapa: 'conversando', columna: prox && prox.dias > 0 ? 'seguimiento' : 'hoy', recordar: false, recs: 0, sinDec: false, esperandoVence: null, fuente: o.origen || '', notas: '', historial: [], cierre: null, actualizado: o.updatedAt || o.createdAt

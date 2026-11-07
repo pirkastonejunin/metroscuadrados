@@ -230,7 +230,7 @@ ul.l{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3
     <select id="fProd" aria-label="Producto"><option value="">Producto</option></select>
     <input id="q" type="search" placeholder="Buscar" aria-label="Buscar" style="max-width:110px">
     <label class="tip"><input type="checkbox" id="fCer"> Cerradas</label>
-    <span class="sp"></span><span class="tip" id="cant"></span><button class="chip" id="soloHoy">Solo Hoy</button><button class="chip" id="snd" title="Sonido cuando entra un mensaje o un lead">🔔 Sonido</button><button class="btn sm" id="ej" hidden>Quitar ejemplos</button><a class="ghost" href="/crm.html" title="Vista clásica del CRM">Clásica</a>
+    <span class="sp"></span><span class="tip" id="cant"></span><button class="chip" id="soloHoy">Solo Hoy</button><button class="chip" id="hist" title="Contactos importados del histórico, sin fecha de próxima acción" hidden>📚 Base histórica</button><button class="chip" id="snd" title="Sonido cuando entra un mensaje o un lead">🔔 Sonido</button><button class="btn sm" id="ej" hidden>Quitar ejemplos</button><a class="ghost" href="/crm.html" title="Vista clásica del CRM">Clásica</a>
   </div>
   <div class="embudo" id="embudo"></div>
   <div class="tablero" id="tab"></div>
@@ -275,8 +275,10 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let PREV = {}, ETF = '', ITEMS = [], YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
+let PREV = {}, ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
+// Contactos del histórico importado (Pirka) sin fecha puesta a propósito: no ensucian el tablero, se trabajan en la vista "Base histórica".
+function soloVista(todos){ HISTN = todos.filter(l=>l.historica && !l.cierre).length; const b=$('hist'); if(b){ b.textContent='📚 Base histórica ('+HISTN+')'; b.hidden = !HISTN && !HIST; } return todos.filter(l=>HIST ? l.historica : !l.historica); }
 const cur = () => ITEMS.find(l=>l.id===sel);
 const mio = l => l.sinAsignar || String(l.asesorId||'') === YO.id;
 function filtradas(){
@@ -583,14 +585,14 @@ function novedades(items){
 document.addEventListener('click', audioListo, {once:true}); document.addEventListener('keydown', audioListo, {once:true});
 { pintarSnd(); const b = $('snd'); if (b) b.onclick = () => { SND_ON = !SND_ON; try{ localStorage.setItem('crm_sonido', SND_ON?'1':'0'); }catch(e){} pintarSnd(); if (SND_ON){ audioListo(); sonar('msg'); } }; }
 // Con la pestaña en segundo plano no se redibuja, pero se sigue revisando para avisar con el sonido.
-async function sondear(){ try{ const d = await api('/api/mesa?cerradas=1', {headers:H()}); ITEMS = d.items; novedades(d.items); }catch(e){} }
+async function sondear(){ try{ const d = await api('/api/mesa?cerradas=1', {headers:H()}); ITEMS = soloVista(d.items); novedades(ITEMS); }catch(e){} }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) cargar(); });
 
 async function cargar(opts){
   try{
     const d = await api('/api/mesa?cerradas=1', {headers:H()});
     novedades(d.items);
-    const antes = cur(); ITEMS = d.items; YO = d.yo; MOTIVOS = d.motivosPerdida;
+    const antes = cur(); ITEMS = soloVista(d.items); YO = d.yo; MOTIVOS = d.motivosPerdida;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
     pintar();
     const l = cur();
@@ -854,6 +856,7 @@ function setV(v){
 }
 $('vistas').onclick = e => { const b = e.target.closest('button'); if (b) setV(b.dataset.v); };
 document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{ F=b.dataset.f; document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b)); pintar(); });
+$('hist').onclick = async () => { HIST = !HIST; $('hist').classList.toggle('on', HIST); await cargar(); };
 $('soloHoy').onclick = () => { $('soloHoy').classList.toggle('on'); pintar(); };
 ['fTemp','fProd','fCamp','q'].forEach(i=>$(i).addEventListener('input', pintar));
 $('fCer').addEventListener('change', pintar);
