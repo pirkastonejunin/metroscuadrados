@@ -198,7 +198,7 @@ function filaDeProductoMaxipiso(p, i) {
   const nombre = [p.tipoProducto || p._tablaLabel, p.nombre, p.codigo, p.marca].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   const stock = Number(p.stock);
   const b = bultoDeProducto(p);
-  return { fila: i + 1, descripcion: descripcionDeProducto(p), pesoCaja: numero(p.pesoCaja), porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla };
+  return { fila: i + 1, descripcion: descripcionDeProducto(p), pesoCaja: numero(p.pesoCaja), porM2: !!numero(p.precioM2), bulto: b ? b.valor : null, imagenes: imagenesDeProducto(p, MAXIPISO_BASE), codigo: String(p.sku == null ? '' : p.sku).trim(), nombre: nombre + ' (' + unidad + ')', precio, moneda: monedaDe(p.moneda), stock: Number.isFinite(stock) ? stock : null, stockCelda: p.stock, categoria: p._tabla, rubroPortal: String(p._tablaLabel || p.tipoProducto || '').trim(), marca: String(p.marca || '').trim() };
 }
 
 async function filasMaxipiso(cred, opciones) {

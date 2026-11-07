@@ -250,8 +250,20 @@ router.get('/publicar/datos', auth, async (req, res) => {
       for (const cat of categorias) { const n = normCat(cat.nombre); let s = 0; if (n === r) s = 100; else if (n.includes(r) || r.includes(n)) s = 60; else s = palabras.filter(w => n.includes(w.replace(/s$/, ''))).length * 10; if (s > ms) { ms = s; mejor = cat; } }
       return ms >= 10 && mejor ? mejor.id : null;
     };
+    const rubrosTn_ = require('./rubrosTn'); const mapaBase_ = rubrosTn_.mapaCategorias(await rubrosTn_.cargar(db, { orgId: req.orgId }));
     const { listas, lista } = await listaDePrecios(db, req, req.query.listaId);
-    res.json({ categorias, rubros: rubros.map(r => ({ rubro: r._id || '', n: r.n, categoriaId: guardado[r._id || ''] || sugerir(r._id) })), listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), lista: lista ? String(lista._id) : null });
+    res.json({ categorias, rubros: rubros.map(r => ({ rubro: r._id || '', n: r.n, categoriaId: rubrosTn_.categoriaDe(mapaBase_, r._id, '') || guardado[r._id || ''] || sugerir(r._id) })), listas: listas.map(l => ({ _id: String(l._id), nombre: l.nombre })), lista: lista ? String(lista._id) : null });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Trae las categorías de Tiendanube y las convierte en rubros/subrubros del sistema (no borra nada). 7/11/2026
+router.post('/rubros/sincronizar', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const store = await tiendaConfig();
+    const c = await tnFetch(store, '/categories?per_page=200');
+    if (!c.ok || !Array.isArray(c.data)) throw err(502, 'Tiendanube no devolvió las categorías (' + c.status + ').');
+    const categorias = c.data.map(x => ({ id: x.id, nombre: cotizador.nombreLocalizado(x.name), padre: x.parent || null })).filter(x => x.nombre);
+    res.json(Object.assign({ ok: true }, await require('./rubrosTn').sincronizar(db, req.orgId, categorias)));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -335,7 +347,7 @@ async function fotosPorCodigo(db, provId, req) {
   const m = new Map();
   if (prov && prov.portal && prov.portal.tipo) {
     const filas = await portales.filasDePortal(prov.portal, prov.reglaImport || {});
-    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja || f.descripcion) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null, descripcion: f.descripcion || '', bulto: f.bulto || null });
+    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja || f.descripcion || f.rubroPortal || f.marca) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null, descripcion: f.descripcion || '', bulto: f.bulto || null, rubroPortal: f.rubroPortal || '', marca: f.marca || '' });
   }
   // Fotos traídas de la página web del proveedor (links guardados por código); el portal tiene prioridad si trae las suyas
   try { (await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1, descripcion: 1 }).toArray()).forEach(x => { const k = K(x.codigoClave); const e = m.get(k); if (e) { if (!e.descripcion && x.descripcion) e.descripcion = x.descripcion; } else if ((x.imagenes && x.imagenes.length) || x.descripcion) m.set(k, { imagenes: x.imagenes || [], pesoCaja: null, descripcion: x.descripcion || '' }); }); } catch (e) { /* sin fotos web */ }
@@ -421,6 +433,7 @@ router.post('/publicar', auth, async (req, res) => {
     const mapa = await db.collection('config_general').findOne({ clave: 'tnCategoriasRubro', orgId: req.orgId }).then(d => (d && d.valor) || {}).catch(() => ({}));
     const prods = await db.collection('productos_catalogo').find(Object.assign({ _id: { $in: ids } }, filtroOrg(req))).toArray();
     const stock = await stockDisponible(db, prods.map(p => p._id));
+    const rubrosTn = require('./rubrosTn'); const baseRubros = await rubrosTn.cargar(db, { orgId: req.orgId }); const mapaBase = rubrosTn.mapaCategorias(baseRubros);
     const resultados = [];
     for (const p of prods) {
       try {
@@ -434,7 +447,12 @@ router.post('/publicar', auth, async (req, res) => {
         if (!(precio > 0)) { resultados.push({ sku: p.sku, ok: false, motivo: 'no tiene precio en la lista elegida' }); continue; }
         let imagenes = [], pesoCaja = null, descWeb = '';
         if (datosPortal) { imagenes = datosPortal.imagenes || []; pesoCaja = datosPortal.pesoCaja; descWeb = datosPortal.descripcion || ''; }
-        const cat = mapa[p.rubro || ''];
+        // Rubro/marca faltantes: se completan desde el catálogo del proveedor (y se guardan en el producto)
+        const setRM = {};
+        if (!p.rubro && datosPortal && datosPortal.rubroPortal) { const rr = rubrosTn.resolver(baseRubros, datosPortal.rubroPortal); if (rr.rubro) { p.rubro = rr.rubro; setRM.rubro = rr.rubro; if (rr.subrubro && !p.subrubro) { p.subrubro = rr.subrubro; setRM.subrubro = rr.subrubro; } } }
+        if (!p.marca && datosPortal && datosPortal.marca) { p.marca = datosPortal.marca; setRM.marca = datosPortal.marca; }
+        if (Object.keys(setRM).length) { setRM.updatedAt = new Date(); await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: setRM }); }
+        const cat = rubrosTn.categoriaDe(mapaBase, p.rubro, p.subrubro) || mapa[p.rubro || ''];
         const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: Math.max(0, Math.floor(stock.get(String(p._id)) || 0)), weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
         if (p.descripcion) body.description = { es: String(p.descripcion) };
         else if (descWeb) body.description = { es: descripcionHtml(descWeb) };

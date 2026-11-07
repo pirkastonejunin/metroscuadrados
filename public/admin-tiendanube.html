@@ -192,6 +192,7 @@
       <div class="card">
         <div class="section-title">Categorías</div>
         <p class="muted" style="margin:8px 0">Para cada rubro del sistema, en qué categoría de Tiendanube se crea el producto. Se completa sola cuando los nombres se parecen; revisala y guardá.</p>
+        <div style="margin-bottom:10px"><button class="btn" onclick="traerRubros()">Traer rubros de Tiendanube</button> <span id="resRubros"></span><div class="muted" style="margin-top:4px">Crea en el sistema los rubros y subrubros que figuran como categorías en Tiendanube (no borra nada). Después, al importar de un proveedor, cada producto se asigna a uno de esos rubros y se publica en su categoría.</div></div>
         <div id="mapaCat" class="muted">Cargando…</div>
         <div style="margin-top:10px"><button class="btn secondary" onclick="guardarMapa()">Guardar categorías</button> <span id="resMapa"></span></div>
       </div>
@@ -384,6 +385,13 @@ async function cargarPublicar(){
     document.getElementById('pbRubro').innerHTML = '<option value="todos">Todos</option>' + d.rubros.map(x => '<option value="' + esc(x.rubro) + '">' + esc(x.rubro || '(sin rubro)') + ' (' + N(x.n) + ')</option>').join('');
     cargarCandidatos();
   }catch(e){ err.textContent = e.message; }
+}
+async function traerRubros(){
+  const o = document.getElementById('resRubros'); o.innerHTML = '<span class="muted">Leyendo Tiendanube…</span>';
+  try{ const r = await fetch('/api/tiendanube-vinculo/rubros/sincronizar', {method:'POST', headers: H(), body:'{}'}); const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Error');
+    o.innerHTML = '<span class="ok-msg">Listo: ' + d.categorias + ' categorías · ' + d.rubrosNuevos + ' rubros nuevos · ' + d.subrubrosNuevos + ' subrubros nuevos · ' + d.vinculados + ' vinculados.</span>'; cargarPublicar();
+  }catch(e){ o.innerHTML = '<span class="err">' + esc(e.message) + '</span>'; }
 }
 async function guardarMapa(){
   const mapa = {}; document.querySelectorAll('.mapa').forEach(s => { if (s.value) mapa[s.dataset.rubro] = s.value; });

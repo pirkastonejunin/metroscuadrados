@@ -447,6 +447,7 @@ async function calcular(db, req, prov, regla, filas) {
       (await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false }, sku: { $in: lote } }, filtroOrg(req))).project({ sku: 1 }).toArray()).forEach(x => skuOcupados.add(codigoClave(x.sku)));
     }
   }
+  const rubrosTn = require('./rubrosTn'); const baseRubros = await rubrosTn.cargar(db, { orgId: req.orgId });
   const factorDesc = regla.descuentos.reduce((a, d) => a * (1 - d / 100), 1);
   const decimales = regla.moneda === 'USD' ? 4 : 2;
   for (const f of filas) {
@@ -455,7 +456,8 @@ async function calcular(db, req, prov, regla, filas) {
     if (!cands.length) {
       if (vistos.has(k)) continue;
       vistos.add(k);
-      const n = { fila: f.fila, codigo: f.codigo, nombre: f.nombre, precioLista: f.precio, moneda: regla.moneda, precios: [], porM2: !!f.porM2, bulto: f.bulto > 0 ? f.bulto : null };
+      const n = { fila: f.fila, codigo: f.codigo, nombre: f.nombre, precioLista: f.precio, moneda: regla.moneda, precios: [], porM2: !!f.porM2, bulto: f.bulto > 0 ? f.bulto : null, marca: f.marca || '' };
+      { const rr = rubrosTn.resolver(baseRubros, f.rubroPortal); n.rubro = rr.rubro; n.subrubro = rr.subrubro; n.rubroPortal = f.rubroPortal || ''; }
       if (f.precio != null && f.precio > 0) {
         let costo = f.precio * factorDesc * (1 + regla.recargoPct / 100);
         if (regla.ivaIncluido) costo = costo / 1.21;
@@ -484,6 +486,9 @@ async function calcular(db, req, prov, regla, filas) {
     // Precio por unidad/malla: si la ficha quedó con unidades por bulto (de importaciones anteriores), se quitan para que el precio de venta sea por unidad.
     if (f.porUnidad && Number(p.unidadesPorBulto) > 1) c.bultoQuitar = p.unidadesPorBulto;
     if (f.piezasM2 > 0) c.piezasM2 = f.piezasM2;
+    // Rubro (de las categorías de Tiendanube) y marca que trae el portal: solo se completan si el producto no los tiene
+    if (!p.rubro && f.rubroPortal) { const rr = rubrosTn.resolver(baseRubros, f.rubroPortal); if (rr.rubro) { c.rubroNuevo = rr.rubro; if (rr.subrubro && !p.subrubro) c.subrubroNuevo = rr.subrubro; } }
+    if (!p.marca && f.marca) c.marcaNueva = f.marca;
     if (f.porM2 && p.unidad !== 'm2') c.pasaAM2 = true;
 
     if (f.precio != null && f.precio > 0) {
@@ -518,7 +523,7 @@ async function calcular(db, req, prov, regla, filas) {
       const ant = stockPrev.has(String(p._id)) ? stockPrev.get(String(p._id)) : 0;
       c.stock = { anterior: ant, nuevo, cambia: Math.abs(ant - nuevo) > 0.0005 };
     }
-    c.hayCambio = !!(c.vinculaCodigo || c.cambiaCosto || c.bultoNuevo || c.bultoQuitar || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
+    c.hayCambio = !!(c.vinculaCodigo || c.rubroNuevo || c.marcaNueva || c.cambiaCosto || c.bultoNuevo || c.bultoQuitar || c.pasaAM2 || (c.precios || []).some(x => x.cambia) || (c.stock && c.stock.cambia));
     cambios.push(c);
   }
 
@@ -621,7 +626,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
       const aplicables = calc.cambios.filter(c => c.hayCambio && !(omitirAlertas && c.alerta));
       const omitidos = calc.cambios.filter(c => c.hayCambio && omitirAlertas && c.alerta).length;
-      let costos = 0, precios = 0, stocks = 0, bultos = 0, vinculados = 0;
+      let costos = 0, precios = 0, stocks = 0, bultos = 0, vinculados = 0, rubrosCompletados = 0;
 
       for (let i = 0; i < aplicables.length; i += TANDA) {
         const lote = aplicables.slice(i, i + TANDA);
@@ -634,6 +639,8 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           if (c.bultoNuevo) { set.unidadesPorBulto = c.bultoNuevo; bultos++; }
           else if (c.bultoQuitar) { set.unidadesPorBulto = null; bultos++; }
           if (c.pasaAM2) { set.unidad = 'm2'; set.tipoUnidad = 'superficie'; }
+          if (c.rubroNuevo) { set.rubro = c.rubroNuevo; if (c.subrubroNuevo) set.subrubro = c.subrubroNuevo; rubrosCompletados++; }
+          if (c.marcaNueva) set.marca = c.marcaNueva;
           opsProd.push({ updateOne: { filter: { _id: c.productoId }, update: { $set: set } } });
           if ((c.precios || []).length) opsProd.push({ updateOne: { filter: { _id: c.productoId, preciosPorLista: { $not: { $type: 'array' } } }, update: { $set: { preciosPorLista: [] } } } });
           for (const pr of (c.precios || [])) {
@@ -679,7 +686,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           if (await db.collection('productos_catalogo').findOne(Object.assign({ sku, activo: { $ne: false } }, filtroOrg(req)))) { noCreados.push({ codigo: pd.codigo, motivo: `Ya hay un producto con el SKU ${sku}.` }); continue; }
           const doc = {
             sku, nombre, unidad: n.porM2 ? 'm2' : 'unidad', tipoUnidad: n.porM2 ? 'superficie' : 'unidad', disponiblePara: 'todos', tipoProducto: 'simple',
-            rubro: '', subrubro: '', marca: '', codigoBarra: '', embalaje: '', descripcion: '', notas: '',
+            rubro: n.rubro || '', subrubro: n.subrubro || '', marca: n.marca || '', codigoBarra: '', embalaje: '', descripcion: '', notas: '',
             codigoExterno: regla.matchPor === 'codigoExterno' ? String(n.codigo).trim() : '', proveedor: prov.razonSocial || '', proveedorId: prov._id,
             costo: n.costoNuevo, moneda: n.moneda, porcentajeIva: 21, impuestoInterno: null, unidadesPorBulto: n.bulto || null, fechaVencimiento: null,
             stockeable: true, aceptaStockNegativo: false, trazable: false, utilizaVariantes: false, indicaCtdBultos: false,
@@ -690,7 +697,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           const cf = n.precios.find(pr => pr.predeterminada);
           if (cf) doc.precio = cf.nuevo;
           const ins = await db.collection('productos_catalogo').insertOne(doc);
-          creados.push({ codigo: n.codigo, sku, nombre });
+          creados.push({ codigo: n.codigo, sku, nombre, rubro: n.rubro || '', rubroPortal: n.rubroPortal || '' });
           if (calc.deposito && n.stock != null && n.stock > 0) {
             await db.collection('stock_actual').updateOne(Object.assign({ productoId: ins.insertedId, depositoId: calc.deposito._id }, filtroOrg(req)), { $set: { cantidad: n.stock, actualizadoEn: ahora }, $setOnInsert: Object.assign({ productoId: ins.insertedId, depositoId: calc.deposito._id }, filtroOrg(req)) }, { upsert: true });
             await db.collection('stock_movimientos').insertOne({ productoId: ins.insertedId, depositoId: calc.deposito._id, tipo: 'ingreso', cantidad: n.stock, motivo: `Alta desde lista de ${prov.razonSocial} (0 → ${n.stock})`, sucursal: '', codigoExterno: '', observaciones: '', usuarioNombre, fecha: ahora, orgId: req.orgId, createdAt: ahora });
@@ -710,7 +717,7 @@ router.post('/:id/aplicar', authAdmin, async (req, res) => {
           await db.collection('stock_movimientos').insertMany(movs.slice(i, i + TANDA), { ordered: false });
         }
       }
-      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, bultosActualizados: bultos, productosVinculados: vinculados, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, noCreados, totalPorCrear });
+      const resumen = Object.assign({}, calc.resumen, { costosActualizados: costos, bultosActualizados: bultos, productosVinculados: vinculados, preciosActualizados: precios, stocksActualizados: stocks, omitidosPorAlerta: omitidos, productosCreados: creados.length, creadosSinRubro: creados.filter(c => !c.rubro).length, rubrosCompletados, noCreados, totalPorCrear });
       await db.collection('proveedores_import_log').insertOne({ orgId: req.orgId, proveedorId: prov._id, fecha: ahora, archivo: (req.body || {}).desdePortal ? 'Portal ' + ((prov.portal && prov.portal.tipo) || '') : String((req.body || {}).nombreArchivo || '').slice(0, 200), usuario: usuarioNombre, resumen });
       return resumen;
     });
