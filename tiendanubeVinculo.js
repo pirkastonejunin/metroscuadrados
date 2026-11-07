@@ -335,7 +335,7 @@ async function fotosPorCodigo(db, provId, req) {
   const m = new Map();
   if (prov && prov.portal && prov.portal.tipo) {
     const filas = await portales.filasDePortal(prov.portal, prov.reglaImport || {});
-    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja || f.descripcion) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null, descripcion: f.descripcion || '' });
+    for (const f of filas) if ((f.imagenes && f.imagenes.length) || f.pesoCaja || f.descripcion) m.set(K(f.codigo), { imagenes: f.imagenes || [], pesoCaja: f.pesoCaja || null, descripcion: f.descripcion || '', bulto: f.bulto || null });
   }
   // Fotos traídas de la página web del proveedor (links guardados por código); el portal tiene prioridad si trae las suyas
   try { (await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1, descripcion: 1 }).toArray()).forEach(x => { const k = K(x.codigoClave); const e = m.get(k); if (e) { if (!e.descripcion && x.descripcion) e.descripcion = x.descripcion; } else if ((x.imagenes && x.imagenes.length) || x.descripcion) m.set(k, { imagenes: x.imagenes || [], pesoCaja: null, descripcion: x.descripcion || '' }); }); } catch (e) { /* sin fotos web */ }
@@ -425,11 +425,15 @@ router.post('/publicar', auth, async (req, res) => {
     for (const p of prods) {
       try {
         if (p.skuTiendanube) { resultados.push({ sku: p.sku, ok: false, motivo: 'ya está vinculado con Tiendanube' }); continue; }
-        if (require('./productos').sinBultoPorM2(p)) { resultados.push({ sku: p.sku, ok: false, motivo: 'es por m² y no tiene los m² por caja cargados' }); continue; }
+        // Datos del portal del proveedor (fotos, descripción, m² por caja): si al producto le faltan los m² por caja y el catálogo del proveedor los trae, se completan acá.
+        let datosPortal = null;
+        if (p.codigoExterno && p.proveedorId) { try { datosPortal = (await fotosPorCodigo(db, p.proveedorId, req)).get(K(p.codigoExterno)) || null; } catch (e) { datosPortal = null; } }
+        if (require('./productos').sinBultoPorM2(p) && datosPortal && datosPortal.bulto > 0) { p.unidadesPorBulto = datosPortal.bulto; await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: { unidadesPorBulto: datosPortal.bulto, updatedAt: new Date() } }); }
+        if (require('./productos').sinBultoPorM2(p)) { resultados.push({ sku: p.sku, ok: false, motivo: 'es por m² y no tiene los m² por caja cargados' + (p.codigoExterno && p.proveedorId ? (datosPortal ? ' (el catálogo del proveedor tampoco los trae)' : ' (no se encontró en el catálogo del proveedor)') : ' (no está vinculado al código del proveedor)') }); continue; }
         const precio = lista ? precioResuelto(p, lista, cot).precio : null;
         if (!(precio > 0)) { resultados.push({ sku: p.sku, ok: false, motivo: 'no tiene precio en la lista elegida' }); continue; }
         let imagenes = [], pesoCaja = null, descWeb = '';
-        if (p.codigoExterno && p.proveedorId) { try { const m = await fotosPorCodigo(db, p.proveedorId, req); const d = m.get(K(p.codigoExterno)); if (d) { imagenes = d.imagenes; pesoCaja = d.pesoCaja; descWeb = d.descripcion || ''; } } catch (e) { /* sin fotos */ } }
+        if (datosPortal) { imagenes = datosPortal.imagenes || []; pesoCaja = datosPortal.pesoCaja; descWeb = datosPortal.descripcion || ''; }
         const cat = mapa[p.rubro || ''];
         const body = { name: { es: p.nombre }, published: false, variants: [{ sku: p.sku, price: String(precio), stock_management: true, stock: Math.max(0, Math.floor(stock.get(String(p._id)) || 0)), weight: pesoCaja ? pesoCaja.toFixed(3) : '0.000', width: '0.00', height: '0.00', depth: '0.00' }] };
         if (p.descripcion) body.description = { es: String(p.descripcion) };
