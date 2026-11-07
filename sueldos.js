@@ -147,7 +147,7 @@ const FRECUENCIAS = { semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mens
 const CUOTAS = { semanal: 4, quincenal: 2, mensual: 1 };
 // Cómo cobra las comisiones quien no cobra por mes: sumadas a cada pago o todas juntas al cierre del mes.
 // Tipo de comisión: % de las ventas del vendedor vinculado, o esquema por visita (ver calcularComisionVisitas).
-const COMISION_TIPO = { porcentaje: 'Porcentaje de ventas', por_visita: 'Por visita + ventas de mostrador' };
+const COMISION_TIPO = { porcentaje: 'Porcentaje de ventas', por_visita: 'Por visita + ventas de mostrador', porcentaje_sucursal: '% sobre lo vendido por la sucursal' };
 const COMISION_PAGO = { fin_de_mes: 'Todas juntas, un solo día', con_sueldo: 'Se suman a cada pago' };
 
 function monto(v, etiqueta) {
@@ -248,11 +248,15 @@ function datosEmpleado(b) {
   const montoVisita = monto(b.montoVisita, 'El monto por visita'), pctMostrador = monto(b.pctMostrador, 'El % de ventas de mostrador');
   if (pctMostrador > 100) throw err(400, 'El % de ventas de mostrador no puede pasar de 100.');
   if (comisionTipo === 'por_visita' && !usuarioId) throw err(400, 'Elegí el usuario que carga las visitas y las ventas de esta persona.');
+  const pctSucursal = monto(b.pctSucursal, 'El % sobre lo vendido por la sucursal');
+  if (pctSucursal > 100) throw err(400, 'El % no puede pasar de 100.');
+  const sucursalComisionId = b.sucursalComisionId ? toObjectId(b.sucursalComisionId) : null;
+  if (b.sucursalComisionId && !sucursalComisionId) throw err(400, 'Sucursal inválida.');
   const frecuencia = texto(b.frecuencia) || 'mensual';
   if (!FRECUENCIAS[frecuencia]) throw err(400, 'Frecuencia de pago inválida.');
   const comisionPago = texto(b.comisionPago) || 'fin_de_mes';
   if (!COMISION_PAGO[comisionPago]) throw err(400, 'Modo de pago de comisiones inválido.');
-  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas), frecuencia, comisionPago, comisionTipo, usuarioId: comisionTipo === 'por_visita' ? usuarioId : null, montoVisita, pctMostrador };
+  return { nombre, cuil: texto(b.cuil), vendedorId, sector, sueldoBasico: monto(b.sueldoBasico, 'El sueldo básico'), fechaIngreso, notas: texto(b.notas), frecuencia, comisionPago, comisionTipo, usuarioId: comisionTipo === 'por_visita' ? usuarioId : null, montoVisita, pctMostrador, pctSucursal, sucursalComisionId: comisionTipo === 'porcentaje_sucursal' ? sucursalComisionId : null };
 }
 router.get('/empleados', authSueldosLectura, async (req, res) => {
   try {
@@ -308,6 +312,7 @@ function netoVenta(v) {
 // desde/hasta (opcionales): ventana de fechas distinta del mes completo (pagos semanales con comisión).
 async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase) {
   if (emp && emp.comisionTipo === 'por_visita') return calcularComisionVisitas(db, req, emp, periodo, hasta, sueldoBase === undefined ? emp.sueldoBasico : sueldoBase);
+  if (emp && emp.comisionTipo === 'porcentaje_sucursal') return calcularComisionSucursal(db, req, emp, periodo);
   if (!emp || !emp.vendedorId) return { vinculado: false, pct: 0, base: 0, monto: 0, ventas: 0, notasCredito: 0, avisos: [] };
   const vend = await db.collection('visitas_vendedores').findOne({ _id: emp.vendedorId });
   const pct = vend && Number(vend.comisionPct) > 0 ? Number(vend.comisionPct) : 0;
@@ -341,6 +346,21 @@ async function calcularComision(db, req, emp, periodo, desde, hasta, sueldoBase)
   }
   base = Math.max(0, r2(base));
   return { vinculado: true, mesVentas: mesAnterior(periodo), vendedor: vend ? vend.nombre : '', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
+}
+// % sobre TODO lo vendido por la sucursal (no solo sus ventas), a mes vencido. Total con IVA en pesos, las notas
+// de crédito restan, sin anuladas. La sucursal es la elegida en la ficha o, si no, la del empleado.
+async function calcularComisionSucursal(db, req, emp, periodo) {
+  const avisos = [], pct = Number(emp.pctSucursal) || 0;
+  if (!pct) avisos.push('No tiene cargado el % sobre lo vendido por la sucursal (solapa Empleados).');
+  const orgId = emp.sucursalComisionId || emp.orgId || req.orgId;
+  const org = orgId ? await db.collection('organizaciones').findOne({ _id: orgId }, { projection: { nombre: 1 } }) : null;
+  const pv = mesAnterior(periodo);
+  const lista = await db.collection('ventas').find({ orgId, estado: { $ne: 'anulada' }, fecha: { $gte: inicioMes(pv), $lte: finPeriodo(pv) } })
+    .project({ total: 1, moneda: 1, cotizacionDolar: 1, tipoComprobante: 1 }).toArray();
+  let base = 0, ventas = 0, nc = 0;
+  lista.forEach(v => { base += netoVenta(v); if (v.tipoComprobante === 'nota_credito') nc++; else ventas++; });
+  base = Math.max(0, r2(base));
+  return { vinculado: true, tipo: 'porcentaje_sucursal', mesVentas: pv, vendedor: org ? org.nombre : 'la sucursal', pct, base, monto: r2(base * pct / 100), ventas, notasCredito: nc, avisos };
 }
 // Esquema por visita (la empleada que carga las visitas):
 //   variable = visitas hechas x monto + visitas vendidas x (2 x monto) + % x ventas de mostrador que cargó
