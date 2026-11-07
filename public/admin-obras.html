@@ -501,7 +501,7 @@ async function fotosParaSubir(files, apiFn){
 function miniFoto(u){ return String(u).indexOf('res.cloudinary.com') >= 0 ? String(u).replace('/upload/', '/upload/c_fill,w_300,h_300,q_auto/') : u; }
 async function borrarFotoObra(obraId, i){
   if (!confirm('¿Borrar esta foto?')) return;
-  try{ await api('/colocador/obras/' + obraId + '/fotos/' + i, {method:'DELETE'}); await abrirObra(obraId); } catch(e){ alert(e.message); }
+  try{ await api('/colocador/obras/' + obraId + '/fotos/' + i, {method:'DELETE'}); await abrirObra(obraId,'datos'); } catch(e){ alert(e.message); }
 }
 async function subirFotosAdmin(obraId){
   const input = document.getElementById('inputFotosAdmin'), err = document.getElementById('fotoAdminErr');
@@ -510,10 +510,10 @@ async function subirFotosAdmin(obraId){
   try{
     const fotos = await fotosParaSubir(input.files, path => api(path));
     await api('/colocador/obras/' + obraId + '/fotos', {method:'POST', body:{fotos}});
-    await abrirObra(obraId);
+    await abrirObra(obraId,'datos');
   }catch(e){ err.textContent = e.message; }
 }
-async function abrirObra(id){
+async function abrirObra(id, tab){
   const o = await api('/'+id);
   const tareas = o.tareas || [];
 
@@ -537,8 +537,8 @@ async function abrirObra(id){
 
       <div style="margin-top:8px"><label>m² presupuestados</label><input type="number" value="${t.m2Presupuestados}" onchange="editarTarea('${o._id}','${t._id}',{m2Presupuestados:this.value})"></div>
 
-      <div style="margin-top:10px">
-        <div class="tarea-seccion-titulo">Materiales a llevar</div>
+      <details style="margin-top:10px"${(t.materiales&&t.materiales.length)?'':''}><summary style="cursor:pointer;font-weight:600;font-size:13px">Materiales a llevar${(t.materiales&&t.materiales.length)?' ('+t.materiales.length+')':''}</summary>
+      <div style="margin-top:6px">
         ${(o.visitaId && t.materiales && t.materiales.length) ? '<div class="materiales-origen">✓ Precargados desde el presupuesto de la visita</div>' : ''}
         <div id="materialesContainer-${t._id}">${(t.materiales&&t.materiales.length) ? t.materiales.map(m=>filaMaterial(m.tipo,m.cantidad)).join('') : filaMaterial()}</div>
         <div class="row" style="margin-top:6px">
@@ -546,7 +546,7 @@ async function abrirObra(id){
           <button class="btn small" type="button" onclick="guardarMateriales('${o._id}','${t._id}')">Guardar materiales</button>
         </div>
         <div class="muted" style="margin-top:4px">Los productos se guardan solo al tocar "Guardar materiales".</div>
-      </div>
+      </div></details>
     </div>
   `;
   }).join('');
@@ -572,9 +572,9 @@ async function abrirObra(id){
       </div>
       <div style="margin-top:8px"><button class="btn small" type="button" onclick="guardarDatosObra('${o._id}')">Guardar datos</button></div>
     </div>`;
-  const datosGeneralesHtml = datosClienteHtml + `
+  const datosGeneralesHtml = `
     <div class="tarea-seccion">
-      <div class="tarea-seccion-titulo">Datos generales de la obra</div>
+      <div class="tarea-seccion-titulo">Asignación y estado</div>
       <div class="grid2">
         <div><label>Colocador asignado</label>
           <select onchange="asignarColocadorObra('${o._id}',this.value)">
@@ -618,31 +618,53 @@ async function abrirObra(id){
     ${fotosDespues.length ? `<div style="margin-top:8px"><label>Fotos después (colocador)</label>${galeria(fotosDespues)}</div>` : ''}
   ` : '';
 
+  const ventasHtml = `
+    <div class="tarea-seccion"><div class="tarea-seccion-titulo">Ventas vinculadas (metros que el cliente sumó después)</div>
+      ${(o.ventas||[]).length ? (o.ventas||[]).map(v=>`<div class="row" style="justify-content:space-between;align-items:center"><span>Venta #${escapeHtml(String(v.numero))} · ${v.fecha?new Date(v.fecha).toLocaleDateString('es-AR'):''} · $${Number(v.total||0).toLocaleString('es-AR')}</span><button class="btn small danger" onclick="desvincularVenta('${o._id}','${v.ventaId}')">Desvincular</button></div>`).join('') : '<div class="muted">Ninguna todavía.</div>'}
+      <div style="margin-top:6px"><button class="btn small secondary" onclick="sumarVenta('${o._id}')">+ Sumar una venta a esta obra</button></div>
+    </div>`;
+  const totalM2 = tareas.reduce((a,t)=>a+(Number(t.m2Presupuestados)||0),0);
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Obra #${o.numero} — ${escapeHtml(o.cliente.nombre)}</h2>
-    <div class="muted">${escapeHtml(o.cliente.direccion||'')} ${escapeHtml(o.cliente.localidad?'· '+o.cliente.localidad:'')} ${escapeHtml(o.cliente.telefono?'· '+o.cliente.telefono:'')}</div>
-    <div class="muted">Venta: ${o.fechaVenta?new Date(o.fechaVenta).toLocaleDateString('es-AR'):''} ${o.vendedor?'· Vendedor: '+o.vendedor:''}${o.precioVentaCliente?' · Presupuestado: $'+o.precioVentaCliente.toLocaleString('es-AR'):''}</div>
-    ${o.visitaId ? '<div class="muted">Generada automáticamente desde una visita confirmada</div>' : ''}
-    ${fotosHtml}
-    <div style="margin-top:10px"><label>Agregar fotos a la obra</label>
-      <div class="row" style="gap:8px;align-items:center"><input type="file" accept="image/*" multiple id="inputFotosAdmin" style="flex:1"><button class="btn small secondary" onclick="subirFotosAdmin('${o._id}')">Subir fotos</button></div>
-      <div class="err" id="fotoAdminErr"></div></div>
-    <div id="rentabObra" style="margin:14px 0"><div class="muted">Calculando rentabilidad…</div></div>
-    <div style="margin:14px 0">${tareasHtml}</div>
-    <div style="margin:10px 0"><label>Ventas vinculadas (metros que el cliente sumó después)</label>
-      ${(o.ventas||[]).length ? (o.ventas||[]).map(v=>`<div class="row" style="justify-content:space-between;align-items:center"><span>Venta #${escapeHtml(String(v.numero))} · ${v.fecha?new Date(v.fecha).toLocaleDateString('es-AR'):''} · $${Number(v.total||0).toLocaleString('es-AR')}</span><button class="btn small danger" onclick="desvincularVenta('${o._id}','${v.ventaId}')">Desvincular</button></div>`).join('') : '<div class="muted">Ninguna todavía.</div>'}
-      <div style="margin-top:6px"><button class="btn small secondary" onclick="sumarVenta('${o._id}')">+ Sumar una venta a esta obra</button></div>
+    <div class="muted">${escapeHtml(o.cliente.direccion||'')} ${escapeHtml(o.cliente.localidad?'· '+o.cliente.localidad:'')} ${escapeHtml(o.cliente.telefono?'· '+o.cliente.telefono:'')} · ${totalM2.toLocaleString('es-AR')} m² en total${o.visitaId ? ' · desde una visita confirmada' : ''}</div>
+    <div class="row" style="gap:6px;margin:12px 0 4px">
+      <button class="btn small" id="obTabB-obra" onclick="obTab('obra')">Obra y asignación</button>
+      <button class="btn small secondary" id="obTabB-fact" onclick="obTab('fact')">Facturas y rentabilidad</button>
+      <button class="btn small secondary" id="obTabB-datos" onclick="obTab('datos')">Cliente y fotos</button>
     </div>
-    <div class="row">
-      <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${escapeHtml(t.nombre)}">${escapeHtml(t.nombre)}</option>`).join('')}</select>
-      <input id="nuevaTareaM2" type="number" step="0.01" placeholder="m²" style="flex:1">
-      <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar producto</button>
+    <div id="obTab-obra">
+      <div class="tarea-box">${datosGeneralesHtml}</div>
+      <div class="tarea-box" style="margin-top:10px"><div class="tarea-seccion-titulo">Productos de la obra</div>
+        ${productosHtml || '<p class="muted">Esta obra todavía no tiene productos cargados.</p>'}
+        <div class="row" style="margin-top:10px">
+          <select id="nuevaTareaTipo" style="flex:2">${TIPOS.map(t=>`<option value="${escapeHtml(t.nombre)}">${escapeHtml(t.nombre)}</option>`).join('')}</select>
+          <input id="nuevaTareaM2" type="number" step="0.01" placeholder="m²" style="flex:1">
+          <button class="btn small" onclick="agregarTarea('${o._id}')">+ Agregar producto</button>
+        </div>
+      </div>
+      ${ventasHtml}
+    </div>
+    <div id="obTab-fact" class="hidden"><div id="rentabObra" style="margin:10px 0"><div class="muted">Calculando rentabilidad…</div></div></div>
+    <div id="obTab-datos" class="hidden">
+      <div class="tarea-box">${datosClienteHtml}</div>
+      ${fotosHtml}
+      <div style="margin-top:10px"><label>Agregar fotos a la obra</label>
+        <div class="row" style="gap:8px;align-items:center"><input type="file" accept="image/*" multiple id="inputFotosAdmin" style="flex:1"><button class="btn small secondary" onclick="subirFotosAdmin('${o._id}')">Subir fotos</button></div>
+        <div class="err" id="fotoAdminErr"></div></div>
     </div>
   `);
   cargarRentabilidadObra(o._id);
+  if (tab) obTab(tab);
 }
 
+function obTab(t){
+  ['obra','fact','datos'].forEach(x=>{
+    const c=document.getElementById('obTab-'+x), b=document.getElementById('obTabB-'+x);
+    if(c) c.classList.toggle('hidden', x!==t);
+    if(b) b.classList.toggle('secondary', x!==t);
+  });
+}
 const $m = n => '$ ' + (Number(n)||0).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
 async function cargarRentabilidadObra(id){
   const cont = document.getElementById('rentabObra'); if (!cont) return;
@@ -696,7 +718,7 @@ async function editarPresupuestoMateriales(obraId){
   const o = await api('/'+obraId);
   _pmItems = (o.presupuestoMateriales||[]).map(x => ({productoId: x.productoId||null, sku: x.sku||'', nombre: x.nombre, cantidad: x.cantidad, costoUnitario: x.costoUnitario}));
   modal(`
-    <span class="close-x" onclick="abrirObra('${obraId}')">✕</span>
+    <span class="close-x" onclick="abrirObra('${obraId}','fact')">✕</span>
     <h2>Presupuesto de materiales — Obra #${o.numero}</h2>
     <div class="muted">Lista de productos y cantidades que calculás para esta obra, con su costo unitario (sin IVA). Después se compara contra las facturas de compra imputadas.</div>
     <div style="margin-top:10px;position:relative"><label>Agregar producto</label><input id="pmBuscar" placeholder="Buscá por código o nombre…" oninput="pmBuscar()" autocomplete="off"><div id="pmResultados" style="position:absolute;left:0;right:0;z-index:5"></div></div>
@@ -706,7 +728,7 @@ async function editarPresupuestoMateriales(obraId){
       <textarea id="pmPegar" rows="5" style="width:100%" placeholder="PERF-100;40;&#10;PLACA-OSB;25;18500"></textarea>
       <button class="btn small secondary" onclick="pmPegarLista()">Agregar a la lista</button></details>
     <div class="err" id="pmErr"></div>
-    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="pmGuardar()">Guardar presupuesto</button><button class="btn secondary" onclick="abrirObra('${obraId}')">Volver a la obra</button></div>
+    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="pmGuardar()">Guardar presupuesto</button><button class="btn secondary" onclick="abrirObra('${obraId}','fact')">Volver a la obra</button></div>
   `);
   pmRender();
 }
@@ -764,7 +786,7 @@ async function pmGuardar(){
   const err = document.getElementById('pmErr'); err.textContent = '';
   try {
     await api('/' + _pmObraId + '/presupuesto-materiales', {method:'PUT', body: {items: _pmItems.map(x => ({productoId: x.productoId, sku: x.sku, nombre: x.nombre, cantidad: Number(x.cantidad), costoUnitario: Number(x.costoUnitario)||0}))}});
-    abrirObra(_pmObraId);
+    abrirObra(_pmObraId,'fact');
   } catch (e) { err.textContent = e.message; }
 }
 async function quitarFacturaDeObra(compraId, obraId){
@@ -778,15 +800,15 @@ async function quitarFacturaDeObra(compraId, obraId){
 }
 function editarPresupuestoManoObra(obraId, actual){
   modal(`
-    <span class="close-x" onclick="abrirObra('${obraId}')">✕</span>
+    <span class="close-x" onclick="abrirObra('${obraId}','fact')">✕</span>
     <h2>Presupuesto de mano de obra</h2>
     <div class="muted">Total que calculás gastar en mano de obra en esta obra (colocación por m² + trabajos especiales). Dejalo en 0 para quitarlo.</div>
     <div style="margin-top:10px"><label>Monto total $</label><input id="pmoMonto" type="number" min="0" step="0.01" value="${actual||''}"></div>
     <div class="err" id="pmoErr"></div>
-    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="guardarPresupuestoManoObra('${obraId}')">Guardar</button><button class="btn secondary" onclick="abrirObra('${obraId}')">Volver a la obra</button></div>`);
+    <div class="row" style="margin-top:12px;gap:8px"><button class="btn" onclick="guardarPresupuestoManoObra('${obraId}')">Guardar</button><button class="btn secondary" onclick="abrirObra('${obraId}','fact')">Volver a la obra</button></div>`);
 }
 async function guardarPresupuestoManoObra(obraId){
-  try { await api('/' + obraId + '/presupuesto-mano-obra', {method:'PUT', body:{monto: Number(document.getElementById('pmoMonto').value) || 0}}); abrirObra(obraId); }
+  try { await api('/' + obraId + '/presupuesto-mano-obra', {method:'PUT', body:{monto: Number(document.getElementById('pmoMonto').value) || 0}}); abrirObra(obraId,'fact'); }
   catch (e) { document.getElementById('pmoErr').textContent = e.message; }
 }
 function escapeHtmlO(t){ return String(t==null?'':t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
