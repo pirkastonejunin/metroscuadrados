@@ -329,6 +329,30 @@ async function convDeReq(db, req) {
 const quien = req => ({ id: String(req.usuario && req.usuario._id || ''), nombre: (req.usuario && req.usuario.nombre) || '' });
 function reg(req, txt) { return { at: new Date(), txt, usuario: quien(req).nombre }; }
 
+// Contactos sin conversación (de Azuite, del histórico o cargados a mano): para poder moverlos de etapa, cerrarlos, anotarles y asignarlos
+// se les crea una conversación vacía (sin mensajes), con su teléfono y nombre. No envía nada. Si ya existe una para ese teléfono, la devuelve.
+router.post('/materializar', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const org = filtroOrg(req); const b = req.body || {};
+    let nombre = '', tel = '', desde = null, origen = '', orgDoc = null;
+    if (b.opId && /^[0-9a-f]{24}$/i.test(String(b.opId))) {
+      const o = await db.collection('oportunidades').findOne(Object.assign({ _id: new ObjectId(String(b.opId)) }, org));
+      if (!o) return res.status(404).json({ error: 'Oportunidad no encontrada.' });
+      nombre = (o.cliente && o.cliente.nombre) || ''; tel = digitos(o.cliente && o.cliente.telefono); desde = o.updatedAt || o.createdAt; origen = 'oportunidad ' + (o.numero || ''); orgDoc = o.orgId;
+    } else if (b.leadId && /^[0-9a-f]{24}$/i.test(String(b.leadId))) {
+      const l = await db.collection('leads_whatsapp').findOne(Object.assign({ _id: new ObjectId(String(b.leadId)) }, org));
+      if (!l) return res.status(404).json({ error: 'Contacto no encontrado.' });
+      nombre = l.nombre || ''; tel = digitos(l.telefono); desde = l.creadoOrigen || l.createdAt; origen = 'lead'; orgDoc = l.orgId;
+    } else return res.status(400).json({ error: 'Falta el contacto.' });
+    const t10 = tel.slice(-10); if (t10.length < 8) return res.status(400).json({ error: 'El contacto no tiene un teléfono válido.' });
+    const ya = await db.collection(COL_C).findOne(Object.assign({ tel10: t10 }, org));
+    if (ya) return res.json({ convId: String(ya._id) });
+    const ahora = new Date(), f = desde ? new Date(desde) : ahora;
+    const orgId = orgDoc || org.orgId || req.orgId;
+    const r = await db.collection(COL_C).insertOne({ orgId, tel, tel10: t10, nombre, estado: 'derivado', datos: {}, createdAt: f, updatedAt: f, mesa: { historial: [reg(req, 'Pasada al tablero desde ' + origen)] } });
+    res.json({ convId: String(r.insertedId) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.post('/:id/temperatura', auth, async (req, res) => {
   try {
     const t = req.body && req.body.temperatura; if (!TEMPS.includes(t)) return res.status(400).json({ error: 'Temperatura inválida.' });

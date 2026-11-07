@@ -606,6 +606,8 @@ async function cargar(opts){
 /* ---- cajón ---- */
 async function abrirCaj(l, o){
   VENT = null; PLANT = [];
+  // contacto sin chat (Azuite / histórico / a mano): se le crea la conversación vacía para poder moverlo, anotarlo y cerrarlo
+  if (!l.convId && (l.opId || l.leadId) && !(o && o.sinMat)){ try{ const r = await post('/api/mesa/materializar', {opId:l.opId, leadId:l.leadId}); sel = r.convId; await cargar(); const n = cur(); if (n && n.convId) return abrirCaj(n, o); return; }catch(e){ err(e); } }
   if (l.convId){ try{ const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()}); MSGS = d.mensajes; VENT = d.ventana||null; PLANT = d.plantillas||[]; }catch(e){ err(e); MSGS=[]; } } else MSGS = [];
   pintarCaj(l, o);
 }
