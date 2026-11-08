@@ -303,7 +303,25 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     if (filtroStock) { stock = await stockDisponible(db, prods.map(p => p._id)); prods = prods.filter(p => { const s = stock.get(String(p._id)) || 0; return filtroStock === 'con' ? s > 0 : s <= 0; }); }
     else stock = await stockDisponible(db, prods.slice(0, limite).map(p => p._id));
     const { precioResuelto: pr } = { precioResuelto };
-    res.json({ total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
+    // Si se buscó algo: por qué quedaron afuera los productos que coinciden pero no se ofrecen
+    let excluidos = [];
+    if (palabras.length) {
+      const visibles = new Set(prods.map(p => String(p._id)));
+      const qx = Object.assign({ $and: palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }, { marca: { $regex: w, $options: 'i' } }] })) }, filtroOrg(req));
+      const otros = await db.collection('productos_catalogo').find(qx).project({ sku: 1, nombre: 1, activo: 1, skuTiendanube: 1, noTiendanube: 1, rubro: 1, marca: 1, proveedorId: 1, proveedor: 1 }).limit(60).toArray();
+      excluidos = otros.filter(p => !visibles.has(String(p._id))).slice(0, 25).map(p => {
+        let motivo;
+        if (p.activo === false) motivo = 'está inactivo';
+        else if (!p.sku) motivo = 'no tiene SKU';
+        else if (p.skuTiendanube) motivo = 'ya está vinculado con Tiendanube (SKU ' + p.skuTiendanube + ')';
+        else if (p.noTiendanube && !verDescartados) motivo = 'está marcado como "No va a Tiendanube" (tildá Ver descartados)';
+        else if (!p.noTiendanube && verDescartados) motivo = 'no está descartado (destildá Ver descartados)';
+        else if (enTienda.has(K(p.sku))) motivo = 'en Tiendanube ya hay un producto con el SKU ' + p.sku;
+        else motivo = 'no coincide con los otros filtros (rubro, marca, proveedor o stock)';
+        return { sku: p.sku || '', nombre: p.nombre || '', rubro: p.rubro || '', motivo };
+      });
+    }
+    res.json({ excluidos, total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
