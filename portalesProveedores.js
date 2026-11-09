@@ -157,6 +157,13 @@ function bultoDeProducto(p) {
   const base = parseFloat(String(p.base == null ? '' : p.base).replace(',', '.'));
   const baseEsM2 = /m2|m²/i.test(String(p.baseUm || p.base || ''));
   if (baseEsM2 && base > 0 && base < 1000) return { campo: 'base', valor: Math.round(base * 1000) / 1000 };
+  // Otras "bases": en revestimientos/tablas viene como "Base Tabla" (baseTabla, base_tabla…) con un valor en m² ("0.35 m²")
+  for (const k of Object.keys(p || {})) {
+    if (!/^base/i.test(k) || /um$|unidad/i.test(k) || k === 'base') continue;
+    const v = String(p[k] == null ? '' : p[k]); const n = parseFloat(v.replace(',', '.'));
+    const um = String(p[k + 'Um'] || p[k + 'Unidad'] || '');
+    if (n > 0 && n < 1000 && (/m2|m²/i.test(v) || /m2|m²/i.test(um) || !/[a-z]/i.test(v))) return { campo: k, valor: Math.round(n * 1000) / 1000 };
+  }
   const pc = numero(p.precioCaja), pm = numero(p.precioM2);
   if (pc && pm) { const r = Math.round(pc / pm * 1000) / 1000; if (r > 0 && r < 1000) return { campo: 'precioCaja / precioM2', valor: r }; }
   const cand = Object.keys(p || {}).filter(k => RE_M2_CAJA.test(k) && !/precio|costo|stock|total|pallet/i.test(k));

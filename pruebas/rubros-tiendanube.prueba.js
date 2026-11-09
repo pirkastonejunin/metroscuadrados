@@ -15,3 +15,7 @@ assert.equal(R.categoriaDe(m, 'Porcelanatos', 'Otro'), 10); assert.equal(R.categ
 const f = filaDeProductoMaxipiso({ sku: 'A', nombre: 'N', marca: 'Chiusaroli', _tablaLabel: 'Porcelanatos', precioM2: 5 }, 0);
 assert.equal(f.rubroPortal, 'Porcelanatos'); assert.equal(f.marca, 'Chiusaroli');
 console.log('OK');
+const { bultoDeProducto } = require('../portalesProveedores');
+assert.equal(bultoDeProducto({ baseTabla: '0.35 m2' }).valor, 0.35); assert.equal(bultoDeProducto({ base_tabla: '0,35', base_tablaUm: 'm2' }).valor, 0.35);
+assert.equal(bultoDeProducto({ base: '2.26 m2', baseUm: 'm2', baseTabla: '9' }).valor, 2.26, 'base manda');
+console.log('OK bultos');
