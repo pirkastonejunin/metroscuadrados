@@ -312,6 +312,7 @@
       var skuM = (document.getElementById('pimpMuestraSku') || {}).value || ''; var d = await pedir('/' + estado.id + '/portal/muestra' + (skuM.trim() ? '?sku=' + encodeURIComponent(skuM.trim()) : ''));
       var esc = function (x) { return String(x == null ? '' : x).replace(/[&<>]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]; }); };
       var arr = Array.isArray(d) ? d : (d.muestra || d.productos || [d]);
+      if (!arr.length) { box.innerHTML = '<span class="err">' + (skuM.trim() ? 'El SKU ' + esc(skuM.trim()) + ' NO está en el catálogo que baja el sistema desde Maxipiso (/api/catalogo/todos), aunque exista en su página.' : 'El portal no devolvió productos.') + '</span>'; return; }
       box.innerHTML = arr.slice(0, 3).map(function (x) { return '<div class="card" style="padding:10px;margin-bottom:8px"><b>' + esc(x.sku) + ' — ' + esc(x.nombre) + '</b><div class="muted" style="margin:4px 0">m² por caja detectado: <b>' + (x.m2PorCaja ? esc(x.m2PorCaja.valor) + ' (campo ' + esc(x.m2PorCaja.campo) + ')' : 'ninguno') + '</b> · fotos detectadas: <b>' + ((x.imagenes || []).length) + '</b></div><pre style="white-space:pre-wrap;font-size:11px;margin:0;max-height:260px;overflow:auto">' + esc(JSON.stringify(x.valores || x.campos, null, 1)) + '</pre></div>'; }).join('');
     } catch (e) { box.innerHTML = '<span class="err">' + esc2(e.message) + '</span>'; }
     function esc2(t) { return String(t).replace(/[&<>]/g, ''); }
