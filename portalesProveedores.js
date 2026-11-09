@@ -232,11 +232,21 @@ async function filasMaxipiso(cred, opciones) {
 }
 
 // Diagnóstico: qué campos trae el catálogo y cuáles se reconocen como fotos (para verificar el conector sin adivinar).
-async function muestraMaxipiso(cred) {
+async function muestraMaxipiso(cred, sku) {
   const jarra = await loginMaxipiso(cred);
-  const r = await pedirJson(`${MAXIPISO_BASE}/api/catalogo/todos?take=3&skip=0&sortBy=relevancia`, {}, jarra, 45000);
-  const j = await r.json().catch(() => null);
-  const lista = j && j.data && Array.isArray(j.data.productos) ? j.data.productos : [];
+  let lista = [];
+  if (sku) { // un SKU puntual: se recorre el catálogo hasta encontrarlo
+    for (let skip = 0; skip < 5000 && !lista.length; skip += 100) {
+      const r = await pedirJson(`${MAXIPISO_BASE}/api/catalogo/todos?take=100&skip=${skip}&sortBy=relevancia`, {}, jarra, 45000);
+      const j = await r.json().catch(() => null); const pag = j && j.data && Array.isArray(j.data.productos) ? j.data.productos : [];
+      lista = pag.filter(p => String(p.sku == null ? '' : p.sku).trim() === String(sku).trim());
+      if (pag.length < 100) break;
+    }
+  } else {
+    const r = await pedirJson(`${MAXIPISO_BASE}/api/catalogo/todos?take=3&skip=0&sortBy=relevancia`, {}, jarra, 45000);
+    const j = await r.json().catch(() => null);
+    lista = j && j.data && Array.isArray(j.data.productos) ? j.data.productos : [];
+  }
   const corto = v => (v && typeof v === 'object') ? JSON.stringify(v).slice(0, 200) : (typeof v === 'string' ? v.slice(0, 200) : v);
   return lista.map(p => ({ sku: p.sku, nombre: p.nombre, campos: Object.keys(p), valores: Object.fromEntries(Object.keys(p).map(k => [k, corto(p[k])])), camposImagen: camposImagen(p), descripcion: descripcionDeProducto(p), imagenes: imagenesDeProducto(p, MAXIPISO_BASE), m2PorCaja: bultoDeProducto(p) }));
 }
@@ -340,10 +350,10 @@ async function filasDePortal(portal, regla) {
   return con.filas({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' }, { moneda: regla && regla.moneda });
 }
 
-async function muestraDePortal(portal) {
+async function muestraDePortal(portal, sku) {
   const con = portal && CONECTORES[portal.tipo];
   if (!con || !con.muestra) throw err(400, 'Este proveedor no tiene un portal configurado.');
   if (!portal.usuario || !portal.claveCifrada) throw err(400, 'Faltan el usuario y la clave del portal en la ficha del proveedor.');
-  return con.muestra({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' });
+  return con.muestra({ usuario: portal.usuario, clave: descifrar(portal.claveCifrada), totpSecreto: portal.totpCifrado ? descifrar(portal.totpCifrado) : '' }, sku);
 }
 module.exports = { bultoDeProducto, muestraDePortal, imagenesDeProducto, camposImagen, CONECTORES, filasDePortal, cifrar, descifrar, codigoTotp, monedaDe, filaDeProductoMaxipiso, filaDeProductoVigorita, filasDeProductosVigorita };

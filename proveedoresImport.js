@@ -888,7 +888,7 @@ router.get('/:id/portal', authAdmin, async (req, res) => {
 });
 router.get('/:id/portal/muestra', authAdmin, async (req, res) => {
   try {
-    const out = await conReintento(async () => portales.muestraDePortal((await proveedorDeOrg(await getDb(), req)).portal));
+    const out = await conReintento(async () => portales.muestraDePortal((await proveedorDeOrg(await getDb(), req)).portal, String(req.query.sku || '').trim() || null));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
