@@ -42,16 +42,17 @@ async function sincronizar(db, orgId, categorias) {
   const nivel1De = c => { let x = c, g = 0; while (x && x.padre && porId.get(x.padre) && g++ < 10) x = porId.get(x.padre); return x; };
   const base = await cargar(db, { orgId });
   const rubroPorClave = new Map(base.rubros.map(r => [clave(r.nombre), r]));
+  const buscarRubro = n => rubroPorClave.get(clave(n)) || base.rubros.find(r => singular(clave(r.nombre)) === singular(clave(n)));
   let rubrosNuevos = 0, subsNuevos = 0, vinculados = 0;
   for (const c of categorias.filter(c => !c.padre || !porId.get(c.padre))) {
-    let r = rubroPorClave.get(clave(c.nombre));
+    let r = buscarRubro(c.nombre);
     if (!r) { const doc = { nombre: c.nombre, activo: true, orgId, tnCategoriaId: c.id, createdAt: ahora, updatedAt: ahora }; doc._id = (await db.collection('productos_rubros_base').insertOne(doc)).insertedId; r = doc; rubroPorClave.set(clave(c.nombre), r); rubrosNuevos++; }
     else if (Number(r.tnCategoriaId) !== c.id) { await db.collection('productos_rubros_base').updateOne({ _id: r._id }, { $set: { tnCategoriaId: c.id, activo: true, updatedAt: ahora } }); r.tnCategoriaId = c.id; vinculados++; }
   }
   const subs = await db.collection('productos_subrubros_base').find({ orgId }).toArray();
   for (const c of categorias.filter(c => c.padre && porId.get(c.padre))) {
-    const top = nivel1De(c); const r = top && rubroPorClave.get(clave(top.nombre)); if (!r) continue;
-    const s = subs.find(x => String(x.rubroId) === String(r._id) && clave(x.nombre) === clave(c.nombre));
+    const top = nivel1De(c); const r = top && buscarRubro(top.nombre); if (!r) continue;
+    const s = subs.find(x => String(x.rubroId) === String(r._id) && singular(clave(x.nombre)) === singular(clave(c.nombre)));
     if (!s) { await db.collection('productos_subrubros_base').insertOne({ nombre: c.nombre, rubroId: r._id, rubroNombre: r.nombre, activo: true, orgId, tnCategoriaId: c.id, createdAt: ahora, updatedAt: ahora }); subsNuevos++; }
     else if (Number(s.tnCategoriaId) !== c.id) { await db.collection('productos_subrubros_base').updateOne({ _id: s._id }, { $set: { tnCategoriaId: c.id, activo: true, updatedAt: ahora } }); vinculados++; }
   }
