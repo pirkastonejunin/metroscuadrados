@@ -291,7 +291,9 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     if (palabras.length) filtro.$and = palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }, { marca: { $regex: w, $options: 'i' } }] }));
     // los que ya están en la tienda con ese SKU no se ofrecen
     const store = await tiendaConfig(); const enTienda = new Set((await productosTienda()).map(f => K(f.sku)).filter(Boolean));
-    let prods = (await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(20000).toArray()).filter(p => !enTienda.has(K(p.sku)));
+    const crudos = await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(20000).toArray();
+    const yaEnTienda = crudos.filter(p => enTienda.has(K(p.sku)));
+    let prods = crudos.filter(p => !enTienda.has(K(p.sku)));
     const limite = Math.min(3000, Math.max(50, Number(req.query.limite) || 400));
     // Opciones de los filtros de marca y proveedor (sobre lo que ya pasó los otros filtros)
     const cuenta = (fn) => { const m = new Map(); prods.forEach(p => { const k = fn(p); if (k && k.v) m.set(k.v, { v: k.v, n: k.n, c: ((m.get(k.v) || {}).c || 0) + 1 }); }); return [...m.values()].sort((a, b) => String(a.n).localeCompare(String(b.n), 'es')); };
@@ -321,7 +323,13 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
         return { sku: p.sku || '', nombre: p.nombre || '', rubro: p.rubro || '', motivo };
       });
     }
-    res.json({ excluidos, total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
+    // Resumen general (sin filtros de pantalla): qué productos activos del sistema no se están ofreciendo y por qué
+    const base = Object.assign({ activo: { $ne: false }, sku: { $nin: [null, ''] } }, filtroOrg(req));
+    const descartadosN = await db.collection('productos_catalogo').countDocuments(Object.assign({ skuTiendanube: { $in: [null, ''] }, noTiendanube: true }, base));
+    const vinculadosN = await db.collection('productos_catalogo').countDocuments(Object.assign({ skuTiendanube: { $nin: [null, ''] } }, base));
+    const sinVincularN = await db.collection('productos_catalogo').countDocuments(Object.assign({ skuTiendanube: { $in: [null, ''] }, noTiendanube: { $ne: true } }, base));
+    const resumenGeneral = { activos: descartadosN + vinculadosN + sinVincularN, vinculados: vinculadosN, descartados: descartadosN, sinVincular: sinVincularN, sinVincularPeroSkuEnTienda: yaEnTienda.length, ofrecidos: prods.length };
+    res.json({ resumenGeneral, excluidos, total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
