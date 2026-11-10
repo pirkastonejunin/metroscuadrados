@@ -275,7 +275,7 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let PREV = {}, FIRMA_ITEMS = '', ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
+let PREV = {}, FIRMA_ITEMS = '', ULT_SCROLL = 0, ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
 // Contactos del histórico importado (Pirka) sin fecha puesta a propósito: no ensucian el tablero, se trabajan en la vista "Base histórica".
 function soloVista(todos){ HISTN = todos.filter(l=>l.historica && !l.cierre).length; const b=$('hist'); if(b){ b.textContent='📚 Base histórica ('+HISTN+')'; b.hidden = !HISTN && !HIST; } return todos.filter(l=>HIST ? l.historica : !l.historica); }
@@ -595,7 +595,7 @@ async function cargar(opts){
   try{
     const d = await api('/api/mesa?cerradas=1', {headers:H()});
     novedades(d.items);
-    const firma = JSON.stringify(d.items) + '|' + ($('fCer') && $('fCer').checked) + '|' + F + '|' + HIST;
+    const firma = JSON.stringify(d.items, (k, v) => k === 'esperaMin' ? undefined : v) + '|' + ($('fCer') && $('fCer').checked) + '|' + F + '|' + HIST;
     const igual = firma === FIRMA_ITEMS && !(opts && opts.forzar); FIRMA_ITEMS = firma; // sin cambios en los datos: no se repinta (evita el parpadeo y el salto al tope)
     const antes = cur(); ITEMS = soloVista(d.items); YO = d.yo; MOTIVOS = d.motivosPerdida;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
@@ -878,7 +878,8 @@ document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hi
   await cargar();
   { const q = new URLSearchParams(location.search).get('abrir'); if (q && ITEMS.some(i=>i.id===q)) abrir(q); } // enlace desde la campanita
   if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);
-  setInterval(() => { if (document.hidden || VISTA === 'resumen') { sondear(); return; } /* en Resumen (gráficos) no se repinta solo: te devolvía arriba mientras leías */ if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
+  document.addEventListener('scroll', () => { ULT_SCROLL = Date.now(); }, true); document.addEventListener('wheel', () => { ULT_SCROLL = Date.now(); }, { passive: true, capture: true }); document.addEventListener('touchmove', () => { ULT_SCROLL = Date.now(); }, { passive: true, capture: true });
+  setInterval(() => { if (!document.hidden && Date.now() - ULT_SCROLL < 8000) return; /* estás desplazándote: no se toca la pantalla */ if (document.hidden || VISTA === 'resumen') { sondear(); return; } /* en Resumen (gráficos) no se repinta solo: te devolvía arriba mientras leías */ if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
 })();
 </script>
 </body>
