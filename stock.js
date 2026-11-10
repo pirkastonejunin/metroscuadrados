@@ -359,9 +359,15 @@ router.get('/comprometido', authAdmin, async (req, res) => {
       // que "pendiente" — y la cantidad que aporta es la PENDIENTE del
       // ítem, no el total original (lo ya entregado dejó de estar
       // comprometido al generarse su remito).
+      // Las ventas sin depósito asignado (típico de lo importado de Dux) cuentan contra el depósito Junín de su sucursal, igual que en "Recalcular comprometido" (10/11/2026)
+      let filtroDep = { depositoId };
+      if (depositoId) {
+        const dep = await db.collection('depositos').findOne({ _id: depositoId });
+        if (dep && dep.orgId && /jun[ií]n/i.test(dep.nombre || '')) filtroDep = { $or: [{ depositoId }, { depositoId: null, orgId: dep.orgId }] };
+      }
       const ventas = await db.collection('ventas').find(Object.assign({
-        estado: { $in: ['pendiente', 'parcialmente_entregada'] }, depositoId, 'items.productoId': productoId
-      })).sort({ fecha: 1 }).toArray(); // sin filtro de sucursal: el depósito es compartido y el comprometido suma las ventas de TODAS (16/10/2026, pedido de Mato)
+        estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] }, 'items.productoId': productoId
+      }, filtroDep)).sort({ fecha: 1 }).toArray(); // sin filtro de sucursal: el depósito es compartido y el comprometido suma las ventas de TODAS (16/10/2026, pedido de Mato)
       const orgs = await db.collection('organizaciones').find({ _id: { $in: [...new Set(ventas.map(v => String(v.orgId || '')).filter(Boolean))].map(toObjectId).filter(Boolean) } }).project({ nombre: 1 }).toArray();
       const nombreOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
       return ventas.map(v => {
