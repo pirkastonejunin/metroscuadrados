@@ -467,7 +467,8 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       const sinVincular = ventas.filter(v => (v.items || []).some(it => !it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0)).slice(0, 30).map(v => ({
         ventaId: v._id, comprobante: v.numeroOriginal || ('Nº ' + v.numero), cliente: v.clienteNombre || '', estado: v.estado,
         items: (v.items || []).filter(it => !it.productoId).slice(0, 4).map(it => [it.sku || it.codigo || '', it.nombre || it.descripcion || it.producto || ''].filter(Boolean).join(' · ') || '(sin descripción)') }));
-      return { aplicado: aplicar, itemsVinculados: vinculados, sinVincular, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
+      const lista = vs => vs.slice(0, 60).map(v => ({ comprobante: v.numeroOriginal || ('Nº ' + v.numero), cliente: v.clienteNombre || '', productos: (v.items || []).filter(it => (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0).slice(0, 3).map(it => (it.sku || it.nombre || '') + (it.productoId ? '' : ' (sin vincular)')).join(' | ') }));
+      return { aplicado: aplicar, ventasPendientes: ventas.filter(conPendiente).length, ventasReservadas: lista(ventas.filter(v => !v.stockComprometido && conPendiente(v))), itemsVinculados: vinculados, sinVincular, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

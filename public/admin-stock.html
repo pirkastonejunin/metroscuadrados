@@ -507,8 +507,10 @@ async function recalcularGlobal(){
     let d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     const sv = (d.sinVincular || []).map(v => v.comprobante + ' · ' + v.cliente + ' → ' + v.items.join(' | ')).join('\n');
     const aviso = sv ? '\n\nQuedan ventas pendientes con productos que no pude vincular al catálogo (no comprometen stock):\n' + sv : '';
-    if (!d.filasCorregidas && !d.itemsVinculados) { alert('El comprometido ya coincide con las ventas pendientes.' + aviso); return; }
-    if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de stock' + (d.itemsVinculados ? ', y se vincularán ' + d.itemsVinculados + ' producto(s) de ventas pendientes al catálogo' : '') + (d.ventasSinReserva ? '. Hay ' + d.ventasSinReserva + ' venta(s) pendiente(s) que no estaban reservadas y se van a reservar' : '') + '. Lo comprometido sin depósito pasa a Junín.' + aviso + '\n\n¿Aplicar?')) return;
+    if (!d.filasCorregidas && !d.itemsVinculados) { alert('El comprometido ya coincide con las ventas pendientes (' + (d.ventasPendientes || 0) + ' ventas pendientes en total).' + aviso); return; }
+    const resv = (d.ventasReservadas || []).map(v => '• ' + v.comprobante + ' · ' + v.cliente + ' → ' + v.productos).join('\n');
+    const aviso2 = '\n\nVentas pendientes en total: ' + (d.ventasPendientes || 0) + (resv ? '\nSe van a reservar:\n' + resv : '');
+    if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de stock' + (d.itemsVinculados ? ', y se vincularán ' + d.itemsVinculados + ' producto(s) de ventas pendientes al catálogo' : '') + (d.ventasSinReserva ? '. Hay ' + d.ventasSinReserva + ' venta(s) pendiente(s) que no estaban reservadas y se van a reservar' : '') + '. Lo comprometido sin depósito pasa a Junín.' + aviso2 + aviso + '\n\n¿Aplicar?')) return;
     r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({aplicar:true})});
     d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     alert('Listo: ' + d.filasCorregidas + ' fila(s) corregidas.'); cargarStockActual();
