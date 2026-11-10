@@ -405,6 +405,20 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
     const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
       const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1, numero: 1, numeroOriginal: 1, clienteNombre: 1, estado: 1 }).toArray();
+      // Ítems sin producto vinculado (típico de Dux): se vinculan por SKU/código, o por nombre exacto si es único (10/11/2026)
+      const norm = t => String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+      let vinculados = 0; const ventasVinculadas = new Set();
+      const hayHuerfanos = ventas.some(v => (v.items || []).some(it => !it.productoId));
+      if (hayHuerfanos) {
+        const cat = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1 }).toArray();
+        const porSku = new Map(), porNombre = new Map();
+        for (const c of cat) { if (c.sku) porSku.set(norm(c.sku), c._id); const n = norm(c.nombre); if (n) porNombre.set(n, porNombre.has(n) ? false : c._id); }
+        for (const v of ventas) for (const it of (v.items || [])) {
+          if (it.productoId) continue;
+          const id = porSku.get(norm(it.sku || it.codigo)) || porNombre.get(norm(it.nombre || it.descripcion || it.producto)) || null;
+          if (id) { it.productoId = id; it._vinculadoAhora = true; vinculados++; ventasVinculadas.add(String(v._id)); }
+        }
+      }
       const conPendiente = v => (v.items || []).some(it => it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0);
       const ventasSinReserva = ventas.filter(v => !v.stockComprometido && conPendiente(v)).length;
       // Lo comprometido sin depósito va contra el depósito Junín de su sucursal (15/10/2026, pedido de Mato).
@@ -442,6 +456,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       }
       const nuevas = [...esperado.values()];
       if (aplicar) {
+        for (const v of ventas) if (ventasVinculadas.has(String(v._id))) await db.collection('ventas').updateOne({ _id: v._id }, { $set: { items: v.items.map(it => { const n = Object.assign({}, it); delete n._vinculadoAhora; return n; }) } });
         const sinMarca = ventas.filter(v => !v.stockComprometido).map(v => v._id);
         if (sinMarca.length) await db.collection('ventas').updateMany({ _id: { $in: sinMarca } }, { $set: { stockComprometido: true } });
         for (const v of ventas) if (v._reasignada) await db.collection('ventas').updateOne({ _id: v._id, depositoId: null }, { $set: { depositoId: v.depositoId } });
@@ -452,7 +467,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       const sinVincular = ventas.filter(v => (v.items || []).some(it => !it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0)).slice(0, 30).map(v => ({
         ventaId: v._id, comprobante: v.numeroOriginal || ('Nº ' + v.numero), cliente: v.clienteNombre || '', estado: v.estado,
         items: (v.items || []).filter(it => !it.productoId).slice(0, 4).map(it => [it.sku || it.codigo || '', it.nombre || it.descripcion || it.producto || ''].filter(Boolean).join(' · ') || '(sin descripción)') }));
-      return { aplicado: aplicar, sinVincular, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
+      return { aplicado: aplicar, itemsVinculados: vinculados, sinVincular, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

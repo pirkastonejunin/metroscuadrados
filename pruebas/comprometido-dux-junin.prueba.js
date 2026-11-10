@@ -8,5 +8,14 @@ const assert = require('assert'); const { start } = require('./harness');
   let r = await api('GET', `/api/stock/comprometido?productoId=${prod}&depositoId=${junin}`); assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.length, 1, JSON.stringify(r.data)); assert.equal(r.data[0].cantidad, 7);
   r = await api('GET', `/api/stock/comprometido?productoId=${prod}&depositoId=${colome}`); assert.equal(r.data.length, 0, 'en otro depósito no aparece');
+  // ítem de Dux sin producto vinculado: el recálculo lo vincula por SKU y lo compromete contra Junín
+  const prod2 = new ObjectId();
+  await db.collection('productos_catalogo').insertOne({ _id: prod2, orgId: ORG, sku: 'IRREGULAR GRIS', nombre: 'REVESTIMIENTO IRREGULAR GRIS 0,25 M2', activo: true });
+  await db.collection('stock_actual').insertOne({ orgId: ORG, productoId: prod2, depositoId: junin, cantidad: 42.5, cantidadComprometida: 0 });
+  const v2 = (await db.collection('ventas').insertOne({ orgId: ORG, numero: 31, tipoComprobante: 'comprobante_x', estado: 'pendiente', importado: true, depositoId: null, clienteNombre: 'Otro', total: 50, fecha: new Date(), items: [{ sku: 'irregular gris', nombre: 'IRREGULAR GRIS', cantidad: 3, cantidadEntregada: 0 }] })).insertedId;
+  r = await api('POST', '/api/stock/recalcular-comprometido', {}); assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.itemsVinculados, 1, JSON.stringify(r.data));
+  r = await api('POST', '/api/stock/recalcular-comprometido', { aplicar: true }); assert.equal(r.status, 200, JSON.stringify(r.data));
+  const st = await db.collection('stock_actual').findOne({ productoId: prod2, depositoId: junin }); assert.equal(st.cantidadComprometida, 3, JSON.stringify(st));
+  const vv = await db.collection('ventas').findOne({ _id: v2 }); assert.equal(String(vv.items[0].productoId), String(prod2));
   console.log('OK'); await h.stop(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -163,6 +163,7 @@
               </label>
             </div>
           </div>
+          <button class="btn secondary" onclick="recalcularGlobal()" title="Recalcula el comprometido de todos los productos desde las ventas pendientes (incluye las de Dux) y vincula los productos que falten">Recalcular comprometido</button>
           <button class="btn secondary" onclick="descargarBlob(BASE + '/actual/export', 'stock-actual.xlsx')">Exportar</button>
         </div>
       </div>
@@ -499,6 +500,20 @@ function renderStockActual(limite){
 // Detalle de qué ventas pendientes de remito componen el "comprometido"
 // de un producto en un depósito (2/10/2026, pedido de Mato) — para ver a
 // qué cliente y qué cantidad corresponde ese número.
+async function recalcularGlobal(){
+  try{
+    const h = Object.assign({'Content-Type':'application/json'}, headersAuth());
+    let r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({})});
+    let d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const sv = (d.sinVincular || []).map(v => v.comprobante + ' · ' + v.cliente + ' → ' + v.items.join(' | ')).join('\n');
+    const aviso = sv ? '\n\nQuedan ventas pendientes con productos que no pude vincular al catálogo (no comprometen stock):\n' + sv : '';
+    if (!d.filasCorregidas && !d.itemsVinculados) { alert('El comprometido ya coincide con las ventas pendientes.' + aviso); return; }
+    if (!confirm('Se corregirán ' + d.filasCorregidas + ' fila(s) de stock' + (d.itemsVinculados ? ', y se vincularán ' + d.itemsVinculados + ' producto(s) de ventas pendientes al catálogo' : '') + (d.ventasSinReserva ? '. Hay ' + d.ventasSinReserva + ' venta(s) pendiente(s) que no estaban reservadas y se van a reservar' : '') + '. Lo comprometido sin depósito pasa a Junín.' + aviso + '\n\n¿Aplicar?')) return;
+    r = await fetch(BASE + '/recalcular-comprometido', {method:'POST', headers:h, body: JSON.stringify({aplicar:true})});
+    d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    alert('Listo: ' + d.filasCorregidas + ' fila(s) corregidas.'); cargarStockActual();
+  }catch(e){ alert(e.message); }
+}
 async function recalcularComprometido(productoId){
   const msg = document.getElementById('rcMsg');
   try{
