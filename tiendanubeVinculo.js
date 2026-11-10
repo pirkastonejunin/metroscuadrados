@@ -210,6 +210,8 @@ router.post('/desvincular', auth, async (req, res) => {
 // revisarlos en Tiendanube. Nombre, SKU, precio (lista elegida), stock (todos los depósitos, menos lo comprometido), categoría
 // (según el rubro), marca y fotos (de Maxipiso, por link, si el producto viene de su catálogo). Peso y medidas van en cero.
 // ---------------------------------------------------------------------------
+// De la dirección del optimizador (…/_next/image?url=%2F25267-1.jpg&…) a la directa (…/25267-1.jpg), por si Tiendanube no logra bajar la primera
+const urlDirecta = u => { try { const x = new URL(u); if (x.pathname === '/_next/image' && x.searchParams.get('url')) return x.origin + x.searchParams.get('url'); } catch (e) { /* queda igual */ } return u; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function tiendaConfig() {
   const storeId = process.env.TIENDA_REAL_STORE_ID;
@@ -429,7 +431,8 @@ router.post('/fotos-existentes/subir', auth, async (req, res) => {
       let subidas = 0, desc = false; const motivos = [];
       const falla = rr => 'Tiendanube respondió ' + rr.status + ': ' + (typeof rr.data === 'string' ? rr.data : JSON.stringify(rr.data)).slice(0, 120);
       for (let i = 0; i < x.imagenes.length; i++) {
-        const rr = await tnFetch(store, '/products/' + Number(x.tnProductId) + '/images', { method: 'POST', body: JSON.stringify({ src: x.imagenes[i], position: i + 1 }) });
+        let rr = await tnFetch(store, '/products/' + Number(x.tnProductId) + '/images', { method: 'POST', body: JSON.stringify({ src: x.imagenes[i], position: i + 1 }) });
+        if (!rr.ok && urlDirecta(x.imagenes[i]) !== x.imagenes[i]) rr = await tnFetch(store, '/products/' + Number(x.tnProductId) + '/images', { method: 'POST', body: JSON.stringify({ src: urlDirecta(x.imagenes[i]), position: i + 1 }) });
         if (rr.ok) subidas++; else motivos.push(falla(rr));
         await sleep(400);
       }
@@ -490,7 +493,9 @@ router.post('/publicar', auth, async (req, res) => {
         if (p.marca) body.brand = p.marca;
         if (cat) body.categories = [cat];
         if (imagenes.length) body.images = imagenes.map(src => ({ src }));
-        const r = await tnFetch(store, '/products', { method: 'POST', body: JSON.stringify(body) });
+        let r = await tnFetch(store, '/products', { method: 'POST', body: JSON.stringify(body) });
+        if (!r.ok && imagenes.length && r.status === 422) { body.images = imagenes.map(src => ({ src: urlDirecta(src) })); r = await tnFetch(store, '/products', { method: 'POST', body: JSON.stringify(body) }); }
+        if (!r.ok && imagenes.length && r.status === 422) { delete body.images; imagenes = []; r = await tnFetch(store, '/products', { method: 'POST', body: JSON.stringify(body) }); } // sin fotos: se suben después con la tarjeta de fotos
         if (!r.ok) { resultados.push({ sku: p.sku, ok: false, motivo: 'Tiendanube respondió ' + r.status + ': ' + (typeof r.data === 'string' ? r.data : JSON.stringify(r.data)).slice(0, 180) }); await sleep(600); continue; }
         const variante = r.data && r.data.variants && r.data.variants[0];
         await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: { skuTiendanube: p.sku, tiendanube: { productId: r.data && r.data.id || null, variantId: variante && variante.id || null, vinculadoEn: new Date(), creadoDesdeSistema: true }, updatedAt: new Date() } });
