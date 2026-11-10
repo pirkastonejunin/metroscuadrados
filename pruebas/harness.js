@@ -26,7 +26,7 @@ async function start(port = 4010, opciones = {}) {
     requiereVendedorPropio: (req, res, next) => next(),
     tieneModulo: () => true,
     MODULOS: [],
-    resolverOrg: (req, res, next) => { const h = req.headers['x-org-id']; req.orgId = h === 'todas' ? null : (h ? new ObjectId(h) : ORG); { const o = req.headers['x-org-operar']; if (/^[0-9a-f]{24}$/i.test(o || '')) req.orgOperar = new ObjectId(o); if (h === 'todas' && req.method !== 'GET' && req.orgOperar) req.orgId = req.orgOperar; } next(); },
+    resolverOrg: (req, res, next) => { const h = req.headers['x-org-id']; if (h === 'todas') req.vistaTodas = true; req.orgId = h === 'todas' ? null : (h ? new ObjectId(h) : ORG); { const o = req.headers['x-org-operar']; if (/^[0-9a-f]{24}$/i.test(o || '')) req.orgOperar = new ObjectId(o); if (h === 'todas' && req.method !== 'GET' && req.orgOperar) req.orgId = req.orgOperar; } next(); },
     orgDelRegistro: (colDe) => async (req, res, next) => { try { if (!req.vistaTodas || req.method === 'GET') return next(); const id = req.params && req.params.id; if (!/^[0-9a-f]{24}$/i.test(String(id || ''))) return next(); const col = typeof colDe === 'function' ? colDe(req) : colDe; if (!col) return next(); const d = await db.collection(col).findOne({ _id: new ObjectId(id) }); if (d && d.orgId) { req.orgId = d.orgId; req.orgOperar = d.orgId; } next(); } catch (e) { next(e); } },
     asegurarOrgPorDefecto: async () => ORG,
     backfillOrgId: async () => {},

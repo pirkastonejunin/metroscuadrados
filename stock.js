@@ -399,10 +399,12 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
   try {
     const aplicar = !!(req.body && req.body.aplicar);
     const productoId = req.body && req.body.productoId ? toObjectId(req.body.productoId) : null;
+    const todas = !!req.vistaTodas; // vista "todas las sucursales": se recalculan todas juntas, cada venta contra el stock de su propia sucursal
+    const fOrg = todas ? {} : filtroOrg(req);
     const resultado = await conReintento(async () => {
       const db = await getDb();
       // Incluye todas las ventas pendientes de entrega, tengan o no la marca de "reservada" y sean cargadas acá o importadas de Dux.
-    const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } }, filtroOrg(req));
+    const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } }, fOrg);
       if (productoId) filtroV['items.productoId'] = productoId;
       const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1, numero: 1, numeroOriginal: 1, clienteNombre: 1, estado: 1 }).toArray();
       // Ítems sin producto vinculado (típico de Dux): se vinculan por SKU/código, o por nombre exacto si es único (10/11/2026)
@@ -410,12 +412,12 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       let vinculados = 0; const ventasVinculadas = new Set();
       const hayHuerfanos = ventas.some(v => (v.items || []).some(it => !it.productoId));
       if (hayHuerfanos) {
-        const cat = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1 }).toArray();
-        const porSku = new Map(), porNombre = new Map();
-        for (const c of cat) { if (c.sku) porSku.set(norm(c.sku), c._id); const n = norm(c.nombre); if (n) porNombre.set(n, porNombre.has(n) ? false : c._id); }
+        const cat = await db.collection('productos_catalogo').find(Object.assign({ activo: { $ne: false } }, fOrg)).project({ sku: 1, nombre: 1, codigoExterno: 1, orgId: 1 }).toArray();
+        const porSku = new Map(), porNombre = new Map(); // por sucursal: un SKU igual en otra sucursal no es el mismo producto
+        for (const c of cat) { if (c.sku) porSku.set(String(c.orgId) + '|' + norm(c.sku), c._id); const n = String(c.orgId) + '|' + norm(c.nombre); if (norm(c.nombre)) porNombre.set(n, porNombre.has(n) ? false : c._id); }
         for (const v of ventas) for (const it of (v.items || [])) {
           if (it.productoId) continue;
-          const id = porSku.get(norm(it.sku || it.codigo)) || porNombre.get(norm(it.nombre || it.descripcion || it.producto)) || null;
+          const ok = String(v.orgId) + '|'; const id = porSku.get(ok + norm(it.sku || it.codigo)) || porNombre.get(ok + norm(it.nombre || it.descripcion || it.producto)) || null;
           if (id) { it.productoId = id; it._vinculadoAhora = true; vinculados++; ventasVinculadas.add(String(v._id)); }
         }
       }
@@ -443,7 +445,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
         const e = esperado.get(key) || { orgId: v.orgId, productoId: it.productoId, depositoId: v.depositoId || null, cantidad: 0 };
         e.cantidad += pend; esperado.set(key, e);
       }
-      const filtroS = Object.assign({}, filtroOrg(req));
+      const filtroS = Object.assign({}, fOrg);
       if (productoId) filtroS.productoId = productoId;
       const filas = await db.collection('stock_actual').find(filtroS).toArray();
       const cambios = [];
