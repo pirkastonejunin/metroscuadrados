@@ -140,7 +140,7 @@ function imagenesDeProducto(p, base) {
   const agregar = (v) => {
     if (!v) return;
     if (typeof v === 'string' && v.includes('|')) { v.split('|').forEach(agregar); return; } // Maxipiso: varias fotos separadas por " | "
-    if (typeof v === 'string') { const s = v.trim(); if (/^https?:\/\//i.test(s)) urls.push(s); else if (/^\/[^\s]+\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(s)) urls.push((base || '') + s); return; }
+    if (typeof v === 'string') { const s = v.trim(); if (/^https?:\/\//i.test(s)) urls.push(s); else if (/^\/[^\s]+\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(s)) urls.push((base || '') + '/_next/image?url=' + encodeURIComponent(s) + '&w=1920&q=80'); return; } // rutas cortas (/25267-1.jpg): el sitio (Next.js) las sirve por su optimizador de imágenes
     if (Array.isArray(v)) { v.forEach(agregar); return; }
     if (typeof v === 'object') { agregar(v.url || v.src || v.secure_url || v.path || v.imagen || v.image); }
   };

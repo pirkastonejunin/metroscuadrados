@@ -19,3 +19,7 @@ const { bultoDeProducto } = require('../portalesProveedores');
 assert.equal(bultoDeProducto({ baseTabla: '0.35 m2' }).valor, 0.35); assert.equal(bultoDeProducto({ base_tabla: '0,35', base_tablaUm: 'm2' }).valor, 0.35);
 assert.equal(bultoDeProducto({ base: '2.26 m2', baseUm: 'm2', baseTabla: '9' }).valor, 2.26, 'base manda');
 console.log('OK bultos');
+const { imagenesDeProducto } = require('../portalesProveedores');
+const im = imagenesDeProducto({ imagenes: '/25267-1.jpg | /25267-2.jpg' }, 'https://www.maxipiso.com.ar');
+assert.equal(im[0], 'https://www.maxipiso.com.ar/_next/image?url=%2F25267-1.jpg&w=1920&q=80'); assert.equal(im.length, 2);
+console.log('OK imagenes');

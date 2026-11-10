@@ -389,14 +389,14 @@ async function fotosPorCodigo(db, provId, req) {
 router.get('/fotos-existentes/proveedores', auth, async (req, res) => {
   try {
     const db = await getDb();
-    const ids = await db.collection('proveedor_fotos_web').distinct('proveedorId');
+    const ids = (await db.collection('proveedor_fotos_web').distinct('proveedorId')).concat((await db.collection('proveedores').find(Object.assign({ 'portal.tipo': { $exists: true, $ne: null } }, filtroOrgClientes(req))).project({ _id: 1 }).toArray()).map(x => x._id));
     const provs = ids.length ? await db.collection('proveedores').find(Object.assign({ _id: { $in: ids } }, filtroOrgClientes(req))).project({ razonSocial: 1, nombre: 1 }).toArray() : [];
     res.json(provs.map(p => ({ _id: String(p._id), nombre: p.razonSocial || p.nombre || '' })));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 async function fotosExistentes(db, req, proveedorId) {
   const provId = oid(proveedorId); if (!provId) throw err(400, 'Elegí el proveedor.');
-  const web = new Map((await db.collection('proveedor_fotos_web').find({ proveedorId: provId }).project({ codigoClave: 1, imagenes: 1, descripcion: 1 }).toArray()).map(x => [x.codigoClave, x]));
+  const web = await fotosPorCodigo(db, provId, req); // portal del proveedor + fotos de su página web
   const filas = await productosTienda(); const porSku = new Map(); filas.forEach(f => { if (f.sku) porSku.set(K(f.sku), f); });
   const prods = await db.collection('productos_catalogo').find(Object.assign({ proveedorId: provId, activo: { $ne: false } }, filtroOrg(req))).project({ sku: 1, nombre: 1, codigoExterno: 1, skuTiendanube: 1 }).toArray();
   const out = []; const vistos = new Set(); let yaCompletos = 0, noEstanEnTienda = 0, sinDatosWeb = 0;
