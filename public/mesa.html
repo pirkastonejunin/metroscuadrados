@@ -275,7 +275,7 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let PREV = {}, ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
+let PREV = {}, FIRMA_ITEMS = '', ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
 // Contactos del histórico importado (Pirka) sin fecha puesta a propósito: no ensucian el tablero, se trabajan en la vista "Base histórica".
 function soloVista(todos){ HISTN = todos.filter(l=>l.historica && !l.cierre).length; const b=$('hist'); if(b){ b.textContent='📚 Base histórica ('+HISTN+')'; b.hidden = !HISTN && !HIST; } return todos.filter(l=>HIST ? l.historica : !l.historica); }
@@ -305,12 +305,15 @@ function tarjeta(l){
     <div class="r3"><span class="tag ${c}">${esc(t)}</span>${l.sinLeer?`<span class="unread">${l.sinLeer}</span>`:''}<span class="tmp ${l.temperatura}">${l.temperatura==='caliente'?'Caliente':l.temperatura==='tibio'?'Tibio':'Frío'}</span><span class="mini">${esc(l.asesorNombre||'Sin asignar')}</span></div>${l.campana?`<div class="cmpn" title="${esc(l.campana)}">📣 ${esc(l.campana)}</div>`:''}</div>`;
 }
 function pintar(){
+  // se recuerda el scroll de cada columna (y el lateral) para no volver al tope al repintar
+  const SC = {}; document.querySelectorAll('#tab .colu').forEach(c => { const k = c.dataset.e, cc = c.querySelector('.cards'); if (k && cc) SC[k] = cc.scrollTop; }); const SX = $('tab').scrollLeft;
   const L = filtradas().filter(l=>!l.cierre || $('fCer').checked);
   $('tab').innerHTML = COLS.map(e=>{
     const c = L.filter(l=>l.columna===e.k && !l.cierre).sort((a,b)=>orden(a)-orden(b)); const tot = c.reduce((s,l)=>s+(l.valor||0),0);
     const vacio = e.k==='hoy' ? '<div class="vacioc"><big>✅</big>Hoy está vacío.<br>No queda nada por resolver.</div>' : '<div class="vacioc">Nada acá</div>';
     return `<section class="colu" data-e="${e.k}"><div class="ch"><span class="ico">${e.i}</span><h2>${e.n}</h2><span class="n">${c.length}</span><span class="v">${tot?money(tot):''}</span></div><div class="ch-sub" title="${e.sub}">${e.sub}</div><div class="cards">${c.map(tarjeta).join('')||vacio}</div></section>`;
   }).join('');
+  document.querySelectorAll('#tab .colu').forEach(c => { const cc = c.querySelector('.cards'); if (cc && SC[c.dataset.e]) cc.scrollTop = SC[c.dataset.e]; }); $('tab').scrollLeft = SX;
   pintarEmbudo();
   const a = ITEMS.filter(l=>!l.cierre), s24n = a.filter(l=>l.sin24).length, h = a.filter(l=>l.columna==='hoy').length, ve = a.filter(l=>l.columna==='hoy'&&l.prox&&l.prox.dias<0).length, sd = a.filter(l=>l.sinDec).length;
   $('resumen').innerHTML = `<div class="stat ${h?'al':'okk'}"><b>${h}</b><span>${h?'por resolver hoy':'Hoy al día'}</span></div>${ve?`<div class="stat al"><b>${ve}</b><span>vencidas</span></div>`:''}${sd?`<div class="stat al"><b>${sd}</b><span>sin decidir</span></div>`:''}${s24n?`<div class="stat al" title="Consultas con 24 h o más sin decisión"><b>${s24n}</b><span>+24 h sin decidir</span></div>`:''}<div class="stat"><b>${money(a.reduce((x,l)=>x+(l.valor||0),0))}</b><span>en presupuestos</span></div>`;
@@ -592,9 +595,11 @@ async function cargar(opts){
   try{
     const d = await api('/api/mesa?cerradas=1', {headers:H()});
     novedades(d.items);
+    const firma = JSON.stringify(d.items) + '|' + ($('fCer') && $('fCer').checked) + '|' + F + '|' + HIST;
+    const igual = firma === FIRMA_ITEMS && !(opts && opts.forzar); FIRMA_ITEMS = firma; // sin cambios en los datos: no se repinta (evita el parpadeo y el salto al tope)
     const antes = cur(); ITEMS = soloVista(d.items); YO = d.yo; MOTIVOS = d.motivosPerdida;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
-    pintar();
+    if (!igual) pintar();
     const l = cur();
     if (!$('caj').hidden && l){
       const cambio = !antes || (antes.ultimo&&l.ultimo&&String(antes.ultimo.at)!==String(l.ultimo.at));
