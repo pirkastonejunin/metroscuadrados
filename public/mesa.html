@@ -873,7 +873,7 @@ document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hi
   await cargar();
   { const q = new URLSearchParams(location.search).get('abrir'); if (q && ITEMS.some(i=>i.id===q)) abrir(q); } // enlace desde la campanita
   if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);
-  setInterval(() => { if (document.hidden) { sondear(); return; } if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
+  setInterval(() => { if (document.hidden || VISTA === 'resumen') { sondear(); return; } /* en Resumen (gráficos) no se repinta solo: te devolvía arriba mientras leías */ if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
 })();
 </script>
 </body>
