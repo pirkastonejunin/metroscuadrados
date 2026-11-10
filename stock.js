@@ -366,7 +366,7 @@ router.get('/comprometido', authAdmin, async (req, res) => {
       const nombreOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
       return ventas.map(v => {
         const item = (v.items || []).find(it => String(it.productoId) === String(productoId));
-        const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0)) : 0;
+        const cantidad = item ? Math.max(0, item.cantidad - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0) - (item.cantidadCerrada || 0)) : 0;
         return {
           ventaId: v._id,
           clienteId: v.clienteId || null,
@@ -399,7 +399,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
     const filtroV = Object.assign({ estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true }, tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] } }, filtroOrg(req));
       if (productoId) filtroV['items.productoId'] = productoId;
       const ventas = await db.collection('ventas').find(filtroV).project({ items: 1, depositoId: 1, orgId: 1, stockComprometido: 1, numero: 1, numeroOriginal: 1, clienteNombre: 1, estado: 1 }).toArray();
-      const conPendiente = v => (v.items || []).some(it => it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0);
+      const conPendiente = v => (v.items || []).some(it => it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0);
       const ventasSinReserva = ventas.filter(v => !v.stockComprometido && conPendiente(v)).length;
       // Lo comprometido sin depósito va contra el depósito Junín de su sucursal (15/10/2026, pedido de Mato).
       const juninPorOrg = new Map();
@@ -417,7 +417,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
       for (const v of ventas) for (const it of (v.items || [])) {
         if (!it.productoId) continue;
         if (productoId && String(it.productoId) !== String(productoId)) continue;
-        const pend = Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0));
+        const pend = Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0));
         if (pend <= 0) continue;
         const key = k(v.orgId, it.productoId, v.depositoId);
         const e = esperado.get(key) || { orgId: v.orgId, productoId: it.productoId, depositoId: v.depositoId || null, cantidad: 0 };
@@ -443,7 +443,7 @@ router.post('/recalcular-comprometido', authAdmin, async (req, res) => {
         for (const e of nuevas) await db.collection('stock_actual').updateOne({ orgId: e.orgId, productoId: e.productoId, depositoId: e.depositoId }, { $set: { cantidadComprometida: Math.round(e.cantidad * 100) / 100 }, $setOnInsert: { cantidad: 0 } }, { upsert: true });
       }
       // Ventas pendientes con productos que no están vinculados al catálogo (típico de lo importado de Dux): por eso no suman al comprometido.
-      const sinVincular = ventas.filter(v => (v.items || []).some(it => !it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0)).slice(0, 30).map(v => ({
+      const sinVincular = ventas.filter(v => (v.items || []).some(it => !it.productoId && (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0)).slice(0, 30).map(v => ({
         ventaId: v._id, comprobante: v.numeroOriginal || ('Nº ' + v.numero), cliente: v.clienteNombre || '', estado: v.estado,
         items: (v.items || []).filter(it => !it.productoId).slice(0, 4).map(it => [it.sku || it.codigo || '', it.nombre || it.descripcion || it.producto || ''].filter(Boolean).join(' · ') || '(sin descripción)') }));
       return { aplicado: aplicar, sinVincular, ventasSinReserva, filasCorregidas: cambios.length + nuevas.length, unidadesQuitadas: Math.round(cambios.reduce((s, c) => s + Math.max(0, c.antes - c.despues), 0) * 100) / 100 };

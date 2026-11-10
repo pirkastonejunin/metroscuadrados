@@ -818,6 +818,7 @@ async function desasociarNota(notaId){
 }
 function estadoLabelVenta(v){
   if (v.estado === 'entregada' && (v.tipoComprobante === 'nota_credito' || v.tipoComprobante === 'nota_debito')) return 'Emitida';
+  if (v.estado === 'entregada' && (v.items || []).some(it => (it.cantidadCerrada || 0) > 0)) return 'Cerrada (parte sin entregar)';
   return ESTADO_LABEL[v.estado] || v.estado;
 }
 
@@ -1819,14 +1820,15 @@ function verDetalle(id){
   // una sola vez o no se entregaba nada.
   const filasItems = v.items.map(it => {
     const entregada = it.cantidadEntregada || 0;
-    const pendiente = Math.max(0, it.cantidad - entregada);
+    const cerrada = it.cantidadCerrada || 0;
+    const pendiente = Math.max(0, it.cantidad - entregada - (it.cantidadAcreditada || 0) - cerrada);
     return `
     <tr>
       <td>${escapeHtml(it.sku||'')}</td>
       <td>${escapeHtml(it.nombre)}</td>
       <td>${it.cantidad}</td>
       <td class="muted">${entregada || '—'}</td>
-      <td class="muted">${pendiente || '—'}</td>
+      <td class="muted">${pendiente || '—'}${cerrada ? ` <span title="Cerrado sin entregar: ya no está comprometido">(${cerrada} cerrado)</span>` : ''}</td>
       <td>${money(it.precioUnitario)}${it.descuentoPorcentaje ? ` <span class="muted">(−${it.descuentoPorcentaje}%)</span>` : ''}</td>
       <td>${money(it.subtotal)}</td>
     </tr>
@@ -1888,6 +1890,8 @@ function verDetalle(id){
         <div id="dvRemitos"><p class="muted">Cargando...</p></div>
         <div class="row" style="margin-top:10px">
           ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
+          ${((v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="cerrarSinEntregar('${v._id}')" title="Da la venta por terminada sin entregar lo que falta: sale del comprometido y no mueve el stock">Cerrar sin entregar lo que falta</button>` : ''}
+          ${((v.items || []).some(it => (it.cantidadCerrada || 0) > 0) && v.estado !== 'anulada') ? `<button class="btn secondary" onclick="reabrirCierre('${v._id}')">Reabrir cierre</button>` : ''}
           ${(v.importado && v.estado !== 'anulada' && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="abrirAjusteEntrega('${v._id}')">Corregir entrega (Dux)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 && v.moneda === 'ARS' ? `<button class="btn secondary" onclick="abrirMP('${v._id}','link')">Link de pago</button><button class="btn secondary" onclick="abrirMP('${v._id}','point')">Cobrar con Point</button>` : ''}
@@ -2048,7 +2052,7 @@ async function abrirEntregar(id){
   const deposito = v.depositoId ? depositosCache.find(d => String(d._id) === String(v.depositoId)) : null;
   const filasItems = v.items.map((it, idx) => {
     const entregada = it.cantidadEntregada || 0;
-    const pendiente = Math.max(0, it.cantidad - entregada - (it.cantidadAcreditada || 0));
+    const pendiente = Math.max(0, it.cantidad - entregada - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0));
     if (pendiente <= 0) return '';
     // Igual que al cargar la venta: si el producto se vende por bulto, no
     // se puede remitir una fracción de bulto, y se puede elegir la
@@ -2493,6 +2497,26 @@ async function convertirAFiscal(id){
   }
 }
 
+async function cerrarSinEntregar(id){
+  const v = ventasCache.find(x => x._id === id); if (!v) return;
+  const falta = (v.items || []).map(it => ({ n: it.nombre, q: Math.max(0, it.cantidad - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0)) })).filter(x => x.q > 0);
+  if (!falta.length) { alert('No hay nada pendiente para cerrar.'); return; }
+  const motivo = prompt('Se cierra la venta sin entregar:\n' + falta.map(x => '• ' + x.q + ' × ' + x.n).join('\n') + '\n\nSale del stock comprometido y NO se mueve el stock físico. ¿Motivo? (opcional)');
+  if (motivo === null) return;
+  try{
+    const r = await fetch(BASE + '/' + id + '/cerrar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas(); verDetalle(id);
+  }catch(e){ alert(e.message); }
+}
+async function reabrirCierre(id){
+  if (!confirm('¿Reabrir el cierre? Lo que se había cerrado vuelve a quedar pendiente y comprometido.')) return;
+  try{
+    const r = await fetch(BASE + '/' + id + '/reabrir-cierre', {method:'POST', headers: headersAuthJson(), body: '{}'});
+    const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Error');
+    await cargarVentas(); verDetalle(id);
+  }catch(e){ alert(e.message); }
+}
 async function anularVenta(id){
   const v = ventasCache.find(x => x._id === id);
   const motivo = prompt('¿Por qué se anula esta ' + nombreDoc(v.tipoComprobante) + '? (opcional)') || '';

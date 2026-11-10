@@ -448,7 +448,7 @@ async function comprometerStockDeVenta(db, req, items, depositoId) {
 // el cliente puede retirar parcialmente) cuánto queda sin entregar de
 // cada ítem — lo que ya salió por algún remito anterior no cuenta.
 function cantidadPendiente(item) {
-  return Math.max(0, (item.cantidad || 0) - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0));
+  return Math.max(0, (item.cantidad || 0) - (item.cantidadEntregada || 0) - (item.cantidadAcreditada || 0) - (item.cantidadCerrada || 0));
 }
 
 // Mueve lo comprometido de un depósito a otro (3/10/2026, pedido de
@@ -579,7 +579,7 @@ async function generarRemitoDeVenta(db, req, venta, depositoId, entregas, observ
   });
   const totalCantidad = itemsActualizados.reduce((s, it) => s + (it.cantidad || 0), 0);
   const totalEntregada = itemsActualizados.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
-  const totalCerrado = totalEntregada + itemsActualizados.reduce((s, it) => s + (it.cantidadAcreditada || 0), 0);
+  const totalCerrado = totalEntregada + itemsActualizados.reduce((s, it) => s + (it.cantidadAcreditada || 0) + (it.cantidadCerrada || 0), 0);
   const nuevoEstado = totalCerrado <= 0 ? 'pendiente' : (totalCerrado >= totalCantidad - 1e-9 ? 'entregada' : 'parcialmente_entregada');
 
   await db.collection('ventas').updateOne(
@@ -824,7 +824,7 @@ async function aplicarNotaAFactura(db, req, nota, facturaId, montoPedido, opts) 
 function estadoSegunItems(items) {
   const total = items.reduce((s, it) => s + (it.cantidad || 0), 0);
   const ent = items.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
-  const cerrado = ent + items.reduce((s, it) => s + (it.cantidadAcreditada || 0), 0);
+  const cerrado = ent + items.reduce((s, it) => s + (it.cantidadAcreditada || 0) + (it.cantidadCerrada || 0), 0);
   return cerrado <= 0 ? 'pendiente' : (cerrado >= total - 1e-9 ? 'entregada' : (ent > 0 || cerrado > 0 ? 'parcialmente_entregada' : 'pendiente'));
 }
 async function ajustarCompromisoPorNota(db, nota, fact, liberar) {
@@ -915,7 +915,7 @@ router.get('/con-saldo', authAdmin, async (req, res) => {
     const lista = await db.collection('ventas').find(filtro).sort({ fecha: -1 }).limit(100).toArray();
     res.json(lista.map(v => {
       const saldo = v.saldoPendiente != null ? v.saldoPendiente : v.total;
-      const pendEntrega = (v.items || []).some(it => (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) > 0) && ['pendiente', 'parcialmente_entregada'].includes(v.estado);
+      const pendEntrega = (v.items || []).some(it => (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0) > 0) && ['pendiente', 'parcialmente_entregada'].includes(v.estado);
       return { _id: v._id, numero: v.numero, numeroOriginal: v.numeroOriginal || '', letra: v.letra || 'X', tipoComprobante: v.tipoComprobante, fecha: v.fecha, total: v.total, clienteNombre: v.clienteNombre || '',
         saldoPendiente: saldo, acreditable: saldo > 0 ? saldo : Math.max(0, Math.round(((v.total || 0) - (v.totalAcreditado || 0)) * 100) / 100), pendienteEntrega: pendEntrega, moneda: v.moneda || 'ARS' };
     }));
@@ -1822,6 +1822,7 @@ router.put('/:id', authAdmin, async (req, res) => {
         if (Array.isArray(body.items)) {
           if (!body.items.length) throw err(400, 'La venta necesita al menos un producto.');
           if (originales.some(o => (o.cantidadAcreditada || 0) > 0)) throw err(400, 'Esta venta tiene notas de crédito aplicadas: no se pueden cambiar sus productos.');
+          if (originales.some(o => (o.cantidadCerrada || 0) > 0)) throw err(400, 'Esta venta tiene productos cerrados sin entregar: reabrí el cierre antes de cambiar sus productos.');
           const usados = new Set();
           body.items.forEach(it => { if (it.index !== undefined && it.index !== null && it.index !== '') { const i = Number(it.index); if (!Number.isInteger(i) || i < 0 || i >= originales.length || usados.has(i)) throw err(400, 'Hay un producto inválido en la venta.'); usados.add(i); } });
           originales.forEach((o, i) => { if (!usados.has(i) && (o.cantidadEntregada || 0) > 0) throw err(400, `No se puede quitar "${o.nombre}": ya se entregó.`); });
@@ -1972,6 +1973,73 @@ router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
       const ent = nuevos.reduce((s, it) => s + (it.cantidadEntregada || 0), 0);
       const estado = ent <= 0 ? 'pendiente' : (ent >= total - 1e-9 ? 'entregada' : 'parcialmente_entregada');
       await db.collection('ventas').updateOne({ _id: id }, { $set: { items: nuevos, estado, entregaCorregida: true, updatedAt: new Date() } });
+      return db.collection('ventas').findOne({ _id: id });
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Cierra una venta SIN entregar lo que falta (10/11/2026, pedido de Mato: "poder cerrarlas aun sin entregar algunos productos, y que
+// al cerrar la venta ya me saque del comprometido sin mover stock"). Lo pendiente de cada ítem pasa a `cantidadCerrada`: sale del comprometido,
+// NO se toca el stock físico y no se genera remito. El total y el saldo de la venta no cambian (si hay que devolverle plata, va con una nota de crédito).
+// body: { items?: [{index}], motivo? } — sin items se cierra todo lo pendiente.
+router.post('/:id/cerrar', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const motivo = String((req.body && req.body.motivo) || '').trim().slice(0, 300);
+    const soloIdx = req.body && Array.isArray(req.body.items) ? new Set(req.body.items.map(x => Number(x.index))) : null;
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const venta = await buscarVentaOperable(db, req, id);
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.tipoComprobante === 'nota_credito' || venta.tipoComprobante === 'nota_debito') throw err(400, 'Las notas de crédito/débito no se cierran.');
+      if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
+      if (venta.estado === 'entregada') throw err(400, 'Esta venta ya está entregada o cerrada.');
+      const ahora = new Date(); const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      const cerrados = [];
+      const items = venta.items.map((it, idx) => {
+        if (soloIdx && !soloIdx.has(idx)) return it;
+        const q = cantidadPendiente(it); if (q <= 1e-9) return it;
+        cerrados.push({ index: idx, productoId: it.productoId || null, nombre: it.nombre || '', cantidad: q });
+        return Object.assign({}, it, { cantidadCerrada: (it.cantidadCerrada || 0) + q });
+      });
+      if (!cerrados.length) throw err(400, 'No hay nada pendiente para cerrar.');
+      if (venta.stockComprometido) {
+        for (const c of cerrados) {
+          if (!c.productoId) continue;
+          await db.collection('stock_actual').updateOne(Object.assign({ productoId: c.productoId, depositoId: venta.depositoId || null }, filtroOrg(req)),
+            { $inc: { cantidadComprometida: -c.cantidad }, $set: { actualizadoEn: ahora } });
+        }
+      }
+      const previos = (venta.cierreSinEntrega && venta.cierreSinEntrega.items) || [];
+      await db.collection('ventas').updateOne({ _id: id }, { $set: { items, estado: estadoSegunItems(items), cierreSinEntrega: { at: ahora, usuario: usuarioNombre, motivo, items: previos.concat(cerrados) }, updatedAt: ahora },
+        $push: { ediciones: { at: ahora, usuario: usuarioNombre, cambios: ['cierre sin entregar: ' + cerrados.map(c => c.cantidad + ' × ' + c.nombre).join(', ')] } } });
+      return db.collection('ventas').findOne({ _id: id });
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+// Deshace el cierre: lo que se había cerrado vuelve a quedar pendiente y comprometido.
+router.post('/:id/reabrir-cierre', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const venta = await buscarVentaOperable(db, req, id);
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if (venta.estado === 'anulada') throw err(400, 'Esta venta está anulada.');
+      if (!venta.items.some(it => (it.cantidadCerrada || 0) > 0)) throw err(400, 'Esta venta no tiene nada cerrado sin entregar.');
+      const ahora = new Date(); const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      if (venta.stockComprometido) {
+        for (const it of venta.items) {
+          const q = it.cantidadCerrada || 0; if (!(q > 0) || !it.productoId) continue;
+          await db.collection('stock_actual').updateOne(Object.assign({ productoId: it.productoId, depositoId: venta.depositoId || null }, filtroOrg(req)),
+            { $inc: { cantidadComprometida: q }, $set: { actualizadoEn: ahora }, $setOnInsert: Object.assign({ productoId: it.productoId, depositoId: venta.depositoId || null, cantidad: 0 }, filtroOrg(req)) }, { upsert: true });
+        }
+      }
+      const items = venta.items.map(it => { const n = Object.assign({}, it); delete n.cantidadCerrada; return n; });
+      await db.collection('ventas').updateOne({ _id: id }, { $set: { items, estado: estadoSegunItems(items), updatedAt: ahora }, $unset: { cierreSinEntrega: '' },
+        $push: { ediciones: { at: ahora, usuario: usuarioNombre, cambios: ['se reabrió el cierre sin entregar'] } } });
       return db.collection('ventas').findOne({ _id: id });
     }));
     res.json(resultado);

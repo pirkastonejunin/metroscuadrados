@@ -1094,7 +1094,7 @@ router.get('/produccion/comprometido', authProduccion, async (req, res) => {
       const filas = [];
       for (const v of ventas) {
         let cantidad = 0;
-        for (const it of (v.items || [])) if (String(it.productoId) === String(cat._id)) cantidad += Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0));
+        for (const it of (v.items || [])) if (String(it.productoId) === String(cat._id)) cantidad += Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0));
         if (cantidad <= 0) continue;
         filas.push({
           ventaId: v._id, clienteId: v.clienteId || null, clienteNombre: v.clienteNombre || 'Sin cliente',
