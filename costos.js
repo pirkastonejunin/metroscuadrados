@@ -980,6 +980,19 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
       const catPorCosto = new Map(catalogo.filter(c => c.costoProductoId).map(c => [String(c.costoProductoId), c]));
       const catDe = p => catPorCosto.get(String(p._id)) || (p.sku ? catPorSku.get(normSku(p.sku)) : null) || null;
       const existencias = catalogo.length ? await db.collection('stock_actual').find({ productoId: { $in: catalogo.map(c => c._id) } }).toArray() : [];
+      // Stock y comprometido por SKU de TODAS las sucursales (10/11/2026, pedido de Mato: "no me salen todos los pendientes"): una venta de otra
+      // sucursal reserva su propia copia del producto (otro registro con el mismo SKU), así que se junta por SKU.
+      const todosCat = skusUp.length ? await db.collection('productos_catalogo').find({ activo: { $ne: false }, sku: { $in: skusUp } }).project({ sku: 1 }).toArray() : [];
+      const skuDeCat = new Map(todosCat.map(c => [String(c._id), normSku(c.sku)]));
+      const existTodas = todosCat.length ? await db.collection('stock_actual').find({ productoId: { $in: todosCat.map(c => c._id) } }).toArray() : [];
+      const stockPorSku = new Map();
+      for (const e of existTodas) {
+        const k = skuDeCat.get(String(e.productoId)); if (!k) continue;
+        const a = stockPorSku.get(k) || { stock: 0, comprometido: 0 };
+        if (e.depositoId != null) a.stock += Number(e.cantidad) || 0;
+        a.comprometido += Number(e.cantidadComprometida) || 0;
+        stockPorSku.set(k, a);
+      }
       const stockPorProd = new Map();
       for (const e of existencias) {
         const k = String(e.productoId);
@@ -1010,7 +1023,7 @@ router.get('/produccion/panel', authProduccion, async (req, res) => {
         }
       }
       const fila = (p, nombre, sku, unidad, rinde, porDia, cat) => {
-        const st = cat ? (stockPorProd.get(String(cat._id)) || { stock: 0, comprometido: 0 }) : null;
+        const st = cat ? (stockPorSku.get(normSku(cat.sku)) || stockPorProd.get(String(cat._id)) || { stock: 0, comprometido: 0 }) : null;
         const disponible = st ? st.stock - st.comprometido : null;
         const faltante = st ? Math.max(0, st.comprometido - st.stock) : null;
         return {
@@ -1084,9 +1097,13 @@ router.get('/produccion/comprometido', authProduccion, async (req, res) => {
         $or: [{ costoProductoId: prod._id }].concat(sku ? [{ sku }] : [])
       }));
       if (!cat) return { producto: prod.nombre, vinculado: false, ventas: [], total: 0, comprometidoStock: null };
+      // mismo SKU en todas las sucursales (cada una tiene su propia copia del producto)
+      const mismos = cat.sku ? await db.collection('productos_catalogo').find({ activo: { $ne: false }, sku: cat.sku }).project({ _id: 1 }).toArray() : [];
+      const idsCat = mismos.length ? mismos.map(m => m._id) : [cat._id];
+      const idsCatStr = new Set(idsCat.map(String));
       const ventas = await db.collection('ventas').find({
         estado: { $in: ['pendiente', 'parcialmente_entregada'] }, canceladaPorNota: { $ne: true },
-        tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] }, 'items.productoId': cat._id
+        tipoComprobante: { $nin: ['nota_credito', 'nota_debito'] }, 'items.productoId': { $in: idsCat }
       }).sort({ fecha: 1 }).toArray();
       const orgIds = [...new Set(ventas.map(v => String(v.orgId || '')).filter(Boolean))].map(toObjectId).filter(Boolean);
       const orgs = orgIds.length ? await db.collection('organizaciones').find({ _id: { $in: orgIds } }).project({ nombre: 1 }).toArray() : [];
@@ -1094,7 +1111,7 @@ router.get('/produccion/comprometido', authProduccion, async (req, res) => {
       const filas = [];
       for (const v of ventas) {
         let cantidad = 0;
-        for (const it of (v.items || [])) if (String(it.productoId) === String(cat._id)) cantidad += Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0));
+        for (const it of (v.items || [])) if (idsCatStr.has(String(it.productoId))) cantidad += Math.max(0, (it.cantidad || 0) - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0));
         if (cantidad <= 0) continue;
         filas.push({
           ventaId: v._id, clienteId: v.clienteId || null, clienteNombre: v.clienteNombre || 'Sin cliente',
@@ -1102,7 +1119,7 @@ router.get('/produccion/comprometido', authProduccion, async (req, res) => {
           estado: v.estado, fecha: v.fecha, sucursal: nombreOrg.get(String(v.orgId || '')) || '', cantidad: redond2(cantidad)
         });
       }
-      const existencias = await db.collection('stock_actual').find({ productoId: cat._id }).toArray();
+      const existencias = await db.collection('stock_actual').find({ productoId: { $in: idsCat } }).toArray();
       const comprometidoStock = redond2(existencias.reduce((a, e) => a + (Number(e.cantidadComprometida) || 0), 0));
       const stock = redond2(existencias.filter(e => e.depositoId != null).reduce((a, e) => a + (Number(e.cantidad) || 0), 0));
       return { producto: prod.nombre, vinculado: true, unidad: cat.unidad || null, ventas: filas, total: redond2(filas.reduce((a, f) => a + f.cantidad, 0)), clientes: new Set(filas.map(f => f.clienteNombre)).size, comprometidoStock, stock };
