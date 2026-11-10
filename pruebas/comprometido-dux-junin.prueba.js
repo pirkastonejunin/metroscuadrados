@@ -17,5 +17,6 @@ const assert = require('assert'); const { start } = require('./harness');
   r = await api('POST', '/api/stock/recalcular-comprometido', { aplicar: true }); assert.equal(r.status, 200, JSON.stringify(r.data));
   const st = await db.collection('stock_actual').findOne({ productoId: prod2, depositoId: junin }); assert.equal(st.cantidadComprometida, 3, JSON.stringify(st));
   const vv = await db.collection('ventas').findOne({ _id: v2 }); assert.equal(String(vv.items[0].productoId), String(prod2));
+  r = await api('GET', `/api/ventas/${v2}/diagnostico-stock`); assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.items.length, 1); assert.equal(r.data.items[0].stock[0].comprometida, 3, JSON.stringify(r.data));
   console.log('OK'); await h.stop(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

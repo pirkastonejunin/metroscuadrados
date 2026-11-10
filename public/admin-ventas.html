@@ -1891,6 +1891,7 @@ function verDetalle(id){
         <div class="row" style="margin-top:10px">
           ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${((v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="cerrarSinEntregar('${v._id}')" title="Da la venta por terminada sin entregar lo que falta: sale del comprometido y no mueve el stock">Cerrar sin entregar lo que falta</button>` : ''}
+          ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary small" onclick="diagnosticoStock('${v._id}')" title="Muestra por qué esta venta aporta (o no) al stock comprometido">Diagnóstico de stock</button>` : ''}
           ${((v.items || []).some(it => (it.cantidadCerrada || 0) > 0) && v.estado !== 'anulada') ? `<button class="btn secondary" onclick="reabrirCierre('${v._id}')">Reabrir cierre</button>` : ''}
           ${(v.importado && v.estado !== 'anulada' && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="abrirAjusteEntrega('${v._id}')">Corregir entrega (Dux)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
@@ -2497,6 +2498,15 @@ async function convertirAFiscal(id){
   }
 }
 
+async function diagnosticoStock(id){
+  try{
+    const r = await fetch(BASE + '/' + id + '/diagnostico-stock', {headers: headersAuthJson()}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    const txt = ['Venta ' + d.comprobante + ' · ' + d.estado + ' · sucursal: ' + d.sucursal + ' · depósito: ' + d.deposito + ' · reservó stock: ' + (d.stockComprometido ? 'sí' : 'NO') + (d.canceladaPorNota ? ' · cancelada por NC' : '')]
+      .concat(d.items.map(i => '\n• ' + i.sku + ' ' + i.nombre + ' (pendiente ' + i.pendiente + ')\n   producto: ' + (i.productoId ? (typeof i.producto === 'string' ? i.producto : (i.producto.sku + ' · ' + (i.producto.activo ? 'activo' : 'INACTIVO') + ' · ' + i.producto.sucursal + (i.otrosConMismoSku ? ' · hay ' + i.otrosConMismoSku + ' más con el mismo SKU' : ''))) : 'SIN VINCULAR' + ((i.candidatos || []).length ? ' (en el catálogo hay: ' + i.candidatos.map(c => c.sku + '/' + c.sucursal + (c.activo ? '' : ' inactivo')).join(', ') + ')' : ''))
+        + (i.stock && i.stock.length ? '\n   stock: ' + i.stock.map(s => s.deposito + '/' + s.sucursal + ': ' + s.cantidad + ' (comprometido ' + s.comprometida + ')').join(' | ') : ''))).join('\n');
+    alert(txt);
+  }catch(e){ alert(e.message); }
+}
 async function cerrarSinEntregar(id){
   const v = ventasCache.find(x => x._id === id); if (!v) return;
   const falta = (v.items || []).map(it => ({ n: it.nombre, q: Math.max(0, it.cantidad - (it.cantidadEntregada || 0) - (it.cantidadAcreditada || 0) - (it.cantidadCerrada || 0)) })).filter(x => x.q > 0);

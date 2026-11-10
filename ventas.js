@@ -1979,6 +1979,33 @@ router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Diagnóstico: por qué una venta pendiente aporta (o no) al stock comprometido. Solo lee. (10/11/2026)
+router.get('/:id/diagnostico-stock', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const db = await getDb();
+    const venta = await db.collection('ventas').findOne(Object.assign({ _id: id }, req.vistaTodas ? {} : filtroOrg(req)));
+    if (!venta) throw err(404, 'Venta no encontrada');
+    const orgs = new Map((await db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray()).map(o => [String(o._id), o.nombre]));
+    const deps = new Map((await db.collection('depositos').find({}).project({ nombre: 1, orgId: 1 }).toArray()).map(d => [String(d._id), d]));
+    const out = { comprobante: venta.numeroOriginal || venta.numero, estado: venta.estado, sucursal: orgs.get(String(venta.orgId)) || String(venta.orgId || ''), stockComprometido: !!venta.stockComprometido,
+      deposito: venta.depositoId ? ((deps.get(String(venta.depositoId)) || {}).nombre || String(venta.depositoId)) : '(sin depósito)', canceladaPorNota: !!venta.canceladaPorNota, items: [] };
+    for (const it of (venta.items || [])) {
+      const fila = { sku: it.sku || '', nombre: it.nombre || '', pendiente: cantidadPendiente(it), productoId: it.productoId ? String(it.productoId) : null, producto: null, otrosConMismoSku: 0, stock: [] };
+      if (it.productoId) {
+        const p = await db.collection('productos_catalogo').findOne({ _id: it.productoId }, { projection: { sku: 1, nombre: 1, activo: 1, orgId: 1 } });
+        fila.producto = p ? { sku: p.sku, nombre: p.nombre, activo: p.activo !== false, sucursal: orgs.get(String(p.orgId)) || String(p.orgId || '') } : '(el producto ya no existe)';
+        if (p && p.sku) fila.otrosConMismoSku = await db.collection('productos_catalogo').countDocuments({ sku: p.sku, _id: { $ne: p._id } });
+        const rows = await db.collection('stock_actual').find({ productoId: it.productoId }).toArray();
+        fila.stock = rows.map(r => ({ deposito: r.depositoId ? ((deps.get(String(r.depositoId)) || {}).nombre || String(r.depositoId)) : '(sin depósito)', sucursal: orgs.get(String(r.orgId)) || String(r.orgId || ''), cantidad: r.cantidad || 0, comprometida: r.cantidadComprometida || 0 }));
+      } else if (it.sku) {
+        fila.candidatos = (await db.collection('productos_catalogo').find({ sku: it.sku }).project({ sku: 1, nombre: 1, activo: 1, orgId: 1 }).limit(5).toArray()).map(p => ({ sku: p.sku, activo: p.activo !== false, sucursal: orgs.get(String(p.orgId)) || '' }));
+      }
+      out.items.push(fila);
+    }
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 // Cierra una venta SIN entregar lo que falta (10/11/2026, pedido de Mato: "poder cerrarlas aun sin entregar algunos productos, y que
 // al cerrar la venta ya me saque del comprometido sin mover stock"). Lo pendiente de cada ítem pasa a `cantidadCerrada`: sale del comprometido,
 // NO se toca el stock físico y no se genera remito. El total y el saldo de la venta no cambian (si hay que devolverle plata, va con una nota de crédito).
