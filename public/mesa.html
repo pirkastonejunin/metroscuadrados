@@ -612,7 +612,9 @@ async function cargar(opts){
 async function abrirCaj(l, o){
   VENT = null; PLANT = [];
   // contacto sin chat (Azuite / histórico / a mano): se le crea la conversación vacía para poder moverlo, anotarlo y cerrarlo
-  if (!l.convId && (l.opId || l.leadId) && !(o && o.sinMat)){ try{ const r = await post('/api/mesa/materializar', {opId:l.opId, leadId:l.leadId}); sel = r.convId; await cargar(); const n = cur(); if (n && n.convId) return abrirCaj(n, o); return; }catch(e){ err(e); } }
+  if (!l.convId && (l.opId || l.leadId) && !(o && o.sinMat)){ try{ const r = await post('/api/mesa/materializar', {opId:l.opId, leadId:l.leadId}); sel = r.convId; await cargar(); let n = cur() || ITEMS.find(x=>x.convId===r.convId);
+      if (!n){ n = Object.assign({}, l, {id:r.convId, convId:r.convId}); ITEMS.push(n); sel = n.id; } // la conversación existe pero el tablero no la muestra como tarjeta propia: se abre igual
+      return abrirCaj(n, o); }catch(e){ err(e); return; } }
   if (l.convId){ try{ const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()}); MSGS = d.mensajes; VENT = d.ventana||null; PLANT = d.plantillas||[]; }catch(e){ err(e); MSGS=[]; } } else MSGS = [];
   pintarCaj(l, o);
 }
