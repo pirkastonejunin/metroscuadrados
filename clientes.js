@@ -567,7 +567,23 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       const historial = { debito: 0, credito: 0 };
       vt.forEach(x => { if (x._id) historial.credito += x.t; else historial.debito += x.t; }); mt.forEach(x => { if (x._id === 'credito') historial.credito += x.t; else historial.debito += x.t; });
       historial.debito = Math.round(historial.debito * 100) / 100; historial.credito = Math.round(historial.credito * 100) / 100;
-      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos, ventasPorId, historial, completo: movimientos.length < limite };
+      // Mismo cliente cargado en otras sucursales (otra ficha con el mismo CUIT/CUIL o documento): se muestra su saldo para ver la deuda total.
+      const otrasCuentas = [];
+      try {
+        const claves = [cliente.cuit, cliente.numeroDocumento].map(x => String(x || '').replace(/\D/g, '')).filter(x => x.length >= 7);
+        if (claves.length) {
+          const cand = await db.collection('clientes').find({ _id: { $ne: id }, activo: { $ne: false }, $or: [{ cuit: { $in: claves } }, { numeroDocumento: { $in: claves } }, { cuit: { $in: [cliente.cuit].filter(Boolean) } }, { numeroDocumento: { $in: [cliente.numeroDocumento].filter(Boolean) } }] })
+            .project({ apellidoRazonSocial: 1, nombre: 1, orgId: 1 }).limit(10).toArray();
+          if (cand.length) {
+            const sal = await db.collection('cuenta_corriente_saldos').find({ clienteId: { $in: cand.map(c => c._id) } }).toArray();
+            const orgs = await db.collection('organizaciones').find({ _id: { $in: cand.map(c => c.orgId).filter(Boolean) } }).project({ nombre: 1 }).toArray();
+            const nomOrg = new Map(orgs.map(o => [String(o._id), o.nombre]));
+            const salPor = new Map(sal.map(x => [String(x.clienteId), x.saldo || 0]));
+            cand.forEach(c => otrasCuentas.push({ _id: c._id, nombre: [c.apellidoRazonSocial, c.nombre].filter(Boolean).join(' '), sucursal: nomOrg.get(String(c.orgId)) || '', saldo: salPor.get(String(c._id)) || 0 }));
+          }
+        }
+      } catch (e) { /* informativo: nunca rompe la cuenta */ }
+      return { cliente, saldo: (saldoDoc && saldoDoc.saldo) || 0, movimientos, ventasPorId, historial, otrasCuentas, completo: movimientos.length < limite };
     });
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

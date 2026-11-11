@@ -1017,6 +1017,7 @@ async function cargarCuentaCorrienteTab(id){
     window._ccCtx = { id, cliente: data.cliente, saldo: data.saldo, filas, saldoAnterior };
     window._ccVentas = ventasPorId;
     cont.innerHTML = `
+      ${(data.otrasCuentas||[]).length ? (()=>{ const tot = data.saldo + data.otrasCuentas.reduce((t,x)=>t+x.saldo,0); return `<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border,#ccc);border-radius:8px;font-size:13px"><b>Este cliente también está en otra sucursal</b> (mismo CUIT/documento):<br>${data.otrasCuentas.map(x=>`• ${escapeHtml(x.sucursal||'otra sucursal')} — ${escapeHtml(x.nombre)}: <b>${money(x.saldo)}</b>`).join('<br>')}<br><b>Saldo total entre sucursales: ${money(tot)}</b></div>`; })() : ''}
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative">
         <p class="muted" style="margin:0">Saldo: <strong style="color:${data.saldo > 0 ? 'var(--danger)' : (data.saldo < 0 ? 'var(--ok)' : 'var(--text)')}">${saldoTexto}</strong></p>
         <div style="position:relative">
