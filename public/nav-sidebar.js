@@ -40,7 +40,21 @@
           }
         }
       } catch (e) { /* nunca romper un pedido por esto */ }
-      return f0.call(this, input, init);
+      const p = f0.call(this, input, init);
+      // Si el servidor dice que la sesión se cerró (inactividad, vencida o revocada), vuelve al login.
+      try {
+        const url2 = typeof input === 'string' ? input : (input && input.url) || '';
+        if (url2.indexOf('/api/') !== -1 && url2.indexOf('/api/usuarios/login') === -1) {
+          p.then(function (r) {
+            if (r && r.status === 401 && localStorage.getItem(TOKEN_KEY)) {
+              r.clone().json().then(function (j) {
+                if (j && /Sesi[oó]n cerrada|vencida/i.test(j.error || '')) { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(ORG_KEY); location.href = '/inicio.html'; }
+              }).catch(function () {});
+            }
+          }).catch(function () {});
+        }
+      } catch (e) {}
+      return p;
     };
   })();
   let OCULTAR_ORG = false;

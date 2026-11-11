@@ -65,6 +65,16 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
     await db.collection('sesiones').updateMany({ revocada: false }, { $set: { expira: new Date(Date.now() - 1000) } });
     assert.strictEqual((await req('GET', '/api/usuarios/me', null, T(t))).status, 401);
   });
+  await caso('3 horas sin usar el sistema cierra la sesión; con 2 h sigue valiendo', async () => {
+    const t = await login();
+    await db.collection('sesiones').updateMany({ revocada: false }, { $set: { ultimoUso: new Date(Date.now() - 2 * 3600e3) } });
+    assert.strictEqual((await req('GET', '/api/usuarios/me', null, T(t))).status, 200);
+    await db.collection('sesiones').updateMany({ revocada: false }, { $set: { ultimoUso: new Date(Date.now() - 3.2 * 3600e3) } });
+    const r = await req('GET', '/api/usuarios/me', null, T(t));
+    assert.strictEqual(r.status, 401);
+    assert.ok(/inactividad/.test(JSON.stringify(r.body || r.data || r)), 'sin mensaje de inactividad');
+    assert.strictEqual((await req('GET', '/api/usuarios/me', null, T(t))).status, 401);
+  });
   await caso('token viejo (sin sesión) sigue valiendo hasta el corte, y "cerrar todas" lo anula', async () => {
     const uid = (await db.collection('usuarios').findOne({}))._id;
     const mk = (ts) => { const p = `${uid}.${ts}`; return Buffer.from(p).toString('base64') + '.' + crypto.createHmac('sha256', 'test-secret').update('usuario.' + p).digest('hex'); };

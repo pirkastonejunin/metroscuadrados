@@ -198,6 +198,7 @@ function hmac(data) {
 // Los tokens viejos (sin sesión, de antes de este cambio) siguen valiendo hasta LEGACY_HASTA, para no sacar a todos de golpe.
 const SESION_DIAS = 30;
 const LEGACY_HASTA = new Date('2026-11-17T00:00:00-03:00');
+const INACTIVIDAD_MS = 3 * 60 * 60 * 1000;
 function crearToken(usuarioId, sesionId) {
   const payload = `${usuarioId}.${Date.now()}.${sesionId}`;
   return Buffer.from(payload).toString('base64') + '.' + hmac(payload);
@@ -321,8 +322,14 @@ async function authUsuario(req, res, next) {
       const sesion = await conReintento(() => db.collection('sesiones').findOne({ _id: toObjectId(tk.sid), usuarioId: datos.usuario._id }));
       const ahora = Date.now();
       if (!sesion || sesion.revocada || new Date(sesion.expira).getTime() < ahora) return res.status(401).json({ error: 'Sesión cerrada o vencida, iniciá sesión de nuevo' });
-      // Se renueva con el uso (a lo sumo una vez cada 10 minutos, para no escribir en cada pedido).
-      if (ahora - new Date(sesion.ultimoUso).getTime() > 10 * 60 * 1000) db.collection('sesiones').updateOne({ _id: sesion._id }, { $set: { ultimoUso: new Date(ahora), expira: new Date(ahora + SESION_DIAS * 864e5), ip: ipDe(req) } }).catch(() => {});
+      // Inactividad: más de 3 horas sin usar el sistema → la sesión se cierra (hay que volver a entrar).
+      const ultimo = new Date(sesion.ultimoUso || sesion.creada).getTime();
+      if (ahora - ultimo > INACTIVIDAD_MS) {
+        db.collection('sesiones').updateOne({ _id: sesion._id }, { $set: { revocada: true, revocadaEn: new Date(), revocadaPor: 'inactividad' } }).catch(() => {});
+        return res.status(401).json({ error: 'Sesión cerrada por inactividad (más de 3 horas), iniciá sesión de nuevo' });
+      }
+      // Se renueva con el uso (a lo sumo una vez cada 2 minutos, para no escribir en cada pedido).
+      if (ahora - new Date(sesion.ultimoUso).getTime() > 2 * 60 * 1000) db.collection('sesiones').updateOne({ _id: sesion._id }, { $set: { ultimoUso: new Date(ahora), expira: new Date(ahora + SESION_DIAS * 864e5), ip: ipDe(req) } }).catch(() => {});
       req.sesionId = String(sesion._id);
     }
     if (!datos.rol) return res.status(401).json({ error: 'Este usuario no tiene un rol asignado — pedile a un administrador que le asigne uno' });
