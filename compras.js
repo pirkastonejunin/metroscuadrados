@@ -208,7 +208,7 @@ const COLUMNAS_COMPRAS_EXPORT = [
 // (recibir, anular, pagar, imputar a obra...) hay que trabajar en la sucursal de esa compra, si no sale "Compra no encontrada".
 async function orgDeLaCompra(req, res, next) {
   try {
-    if (!req.vistaTodas || req.method === 'GET' || !req.params || !/^[0-9a-f]{24}$/i.test(String(req.params.id || ''))) return next();
+    if (!req.vistaTodas || req.method === 'GET' || /\/pagos$/.test(req.path) || !req.params || !/^[0-9a-f]{24}$/i.test(String(req.params.id || ''))) return next();
     const c = await (await getDb()).collection('compras').findOne({ _id: toObjectId(req.params.id) }, { projection: { orgId: 1 } });
     if (c && c.orgId) req.orgId = c.orgId;
     next();
@@ -736,7 +736,7 @@ router.get('/pagos', authAdmin, async (req, res) => {
 router.get('/cheques-tercero', authAdmin, async (req, res) => {
   try {
     const lista = await conReintento(async () => (await getDb()).collection('cheques')
-      .find(Object.assign({ tipo: 'tercero', estado: 'en_cartera' }, filtroOrg(req))).sort({ fechaVencimiento: 1 }).limit(500).toArray());
+      .find({ tipo: 'tercero', estado: 'en_cartera' }).sort({ fechaVencimiento: 1 }).limit(500).toArray());
     res.json(lista.map(c => ({ _id: c._id, numero: c.numero, banco: c.banco, librador: c.librador, clienteNombre: c.clienteNombre, monto: c.monto, moneda: c.moneda || 'ARS', fechaVencimiento: c.fechaVencimiento })));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1491,7 +1491,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   const pagoCuentaId = new ObjectId();
   let chequesTercero = [];
   if (tipoValor === 'cheque_tercero') {
-    chequesTercero = await db.collection('cheques').find(Object.assign({ _id: { $in: chequesTerceroIds }, tipo: 'tercero', estado: 'en_cartera' }, filtroOrg(req))).toArray();
+    chequesTercero = await db.collection('cheques').find({ _id: { $in: chequesTerceroIds }, tipo: 'tercero', estado: 'en_cartera' }).toArray();
     if (chequesTercero.length !== chequesTerceroIds.length) throw err(400, 'Algún cheque ya no está en cartera (se usó, depositó o anuló). Refrescá la lista y elegí de nuevo.');
     if (chequesTercero.some(c => (c.moneda || 'ARS') !== (moneda || 'ARS'))) throw err(400, 'Hay cheques en otra moneda que la del pago.');
     const sumaCheques = Math.round(chequesTercero.reduce((a, c) => a + (c.monto || 0), 0) * 100) / 100;
@@ -1501,7 +1501,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   // Se valida TODO antes de mover plata (16/10/2026): antes la salida de caja se registraba primero y recién después se controlaban las
   // compras; si algo fallaba (por ejemplo un doble clic: la compra ya no tenía saldo), el movimiento de caja quedaba sin pago.
   for (const aplic of aplicaciones) {
-    const compra = await db.collection('compras').findOne(Object.assign({ _id: aplic.compraId }, filtroOrg(req)));
+    const compra = await db.collection('compras').findOne({ _id: aplic.compraId }); // base única: se puede pagar una compra de otra sucursal
     if (!compra) throw err(404, 'Una de las compras elegidas no existe o es de otra sucursal. Si es de otra sucursal, cambiá "Opero en" (barra de arriba) a esa sucursal para pagarla.');
     if (compra.estado === 'anulada') throw err(400, `La compra #${compra.numero} está anulada, no se le pueden registrar pagos.`);
     if (String(compra.proveedorId) !== String(proveedorId)) throw err(400, `La compra #${compra.numero} no es de este proveedor.`);
@@ -1538,7 +1538,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   const compras = [];
   const aplicacionesGuardadas = [];
   for (const aplic of aplicaciones) {
-    const compra = await db.collection('compras').findOne(Object.assign({ _id: aplic.compraId }, filtroOrg(req)));
+    const compra = await db.collection('compras').findOne({ _id: aplic.compraId }); // base única: se puede pagar una compra de otra sucursal
     if (!compra) throw err(404, 'Una de las compras elegidas no existe o es de otra sucursal. Si es de otra sucursal, cambiá "Opero en" (barra de arriba) a esa sucursal para pagarla.');
     if (compra.estado === 'anulada') throw err(400, `La compra #${compra.numero} está anulada, no se le pueden registrar pagos.`);
     if (String(compra.proveedorId) !== String(proveedorId)) throw err(400, `La compra #${compra.numero} no es de este proveedor.`);
@@ -1666,7 +1666,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     const datosPago = normalizarDatosPago(body, fecha);
 
     const resultado = await conReintento(() => enTransaccion(async (db) => {
-      const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const compra = await db.collection('compras').findOne({ _id: id });
       if (!compra) throw err(404, 'Compra no encontrada');
       if (compra.estado === 'anulada') throw err(400, 'Esta compra está anulada, no se le pueden registrar pagos.');
       if (monto > compra.saldoPendiente + 0.01) throw err(400, `El monto no puede ser mayor que el saldo pendiente (${compra.saldoPendiente}).`);
