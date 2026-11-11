@@ -1979,6 +1979,25 @@ router.post('/:id/ajustar-entrega', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Cambiar el vendedor de CUALQUIER venta ya hecha (11/11/2026, pedido de Mato): fiscal con CAE, migrada de Dux, entregada o anulada.
+// El vendedor no es un dato fiscal ni mueve stock ni cuenta corriente: solo cambia a quién se le atribuye (comisiones, filtros y reportes).
+router.put('/:id/vendedor', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const nuevo = normalizarTexto((req.body || {}).vendedor);
+    const resultado = await conReintento(async () => {
+      const db = await getDb();
+      const venta = await buscarVentaOperable(db, req, id);
+      if (!venta) throw err(404, 'Venta no encontrada');
+      if ((venta.vendedor || '') === nuevo) return venta;
+      const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
+      await db.collection('ventas').updateOne({ _id: id }, { $set: { vendedor: nuevo, updatedAt: new Date() }, $push: { ediciones: { at: new Date(), usuario: usuarioNombre, cambios: ['vendedor: ' + (venta.vendedor || '(sin vendedor)') + ' → ' + (nuevo || '(sin vendedor)')] } } });
+      return db.collection('ventas').findOne({ _id: id });
+    });
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
 // Diagnóstico: por qué una venta pendiente aporta (o no) al stock comprometido. Solo lee. (10/11/2026)
 router.get('/:id/diagnostico-stock', authAdmin, async (req, res) => {
   try {
