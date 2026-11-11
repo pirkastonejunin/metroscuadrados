@@ -234,7 +234,7 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
     const out = await conReintento(async () => {
       const db = await getDb();
       const compartidos = req.orgId ? (await db.collection('proveedores').find({ $or: [{ orgIdsCompartidas: req.orgId }, { orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }] }).project({ _id: 1 }).toArray()).map(x => x._id) : [];
-      const fo = req.orgId ? (compartidos.length ? { $or: [{ orgId: req.orgId }, { proveedorId: { $in: compartidos } }] } : { orgId: req.orgId }) : {};
+      const fo = {}; // cuenta única entre sucursales
       const mapa = new Map();
       const suma = (id, v) => { if (!id) return; const k = String(id); mapa.set(k, (mapa.get(k) || 0) + v); };
       const esNC = { $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } };
@@ -297,7 +297,7 @@ router.get('/conciliacion-dux', authAdmin, async (req, res) => {
     const out = await conReintento(async () => {
       const db = await getDb();
       const compartidos = req.orgId ? (await db.collection('proveedores').find({ $or: [{ orgIdsCompartidas: req.orgId }, { orgId: req.orgId, 'orgIdsCompartidas.0': { $exists: true } }] }).project({ _id: 1 }).toArray()).map(x => x._id) : [];
-      const fo = req.orgId ? (compartidos.length ? { $or: [{ orgId: req.orgId }, { proveedorId: { $in: compartidos } }] } : { orgId: req.orgId }) : {};
+      const fo = {}; // cuenta única entre sucursales
       const signo = { $cond: [{ $regexMatch: { input: { $ifNull: ['$tipoComprobante', ''] }, regex: '^nota_credito' } }, -1, 1] };
       const agg = (col, extra, valor) => db.collection(col).aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, extra, fo) }, { $group: { _id: '$proveedorId', t: { $sum: valor }, n: { $sum: 1 } } }]).toArray();
       const [ini, compras, gastos, pagos, pagosGasto] = await Promise.all([
@@ -525,7 +525,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
       if (!proveedor) throw err(404, 'Proveedor no encontrado');
 
       // Un proveedor compartido entre sucursales (unificado) muestra toda su cuenta, de todas las sucursales que lo usan.
-      const fOrg = (proveedor.orgIdsCompartidas || []).length ? { orgId: { $in: [proveedor.orgId].concat(proveedor.orgIdsCompartidas) } } : filtroOrg(req);
+      const fOrg = {}; // cuenta corriente única: toda la actividad del proveedor, de todas las sucursales
       // Reparación: pagos hechos en modo "todas las sucursales" quedaron sin sucursal y no aparecían; se la ponemos según la compra a la que se aplicaron.
       const huerfanos = await db.collection('compras_pagos').find({ proveedorId: id, $or: [{ orgId: null }, { orgId: { $exists: false } }] }).toArray();
       for (const hp of huerfanos) {

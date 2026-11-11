@@ -427,7 +427,8 @@ function filtroOrg(req) {
 // Clientes: además de los de la sucursal, los clientes COMPARTIDOS con ella (un mismo cliente que opera en varias sucursales, unificado
 // con "Unificar duplicados"): tienen su sucursal de origen en orgId y las demás en orgIdsCompartidas.
 function filtroOrgClientes(req) {
-  return req.orgId ? { $or: [{ orgId: req.orgId }, { orgIdsCompartidas: req.orgId }] } : {};
+  // 11/11/2026 (pedido de Mato): clientes y proveedores son UNA sola base para todas las sucursales (una ficha, una cuenta corriente).
+  return {};
 }
 // Backfill perezoso, una sola vez por proceso: le pone la organización por
 // defecto a los documentos viejos de `coleccion` que no tienen orgId
@@ -1056,7 +1057,7 @@ module.exports.filtroOrgClientes = filtroOrgClientes;
 // a la que el usuario tiene acceso, se comparte con la actual (un mismo cliente que opera en varias sucursales es UNA sola ficha y un solo saldo).
 module.exports.cargarClienteParaOperar = async function (db, req, clienteId) {
   const col = db.collection('clientes');
-  let c = await col.findOne(Object.assign({ _id: clienteId }, filtroOrgClientes(req)));
+  let c = await col.findOne({ _id: clienteId }); // base única: se usa desde cualquier sucursal
   if (c || !req.orgId) return c;
   const otro = await col.findOne({ _id: clienteId });
   if (!otro) return null;
@@ -1071,7 +1072,7 @@ module.exports.cargarClienteParaOperar = async function (db, req, clienteId) {
 module.exports.cargarProveedorParaOperar = async function (db, req, proveedorId) {
   const col = db.collection('proveedores');
   const filtro = req.orgId ? { $or: [{ orgId: req.orgId }, { orgIdsCompartidas: req.orgId }] } : {};
-  let p = await col.findOne(Object.assign({ _id: proveedorId }, filtro));
+  let p = await col.findOne({ _id: proveedorId }); // base única: se usa desde cualquier sucursal
   if (p || !req.orgId) return p;
   const otro = await col.findOne({ _id: proveedorId });
   if (!otro) return null;
