@@ -1933,8 +1933,7 @@ async function modificarRemito(remId, ventaId){
         const items = rem.items.map((it,i)=>({index:i, cantidad:Number(document.getElementById('remQ'+i).value)}));
         const rr = await fetch(BASE + '/remitos/' + remId, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({items, observaciones: document.getElementById('remObs').value})});
         const d = await rr.json(); if (!rr.ok) throw new Error(d.error || 'Error');
-        w.remove(); alert('Remito modificado'); cargarRemitosDetalle(ventaId);
-        if (typeof cargar === 'function') { try{ cargar(); }catch(e){} }
+        w.remove(); await cargarVentas(); verDetalle(ventaId); // se vuelve a leer la venta para que Entregado / Pendiente se actualicen
       }catch(e){ document.getElementById('remErr').textContent = e.message; btn.disabled = false; }
     };
   }catch(e){ alert(e.message); }
