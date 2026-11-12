@@ -1892,7 +1892,6 @@ function verDetalle(id){
           ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary" onclick="abrirEntregar('${v._id}')">Generar remito (descuenta stock)</button>` : ''}
           ${((v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="cerrarSinEntregar('${v._id}')" title="Da la venta por terminada sin entregar lo que falta: sale del comprometido y no mueve el stock">Cerrar sin entregar lo que falta</button>` : ''}
           ${(v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="cambiarVendedorVenta('${v._id}')" title="Cambia a quién se le atribuye la venta (sirve también para facturas y ventas de Dux)">Cambiar vendedor</button>` : ''}
-          ${(v.estado === 'pendiente' || v.estado === 'parcialmente_entregada') ? `<button class="btn secondary small" onclick="diagnosticoStock('${v._id}')" title="Muestra por qué esta venta aporta (o no) al stock comprometido">Diagnóstico de stock</button>` : ''}
           ${((v.items || []).some(it => (it.cantidadCerrada || 0) > 0) && v.estado !== 'anulada') ? `<button class="btn secondary" onclick="reabrirCierre('${v._id}')">Reabrir cierre</button>` : ''}
           ${(v.importado && v.estado !== 'anulada' && v.tipoComprobante !== 'nota_credito' && v.tipoComprobante !== 'nota_debito') ? `<button class="btn secondary" onclick="abrirAjusteEntrega('${v._id}')">Corregir entrega (Dux)</button>` : ''}
           ${v.estado !== 'anulada' && v.saldoPendiente > 0 ? `<button class="btn secondary" onclick="abrirCobro('${v._id}')">Registrar cobro</button>` : ''}
@@ -1912,6 +1911,34 @@ function verDetalle(id){
 // Lista todos los remitos de la venta (3/10/2026, pedido de Mato: "una
 // venta puede tener varios remitos") — se pide aparte porque la venta en
 // caché no trae el detalle de cada remito, solo iba a tener el último.
+
+// Modificar un remito ya hecho: cambia las cantidades entregadas y la observación (ajusta stock y pendiente de la venta).
+async function modificarRemito(remId, ventaId){
+  try{
+    const r = await fetch(BASE + '/remitos/' + remId, {headers: headersAuth()}); const rem = await r.json();
+    if (!r.ok) throw new Error(rem.error || 'Error');
+    const w = document.createElement('div'); w.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    w.innerHTML = `<div style="background:var(--surface,#fff);color:var(--text,#222);border-radius:12px;padding:18px;max-width:560px;width:100%;max-height:90vh;overflow:auto">
+      <h3 style="margin:0 0 6px">Modificar remito N° ${rem.numero}</h3>
+      <p class="muted" style="margin:0 0 10px;font-size:13px">Si bajás una cantidad, esa mercadería vuelve al stock y queda pendiente de entrega. Si la subís, sale más stock y baja lo pendiente.</p>
+      ${rem.items.map((it,i)=>`<div style="display:flex;gap:8px;align-items:center;margin:6px 0"><span style="flex:1">${escapeHtml(it.nombre)}${it.sku?` <span class="muted">(${escapeHtml(String(it.sku))})</span>`:''}</span><input type="number" step="any" min="0" id="remQ${i}" value="${it.cantidad}" style="width:110px"></div>`).join('')}
+      <label style="display:block;margin-top:10px;font-size:13px">Observaciones<br><textarea id="remObs" rows="2" style="width:100%">${escapeHtml(rem.observaciones||'')}</textarea></label>
+      <p class="err" id="remErr" style="margin:6px 0"></p>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn secondary" id="remNo">Cancelar</button><button class="btn" id="remSi">Guardar cambios</button></div></div>`;
+    document.body.appendChild(w);
+    document.getElementById('remNo').onclick = () => w.remove();
+    document.getElementById('remSi').onclick = async () => {
+      const btn = document.getElementById('remSi'); btn.disabled = true;
+      try{
+        const items = rem.items.map((it,i)=>({index:i, cantidad:Number(document.getElementById('remQ'+i).value)}));
+        const rr = await fetch(BASE + '/remitos/' + remId, {method:'PUT', headers: headersAuthJson(), body: JSON.stringify({items, observaciones: document.getElementById('remObs').value})});
+        const d = await rr.json(); if (!rr.ok) throw new Error(d.error || 'Error');
+        w.remove(); alert('Remito modificado'); cargarRemitosDetalle(ventaId);
+        if (typeof cargar === 'function') { try{ cargar(); }catch(e){} }
+      }catch(e){ document.getElementById('remErr').textContent = e.message; btn.disabled = false; }
+    };
+  }catch(e){ alert(e.message); }
+}
 async function cargarRemitosDetalle(ventaId){
   const cont = document.getElementById('dvRemitos');
   if (!cont) return;
@@ -1926,6 +1953,7 @@ async function cargarRemitosDetalle(ventaId){
         <div class="row" style="margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px">
           <span class="muted" style="font-size:12px">Remito N° ${rem.numero} — ${fechaCorta(rem.fecha)}:</span>
           ${botonesImprimible(BASE+'/remitos/'+rem._id+'/imprimir')}
+          <button class="btn secondary small" onclick="modificarRemito('${rem._id}','${ventaId}')">✏️ Modificar</button>
         </div>
       `).join('')
       : '<p class="muted">Todavía no se generó ningún remito.</p>';

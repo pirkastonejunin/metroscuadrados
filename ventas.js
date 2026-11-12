@@ -1186,6 +1186,94 @@ router.get('/remitos/:id', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Modificar un remito ya hecho (12/11/2026, pedido de Mato): cambia las cantidades entregadas de sus líneas y/o la observación.
+// Cada diferencia mueve el stock físico del depósito del remito (si se entregó de menos vuelve; si se entregó de más sale) y ajusta lo
+// entregado/pendiente/comprometido de la venta. Queda registrado quién y cuándo en `ediciones`. Body: { items:[{ index, cantidad }], observaciones }.
+router.put('/remitos/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const remito = await db.collection('remitos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!remito) throw err(404, 'Remito no encontrado');
+      if (remito.anulado) throw err(400, 'El remito está anulado.');
+      const venta = await db.collection('ventas').findOne({ _id: remito.ventaId });
+      if (!venta) throw err(404, 'No se encontró la venta de este remito.');
+      if (venta.estado === 'anulada') throw err(400, 'La venta está anulada: no se puede modificar el remito.');
+      const nuevas = remito.items.map(it => Number(it.cantidad) || 0);
+      if (Array.isArray(b.items)) {
+        for (const e of b.items) {
+          const i = Number(e.index);
+          if (!Number.isInteger(i) || i < 0 || i >= nuevas.length) throw err(400, 'Línea de remito inválida.');
+          const c = Number(e.cantidad);
+          if (!Number.isFinite(c) || c < 0) throw err(400, 'Cantidad inválida.');
+          nuevas[i] = Math.round(c * 10000) / 10000;
+        }
+      }
+      if (!nuevas.some(c => c > 0)) throw err(400, 'El remito no puede quedar sin cantidades. Si no se entregó nada, hay que anular la entrega.');
+      // qué ítem de la venta corresponde a cada línea del remito
+      const usados = new Set();
+      const idxVenta = remito.items.map(it => {
+        let k = venta.items.findIndex((v, j) => !usados.has(j) && String(v.productoId || '') === String(it.productoId || '') && (v.sku || '') === (it.sku || '') && (v.cantidadEntregada || 0) >= (Number(it.cantidad) || 0) - 1e-9);
+        if (k < 0) k = venta.items.findIndex((v, j) => !usados.has(j) && String(v.productoId || '') === String(it.productoId || '') && (v.nombre || '') === (it.nombre || ''));
+        if (k >= 0) usados.add(k);
+        return k;
+      });
+      const cambios = [];
+      remito.items.forEach((it, i) => { const d = Math.round((nuevas[i] - (Number(it.cantidad) || 0)) * 10000) / 10000; if (Math.abs(d) > 1e-9) cambios.push({ i, d }); });
+      const itemsVenta = venta.items.map(v => Object.assign({}, v));
+      const depositoId = remito.depositoId;
+      const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+      // 1) validar todo antes de mover stock
+      for (const { i, d } of cambios) {
+        const k = idxVenta[i];
+        if (k < 0) throw err(400, `No se encontró en la venta el ítem "${remito.items[i].nombre}".`);
+        if (d > 0) {
+          const pend = cantidadPendiente(itemsVenta[k]);
+          if (d > pend + 1e-9) throw err(400, `No se puede entregar ${d} más de "${remito.items[i].nombre}": solo queda pendiente ${pend}.`);
+        } else if ((itemsVenta[k].cantidadEntregada || 0) + d < -1e-9) throw err(400, `"${remito.items[i].nombre}": la venta no tiene tanto entregado para quitar.`);
+      }
+      const sube = cambios.filter(c => c.d > 0).map(({ i, d }) => Object.assign({}, remito.items[i], { cantidad: d }));
+      if (sube.length && !venta.importado) await validarStockFisicoParaRemito(db, req, sube, depositoId);
+      // 2) mover stock y actualizar la venta
+      for (const { i, d } of cambios) {
+        const it = remito.items[i], k = idxVenta[i];
+        if (it.productoId) {
+          await aplicarMovimientoStock(db, req, {
+            productoId: it.productoId, depositoId, tipo: d > 0 ? 'egreso' : 'ingreso', cantidad: Math.abs(d),
+            motivo: 'Corrección de remito', observaciones: `Remito N° ${remito.numero} modificado (venta ${venta.numero ? '#' + venta.numero : ''})`.trim(),
+            ventaId: venta._id, usuarioNombre, fecha: new Date()
+          });
+          await db.collection('stock_actual').updateOne(
+            Object.assign({ productoId: it.productoId, depositoId }, filtroOrg(req)),
+            { $inc: { cantidadComprometida: -d }, $setOnInsert: Object.assign({ productoId: it.productoId, depositoId, cantidad: 0 }, filtroOrg(req)) },
+            { upsert: true }
+          );
+        }
+        itemsVenta[k].cantidadEntregada = Math.max(0, Math.round(((itemsVenta[k].cantidadEntregada || 0) + d) * 10000) / 10000);
+      }
+      const totalCantidad = itemsVenta.reduce((t, x) => t + (x.cantidad || 0), 0);
+      const totalEntregada = itemsVenta.reduce((t, x) => t + (x.cantidadEntregada || 0), 0);
+      const totalCerrado = totalEntregada + itemsVenta.reduce((t, x) => t + (x.cantidadAcreditada || 0) + (x.cantidadCerrada || 0), 0);
+      const nuevoEstado = totalCerrado <= 0 ? 'pendiente' : (totalCerrado >= totalCantidad - 1e-9 ? 'entregada' : 'parcialmente_entregada');
+      const ahora = new Date();
+      if (cambios.length) {
+        await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { items: itemsVenta, estado: nuevoEstado, stockDescontado: totalEntregada > 0, entregadaEn: nuevoEstado === 'entregada' ? (venta.entregadaEn || ahora) : null, updatedAt: ahora } });
+      }
+      const set = { updatedAt: ahora };
+      if (cambios.length) set.items = remito.items.map((it, i) => Object.assign({}, it, { cantidad: nuevas[i] }));
+      if (b.observaciones !== undefined) set.observaciones = String(b.observaciones || '').trim().slice(0, 1000);
+      const reg = { at: ahora, usuario: usuarioNombre, cambios: cambios.map(({ i, d }) => ({ nombre: remito.items[i].nombre, antes: remito.items[i].cantidad, despues: nuevas[i] })) };
+      if (b.observaciones !== undefined && set.observaciones !== (remito.observaciones || '')) reg.observaciones = { antes: remito.observaciones || '', despues: set.observaciones };
+      if (!reg.cambios.length && !reg.observaciones) return remito;
+      await db.collection('remitos').updateOne({ _id: id }, { $set: set, $push: { ediciones: reg } });
+      return db.collection('remitos').findOne({ _id: id });
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // -----------------------------------------------------------------------
 // Imprimibles (3/10/2026, pedido de Mato: "comencemos a trabajar en los
 // imprimibles. el comprobante de venta..., recibo, remito, etc."). Las
