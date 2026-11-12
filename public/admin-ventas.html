@@ -193,9 +193,10 @@
       <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase"><span id="rvCobradoT">Cobrado</span></div><div id="rvCobrado" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
       <div class="card" style="margin:0"><div class="muted" style="font-size:12px;font-weight:700;text-transform:uppercase"><span id="rvPorCobrarT">Por cobrar</span></div><div id="rvPorCobrar" style="font-size:24px;font-weight:800;margin-top:4px">—</div></div>
     </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn secondary small" title="Elegir qué columnas ver en el listado" onclick="abrirColumnasVentas()">⚙️ Columnas</button></div>
     <div class="card">
       <table>
-        <thead><tr><th>Nº</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+        <thead><tr id="ventasHead"><th>Nº</th><th>Fecha</th><th>Cliente</th><th>Total</th><th>Cobrado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
         <tbody id="ventasBody"><tr><td colspan="8" class="muted">Cargando...</td></tr></tbody>
       </table>
     </div>
@@ -550,18 +551,64 @@ async function cargarVentas(){
   if (!r.ok) { body.innerHTML = '<tr><td colspan="8" class="err">No se pudo cargar.</td></tr>'; return; }
   ventasCache = await r.json();
   if (!ventasCache.length) { body.innerHTML = '<tr><td colspan="8" class="muted">No hay ventas cargadas todavía.</td></tr>'; return; }
-  body.innerHTML = ventasCache.map(v => `
-    <tr>
-      <td><span class="pill" style="font-size:10.5px;margin-right:4px">${etiquetaTipoComprobante(v.tipoComprobante)}</span><strong>${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')}</strong>${v.importado ? ' <span class="muted" style="font-size:11px" title="Venta histórica importada de Dux">Dux</span>' : ''}${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>
-      <td class="muted">${fechaCorta(v.fecha)}</td>
-      <td>${escapeHtml(v.clienteNombre)}</td>
-      <td>${money(v.total)}</td>
-      <td class="muted">${money(v.totalCobrado)}</td>
-      <td>${v.saldoPendiente > 0 ? money(v.saldoPendiente) : '<span class="muted">—</span>'}</td>
-      <td><span class="pill ${v.estado}">${estadoLabelVenta(v)}</span>${v.canceladaPorNota ? ' <span class="pill" style="background:rgba(46,160,67,.15);color:var(--ok,#2a7)" title="Cancelada con una nota de crédito">Cancelada por NC</span>' : ''}${(v.tipoComprobante === 'nota_credito' && v.aplicadaA) ? ' <span class="pill" title="Aplicada a ' + (v.aplicadaA.letra || 'X') + '-' + String(v.aplicadaA.numero).padStart(5,'0') + '">Aplicada</span>' : ''}</td>
-      <td style="white-space:nowrap"><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button> <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante','pdf')">Exportar PDF</button></td>
-    </tr>
-  `).join('');
+  pintarVentasTabla();
+}
+
+// Columnas del listado (12/11/2026, pedido de Mato: elegir qué ver y tener el teléfono del cliente a mano). Nº y las acciones siempre se muestran.
+const COLUMNAS_VENTAS = [
+  { key: 'fecha', titulo: 'Fecha', defecto: true }, { key: 'cliente', titulo: 'Cliente', defecto: true }, { key: 'telefono', titulo: 'Teléfono del cliente', defecto: false },
+  { key: 'vendedor', titulo: 'Vendedor', defecto: false }, { key: 'total', titulo: 'Total', defecto: true }, { key: 'cobrado', titulo: 'Cobrado', defecto: true },
+  { key: 'saldo', titulo: 'Saldo', defecto: true }, { key: 'estado', titulo: 'Estado', defecto: true }
+];
+const COLUMNAS_VENTAS_KEY = 'pn_ventas_columnas_v1';
+function columnasVentasVisibles(){
+  try { const g = JSON.parse(localStorage.getItem(COLUMNAS_VENTAS_KEY) || 'null'); if (Array.isArray(g)) return g; } catch(e) {}
+  return COLUMNAS_VENTAS.filter(c => c.defecto).map(c => c.key);
+}
+function telefonoDeVenta(v){
+  const c = clientesCache.find(x => String(x._id) === String(v.clienteId));
+  return c ? (c.celular || c.telefono || '') : '';
+}
+function celdaTelefono(v){
+  const t = telefonoDeVenta(v); if (!t) return '<td class="muted">—</td>';
+  const limpio = String(t).replace(/[^\d+]/g, '');
+  return `<td style="white-space:nowrap"><a href="tel:${escapeHtml(limpio)}" title="Llamar">📞 ${escapeHtml(t)}</a></td>`;
+}
+function abrirColumnasVentas(){
+  const vis = columnasVentasVisibles();
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg"><div class="modal" style="max-width:360px">
+      <span class="close-x" onclick="cerrarModal()">✕</span>
+      <h2>Columnas a mostrar</h2>
+      <p class="muted">Nº y los botones de la derecha siempre se muestran.</p>
+      ${COLUMNAS_VENTAS.map(c => `<label style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--text);margin-bottom:8px"><input type="checkbox" style="width:auto" id="vcol_${c.key}" ${vis.includes(c.key)?'checked':''}> ${escapeHtml(c.titulo)}</label>`).join('')}
+      <button class="btn" style="margin-top:6px" onclick="guardarColumnasVentas()">Aplicar</button>
+    </div></div>`;
+}
+function guardarColumnasVentas(){
+  const el = COLUMNAS_VENTAS.filter(c => document.getElementById('vcol_'+c.key).checked).map(c => c.key);
+  try { localStorage.setItem(COLUMNAS_VENTAS_KEY, JSON.stringify(el)); } catch(e) {}
+  cerrarModal(); pintarVentasTabla();
+}
+function pintarVentasTabla(){
+  const body = document.getElementById('ventasBody'); if (!body) return;
+  const vis = columnasVentasVisibles();
+  const CEL = {
+    num: v => `<td><span class="pill" style="font-size:10.5px;margin-right:4px">${etiquetaTipoComprobante(v.tipoComprobante)}</span><strong>${v.numeroOriginal ? escapeHtml(v.numeroOriginal) : (v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0')}</strong>${v.importado ? ' <span class="muted" style="font-size:11px" title="Venta histórica importada de Dux">Dux</span>' : ''}${(v.esFiscal && v.tipoComprobante !== 'comprobante_x' && !v.cae && v.estado !== 'anulada') ? ' <span title="Pendiente de CAE de ARCA" style="cursor:help">⏳</span>' : ''}</td>`,
+    fecha: v => `<td class="muted">${fechaCorta(v.fecha)}</td>`,
+    cliente: v => `<td>${escapeHtml(v.clienteNombre)}</td>`,
+    total: v => `<td>${money(v.total)}</td>`,
+    cobrado: v => `<td class="muted">${money(v.totalCobrado)}</td>`,
+    saldo: v => `<td>${v.saldoPendiente > 0 ? money(v.saldoPendiente) : '<span class="muted">—</span>'}</td>`,
+    estado: v => `<td><span class="pill ${v.estado}">${estadoLabelVenta(v)}</span>${v.canceladaPorNota ? ' <span class="pill" style="background:rgba(46,160,67,.15);color:var(--ok,#2a7)" title="Cancelada con una nota de crédito">Cancelada por NC</span>' : ''}${(v.tipoComprobante === 'nota_credito' && v.aplicadaA) ? ' <span class="pill" title="Aplicada a ' + (v.aplicadaA.letra || 'X') + '-' + String(v.aplicadaA.numero).padStart(5,'0') + '">Aplicada</span>' : ''}</td>`,
+    acc: v => `<td style="white-space:nowrap"><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button> <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante','pdf')">Exportar PDF</button></td>`,
+    telefono: v => celdaTelefono(v),
+    vendedor: v => `<td class="muted">${escapeHtml(v.vendedor || '')}</td>`
+  };
+  const cols = ['num'].concat(COLUMNAS_VENTAS.map(c => c.key).filter(k => vis.includes(k))).concat(['acc']);
+  const TIT = { num: 'Nº', acc: '' }; COLUMNAS_VENTAS.forEach(c => TIT[c.key] = c.titulo.replace(' del cliente', ''));
+  const tr = document.getElementById('ventasHead'); if (tr) tr.innerHTML = cols.map(k => `<th>${TIT[k]}</th>`).join('');
+  body.innerHTML = ventasCache.map(v => `<tr>${cols.map(k => CEL[k](v)).join('')}</tr>`).join('');
 }
 
 // -------------------------------------------------------------------
