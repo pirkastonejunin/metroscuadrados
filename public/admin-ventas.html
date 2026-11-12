@@ -556,7 +556,7 @@ async function cargarVentas(){
 
 // Columnas del listado (12/11/2026, pedido de Mato: elegir qué ver y tener el teléfono del cliente a mano). Nº y las acciones siempre se muestran.
 const COLUMNAS_VENTAS = [
-  { key: 'fecha', titulo: 'Fecha', defecto: true }, { key: 'cliente', titulo: 'Cliente', defecto: true }, { key: 'telefono', titulo: 'Teléfono del cliente', defecto: false },
+  { key: 'fecha', titulo: 'Fecha', defecto: true }, { key: 'cliente', titulo: 'Cliente', defecto: true }, { key: 'telefono', titulo: 'Teléfono del cliente', defecto: false }, { key: 'celular', titulo: 'Celular del cliente', defecto: false },
   { key: 'vendedor', titulo: 'Vendedor', defecto: false }, { key: 'total', titulo: 'Total', defecto: true }, { key: 'cobrado', titulo: 'Cobrado', defecto: true },
   { key: 'saldo', titulo: 'Saldo', defecto: true }, { key: 'estado', titulo: 'Estado', defecto: true }
 ];
@@ -565,12 +565,12 @@ function columnasVentasVisibles(){
   try { const g = JSON.parse(localStorage.getItem(COLUMNAS_VENTAS_KEY) || 'null'); if (Array.isArray(g)) return g; } catch(e) {}
   return COLUMNAS_VENTAS.filter(c => c.defecto).map(c => c.key);
 }
-function telefonoDeVenta(v){
+function telefonoDeVenta(v, campo){
   const c = clientesCache.find(x => String(x._id) === String(v.clienteId));
-  return c ? (c.celular || c.telefono || '') : '';
+  return c ? (c[campo] || '') : '';
 }
-function celdaTelefono(v){
-  const t = telefonoDeVenta(v); if (!t) return '<td class="muted">—</td>';
+function celdaTelefono(v, campo){
+  const t = telefonoDeVenta(v, campo); if (!t) return '<td class="muted">—</td>';
   const limpio = String(t).replace(/[^\d+]/g, '');
   return `<td style="white-space:nowrap"><a href="tel:${escapeHtml(limpio)}" title="Llamar">📞 ${escapeHtml(t)}</a></td>`;
 }
@@ -602,7 +602,8 @@ function pintarVentasTabla(){
     saldo: v => `<td>${v.saldoPendiente > 0 ? money(v.saldoPendiente) : '<span class="muted">—</span>'}</td>`,
     estado: v => `<td><span class="pill ${v.estado}">${estadoLabelVenta(v)}</span>${v.canceladaPorNota ? ' <span class="pill" style="background:rgba(46,160,67,.15);color:var(--ok,#2a7)" title="Cancelada con una nota de crédito">Cancelada por NC</span>' : ''}${(v.tipoComprobante === 'nota_credito' && v.aplicadaA) ? ' <span class="pill" title="Aplicada a ' + (v.aplicadaA.letra || 'X') + '-' + String(v.aplicadaA.numero).padStart(5,'0') + '">Aplicada</span>' : ''}</td>`,
     acc: v => `<td style="white-space:nowrap"><button class="btn small secondary" onclick="verDetalle('${v._id}')">Ver</button> <button class="btn small secondary" onclick="imprimirDocumento('${BASE}/${v._id}/comprobante','pdf')">Exportar PDF</button></td>`,
-    telefono: v => celdaTelefono(v),
+    telefono: v => celdaTelefono(v, 'telefono'),
+    celular: v => celdaTelefono(v, 'celular'),
     vendedor: v => `<td class="muted">${escapeHtml(v.vendedor || '')}</td>`
   };
   const cols = ['num'].concat(COLUMNAS_VENTAS.map(c => c.key).filter(k => vis.includes(k))).concat(['acc']);
