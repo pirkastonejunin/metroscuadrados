@@ -20,5 +20,9 @@ const assert = require('assert'); const { start } = require('./harness');
   // si el cliente vuelve a escribir, reabre sola
   await db.collection('wa_mensajes').insertOne({ convId: c1, orgId: ORG, dir: 'in', origen: 'cliente', texto: 'gracias, y hasta qué hora?', at: new Date(Date.now() + 1000) });
   r = await api('GET', '/api/mesa'); assert(it(c1) && !it(c1).cierre, 'reabrió sola');
+  // pulso: cambia cuando llega un mensaje
+  const p1 = (await api('GET', '/api/mesa/pulso')).data.t; assert(p1);
+  await db.collection('wa_mensajes').insertOne({ convId: c2, orgId: ORG, dir: 'in', origen: 'cliente', texto: 'hola?', at: new Date() });
+  assert.notEqual((await api('GET', '/api/mesa/pulso')).data.t, p1, 'el pulso detecta el mensaje nuevo');
   console.log('OK'); await h.stop(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });

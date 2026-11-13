@@ -323,6 +323,20 @@ router.post('/cierre-masivo', auth, async (req, res) => {
     res.json({ ok: true, cerradas: r.modifiedCount, contactos: ro.modifiedCount + rl.modifiedCount, dias });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Pulso: una consulta MUY barata (último mensaje y última actividad) para que la pantalla se entere al toque de que llegó algo y
+// recién ahí recargue el tablero, sin esperar al refresco general.
+let pulsoIdx = false;
+router.get('/pulso', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const org = filtroOrg(req);
+    if (!pulsoIdx) { pulsoIdx = true; db.collection(COL_C).createIndex({ orgId: 1, updatedAt: -1 }).catch(() => {}); }
+    const [m, c] = await Promise.all([
+      db.collection(COL_M).find(org).sort({ _id: -1 }).limit(1).project({ _id: 1 }).toArray(),
+      db.collection(COL_C).find(org).sort({ updatedAt: -1 }).limit(1).project({ updatedAt: 1 }).toArray()
+    ]);
+    res.json({ t: (m[0] ? String(m[0]._id) : '') + '|' + (c[0] && c[0].updatedAt ? new Date(c[0].updatedAt).getTime() : 0) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 router.get('/', auth, async (req, res) => {
   try {
     const db = await getDb(); const items = await armar(db, req, { cerradas: req.query.cerradas === '1' });

@@ -939,6 +939,16 @@ document.addEventListener('keydown', e => { if (e.key==='Escape' && !$('caj').hi
   { const q = new URLSearchParams(location.search).get('abrir'); if (q && ITEMS.some(i=>i.id===q)) abrir(q); } // enlace desde la campanita
   if (!ITEMS.length) $('tab').querySelector('[data-e=hoy] .cards').innerHTML = '<div class="vacioc"><big>💬</big>Todavía no hay conversaciones derivadas.<br>Cuando el bot pase una a un asesor, aparece acá.<br><br><button class="btn sm" id="cej">Cargar conversaciones de ejemplo</button></div>', $('cej').onclick = () => ejemplos(true);
   document.addEventListener('scroll', () => { ULT_SCROLL = Date.now(); }, true); document.addEventListener('wheel', () => { ULT_SCROLL = Date.now(); }, { passive: true, capture: true }); document.addEventListener('touchmove', () => { ULT_SCROLL = Date.now(); }, { passive: true, capture: true });
+  // Pulso cada 4 segundos (consulta liviana): si llegó un mensaje o cambió algo, se recarga ya, sin esperar los 20 segundos.
+  let PULSO = null;
+  setInterval(async () => { try{
+    const d = await api('/api/mesa/pulso', {headers:H()});
+    if (PULSO === null){ PULSO = d.t; return; } if (d.t === PULSO) return;
+    if (document.hidden || VISTA === 'resumen'){ await sondear(); PULSO = d.t; return; }
+    const ae = document.activeElement;
+    if (Date.now() - ULT_SCROLL < 8000 || decOpen || (ae && ae.closest && ae.closest('.gads')) || (ae && ae.id==='txt' && ae.value)) return; // se reintenta en el próximo pulso
+    await cargar(); PULSO = d.t;
+  }catch(e){} }, 4000);
   setInterval(() => { if (!document.hidden && Date.now() - ULT_SCROLL < 8000) return; /* estás desplazándote: no se toca la pantalla */ if (document.hidden || VISTA === 'resumen') { sondear(); return; } /* en Resumen (gráficos) no se repinta solo: te devolvía arriba mientras leías */ if (!document.hidden && !decOpen && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.gads')) && !(document.activeElement && document.activeElement.id==='txt' && document.activeElement.value)) cargar(); }, 20000);
 })();
 </script>
