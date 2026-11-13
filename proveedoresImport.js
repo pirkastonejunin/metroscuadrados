@@ -277,6 +277,27 @@ function reglaParaCliente(r) {
     stock: Object.assign({}, r.stock, { depositoId: r.stock && r.stock.depositoId ? String(r.stock.depositoId) : '' })
   });
 }
+// Al unificar proveedores, la regla de importación, la conexión al portal y la tabla de rubros solo estaban en el registro que se dio de baja
+// (el unificador copiaba únicamente los datos de contacto). Acá se recuperan desde los registros unificados dentro de este proveedor.
+const CONFIG_PROVEEDOR = ['reglaImport', 'portal', 'equivalenciasRubro'];
+async function recuperarConfigUnificada(db, prov) {
+  const faltan = CONFIG_PROVEEDOR.filter(k => prov[k] == null || (typeof prov[k] === 'object' && !Object.keys(prov[k]).length));
+  if (!faltan.length) return prov;
+  let nivel = [prov._id]; const vistos = new Set([String(prov._id)]); const set = {};
+  for (let i = 0; i < 4 && nivel.length && Object.keys(set).length < faltan.length; i++) {
+    const hijos = await db.collection('proveedores').find({ unificadoEn: { $in: nivel } }).toArray();
+    nivel = [];
+    for (const h of hijos.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))) {
+      if (vistos.has(String(h._id))) continue; vistos.add(String(h._id)); nivel.push(h._id);
+      for (const k of faltan) if (set[k] == null && h[k] != null && !(typeof h[k] === 'object' && !Object.keys(h[k]).length)) set[k] = h[k];
+    }
+  }
+  if (Object.keys(set).length) {
+    await db.collection('proveedores').updateOne({ _id: prov._id }, { $set: Object.assign({}, set, { updatedAt: new Date() }) });
+    return Object.assign({}, prov, set);
+  }
+  return prov;
+}
 async function proveedorDeOrg(db, req) {
   const id = oid(req.params.id);
   if (!id) throw err(400, 'id inválido');
@@ -288,7 +309,7 @@ async function proveedorDeOrg(db, req) {
     if (p && p.orgId) { req.orgId = p.orgId; req.vistaTodas = false; }
   }
   if (!p) throw err(404, 'Proveedor no encontrado');
-  return p;
+  return recuperarConfigUnificada(db, p);
 }
 
 router.get('/:id/regla', authAdmin, async (req, res) => {

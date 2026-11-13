@@ -124,6 +124,8 @@ async function unificarGrupos(db, orgIds, items) {
     const ganador = docs.get(String(it.gan)); const perdedores = it.per.map(p => docs.get(String(p)));
     if (!ganador || perdedores.some(p => !p)) throw err(400, 'Los proveedores tienen que ser de sucursales a las que tenés acceso.');
     const set = {};
+    // regla de importación, portal y tabla de rubros: si el que se conserva no los tiene, pasan del duplicado
+    for (const p of perdedores) ['reglaImport', 'portal', 'equivalenciasRubro'].forEach(k => { if (ganador[k] == null && set[k] == null && p[k] != null) set[k] = p[k]; });
     for (const p of perdedores) CAMPOS.forEach(k => { if (vacio(ganador[k]) && vacio(set[k]) && !vacio(p[k])) set[k] = p[k]; });
     if (set.cuit && await db.collection('proveedores').findOne({ orgId: { $in: orgIds }, cuit: set.cuit, activo: { $ne: false }, _id: { $nin: it.per.concat([it.gan]) } })) delete set.cuit;
     if (set.codigo && await db.collection('proveedores').findOne({ orgId: ganador.orgId, codigo: set.codigo, activo: { $ne: false }, _id: { $nin: it.per.concat([it.gan]) } })) delete set.codigo;
