@@ -655,9 +655,24 @@ async function abrirCaj(l, o){
   if (!l.convId && (l.opId || l.leadId) && !(o && o.sinMat)){ try{ const r = await post('/api/mesa/materializar', {opId:l.opId, leadId:l.leadId}); sel = r.convId; await cargar(); let n = cur() || ITEMS.find(x=>x.convId===r.convId);
       if (!n){ n = Object.assign({}, l, {id:r.convId, convId:r.convId}); ITEMS.push(n); sel = n.id; } // la conversación existe pero el tablero no la muestra como tarjeta propia: se abre igual
       return abrirCaj(n, o); }catch(e){ err(e); return; } }
-  if (l.convId){ try{ const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()}); MSGS = d.mensajes; VENT = d.ventana||null; PLANT = d.plantillas||[]; }catch(e){ err(e); MSGS=[]; } } else MSGS = [];
-  pintarCaj(l, o);
+  if (l.convId){
+    // se abre YA (con los mensajes que ya se habían bajado de este chat, si los hay) y los mensajes frescos llegan enseguida
+    const memo = CACHE_MSGS.get(l.convId);
+    if (memo){ MSGS = memo.mensajes; VENT = memo.ventana; PLANT = memo.plantillas; } else MSGS = [];
+    const miSel = sel; pintarCaj(l, o);
+    if (!memo){ const cj = $('caj'); const area = cj && (cj.querySelector('.msgs') || cj.querySelector('#msgs')); if (area && !MSGS.length) area.insertAdjacentHTML('afterbegin', '<div class="tip" id="cargandoMsgs" style="padding:8px">Cargando mensajes…</div>'); }
+    try{
+      const d = await api('/api/bot/conversaciones/'+l.convId, {headers:H()});
+      CACHE_MSGS.set(l.convId, {mensajes:d.mensajes, ventana:d.ventana||null, plantillas:d.plantillas||[]}); if (CACHE_MSGS.size > 40) CACHE_MSGS.delete(CACHE_MSGS.keys().next().value);
+      if (sel !== miSel) return; // mientras tanto abrió otro chat
+      const cambio = !memo || memo.mensajes.length !== d.mensajes.length || (memo.mensajes[memo.mensajes.length-1]||{})._id !== (d.mensajes[d.mensajes.length-1]||{})._id;
+      MSGS = d.mensajes; VENT = d.ventana||null; PLANT = d.plantillas||[];
+      if (cambio){ const cur2 = cur() || l; pintarCaj(cur2, Object.assign({}, o, {keep:true})); }
+      else { const e = $('cargandoMsgs'); if (e) e.remove(); }
+    }catch(e){ err(e); if (!memo) MSGS = []; const x = $('cargandoMsgs'); if (x) x.remove(); }
+  } else { MSGS = []; pintarCaj(l, o); }
 }
+const CACHE_MSGS = new Map(); // convId -> {mensajes, ventana, plantillas}: abrir de nuevo un chat ya visto es instantáneo
 function abrir(id){
   const c = cur();
   if (c && c.id!==id && !$('caj').hidden && TOC.has(c.id)) return pedirDecision(()=>{ sel=id; pintar(); const l=cur(); if(l) abrirCaj(l); });
@@ -709,7 +724,7 @@ async function decidir(l, k, btn){
     }
     TOC.delete(l.id); decOpen = false;
     const f = pend; pend = null;
-    await cargar();
+    cargar({forzar:true}); // la pantalla sigue ya: el tablero se actualiza en segundo plano
     if (f) f(); else siguiente(l);
   }catch(e){ err(e); if (btn) btn.disabled=false; }
 }
@@ -743,7 +758,7 @@ function pintarCaj(l, o){
   const ms = $('msgs'); if (ms) ms.scrollTop = ms.scrollHeight; activarMedia();
   $('cx').onclick = cerrarCaj; $('vel').onclick = cerrarCaj;
   const tx = $('txt'); if (tx){ tx.value = keep; if (!(o&&o.keep)) tx.focus(); }
-  if ($('tomar')) $('tomar').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/tomar`); toast('Es tuya'); await cargar({forzar:true}); }catch(e){ err(e); } };
+  if ($('tomar')) $('tomar').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/tomar`); toast('Es tuya'); cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('interno')) $('interno').onclick = async () => { if (!confirm('Este número pasa a la lista de internos: sus mensajes ya no entran al CRM, el bot no le contesta y no se gasta IA. La conversación se oculta (no se borra). ¿Seguir?')) return; try{ await post(`/api/bot/conversaciones/${l.convId}/interno`); toast('Número interno: ya no entra al CRM'); await cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('reab')) $('reab').onclick = async () => { try{ await post(`/api/mesa/${l.convId}/reabrir`); toast('Reabierta'); await cargar({forzar:true}); }catch(e){ err(e); } };
   if ($('usar')) $('usar').onclick = () => { tx.value = sugDe(l); tx.focus(); };
@@ -784,8 +799,8 @@ function pintarFicha(l){
   c.querySelectorAll('[data-pop]').forEach(b=>b.onclick=()=>popup(b.dataset.pop));
   if ($('adjP')) $('adjP').onclick = () => { ADJ={id:l.presupuesto.id, numero:l.presupuesto.numero, conv:l.id}; pintarCaj(l,{keep:true}); const t=$('txt'); if(t){ if(!t.value) t.value='Te paso el presupuesto Nº '+String(l.presupuesto.numero).padStart(5,'0')+' (total '+money(l.presupuesto.total)+', precios finales con IVA). Cualquier duda me avisás.'; t.focus(); } };
   if ($('hacerP')) $('hacerP').onclick = () => popup('/admin-presupuestos.html?embed=1&nuevo=1&nombre='+encodeURIComponent(l.nombre)+'&tel='+encodeURIComponent(l.tel)+(l.convId?'&convId='+encodeURIComponent(l.convId):''), 'Nuevo presupuesto para '+l.nombre);
-  c.querySelectorAll('.temp button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}); await cargar({forzar:true}); }catch(e){ err(e); } });
-  c.querySelectorAll('.etapas button').forEach(b=>b.onclick=async()=>{ try{ await post(`/api/mesa/${l.convId}/etapa`, {etapa:b.dataset.e}); await cargar({forzar:true}); }catch(e){ err(e); } });
+  c.querySelectorAll('.temp button').forEach(b=>b.onclick=async()=>{ try{ const it = ITEMS.find(x=>x.id===l.id); if (it){ it.temperatura = b.dataset.t; it.temperaturaOrigen = 'manual'; l.temperatura = b.dataset.t; pintar(); pintarCaj(it,{keep:true}); } await post(`/api/mesa/${l.convId}/temperatura`, {temperatura:b.dataset.t}); cargar({forzar:true}); }catch(e){ err(e); } });
+  c.querySelectorAll('.etapas button').forEach(b=>b.onclick=async()=>{ try{ const it = ITEMS.find(x=>x.id===l.id); if (it){ it.etapa = b.dataset.e; pintar(); pintarCaj(it,{keep:true}); } await post(`/api/mesa/${l.convId}/etapa`, {etapa:b.dataset.e}); cargar({forzar:true}); }catch(e){ err(e); } });
   if ($('nota')){ let t; $('nota').oninput = e => { clearTimeout(t); const v=e.target.value; t=setTimeout(()=>post(`/api/mesa/${l.convId}/nota`, {texto:v}).catch(()=>{}), 700); }; }
 }
 
@@ -885,7 +900,7 @@ function enlazar(){
   document.querySelectorAll('.colu').forEach(col=>{
     col.ondragover = e => { e.preventDefault(); col.classList.add('over'); }; col.ondragleave = () => col.classList.remove('over');
     col.ondrop = async e => { e.preventDefault(); col.classList.remove('over'); const l = ITEMS.find(x=>x.id===dragId); if (!l||!l.convId||l.columna===col.dataset.e) return;
-      try{ await post(`/api/mesa/${l.convId}/mover`, {columna:col.dataset.e}); toast(l.nombre+' → '+COLS.find(x=>x.k===col.dataset.e).n); await cargar(); }catch(x){ err(x); } };
+      try{ l.columna = col.dataset.e; pintar(); toast(l.nombre+' → '+COLS.find(x=>x.k===col.dataset.e).n); await post(`/api/mesa/${l.convId}/mover`, {columna:col.dataset.e}); cargar({forzar:true}); }catch(x){ err(x); } };
   });
 }
 document.querySelectorAll('.zona').forEach(z=>{

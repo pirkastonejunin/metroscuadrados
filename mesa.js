@@ -67,14 +67,18 @@ async function armar(db, req, { cerradas }) {
     }
   }
   const ids = convs.map(c => c._id);
-  const ult = ids.length ? await db.collection(COL_M).aggregate([
-    { $match: { convId: { $in: ids } } }, { $sort: { at: 1 } },
-    { $group: { _id: '$convId', ult: { $last: '$$ROOT' }, lastOut: { $max: { $cond: [{ $eq: ['$dir', 'out'] }, '$at', null] } }, ins: { $push: { $cond: [{ $eq: ['$dir', 'in'] }, '$at', '$$REMOVE'] } } } }
-  ]).toArray() : [];
+  // Las cuatro lecturas no dependen entre sí: se piden juntas (antes se esperaba una por una). El sort por convId+at usa el índice.
+  const [ult, ops, press, leadsSueltos] = await Promise.all([
+    ids.length ? db.collection(COL_M).aggregate([
+      { $match: { convId: { $in: ids } } }, { $sort: { convId: 1, at: 1 } },
+      { $group: { _id: '$convId', ult: { $last: '$$ROOT' }, lastOut: { $max: { $cond: [{ $eq: ['$dir', 'out'] }, '$at', null] } }, ins: { $push: { $cond: [{ $eq: ['$dir', 'in'] }, '$at', '$$REMOVE'] } } } }
+    ], { allowDiskUse: true }).toArray() : [],
+    db.collection('oportunidades').find(Object.assign({}, org, { estado: 'activa' })).toArray(),
+    ids.length ? db.collection('presupuestos').find({ 'origenBot.convId': { $in: ids } }).sort({ createdAt: -1 }).toArray() : [],
+    db.collection('leads_whatsapp').find(Object.assign({}, org, { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).sort({ creadoOrigen: -1 }).limit(300).toArray()
+  ]);
   const porConv = new Map(ult.map(u => [String(u._id), u]));
-  const ops = await db.collection('oportunidades').find(Object.assign({}, org, { estado: 'activa' })).toArray();
   const opPorTel = new Map(); for (const o of ops) { const t = tel10(o.cliente && o.cliente.telefono); if (t && !opPorTel.has(t)) opPorTel.set(t, o); }
-  const press = ids.length ? await db.collection('presupuestos').find({ 'origenBot.convId': { $in: ids } }).sort({ createdAt: -1 }).toArray() : [];
   const presPorConv = new Map(); for (const p of press) { const k = String(p.origenBot.convId); if (!presPorConv.has(k)) presPorConv.set(k, p); }
   const items = []; const vistos = new Set();
   for (const c of convs) {
@@ -127,7 +131,6 @@ async function armar(db, req, { cerradas }) {
     });
   }
   // leads sueltos (llegaron de Azuite o de un anuncio y todavía no son oportunidad ni tienen conversación): para no perder ninguno al unificar pantallas
-  const leadsSueltos = await db.collection('leads_whatsapp').find(Object.assign({}, org, { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).sort({ creadoOrigen: -1 }).limit(300).toArray();
   for (const l of leadsSueltos) {
     if (!l.tel10 || vistos.has(l.tel10) || opPorTel.has(l.tel10) || l.oportunidadId) continue;
     vistos.add(l.tel10);
