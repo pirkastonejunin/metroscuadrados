@@ -12,6 +12,7 @@ const router = express.Router();
 const auth = [authUsuario, resolverOrg, requiereAlgunModulo('crm', 'visitas')];
 const COL_C = 'wa_conversaciones', COL_M = 'wa_mensajes';
 const TEMPS = ['caliente', 'tibio', 'frio'];
+const MOTIVOS_CONSULTA = ['dirección', 'horario', 'ya compró', 'información general', 'otro'];
 const MOTIVOS_PERDIDA = ['precio', 'sin stock', 'eligió otro proveedor', 'sin respuesta', 'postergó la obra', 'otro'];
 
 const digitos = s => String(s || '').replace(/\D/g, '');
@@ -91,7 +92,7 @@ async function armar(db, req, { cerradas }) {
         try {
           const ci = m.cierre;
           const r = await db.collection(COL_C).updateOne({ _id: c._id, 'mesa.cierre': { $exists: true } }, { $unset: { 'mesa.cierre': '' }, $push: { 'mesa.historial': { at: ahora, txt: 'Reabierta: el cliente volvió a escribir', usuario: 'Sistema' } } });
-          if (r.modifiedCount && ci.estado === 'perdida' && ci.opId) await db.collection('oportunidades').updateOne({ _id: ci.opId, estado: 'descartada' }, { $set: { estado: 'activa', motivoDescarte: '', updatedAt: ahora } });
+          if (r.modifiedCount && ['perdida', 'consulta'].includes(ci.estado) && ci.opId) await db.collection('oportunidades').updateOne({ _id: ci.opId, estado: 'descartada' }, { $set: { estado: 'activa', motivoDescarte: '', updatedAt: ahora } });
           m = Object.assign({}, m, { cierre: null }); cerrada = false;
         } catch (e) { /* si falla queda cerrada */ }
       } }
@@ -326,7 +327,7 @@ router.get('/', auth, async (req, res) => {
   try {
     const db = await getDb(); const items = await armar(db, req, { cerradas: req.query.cerradas === '1' });
     const yo = String(req.usuario && req.usuario._id || '');
-    res.json({ items, yo: { id: yo, nombre: (req.usuario && req.usuario.nombre) || '' }, productos: [...new Set(items.map(i => i.producto).filter(Boolean))].sort(), motivosPerdida: MOTIVOS_PERDIDA });
+    res.json({ items, yo: { id: yo, nombre: (req.usuario && req.usuario.nombre) || '' }, productos: [...new Set(items.map(i => i.producto).filter(Boolean))].sort(), motivosPerdida: MOTIVOS_PERDIDA, motivosConsulta: MOTIVOS_CONSULTA });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -392,7 +393,7 @@ router.post('/:id/cerrar', auth, async (req, res) => {
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const ahora = new Date(); const q = quien(req);
     const op = await db.collection('oportunidades').findOne(Object.assign({ estado: 'activa' }, filtroOrg(req), { 'cliente.telefono': { $regex: c.tel10 + '$' } }));
-    if (op) await db.collection('oportunidades').updateOne({ _id: op._id }, { $set: estado === 'ganada' ? { proximaAccion: null, updatedAt: ahora } : { estado: 'descartada', motivoDescarte: 'Perdida: ' + motivo, proximaAccion: null, updatedAt: ahora } });
+    if (op) await db.collection('oportunidades').updateOne({ _id: op._id }, { $set: estado === 'ganada' ? { proximaAccion: null, updatedAt: ahora } : { estado: 'descartada', motivoDescarte: (estado === 'consulta' ? 'Consulta resuelta: ' : 'Perdida: ') + motivo, proximaAccion: null, updatedAt: ahora } });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $set: { 'mesa.cierre': { estado, motivo, at: ahora, usuario: q.nombre, opId: op ? op._id : null } }, $push: { 'mesa.historial': reg(req, estado === 'ganada' ? 'Venta ganada' : 'Perdida: ' + motivo) } });
     if (estado === 'ganada') avisarGanada(db, c);
     res.json({ ok: true });
@@ -402,7 +403,7 @@ router.post('/:id/reabrir', auth, async (req, res) => {
   try {
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const cierre = c.mesa && c.mesa.cierre;
-    if (cierre && cierre.estado === 'perdida' && cierre.opId) await db.collection('oportunidades').updateOne({ _id: cierre.opId, estado: 'descartada' }, { $set: { estado: 'activa', motivoDescarte: '', updatedAt: new Date() } });
+    if (cierre && ['perdida', 'consulta'].includes(cierre.estado) && cierre.opId) await db.collection('oportunidades').updateOne({ _id: cierre.opId, estado: 'descartada' }, { $set: { estado: 'activa', motivoDescarte: '', updatedAt: new Date() } });
     await db.collection(COL_C).updateOne({ _id: c._id }, { $unset: { 'mesa.cierre': '' }, $push: { 'mesa.historial': reg(req, 'Reabierta') } });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -436,13 +437,13 @@ async function cerrarConv(db, req, c, estado, motivo) {
 router.post('/:id/decidir', auth, async (req, res) => {
   try {
     const b = req.body || {}; const tipo = b.tipo; const ahora = new Date();
-    if (!['esperar', 'seguimiento', 'posponer', 'ganada', 'perdida'].includes(tipo)) return res.status(400).json({ error: 'Decisión inválida.' });
+    if (!['esperar', 'seguimiento', 'posponer', 'ganada', 'perdida', 'consulta'].includes(tipo)) return res.status(400).json({ error: 'Decisión inválida.' });
     const db = await getDb(); const c = await convDeReq(db, req); if (!c) return res.status(404).json({ error: 'No encontrada.' });
     const ult = await db.collection(COL_M).find({ convId: c._id }).sort({ at: -1 }).limit(1).toArray();
     const clienteRespondio = ult.length && ult[0].dir === 'in';
     const update = { $set: {}, $unset: { 'mesa.recordar': '', 'mesa.sinDec': '' }, $push: { 'mesa.historial': null } };
     let txt = '';
-    if (tipo !== 'ganada' && tipo !== 'perdida') update.$set['mesa.atendidoAt'] = ahora;
+    if (!['ganada', 'perdida', 'consulta'].includes(tipo)) update.$set['mesa.atendidoAt'] = ahora;
     if (tipo === 'esperar') {
       update.$set['mesa.esperando'] = { desde: ahora, venceAt: venceEsperando(ahora) }; if (clienteRespondio) update.$set['mesa.recs'] = 0; txt = 'Esperando respuesta del cliente';
     } else if (tipo === 'seguimiento' || tipo === 'posponer') {
@@ -454,7 +455,8 @@ router.post('/:id/decidir', auth, async (req, res) => {
       txt = (tipo === 'posponer' ? 'Pospuesta ' : 'Seguimiento ') + 'en ' + dias + ' día(s)';
     } else {
       const motivo = String(b.motivo || '').slice(0, 120); if (tipo === 'perdida' && !motivo) return res.status(400).json({ error: 'Indicá el motivo de la pérdida.' });
-      const p = await cerrarConv(db, req, c, tipo, motivo); Object.assign(update.$set, p.$set); Object.assign(update.$unset, p.$unset); txt = tipo === 'ganada' ? 'Venta ganada' : 'Perdida: ' + motivo;
+      if (tipo === 'consulta' && !motivo) return res.status(400).json({ error: 'Indicá de qué era la consulta.' });
+      const p = await cerrarConv(db, req, c, tipo, motivo); Object.assign(update.$set, p.$set); Object.assign(update.$unset, p.$unset); txt = tipo === 'ganada' ? 'Venta ganada' : (tipo === 'consulta' ? 'Consulta resuelta (sin venta): ' : 'Perdida: ') + (tipo === 'ganada' ? '' : motivo);
     }
     update.$push['mesa.historial'] = reg(req, txt);
     if (!Object.keys(update.$set).length) delete update.$set;

@@ -275,7 +275,7 @@ const COLS = [
 const ETAPAS = [{k:'nuevo',n:'Nuevo'},{k:'conversando',n:'En conversación'},{k:'presupuesto',n:'Presupuesto enviado'},{k:'cerrando',n:'Por cerrar'}];
 const ETN = Object.fromEntries(ETAPAS.map(e=>[e.k,e.n]));
 
-let PREV = {}, FIRMA_ITEMS = '', ULT_SCROLL = 0, ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
+let PREV = {}, FIRMA_ITEMS = '', ULT_SCROLL = 0, ETF = '', ITEMS = [], HISTN = 0, HIST = false, YO = {id:'',nombre:''}, MOTIVOS = [], MOTIVOS_CONS = ['dirección','horario','ya compró','información general','otro'], F = 'mias', VISTA = 'tablero', sel = null, MSGS = [], VENT = null, PLANT = [], FILE = null, dragId = null, pend = null, decOpen = false;
 const TOC = new Set(); // conversaciones donde escribí en esta sesión: al salir hay que decidir qué sigue
 // Contactos del histórico importado (Pirka) sin fecha puesta a propósito: no ensucian el tablero, se trabajan en la vista "Base histórica".
 function soloVista(todos){ HISTN = todos.filter(l=>l.historica && !l.cierre).length; const b=$('hist'); if(b){ b.textContent='📚 Base histórica ('+HISTN+')'; b.hidden = !HISTN && !HIST; } return todos.filter(l=>HIST ? l.historica : !l.historica); }
@@ -287,7 +287,7 @@ function filtradas(){
 }
 const orden = l => (l.sinDec?-5:0) + (l.esperaCliente?0:50) + (l.prox&&l.prox.dias<=0?10:20) + ({caliente:0,tibio:3,frio:6}[l.temperatura]) - Math.min(9,(l.esperaMin||0)/1000);
 function aviso(l){
-  if (l.cierre) return [l.cierre.estado==='ganada'?'Ganada':'Perdida: '+(l.cierre.motivo||''), l.cierre.estado==='ganada'?'ok':'bad'];
+  if (l.cierre) return [l.cierre.estado==='ganada'?'Ganada':(l.cierre.estado==='consulta'?'Consulta: ':'Perdida: ')+(l.cierre.motivo||''), l.cierre.estado==='ganada'?'ok':(l.cierre.estado==='consulta'?'warm':'bad')];
   if (l.sinDec) return ['Falta decidir','bad'];
   if (l.esperaCliente) return ['Espera '+mins(l.esperaMin), l.esperaMin>240?'bad':'warm'];
   if (l.recordar) return l.recs>=3 ? [l.recs+' recordatorios: ¿cerrar?','bad'] : ['Sin respuesta: recordale','warm'];
@@ -328,7 +328,7 @@ function pintarEmbudo(){
   const base = ITEMS.filter(l=>(F==='todas'||mio(l))), ab = base.filter(l=>!l.cierre);
   const mes = new Date(Date.now()-3*3600000).toISOString().slice(0,7);
   const delMes = base.filter(l=>l.cierre && l.cierre.at && new Date(new Date(l.cierre.at).getTime()-3*3600000).toISOString().slice(0,7)===mes);
-  const gan = delMes.filter(l=>l.cierre.estado==='ganada'), per = delMes.filter(l=>l.cierre.estado!=='ganada');
+  const gan = delMes.filter(l=>l.cierre.estado==='ganada'), per = delMes.filter(l=>!['ganada','consulta'].includes(l.cierre.estado));
   const tot = ab.length + gan.length || 1;
   const pasos = [['nuevo','🆕','Nuevos'],['conversando','💬','En conversación'],['presupuesto','📄','Presupuesto enviado'],['cerrando','🤝','Por cerrar']];
   const sv = a => a.reduce((x,l)=>x+(l.valor||0),0);
@@ -368,7 +368,7 @@ async function detCampana(camp, tipo){
       const per = $('rper') ? $('rper').value : 'mes';
       const desde = per==='7' ? Date.now()-7*864e5 : per==='30' ? Date.now()-30*864e5 : per==='mes' ? new Date(new Date(Date.now()-3*3600000).toISOString().slice(0,7)+'-01T03:00:00Z').getTime() : 0;
       const base = ITEMS.filter(l=>(F==='todas'||mio(l)) && (l.campana||'(sin campaña)')===camp);
-      const L = tipo==='abiertas' ? base.filter(l=>!l.cierre) : base.filter(l=>l.cierre && new Date(l.cierre.at)>=desde && ((tipo==='ganadas') === (l.cierre.estado==='ganada')));
+      const L = tipo==='abiertas' ? base.filter(l=>!l.cierre) : base.filter(l=>l.cierre && new Date(l.cierre.at)>=desde && (tipo==='ganadas' ? l.cierre.estado==='ganada' : !['ganada','consulta'].includes(l.cierre.estado)));
       abreDetCamp(tit, L.length ? `<table class="rt"><thead><tr><th>Cliente</th><th>Teléfono</th><th>Asesor</th><th>Valor</th><th></th></tr></thead><tbody>${L.map(l=>`<tr><td>${esc(l.nombre)}</td><td>${esc(l.tel||'')}</td><td>${esc(l.asesorNombre||'—')}</td><td>${l.valor?money(l.valor):'—'}</td><td><button class="btn" onclick="cierraDetCamp();abrir('${esc(l.id)}')">Abrir</button></td></tr>`).join('')}</tbody></table>` : '<div class="tip">No hay nadie en esta categoría para el período elegido.</div>');
       return;
     }
@@ -386,18 +386,18 @@ function pintarResumen(){
   const base = ITEMS.filter(l=>F==='todas'||mio(l)), ab = base.filter(l=>!l.cierre);
   const desde = per==='7' ? Date.now()-7*864e5 : per==='30' ? Date.now()-30*864e5 : per==='mes' ? new Date(new Date(Date.now()-3*3600000).toISOString().slice(0,7)+'-01T03:00:00Z').getTime() : 0;
   const cer = base.filter(l=>l.cierre && l.cierre.at && new Date(l.cierre.at).getTime()>=desde);
-  const gan = cer.filter(l=>l.cierre.estado==='ganada'), perd = cer.filter(l=>l.cierre.estado!=='ganada');
+  const gan = cer.filter(l=>l.cierre.estado==='ganada'), perd = cer.filter(l=>!['ganada','consulta'].includes(l.cierre.estado)), cons = cer.filter(l=>l.cierre.estado==='consulta');
   const sv = a => a.reduce((x,l)=>x+(l.valor||0),0), pc = (a,b) => b ? Math.round(a/b*100)+'%' : '—';
   const hoy = ab.filter(l=>l.columna==='hoy'), venc = hoy.filter(l=>l.prox&&l.prox.dias<0), sd = ab.filter(l=>l.sinDec), s24 = ab.filter(l=>l.sin24), sinResp = ab.filter(l=>l.recordar);
   const bars = (rows, color) => { const mx = Math.max(1,...rows.map(r=>r.n)); return rows.length ? rows.map(r=>`<div class="br" style="--cc:${r.c||color||'var(--accent)'}"><span class="nm" title="${esc(r.k)}">${esc(r.k)}</span><span class="tr"><i style="width:${Math.round(r.n/mx*100)}%"></i></span><span class="vl">${r.n}${r.v?`<small>${money(r.v)}</small>`:''}</span></div>`).join('') : '<div class="tip">Sin datos todavía.</div>'; };
   const grp = (arr, fn) => { const m = new Map(); arr.forEach(l=>{ const k = fn(l)||'Sin definir'; const e = m.get(k)||{k,n:0,v:0}; e.n++; e.v+=l.valor||0; m.set(k,e); }); return [...m.values()].sort((a,b)=>b.n-a.n); };
   const etp = ETAPAS.map(e=>({k:e.n, n:ab.filter(l=>l.etapa===e.k).length, v:sv(ab.filter(l=>l.etapa===e.k)), c:{nuevo:'var(--cold)',conversando:'var(--warm)',presupuesto:'var(--violet)',cerrando:'var(--accent)'}[e.k]}));
   const tmp = [['caliente','Caliente','var(--hot)'],['tibio','Tibio','var(--warm)'],['frio','Frío','var(--cold)']].map(([k,n,c])=>({k:n,c,n:ab.filter(l=>l.temperatura===k).length,v:sv(ab.filter(l=>l.temperatura===k))}));
-  const ases = [...new Set(base.map(l=>l.asesorNombre||'Sin asignar'))].map(a=>{ const m = base.filter(l=>(l.asesorNombre||'Sin asignar')===a), o = m.filter(l=>!l.cierre), g = m.filter(l=>l.cierre&&l.cierre.estado==='ganada'&&new Date(l.cierre.at)>=desde), p = m.filter(l=>l.cierre&&l.cierre.estado!=='ganada'&&new Date(l.cierre.at)>=desde);
+  const ases = [...new Set(base.map(l=>l.asesorNombre||'Sin asignar'))].map(a=>{ const m = base.filter(l=>(l.asesorNombre||'Sin asignar')===a), o = m.filter(l=>!l.cierre), g = m.filter(l=>l.cierre&&l.cierre.estado==='ganada'&&new Date(l.cierre.at)>=desde), p = m.filter(l=>l.cierre&&!['ganada','consulta'].includes(l.cierre.estado)&&new Date(l.cierre.at)>=desde);
     return {a, ab:o.length, hoy:o.filter(l=>l.columna==='hoy').length, sd:o.filter(l=>l.sinDec).length, s24:o.filter(l=>l.sin24).length, g:g.length, p:p.length, vg:sv(g)}; }).sort((x,y)=>y.ab-x.ab);
   const cm = new Map((CAMPS||[]).map(x=>[x.nombre,{k:x.nombre,leads:x.leads,clientes:x.clientes,compraron:x.compraron,montoARS:x.montoARS,montoUSD:x.montoUSD,ab:0,g:0,p:0,vj:0}]));
   base.forEach(l=>{ const k = l.campana||'(sin campaña)'; if (!cm.has(k)) cm.set(k,{k,leads:0,clientes:0,compraron:0,montoARS:0,montoUSD:0,ab:0,g:0,p:0,vj:0}); const e = cm.get(k);
-    if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else e.p++; } });
+    if (!l.cierre){ e.ab++; e.vj+=l.valor||0; } else if (new Date(l.cierre.at)>=desde){ if (l.cierre.estado==='ganada') e.g++; else if (l.cierre.estado!=='consulta') e.p++; } });
   const nrm = x => String(x||'').toLowerCase().replace(/\s+/g,' ').trim(); const invm = new Map((EVOX.camp||[]).map(c=>[nrm(c.campana), c.monto])); cm.forEach(e=>{ e.inv = invm.get(nrm(e.k))||0; });
   const camp = [...cm.values()].sort((a,b)=>(b.montoARS-a.montoARS)||(b.leads-a.leads)||(b.ab-a.ab));
   SNAP = { periodo: ({mes:'este mes','7':'últimos 7 días','30':'últimos 30 días',todo:'todo el historial'})[per], alcance: F==='todas'?'toda la sucursal':'mis oportunidades y sin asignar',
@@ -428,6 +428,7 @@ function pintarResumen(){
     <div class="bx" data-w="etapa" data-t="Oportunidades por etapa"><h3>Oportunidades por etapa</h3>${bars(etp)}</div>
     <div class="bx" data-w="temp" data-t="Temperatura"><h3>Temperatura</h3>${bars(tmp)}</div>
     <div class="bx" data-w="perdidas" data-t="Por qué perdemos"><h3>Por qué perdemos</h3>${bars(grp(perd, l=>(l.cierre.motivo||'').replace(/^Perdida: /,'')).map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--bad)')}</div>
+    <div class="bx" data-w="consultas" data-t="Consultas resueltas (sin venta)"><h3>Consultas resueltas, sin venta (${cons.length})</h3>${bars(grp(cons, l=>l.cierre.motivo||'otro').map(r=>({k:r.k,n:r.n,v:r.v})), 'var(--cold)')}</div>
     <div class="bx" data-w="productos" data-t="Productos más consultados"><h3>Productos más consultados (abiertas)</h3>${bars(grp(ab, l=>l.producto).slice(0,8), 'var(--violet)')}</div>
    </div>
 </div>
@@ -482,7 +483,7 @@ function v_gads(){
   document.querySelectorAll('.gads input').forEach(i=>i.onchange = async () => { const e = $('gadsErr'); if (e) e.textContent='';
     try{ await api('/api/mesa/gasto-ads', {method:'PUT', headers:H(J), body:JSON.stringify({mes:i.dataset.mes, monto:Number(i.value)||0})}); const m = (EVO||[]).find(x=>x.mes===i.dataset.mes); if (m) m.gastoAds = Number(i.value)||0; toast('Guardado'); pintarResumen(); }catch(x){ if (e) e.textContent = x.message; } });
 }
-const WNOM = [['kpis','Números clave'],['atencion','Lo que pide atención ahora'],['vendedor','Por vendedor'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['productos','Productos más consultados'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['evo','Evolución mensual: consultas y presupuestos'],['evom','Evolución mensual: monto presupuestado'],['ads','Meta Ads: consultas e inversión'],['campanas','Campañas de Meta Ads']];
+const WNOM = [['kpis','Números clave'],['atencion','Lo que pide atención ahora'],['vendedor','Por vendedor'],['etapa','Oportunidades por etapa'],['temp','Temperatura'],['perdidas','Por qué perdemos'],['consultas','Consultas resueltas (sin venta)'],['productos','Productos más consultados'],['fecha','Consultas por fecha'],['canal','Por canal'],['fuente','Por fuente'],['evo','Evolución mensual: consultas y presupuestos'],['evom','Evolución mensual: monto presupuestado'],['ads','Meta Ads: consultas e inversión'],['campanas','Campañas de Meta Ads']];
 let OCULTOS = (()=>{ try{ return JSON.parse(localStorage.getItem('crm_res_ocultos')||'[]'); }catch(e){ return []; } })();
 let PANEL = false;
 function guardarOcultos(){ try{ localStorage.setItem('crm_res_ocultos', JSON.stringify(OCULTOS)); }catch(e){} }
@@ -637,7 +638,7 @@ async function cargar(opts){
     novedades(d.items);
     const firma = JSON.stringify(d.items, (k, v) => k === 'esperaMin' ? undefined : v) + '|' + ($('fCer') && $('fCer').checked) + '|' + F + '|' + HIST;
     const igual = firma === FIRMA_ITEMS && !(opts && opts.forzar); FIRMA_ITEMS = firma; // sin cambios en los datos: no se repinta (evita el parpadeo y el salto al tope)
-    const antes = cur(); ITEMS = soloVista(d.items); YO = d.yo; MOTIVOS = d.motivosPerdida;
+    const antes = cur(); ITEMS = soloVista(d.items); YO = d.yo; MOTIVOS = d.motivosPerdida; MOTIVOS_CONS = d.motivosConsulta || MOTIVOS_CONS;
     $('quien').textContent = 'Piedra Negra · ' + (YO.nombre||''); err('');
     if (!igual) pintar();
     const l = cur();
@@ -691,7 +692,7 @@ function sugDe(l){
 }
 function decBar(l){
   return `<div class="dec" id="dec"><div class="dh"><span class="q">${pend?'Antes de salir: ':''}¿Qué sigue con ${esc(String(l.nombre).split(' ')[0])}?</span><span class="sp"></span><button class="later" data-d="keep">Volver al chat</button></div>
-   <div class="pills"><button class="pl" data-d="esperar">⏳ Espero al cliente hoy</button><button class="pl" data-d="seg">⏰ Seguimiento</button><button class="pl" data-d="pos">📅 Posponer</button><button class="pl ok" data-d="ganada">✅ Ganada</button><button class="pl bad" data-d="x">❌ Perdida</button></div>
+   <div class="pills"><button class="pl" data-d="esperar">⏳ Espero al cliente hoy</button><button class="pl" data-d="seg">⏰ Seguimiento</button><button class="pl" data-d="pos">📅 Posponer</button><button class="pl ok" data-d="ganada">✅ Ganada</button><button class="pl bad" data-d="x">❌ Perdida</button><button class="pl" data-d="c">ℹ️ Solo consulta</button></div>
    <div class="sub" id="decSub"></div>${pend?'<div><button class="later" data-d="later">Decidir después</button></div>':''}</div>`;
 }
 function ligarDec(l){
@@ -702,6 +703,7 @@ function ligarDec(l){
     const k = b.dataset.d;
     if (k==='seg'){ marcar(b); sub.innerHTML='<button class="pl" data-d="s:1">Mañana</button><button class="pl" data-d="s:2">En 2 días</button><button class="pl" data-d="s:7">En 1 semana</button>'; sb(); }
     else if (k==='pos'){ marcar(b); const f=new Date(Date.now()-3*3600000+3*86400000).toISOString().slice(0,10); sub.innerHTML=`<input type="date" id="pf" value="${f}" aria-label="Fecha"><button class="pl" data-d="p">Listo</button>`; sb(); }
+    else if (k==='c'){ marcar(b); sub.innerHTML='<span class="tip">Era sobre:</span>'+(MOTIVOS_CONS||[]).map(m=>`<button class="pl" data-d="c:${esc(m)}">${esc(m)}</button>`).join(''); sb(); }
     else if (k==='x'){ marcar(b); sub.innerHTML='<span class="tip">Motivo:</span>'+MOTIVOS.map(m=>`<button class="pl" data-d="x:${esc(m)}">${esc(m)}</button>`).join(''); sb(); }
     else decidir(l,k,b);
   });
@@ -717,10 +719,11 @@ async function decidir(l, k, btn){
       else if (k.startsWith('s:')) body = {tipo:'seguimiento', dias:+k.slice(2)};
       else if (k==='p') body = {tipo:'posponer', fecha:$('pf').value};
       else if (k==='ganada') body = {tipo:'ganada'};
+      else if (k.startsWith('c:')) body = {tipo:'consulta', motivo:k.slice(2)};
       else body = {tipo:'perdida', motivo:k.split(':')[1]||''};
       if (btn) btn.disabled = true;
       await post(`/api/mesa/${l.convId}/decidir`, body);
-      toast({esperar:'Esperando respuesta. Si no contesta hoy, vuelve a Hoy para recordarle.',seguimiento:'Seguimiento programado',posponer:'Pospuesta',ganada:'¡Venta cerrada!',perdida:'Marcada como perdida'}[body.tipo]);
+      toast({esperar:'Esperando respuesta. Si no contesta hoy, vuelve a Hoy para recordarle.',seguimiento:'Seguimiento programado',posponer:'Pospuesta',ganada:'¡Venta cerrada!',perdida:'Marcada como perdida',consulta:'Consulta resuelta, sin venta'}[body.tipo]);
     }
     TOC.delete(l.id); decOpen = false;
     const f = pend; pend = null;
