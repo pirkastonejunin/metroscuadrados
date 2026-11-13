@@ -341,6 +341,38 @@ function pintarEmbudo(){
     if (prev[k]!==undefined && prev[k]!==n){ f.classList.add('flash'); const t0=performance.now(), d=prev[k]; const step=t=>{ const q=Math.min(1,(t-t0)/500); c.textContent=Math.round(d+(n-d)*q); if(q<1) requestAnimationFrame(step); }; requestAnimationFrame(step); } });
   $('embudo').querySelectorAll('button.fz').forEach(b=>b.onclick=()=>{ ETF = ETF===b.dataset.k ? '' : b.dataset.k; pintar(); });
 }
+
+/* ---- detalle de la tabla de campañas: clic en un número y se ve quiénes son ---- */
+document.addEventListener('click', ev => { const a = ev.target.closest && ev.target.closest('a.cdet'); if (a) detCampana(a.dataset.c, a.dataset.t); });
+function cierraDetCamp(){ const m = $('detCamp'); if (m) m.remove(); }
+function abreDetCamp(titulo, cuerpo){
+  cierraDetCamp(); const m = document.createElement('div'); m.id = 'detCamp';
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.innerHTML = `<div class="bx" style="max-width:760px;width:100%;max-height:85vh;overflow:auto"><h3 style="display:flex;justify-content:space-between;gap:10px"><span>${titulo}</span><button class="wx" style="opacity:1;border:0;background:transparent;cursor:pointer;font-size:16px" onclick="cierraDetCamp()">✕</button></h3>${cuerpo}</div>`;
+  m.onclick = e => { if (e.target === m) cierraDetCamp(); }; document.body.appendChild(m);
+}
+const T10 = t => String(t||'').replace(/\D/g,'').slice(-10);
+async function detCampana(camp, tipo){
+  const NOM = { leads:'Leads', clientes:'Ya son clientes', compraron:'Compraron', abiertas:'Abiertas en CRM', ganadas:'Ganadas', perdidas:'Perdidas' };
+  const tit = `${esc(camp)} · ${NOM[tipo]}`;
+  try{
+    if (['abiertas','ganadas','perdidas'].includes(tipo)){
+      const per = $('rper') ? $('rper').value : 'mes';
+      const desde = per==='7' ? Date.now()-7*864e5 : per==='30' ? Date.now()-30*864e5 : per==='mes' ? new Date(new Date(Date.now()-3*3600000).toISOString().slice(0,7)+'-01T03:00:00Z').getTime() : 0;
+      const base = ITEMS.filter(l=>(F==='todas'||mio(l)) && (l.campana||'(sin campaña)')===camp);
+      const L = tipo==='abiertas' ? base.filter(l=>!l.cierre) : base.filter(l=>l.cierre && new Date(l.cierre.at)>=desde && ((tipo==='ganadas') === (l.cierre.estado==='ganada')));
+      abreDetCamp(tit, L.length ? `<table class="rt"><thead><tr><th>Cliente</th><th>Teléfono</th><th>Asesor</th><th>Valor</th><th></th></tr></thead><tbody>${L.map(l=>`<tr><td>${esc(l.nombre)}</td><td>${esc(l.tel||'')}</td><td>${esc(l.asesorNombre||'—')}</td><td>${l.valor?money(l.valor):'—'}</td><td><button class="btn" onclick="cierraDetCamp();abrir('${esc(l.id)}')">Abrir</button></td></tr>`).join('')}</tbody></table>` : '<div class="tip">No hay nadie en esta categoría para el período elegido.</div>');
+      return;
+    }
+    const d = await api('/api/leads/campanas/detalle?campana='+encodeURIComponent(camp)+'&tipo='+tipo, {headers:H()});
+    const it = d.items||[];
+    abreDetCamp(tit, it.length ? `<table class="rt"><thead><tr><th>Nombre</th><th>Teléfono</th><th>Escribió</th>${tipo==='leads'?'<th>Estado</th>':'<th>Compras</th>'}<th></th></tr></thead><tbody>${it.map(x=>{
+      const crm = ITEMS.find(l=>T10(l.tel)===T10(x.telefono) && T10(x.telefono));
+      const fch = x.fecha ? new Date(x.fecha).toLocaleDateString('es-AR') : '';
+      const botones = (crm ? `<button class="btn" onclick="cierraDetCamp();abrir('${esc(crm.id)}')">Abrir en CRM</button> ` : '') + (x.clienteId ? `<a class="btn" target="_blank" href="/admin-clientes.html?id=${x.clienteId}&tab=cuenta-corriente">Ficha</a>` : '');
+      return `<tr><td>${esc(x.nombre||'—')}</td><td>${x.telefono?`<a href="tel:+${esc(String(x.telefono).replace(/\D/g,''))}">${esc(x.telefono)}</a>`:'—'}</td><td>${fch}</td><td>${tipo==='leads'?esc(x.estado):(x.ventas?`${x.ventas} · ${money(x.montoARS)}${x.montoUSD?` + US$ ${x.montoUSD.toLocaleString('es-AR')}`:''}`:'—')}</td><td style="white-space:nowrap">${botones}</td></tr>`; }).join('')}</tbody></table>${it.length>=500?'<div class="tip">Se muestran los 500 más recientes.</div>':''}` : '<div class="tip">No hay nadie en esta categoría.</div>');
+  }catch(e){ toast(e.message || 'No se pudo cargar el detalle'); }
+}
 function pintarResumen(){
   const per = $('rper') ? $('rper').value : 'mes';
   const base = ITEMS.filter(l=>F==='todas'||mio(l)), ab = base.filter(l=>!l.cierre);
@@ -413,7 +445,7 @@ function pintarResumen(){
       ${graficoAds(ms)}
       <div class="err" id="gadsErr"></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 8px">${ADSCON?'<button class="btn sm pri" id="adsSync">⬇ Traer de Meta Ads</button>'+adsEstadoTxt()+'<span class="tip">Trae lo invertido por campaña y por mes de la cuenta publicitaria. Los meses traídos de Meta no se editan a mano.</span>':'<span class="tip">Cargá lo gastado en Meta Ads cada mes (en pesos, como figura en la cuenta publicitaria). Para que se traiga solo, falta conectar la cuenta publicitaria (ver la guía del asistente).</span>'}</div>
       <details class="mm" ${ADSCON?'':'open'}><summary>Cargar o corregir la inversión mes a mes</summary><div class="gads">${ms.map(m=>`<label><span>${['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m.mes.slice(5)-1]} ${m.mes.slice(2,4)}</span><input type="number" min="0" step="1" data-mes="${m.mes}" value="${m.gastoAds||''}" placeholder="0" ${EVOX.meta&&EVOX.meta.includes(m.mes)?'disabled title="Viene de Meta Ads"':''}></label>`).join('')}</div></details></div></div>`; })()}
-   <div class="rg"><div class="bx" data-w="campanas" data-t="Campañas de Meta Ads" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Invertido</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>`<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${r.leads}</td><td>${r.clientes}</td><td>${r.compraron}</td><td>${r.inv?money(r.inv):'—'}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${r.ab}</td><td>${r.g}</td><td>${r.p}</td><td>${money(r.vj)}</td></tr>`).join('')||'<tr><td colspan="10" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
+   <div class="rg"><div class="bx" data-w="campanas" data-t="Campañas de Meta Ads" style="grid-column:1/-1"><h3>Campañas de Meta Ads</h3><div style="overflow:auto"><table class="rt"><thead><tr><th>Campaña</th><th>Leads</th><th>Ya son clientes</th><th>Compraron</th><th>Invertido</th><th>Vendido (ARS)</th><th>Abiertas en CRM</th><th>Ganadas</th><th>Perdidas</th><th>En juego</th></tr></thead><tbody>${camp.map(r=>{ const cl = (t,n)=> n ? `<a href="javascript:void(0)" class="cdet" data-c="${esc(r.k)}" data-t="${t}" title="Ver quiénes son" style="text-decoration:underline dotted;cursor:pointer;color:inherit">${n}</a>` : n; return `<tr><td title="${esc(r.k)}">${esc(r.k)}</td><td>${cl('leads',r.leads)}</td><td>${cl('clientes',r.clientes)}</td><td>${cl('compraron',r.compraron)}</td><td>${r.inv?money(r.inv):'—'}</td><td>${money(r.montoARS)}${r.montoUSD?` + US$ ${r.montoUSD.toLocaleString('es-AR')}`:''}</td><td>${cl('abiertas',r.ab)}</td><td>${cl('ganadas',r.g)}</td><td>${cl('perdidas',r.p)}</td><td>${money(r.vj)}</td></tr>`; }).join('')||'<tr><td colspan="10" class="tip">Sin datos de campañas todavía.</td></tr>'}</tbody></table></div><div class="tip" style="margin-top:6px">Leads, clientes y ventas vienen de los leads cargados (Azuite y WhatsApp): "Compraron" cuenta clientes con una venta posterior a su primer mensaje. Abiertas, ganadas y perdidas son del CRM. "(sin campaña)" = contacto directo u orgánico.</div></div></div>
 </div>
    </div>`;
   v_gads();

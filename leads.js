@@ -253,6 +253,27 @@ router.get('/campanas', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Detalle de una celda de la tabla de campañas: qué personas son (leads / ya son clientes / compraron) de una campaña.
+router.get('/campanas/detalle', auth, async (req, res) => {
+  try {
+    const db = await getDb(); const f = filtroOrg(req);
+    const nombre = String(req.query.campana || ''); const tipo = ['leads', 'clientes', 'compraron'].includes(req.query.tipo) ? req.query.tipo : 'leads';
+    const match = Object.assign({}, f, nombre === '(sin campaña)' ? { $or: [{ campana: null }, { campana: '' }, { campana: { $exists: false } }] } : { campana: nombre });
+    if (tipo !== 'leads') match.clienteId = { $ne: null };
+    const filas = await db.collection(COL).aggregate([
+      { $match: match },
+      { $lookup: { from: 'ventas', let: { cid: '$clienteId', desde: '$creadoOrigen', org: '$orgId' },
+          pipeline: [{ $match: { $expr: { $and: [{ $eq: ['$clienteId', '$$cid'] }, { $eq: ['$orgId', '$$org'] }, { $gte: ['$fecha', '$$desde'] }, { $ne: ['$estado', 'anulada'] }] } } }, { $project: { total: 1, moneda: 1, numero: 1, fecha: 1 } }], as: 'v' } },
+      { $addFields: { v: { $cond: [{ $eq: [{ $ifNull: ['$clienteId', null] }, null] }, [], '$v'] } } },
+      ...(tipo === 'compraron' ? [{ $match: { 'v.0': { $exists: true } } }] : []),
+      { $sort: { creadoOrigen: -1 } }, { $limit: 500 },
+      { $project: { nombre: 1, telefono: 1, creadoOrigen: 1, estado: 1, clienteId: 1, oportunidadId: 1, v: 1 } }
+    ]).toArray();
+    res.json({ tipo, campana: nombre, items: filas.map(x => ({ _id: x._id, nombre: x.nombre || '', telefono: x.telefono || '', fecha: x.creadoOrigen, estado: x.estado || '', clienteId: x.clienteId || null,
+      ventas: (x.v || []).length, montoARS: Math.round((x.v || []).filter(v => v.moneda !== 'USD').reduce((t, v) => t + (v.total || 0), 0)), montoUSD: Math.round((x.v || []).filter(v => v.moneda === 'USD').reduce((t, v) => t + (v.total || 0), 0)) })) });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // "Pasar a oportunidad": crea la oportunidad del CRM con los datos del lead (nombre, teléfono, campaña de origen y resumen del bot).
 router.post('/:id/oportunidad', auth, async (req, res) => {
   try {
