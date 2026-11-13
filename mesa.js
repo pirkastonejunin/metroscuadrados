@@ -45,11 +45,13 @@ function etapaDe(c, m, pres) {
   return c.estado === 'derivado' || c.estado === 'bot' ? 'nuevo' : 'conversando';
 }
 // Columna del tablero. "Hoy" junta todo lo que pide una acción hoy; el resto espera una fecha o al cliente.
-function columnaDe({ esp, m, prox, etapa }) {
+function columnaDe({ esp, m, prox, etapa, asesorHablo }) {
   // "Presupuesto enviado" se queda ahí aunque el cliente escriba o no haya fecha (6/11/2026): solo vuelve a Hoy si hay una fecha puesta a propósito y ya llegó.
   if (etapa === 'presupuesto') return prox && prox.dias <= 0 ? 'hoy' : 'presupuesto';
   if (esp || m.recordar || m.sinDec) return 'hoy';
   if (m.esperando) return 'esperando';
+  // Un asesor ya contestó y el cliente no volvió a escribir: la pelota está del lado del cliente, no es trabajo de Hoy (antes se quedaba en Hoy para siempre).
+  if (asesorHablo && (!prox || prox.dias > 0 ? !prox : false)) return 'esperando';
   if (!prox || prox.dias <= 0) return 'hoy';
   if (etapa === 'presupuesto' || etapa === 'cerrando') return etapa;
   return 'seguimiento';
@@ -114,7 +116,7 @@ async function armar(db, req, { cerradas }) {
       ultimo, esperaCliente, esperaMin: esperaCliente ? Math.max(0, Math.round((ahora - new Date(ultimo.at)) / 60000)) : 0, sinLeer: esperaCliente ? sinLeer : 0,
       prox, paso: a ? a.proximoPaso : '', resumen: (a && a.resumen) || c.resumen || '', falta: (a && a.datosFaltantes) || [], sugerida: a ? a.respuestaSugerida : '', analizadoAt: a ? a.at : null,
       presupuesto: pres ? { id: String(pres._id), numero: pres.numero, total: Number(pres.total) || 0, items: (pres.items || []).length, estado: pres.estado, borrador: !!(pres.origenBot && pres.usuarioNombre === 'Bot de WhatsApp' && (pres.seguimiento || []).length <= 1) } : null,
-      etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
+      etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa, asesorHablo: !!(ultimo && ultimo.dir === 'out' && ultimo.origen === 'asesor') }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
       notas: m.notas || '', historial: (m.historial || []).slice(-30), cierre: m.cierre || null, actualizado: (ultimo && ultimo.at) || c.updatedAt,
       pendienteDesde: pendDesde, sin24
     });
