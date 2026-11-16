@@ -20,6 +20,14 @@ const assert = require('assert'); const { start } = require('./harness');
   // si el cliente vuelve a escribir, reabre sola
   await db.collection('wa_mensajes').insertOne({ convId: c1, orgId: ORG, dir: 'in', origen: 'cliente', texto: 'gracias, y hasta qué hora?', at: new Date(Date.now() + 1000) });
   r = await api('GET', '/api/mesa'); assert(it(c1) && !it(c1).cierre, 'reabrió sola');
+  // contacto suelto (lead) cuya conversación la atendió el bot: al cerrarla como consulta sale de Hoy
+  const lead = (await db.collection('leads_whatsapp').insertOne({ orgId: ORG, nombre: 'Diego', telefono: '5492364557223', tel10: '2364557223', oportunidadId: null, estado: 'Nuevo', creadoOrigen: hace(10) })).insertedId;
+  const cb = (await db.collection('wa_conversaciones').insertOne({ orgId: ORG, tel: '5492364557223', tel10: '2364557223', nombre: 'Diego', estado: 'bot', datos: {}, createdAt: hace(10), updatedAt: hace(10), mesa: {} })).insertedId;
+  await db.collection('wa_mensajes').insertMany([{ convId: cb, orgId: ORG, dir: 'in', origen: 'cliente', texto: 'hasta qué hora?', at: hace(10) }, { convId: cb, orgId: ORG, dir: 'out', origen: 'bot', texto: 'de 8 a 16', at: hace(10) }]);
+  r = await api('GET', '/api/mesa?cerradas=1'); const dl = r.data.items.find(i => i.leadId === String(lead)); assert(dl, 'el lead aparece como contacto suelto');
+  r = await api('POST', '/api/mesa/materializar', { leadId: String(lead) }); assert.equal(r.data.convId, String(cb));
+  r = await api('POST', `/api/mesa/${cb}/decidir`, { tipo: 'consulta', motivo: 'horario' }); assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await api('GET', '/api/mesa?cerradas=1'); assert(!r.data.items.find(i => i.leadId === String(lead)), 'el contacto suelto ya no queda en Hoy');
   // pulso: cambia cuando llega un mensaje
   const p1 = (await api('GET', '/api/mesa/pulso')).data.t; assert(p1);
   await db.collection('wa_mensajes').insertOne({ convId: c2, orgId: ORG, dir: 'in', origen: 'cliente', texto: 'hola?', at: new Date() });

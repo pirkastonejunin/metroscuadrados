@@ -71,15 +71,18 @@ async function armar(db, req, { cerradas }) {
   }
   const ids = convs.map(c => c._id);
   // Las cuatro lecturas no dependen entre sí: se piden juntas (antes se esperaba una por una). El sort por convId+at usa el índice.
-  const [ult, ops, press, leadsSueltos] = await Promise.all([
+  const [ult, ops, press, leadsSueltos, cerradasTel] = await Promise.all([
     ids.length ? db.collection(COL_M).aggregate([
       { $match: { convId: { $in: ids } } }, { $sort: { convId: 1, at: 1 } },
       { $group: { _id: '$convId', ult: { $last: '$$ROOT' }, lastOut: { $max: { $cond: [{ $eq: ['$dir', 'out'] }, '$at', null] } }, ins: { $push: { $cond: [{ $eq: ['$dir', 'in'] }, '$at', '$$REMOVE'] } } } }
     ], { allowDiskUse: true }).toArray() : [],
     db.collection('oportunidades').find(Object.assign({}, org, { estado: 'activa' })).toArray(),
     ids.length ? db.collection('presupuestos').find({ 'origenBot.convId': { $in: ids } }).sort({ createdAt: -1 }).toArray() : [],
-    db.collection('leads_whatsapp').find(Object.assign({}, org, { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).sort({ creadoOrigen: -1 }).limit(300).toArray()
+    db.collection('leads_whatsapp').find(Object.assign({}, org, { oportunidadId: null, estado: { $nin: ['Cerrado', 'Perdido'] } })).sort({ creadoOrigen: -1 }).limit(300).toArray(),
+    // conversaciones ya cerradas (ganada / perdida / solo consulta) aunque el tablero no las muestre (p. ej. las que atendió el bot): su contacto suelto no debe seguir en Hoy
+    db.collection(COL_C).find(Object.assign({}, org, { 'mesa.cierre': { $nin: [null] } })).project({ tel10: 1 }).toArray()
   ]);
+  const telCerrado = new Set(cerradasTel.map(c => c.tel10));
   const porConv = new Map(ult.map(u => [String(u._id), u]));
   const opPorTel = new Map(); for (const o of ops) { const t = tel10(o.cliente && o.cliente.telefono); if (t && !opPorTel.has(t)) opPorTel.set(t, o); }
   const presPorConv = new Map(); for (const p of press) { const k = String(p.origenBot.convId); if (!presPorConv.has(k)) presPorConv.set(k, p); }
@@ -117,14 +120,14 @@ async function armar(db, req, { cerradas }) {
       ultimo, esperaCliente, esperaMin: esperaCliente ? Math.max(0, Math.round((ahora - new Date(ultimo.at)) / 60000)) : 0, sinLeer: esperaCliente ? sinLeer : 0,
       prox, paso: a ? a.proximoPaso : '', resumen: (a && a.resumen) || c.resumen || '', falta: (a && a.datosFaltantes) || [], sugerida: a ? a.respuestaSugerida : '', analizadoAt: a ? a.at : null,
       presupuesto: pres ? { id: String(pres._id), numero: pres.numero, total: Number(pres.total) || 0, items: (pres.items || []).length, estado: pres.estado, borrador: !!(pres.origenBot && pres.usuarioNombre === 'Bot de WhatsApp' && (pres.seguimiento || []).length <= 1) } : null,
-      etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa, asesorHablo: !!(ultimo && ultimo.dir === 'out' && ultimo.origen === 'asesor') }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
+      etapa, columna: columnaDe({ esp: esperaCliente, m, prox, etapa, asesorHablo: !!(ultimo && ultimo.dir === 'out' && (ultimo.origen === 'asesor' || c.estado === 'bot')) }), recordar: !!m.recordar, recs: m.recs || 0, sinDec: !!m.sinDec, esperandoVence: m.esperando ? m.esperando.venceAt : null, fuente: c.referral && (c.referral.headline || c.referral.source_id) ? 'Meta Ads · ' + (c.referral.headline || '') : 'Directo',
       notas: m.notas || '', historial: (m.historial || []).slice(-30), cierre: m.cierre || null, actualizado: (ultimo && ultimo.at) || c.updatedAt,
       pendienteDesde: pendDesde, sin24
     });
   }
   // oportunidades activas sin conversación guardada (vienen de Azuite o se cargaron a mano): se ven igual, sin chat
   for (const [t, o] of opPorTel) {
-    if (vistos.has(t)) continue;
+    if (vistos.has(t) || telCerrado.has(t)) continue;
     const prox = o.proximaAccion && o.proximaAccion.fecha ? { fecha: o.proximaAccion.fecha, nota: o.proximaAccion.nota || '', dias: diasHasta(o.proximaAccion.fecha, ahora) } : null;
     items.push({
       historica: !!(o.importado && !(prox && prox.dias > 0)), id: 'op:' + o._id, convId: null, opId: String(o._id), opNumero: o.numero, nombre: o.cliente.nombre || ('+' + digitos(o.cliente.telefono)), tel: digitos(o.cliente.telefono), estadoConv: null, demo: false,
@@ -135,7 +138,7 @@ async function armar(db, req, { cerradas }) {
   }
   // leads sueltos (llegaron de Azuite o de un anuncio y todavía no son oportunidad ni tienen conversación): para no perder ninguno al unificar pantallas
   for (const l of leadsSueltos) {
-    if (!l.tel10 || vistos.has(l.tel10) || opPorTel.has(l.tel10) || l.oportunidadId) continue;
+    if (!l.tel10 || vistos.has(l.tel10) || opPorTel.has(l.tel10) || l.oportunidadId || telCerrado.has(l.tel10)) continue;
     vistos.add(l.tel10);
     items.push({
       id: 'lead:' + l._id, convId: null, opId: null, leadId: String(l._id), opNumero: null, nombre: l.nombre || ('+' + l.telefono), tel: digitos(l.telefono), estadoConv: null, demo: false,
