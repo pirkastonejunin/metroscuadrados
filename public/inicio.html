@@ -1247,12 +1247,12 @@ function renderVencimientosPrincipal() {
 
   if (vencDiaSeleccionado) {
     const items = porDia[vencDiaSeleccionado] || [];
-    listaEl.innerHTML = items.length ? items.map(it => `
+    listaEl.innerHTML = items.length ? notifAgrupadas(items, it => `
       <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
         <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
         <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
       </div>
-    `).join('') : '<div class="venc-detalle-vacio">Sin vencimientos ese día.</div>';
+    `) : '<div class="venc-detalle-vacio">Sin vencimientos ese día.</div>';
   } else {
     listaEl.innerHTML = NOTIF_ITEMS.length
       ? `<div class="venc-detalle-vacio">Tocá un día marcado para ver el detalle — hay ${NOTIF_ITEMS.length} vencimiento${NOTIF_ITEMS.length===1?'':'s'} en total.</div>`
@@ -1273,17 +1273,26 @@ function toggleNotifPanel(){
   panel.classList.toggle('hidden', !abriendo);
   if (abriendo) renderNotifPanel();
 }
+// Avisos agrupados por módulo (16/11/2026, pedido de Mato): cada grupo con su título y cantidad, en un orden fijo.
+const NOTIF_GRUPOS = [['Comercial · CRM y visitas',['crm','crm_sin_decidir','meta_token','visita']],['Ventas',['venta_sin_entregar','venta_sin_cobrar']],['Compras',['orden_compra','compra_por_pagar']],['Tesorería',['cheque_vencido','cheque_por_vencer','caja_sin_cerrar']],['Stock',['stock_bajo']],['Obras',['obra']],['Recordatorios',['recordatorio']]];
+function notifAgrupadas(items, htmlItem){
+  const usados = new Set(); let out = '';
+  const bloque = (titulo, lista) => { if (!lista.length) return; out += `<div class="notif-grupo" style="padding:6px 14px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);background:var(--bg);border-bottom:1px solid var(--border)">${notifEscapeHtml(titulo)} · ${lista.length}</div>` + lista.map(htmlItem).join(''); };
+  NOTIF_GRUPOS.forEach(([t, tipos]) => { const l = items.filter(x => tipos.includes(x.tipo)); l.forEach(x => usados.add(x)); bloque(t, l); });
+  bloque('Otros', items.filter(x => !usados.has(x)));
+  return out;
+}
 function renderNotifPanel(){
   const cont = document.getElementById('notifPanelBody');
   if (!cont) return;
   if (!NOTIF_ITEMS.length) { cont.innerHTML = '<div class="notif-empty">Sin vencimientos pendientes.</div>'; return; }
-  cont.innerHTML = NOTIF_ITEMS.map(it => `
+  cont.innerHTML = notifAgrupadas(NOTIF_ITEMS, it => `
     <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
       <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
       <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
       <div class="notif-item-fecha">${notifEscapeHtml(it.etiquetaFecha || 'Venció el')} ${notifFmtFecha(it.fecha)}</div>
     </div>
-  `).join('');
+  `);
 }
 function irANotificacion(tipo, id){
   toggleNotifPanel();
