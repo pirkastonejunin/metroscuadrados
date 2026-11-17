@@ -959,10 +959,9 @@ $('#btnContinuarDatos').addEventListener('click', () => {
     const esPlacas = categoria === 'placas';
     $('#camposSuperficiesTitulo').textContent = esPlacas ? 'Superficies a revestir con placas' : 'Superficies a revestir';
     $('#camposSuperficiesHint').textContent = esPlacas
-      ? 'Cargá cada pared/superficie por separado (largo x alto). Cada lado se mide en módulos de 0,60 m (la placa es de 0,60 x 0,60) y se redondea para arriba: ahí ya queda incluido el desperdicio.'
+      ? 'Cargá cada pared/superficie por separado (largo x alto). Cada lado se mide en módulos de 0,60 m (la placa es de 0,60 x 0,60) y se redondea para arriba; después se suma el % de desperdicio de abajo (arranca con el que tiene cargado el tipo de obra).'
       : 'Cargá cada pared/superficie por separado (largo x alto) — se van a sumar todas para calcular los m² totales de piedra.';
-    $('#labelDesperdicioSuperficies').textContent = esPlacas ? '% desperdicio adicional de placas (opcional)' : '% desperdicio de piedra';
-    if (esPlacas) $('#desperdicioPctSuperficies').value = 0;
+    $('#labelDesperdicioSuperficies').textContent = esPlacas ? '% desperdicio de placas' : '% desperdicio de piedra';
     const gen = !!tipoObraElegido.generico;
     $('#campoPrecioM2Generico').classList.toggle('hidden', !gen);
     $('#precioM2Generico').value = '';
