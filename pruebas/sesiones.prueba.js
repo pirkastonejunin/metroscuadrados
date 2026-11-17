@@ -80,7 +80,8 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
     const mk = (ts) => { const p = `${uid}.${ts}`; return Buffer.from(p).toString('base64') + '.' + crypto.createHmac('sha256', 'test-secret').update('usuario.' + p).digest('hex'); };
     const viejo = mk(Date.now() - 5 * 864e5);
     await db.collection('usuarios').updateMany({}, { $unset: { sesionesDesde: '' } }); // empieza limpio
-    assert.strictEqual((await req('GET', '/api/usuarios/me', null, T(viejo))).status, 200);
+    const pasoElCorte = Date.now() > new Date('2026-11-17T00:00:00-03:00').getTime(); // desde el 17/11/2026 los tokens sin sesión ya no valen
+    assert.strictEqual((await req('GET', '/api/usuarios/me', null, T(viejo))).status, pasoElCorte ? 401 : 200);
     const t = await login();
     await req('POST', '/api/usuarios/sesiones/cerrar-todas', { conservarActual: true }, T(t));
     assert.strictEqual((await req('GET', '/api/usuarios/me', null, T(viejo))).status, 401);

@@ -489,15 +489,21 @@
           try { localStorage.setItem(clave, hoy); } catch (e) {}
           const todos = d.items || [];
           if (!todos.length) return;
-          const orden = todos.slice().sort((a, b) => (a.tipo === 'recordatorio' ? 0 : 1) - (b.tipo === 'recordatorio' ? 0 : 1));
+          const GRUPOS = [['Recordatorios', ['recordatorio']], ['Comercial · CRM y visitas', ['crm', 'crm_sin_decidir', 'meta_token', 'visita']], ['Ventas', ['venta_sin_entregar', 'venta_sin_cobrar']], ['Compras', ['orden_compra', 'compra_por_pagar']], ['Tesorería', ['cheque_vencido', 'cheque_por_vencer', 'caja_sin_cerrar']], ['Stock', ['stock_bajo']], ['Obras', ['obra']]];
+          const grupoDe = t => { const i = GRUPOS.findIndex(g => g[1].indexOf(t) >= 0); return i < 0 ? GRUPOS.length : i; };
+          const orden = todos.map((x, i) => ({ x: x, i: i })).sort((a, b) => (grupoDe(a.x.tipo) - grupoDe(b.x.tipo)) || (a.i - b.i)).map(o => o.x);
+          const cuentaGrupo = {}; orden.forEach(x => { const g = grupoDe(x.tipo); cuentaGrupo[g] = (cuentaGrupo[g] || 0) + 1; });
+          let grupoPrev = -1;
           const esc = x => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
           const ov = document.createElement('div');
           ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:12px';
           ov.innerHTML = '<div style="background:var(--card,#fff);color:var(--text,#222);border-radius:14px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:inherit">' +
             '<div style="padding:16px 18px;border-bottom:1px solid var(--border,#ddd);font-weight:800;font-size:16px">🔔 Pendientes de hoy (' + orden.length + ')</div>' +
             '<div class="pn-pop-lista" style="overflow:auto;padding:6px 0">' + orden.map(function (it, i) {
-              const url = destino(it.tipo, it.id);
-              return '<div data-i="' + i + '" style="padding:10px 18px;border-bottom:1px solid var(--border,#eee);' + (url ? 'cursor:pointer' : '') + '"><b>' + esc(it.titulo) + '</b><div style="font-size:12.5px;opacity:.75">' + esc(it.subtitulo || '') + '</div>' +
+              const url = destino(it.tipo, it.id), g = grupoDe(it.tipo);
+              let cab = '';
+              if (g !== grupoPrev) { grupoPrev = g; cab = '<div style="padding:6px 18px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;opacity:.65;background:rgba(128,128,128,.12);position:sticky;top:0">' + esc(g < GRUPOS.length ? GRUPOS[g][0] : 'Otros') + ' · ' + cuentaGrupo[g] + '</div>'; }
+              return cab + '<div data-i="' + i + '" style="padding:10px 18px;border-bottom:1px solid var(--border,#eee);' + (url ? 'cursor:pointer' : '') + '"><b>' + esc(it.titulo) + '</b><div style="font-size:12.5px;opacity:.75">' + esc(it.subtitulo || '') + '</div>' +
                 (it.fecha ? '<div style="font-size:11.5px;opacity:.6">' + esc(it.etiquetaFecha || 'Venció el') + ' ' + esc(new Date(it.fecha).toLocaleString('es-AR', it.tipo === 'recordatorio' ? { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' } : undefined)) + '</div>' : '') +
                 (it.tipo === 'recordatorio' ? '<button type="button" data-hecho="' + i + '" style="margin-top:6px;border:1px solid var(--border,#ccc);background:transparent;border-radius:6px;font-size:12px;padding:3px 8px;cursor:pointer;color:inherit">✓ Hecho</button>' : '') + '</div>';
             }).join('') + '</div>' +
