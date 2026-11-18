@@ -128,7 +128,7 @@
         <div class="row" style="flex:1">
           <div style="min-width:220px;flex:1">
             <label>Buscar (nombre, código, CUIT o documento)</label>
-            <input id="fBusqueda" oninput="cargarClientes()" placeholder="Ej: Pérez, 20-12345678-9">
+            <input id="fBusqueda" oninput="buscarClientesLocal()" placeholder="Ej: Pérez, 20-12345678-9">
           </div>
           <div>
             <label style="visibility:hidden">.</label>
@@ -261,7 +261,7 @@ if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.r
 let clientesCache = [];
 async function cargarClientes(){
   const params = new URLSearchParams();
-  if (document.getElementById('fBusqueda').value.trim()) params.set('q', document.getElementById('fBusqueda').value.trim());
+  // (18/11/2026) Se baja la lista completa una vez y la búsqueda se filtra acá, al instante (antes cada letra pedía todo al servidor y el resultado llegaba tarde y pisaba lo escrito).
   if (document.getElementById('fInactivos').checked) params.set('incluirInactivos', '1');
   const r = await fetch(BASE + '?' + params.toString(), {headers: headersAuth()});
   const body = document.getElementById('clientesBody');
@@ -285,8 +285,21 @@ function saldoCli(id){
   const s = resumenSaldosCli.saldos[String(id)];
   return s === undefined ? 0 : s;
 }
+const _sinTildes = t => String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+let _tBusqCli = null;
+function buscarClientesLocal(){ clearTimeout(_tBusqCli); _tBusqCli = setTimeout(renderClientes, 120); }
+function clientesBuscados(){
+  const q = _sinTildes((document.getElementById('fBusqueda') || {}).value || '').trim();
+  if (!q) return clientesCache;
+  const palabras = q.split(/\s+/).filter(Boolean), soloDigitos = q.replace(/\D/g, '');
+  return clientesCache.filter(c => {
+    const txt = _sinTildes([c.apellidoRazonSocial, c.nombre, c.codigo, c.cuit, c.numeroDocumento].join(' '));
+    const dig = String([c.cuit, c.numeroDocumento].join(' ')).replace(/\D/g, '');
+    return palabras.every(w => txt.includes(w)) || (soloDigitos.length >= 3 && dig.includes(soloDigitos));
+  });
+}
 function clientesVisibles(){
-  const l = clientesCache.filter(c => {
+  const l = clientesBuscados().filter(c => {
     const s = saldoCli(c._id) || 0;
     if (filtroSaldoCli === 'deuda') return s > 0.5;
     if (filtroSaldoCli === 'favor') return s < -0.5;
@@ -301,7 +314,7 @@ function nombreCli(c){ return (c.apellidoRazonSocial || '') + (c.nombre ? ' ' + 
 function renderKpisClientes(){
   const el = document.getElementById('kpisClientes'); if (!el) return;
   if (!resumenSaldosCli) { el.innerHTML = ''; return; }
-  const lista = clientesCache.map(c => ({ c, s: saldoCli(c._id) || 0 }));
+  const lista = clientesBuscados().map(c => ({ c, s: saldoCli(c._id) || 0 }));
   const deudores = lista.filter(x => x.s > 0.5).sort((a, b) => b.s - a.s);
   const favor = lista.filter(x => x.s < -0.5);
   const deuda = deudores.reduce((a, x) => a + x.s, 0), aFavor = favor.reduce((a, x) => a - x.s, 0), neto = deuda - aFavor;
