@@ -357,12 +357,17 @@ async function leerCatalogoVigoritaSF(maxProductos) {
     return { id: it.id, categoriaRaiz: it.categoria, ficha, precios: Array.isArray(precios && precios.returnValue) ? precios.returnValue : [] };
   });
 }
+// Los campos del portal nuevo traen el decimal con PUNTO ("2.2104", "5.4", "18.6 kg"): no se puede usar numeroEs (que toma el punto como separador de miles y convertía 2.80 en 280).
+function numeroSF(t) {
+  const m = /-?\d+(?:[.,]\d+)?/.exec(String(t == null ? '' : t)); if (!m) return null;
+  const n = Number(m[0].replace(',', '.')); return Number.isFinite(n) && n > 0 ? n : null;
+}
 function filaDeProductoVigoritaSF(x, i) {
   const f = x.ficha.fields || {};
   const lista = x.precios || [];
   const transf = lista.find(l => /transferencia/i.test(l.pricebookDescriptiveName || '')) || lista[0] || null;
   const precio = transf && Number.isFinite(Number(transf.unitPrice)) && Number(transf.unitPrice) > 0 ? Number(transf.unitPrice) : null;
-  const m2Caja = numeroEs(f.M2PorCaja__c);
+  const m2Caja = numeroSF(f.M2PorCaja__c);
   const porM2 = transf ? /^(mt2|m2|m²)$/i.test(String(transf.unitOfMeasure || '').trim()) : !!m2Caja;
   const cat = ((x.ficha.primaryProductCategoryPath && x.ficha.primaryProductCategoryPath.path) || []).map(c => c.name).filter(Boolean);
   const imgs = [];
@@ -370,7 +375,7 @@ function filaDeProductoVigoritaSF(x, i) {
   mas(x.ficha.defaultImage && x.ficha.defaultImage.url);
   (x.ficha.mediaGroups || []).forEach(g => (g.mediaItems || []).forEach(m => mas(m.url)));
   const codigo = String(f.ProductCode || f.StockKeepingUnit || '').trim();
-  return { fila: i + 1, pesoCaja: numeroEs(f.PesoDeLaCaja__c) || numeroEs(f.Peso__c), porM2, bulto: porM2 ? m2Caja : null, imagenes: imgs, codigo, nombre: String(f.Name || '').trim() + ' (' + (porM2 ? 'm²' : 'unidad') + ')', precio, moneda: transf ? (transf.currencyIsoCode || null) : null, stock: null, stockCelda: '', categoria: cat.length ? cat.join(' / ') : (x.categoriaRaiz || ''), url: x.id ? VIGORITA_SF + '/product/p/' + x.id : null, listas: lista.map(l => ({ lista: l.pricebookDescriptiveName, precio: l.unitPrice })) };
+  return { fila: i + 1, pesoCaja: numeroSF(f.PesoDeLaCaja__c) || numeroSF(f.Peso__c), porM2, bulto: porM2 ? m2Caja : null, imagenes: imgs, codigo, nombre: String(f.Name || '').trim() + ' (' + (porM2 ? 'm²' : 'unidad') + ')', precio, moneda: transf ? (transf.currencyIsoCode || null) : null, stock: null, stockCelda: '', categoria: cat.length ? cat.join(' / ') : (x.categoriaRaiz || ''), url: x.id ? VIGORITA_SF + '/product/p/' + x.id : null, listas: lista.map(l => ({ lista: l.pricebookDescriptiveName, precio: l.unitPrice })) };
 }
 async function filasVigorita(cred, opciones) {
   const prods = await leerCatalogoVigoritaSF();
