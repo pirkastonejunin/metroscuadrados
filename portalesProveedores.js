@@ -366,16 +366,21 @@ function filaDeProductoVigoritaSF(x, i) {
   const f = x.ficha.fields || {};
   const lista = x.precios || [];
   const transf = lista.find(l => /transferencia/i.test(l.pricebookDescriptiveName || '')) || lista[0] || null;
-  const precio = transf && Number.isFinite(Number(transf.unitPrice)) && Number(transf.unitPrice) > 0 ? Number(transf.unitPrice) : null;
+  let precio = transf && Number.isFinite(Number(transf.unitPrice)) && Number(transf.unitPrice) > 0 ? Number(transf.unitPrice) : null;
   const m2Caja = numeroSF(f.M2PorCaja__c);
-  const porM2 = transf ? /^(mt2|m2|m²)$/i.test(String(transf.unitOfMeasure || '').trim()) : !!m2Caja;
+  let porM2 = transf ? /^(mt2|m2|m²)$/i.test(String(transf.unitOfMeasure || '').trim()) : !!m2Caja;
+  let monedaFicha = null;
+  // (18/11/2026) El portal dejó de mostrar los precios de las listas a quien no inició sesión (getPricesByPricebook vuelve vacío). La ficha todavía trae
+  // "Precio_Filtro_Mayorista__c" (= el precio por transferencia). Solo se usa para los pisos por m² (cobertura por caja cargada), que son en dólares;
+  // el resto queda sin precio porque la moneda de esos campos no es confiable.
+  if (!transf && m2Caja && numeroSF(f.Precio_Filtro_Mayorista__c)) { precio = numeroSF(f.Precio_Filtro_Mayorista__c); porM2 = true; monedaFicha = 'USD'; }
   const cat = ((x.ficha.primaryProductCategoryPath && x.ficha.primaryProductCategoryPath.path) || []).map(c => c.name).filter(Boolean);
   const imgs = [];
   const mas = (u) => { if (u && !imgs.includes(VIGORITA_SF + u)) imgs.push(VIGORITA_SF + u); };
   mas(x.ficha.defaultImage && x.ficha.defaultImage.url);
   (x.ficha.mediaGroups || []).forEach(g => (g.mediaItems || []).forEach(m => mas(m.url)));
   const codigo = String(f.ProductCode || f.StockKeepingUnit || '').trim();
-  return { fila: i + 1, pesoCaja: numeroSF(f.PesoDeLaCaja__c) || numeroSF(f.Peso__c), porM2, bulto: porM2 ? m2Caja : null, imagenes: imgs, codigo, nombre: String(f.Name || '').trim() + ' (' + (porM2 ? 'm²' : 'unidad') + ')', precio, moneda: transf ? (transf.currencyIsoCode || null) : null, stock: null, stockCelda: '', categoria: cat.length ? cat.join(' / ') : (x.categoriaRaiz || ''), url: x.id ? VIGORITA_SF + '/product/p/' + x.id : null, listas: lista.map(l => ({ lista: l.pricebookDescriptiveName, precio: l.unitPrice })) };
+  return { fila: i + 1, pesoCaja: numeroSF(f.PesoDeLaCaja__c) || numeroSF(f.Peso__c), porM2, bulto: porM2 ? m2Caja : null, imagenes: imgs, codigo, nombre: String(f.Name || '').trim() + ' (' + (porM2 ? 'm²' : 'unidad') + ')', precio, moneda: transf ? (transf.currencyIsoCode || null) : monedaFicha, stock: null, stockCelda: '', categoria: cat.length ? cat.join(' / ') : (x.categoriaRaiz || ''), url: x.id ? VIGORITA_SF + '/product/p/' + x.id : null, listas: lista.map(l => ({ lista: l.pricebookDescriptiveName, precio: l.unitPrice })) };
 }
 async function filasVigorita(cred, opciones) {
   const prods = await leerCatalogoVigoritaSF();
