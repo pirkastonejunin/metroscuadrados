@@ -567,7 +567,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
           concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => nombreCompraPorId.get(String(a.compraId)) || '#' + a.compraNumero).join(', ') : ''}`,
-          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado
+          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado, montoSinAplicar: Math.round((Number(p.montoSinAplicar) || 0) * 100) / 100
         });
       }
       for (const g of gastos) {

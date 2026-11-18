@@ -665,7 +665,7 @@ router.get('/', authAdmin, async (req, res) => {
     const lista = await conReintento(async () => {
       const db = await getDb();
       // ?sucursal=1: solo las compras de la sucursal (sin las de otras sucursales de un proveedor compartido) — lo usa el pago, que se hace en UNA sucursal.
-      Object.assign(match, req.query.sucursal === '1' ? filtroOrg(req) : await filtroOrgConCompartidos(db, req));
+      Object.assign(match, req.query.sucursal === '1' ? filtroOrg(req) : (req.query.todas === '1' && req.query.proveedorId ? {} : await filtroOrgConCompartidos(db, req))); // todas=1: todas las sucursales de ese proveedor (base única)
       // limpieza única por proceso: las facturas anuladas antes de este arreglo seguían imputadas a su obra
       if (!global.__comprasAnuladasDesimputadas) {
         global.__comprasAnuladasDesimputadas = true;
@@ -1591,7 +1591,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
     const motivo = normalizarTexto(req.body && req.body.motivo);
     const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
     const out = await conReintento(() => enTransaccion(async (db) => {
-      const compra = await db.collection('compras').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const compra = await db.collection('compras').findOne({ _id: id }); // base única: se puede anular un pago desde cualquier sucursal
       if (!compra) throw err(404, 'Compra no encontrada');
       const p = (compra.pagos || [])[idx];
       if (!p) throw err(404, 'No se encontró ese pago.');
@@ -1739,7 +1739,7 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
       return { compraId, monto };
     });
     const resultado = await conReintento(() => enTransaccion(async (db) => {
-      const pc = await db.collection('compras_pagos').findOne(Object.assign({ _id: pid }, await filtroOrgConCompartidos(db, req)));
+      const pc = await db.collection('compras_pagos').findOne({ _id: pid });
       if (!pc) throw err(404, 'Pago no encontrado');
       if (pc.anulado) throw err(400, 'Ese pago está anulado.');
       const libre = Math.round((pc.montoSinAplicar || 0) * 100) / 100;
@@ -1776,6 +1776,29 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Anular un pago desde la cuenta corriente del proveedor (18/11/2026): se identifica por el id del pago y se deriva a la anulación que corresponda
+// (pago a cuenta sin aplicar, o pago aplicado a compras, que se anula completo con todas sus compras).
+router.post('/pagos/:pagoId/anular', authAdmin, async (req, res, next) => {
+  try {
+    const pid = toObjectId(req.params.pagoId);
+    if (!pid) throw err(400, 'Pago inválido');
+    const db = await getDb();
+    const pc = await db.collection('compras_pagos').findOne({ _id: pid });
+    if (!pc) throw err(404, 'Pago no encontrado');
+    if (pc.anulado) throw err(400, 'Ese pago ya está anulado.');
+    if (pc.importado) throw err(400, 'Es un pago histórico importado de Dux: no se puede anular desde acá.');
+    if (!(pc.aplicaciones || []).length) { req.url = '/pagos-cuenta/' + pid + '/anular'; return router.handle(req, res, next); }
+    for (const a of pc.aplicaciones) {
+      const c = await db.collection('compras').findOne({ _id: a.compraId });
+      if (!c) continue;
+      let i = (c.pagos || []).findIndex(x => x.pagoCuentaId && String(x.pagoCuentaId) === String(pc._id) && !x.anulado);
+      if (i < 0) i = (c.pagos || []).findIndex(x => !x.anulado && x.tipoValor === pc.tipoValor && x.monto === a.monto && String(x.fecha) === String(pc.fecha));
+      if (i >= 0) { req.url = '/' + c._id + '/pagos/' + i + '/anular'; return router.handle(req, res, next); }
+    }
+    throw err(400, 'No se pudo ubicar este pago dentro de sus compras: anulalo desde la compra.');
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Anular un pago a cuenta que todavía no se aplicó a ninguna compra (si ya se aplicó, se anula desde la compra, como siempre).
 router.post('/pagos-cuenta/:id/anular', authAdmin, async (req, res) => {
   try {
@@ -1784,7 +1807,7 @@ router.post('/pagos-cuenta/:id/anular', authAdmin, async (req, res) => {
     const motivo = normalizarTexto(req.body && req.body.motivo);
     const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
     const out = await conReintento(() => enTransaccion(async (db) => {
-      const pc = await db.collection('compras_pagos').findOne(Object.assign({ _id: pid }, filtroOrg(req)));
+      const pc = await db.collection('compras_pagos').findOne({ _id: pid });
       if (!pc) throw err(404, 'Pago no encontrado');
       if (pc.anulado) throw err(400, 'Ese pago ya está anulado.');
       if ((pc.aplicaciones || []).length) throw err(400, 'Ese pago ya se aplicó a una compra: anulalo desde esa compra.');

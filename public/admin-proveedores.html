@@ -820,7 +820,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
               <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
-              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : (m.origen === 'ajuste' ? `<button class="btn small secondary" title="Quitar este ajuste" onclick="quitarAjusteSaldoProveedor('${m.docId}')">Quitar</button>` : '')}</td>
+              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : (m.origen === 'ajuste' ? `<button class="btn small secondary" title="Quitar este ajuste" onclick="quitarAjusteSaldoProveedor('${m.docId}')">Quitar</button>` : (m.origen === 'pago_compra' ? `${m.montoSinAplicar > 0.009 ? `<button class="btn small" title="Aplicar este pago a una o varias facturas" onclick="vincularPagoProveedor(${index})">Vincular</button> ` : ''}${m.importado ? '' : `<button class="btn small secondary" title="Anular este pago (devuelve la plata a la caja/banco)" onclick="anularPagoProveedorCC(${index})">Anular</button>`}` : ''))}</td>
             </tr>
           `; }).join('') : '<tr><td colspan="8" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
@@ -832,6 +832,66 @@ async function cargarCuentaCorrienteProveedorTab(id){
   }
 }
 
+
+// ---- Anular y vincular pagos desde la cuenta corriente (18/11/2026) ----
+async function anularPagoProveedorCC(i){
+  const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return;
+  if (!confirm('¿Anular este pago de ' + money(m.monto) + '?\n\nSe devuelve la plata a la caja/banco (o el cheque vuelve a cartera) y las facturas a las que estaba aplicado recuperan su saldo. El pago queda registrado como anulado.')) return;
+  try{
+    const r = await fetch('/api/compras/pagos/' + m.docId + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({})});
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'No se pudo anular');
+    cargarCuentaCorrienteProveedorTab(ctx.id);
+  }catch(e){ alert(e.message); }
+}
+let _vincCtx = null;
+async function vincularPagoProveedor(i){
+  const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return;
+  _vincCtx = { m, compras: [], provId: ctx.id };
+  document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
+    <div class="modal-bg" id="vincBg"><div class="modal wide">
+      <span class="close-x" onclick="document.getElementById('vincBg').remove()">✕</span>
+      <h2>Vincular pago a facturas</h2>
+      <p class="muted" style="margin-top:-8px">Pago del ${fechaCorta(m.fecha)} — queda sin aplicar <b>${money(m.montoSinAplicar)}</b>. Marcá las facturas y el monto a aplicar a cada una.</p>
+      <div id="vincLista"><p class="muted">Cargando facturas…</p></div>
+      <div class="muted" id="vincResumen" style="margin-top:8px"></div>
+      <div class="err" id="vincErr"></div>
+      <button class="btn" style="margin-top:10px" onclick="confirmarVincularPago()">Aplicar</button>
+    </div></div>`);
+  try{
+    const r = await fetch('/api/compras?todas=1&limite=500&proveedorId=' + ctx.id, {headers: headersAuth()});
+    const l = r.ok ? await r.json() : [];
+    _vincCtx.compras = l.filter(c => c.estado !== 'anulada' && c.saldoPendiente > 0.009).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+  }catch(e){}
+  const cont = document.getElementById('vincLista'); if (!cont) return;
+  if (!_vincCtx.compras.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene facturas con saldo pendiente.</p>'; return; }
+  cont.innerHTML = _vincCtx.compras.map((c, k) => `
+    <div class="fila-pago-cuenta" data-k="${k}" data-saldo="${c.saldoPendiente}" style="display:flex;gap:8px;align-items:center;margin:4px 0">
+      <input type="checkbox" style="width:auto" onchange="vincFila(this)">
+      <div style="flex:1">${c.numero ? 'Compra #' + c.numero : 'Compra'}${c.comprobanteNumero ? ' · ' + (c.puntoVenta ? c.puntoVenta + '-' : '') + c.comprobanteNumero : ''} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
+      <input type="number" min="0" step="0.01" value="0" disabled style="width:130px" oninput="vincResumen()">
+    </div>`).join('');
+  vincResumen();
+}
+function vincSuma(){ let t = 0; document.querySelectorAll('#vincLista .fila-pago-cuenta').forEach(f => { if (f.querySelector('input[type="checkbox"]').checked) t += Number(f.querySelector('input[type="number"]').value) || 0; }); return Math.round(t * 100) / 100; }
+function vincFila(cb){
+  const f = cb.closest('.fila-pago-cuenta'), inp = f.querySelector('input[type="number"]'); inp.disabled = !cb.checked;
+  inp.value = cb.checked ? Math.max(0, Math.min(Number(f.dataset.saldo), Math.round((_vincCtx.m.montoSinAplicar - vincSuma()) * 100) / 100)) : 0;
+  vincResumen();
+}
+function vincResumen(){ const el = document.getElementById('vincResumen'); if (el) el.textContent = 'Aplicando ' + money(vincSuma()) + ' de ' + money(_vincCtx.m.montoSinAplicar) + ' sin aplicar.'; }
+async function confirmarVincularPago(){
+  const err = document.getElementById('vincErr'); err.textContent = '';
+  const aplicaciones = [];
+  document.querySelectorAll('#vincLista .fila-pago-cuenta').forEach(f => { const mo = Number(f.querySelector('input[type="number"]').value) || 0; if (f.querySelector('input[type="checkbox"]').checked && mo > 0) aplicaciones.push({ compraId: _vincCtx.compras[Number(f.dataset.k)]._id, monto: mo }); });
+  if (!aplicaciones.length) { err.textContent = 'Elegí al menos una factura y el monto a aplicar'; return; }
+  if (vincSuma() > _vincCtx.m.montoSinAplicar + 0.01) { err.textContent = 'Estás aplicando más de lo que queda sin aplicar de este pago'; return; }
+  try{
+    const r = await fetch('/api/compras/pagos-cuenta/' + _vincCtx.m.docId + '/aplicar', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ aplicaciones })});
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Error');
+    document.getElementById('vincBg').remove();
+    cargarCuentaCorrienteProveedorTab(_vincCtx.provId);
+  }catch(e){ err.textContent = e.message; }
+}
 
 // ---- Acciones (⚙) de la cuenta corriente del proveedor ----
 (function(){ const st = document.createElement('style'); st.textContent = '.cc-acc-item{display:block;padding:9px 12px;border-radius:6px;color:var(--text,#222);text-decoration:none;font-size:14px;white-space:nowrap}.cc-acc-item:hover{background:rgba(127,127,127,.15)}'; document.head.appendChild(st); })();
