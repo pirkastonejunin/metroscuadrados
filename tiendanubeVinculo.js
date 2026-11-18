@@ -281,6 +281,9 @@ router.post('/publicar/mapa', auth, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// (18/11/2026) El filtro por proveedor agrupa por NOMBRE (si hay varios registros del mismo proveedor, por ejemplo unificados, los productos
+// de todos aparecen juntos); si el producto no tiene nombre de proveedor se usa su id.
+const claveProveedor = (p) => { const n = String(p.proveedor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); return n ? 'n:' + n : (p.proveedorId ? 'i:' + String(p.proveedorId) : ''); };
 router.get('/publicar/candidatos', auth, async (req, res) => {
   try {
     const db = await getDb(); const { precioResuelto } = require('./productos');
@@ -299,9 +302,9 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     const limite = Math.min(3000, Math.max(50, Number(req.query.limite) || 400));
     // Opciones de los filtros de marca y proveedor (sobre lo que ya pasó los otros filtros)
     const cuenta = (fn) => { const m = new Map(); prods.forEach(p => { const k = fn(p); if (k && k.v) m.set(k.v, { v: k.v, n: k.n, c: ((m.get(k.v) || {}).c || 0) + 1 }); }); return [...m.values()].sort((a, b) => String(a.n).localeCompare(String(b.n), 'es')); };
-    const marcas = cuenta(p => p.marca ? { v: p.marca, n: p.marca } : null), proveedores = cuenta(p => (p.proveedorId || p.proveedor) ? { v: String(p.proveedorId || p.proveedor), n: p.proveedor || '(sin nombre)' } : null);
+    const marcas = cuenta(p => p.marca ? { v: p.marca, n: p.marca } : null), proveedores = cuenta(p => { const k = claveProveedor(p); return k ? { v: k, n: p.proveedor || '(sin nombre)' } : null; });
     if (req.query.marca) prods = prods.filter(p => (p.marca || '') === req.query.marca);
-    if (req.query.proveedor) prods = prods.filter(p => String(p.proveedorId || p.proveedor || '') === req.query.proveedor);
+    if (req.query.proveedor) prods = prods.filter(p => claveProveedor(p) === req.query.proveedor);
     const filtroStock = req.query.stock === 'con' || req.query.stock === 'sin' ? req.query.stock : '';
     let stock;
     if (filtroStock) { stock = await stockDisponible(db, prods.map(p => p._id)); prods = prods.filter(p => { const s = stock.get(String(p._id)) || 0; return filtroStock === 'con' ? s > 0 : s <= 0; }); }

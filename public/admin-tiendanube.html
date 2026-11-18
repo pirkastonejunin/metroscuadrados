@@ -201,8 +201,8 @@
           <div style="min-width:200px"><label>Lista de precios</label><select id="pbLista" onchange="cargarCandidatos()"></select></div>
           <div style="min-width:200px"><label>Rubro</label><select id="pbRubro" onchange="cargarCandidatos()"></select></div>
           <div style="flex:1;min-width:220px"><label>Buscar</label><input id="pbQ" placeholder="Nombre, SKU o marca…" onkeydown="if(event.key==='Enter')cargarCandidatos()"></div>
-          <div style="min-width:160px"><label>Marca</label><select id="pbMarca" onchange="LIM=400;cargarCandidatos()"><option value="">Todas</option></select></div>
-          <div style="min-width:180px"><label>Proveedor</label><select id="pbProv" onchange="LIM=400;cargarCandidatos()"><option value="">Todos</option></select></div>
+          <div style="min-width:160px"><label>Marca</label><select id="pbMarca" onchange="LIM=1500;cargarCandidatos()"><option value="">Todas</option></select></div>
+          <div style="min-width:180px"><label>Proveedor</label><select id="pbProv" onchange="LIM=1500;cargarCandidatos()"><option value="">Todos</option></select></div>
           <div style="min-width:150px"><label>Stock</label><select id="pbStock" onchange="LIM=400;cargarCandidatos()"><option value="">Todos</option><option value="con">Con stock</option><option value="sin">Sin stock</option></select></div>
           <div style="min-width:150px"><label style="display:block">&nbsp;</label><label class="check" style="margin:0"><input type="checkbox" id="pbDesc" style="width:auto" onchange="LIM=400;cargarCandidatos()"> Ver descartados</label></div>
           <div><button class="btn" onclick="LIM=400;cargarCandidatos()">Buscar</button></div>
