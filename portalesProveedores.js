@@ -212,23 +212,41 @@ async function filasMaxipiso(cred, opciones) {
   const jarra = await loginMaxipiso(cred);
   const productos = [];
   const lote = 100;
-  for (let skip = 0; skip < 5000; skip += lote) {
+  const vistos = new Set();
+  let total = null;
+  // (18/11/2026) Antes se cortaba apenas una página traía menos de 100: si el portal entrega menos por página (o repite alguno), faltaban artículos.
+  // Ahora se avanza por lo que realmente llegó, se corta cuando una página no trae nada nuevo (o al llegar al total que informe el portal) y se descartan repetidos.
+  for (let skip = 0, paginas = 0; paginas < 300; paginas++) {
     const r = await pedirJson(`${MAXIPISO_BASE}/api/catalogo/todos?take=${lote}&skip=${skip}&sortBy=relevancia`, {}, jarra, 45000);
     if (r.status === 401 || r.status === 403) throw err(400, 'Maxipiso cerró la sesión mientras se leía el catálogo. Probá de nuevo.');
     if (!r.ok) throw err(502, 'El catálogo de Maxipiso respondió con un error (' + r.status + ').');
     const j = await r.json().catch(() => null);
     const lista = j && j.success && j.data && Array.isArray(j.data.productos) ? j.data.productos : null;
     if (!lista) throw err(502, 'El catálogo de Maxipiso devolvió un formato inesperado: puede haber cambiado el sitio.');
-    productos.push(...lista);
-    if (lista.length < lote) break;
+    const d = j.data;
+    const t = [d.total, d.totalProductos, d.count, d.totalCount, d.totalItems, d.pagination && d.pagination.total].map(Number).find(x => Number.isFinite(x) && x > 0);
+    if (t) total = t;
+    let nuevos = 0;
+    for (const x of lista) {
+      const clave = String(x.id != null ? x.id : (x.sku != null ? x.sku : JSON.stringify(x).slice(0, 80)));
+      if (vistos.has(clave)) continue;
+      vistos.add(clave); productos.push(x); nuevos++;
+    }
+    skip += lista.length;
+    if (!lista.length || !nuevos || (total && productos.length >= total)) break;
   }
   if (!productos.length) throw err(502, 'El catálogo de Maxipiso vino vacío.');
   const monedaRegla = (opciones && opciones.moneda) || 'USD';
-  return productos.map(filaDeProductoMaxipiso).filter(f => f.codigo).map(f => {
+  const todas = productos.map(filaDeProductoMaxipiso);
+  const sinCodigo = todas.filter(f => !f.codigo);
+  if (sinCodigo.length) console.warn('[maxipiso] ' + sinCodigo.length + ' artículo(s) del catálogo vienen sin SKU y no se importan: ' + sinCodigo.slice(0, 5).map(f => f.nombre).join(' | '));
+  const out = todas.filter(f => f.codigo).map(f => {
     // La regla del proveedor tiene UNA moneda: las filas en otra moneda no se pueden calcular y quedan "sin precio".
     const m = f.moneda || monedaRegla;
     return Object.assign(f, m === monedaRegla ? {} : { precio: null, nombre: f.nombre + ' — en ' + m + ', la lista está configurada en ' + monedaRegla });
   });
+  out.sinCodigo = sinCodigo.length;
+  return out;
 }
 
 // Diagnóstico: qué campos trae el catálogo y cuáles se reconocen como fotos (para verificar el conector sin adivinar).
