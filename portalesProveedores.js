@@ -347,7 +347,13 @@ async function loginVigoritaSF(cred) {
     if (!loc || rr.status < 300 || rr.status > 399) break;
     destino = /^https?:/i.test(loc) ? loc : new URL(loc, destino).toString();
   }
-  return jarra;
+  // Ya con la sesión: el portal da el token de seguridad (CSRF) en el módulo "user"; los pedidos de precios lo exigen (sin él responden 401).
+  const ru = await pedirJson(`${VIGORITA_SF}/webruntime/module/@app/user`, { headers: { Accept: '*/*' } }, jarra);
+  const txt = ru.ok ? await ru.text() : '';
+  const m = /return\s*(\{[\s\S]*?\})\s*;?\s*\}\s*\)/.exec(txt);
+  let usuario = null; try { usuario = m ? JSON.parse(m[1]) : null; } catch (e) { usuario = null; }
+  if (!usuario || usuario.isGuest !== false || !usuario.csrfToken) throw err(400, 'Vigorita rechazó el usuario o la clave guardados (no se pudo iniciar sesión). Revisalos en la ficha del proveedor.');
+  return { cookie: jarra.cabecera(), csrf: usuario.csrfToken };
 }
 async function leerCatalogoVigoritaSF(maxProductos, cred) {
   const base = `${VIGORITA_SF}/services/data/v62.0/commerce/webstores/${VIGORITA_STORE}`;
@@ -365,13 +371,13 @@ async function leerCatalogoVigoritaSF(maxProductos, cred) {
     }
   }
   const ids = [...vistos.values()].slice(0, maxProductos || 5000);
-  let cookie = '';
-  if (cred && cred.usuario && cred.clave) { const jarra = await loginVigoritaSF(cred); cookie = jarra.cabecera(); }
-  const apex = cookie ? `${VIGORITA_SF}/webruntime/api/apex/execute?language=es&htmlEncode=false` : `${VIGORITA_SF}/webruntime/api/apex/execute?language=es&asGuest=true&htmlEncode=false`;
+  let cookie = '', csrf = '';
+  if (cred && cred.usuario && cred.clave) { const ses = await loginVigoritaSF(cred); cookie = ses.cookie; csrf = ses.csrf; }
+  const apex = cookie ? `${VIGORITA_SF}/webruntime/api/apex/execute?language=es&asGuest=false&htmlEncode=false` : `${VIGORITA_SF}/webruntime/api/apex/execute?language=es&asGuest=true&htmlEncode=false`;
   return enLotes(ids, 6, async (it) => {
     const [ficha, precios] = await Promise.all([
       sfJson(`${VIGORITA_SF}/webruntime/api/services/data/v68.0/commerce/webstores/${VIGORITA_STORE}/products/${it.id}?language=es&asGuest=true&htmlEncode=false`),
-      sfJson(apex, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ namespace: '', classname: VIGORITA_PRECIOS_APEX, method: 'getPricesByPricebook', isContinuation: false, params: { productId: it.id }, cacheable: false }) }, 3, cookie)
+      sfJson(apex, { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, csrf ? { 'CSRF-Token': csrf, 'X-SFDC-Request-Id': require('crypto').randomUUID() } : {}), body: JSON.stringify({ namespace: '', classname: VIGORITA_PRECIOS_APEX, method: 'getPricesByPricebook', isContinuation: false, params: { productId: it.id }, cacheable: false }) }, 3, cookie)
     ]);
     return { id: it.id, categoriaRaiz: it.categoria, ficha, precios: Array.isArray(precios && precios.returnValue) ? precios.returnValue : [] };
   });
