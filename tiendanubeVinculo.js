@@ -290,13 +290,14 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     const { lista } = await listaDePrecios(db, req, req.query.listaId);
     const cot = await db.collection('config_general').findOne({ orgId: req.orgId, clave: 'cotizacionDolar' }).then(d => d && d.valor).catch(() => null);
     const verDescartados = req.query.descartados === '1';
-    const filtro = Object.assign({ activo: { $ne: false }, skuTiendanube: { $in: [null, ''] }, sku: { $nin: [null, ''] }, noTiendanube: verDescartados ? true : { $ne: true } }, filtroOrg(req));
+    const conInactivos = req.query.inactivos === '1'; // (18/11/2026) también ofrece los productos inactivos; al crearlos en Tiendanube se reactivan
+    const filtro = Object.assign({ skuTiendanube: { $in: [null, ''] }, sku: { $nin: [null, ''] }, noTiendanube: verDescartados ? true : { $ne: true } }, conInactivos ? {} : { activo: { $ne: false } }, filtroOrg(req));
     if (req.query.rubro !== undefined && req.query.rubro !== 'todos') filtro.rubro = req.query.rubro === '' ? { $in: [null, ''] } : req.query.rubro;
     const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     if (palabras.length) filtro.$and = palabras.map(w => ({ $or: [{ nombre: { $regex: w, $options: 'i' } }, { sku: { $regex: w, $options: 'i' } }, { marca: { $regex: w, $options: 'i' } }] }));
     // los que ya están en la tienda con ese SKU no se ofrecen
     const store = await tiendaConfig(); const enTienda = new Set((await productosTienda()).map(f => K(f.sku)).filter(Boolean));
-    const crudos = await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1 }).sort({ nombre: 1 }).limit(20000).toArray();
+    const crudos = await db.collection('productos_catalogo').find(filtro).project({ sku: 1, nombre: 1, rubro: 1, marca: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, costo: 1, moneda: 1, codigoExterno: 1, proveedorId: 1, proveedor: 1, descripcion: 1, activo: 1 }).sort({ nombre: 1 }).limit(20000).toArray();
     const yaEnTienda = crudos.filter(p => enTienda.has(K(p.sku)));
     let prods = crudos.filter(p => !enTienda.has(K(p.sku)));
     const limite = Math.min(3000, Math.max(50, Number(req.query.limite) || 400));
@@ -318,7 +319,7 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
       const otros = await db.collection('productos_catalogo').find(qx).project({ sku: 1, nombre: 1, activo: 1, skuTiendanube: 1, noTiendanube: 1, rubro: 1, marca: 1, proveedorId: 1, proveedor: 1 }).limit(60).toArray();
       excluidos = otros.filter(p => !visibles.has(String(p._id))).slice(0, 25).map(p => {
         let motivo;
-        if (p.activo === false) motivo = 'está inactivo';
+        if (p.activo === false && !conInactivos) motivo = 'está inactivo (tildá "Incluir inactivos")';
         else if (!p.sku) motivo = 'no tiene SKU';
         else if (p.skuTiendanube) motivo = 'ya está vinculado con Tiendanube (SKU ' + p.skuTiendanube + ')';
         else if (p.noTiendanube && !verDescartados) motivo = 'está marcado como "No va a Tiendanube" (tildá Ver descartados)';
@@ -334,7 +335,7 @@ router.get('/publicar/candidatos', auth, async (req, res) => {
     const vinculadosN = await db.collection('productos_catalogo').countDocuments(Object.assign({ skuTiendanube: { $nin: [null, ''] } }, base));
     const sinVincularN = await db.collection('productos_catalogo').countDocuments(Object.assign({ skuTiendanube: { $in: [null, ''] }, noTiendanube: { $ne: true } }, base));
     const resumenGeneral = { activos: descartadosN + vinculadosN + sinVincularN, vinculados: vinculadosN, descartados: descartadosN, sinVincular: sinVincularN, sinVincularPeroSkuEnTienda: yaEnTienda.length, ofrecidos: prods.length };
-    res.json({ resumenGeneral, excluidos, total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
+    res.json({ resumenGeneral, excluidos, total: prods.length, productos: prods.slice(0, limite).map(p => { let precio = null; try { precio = lista ? pr(p, lista, cot).precio : null; } catch (e) { precio = null; } return { _id: String(p._id), sku: p.sku, nombre: p.nombre, rubro: p.rubro || '', marca: p.marca || '', precio, stock: stock.get(String(p._id)) || 0, proveedor: p.proveedor || '', inactivo: p.activo === false, conPortal: !!p.codigoExterno && !!p.proveedorId }; }), hayMas: prods.length > limite, limite, marcas, proveedores });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -501,7 +502,7 @@ router.post('/publicar', auth, async (req, res) => {
         if (!r.ok && imagenes.length && r.status === 422) { delete body.images; imagenes = []; r = await tnFetch(store, '/products', { method: 'POST', body: JSON.stringify(body) }); } // sin fotos: se suben después con la tarjeta de fotos
         if (!r.ok) { resultados.push({ sku: p.sku, ok: false, motivo: 'Tiendanube respondió ' + r.status + ': ' + (typeof r.data === 'string' ? r.data : JSON.stringify(r.data)).slice(0, 180) }); await sleep(600); continue; }
         const variante = r.data && r.data.variants && r.data.variants[0];
-        await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: { skuTiendanube: p.sku, tiendanube: { productId: r.data && r.data.id || null, variantId: variante && variante.id || null, vinculadoEn: new Date(), creadoDesdeSistema: true }, updatedAt: new Date() } });
+        await db.collection('productos_catalogo').updateOne({ _id: p._id }, { $set: { skuTiendanube: p.sku, activo: true, tiendanube: { productId: r.data && r.data.id || null, variantId: variante && variante.id || null, vinculadoEn: new Date(), creadoDesdeSistema: true }, updatedAt: new Date() } });
         resultados.push({ sku: p.sku, ok: true, fotos: imagenes.length, categoria: !!cat });
         await sleep(600);
       } catch (e) { resultados.push({ sku: p.sku, ok: false, motivo: e.message }); }
