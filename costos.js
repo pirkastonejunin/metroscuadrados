@@ -1131,6 +1131,48 @@ router.get('/produccion/comprometido', authProduccion, async (req, res) => {
 // Ingresa a Stock los ítems de una carga de producción (un documento de costos_produccion_diaria)
 // en el depósito dado y la marca como ingresada. Los movimientos de Stock son un libro inmutable,
 // por eso cada carga se ingresa una sola vez.
+// ---------------------------------------------------------------------
+// Stock de insumos (materia prima) — 19/11/2026, pedido de Mato.
+// Antes la materia prima se cargaba como una compra común de productos. Ahora se ingresa acá (compra / ajuste)
+// y cada vez que se registra producción se descuenta sola: cantidad fabricada (m² o unidades) × cantidad de
+// cada insumo en la receta. La mano de obra (jornal) no es stock y no se descuenta.
+//
+// Colección: costos_insumos_movimientos : { insumoId, tipo 'compra'|'ajuste'|'consumo', cantidad (+ entra / - sale),
+//   fecha, mes 'AAAA-MM', costoUnitario (snapshot), proveedor, nota, cargaId, productoId, productoNombre,
+//   cantidadProducida, usuario, orgId, createdAt }. El saldo vive en costos_insumos.stockActual (se mueve con $inc).
+// Puede quedar negativo (se produjo antes de cargar la compra): se muestra en rojo, no se bloquea la producción.
+// ---------------------------------------------------------------------
+async function consumirInsumosDeProduccion(db, req, doc, fecha) {
+  const out = { descontados: 0, sinReceta: [] };
+  const movs = db.collection('costos_insumos_movimientos');
+  const fechaMov = new Date(fecha + 'T12:00:00-03:00');
+  const mes = fecha.slice(0, 7);
+  for (const it of (doc.items || [])) {
+    if (it.unidadConvertida === 'paquete') continue;
+    const cant = Number(it.cantidadConvertida);
+    if (!Number.isFinite(cant) || cant <= 0) continue;
+    const prod = await db.collection('costos_productos').findOne({ _id: it.productoId });
+    if (!prod || !(prod.receta || []).length) { out.sinReceta.push(it.nombre); continue; }
+    for (const fila of prod.receta) {
+      const insumo = await db.collection('costos_insumos').findOne({ _id: fila.insumoId });
+      if (!insumo || insumo.unidad === UNIDAD_MANO_DE_OBRA) continue;
+      const total = Math.round(Number(fila.cantidad) * cant * 10000) / 10000;
+      if (!(total > 0)) continue;
+      const ya = await movs.findOne({ cargaId: doc._id, productoId: prod._id, insumoId: insumo._id, tipo: 'consumo' });
+      if (ya) continue; // idempotente: nunca descuenta dos veces la misma carga
+      await movs.insertOne({
+        insumoId: insumo._id, tipo: 'consumo', cantidad: -total, fecha: fechaMov, mes,
+        costoUnitario: insumo.costoActual || 0, proveedor: '', nota: `Producción del ${fecha}`,
+        cargaId: doc._id, productoId: prod._id, productoNombre: it.nombre, cantidadProducida: cant,
+        usuario: (req.usuario && req.usuario.nombre) || '', orgId: req.orgId, createdAt: new Date()
+      });
+      await db.collection('costos_insumos').updateOne({ _id: insumo._id }, { $inc: { stockActual: -total } });
+      out.descontados++;
+    }
+  }
+  return out;
+}
+
 async function aplicarProduccionAStock(db, req, doc, fecha, deposito) {
   const depositoId = deposito._id;
   const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
@@ -1175,6 +1217,12 @@ async function aplicarProduccionAStock(db, req, doc, fecha, deposito) {
     aplicados.push({ nombre: it.nombre, sku: it.sku, cantidad, unidad: it.unidadConvertida, deposito: deposito.nombre });
   }
 
+  // Descuenta la materia prima de la receta de lo que se acaba de fabricar (mismo criterio que el ingreso a stock:
+  // los ítems en paquetes sin convertir se descuentan recién cuando se reintenta). Si falla no frena la producción.
+  let consumo = { descontados: 0, sinReceta: [] };
+  try { consumo = await consumirInsumosDeProduccion(db, req, doc, fecha); }
+  catch (e) { console.error('[costos] consumo de insumos:', e.message); consumo.error = e.message; }
+
   const ahora = new Date();
   const stockIngresadoPor = { usuarioId: req.usuario._id, nombre: usuarioNombre };
   await db.collection('costos_produccion_diaria').updateOne(
@@ -1182,7 +1230,7 @@ async function aplicarProduccionAStock(db, req, doc, fecha, deposito) {
     { $set: { depositoId, stockIngresado: true, stockIngresadoEn: ahora, stockIngresadoPor } }
   );
 
-  return { aplicados, sinCatalogo, sinConvertir, stockIngresadoEn: ahora, stockIngresadoPor };
+  return { aplicados, sinCatalogo, sinConvertir, consumo, stockIngresadoEn: ahora, stockIngresadoPor };
 }
 
 // Reintenta la conversión de una carga que quedó en "paquetes" porque el producto no tenía rendimiento (15/10/2026):
@@ -1249,6 +1297,124 @@ router.post('/produccion/:fecha/ingresar-stock', authProduccion, async (req, res
       return aplicarProduccionAStock(db, req, doc, fecha, deposito);
     });
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// ---- Stock de insumos: ingreso de materia prima, ajustes, movimientos e informe de consumo ----
+// POST /insumos/:id/ingreso { tipo:'compra'|'ajuste', cantidad, costoUnitario?, actualizarCosto?, proveedor?, nota?, fecha? }
+router.post('/insumos/:id/ingreso', authProduccion, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const tipo = b.tipo === 'ajuste' ? 'ajuste' : 'compra';
+    const cantidad = Number(b.cantidad);
+    if (!Number.isFinite(cantidad) || cantidad === 0) throw err(400, 'Ingresá una cantidad distinta de 0');
+    if (tipo === 'compra' && cantidad < 0) throw err(400, 'Una compra tiene que ser mayor a 0 (para restar usá "Ajuste")');
+    const fecha = b.fecha ? validarFecha(b.fecha) : fechaARCostos(new Date());
+    const costoU = b.costoUnitario !== undefined && b.costoUnitario !== '' && b.costoUnitario !== null ? Number(b.costoUnitario) : null;
+    if (costoU !== null && (!Number.isFinite(costoU) || costoU < 0)) throw err(400, 'Costo inválido');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const insumo = await db.collection('costos_insumos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!insumo) throw err(404, 'Insumo no encontrado');
+      if (insumo.unidad === UNIDAD_MANO_DE_OBRA) throw err(400, 'La mano de obra no lleva stock.');
+      const mov = {
+        insumoId: id, tipo, cantidad, fecha: new Date(fecha + 'T12:00:00-03:00'), mes: fecha.slice(0, 7),
+        costoUnitario: costoU !== null ? costoU : (insumo.costoActual || 0), proveedor: String(b.proveedor || '').trim(),
+        nota: String(b.nota || '').trim(), usuario: (req.usuario && req.usuario.nombre) || '', orgId: insumo.orgId || req.orgId, createdAt: new Date()
+      };
+      await db.collection('costos_insumos_movimientos').insertOne(mov);
+      const set = { updatedAt: new Date() };
+      const upd = { $inc: { stockActual: cantidad }, $set: set };
+      if (tipo === 'compra' && costoU !== null && b.actualizarCosto && costoU !== insumo.costoActual) {
+        set.costoActual = costoU;
+        upd.$push = { historial: { costo: costoU, fecha: new Date(), nota: 'Compra' + (mov.proveedor ? ' a ' + mov.proveedor : ''), usuario: mov.usuario } };
+      }
+      await db.collection('costos_insumos').updateOne({ _id: id }, upd);
+      return db.collection('costos_insumos').findOne({ _id: id });
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Últimos movimientos de un insumo.
+router.get('/insumos/:id/movimientos', authProduccion, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const lista = await conReintento(async () => {
+      const db = await getDb();
+      const insumo = await db.collection('costos_insumos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!insumo) throw err(404, 'Insumo no encontrado');
+      return db.collection('costos_insumos_movimientos').find({ insumoId: id }).sort({ fecha: -1, createdAt: -1 }).limit(200).toArray();
+    });
+    res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Informe de consumo: GET /insumos-informe?desde=AAAA-MM&hasta=AAAA-MM[&formato=xlsx]
+// Por insumo × mes y por producto × insumo × mes, con lo producido de cada producto para comparar el consumo por m²/unidad.
+async function armarInformeConsumo(req) {
+  const hoyMes = fechaARCostos(new Date()).slice(0, 7);
+  const re = /^\d{4}-(0[1-9]|1[0-2])$/;
+  const hasta = re.test(req.query.hasta || '') ? req.query.hasta : hoyMes;
+  let desde = re.test(req.query.desde || '') ? req.query.desde : null;
+  if (!desde) { const [y, m] = hasta.split('-').map(Number); const d = new Date(Date.UTC(y, m - 6, 1)); desde = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0'); }
+  if (desde > hasta) throw err(400, '"Desde" no puede ser posterior a "Hasta"');
+  const meses = [];
+  { let [y, m] = desde.split('-').map(Number); while (true) { const k = y + '-' + String(m).padStart(2, '0'); meses.push(k); if (k >= hasta || meses.length > 36) break; m++; if (m > 12) { m = 1; y++; } } }
+  return conReintento(async () => {
+    const db = await getDb();
+    const org = Object.assign({}, filtroOrg(req));
+    const insumos = await db.collection('costos_insumos').find(org).toArray();
+    const porId = {}; insumos.forEach(i => { porId[i._id.toString()] = i; });
+    const movs = await db.collection('costos_insumos_movimientos').find(Object.assign({ tipo: 'consumo', mes: { $gte: desde, $lte: hasta } }, org)).toArray();
+    const porInsumo = {}, porProducto = {};
+    for (const m of movs) {
+      const iid = m.insumoId.toString(); const ins = porId[iid];
+      const cant = -m.cantidad; const costo = cant * (m.costoUnitario || 0);
+      const a = porInsumo[iid] || (porInsumo[iid] = { insumoId: iid, nombre: ins ? ins.nombre : '(borrado)', unidad: ins ? ins.unidad : '', meses: {}, cantidad: 0, costo: 0 });
+      const am = a.meses[m.mes] || (a.meses[m.mes] = { cantidad: 0, costo: 0 }); am.cantidad += cant; am.costo += costo; a.cantidad += cant; a.costo += costo;
+      const pid = m.productoId ? m.productoId.toString() : '-';
+      const p = porProducto[pid] || (porProducto[pid] = { productoId: pid, nombre: m.productoNombre || '-', meses: {}, insumos: {}, costo: 0 });
+      const pi = p.insumos[iid] || (p.insumos[iid] = { insumoId: iid, nombre: a.nombre, unidad: a.unidad, meses: {}, cantidad: 0, costo: 0 });
+      const pim = pi.meses[m.mes] || (pi.meses[m.mes] = { cantidad: 0, costo: 0 }); pim.cantidad += cant; pim.costo += costo; pi.cantidad += cant; pi.costo += costo; p.costo += costo;
+    }
+    // Producido por producto y mes (para comparar contra lo consumido).
+    const cargas = await db.collection('costos_produccion_diaria').find(Object.assign({ fecha: { $gte: desde + '-01', $lte: hasta + '-31' } }, org)).toArray();
+    for (const c of cargas) for (const it of (c.items || [])) {
+      if (it.unidadConvertida === 'paquete') continue;
+      const pid = it.productoId ? it.productoId.toString() : '-';
+      const p = porProducto[pid]; if (!p) continue;
+      const mes = c.fecha.slice(0, 7); const pm = p.meses[mes] || (p.meses[mes] = { producido: 0 });
+      pm.producido = (pm.producido || 0) + (Number(it.cantidadConvertida) || 0); p.unidad = it.unidadConvertida;
+    }
+    const ordenar = o => Object.values(o).sort((x, y) => (y.costo - x.costo) || x.nombre.localeCompare(y.nombre));
+    const prods = ordenar(porProducto).map(p => Object.assign(p, { insumos: ordenar(p.insumos) }));
+    return { desde, hasta, meses, porInsumo: ordenar(porInsumo), porProducto: prods,
+      totalCosto: Object.values(porInsumo).reduce((s, x) => s + x.costo, 0) };
+  });
+}
+router.get('/insumos-informe', authAdmin, async (req, res) => {
+  try {
+    const inf = await armarInformeConsumo(req);
+    if (req.query.formato !== 'xlsx') return res.json(inf);
+    const r2 = n => Math.round(n * 100) / 100;
+    const h1 = [['Insumo', 'Unidad'].concat(inf.meses.map(m => m + ' (cant.)')).concat(['Total cant.', 'Costo total'])];
+    inf.porInsumo.forEach(i => h1.push([i.nombre, i.unidad].concat(inf.meses.map(m => r2((i.meses[m] || {}).cantidad || 0))).concat([r2(i.cantidad), r2(i.costo)])));
+    const h2 = [['Producto', 'Mes', 'Producido', 'Insumo', 'Unidad', 'Consumido', 'Consumo por unidad/m²', 'Costo']];
+    inf.porProducto.forEach(p => inf.meses.forEach(m => {
+      const prod = (p.meses[m] || {}).producido || 0;
+      p.insumos.forEach(i => { const x = i.meses[m]; if (!x) return; h2.push([p.nombre, m, r2(prod), i.nombre, i.unidad, r2(x.cantidad), prod ? Math.round(x.cantidad / prod * 10000) / 10000 : '', r2(x.costo)]); });
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(h1), 'Por insumo');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(h2), 'Por producto');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="consumo_insumos_${inf.desde}_${inf.hasta}.xlsx"`);
+    res.send(buf);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

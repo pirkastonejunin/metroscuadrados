@@ -126,6 +126,7 @@
     <button data-tab="insumos" class="active" onclick="showTab('insumos')">Insumos</button>
     <button data-tab="productos" onclick="showTab('productos')">Productos</button>
     <button data-tab="formulacion" onclick="showTab('formulacion')">Formulación</button>
+    <button data-tab="consumo" onclick="showTab('consumo')">Consumo de insumos</button>
     <button data-tab="listas" onclick="showTab('listas')">Listas de precio</button>
   </nav>
   <main>
@@ -147,11 +148,26 @@
       <div class="card">
         <table>
           <thead><tr>
-            <th>Nombre</th><th>Unidad</th><th>Costo actual</th><th>Actualizado</th><th>Estado</th><th></th>
+            <th>Nombre</th><th>Unidad</th><th>Stock</th><th>Costo actual</th><th>Actualizado</th><th>Estado</th><th></th>
           </tr></thead>
           <tbody id="insumosBody"></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- CONSUMO DE INSUMOS -->
+    <section id="tab-consumo" class="hidden">
+      <div class="card">
+        <div class="row">
+          <p class="muted" style="flex:1;min-width:200px;margin:0">Materia prima consumida según la receta de lo que se registra en producción. Cargá las compras en Insumos → "Ingresar".</p>
+          <div><label>Desde</label><input type="month" id="icDesde" style="width:auto"></div>
+          <div><label>Hasta</label><input type="month" id="icHasta" style="width:auto"></div>
+          <button class="btn" onclick="cargarInformeConsumo()">Ver</button>
+          <button class="btn secondary" onclick="exportarInformeConsumo()">Excel</button>
+        </div>
+      </div>
+      <div class="card"><h3 style="margin-top:0">Por insumo</h3><div style="overflow:auto"><table><thead id="icInsumoHead"></thead><tbody id="icInsumoBody"></tbody></table></div></div>
+      <div class="card"><h3 style="margin-top:0">Por producto</h3><p class="muted" style="margin-top:0">Producido en el período y cuánto de cada insumo se usó (por m² / unidad fabricada, para comparar entre meses).</p><div id="icProductos"></div></div>
     </section>
 
     <!-- PRODUCTOS -->
@@ -357,6 +373,7 @@ function showTab(tab){
   if (tab==='productos') cargarProductos();
   if (tab==='formulacion') poblarSelectProductosFormulacion();
   if (tab==='listas') cargarListasPrecio();
+  if (tab==='consumo') { const h=new Date(); const m=h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0'); if(!document.getElementById('icHasta').value){ document.getElementById('icHasta').value=m; const d=new Date(h.getFullYear(),h.getMonth()-5,1); document.getElementById('icDesde').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); } cargarInformeConsumo(); }
 }
 
 // ---------------- Exportar a CSV (planillas, separador ; para Excel es-AR) ----------------
@@ -399,16 +416,94 @@ function renderInsumos(){
     <tr>
       <td><strong>${escapeHtml(i.nombre)}</strong></td>
       <td>${escapeHtml(i.unidad)} ${i.unidad==='jornal' ? '<span class="pill jornal">mano de obra</span>' : ''}</td>
+      <td>${i.unidad==='jornal' ? '<span class="muted">—</span>' : `<strong style="${(i.stockActual||0)<0?'color:#c0392b':''}">${num(i.stockActual||0)}</strong> <span class="muted">${escapeHtml(i.unidad)}</span>`}</td>
       <td>${money(i.costoActual)}</td>
       <td class="muted">${fmtFecha(i.updatedAt)}</td>
       <td><span class="pill ${i.activo===false?'inactivo':'activo'}">${i.activo===false?'Inactivo':'Activo'}</span></td>
       <td style="white-space:nowrap">
+        ${i.unidad==='jornal' ? '' : `<button class="btn small" onclick="abrirIngresoInsumo('${i._id}')">Ingresar</button>
+        <button class="btn small secondary" onclick="abrirMovimientosInsumo('${i._id}')">Movimientos</button>`}
         <button class="btn small" onclick="abrirActualizarCosto('${i._id}')">Actualizar costo</button>
         <button class="btn small secondary" onclick="abrirHistorial('${i._id}')">Historial</button>
         <button class="btn small secondary" onclick="abrirEditarInsumo('${i._id}')">Editar</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="muted">Todavía no hay insumos cargados.</td></tr>';
+  `).join('') || '<tr><td colspan="7" class="muted">Todavía no hay insumos cargados.</td></tr>';
+}
+function num(n){ return Number(n||0).toLocaleString('es-AR',{maximumFractionDigits:2}); }
+
+function abrirIngresoInsumo(id){
+  const i = INSUMOS.find(x=>x._id===id); if (!i) return;
+  const hoy = new Date(); const f = hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0')+'-'+String(hoy.getDate()).padStart(2,'0');
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Ingresar materia prima — ${escapeHtml(i.nombre)}</h2>
+    <p class="muted">Stock actual: <strong>${num(i.stockActual||0)} ${escapeHtml(i.unidad)}</strong>. Se descuenta solo al registrar producción, según la receta.</p>
+    <div class="campo-edit"><label>Tipo</label><select id="inTipo" onchange="document.getElementById('inCompra').style.display=this.value==='compra'?'':'none'"><option value="compra">Compra (suma stock)</option><option value="ajuste">Ajuste de inventario (+ o −)</option></select></div>
+    <div class="grid2">
+      <div class="campo-edit"><label>Cantidad (${escapeHtml(i.unidad)})</label><input id="inCant" type="number" step="any" autofocus></div>
+      <div class="campo-edit"><label>Fecha</label><input id="inFecha" type="date" value="${f}"></div>
+    </div>
+    <div id="inCompra">
+      <div class="grid2">
+        <div class="campo-edit"><label>Costo por ${escapeHtml(i.unidad)} (opcional)</label><input id="inCosto" type="number" min="0" step="0.01"></div>
+        <div class="campo-edit"><label>Proveedor (opcional)</label><input id="inProv"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:auto" id="inActCosto" checked> Actualizar el costo del insumo con este valor</label>
+    </div>
+    <div class="campo-edit"><label>Nota (opcional)</label><input id="inNota" placeholder="Ej: remito 0012-345"></div>
+    <div class="err" id="inErr"></div>
+    <button class="btn" onclick="guardarIngresoInsumo('${id}')">Guardar</button>
+  `);
+}
+async function guardarIngresoInsumo(id){
+  const g = x => document.getElementById(x).value;
+  const tipo = g('inTipo');
+  const body = {tipo, cantidad: g('inCant'), fecha: g('inFecha'), nota: g('inNota').trim()};
+  if (tipo==='compra') { body.costoUnitario = g('inCosto'); body.proveedor = g('inProv').trim(); body.actualizarCosto = document.getElementById('inActCosto').checked; }
+  try{
+    const r = await fetch(BASE + '/insumos/' + id + '/ingreso', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Error');
+    cerrarModal(); await cargarInsumos(); if (body.actualizarCosto && body.costoUnitario) cargarProductos();
+  }catch(e){ document.getElementById('inErr').textContent = e.message; }
+}
+async function abrirMovimientosInsumo(id){
+  const i = INSUMOS.find(x=>x._id===id); if (!i) return;
+  const r = await fetch(BASE + '/insumos/' + id + '/movimientos', {headers: headersAuth()});
+  const lista = r.ok ? await r.json() : [];
+  const etq = {compra:'Compra', ajuste:'Ajuste', consumo:'Consumo'};
+  modal(`
+    <span class="close-x" onclick="cerrarModal()">✕</span>
+    <h2>Movimientos — ${escapeHtml(i.nombre)}</h2>
+    <p class="muted">Stock actual: <strong>${num(i.stockActual||0)} ${escapeHtml(i.unidad)}</strong> (últimos 200 movimientos)</p>
+    <div style="max-height:60vh;overflow:auto"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Detalle</th><th>Usuario</th></tr></thead><tbody>
+    ${lista.map(m => `<tr><td>${new Date(m.fecha).toLocaleDateString('es-AR')}</td><td>${etq[m.tipo]||m.tipo}</td><td style="color:${m.cantidad<0?'#c0392b':'#1e8449'}"><strong>${m.cantidad>0?'+':''}${num(m.cantidad)}</strong></td><td class="muted">${escapeHtml([m.productoNombre, m.proveedor, m.nota].filter(Boolean).join(' · '))}</td><td class="muted">${escapeHtml(m.usuario||'')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sin movimientos todavía.</td></tr>'}
+    </tbody></table></div>
+  `, 760);
+}
+
+// ---------------- Informe de consumo de insumos ----------------
+function qsConsumo(){ return 'desde='+document.getElementById('icDesde').value+'&hasta='+document.getElementById('icHasta').value; }
+async function cargarInformeConsumo(){
+  const r = await fetch(BASE + '/insumos-informe?' + qsConsumo(), {headers: headersAuth()});
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || 'Error'); return; }
+  document.getElementById('icInsumoHead').innerHTML = '<tr><th>Insumo</th>' + d.meses.map(m=>`<th style="text-align:right">${m}</th>`).join('') + '<th style="text-align:right">Total</th><th style="text-align:right">Costo</th></tr>';
+  document.getElementById('icInsumoBody').innerHTML = d.porInsumo.map(i => `<tr><td><strong>${escapeHtml(i.nombre)}</strong> <span class="muted">${escapeHtml(i.unidad)}</span></td>${d.meses.map(m=>`<td style="text-align:right">${i.meses[m]?num(i.meses[m].cantidad):'<span class="muted">—</span>'}</td>`).join('')}<td style="text-align:right"><strong>${num(i.cantidad)}</strong></td><td style="text-align:right">${money(i.costo)}</td></tr>`).join('')
+    + (d.porInsumo.length ? `<tr><td colspan="${d.meses.length+2}" style="text-align:right"><strong>Costo total</strong></td><td style="text-align:right"><strong>${money(d.totalCosto)}</strong></td></tr>` : `<tr><td colspan="${d.meses.length+3}" class="muted">Todavía no hay consumo en el período. Se genera al registrar producción de productos con receta.</td></tr>`);
+  document.getElementById('icProductos').innerHTML = d.porProducto.map(p => `
+    <details style="margin-bottom:8px"><summary><strong>${escapeHtml(p.nombre)}</strong> <span class="muted">— ${money(p.costo)} en insumos</span></summary>
+    <div style="overflow:auto"><table><thead><tr><th>Insumo</th>${d.meses.map(m=>`<th style="text-align:right">${m}</th>`).join('')}<th style="text-align:right">Total</th></tr></thead><tbody>
+      <tr><td class="muted">Producido (${p.unidad==='m2'?'m²':'u'})</td>${d.meses.map(m=>`<td style="text-align:right" class="muted">${(p.meses[m]&&p.meses[m].producido)?num(p.meses[m].producido):'—'}</td>`).join('')}<td></td></tr>
+      ${p.insumos.map(i=>`<tr><td>${escapeHtml(i.nombre)} <span class="muted">${escapeHtml(i.unidad)}</span></td>${d.meses.map(m=>{const x=i.meses[m];const pr=p.meses[m]&&p.meses[m].producido;return `<td style="text-align:right">${x?num(x.cantidad)+(pr?` <span class="muted">(${(x.cantidad/pr).toLocaleString('es-AR',{maximumFractionDigits:3})}/${p.unidad==='m2'?'m²':'u'})</span>`:''):'<span class="muted">—</span>'}</td>`}).join('')}<td style="text-align:right"><strong>${num(i.cantidad)}</strong></td></tr>`).join('')}
+    </tbody></table></div></details>`).join('') || '<p class="muted">Sin datos en el período.</p>';
+}
+async function exportarInformeConsumo(){
+  const r = await fetch(BASE + '/insumos-informe?formato=xlsx&' + qsConsumo(), {headers: headersAuth()});
+  if (!r.ok) { alert('No se pudo generar el Excel.'); return; }
+  const url = URL.createObjectURL(await r.blob()); const a = document.createElement('a');
+  a.href = url; a.download = 'consumo_insumos.xlsx'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 function opcionesUnidad(actual){
