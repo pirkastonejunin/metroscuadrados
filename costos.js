@@ -1307,7 +1307,8 @@ router.post('/insumos/:id/ingreso', authProduccion, async (req, res) => {
     const id = toObjectId(req.params.id);
     if (!id) throw err(400, 'id inválido');
     const b = req.body || {};
-    const tipo = b.tipo === 'ajuste' ? 'ajuste' : 'compra';
+    if (b.tipo !== 'ajuste') throw err(400, 'La materia prima se ingresa desde Compras, cargando el comprobante del proveedor. Acá solo se hacen ajustes de inventario.');
+    const tipo = 'ajuste';
     const cantidad = Number(b.cantidad);
     if (!Number.isFinite(cantidad) || cantidad === 0) throw err(400, 'Ingresá una cantidad distinta de 0');
     if (tipo === 'compra' && cantidad < 0) throw err(400, 'Una compra tiene que ser mayor a 0 (para restar usá "Ajuste")');

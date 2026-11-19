@@ -297,7 +297,7 @@ function redondear2(n){ return Math.round((Number(n)||0) * 100) / 100; }
 // reemplaza al <select> con las +25.000 opciones del catálogo, que
 // tardaba en abrirse y no dejaba buscar por cualquier parte del texto.
 const LIMITE_SUGERENCIAS_PRODUCTO = 30;
-function textoProducto(p){ return (p.sku ? p.sku + ' — ' : '') + p.nombre; }
+function textoProducto(p){ return p.esInsumo ? '🧪 Insumo — ' + p.nombre + ' (' + p.unidad + ')' : (p.sku ? p.sku + ' — ' : '') + p.nombre; }
 function htmlBuscadorProducto(){
   return `<input type="text" class="producto-buscar" placeholder="Buscar por SKU o nombre…" autocomplete="off"
       oninput="escribirProductoCompra(this)" onfocus="renderOpcionesProductoCompra(this, this.value)"
@@ -330,7 +330,7 @@ function renderOpcionesProductoCompra(input, query){
   clearTimeout(input._t);
   input._t = setTimeout(async () => {
     try {
-      const r = await fetch(BASE + '/productos?limit=' + LIMITE_SUGERENCIAS_PRODUCTO + '&q=' + encodeURIComponent(q), {headers: headersAuth()});
+      const r = await fetch(BASE + '/productos?limit=' + LIMITE_SUGERENCIAS_PRODUCTO + (input.closest('#ncFilasItems') ? '&insumos=1' : '') + '&q=' + encodeURIComponent(q), {headers: headersAuth()});
       if (!r.ok) throw new Error('estado ' + r.status);
       const lista = await r.json();
       if (input._seq !== seq) return; // llegó tarde: ya se tipeó otra cosa
@@ -865,7 +865,9 @@ function juntarItemsCompra(){
     const precioUnitario = Number(fila.querySelector('.campo-precio input').value);
     const alicuotaIva = Number(fila.querySelector('select.select-iva').value);
     const descuentoPorcentaje = Number(fila.querySelector('.campo-desc input').value) || 0;
-    if (productoId && cantidad > 0) items.push({ productoId, cantidad, precioUnitario, alicuotaIva, descuentoPorcentaje });
+    if (!productoId || !(cantidad > 0)) return;
+    const esIns = (productosCache.find(p => String(p._id) === String(productoId)) || {}).esInsumo;
+    items.push(esIns ? { insumoId: productoId, cantidad, precioUnitario, alicuotaIva, descuentoPorcentaje } : { productoId, cantidad, precioUnitario, alicuotaIva, descuentoPorcentaje });
   });
   return items;
 }

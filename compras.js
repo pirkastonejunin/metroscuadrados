@@ -274,9 +274,19 @@ router.get('/productos', authAdmin, async (req, res) => {
     }
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('productos_catalogo')
+      const prods = await db.collection('productos_catalogo')
         .find(match, { projection: { sku: 1, nombre: 1, costo: 1, moneda: 1, unidad: 1, unidadesPorBulto: 1, proveedorId: 1 } })
         .sort({ nombre: 1 }).limit(limite).toArray();
+      // ?insumos=1 (comprobante de compra): suma la materia prima de Producción para poder comprarla como ítem.
+      if (req.query.insumos && !req.query.ids) {
+        const palabras = String(req.query.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+        const mi = Object.assign({ activo: { $ne: false }, unidad: { $ne: 'jornal' } }, filtroOrg(req));
+        if (palabras.length) mi.$and = palabras.map(p => ({ nombre: new RegExp(escaparRegex(p), 'i') }));
+        const ins = await db.collection('costos_insumos').find(mi).sort({ nombre: 1 }).limit(15).toArray();
+        const comoItems = ins.map(i => ({ _id: i._id, esInsumo: true, sku: 'INSUMO', nombre: i.nombre, costo: i.costoActual || 0, moneda: 'ARS', unidad: i.unidad }));
+        return comoItems.concat(prods);
+      }
+      return prods;
     });
     res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -329,6 +339,30 @@ async function aplicarMovimientoStock(db, req, { productoId, depositoId, tipo, c
   );
 }
 
+// Materia prima comprada (ítem con insumoId): suma al stock del insumo, deja el movimiento ligado a la compra y
+// actualiza el costo del insumo con lo pagado (neto de descuento, en pesos). Al anular se revierte (signo -1).
+async function moverInsumoDeCompra(db, req, compra, item, cantidad, signo) {
+  signo = signo || 1;
+  const insumo = await db.collection('costos_insumos').findOne({ _id: item.insumoId });
+  if (!insumo) return;
+  const precioNeto = (item.precioUnitario || 0) * (1 - (Number(item.descuentoPorcentaje) || 0) / 100);
+  const costoPesos = Math.round(precioNeto * (compra.moneda === 'USD' ? (compra.cotizacionDolar || 0) : 1) * 10000) / 10000;
+  const fecha = compra.fecha ? new Date(compra.fecha) : new Date();
+  const mes = new Date(fecha.getTime() - 3 * 3600e3).toISOString().slice(0, 7);
+  await db.collection('costos_insumos_movimientos').insertOne({
+    insumoId: insumo._id, tipo: signo > 0 ? 'compra' : 'anulacion', cantidad: signo * cantidad, fecha, mes,
+    costoUnitario: costoPesos || insumo.costoActual || 0, proveedor: compra.proveedorNombre || '',
+    nota: `${signo > 0 ? 'Compra' : 'Anulación de compra'} ${compra.numero ? '#' + compra.numero : ''}`.trim(),
+    compraId: compra._id, usuario: compra.usuarioNombre || '', orgId: insumo.orgId || req.orgId, createdAt: new Date()
+  });
+  const upd = { $inc: { stockActual: signo * cantidad }, $set: { updatedAt: new Date() } };
+  if (signo > 0 && costoPesos > 0 && costoPesos !== insumo.costoActual) {
+    upd.$set.costoActual = costoPesos;
+    upd.$push = { historial: { costo: costoPesos, fecha: new Date(), nota: `Compra ${compra.numero ? '#' + compra.numero : ''} a ${compra.proveedorNombre || 'proveedor'}`.trim(), usuario: compra.usuarioNombre || '' } };
+  }
+  await db.collection('costos_insumos').updateOne({ _id: insumo._id }, upd);
+}
+
 // Ingresa a stock cada ítem de la compra (sin validación de stock
 // negativo — un ingreso nunca deja el stock en negativo). Los ítems sin
 // `productoId` (cargados a mano, sin vínculo al catálogo) no generan
@@ -345,6 +379,7 @@ async function ingresarStockDeCompra(db, req, compra, depositoId) {
     // (ver egresarStockDeCompra), no el total facturado.
     const aIngresar = Math.round((item.cantidad - (item.cantidadYaRecibida || 0)) * 1000) / 1000;
     item.cantidadIngresoStock = aIngresar;
+    if (item.insumoId && aIngresar > 0) { await moverInsumoDeCompra(db, req, compra, item, aIngresar); continue; }
     if (!item.productoId || aIngresar <= 0) continue;
     await aplicarMovimientoStock(db, req, {
       productoId: item.productoId, depositoId, tipo: 'ingreso', cantidad: aIngresar,
@@ -367,6 +402,11 @@ async function egresarStockDeCompra(db, req, compra) {
   // compra viene de convertir una orden que ya tenía parte recibida de
   // antes (ver POST /ordenes/:id/convertir). Si no está, es una compra
   // "normal" (no por orden) y se ingresó el total, como siempre.
+  for (const item of compra.items) {
+    if (!item.insumoId) continue;
+    const aRev = item.cantidadIngresoStock != null ? item.cantidadIngresoStock : item.cantidad;
+    if (aRev > 0) await moverInsumoDeCompra(db, req, compra, item, aRev, -1); // puede dejar el stock del insumo en negativo: se avisa en rojo
+  }
   for (const item of compra.items) {
     if (!item.productoId) continue;
     const aRevertir = item.cantidadIngresoStock != null ? item.cantidadIngresoStock : item.cantidad;
@@ -462,10 +502,16 @@ async function normalizarItems(db, req, itemsRaw) {
   let subtotal = 0;
   for (const it of itemsRaw) {
     const productoId = it.productoId ? toObjectId(it.productoId) : null;
+    const insumoId = it.insumoId ? toObjectId(it.insumoId) : null;
     let nombre = normalizarTexto(it.nombre);
     let sku = normalizarTexto(it.sku) || null;
     let precioBase = it.precioUnitario;
-    if (productoId) {
+    if (insumoId) {
+      const insumo = await db.collection('costos_insumos').findOne(Object.assign({ _id: insumoId }, filtroOrg(req)));
+      if (!insumo) throw err(400, 'Uno de los insumos de la compra no existe (o no pertenece a esta organización)');
+      nombre = insumo.nombre; sku = null;
+      if (precioBase === undefined || precioBase === null || precioBase === '') precioBase = insumo.costoActual;
+    } else if (productoId) {
       const producto = await db.collection('productos_catalogo').findOne(Object.assign({ _id: productoId }, filtroOrg(req)));
       if (!producto) throw err(400, 'Uno de los productos de la compra no existe (o no pertenece a esta organización)');
       nombre = producto.nombre;
@@ -486,7 +532,7 @@ async function normalizarItems(db, req, itemsRaw) {
     const itemSubtotal = Math.round(cantidad * precioUnitario * (1 - descuentoPorcentaje / 100) * 100) / 100;
     const itemIva = Math.round(itemSubtotal * alicuotaIva) / 100;
     subtotal += itemSubtotal;
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, alicuotaIva, importeIva: itemIva });
+    items.push(Object.assign({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, alicuotaIva, importeIva: itemIva }, insumoId ? { insumoId } : {}));
   }
   return { items, subtotal };
 }

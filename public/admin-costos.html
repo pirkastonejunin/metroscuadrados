@@ -159,7 +159,7 @@
     <section id="tab-consumo" class="hidden">
       <div class="card">
         <div class="row">
-          <p class="muted" style="flex:1;min-width:200px;margin:0">Materia prima consumida según la receta de lo que se registra en producción. Cargá las compras en Insumos → "Ingresar".</p>
+          <p class="muted" style="flex:1;min-width:200px;margin:0">Materia prima consumida según la receta de lo que se registra en producción. Las compras de materia prima se cargan en Compras, como ítem del comprobante.</p>
           <div><label>Desde</label><input type="month" id="icDesde" style="width:auto"></div>
           <div><label>Hasta</label><input type="month" id="icHasta" style="width:auto"></div>
           <button class="btn" onclick="cargarInformeConsumo()">Ver</button>
@@ -421,7 +421,7 @@ function renderInsumos(){
       <td class="muted">${fmtFecha(i.updatedAt)}</td>
       <td><span class="pill ${i.activo===false?'inactivo':'activo'}">${i.activo===false?'Inactivo':'Activo'}</span></td>
       <td style="white-space:nowrap">
-        ${i.unidad==='jornal' ? '' : `<button class="btn small" onclick="abrirIngresoInsumo('${i._id}')">Ingresar</button>
+        ${i.unidad==='jornal' ? '' : `<button class="btn small" onclick="abrirIngresoInsumo('${i._id}')">Ajustar stock</button>
         <button class="btn small secondary" onclick="abrirMovimientosInsumo('${i._id}')">Movimientos</button>`}
         <button class="btn small" onclick="abrirActualizarCosto('${i._id}')">Actualizar costo</button>
         <button class="btn small secondary" onclick="abrirHistorial('${i._id}')">Historial</button>
@@ -437,19 +437,13 @@ function abrirIngresoInsumo(id){
   const hoy = new Date(); const f = hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0')+'-'+String(hoy.getDate()).padStart(2,'0');
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2>Ingresar materia prima — ${escapeHtml(i.nombre)}</h2>
+    <h2>Ajuste de stock — ${escapeHtml(i.nombre)}</h2>
     <p class="muted">Stock actual: <strong>${num(i.stockActual||0)} ${escapeHtml(i.unidad)}</strong>. Se descuenta solo al registrar producción, según la receta.</p>
-    <div class="campo-edit"><label>Tipo</label><select id="inTipo" onchange="document.getElementById('inCompra').style.display=this.value==='compra'?'':'none'"><option value="compra">Compra (suma stock)</option><option value="ajuste">Ajuste de inventario (+ o −)</option></select></div>
+    <p class="muted" style="background:var(--accent-soft);padding:8px;border-radius:6px">La materia prima se ingresa desde <strong>Compras</strong>, cargando el comprobante del proveedor (elegí el insumo como ítem). Acá solo se hacen <strong>ajustes de inventario</strong> (conteo, merma, stock inicial).</p>
+    <input type="hidden" id="inTipo" value="ajuste">
     <div class="grid2">
-      <div class="campo-edit"><label>Cantidad (${escapeHtml(i.unidad)})</label><input id="inCant" type="number" step="any" autofocus></div>
+      <div class="campo-edit"><label>Cantidad a sumar o restar (${escapeHtml(i.unidad)})</label><input id="inCant" type="number" step="any" autofocus></div>
       <div class="campo-edit"><label>Fecha</label><input id="inFecha" type="date" value="${f}"></div>
-    </div>
-    <div id="inCompra">
-      <div class="grid2">
-        <div class="campo-edit"><label>Costo por ${escapeHtml(i.unidad)} (opcional)</label><input id="inCosto" type="number" min="0" step="0.01"></div>
-        <div class="campo-edit"><label>Proveedor (opcional)</label><input id="inProv"></div>
-      </div>
-      <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" style="width:auto" id="inActCosto" checked> Actualizar el costo del insumo con este valor</label>
     </div>
     <div class="campo-edit"><label>Nota (opcional)</label><input id="inNota" placeholder="Ej: remito 0012-345"></div>
     <div class="err" id="inErr"></div>
@@ -458,21 +452,19 @@ function abrirIngresoInsumo(id){
 }
 async function guardarIngresoInsumo(id){
   const g = x => document.getElementById(x).value;
-  const tipo = g('inTipo');
-  const body = {tipo, cantidad: g('inCant'), fecha: g('inFecha'), nota: g('inNota').trim()};
-  if (tipo==='compra') { body.costoUnitario = g('inCosto'); body.proveedor = g('inProv').trim(); body.actualizarCosto = document.getElementById('inActCosto').checked; }
+  const body = {tipo:'ajuste', cantidad: g('inCant'), fecha: g('inFecha'), nota: g('inNota').trim()};
   try{
     const r = await fetch(BASE + '/insumos/' + id + '/ingreso', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
-    cerrarModal(); await cargarInsumos(); if (body.actualizarCosto && body.costoUnitario) cargarProductos();
+    cerrarModal(); await cargarInsumos();
   }catch(e){ document.getElementById('inErr').textContent = e.message; }
 }
 async function abrirMovimientosInsumo(id){
   const i = INSUMOS.find(x=>x._id===id); if (!i) return;
   const r = await fetch(BASE + '/insumos/' + id + '/movimientos', {headers: headersAuth()});
   const lista = r.ok ? await r.json() : [];
-  const etq = {compra:'Compra', ajuste:'Ajuste', consumo:'Consumo'};
+  const etq = {compra:'Compra', ajuste:'Ajuste', consumo:'Consumo', anulacion:'Anulación'};
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
     <h2>Movimientos — ${escapeHtml(i.nombre)}</h2>
