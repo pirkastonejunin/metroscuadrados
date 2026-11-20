@@ -10,5 +10,18 @@ const assert = require('assert'); const { start } = require('./harness');
   r = await api('POST', '/api/sueldos/colocadores/liquidar', { periodo: '2026-11', tipo: 'parcial', hasta: '2026-11-20', colocadorId: String(col) });
   assert.equal(r.data.tareas, 3, JSON.stringify(r.data)); assert.equal(r.data.total, 30000);
   r = await api('POST', '/api/sueldos/colocadores/liquidar', { periodo: '2026-11', tipo: 'parcial', hasta: '2026-11-20' }); assert.equal(r.data.tareas, 0, 'no liquida dos veces');
-  console.log('OK'); await h.stop(); process.exit(0);
+  console.log('OK'); await h.stop();
+})().catch(e => { console.error(e); process.exit(1); }).then(() => segundo());
+function segundo(){
+// Vista "Todas las sucursales" operando con otra sucursal: tiene que liquidar igual a los colocadores asignados a su propia sucursal.
+(async () => {
+  const h = await start(4164, { replSet: true }); const { db, ORG } = h; const { ObjectId } = require('mongodb');
+  const OTRA = new ObjectId(), col = new ObjectId();
+  await db.collection('obras_colocadores').insertOne({ _id: col, nombre: 'Carlos', orgId: OTRA, sucursalSueldoId: OTRA });
+  await db.collection('obras').insertOne({ _id: new ObjectId(), orgId: OTRA, numero: 1, cliente: { nombre: 'X' }, estado: 'terminada', tareas: [{ _id: new ObjectId(), estado: 'terminada', colocadorId: col, tipoTrabajo: 'Placa', m2Presupuestados: 10, costoPorM2Aplicado: 1000, fechaFinReal: new Date('2026-11-18T15:00:00-03:00') }] });
+  const r = await fetch('http://localhost:4164/api/sueldos/colocadores/liquidar', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-org-id': 'todas', 'x-org-operar': String(ORG) }, body: JSON.stringify({ periodo: '2026-11', tipo: 'parcial', hasta: '2026-11-20' }) });
+  const d = await r.json(); assert.equal(r.status, 200, JSON.stringify(d)); assert.equal(d.tareas, 1, 'liquida aunque se opere con otra sucursal: ' + JSON.stringify(d));
+  const liq = await db.collection('sueldos_colocadores').findOne({}); assert.equal(String(liq.orgId), String(OTRA), 'queda en la sucursal del colocador');
+  console.log('OK2'); await h.stop(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });
+}

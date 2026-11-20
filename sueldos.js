@@ -1049,7 +1049,10 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
     }
     const soloCol = b.colocadorId ? String(b.colocadorId) : null;
     // Se lee FUERA de la transacción (igual que la pantalla): adentro, con los datos reales, la lectura devolvía 0 tareas.
-    const filas = await conReintento(async () => armarColocadores(await getDb(), req, periodo));
+    // En la vista "Todas las sucursales" resolverOrg pone, al guardar, la sucursal con la que se opera: eso filtraba las tareas de los
+    // colocadores asignados a otra sucursal (0 tareas). Para leer se mira todo, y cada liquidación queda en la sucursal del colocador.
+    const reqLectura = { orgId: req.vistaTodas ? null : req.orgId };
+    const filas = await conReintento(async () => armarColocadores(await getDb(), reqLectura, periodo));
     const out = await conReintento(() => enTransaccion(async (db) => {
       let n = 0, tareasN = 0, total = 0, proxima = null;
       const diag = { colocadores: filas.length, tareasMes: 0, liquidadas: 0, sinLiquidar: 0, fechasSinLiquidar: [], corte: hastaISO, soloCol: !!soloCol };
