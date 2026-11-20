@@ -1142,7 +1142,14 @@ router.get('/produccion/comprometido', authProduccion, async (req, res) => {
 //   cantidadProducida, usuario, orgId, createdAt }. El saldo vive en costos_insumos.stockActual (se mueve con $inc).
 // Puede quedar negativo (se produjo antes de cargar la compra): se muestra en rojo, no se bloquea la producción.
 // ---------------------------------------------------------------------
-async function consumirInsumosDeProduccion(db, req, doc, fecha) {
+// Costo que tenía el insumo en una fecha (último punto del historial hasta ese día; si no hay, el actual).
+function costoInsumoEnFecha(insumo, fechaDate) {
+  const h = (insumo.historial || []).filter(p => p && p.fecha && new Date(p.fecha) <= fechaDate).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+  return h.length ? h[h.length - 1].costo : (insumo.costoActual || 0);
+}
+// opts.retroactivo: carga vieja, solo para el informe — no toca el saldo de stock y valúa al costo de esa fecha.
+async function consumirInsumosDeProduccion(db, req, doc, fecha, opts) {
+  const retro = !!(opts && opts.retroactivo);
   const out = { descontados: 0, sinReceta: [] };
   const movs = db.collection('costos_insumos_movimientos');
   const fechaMov = new Date(fecha + 'T12:00:00-03:00');
@@ -1162,11 +1169,11 @@ async function consumirInsumosDeProduccion(db, req, doc, fecha) {
       if (ya) continue; // idempotente: nunca descuenta dos veces la misma carga
       await movs.insertOne({
         insumoId: insumo._id, tipo: 'consumo', cantidad: -total, fecha: fechaMov, mes,
-        costoUnitario: insumo.costoActual || 0, proveedor: '', nota: `Producción del ${fecha}`,
-        cargaId: doc._id, productoId: prod._id, productoNombre: it.nombre, cantidadProducida: cant,
+        costoUnitario: retro ? costoInsumoEnFecha(insumo, fechaMov) : (insumo.costoActual || 0), proveedor: '', nota: `Producción del ${fecha}` + (retro ? ' (retroactivo)' : ''),
+        retroactivo: retro || undefined, cargaId: doc._id, productoId: prod._id, productoNombre: it.nombre, cantidadProducida: cant,
         usuario: (req.usuario && req.usuario.nombre) || '', orgId: req.orgId, createdAt: new Date()
       });
-      await db.collection('costos_insumos').updateOne({ _id: insumo._id }, { $inc: { stockActual: -total } });
+      if (!retro) await db.collection('costos_insumos').updateOne({ _id: insumo._id }, { $inc: { stockActual: -total } });
       out.descontados++;
     }
   }
@@ -1351,6 +1358,44 @@ router.get('/insumos/:id/movimientos', authProduccion, async (req, res) => {
       return db.collection('costos_insumos_movimientos').find({ insumoId: id }).sort({ fecha: -1, createdAt: -1 }).limit(200).toArray();
     });
     res.json(lista);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Completa el informe con la producción de períodos anteriores: aplica la receta ACTUAL de cada producto a las cargas
+// viejas que todavía no tienen consumo. No mueve el stock (el saldo parte de lo que se cargue en Compras/ajustes).
+// POST /insumos/retroactivo { desde?: 'AAAA-MM-DD', hasta?: 'AAAA-MM-DD', simular?: true }
+router.post('/insumos/retroactivo', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const b = req.body || {};
+    const f = { fecha: {} };
+    if (b.desde) f.fecha.$gte = validarFecha(b.desde);
+    if (b.hasta) f.fecha.$lte = validarFecha(b.hasta);
+    if (!Object.keys(f.fecha).length) delete f.fecha;
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const cargas = await db.collection('costos_produccion_diaria').find(Object.assign({}, f, filtroOrg(req))).sort({ fecha: 1 }).toArray();
+      let cargasConConsumo = 0, movimientos = 0; const sinReceta = new Set(); let primera = null, ultima = null;
+      for (const c of cargas) {
+        if (b.simular) {
+          // cuenta lo que se generaría sin escribir
+          for (const it of (c.items || [])) {
+            if (it.unidadConvertida === 'paquete' || !(Number(it.cantidadConvertida) > 0)) continue;
+            const prod = await db.collection('costos_productos').findOne({ _id: it.productoId });
+            if (!prod || !(prod.receta || []).length) { sinReceta.add(it.nombre); continue; }
+            const ya = await db.collection('costos_insumos_movimientos').findOne({ cargaId: c._id, productoId: prod._id, tipo: 'consumo' });
+            if (ya) continue;
+            movimientos += prod.receta.length; cargasConConsumo++; primera = primera || c.fecha; ultima = c.fecha;
+          }
+        } else {
+          const r = await consumirInsumosDeProduccion(db, req, c, c.fecha, { retroactivo: true });
+          if (r.descontados) { cargasConConsumo++; movimientos += r.descontados; primera = primera || c.fecha; ultima = c.fecha; }
+          r.sinReceta.forEach(n => sinReceta.add(n));
+        }
+      }
+      return { cargasRevisadas: cargas.length, cargasConConsumo, movimientos, desde: primera, hasta: ultima, sinReceta: Array.from(sinReceta), simulado: !!b.simular };
+    });
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

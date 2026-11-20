@@ -164,6 +164,7 @@
           <div><label>Hasta</label><input type="month" id="icHasta" style="width:auto"></div>
           <button class="btn" onclick="cargarInformeConsumo()">Ver</button>
           <button class="btn secondary" onclick="exportarInformeConsumo()">Excel</button>
+          <button class="btn secondary" onclick="completarRetroactivo()">Completar períodos anteriores</button>
         </div>
       </div>
       <div class="card"><h3 style="margin-top:0">Por insumo</h3><div style="overflow:auto"><table><thead id="icInsumoHead"></thead><tbody id="icInsumoBody"></tbody></table></div></div>
@@ -490,6 +491,17 @@ async function cargarInformeConsumo(){
       <tr><td class="muted">Producido (${p.unidad==='m2'?'m²':'u'})</td>${d.meses.map(m=>`<td style="text-align:right" class="muted">${(p.meses[m]&&p.meses[m].producido)?num(p.meses[m].producido):'—'}</td>`).join('')}<td></td></tr>
       ${p.insumos.map(i=>`<tr><td>${escapeHtml(i.nombre)} <span class="muted">${escapeHtml(i.unidad)}</span></td>${d.meses.map(m=>{const x=i.meses[m];const pr=p.meses[m]&&p.meses[m].producido;return `<td style="text-align:right">${x?num(x.cantidad)+(pr?` <span class="muted">(${(x.cantidad/pr).toLocaleString('es-AR',{maximumFractionDigits:3})}/${p.unidad==='m2'?'m²':'u'})</span>`:''):'<span class="muted">—</span>'}</td>`}).join('')}<td style="text-align:right"><strong>${num(i.cantidad)}</strong></td></tr>`).join('')}
     </tbody></table></div></details>`).join('') || '<p class="muted">Sin datos en el período.</p>';
+}
+async function completarRetroactivo(){
+  const post = simular => fetch(BASE + '/insumos/retroactivo', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({simular})}).then(async r => { const d = await r.json(); if (!r.ok) throw new Error(d.error||'Error'); return d; });
+  try{
+    const s = await post(true);
+    if (!s.movimientos) { alert('No hay producción anterior pendiente de calcular.' + (s.sinReceta.length ? '\nProductos sin receta: ' + s.sinReceta.join(', ') : '')); return; }
+    if (!confirm(`Se va a calcular el consumo de ${s.cargasConConsumo} producciones (${s.desde} a ${s.hasta}) con la receta ACTUAL de cada producto y el costo de cada fecha.\nNo modifica el stock de los insumos.` + (s.sinReceta.length ? '\nSin receta (no se calculan): ' + s.sinReceta.join(', ') : '') + '\n¿Continuar?')) return;
+    const r = await post(false);
+    alert(`Listo: ${r.movimientos} consumos generados.`);
+    cargarInformeConsumo();
+  }catch(e){ alert(e.message); }
 }
 async function exportarInformeConsumo(){
   const r = await fetch(BASE + '/insumos-informe?formato=xlsx&' + qsConsumo(), {headers: headersAuth()});

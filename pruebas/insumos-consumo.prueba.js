@@ -31,5 +31,13 @@ const assert = require('assert'); const { start } = require('./harness');
   r = await api('GET', `/api/costos/insumos/${cem}/movimientos`); assert.equal(r.data.length, 3);
   r = await api('POST', `/api/compras/${compraId}/anular`, { motivo: 'prueba' }); assert.equal(r.status, 200, JSON.stringify(r.data));
   ins0 = await db.collection('costos_insumos').findOne({ _id: cem }); assert.equal(ins0.stockActual, -25, 'anular la compra revierte las 100');
+  // retroactivo: carga vieja sin consumo, sin mover stock
+  await db.collection('costos_produccion_diaria').insertOne({ orgId: ORG, fecha: '2026-08-05', items: [{ productoId: cp, nombre: 'Placa', unidadConvertida: 'm2', cantidadConvertida: 4 }] });
+  const antes = (await db.collection('costos_insumos').findOne({ _id: cem })).stockActual;
+  r = await api('POST', '/api/costos/insumos/retroactivo', { simular: true }); assert.equal(r.data.cargasConConsumo, 1, JSON.stringify(r.data));
+  r = await api('POST', '/api/costos/insumos/retroactivo', {}); assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.movimientos, 1);
+  assert.equal((await db.collection('costos_insumos').findOne({ _id: cem })).stockActual, antes, 'no toca el stock');
+  r = await api('POST', '/api/costos/insumos/retroactivo', {}); assert.equal(r.data.movimientos, 0, 'idempotente');
+  r = await api('GET', '/api/costos/insumos-informe?desde=2026-08&hasta=2026-08'); assert.equal(r.data.porInsumo[0].cantidad, 8);
   console.log('OK'); await h.stop(); process.exit(0);
 })().catch(e => { console.error(e); process.exit(1); });
