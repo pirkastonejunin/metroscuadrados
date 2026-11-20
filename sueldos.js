@@ -1048,14 +1048,20 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
       corte = new Date(hastaISO + 'T23:59:59.999-03:00');
     }
     const soloCol = b.colocadorId ? String(b.colocadorId) : null;
+    // Se lee FUERA de la transacción (igual que la pantalla): adentro, con los datos reales, la lectura devolvía 0 tareas.
+    const filas = await conReintento(async () => armarColocadores(await getDb(), req, periodo));
     const out = await conReintento(() => enTransaccion(async (db) => {
-      const filas = await armarColocadores(db, req, periodo);
       let n = 0, tareasN = 0, total = 0, proxima = null;
       const diag = { colocadores: filas.length, tareasMes: 0, liquidadas: 0, sinLiquidar: 0, fechasSinLiquidar: [], corte: hastaISO, soloCol: !!soloCol };
       for (const f of filas) {
         if (soloCol && f.colocadorId !== soloCol) continue;
         f.tareas.forEach(t => { diag.tareasMes++; if (t.liquidada) diag.liquidadas++; else { diag.sinLiquidar++; if (diag.fechasSinLiquidar.length < 6) diag.fechasSinLiquidar.push(isoAR(new Date(t.fecha))); } });
-        const nuevas = f.tareas.filter(t => !t.liquidada && new Date(t.fecha) <= corte);
+        let nuevas = f.tareas.filter(t => !t.liquidada && new Date(t.fecha) <= corte);
+        if (nuevas.length) { // doble clic / otra pestaña: dentro de la transacción se confirma que ninguna ya esté liquidada
+          const ya = await db.collection('sueldos_colocadores').find({ 'tareas.tareaId': { $in: nuevas.map(t => t.tareaId) } }).project({ 'tareas.tareaId': 1 }).toArray();
+          const yaIds = new Set(); ya.forEach(l => (l.tareas || []).forEach(t => yaIds.add(String(t.tareaId))));
+          nuevas = nuevas.filter(t => !yaIds.has(String(t.tareaId)));
+        }
         f.tareas.filter(t => !t.liquidada && new Date(t.fecha) > corte).forEach(t => { const d = isoAR(new Date(t.fecha)); if (!proxima || d < proxima) proxima = d; });
         if (!nuevas.length) continue;
         const docs = nuevas.map(t => ({ obraId: t.obraId, tareaId: t.tareaId, obra: t.obra, tipoTrabajo: t.tipoTrabajo, m2: t.m2, costoPorM2: t.costoPorM2, monto: t.monto, fecha: t.fecha, especial: !!t.especial }));
