@@ -823,6 +823,101 @@ router.delete('/adelantos/:id', authSueldosDoc, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Vacaciones (20/11/2026, pedido de Mato): panel para computar los días de cada empleado.
+// Ley de Contrato de Trabajo, art. 150: días CORRIDOS según la antigüedad al 31/12 del año que se computa:
+//   hasta 5 años: 14 · más de 5 y hasta 10: 21 · más de 10 y hasta 20: 28 · más de 20: 35.
+// Art. 151: si no trabajó la mitad de los días del año (ingreso reciente), 1 día de descanso cada 20 de trabajo efectivo
+// (acá se estima con los días corridos desde el ingreso, descontando los domingos: es una referencia, se corrige con un ajuste).
+// Colección sueldos_vacaciones : { empleadoId, empleadoNombre, tipo ('goce'|'ajuste'), anio (año al que se imputan), desde, hasta,
+//   dias (corridos; en un ajuste puede ser negativo), nota, usuarioNombre, orgId, createdAt }
+// El saldo de años anteriores se arrastra solo desde el primer año en que el empleado tiene algún registro cargado.
+// ---------------------------------------------------------------------------
+function diasVacacionesCorresponden(fechaIngreso, anio) {
+  if (!fechaIngreso) return { dias: 0, antiguedad: null, regla: 'Falta la fecha de ingreso' };
+  const ing = new Date(fechaIngreso);
+  const fin = new Date(Date.UTC(anio, 11, 31, 12));
+  if (ing > fin) return { dias: 0, antiguedad: 0, regla: 'Todavía no había ingresado' };
+  const diasTot = Math.floor((fin - ing) / 864e5) + 1;
+  const antig = diasTot / 365.25;
+  const inicioAnio = new Date(Date.UTC(anio, 0, 1, 12));
+  const diasEnAnio = Math.floor((fin - (ing > inicioAnio ? ing : inicioAnio)) / 864e5) + 1;
+  if (ing > inicioAnio && diasEnAnio < 183) {
+    const domingos = Math.floor(diasEnAnio / 7);
+    return { dias: Math.floor((diasEnAnio - domingos) / 20), antiguedad: r2(antig), regla: 'Menos de la mitad del año trabajado: 1 día cada 20 trabajados (estimado)' };
+  }
+  const dias = antig <= 5 ? 14 : antig <= 10 ? 21 : antig <= 20 ? 28 : 35;
+  return { dias, antiguedad: r2(antig), regla: antig <= 5 ? 'Hasta 5 años: 14 días' : antig <= 10 ? 'Más de 5 y hasta 10 años: 21 días' : antig <= 20 ? 'Más de 10 y hasta 20 años: 28 días' : 'Más de 20 años: 35 días' };
+}
+router.get('/vacaciones', authSueldosLectura, async (req, res) => {
+  try {
+    const anio = parseInt(req.query.anio, 10) || new Date(Date.now() - 3 * 3600e3).getUTCFullYear();
+    if (anio < 2000 || anio > 2100) throw err(400, 'Año inválido.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const org = filtroOrg(req);
+      const emps = await db.collection('empleados').find(Object.assign({ activo: { $ne: false } }, org)).sort({ nombre: 1 }).toArray();
+      const regs = await db.collection('sueldos_vacaciones').find(Object.assign({}, org)).sort({ desde: -1, createdAt: -1 }).toArray();
+      const filas = emps.map(e => {
+        const propios = regs.filter(r => String(r.empleadoId) === String(e._id));
+        const c = diasVacacionesCorresponden(e.fechaIngreso, anio);
+        const sum = y => propios.filter(r => r.anio === y).reduce((s, r) => s + (r.dias || 0), 0);
+        const tomados = propios.filter(r => r.anio === anio && r.tipo !== 'ajuste').reduce((s, r) => s + r.dias, 0);
+        const ajuste = propios.filter(r => r.anio === anio && r.tipo === 'ajuste').reduce((s, r) => s + r.dias, 0);
+        let anterior = 0;
+        if (propios.length) {
+          const primero = Math.min.apply(null, propios.map(r => r.anio));
+          for (let y = Math.max(primero, e.fechaIngreso ? new Date(e.fechaIngreso).getUTCFullYear() : primero); y < anio; y++) {
+            const cy = diasVacacionesCorresponden(e.fechaIngreso, y).dias;
+            const tom = propios.filter(r => r.anio === y && r.tipo !== 'ajuste').reduce((s, r) => s + r.dias, 0);
+            const aj = propios.filter(r => r.anio === y && r.tipo === 'ajuste').reduce((s, r) => s + r.dias, 0);
+            anterior += cy + aj - tom;
+          }
+        }
+        return { empleadoId: e._id, nombre: e.nombre, sector: e.sector, fechaIngreso: e.fechaIngreso || null, antiguedad: c.antiguedad, regla: c.regla,
+          corresponden: c.dias, ajuste, tomados, saldoAnterior: anterior, saldo: c.dias + ajuste - tomados + anterior };
+      });
+      const idsAct = new Set(emps.map(e => String(e._id)));
+      return { anio, empleados: filas, registros: regs.filter(r => r.anio === anio && idsAct.has(String(r.empleadoId))) };
+    });
+    res.json(out);
+  } catch (e) { responder(res, e); }
+});
+router.post('/vacaciones', authSueldosDoc, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const empId = toObjectId(b.empleadoId); if (!empId) throw err(400, 'Elegí el empleado.');
+    const tipo = b.tipo === 'ajuste' ? 'ajuste' : 'goce';
+    let desde = null, hasta = null, dias;
+    if (tipo === 'goce') {
+      desde = fechaDe(b.desde); hasta = fechaDe(b.hasta || b.desde);
+      if (hasta < desde) throw err(400, 'La fecha "hasta" no puede ser anterior a "desde".');
+      dias = Math.round((hasta - desde) / 864e5) + 1;
+      if (b.dias !== undefined && b.dias !== '' && b.dias !== null) { dias = Number(b.dias); if (!(dias > 0) || !Number.isFinite(dias)) throw err(400, 'Los días tienen que ser un número mayor a 0.'); }
+    } else {
+      dias = Number(b.dias); if (!Number.isFinite(dias) || dias === 0) throw err(400, 'Ingresá los días del ajuste (positivo suma, negativo resta).');
+    }
+    const anio = parseInt(b.anio, 10) || (desde ? new Date(desde.getTime() - 3 * 3600e3).getUTCFullYear() : new Date().getFullYear());
+    const doc = await conReintento(async () => {
+      const db = await getDb();
+      const emp = await db.collection('empleados').findOne(Object.assign({ _id: empId }, filtroOrg(req)));
+      if (!emp) throw err(404, 'Empleado no encontrado.');
+      const d = { empleadoId: empId, empleadoNombre: emp.nombre, tipo, anio, desde, hasta, dias, nota: texto(b.nota), usuarioNombre: (req.usuario && req.usuario.nombre) || '', orgId: emp.orgId || req.orgId, createdAt: new Date() };
+      const r = await db.collection('sueldos_vacaciones').insertOne(d);
+      return Object.assign(d, { _id: r.insertedId });
+    });
+    res.json(doc);
+  } catch (e) { responder(res, e); }
+});
+router.delete('/vacaciones/:id', authSueldosDoc, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const r = await conReintento(async () => (await getDb()).collection('sueldos_vacaciones').deleteOne(Object.assign({ _id: id }, filtroOrg(req))));
+    if (!r.deletedCount) throw err(404, 'Registro no encontrado.');
+    res.json({ ok: true });
+  } catch (e) { responder(res, e); }
+});
+
+// ---------------------------------------------------------------------------
 // Colocadores (Gestión de Obras). Se les paga por m² de cada tarea terminada (100 % de los m² x el costo por m²
 // que quedó aplicado a la tarea), en el mes en que se terminó la tarea (devengado). Acá se ven por mes, se
 // liquidan (por colocador y mes, se puede ir completando a medida que se terminan tareas) y se pagan desde

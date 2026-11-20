@@ -97,7 +97,7 @@
 
 <div id="app" class="hidden">
   <main>
-    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="pag">Pagos</button><button data-v="col">Colocadores</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button><button data-v="f931">Cargas sociales (F.931)</button></div>
+    <div class="tabs" id="tabs"><button data-v="liq" class="on">Liquidaciones</button><button data-v="pag">Pagos</button><button data-v="col">Colocadores</button><button data-v="emp">Empleados</button><button data-v="ade">Adelantos</button><button data-v="vac">Vacaciones</button><button data-v="f931">Cargas sociales (F.931)</button></div>
     <div id="err"></div><div id="ok"></div>
 
     <div class="vista" id="v-liq">
@@ -163,6 +163,17 @@
     <div class="vista hidden" id="v-ade">
       <div class="panel" id="pAde"></div>
       <div class="tabla"><table><thead><tr><th>Fecha</th><th>Empleado</th><th class="n">Monto</th><th>Estado</th><th>Nota</th><th></th></tr></thead><tbody id="tAde"></tbody></table></div>
+    </div>
+
+    <div class="vista hidden" id="v-vac">
+      <div class="tb-filtros">
+        <select id="vAnio" aria-label="Año" onchange="cargarVac()"></select>
+        <span class="tb-info" title="Días corridos según la Ley de Contrato de Trabajo (art. 150): hasta 5 años de antigüedad al 31/12 = 14 días, más de 5 = 21, más de 10 = 28, más de 20 = 35. Con menos de medio año trabajado: 1 día cada 20 trabajados (estimado). El saldo de años anteriores se arrastra desde el primer año con registros cargados; para arrancar, cargá un ajuste con los días que ya tenía pendientes."></span>
+      </div>
+      <div class="panel" id="pVac"></div>
+      <div class="tabla"><table><thead><tr><th>Empleado</th><th>Ingreso</th><th class="n">Antigüedad al 31/12</th><th class="n">Corresponden</th><th class="n">Tomados</th><th class="n">Ajustes</th><th class="n">De años anteriores</th><th class="n">Saldo</th><th></th></tr></thead><tbody id="tVac"></tbody></table></div>
+      <h3 style="margin:16px 0 8px;font-size:14px">Registros del año</h3>
+      <div class="tabla"><table><thead><tr><th>Empleado</th><th>Tipo</th><th>Desde</th><th>Hasta</th><th class="n">Días</th><th>Nota</th><th></th></tr></thead><tbody id="tVacReg"></tbody></table></div>
     </div>
 
     <div class="vista hidden" id="v-f931">
@@ -238,8 +249,8 @@ if (TOKEN) iniciarApp(); else $('loginScreen').classList.remove('hidden');
 document.addEventListener('click', e => {
   const b = e.target.closest('#tabs button'); if (!b) return;
   [...document.querySelectorAll('#tabs button')].forEach(x => x.classList.toggle('on', x === b));
-  ['liq','pag','col','emp','ade','f931'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
-  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'pag') iniciarPagos(); else if (b.dataset.v === 'col') iniciarCol(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else if (b.dataset.v === 'f931') iniciarF931(); else { formAde(); cargarAde(); }
+  ['liq','pag','col','emp','ade','vac','f931'].forEach(v => $('v-' + v).classList.toggle('hidden', v !== b.dataset.v));
+  if (b.dataset.v === 'liq') cargarLiq(); else if (b.dataset.v === 'pag') iniciarPagos(); else if (b.dataset.v === 'col') iniciarCol(); else if (b.dataset.v === 'emp') { formEmp(); cargarEmp(); } else if (b.dataset.v === 'vac') iniciarVac(); else if (b.dataset.v === 'f931') iniciarF931(); else { formAde(); cargarAde(); }
 });
 
 // ---------------- Liquidaciones ----------------
@@ -632,6 +643,38 @@ async function cargarAde(){
   }catch(e){ error(e); }
 }
 async function anularAde(id){ if (!confirm('¿Anular este adelanto? La plata vuelve a la caja o banco de donde salió.')) return; try{ await api('DELETE', '/adelantos/' + id); await cargarAde(); }catch(e){ error(e); } }
+
+// ---------------- Vacaciones ----------------
+let VAC = null;
+function iniciarVac(){
+  if (!$('vAnio').options.length) { const y = new Date().getFullYear(); for (let a = y + 1; a >= y - 4; a--) $('vAnio').add(new Option(a, a, false, a === y)); }
+  cargarVac();
+}
+async function cargarVac(){
+  try{ VAC = await api('GET', '/vacaciones?anio=' + $('vAnio').value); }catch(e){ return error(e); }
+  const col = n => '<span style="' + (n < 0 ? 'color:#c0392b;font-weight:700' : '') + '">' + n + '</span>';
+  $('tVac').innerHTML = VAC.empleados.map(e => '<tr><td>' + escapeHtml(e.nombre) + '</td><td>' + (e.fechaIngreso ? fmtF(e.fechaIngreso) : '<span class="chip mal">Falta cargar</span>') + '</td><td class="n">' + (e.antiguedad == null ? '—' : e.antiguedad + ' años') + '</td><td class="n" title="' + escapeHtml(e.regla) + '">' + e.corresponden + '</td><td class="n">' + e.tomados + '</td><td class="n">' + (e.ajuste || 0) + '</td><td class="n">' + col(e.saldoAnterior) + '</td><td class="n"><strong>' + col(e.saldo) + '</strong></td><td><button data-iconizado="1" class="btn secondary" onclick="formVac(\'' + e.empleadoId + '\')">Registrar</button></td></tr>').join('') || '<tr><td colspan="9" class="muted">No hay empleados activos.</td></tr>';
+  $('tVacReg').innerHTML = VAC.registros.map(r => '<tr><td>' + escapeHtml(r.empleadoNombre) + '</td><td>' + (r.tipo === 'ajuste' ? 'Ajuste' : 'Vacaciones') + '</td><td>' + (r.desde ? fmtF(r.desde) : '') + '</td><td>' + (r.hasta ? fmtF(r.hasta) : '') + '</td><td class="n">' + r.dias + '</td><td>' + escapeHtml(r.nota || '') + '</td><td><button data-iconizado="1" class="btn secondary" onclick="borrarVac(\'' + r._id + '\')">Borrar</button></td></tr>').join('') || '<tr><td colspan="7" class="muted">Sin registros este año.</td></tr>';
+  if (!$('pVac').innerHTML) formVac();
+}
+function formVac(empId){
+  const hoy = hoyISO();
+  $('pVac').innerHTML = '<h3>Registrar vacaciones</h3><div class="form"><div><label>Empleado</label><select id="vEmp">' + (VAC ? VAC.empleados : EMPLEADOS.map(e => ({empleadoId: e._id, nombre: e.nombre}))).map(e => '<option value="' + e.empleadoId + '"' + (e.empleadoId === empId ? ' selected' : '') + '>' + escapeHtml(e.nombre) + '</option>').join('') + '</select></div>' +
+    '<div><label>Tipo</label><select id="vTipo" onchange="vacTipo()"><option value="goce">Vacaciones tomadas</option><option value="ajuste">Ajuste de saldo (+/−)</option></select></div>' +
+    '<div class="vGoce"><label>Desde</label><input type="date" id="vDesde" value="' + hoy + '" onchange="vacDias()"></div><div class="vGoce"><label>Hasta (inclusive)</label><input type="date" id="vHasta" value="' + hoy + '" onchange="vacDias()"></div>' +
+    '<div><label>Días corridos</label><input type="number" step="any" id="vDias" value="1"></div><div><label>Año que se computa</label><input type="number" id="vAnioReg" value="' + $('vAnio').value + '"></div>' +
+    '<div class="ancho"><label>Nota</label><input type="text" id="vNota" placeholder="Ej: saldo que traía de 2025"></div></div><div class="acciones"><button data-iconizado="1" class="btn" onclick="guardarVac()">Guardar</button><span class="muted">Los días se cuentan corridos (con fines de semana y feriados). Podés cambiarlos a mano.</span></div>';
+  vacDias();
+}
+function vacTipo(){ const aj = $('vTipo').value === 'ajuste'; document.querySelectorAll('.vGoce').forEach(x => x.style.display = aj ? 'none' : ''); if (aj) $('vDias').value = 0; else vacDias(); }
+function vacDias(){ const d = $('vDesde').value, h = $('vHasta').value; if (d && h) { const n = Math.round((new Date(h) - new Date(d)) / 864e5) + 1; $('vDias').value = n > 0 ? n : 0; $('vAnioReg').value = d.slice(0, 4); } }
+async function guardarVac(){
+  const tipo = $('vTipo').value;
+  try{ await api('POST', '/vacaciones', {empleadoId: $('vEmp').value, tipo, desde: $('vDesde').value, hasta: $('vHasta').value, dias: $('vDias').value, anio: $('vAnioReg').value, nota: $('vNota').value});
+    exito('Registrado.'); const ya = $('vAnioReg').value; if (![...$('vAnio').options].some(o => o.value === ya)) $('vAnio').add(new Option(ya, ya)); $('vAnio').value = ya; $('pVac').innerHTML = ''; await cargarVac();
+  }catch(e){ error(e); }
+}
+async function borrarVac(id){ if (!confirm('¿Borrar este registro de vacaciones?')) return; try{ await api('DELETE', '/vacaciones/' + id); await cargarVac(); }catch(e){ error(e); } }
 
 // ---------------- Cargas sociales (F.931) ----------------
 let F931CFG = null, F931REP_EDITADO = false;
