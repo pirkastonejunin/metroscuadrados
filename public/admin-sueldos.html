@@ -426,7 +426,7 @@ const fISO = s => s ? s.split('-').reverse().join('/') : '';
 function etiquetaLiq(l){ return l.tipo === 'final' ? 'Cierre del mes' : 'Semana ' + fISO(l.desde).slice(0, 5) + ' al ' + fISO(l.hasta).slice(0, 5); }
 function iniciarCol(){
   if (!$('cPeriodo').value) $('cPeriodo').value = $('fPeriodo').value || hoyISO().slice(0, 7);
-  if (!$('cHasta').value) $('cHasta').value = hoyISO();
+  { const hoy = hoyISO(), per = $('cPeriodo').value; $('cHasta').value = hoy.slice(0, 7) === per ? hoy : per + '-' + String(new Date(Number(per.slice(0, 4)), Number(per.slice(5, 7)), 0).getDate()).padStart(2, '0'); } // siempre arranca en hoy: una fecha vieja que quedó puesta dejaba afuera las tareas nuevas
   cargarCol();
 }
 async function cargarCol(){
@@ -544,7 +544,7 @@ async function liquidarCol(tipo, colocadorId){
   if (tipo === 'final' && !confirm('Cerrar el mes liquida todo lo que falte liquidar de ' + $('cPeriodo').value + (colocadorId ? ' de este colocador' : ' de todos los colocadores') + '. ¿Seguimos?')) return;
   try{
     const r = await api('POST', '/colocadores/liquidar', {periodo: $('cPeriodo').value, tipo, hasta: $('cHasta').value, colocadorId});
-    exito(r.tareas ? 'Se liquidaron ' + r.tareas + ' tarea' + (r.tareas > 1 ? 's' : '') + ' por ' + pesos(r.total) + ' (' + r.liquidados + ' colocador' + (r.liquidados > 1 ? 'es' : '') + ').' : 'No hay tareas terminadas sin liquidar' + (tipo === 'parcial' ? ' hasta esa fecha.' : '.'));
+    exito(r.tareas ? 'Se liquidaron ' + r.tareas + ' tarea' + (r.tareas > 1 ? 's' : '') + ' por ' + pesos(r.total) + ' (' + r.liquidados + ' colocador' + (r.liquidados > 1 ? 'es' : '') + ').' : 'No hay tareas terminadas sin liquidar' + (tipo === 'parcial' ? ' hasta el ' + fmtF(r.hasta + 'T12:00:00-03:00') + '.' + (r.proximaFecha ? ' Hay tareas sin liquidar desde el ' + fmtF(r.proximaFecha + 'T12:00:00-03:00') + ': cambiá el campo de fecha (al lado de "Liquidar semana") a una posterior.' : '') : '.'));
     await cargarCol();
   }catch(e){ error(e); }
 }

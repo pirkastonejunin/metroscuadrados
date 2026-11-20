@@ -1050,10 +1050,11 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
     const soloCol = b.colocadorId ? String(b.colocadorId) : null;
     const out = await conReintento(() => enTransaccion(async (db) => {
       const filas = await armarColocadores(db, req, periodo);
-      let n = 0, tareasN = 0, total = 0;
+      let n = 0, tareasN = 0, total = 0, proxima = null;
       for (const f of filas) {
         if (soloCol && f.colocadorId !== soloCol) continue;
         const nuevas = f.tareas.filter(t => !t.liquidada && new Date(t.fecha) <= corte);
+        f.tareas.filter(t => !t.liquidada && new Date(t.fecha) > corte).forEach(t => { const d = isoAR(new Date(t.fecha)); if (!proxima || d < proxima) proxima = d; });
         if (!nuevas.length) continue;
         const docs = nuevas.map(t => ({ obraId: t.obraId, tareaId: t.tareaId, obra: t.obra, tipoTrabajo: t.tipoTrabajo, m2: t.m2, costoPorM2: t.costoPorM2, monto: t.monto, fecha: t.fecha, especial: !!t.especial }));
         const suma = r2(docs.reduce((s, t) => s + t.monto, 0));
@@ -1062,7 +1063,7 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
         await db.collection('sueldos_colocadores').insertOne({ colocadorId: toObjectId(f.colocadorId), colocadorNombre: f.nombre, periodo, tipo, desde: isoAR(nuevas[0].fecha), hasta: hastaISO, tareas: docs, total: suma, pagos: [], totalPagado: 0, estado: suma > 0 ? 'pendiente' : 'pagada', orgId: orgLiq, createdAt: new Date(), updatedAt: new Date() });
         n++; tareasN += docs.length; total = r2(total + suma);
       }
-      return { liquidados: n, tareas: tareasN, total };
+      return { liquidados: n, tareas: tareasN, total, hasta: hastaISO, proximaFecha: tareasN ? null : proxima };
     }));
     res.json(out);
   } catch (e) { responder(res, e); }
