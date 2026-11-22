@@ -142,6 +142,29 @@ async function leerApagadasUsuario(db, usuarioId) {
 }
 
 const MS_DIA = 24 * 60 * 60 * 1000;
+
+// Urgencia de cada pendiente (22/11/2026, pedido de Mato): alta / media / baja según el tipo y cuánto hace que está pendiente.
+const URGENCIA_RANGO = { alta: 3, media: 2, baja: 1 };
+function urgenciaDe(it, ahora) {
+  const ms = it.fecha ? (ahora - new Date(it.fecha)) : 0;
+  const dias = Math.floor(ms / MS_DIA), hs = ms / 3600000;
+  switch (it.tipo) {
+    case 'recordatorio': return new Date(it.fecha) <= ahora ? 'alta' : 'media';
+    case 'meta_token': case 'cheque_vencido': return 'alta';
+    case 'cheque_por_vencer': return 'media';
+    case 'crm': return dias >= 3 ? 'alta' : 'media';
+    case 'crm_sin_decidir': return hs >= 72 ? 'alta' : 'media';
+    case 'visita': case 'caja_sin_cerrar': return dias >= 2 ? 'alta' : 'media';
+    case 'obra': return dias >= 7 ? 'alta' : (dias >= 3 ? 'media' : 'baja');
+    case 'orden_compra': return dias >= 30 ? 'alta' : (dias >= 14 ? 'media' : 'baja');
+    case 'compra_por_pagar': case 'venta_sin_cobrar': return dias >= 60 ? 'alta' : 'media';
+    case 'venta_sin_entregar': return dias >= 7 ? 'alta' : 'media';
+    case 'stock_bajo': return it.sinStock ? 'media' : 'baja';
+    default: return 'media';
+  }
+}
+// Estado personal de cada pendiente: descartado (hasta que se restaure) o pospuesto hasta una fecha.
+const COL_ESTADOS = 'notificaciones_estados';
 const nombreCliente = (v) => v.clienteNombre || (v.cliente && v.cliente.nombre) || 'Cliente';
 const fmtMonto = (n, m) => (m === 'USD' ? 'US$ ' : '$ ') + Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
 // Mismo criterio de "día" que la planilla de caja diaria (ver tesoreria.js).
@@ -364,7 +387,7 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
           const asignada = !!r.asignadoPorId;
           items.push({ tipo: 'recordatorio', id: String(r._id), titulo: r.titulo,
             subtitulo: asignada ? ('Tarea de ' + (r.asignadoPorNombre || 'otro usuario') + (r.nota ? ' — ' + r.nota : '')) : (r.nota || 'Recordatorio'),
-            fecha: r.fechaHora, etiquetaFecha: asignada && r.fechaHora > ahora ? 'Para el' : 'Era para el' });
+            fecha: r.fechaHora, link: r.link || '', etiquetaFecha: asignada && r.fechaHora > ahora ? 'Para el' : 'Era para el' });
         }
       }
 
@@ -380,7 +403,7 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
           existencias.forEach(e => total.set(String(e.productoId), (total.get(String(e.productoId)) || 0) + (e.cantidad || 0)));
           productos.filter(p => (total.get(String(p._id)) || 0) < p.cantidadMinima).slice(0, 30).forEach(p => {
             items.push({
-              tipo: 'stock_bajo', id: String(p._id),
+              tipo: 'stock_bajo', id: String(p._id), sinStock: (total.get(String(p._id)) || 0) <= 0,
               titulo: `${p.sku ? p.sku + ' — ' : ''}${p.nombre}`,
               subtitulo: `Stock ${Math.round((total.get(String(p._id)) || 0) * 100) / 100} ${p.unidad || ''} — mínimo ${p.cantidadMinima}`,
               fecha: ahora, etiquetaFecha: 'Hoy'
@@ -391,7 +414,17 @@ router.get('/', authUsuario, resolverOrg, async (req, res) => {
     });
 
     items.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-    res.json({ items, config });
+    const estados = await conReintento(async () => (await getDb()).collection(COL_ESTADOS).find({ usuarioId: req.usuario._id }).toArray());
+    const mapa = new Map(estados.map(e => [e.tipo + '|' + e.itemId, e]));
+    const visibles = [], ocultos = [];
+    for (const it of items) {
+      it.urgencia = urgenciaDe(it, ahora);
+      const e = mapa.get(it.tipo + '|' + it.id);
+      if (e && (e.estado === 'descartada' || (e.hasta && new Date(e.hasta) > ahora))) { it.oculto = e.estado === 'descartada' ? 'descartada' : 'pospuesta'; it.ocultoHasta = e.hasta || null; ocultos.push(it); }
+      else visibles.push(it);
+    }
+    visibles.sort((a, b) => (URGENCIA_RANGO[b.urgencia] - URGENCIA_RANGO[a.urgencia]) || (new Date(a.fecha) - new Date(b.fecha)));
+    res.json({ items: req.query.ocultos === '1' ? ocultos : visibles, config, ocultos: ocultos.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -470,6 +503,7 @@ router.post('/recordatorios', authUsuario, resolverOrg, async (req, res) => {
     const fecha = parseFechaHoraLocal(b.fechaHora);
     if (isNaN(fecha.getTime())) return res.status(400).json({ error: 'La fecha y hora no son válidas.' });
     const nota = String(b.nota || '').trim();
+    const link = (typeof b.link === 'string' && /^\/[^\/\\]/.test(b.link)) ? b.link.slice(0, 300) : ''; // solo rutas internas (seguimiento de un pendiente)
     const out = await conReintento(async () => {
       const db = await getDb();
       // Asignada a otro usuario: le aparece en SU campanita y el evento va a SU calendario.
@@ -488,13 +522,36 @@ router.post('/recordatorios', authUsuario, resolverOrg, async (req, res) => {
         const v = await db.collection('visitas_vendedores').findOne({ _id: vid });
         calendarId = (v && v.googleCalendarId) || null;
       }
-      const doc = { orgId: req.orgId || null, usuarioId: destino._id, usuarioNombre: destino.nombre, titulo, nota, fechaHora: fecha, hecho: false, googleEventId: null, calendarId, createdAt: new Date() };
+      const doc = { orgId: req.orgId || null, usuarioId: destino._id, usuarioNombre: destino.nombre, titulo, nota, link, fechaHora: fecha, hecho: false, googleEventId: null, calendarId, createdAt: new Date() };
       if (asignada) { doc.asignadoPorId = req.usuario._id; doc.asignadoPorNombre = req.usuario.nombre || ''; }
       doc.googleEventId = await googleCalendar.upsertEvento(null, { titulo: '🔔 ' + titulo, descripcion: nota, inicio: fecha, fin: new Date(fecha.getTime() + 30 * 60000) }, calendarId);
       const r = await db.collection('recordatorios').insertOne(doc);
       return { id: String(r.insertedId), enCalendario: !!doc.googleEventId, calendarioConectado: googleCalendar.habilitado(), asignadoA: asignada ? destino.nombre : null };
     });
     res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Bandeja de pendientes: descartar (para siempre) o posponer (hasta mañana 8:00, o N días) un pendiente, solo para el usuario.
+// POST /ocultar { tipo, id, dias? , manana? }   ·   POST /restaurar { tipo, id }
+router.post('/ocultar', authUsuario, resolverOrg, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const tipo = String(b.tipo || '').slice(0, 40), itemId = String(b.id || '').slice(0, 200);
+    if (!tipo || !itemId) return res.status(400).json({ error: 'Falta indicar el pendiente.' });
+    let hasta = null, estado = 'descartada';
+    if (b.manana) { const t = inicioDeHoyArgentina(); hasta = new Date(t.getTime() + MS_DIA + 8 * 3600000); estado = 'pospuesta'; } // mañana 8:00 (hora Argentina)
+    else if (Number(b.dias) > 0) { hasta = new Date(Date.now() + Math.min(Number(b.dias), 365) * MS_DIA); estado = 'pospuesta'; }
+    await conReintento(async () => (await getDb()).collection(COL_ESTADOS).updateOne({ usuarioId: req.usuario._id, tipo, itemId },
+      { $set: { estado, hasta, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true }));
+    res.json({ ok: true, estado, hasta });
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+router.post('/restaurar', authUsuario, resolverOrg, async (req, res) => {
+  try {
+    const b = req.body || {};
+    await conReintento(async () => (await getDb()).collection(COL_ESTADOS).deleteOne({ usuarioId: req.usuario._id, tipo: String(b.tipo || ''), itemId: String(b.id || '') }));
+    res.json({ ok: true });
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

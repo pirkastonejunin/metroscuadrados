@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="/nav-sidebar.js"></script>
+<script src="/bandeja-pendientes.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
 <style>
@@ -158,7 +159,7 @@
   .notif-btn:hover{border-color:var(--accent);color:var(--accent);}
   .notif-btn svg{width:18px;height:18px;}
   .notif-badge{position:absolute;top:-5px;right:-5px;background:#c53030;color:#fff;font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;}
-  .notif-panel{position:absolute;top:44px;right:0;width:300px;max-width:calc(100vw - 24px);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);z-index:200;max-height:420px;overflow:auto;}
+  .notif-panel{position:absolute;top:44px;right:0;width:420px;max-width:calc(100vw - 24px);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);z-index:200;max-height:420px;overflow:auto;}
   .notif-panel-header{padding:12px 14px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px;display:flex;justify-content:space-between;align-items:center;color:var(--ink);}
   .notif-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;}
   .notif-item:last-child{border-bottom:none;}
@@ -1159,6 +1160,7 @@ window.addEventListener('message', ev => {
 // muestra nada en esta misma pantalla.
 const BASE_NOTIF = '/api/notificaciones';
 let NOTIF_ITEMS = [];
+let NOTIF_OCULTOS = 0, NOTIF_VER_OC = false, NOTIF_OC_ITEMS = [], NOTIF_DIA_ITEMS = [], NOTIF_VER_OC_PRINCIPAL = false;
 let notifIntervalIniciado = false;
 
 function notifEscapeHtml(s){
@@ -1173,11 +1175,13 @@ async function cargarNotificaciones(){
     if (!r.ok) return;
     const data = await r.json().catch(()=>({}));
     NOTIF_ITEMS = data.items || [];
+    NOTIF_OCULTOS = data.ocultos || 0;
     renderNotifBadge();
     if (NOTIF_PREFS === null) cargarPrefsNotif();
     const panel = document.getElementById('notifPanel');
     if (panel && !panel.classList.contains('hidden')) renderNotifPanel();
     renderVencimientosPrincipal();
+    notifEnlazarBandeja();
   }catch(e){ /* que no rompa la pantalla si falla la campanita */ }
 }
 // Mismos datos que la campanita (GET /api/notificaciones), pero mostrados
@@ -1245,19 +1249,34 @@ function renderVencimientosPrincipal() {
   }
   gridEl.innerHTML = celdas;
 
-  if (vencDiaSeleccionado) {
-    const items = porDia[vencDiaSeleccionado] || [];
-    listaEl.innerHTML = items.length ? notifAgrupadas(items, it => `
-      <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
-        <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
-        <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
-      </div>
-    `) : '<div class="venc-detalle-vacio">Sin vencimientos ese día.</div>';
-  } else {
-    listaEl.innerHTML = NOTIF_ITEMS.length
-      ? `<div class="venc-detalle-vacio">Tocá un día marcado para ver el detalle — hay ${NOTIF_ITEMS.length} vencimiento${NOTIF_ITEMS.length===1?'':'s'} en total.</div>`
-      : '<div class="venc-detalle-vacio">Sin vencimientos pendientes 🎉</div>';
+  // Bandeja de pendientes (22/11/2026): sin día elegido muestra TODOS los pendientes (por urgencia); con un día, los de ese día.
+  if (window.PnBandeja) {
+    if (NOTIF_VER_OC_PRINCIPAL) {
+      NOTIF_DIA_ITEMS = NOTIF_OC_ITEMS;
+      listaEl.innerHTML = PnBandeja.barra(NOTIF_DIA_ITEMS, NOTIF_OCULTOS, { ocultos: true }) + PnBandeja.render(NOTIF_DIA_ITEMS, { ocultos: true });
+    } else if (vencDiaSeleccionado) {
+      NOTIF_DIA_ITEMS = porDia[vencDiaSeleccionado] || [];
+      listaEl.innerHTML = '<div style="padding:8px 0"><button type="button" class="btn secondary" onclick="vencVerDia(vencDiaSeleccionado)" style="padding:4px 10px;font-size:12px">← Ver todos los pendientes</button></div>' + (NOTIF_DIA_ITEMS.length ? PnBandeja.render(NOTIF_DIA_ITEMS, { agrupar: 'urgencia' }) : '<div class="venc-detalle-vacio">Sin vencimientos ese día.</div>');
+    } else {
+      NOTIF_DIA_ITEMS = NOTIF_ITEMS;
+      listaEl.innerHTML = '<h4 style="margin:12px 0 4px;font-size:13px">📥 Bandeja de pendientes</h4>' + PnBandeja.barra(NOTIF_DIA_ITEMS, NOTIF_OCULTOS, {}) + PnBandeja.render(NOTIF_DIA_ITEMS, {});
+    }
   }
+}
+// Acciones de la bandeja (descartar, posponer, seguimiento, ir): se recarga todo desde el servidor después de cada una.
+async function notifRecargar(){
+  if (NOTIF_VER_OC || NOTIF_VER_OC_PRINCIPAL) {
+    try{ const r = await fetch(BASE_NOTIF + '?ocultos=1', { headers: headersAuth() }); const d = await r.json(); NOTIF_OC_ITEMS = d.items || []; if (!NOTIF_OC_ITEMS.length) { NOTIF_VER_OC = false; NOTIF_VER_OC_PRINCIPAL = false; } }catch(e){}
+  }
+  await cargarNotificaciones();
+}
+function notifEnlazarBandeja(){
+  if (!window.PnBandeja || window.__bandejaEnlazada) return; window.__bandejaEnlazada = true;
+  const panel = document.getElementById('notifPanelBody'), lista = document.getElementById('vencimientosLista');
+  if (panel) PnBandeja.enlazar(panel, { getItems: () => NOTIF_VER_OC ? NOTIF_OC_ITEMS : NOTIF_ITEMS, hdrs: headersAuth(), recargar: notifRecargar, repintar: () => { renderNotifPanel(); },
+    alIr: () => toggleNotifPanel(), verOcultos: () => { NOTIF_VER_OC = true; notifRecargar(); }, volver: () => { NOTIF_VER_OC = false; notifRecargar(); } });
+  if (lista) PnBandeja.enlazar(lista, { getItems: () => NOTIF_DIA_ITEMS, hdrs: headersAuth(), recargar: notifRecargar, repintar: renderVencimientosPrincipal,
+    verOcultos: () => { NOTIF_VER_OC_PRINCIPAL = true; notifRecargar(); }, volver: () => { NOTIF_VER_OC_PRINCIPAL = false; notifRecargar(); } });
 }
 function renderNotifBadge(){
   const badge = document.getElementById('notifBadge');
@@ -1284,15 +1303,10 @@ function notifAgrupadas(items, htmlItem){
 }
 function renderNotifPanel(){
   const cont = document.getElementById('notifPanelBody');
-  if (!cont) return;
-  if (!NOTIF_ITEMS.length) { cont.innerHTML = '<div class="notif-empty">Sin vencimientos pendientes.</div>'; return; }
-  cont.innerHTML = notifAgrupadas(NOTIF_ITEMS, it => `
-    <div class="notif-item" onclick="irANotificacion('${it.tipo}','${it.id}')">
-      <div class="notif-item-titulo">${notifEscapeHtml(it.titulo)}</div>
-      <div class="notif-item-sub">${notifEscapeHtml(it.subtitulo || '')}</div>
-      <div class="notif-item-fecha">${notifEscapeHtml(it.etiquetaFecha || 'Venció el')} ${notifFmtFecha(it.fecha)}</div>
-    </div>
-  `);
+  if (!cont || !window.PnBandeja) return;
+  notifEnlazarBandeja();
+  const lista = NOTIF_VER_OC ? NOTIF_OC_ITEMS : NOTIF_ITEMS;
+  cont.innerHTML = PnBandeja.barra(lista, NOTIF_OCULTOS, { ocultos: NOTIF_VER_OC }) + PnBandeja.render(lista, { ocultos: NOTIF_VER_OC });
 }
 function irANotificacion(tipo, id){
   toggleNotifPanel();

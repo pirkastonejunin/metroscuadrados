@@ -541,6 +541,12 @@ async function iniciarApp(){
     if (sel) { elegirProveedor('pcProveedor', pagoProveedorId); cargarComprasPendientesPagoCuenta(); }
   }
   // Desde el menú ⚙ de la cuenta corriente del proveedor: nueva compra / nueva orden de compra con el proveedor ya elegido.
+  // Desde la bandeja de pendientes (22/11/2026): ?abrir=<id de compra> / ?abrirOrden=<id de orden> abre el detalle directo.
+  { const ab = qp.get('abrir'), abO = qp.get('abrirOrden');
+    if (ab || abO) history.replaceState(null, '', location.pathname);
+    if (ab) { try{ if (!comprasCache.some(x => x._id === ab)) { const r = await fetch(BASE + '/' + encodeURIComponent(ab), {headers: headersAuth()}); if (r.ok) comprasCache.unshift(await r.json()); } verDetalle(ab); }catch(e){} }
+    if (abO) { try{ cambiarTab('ordenes'); await cargarOrdenes(); if (!ordenesCache.some(x => x._id === abO)) { const r = await fetch(BASE + '/ordenes/' + encodeURIComponent(abO), {headers: headersAuth()}); if (r.ok) ordenesCache.unshift(await r.json()); } verDetalleOrden(abO); }catch(e){} }
+  }
   const nuevaCompraId = qp.get('nuevaCompra'), nuevaOrdenId = qp.get('nuevaOrden'), nuevaCompraObra = qp.get('nuevaCompraObra');
   if (nuevaCompraObra) {
     abrirNuevaCompra(nuevaCompraObra);
