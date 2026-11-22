@@ -221,11 +221,73 @@ async function verDetalle(tipo, concepto, mes){
     if (!d.filas.length) h += '<div class="muted">No hay movimientos para este renglón.</div>';
     else {
       h += '<table class="t" style="width:100%;font-size:13px"><thead><tr>' + (esCosto ? '' : '<th>Fecha</th>') + (multi ? '<th>Sucursal</th>' : '') + '<th>Detalle</th><th>' + (esCosto ? 'Código' : 'Comprobante') + '</th>' + (esCosto ? '<th class="n">Cantidad</th><th>Origen del costo</th>' : '') + '<th class="n">Importe</th></tr></thead><tbody>';
-      h += d.filas.map(f => '<tr>' + (esCosto ? '' : '<td>' + escapeHtml(f.fecha) + '</td>') + (multi ? '<td>' + escapeHtml(f.sucursal) + '</td>' : '') + '<td>' + escapeHtml(f.detalle) + '</td><td>' + escapeHtml(f.ref) + '</td>' + (esCosto ? '<td class="n">' + f.cantidad + '</td><td>' + escapeHtml(f.fuente || '') + '</td>' : '') + '<td class="n">' + pesos(f.monto) + '</td></tr>').join('');
+      h += d.filas.map(f => '<tr' + (f.gastoId ? ' class="click" style="cursor:pointer" title="Tocá para corregir este gasto" onclick="editarGasto(\'' + f.gastoId + '\',\'' + tipo + '\',' + escapeHtml(JSON.stringify(concepto || '')) + ',\'' + mes + '\')"' : '') + '>' + (esCosto ? '' : '<td>' + escapeHtml(f.fecha) + '</td>') + (multi ? '<td>' + escapeHtml(f.sucursal) + '</td>' : '') + '<td>' + escapeHtml(f.detalle) + '</td><td>' + escapeHtml(f.ref) + '</td>' + (esCosto ? '<td class="n">' + f.cantidad + '</td><td>' + escapeHtml(f.fuente || '') + '</td>' : '') + '<td class="n">' + pesos(f.monto) + '</td></tr>').join('');
       h += '</tbody></table>';
     }
     $('detBox').innerHTML = h;
   }catch(e){ $('detBox').innerHTML = '<div class="err">No se pudo cargar el detalle: ' + escapeHtml(e.message) + '</div><button class="btn secondary" onclick="$(\'detOverlay\').remove()">Cerrar</button>'; }
+}
+
+// Corregir un gasto desde el detalle (22/11/2026): se abre el comprobante completo con sus líneas y se guarda con PUT /api/gastos/:id.
+const GASTOS_API = BASE.replace(/\/informes.*$/, '') + '/gastos';
+const IVA_OPC = [0, 2.5, 5, 10.5, 21, 27];
+async function editarGasto(id, tipo, concepto, mes){
+  const box = $('detBox'); box.innerHTML = '<div class="muted">Cargando gasto…</div>';
+  try{
+    const [rg, rc] = await Promise.all([fetch(GASTOS_API + '/' + id, {headers: headersAuth()}), fetch(GASTOS_API + '/conceptos', {headers: headersAuth()})]);
+    const g = await rg.json(); if (!rg.ok) throw new Error(g.error || ('Error ' + rg.status));
+    let cs = []; try{ const c = await rc.json(); cs = Array.isArray(c) ? c : (c.conceptos || []); }catch(e){}
+    window._gEd = {id, tipo, concepto, mes, conceptos: cs, items: (g.items || []).map(it => ({conceptoId: it.conceptoId ? String(it.conceptoId) : '', conceptoNombre: it.conceptoNombre || '', observaciones: it.observaciones || '', cantidad: it.cantidad, precioUnitario: it.precioUnitario, alicuotaIva: it.alicuotaIva}))};
+    const f = g.fecha ? String(g.fecha).slice(0, 10) : '';
+    let h = '<div style="display:flex;align-items:center;gap:8px"><b style="font-size:1.05rem">Corregir gasto #' + escapeHtml(String(g.numero || '')) + '</b><button class="btn secondary" style="margin-left:auto" onclick="verDetalle(window._gEd.tipo,window._gEd.concepto,window._gEd.mes)">Volver</button></div>';
+    h += '<div class="muted" style="margin:4px 0 10px">' + escapeHtml(g.proveedorNombre || '') + ' · ' + escapeHtml(String(g.tipoComprobante || '').replace(/_/g, ' ')) + ' · ' + escapeHtml(g.moneda || 'ARS') + (g.totalPagado ? ' · ya pagado ' + pesos(g.totalPagado) : '') + '</div>';
+    h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<div><div class="muted">Fecha</div><input type="date" id="geFecha" value="' + f + '"></div>' +
+      '<div><div class="muted">Punto de venta</div><input id="gePv" style="width:90px" value="' + escapeHtml(g.puntoVenta || '') + '"></div>' +
+      '<div><div class="muted">Nº comprobante</div><input id="geNro" style="width:140px" value="' + escapeHtml(g.comprobanteNumero || '') + '"></div>' +
+      '<div><div class="muted">Desc. %</div><input id="geDp" type="number" step="any" style="width:80px" value="' + (g.descuentoPorcentaje || 0) + '"></div>' +
+      '<div><div class="muted">Desc. $</div><input id="geDm" type="number" step="any" style="width:100px" value="' + (g.descuentoMonto || 0) + '"></div></div>';
+    h += '<div id="geItems"></div><button class="btn secondary" style="margin:6px 0" onclick="geAgregar()">+ Agregar línea</button>';
+    h += '<div style="margin:6px 0"><div class="muted">Observaciones</div><input id="geObs" style="width:100%" value="' + escapeHtml(g.observaciones || '') + '"></div>';
+    h += '<div id="geErr" class="err" style="margin:6px 0"></div><div style="display:flex;gap:8px;align-items:center"><button class="btn" onclick="guardarGasto()">Guardar corrección</button><span class="muted" id="geTotal"></span></div>';
+    box.innerHTML = h; geRender();
+  }catch(e){ box.innerHTML = '<div class="err">No se pudo abrir el gasto: ' + escapeHtml(e.message) + '</div><button class="btn secondary" onclick="verDetalle(window._gEd.tipo,window._gEd.concepto,window._gEd.mes)">Volver</button>'; }
+}
+function geLeer(){
+  document.querySelectorAll('#geItems tr[data-i]').forEach(tr => {
+    const it = window._gEd.items[+tr.dataset.i], q = c => tr.querySelector('.' + c);
+    const sel = q('gc').value; const c = window._gEd.conceptos.find(x => String(x._id) === sel);
+    it.conceptoId = sel; it.conceptoNombre = c ? c.nombre : it.conceptoNombre;
+    it.observaciones = q('gd').value; it.cantidad = q('gq').value; it.precioUnitario = q('gp').value; it.alicuotaIva = Number(q('gi').value);
+  });
+}
+function geRender(){
+  const E = window._gEd;
+  $('geItems').innerHTML = '<table class="t" style="width:100%;font-size:13px"><thead><tr><th>Concepto</th><th>Descripción</th><th class="n">Cant.</th><th class="n">Precio unit.</th><th>IVA %</th><th></th></tr></thead><tbody>' + E.items.map((it, i) =>
+    '<tr data-i="' + i + '"><td><select class="gc" onchange="geTot()">' + (it.conceptoId ? '' : '<option value="">' + escapeHtml(it.conceptoNombre || '— elegir —') + '</option>') + E.conceptos.map(c => '<option value="' + c._id + '"' + (String(c._id) === it.conceptoId ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></td>' +
+    '<td><input class="gd" style="width:100%" value="' + escapeHtml(it.observaciones || '') + '"></td>' +
+    '<td><input class="gq" type="number" step="any" style="width:70px" value="' + it.cantidad + '" oninput="geTot()"></td>' +
+    '<td><input class="gp" type="number" step="any" style="width:110px" value="' + it.precioUnitario + '" oninput="geTot()"></td>' +
+    '<td><select class="gi" onchange="geTot()">' + IVA_OPC.map(a => '<option' + (a === Number(it.alicuotaIva) ? ' selected' : '') + '>' + a + '</option>').join('') + '</select></td>' +
+    '<td>' + (E.items.length > 1 ? '<button class="btn secondary" onclick="geQuitar(' + i + ')">✕</button>' : '') + '</td></tr>').join('') + '</tbody></table>';
+  geTot();
+}
+function geAgregar(){ geLeer(); window._gEd.items.push({conceptoId: '', conceptoNombre: '', observaciones: '', cantidad: 1, precioUnitario: 0, alicuotaIva: 21}); geRender(); }
+function geQuitar(i){ geLeer(); window._gEd.items.splice(i, 1); geRender(); }
+function geTot(){
+  let sub = 0, iva = 0;
+  document.querySelectorAll('#geItems tr[data-i]').forEach(tr => { const s = (parseFloat(tr.querySelector('.gq').value) || 0) * (parseFloat(tr.querySelector('.gp').value) || 0); sub += s; iva += s * Number(tr.querySelector('.gi').value) / 100; });
+  if ($('geTotal')) $('geTotal').textContent = 'Subtotal ' + pesos(sub) + ' · IVA ' + pesos(iva);
+}
+async function guardarGasto(){
+  geLeer(); const E = window._gEd; $('geErr').textContent = '';
+  const body = {fecha: $('geFecha').value, puntoVenta: $('gePv').value, comprobanteNumero: $('geNro').value, descuentoPorcentaje: $('geDp').value, descuentoMonto: $('geDm').value, observaciones: $('geObs').value,
+    items: E.items.map(it => ({conceptoId: it.conceptoId || undefined, conceptoNombre: it.conceptoId ? undefined : it.conceptoNombre, observaciones: it.observaciones, cantidad: it.cantidad, precioUnitario: it.precioUnitario, alicuotaIva: it.alicuotaIva}))};
+  try{
+    const r = await fetch(GASTOS_API + '/' + E.id, {method: 'PUT', headers: headersAuth({'Content-Type': 'application/json'}), body: JSON.stringify(body)});
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+    cargar(); verDetalle(E.tipo, E.concepto, E.mes);
+  }catch(e){ $('geErr').textContent = e.message; }
 }
 async function cargar(){
   $('err').innerHTML = ''; $('aviso').innerHTML = '';

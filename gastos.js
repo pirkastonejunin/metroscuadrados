@@ -662,6 +662,53 @@ router.post('/', authAdmin, async (req, res) => {
   catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Corrección de un gasto cargado con error (pedido de Mato, 22/11/2026: desde el detalle del Estado de resultados). Se puede cambiar
+// fecha, comprobante, observaciones, descuentos y las líneas (concepto, descripción, cantidad, precio, IVA). El proveedor, la moneda,
+// los impuestos del comprobante y los pagos ya registrados no se tocan; el saldo se recalcula contra lo ya pagado.
+router.put('/:id', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const g = await db.collection('gastos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!g) throw err(404, 'Gasto no encontrado');
+      if (g.estado === 'anulada') throw err(400, 'Este gasto está anulado: no se puede editar.');
+      const set = { updatedAt: new Date() };
+      if (body.fecha) { const f = new Date(body.fecha); if (isNaN(f.getTime())) throw err(400, 'Fecha inválida'); set.fecha = f; }
+      if (body.observaciones !== undefined) set.observaciones = normalizarTexto(body.observaciones);
+      const dp = body.descuentoPorcentaje !== undefined ? (body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0) : (g.descuentoPorcentaje || 0);
+      const dm = body.descuentoMonto !== undefined ? (body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0) : (g.descuentoMonto || 0);
+      set.descuentoPorcentaje = dp; set.descuentoMonto = dm;
+      if (body.comprobanteNumero !== undefined || body.puntoVenta !== undefined || body.tipoComprobante !== undefined) {
+        const cb = normalizarComprobante({
+          tipoComprobante: body.tipoComprobante !== undefined ? body.tipoComprobante : g.tipoComprobante,
+          puntoVenta: body.puntoVenta !== undefined ? body.puntoVenta : g.puntoVenta,
+          comprobanteNumero: body.comprobanteNumero !== undefined ? body.comprobanteNumero : g.comprobanteNumero
+        });
+        const dupe = await db.collection('gastos').findOne(Object.assign({
+          _id: { $ne: id }, proveedorId: g.proveedorId, tipoComprobante: cb.tipoComprobante, puntoVenta: cb.puntoVenta,
+          comprobanteNumero: cb.comprobanteNumero, estado: { $ne: 'anulada' }
+        }, filtroOrg(req)));
+        if (dupe) throw err(400, `Ya hay otro gasto con ese comprobante (${TIPO_COMPROBANTE_LABEL[cb.tipoComprobante]} ${cb.puntoVenta}-${cb.comprobanteNumero}) para este proveedor — es el gasto #${dupe.numero}.`);
+        Object.assign(set, { tipoComprobante: cb.tipoComprobante, puntoVenta: cb.puntoVenta, comprobanteNumero: cb.comprobanteNumero, esFiscal: cb.esFiscal });
+      }
+      let items = g.items || [], subtotal = Number(g.subtotal || 0);
+      if (body.items !== undefined) { const n = await normalizarItems(db, req, body.items); items = n.items; subtotal = n.subtotal; set.items = items; set.subtotal = subtotal; }
+      const fi = calcularComprobanteDesdeItems(items);
+      Object.assign(set, { importeNeto: fi.importeNeto, importeIva: fi.importeIva, importeExento: fi.importeExento, importeTotalComprobante: fi.importeTotalComprobante });
+      const cargos = Number(g.totalPercepciones || 0) + Number(g.impuestoCredito || 0) + Number(g.impuestoDebito || 0) + Number(g.otrosImpuestos || 0);
+      const total = calcularTotalConImpuestos(subtotal, fi.importeIva, dp, dm, Math.round(cargos * 100) / 100);
+      const pagado = Number(g.totalPagado || 0);
+      if (total + 0.005 < pagado) throw err(400, `El nuevo total (${total.toFixed(2)}) es menor a lo ya pagado (${pagado.toFixed(2)}). Anulá el pago que sobra y volvé a guardar.`);
+      set.total = total; set.saldoPendiente = Math.max(0, Math.round((total - pagado) * 100) / 100);
+      await db.collection('gastos').updateOne({ _id: id }, { $set: set });
+      return db.collection('gastos').findOne({ _id: id });
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Anula un gasto — sin stock de por medio, es una baja simple; los pagos
 // ya registrados quedan como registro histórico (mismo criterio que
 // anular una compra: revertir movimientos de caja/banco se hace a mano
