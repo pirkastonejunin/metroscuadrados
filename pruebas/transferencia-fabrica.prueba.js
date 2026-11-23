@@ -17,6 +17,12 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
   await db.collection('config_general').insertOne({ clave: 'resultadosTransferenciaFabrica', valor: { activo: true, fabricaOrgId: String(F), listaId: String(lista) } });
   await caso('sucursal: el costo de lo producido por Fábrica es el precio mayorista', async () => { const r = (await inf(B)).data; const m = r.meses[0]; assert.strictEqual(r.transferencia.estado, 'activa'); assert.strictEqual(m.comprasInternas, 6000, JSON.stringify(m)); });
   await caso('Fábrica: ve la venta interna con su costo de producción', async () => { const r = (await inf(F)).data; const m = r.meses[0]; assert.strictEqual(m.ventasInternas, 6000, JSON.stringify(m)); assert.strictEqual(m.costo, 4000, JSON.stringify(m)); });
+  await caso('detalle de ventas de Fábrica: lista las ventas internas a las sucursales y suma igual que el informe', async () => {
+    await db.collection('config_general').updateOne({ clave: 'resultadosTransferenciaFabrica' }, { $set: { 'valor.activo': true } });
+    const inf = (await api('GET', '/api/informes/resultados?desde=2032-05-01&hasta=2032-05-31', null, String(F))).data;
+    const d = (await api('GET', '/api/informes/resultados/detalle?tipo=ventas&mes=2032-05&desde=2032-05-01&hasta=2032-05-31', null, String(F))).data;
+    assert.strictEqual(d.cantidad, 1, JSON.stringify(d)); assert(/Venta interna a Sucursal/.test(d.filas[0].detalle)); assert.strictEqual(d.total, inf.meses[0].ventasNetas);
+  });
   await caso('avisa los productos de producción sin precio mayorista', async () => { const r = (await inf(B)).data; assert.strictEqual(r.transferencia.cantSinPrecio, 1); assert(/Sin precio/.test(r.transferencia.sinPrecio[0])); });
   await caso('desactivada: avisa que no se aplica', async () => { await db.collection('config_general').updateOne({ clave: 'resultadosTransferenciaFabrica' }, { $set: { 'valor.activo': false } }); const r = (await inf(B)).data; assert.strictEqual(r.transferencia.estado, 'inactiva'); });
   console.log(`\n${fallos ? fallos + ' FALLO(S)' : 'TODO OK'} (${ok}/${ok + fallos})`);

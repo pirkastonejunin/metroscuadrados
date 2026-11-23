@@ -767,6 +767,32 @@ async function detalleResultados(req) {
           push(v.fecha, v.orgId, v.clienteNombre || 'Consumidor final', (String(v.tipoComprobante || 'venta').replace(/_/g, ' ')) + ' ' + num(v), (Number(v.total || 0) * usd - iva) * nc);
         });
         nota = 'Ventas netas de IVA. Las ventas internas de Fábrica a otras sucursales se compensan en el informe.';
+        // Fábrica: lo que las otras sucursales vendieron de sus productos de producción es, para Fábrica, una venta interna a precio mayorista
+        // (igual que en el informe). Si esas sucursales están en la misma consulta ("todas") se compensan y no se listan.
+        const tf = await transferenciaFabrica(db);
+        if (tf && orgIds.some(o => String(o) === tf.fabricaOrgId)) {
+          const todasOrgs = await db.collection('organizaciones').find({}).project({ nombre: 1 }).toArray();
+          const nomTodas = new Map(todasOrgs.map(o => [String(o._id), o.nombre || '']));
+          const otras = todasOrgs.map(o => o._id).filter(id => String(id) !== tf.fabricaOrgId && !orgIds.some(o => String(o) === String(id)));
+          if (otras.length) {
+            const vo = await db.collection('ventas').find({ orgId: { $in: otras }, estado: { $ne: 'anulada' }, fecha: { $gte: d0, $lte: d1 } }).limit(50000).toArray();
+            await vincularItemsLibres(db, vo);
+            const pids = new Set(); vo.forEach(v => (v.items || []).forEach(it => { if (it.productoId) pids.add(String(it.productoId)); }));
+            const prodsO = pids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...pids].map(toObjectId) } }).project({ tipoProducto: 1, costo: 1, moneda: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, porcentajeIva: 1 }).toArray() : [];
+            const pmO = new Map(prodsO.map(p => [String(p._id), p]));
+            const cotDocO = await db.collection('config_general').findOne({ orgId: tf.fabricaOrgId ? toObjectId(tf.fabricaOrgId) : null, clave: 'cotizacionDolar' });
+            const cotO = cotDocO && Number(cotDocO.valor) > 0 ? Number(cotDocO.valor) : null;
+            let nInt = 0;
+            vo.forEach(v => {
+              const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1; let monto = 0;
+              (v.items || []).forEach(it => { const p = it.productoId ? pmO.get(String(it.productoId)) : null; if (!p || p.tipoProducto !== 'produccion') return; const mn = precioMayoristaNeto(tf, p, cotO); if (mn != null) monto += Number(it.cantidad || 0) * mn * nc; });
+              if (!monto) return;
+              nInt++;
+              push(v.fecha, tf.fabricaOrgId, 'Venta interna a ' + (nomTodas.get(String(v.orgId)) || 'otra sucursal') + (v.clienteNombre ? ' (cliente: ' + v.clienteNombre + ')' : ''), 'venta interna ' + num(v), monto);
+            });
+            if (nInt) nota += ' Incluye ' + nInt + ' venta(s) internas a otras sucursales, a precio mayorista (solo productos de producción).';
+          }
+        }
       } else {
         await vincularItemsLibres(db, ventas);
         const ids = new Set(); ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
