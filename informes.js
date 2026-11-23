@@ -784,19 +784,19 @@ async function detalleResultados(req) {
             const cotO = cotDocO && Number(cotDocO.valor) > 0 ? Number(cotDocO.valor) : null;
             let nInt = 0;
             vo.forEach(v => {
-              const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1; let monto = 0; const sinContar = [];
+              const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1; let monto = 0; const sinContar = [], cuentas = [];
               (v.items || []).forEach(it => {
                 const p = it.productoId ? pmO.get(String(it.productoId)) : null;
                 if (!p || p.tipoProducto !== 'produccion') { sinContar.push((it.nombre || it.sku || 'ítem') + ' [no figura como producto de producción]'); return; }
                 const mn = precioMayoristaNeto(tf, p, cotO);
                 if (mn == null) { sinContar.push((it.nombre || it.sku || 'ítem') + ' [sin precio en la lista mayorista]'); return; }
-                monto += Number(it.cantidad || 0) * mn * nc;
+                monto += Number(it.cantidad || 0) * mn * nc; cuentas.push((it.nombre || it.sku || 'ítem') + ': ' + Number(it.cantidad || 0) + ' × $' + r2(mn) + ' (precio de venta de la línea: $' + r2(Number(it.precioUnitario || 0)) + ')');
               });
               if (!monto) return;
               nInt++;
-              push(v.fecha, tf.fabricaOrgId, 'Venta interna a ' + (nomTodas.get(String(v.orgId)) || 'otra sucursal') + (v.clienteNombre ? ' (cliente: ' + v.clienteNombre + ')' : '') + (sinContar.length ? ' — NO incluye: ' + sinContar.slice(0, 3).join('; ') + (sinContar.length > 3 ? '…' : '') : ''), 'venta interna ' + num(v), monto);
+              push(v.fecha, tf.fabricaOrgId, 'Venta interna a ' + (nomTodas.get(String(v.orgId)) || 'otra sucursal') + (v.clienteNombre ? ' (cliente: ' + v.clienteNombre + ')' : '') + (cuentas.length ? ' — Precio de transferencia: ' + cuentas.slice(0, 4).join('; ') + (cuentas.length > 4 ? '…' : '') : '') + (sinContar.length ? ' — NO incluye: ' + sinContar.slice(0, 3).join('; ') + (sinContar.length > 3 ? '…' : '') : ''), 'venta interna ' + num(v), monto);
             });
-            if (nInt) nota += ' Incluye ' + nInt + ' venta(s) internas a otras sucursales, a precio mayorista (solo productos de producción).';
+            if (nInt) nota += ' Incluye ' + nInt + ' venta(s) internas a otras sucursales, valuadas al precio de transferencia (lista "' + (tf.lista.nombre || '') + '", ' + (tf.incluyeIva ? 'precios con IVA: se descuenta el IVA' : 'precios sin IVA') + '), no al precio al que vendió la sucursal. Solo productos de producción.';
           }
         }
       } else {
