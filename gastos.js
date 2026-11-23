@@ -680,7 +680,9 @@ router.post('/cambiar-concepto', authAdmin, async (req, res) => {
       if (!dest) throw err(404, 'El concepto nuevo no existe.');
       if (dest.activo === false) await db.collection('gastos_conceptos').updateOne({ _id: destId }, { $set: { activo: true, updatedAt: new Date() } });
       const u = req.usuario || {};
-      const orgIds = req.orgId ? [req.orgId] : ((u.rol && u.rol.protegido) ? (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id) : (u.orgIds || []).map(toObjectId).filter(Boolean));
+      // siempre todas las sucursales del usuario: en la vista "Todas" req.orgId es solo la sucursal para operar y dejaría afuera gastos de las otras
+      const orgIds = ((u.rol && u.rol.protegido) ? (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id) : (u.orgIds || []).map(toObjectId).filter(Boolean));
+      if (req.orgId && !orgIds.some(o => String(o) === String(req.orgId))) orgIds.push(req.orgId);
       const cat = new Map((await db.collection('gastos_conceptos').find({}).project({ nombre: 1 }).toArray()).map(c => [String(c._id), c.nombre]));
       const gastos = await db.collection('gastos').find({ _id: { $in: ids }, orgId: { $in: orgIds }, estado: { $ne: 'anulada' } }).project({ items: 1 }).toArray();
       let renglones = 0, tocados = 0;

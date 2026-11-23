@@ -308,7 +308,9 @@ async function cambiarConceptoMasivo(){
   try{
     const r = await fetch(GASTOS_API + '/cambiar-concepto', {method: 'POST', headers: headersAuth({'Content-Type': 'application/json'}), body: JSON.stringify({gastoIds: ids, desde: ctx.concepto, conceptoId: cid})});
     const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
-    cargar(); verDetalle(ctx.tipo, ctx.concepto, ctx.mes);
+    if (!d.renglones) { $('bulkMsg').textContent = 'No se cambió nada: ninguno de los gastos marcados tiene hoy el concepto "' + ctx.concepto + '".'; return; }
+    window._bulkAviso = 'Listo: ' + d.renglones + ' renglón(es) de ' + d.gastos + ' gasto(s) pasaron a "' + d.concepto + '".';
+    cargar(); await verDetalle(ctx.tipo, ctx.concepto, ctx.mes); const bm = $('bulkMsg'); if (bm) bm.textContent = window._bulkAviso;
   }catch(e){ $('bulkMsg').textContent = e.message; }
 }
 async function cargar(){
