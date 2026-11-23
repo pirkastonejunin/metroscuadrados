@@ -376,7 +376,9 @@ async function resultadosOrg(db, orgId, d0, d1, tf, ovr) {
     // Línea sin producto del catálogo pero con costo propio (p. ej. importada de Dux): se usa ese costo.
     if (!p) { const cp = Number(it.costoTotal) > 0 ? Number(it.costoTotal) : (Number(it.costoUnitario) > 0 ? Number(it.costoUnitario) * Number(it.cantidad || 0) : 0); if (cp > 0 && ventaInterna == null) { m.costo += cp * nc * (v.moneda === 'USD' ? (Number(v.cotizacionDolar) || 1) : 1); return; } }
     let costoU = null;
-    if (p && p.costo != null) costoU = p.moneda === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? p.costo * (cotVigente || Number(v.cotizacionDolar)) : null) : Number(p.costo);
+    // Costo al momento de la venta (it.costoSnap) si la línea lo guardó; si es una venta anterior a ese registro, el costo actual del producto.
+    const cC = (it.costoSnap != null && isFinite(Number(it.costoSnap))) ? Number(it.costoSnap) : (p && p.costo != null ? Number(p.costo) : null), cM = it.costoSnap != null ? (it.costoSnapMoneda || 'ARS') : (p && p.moneda);
+    if (cC != null) costoU = cM === 'USD' ? ((cotVigente || (v.moneda === 'USD' ? Number(v.cotizacionDolar) : 0)) ? cC * (cotVigente || Number(v.cotizacionDolar)) : null) : cC;
     const cant = Number(it.cantidad || 0);
     if (costoU == null) { m.sinCosto += ventaInterna != null ? ventaInterna : neto * (sub > 0 ? Number(it.subtotal || 0) / sub : (items.length ? 1 / items.length : 0)); return; }
     let costoEf = costoU;
@@ -778,9 +780,10 @@ async function detalleResultados(req) {
           (v.items || []).forEach(it => {
             const p = it.productoId ? pm.get(String(it.productoId)) : null, cant = Number(it.cantidad || 0);
             let costo = null, fuente = '';
-            if (p && p.costo != null) { costo = p.moneda === 'USD' ? ((cot || Number(v.cotizacionDolar)) ? p.costo * (cot || Number(v.cotizacionDolar)) * cant : null) : Number(p.costo) * cant; fuente = 'costo del producto'; }
+            const snapOk = it.costoSnap != null && isFinite(Number(it.costoSnap));
+            if (snapOk || (p && p.costo != null)) { const cC = snapOk ? Number(it.costoSnap) : Number(p.costo), cM = snapOk ? (it.costoSnapMoneda || 'ARS') : p.moneda; costo = cM === 'USD' ? ((cot || Number(v.cotizacionDolar)) ? cC * (cot || Number(v.cotizacionDolar)) * cant : null) : cC * cant; fuente = snapOk ? 'costo al momento de la venta' : 'costo actual del producto (venta anterior al registro del costo)'; }
             else if (Number(it.costoTotal) > 0 || Number(it.costoUnitario) > 0) { costo = Number(it.costoTotal) > 0 ? Number(it.costoTotal) : Number(it.costoUnitario) * cant; fuente = 'costo de la venta (Dux)'; }
-            const k = (p ? String(p._id) : 'l:' + String(it.sku || it.nombre || '').toLowerCase()) + '|' + String(v.orgId);
+            const k = (p ? String(p._id) : 'l:' + String(it.sku || it.nombre || '').toLowerCase()) + '|' + String(v.orgId) + '|' + fuente;
             let g = grupos.get(k);
             if (!g) { g = { sucursal: orgNom.get(String(v.orgId)) || '', detalle: (p && p.nombre) || it.nombre || it.descripcion || '(sin descripción)', ref: (p && p.sku) || it.sku || '', cantidad: 0, monto: 0, venta: 0, fuente, sinCosto: false, prod: p || null }; grupos.set(k, g); }
             g.cantidad += cant * nc; g.venta += Number(it.subtotal || 0) * nc;
@@ -789,7 +792,7 @@ async function detalleResultados(req) {
         });
         [...grupos.values()].forEach(g => filas.push({ fecha: '', sucursal: g.sucursal, detalle: g.detalle, ref: g.ref, cantidad: Math.round(g.cantidad * 100) / 100, monto: r2(g.monto), fuente: g.sinCosto ? 'sin costo cargado' : g.fuente,
           costoUnit: g.cantidad ? r2(g.monto / g.cantidad) : null, ventaUnit: g.cantidad ? r2(g.venta / g.cantidad) : null,
-          origen: g.prod ? ('Ficha del producto: costo cargado ' + (g.prod.moneda === 'USD' ? 'US$ ' : '$ ') + g.prod.costo + (g.prod.unidad ? ' por ' + g.prod.unidad : '') + (g.prod.costoProductoId ? '. Está vinculado a una receta de Costos de Producción (el costo se actualiza desde ahí).' : '. No está vinculado a ninguna receta: es un valor cargado a mano en Productos.') + (g.prod.updatedAt ? ' Última modificación de la ficha: ' + fechaAR(g.prod.updatedAt) + '.' : '')) : '' }));
+          origen: g.prod && g.fuente === 'costo al momento de la venta' ? 'El costo se guardó en la línea de la venta el día que se hizo (ficha del producto en ese momento: ' + (g.prod.moneda === 'USD' ? 'US$ ' : '$ ') + g.prod.costo + ' hoy). No cambia si después se modifica el costo del producto.' : g.prod ? ('Ficha del producto: costo cargado ' + (g.prod.moneda === 'USD' ? 'US$ ' : '$ ') + g.prod.costo + (g.prod.unidad ? ' por ' + g.prod.unidad : '') + (g.prod.costoProductoId ? '. Está vinculado a una receta de Costos de Producción (el costo se actualiza desde ahí).' : '. No está vinculado a ninguna receta: es un valor cargado a mano en Productos.') + (g.prod.updatedAt ? ' Última modificación de la ficha: ' + fechaAR(g.prod.updatedAt) + '.' : '')) : '' }));
         nota = 'Costo = cantidad vendida × costo del producto. El informe además descuenta la mano de obra de recetas (si los sueldos de producción están como gasto) y usa precio mayorista en las compras internas a Fábrica: esos ajustes figuran aparte.';
       }
     } else if (tipo === 'gasto') {

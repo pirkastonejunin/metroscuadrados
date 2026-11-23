@@ -741,7 +741,10 @@ async function normalizarItems(db, req, itemsRaw) {
       if (!Number.isFinite(p) || ![0, 2.5, 5, 10.5, 21, 27].some(a => Math.abs(a - p) < 1e-9)) throw err(400, `La alícuota de IVA de "${nombre}" tiene que ser 0, 2.5, 5, 10.5, 21 o 27`);
       porcentajeIva = p;
     }
-    items.push({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, porcentajeIva, cantidadEntregada: 0 });
+    // Costo del producto AL MOMENTO de la venta (23/11/2026, pedido de Mato): el precio de venta queda guardado a valores de ese día y el costo
+    // tiene que quedar igual, así el Estado de resultados no cambia hacia atrás cuando el producto sube o se corrige su costo.
+    const snap = (producto && producto.costo !== undefined && producto.costo !== null && producto.costo !== '' && Number.isFinite(Number(producto.costo))) ? { costoSnap: Number(producto.costo), costoSnapMoneda: producto.moneda || 'ARS' } : {};
+    items.push(Object.assign({ productoId, sku, nombre, cantidad, precioUnitario, descuentoPorcentaje, subtotal: itemSubtotal, porcentajeIva, cantidadEntregada: 0 }, snap));
   }
   return { items, subtotal };
 }
