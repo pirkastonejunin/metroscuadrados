@@ -784,11 +784,17 @@ async function detalleResultados(req) {
             const cotO = cotDocO && Number(cotDocO.valor) > 0 ? Number(cotDocO.valor) : null;
             let nInt = 0;
             vo.forEach(v => {
-              const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1; let monto = 0;
-              (v.items || []).forEach(it => { const p = it.productoId ? pmO.get(String(it.productoId)) : null; if (!p || p.tipoProducto !== 'produccion') return; const mn = precioMayoristaNeto(tf, p, cotO); if (mn != null) monto += Number(it.cantidad || 0) * mn * nc; });
+              const nc = v.tipoComprobante === 'nota_credito' ? -1 : 1; let monto = 0; const sinContar = [];
+              (v.items || []).forEach(it => {
+                const p = it.productoId ? pmO.get(String(it.productoId)) : null;
+                if (!p || p.tipoProducto !== 'produccion') { sinContar.push((it.nombre || it.sku || 'ítem') + ' [no figura como producto de producción]'); return; }
+                const mn = precioMayoristaNeto(tf, p, cotO);
+                if (mn == null) { sinContar.push((it.nombre || it.sku || 'ítem') + ' [sin precio en la lista mayorista]'); return; }
+                monto += Number(it.cantidad || 0) * mn * nc;
+              });
               if (!monto) return;
               nInt++;
-              push(v.fecha, tf.fabricaOrgId, 'Venta interna a ' + (nomTodas.get(String(v.orgId)) || 'otra sucursal') + (v.clienteNombre ? ' (cliente: ' + v.clienteNombre + ')' : ''), 'venta interna ' + num(v), monto);
+              push(v.fecha, tf.fabricaOrgId, 'Venta interna a ' + (nomTodas.get(String(v.orgId)) || 'otra sucursal') + (v.clienteNombre ? ' (cliente: ' + v.clienteNombre + ')' : '') + (sinContar.length ? ' — NO incluye: ' + sinContar.slice(0, 3).join('; ') + (sinContar.length > 3 ? '…' : '') : ''), 'venta interna ' + num(v), monto);
             });
             if (nInt) nota += ' Incluye ' + nInt + ' venta(s) internas a otras sucursales, a precio mayorista (solo productos de producción).';
           }
