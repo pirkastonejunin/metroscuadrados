@@ -662,6 +662,44 @@ router.post('/', authAdmin, async (req, res) => {
   catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Cambiar el concepto de varios gastos de una vez (23/11/2026, pedido de Mato: un error pasó muchos gastos de Piedras Apiladas a "MANO DE OBRA").
+// Body: { gastoIds: [...], desde: 'nombre del concepto que tienen hoy', conceptoId: 'concepto nuevo' }. Solo cambia las líneas que hoy tienen el
+// concepto "desde" (los otros renglones del mismo gasto no se tocan) y solo gastos de las sucursales del usuario.
+router.post('/cambiar-concepto', authAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const ids = (Array.isArray(b.gastoIds) ? b.gastoIds : []).map(toObjectId).filter(Boolean);
+    if (!ids.length) throw err(400, 'Elegí al menos un gasto.');
+    if (ids.length > 2000) throw err(400, 'Son demasiados gastos juntos: probá de a menos de 2.000.');
+    const desde = claveConcepto(b.desde);
+    if (!desde) throw err(400, 'Falta el concepto actual.');
+    const destId = toObjectId(b.conceptoId); if (!destId) throw err(400, 'Elegí el concepto nuevo.');
+    const out = await conReintento(async () => {
+      const db = await getDb();
+      const dest = await db.collection('gastos_conceptos').findOne({ _id: destId });
+      if (!dest) throw err(404, 'El concepto nuevo no existe.');
+      if (dest.activo === false) await db.collection('gastos_conceptos').updateOne({ _id: destId }, { $set: { activo: true, updatedAt: new Date() } });
+      const u = req.usuario || {};
+      const orgIds = req.orgId ? [req.orgId] : ((u.rol && u.rol.protegido) ? (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id) : (u.orgIds || []).map(toObjectId).filter(Boolean));
+      const cat = new Map((await db.collection('gastos_conceptos').find({}).project({ nombre: 1 }).toArray()).map(c => [String(c._id), c.nombre]));
+      const gastos = await db.collection('gastos').find({ _id: { $in: ids }, orgId: { $in: orgIds }, estado: { $ne: 'anulada' } }).project({ items: 1 }).toArray();
+      let renglones = 0, tocados = 0;
+      for (const g of gastos) {
+        let cambio = false;
+        const items = (g.items || []).map(it => {
+          const nombre = (it.conceptoId && cat.get(String(it.conceptoId))) || it.conceptoNombre;
+          if (claveConcepto(nombre) !== desde) return it;
+          cambio = true; renglones++;
+          return Object.assign({}, it, { conceptoId: dest._id, conceptoNombre: dest.nombre });
+        });
+        if (cambio) { await db.collection('gastos').updateOne({ _id: g._id }, { $set: { items, updatedAt: new Date() } }); tocados++; }
+      }
+      return { gastos: tocados, renglones, concepto: dest.nombre };
+    });
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Corrección de un gasto cargado con error (pedido de Mato, 22/11/2026: desde el detalle del Estado de resultados). Se puede cambiar
 // fecha, comprobante, observaciones, descuentos y las líneas (concepto, descripción, cantidad, precio, IVA). El proveedor, la moneda,
 // los impuestos del comprobante y los pagos ya registrados no se tocan; el saldo se recalcula contra lo ya pagado.

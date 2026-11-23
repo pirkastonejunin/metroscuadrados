@@ -37,6 +37,17 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
     assert.strictEqual(r.status, 200, JSON.stringify(r.data));
     assert(r.data.filas.some(f => f.gastoId === id), 'falta gastoId: ' + JSON.stringify(r.data.filas));
   });
+  await caso('cambiar concepto en lote: solo las líneas con el concepto actual, y respeta el resto del gasto', async () => {
+    const lead = (await db.collection('gastos_conceptos').insertOne({ nombre: 'Lead', activo: false, compartido: true, orgId: null })).insertedId;
+    const g1 = await mk({ comprobanteNumero: '701', items: [{ conceptoId: c1, conceptoNombre: 'Fletes', cantidad: 1, precioUnitario: 10, subtotal: 10, alicuotaIva: 21, importeIva: 2.1 }, { conceptoId: c2, conceptoNombre: 'Combustible', cantidad: 1, precioUnitario: 5, subtotal: 5, alicuotaIva: 21, importeIva: 1 }] });
+    const g2 = await mk({ comprobanteNumero: '702' });
+    const r = await api('POST', '/api/gastos/cambiar-concepto', { gastoIds: [g1, g2], desde: 'fletes', conceptoId: String(lead) });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data)); assert.strictEqual(r.data.gastos, 2); assert.strictEqual(r.data.renglones, 2);
+    const d1 = await db.collection('gastos').findOne({ _id: new (require('mongodb').ObjectId)(g1) });
+    assert.strictEqual(d1.items[0].conceptoNombre, 'Lead'); assert.strictEqual(d1.items[1].conceptoNombre, 'Combustible');
+    assert.strictEqual((await db.collection('gastos_conceptos').findOne({ _id: lead })).activo, true);
+    assert.strictEqual((await api('POST', '/api/gastos/cambiar-concepto', { gastoIds: [], desde: 'x', conceptoId: String(lead) })).status, 400);
+  });
   console.log(`\n${fallos ? fallos + ' FALLO(S)' : 'TODO OK'} (${ok}/${ok + fallos})`);
   process.exit(fallos ? 1 : 0);
 })().catch(e => { console.error('ERROR DE ENTORNO', e); process.exit(2); });
