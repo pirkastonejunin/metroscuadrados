@@ -257,14 +257,14 @@ function geLeer(){
   document.querySelectorAll('#geItems tr[data-i]').forEach(tr => {
     const it = window._gEd.items[+tr.dataset.i], q = c => tr.querySelector('.' + c);
     const sel = q('gc').value; const c = window._gEd.conceptos.find(x => String(x._id) === sel);
-    it.conceptoId = sel; it.conceptoNombre = c ? c.nombre : it.conceptoNombre;
+    it.conceptoId = sel; if (c) it.conceptoNombre = c.nombre;
     it.observaciones = q('gd').value; it.cantidad = q('gq').value; it.precioUnitario = q('gp').value; it.alicuotaIva = Number(q('gi').value);
   });
 }
 function geRender(){
   const E = window._gEd;
   $('geItems').innerHTML = '<table class="t" style="width:100%;font-size:13px"><thead><tr><th>Concepto</th><th>Descripción</th><th class="n">Cant.</th><th class="n">Precio unit.</th><th>IVA %</th><th></th></tr></thead><tbody>' + E.items.map((it, i) =>
-    '<tr data-i="' + i + '"><td><select class="gc" onchange="geTot()">' + (it.conceptoId ? '' : '<option value="">' + escapeHtml(it.conceptoNombre || '— elegir —') + '</option>') + E.conceptos.map(c => '<option value="' + c._id + '"' + (String(c._id) === it.conceptoId ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></td>' +
+    '<tr data-i="' + i + '"><td><select class="gc" onchange="geTot()">' + (it.conceptoId && E.conceptos.some(c => String(c._id) === it.conceptoId) ? '' : '<option value="' + (it.conceptoId || '') + '" selected>' + escapeHtml((it.conceptoNombre || '— elegir —') + (it.conceptoId ? ' (dado de baja)' : '')) + '</option>') + E.conceptos.map(c => '<option value="' + c._id + '"' + (String(c._id) === it.conceptoId ? ' selected' : '') + '>' + escapeHtml(c.nombre) + '</option>').join('') + '</select></td>' +
     '<td><input class="gd" style="width:100%" value="' + escapeHtml(it.observaciones || '') + '"></td>' +
     '<td><input class="gq" type="number" step="any" style="width:70px" value="' + it.cantidad + '" oninput="geTot()"></td>' +
     '<td><input class="gp" type="number" step="any" style="width:110px" value="' + it.precioUnitario + '" oninput="geTot()"></td>' +
