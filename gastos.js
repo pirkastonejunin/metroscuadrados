@@ -502,7 +502,7 @@ function calcularTotal(subtotal, descuentoPorcentaje, descuentoMonto) {
 
 router.get('/', authAdmin, async (req, res) => {
   try {
-    const match = Object.assign({}, filtroOrg(req));
+    const match = Object.assign({}, (req.query.todas === '1' && req.query.proveedorId) ? {} : filtroOrg(req)); // todas=1: cuenta única del proveedor, todas las sucursales
     if (req.query.proveedorId) {
       const pid = toObjectId(req.query.proveedorId);
       if (!pid) throw err(400, 'proveedorId inválido');
@@ -756,6 +756,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
       const p = (gasto.pagos || [])[idx];
       if (!p) throw err(404, 'No se encontró ese pago.');
       if (p.anulado) throw err(400, 'Ese pago ya está anulado.');
+      if (p.pagoCuentaId) throw err(400, 'Este pago viene de un pago a cuenta del proveedor: desvinculalo desde la cuenta corriente del proveedor (Ver pago → Desvincular).');
       let cheques = [];
       if (p.tipoValor === 'cheque') {
         const ch = p.chequeId ? await db.collection('cheques').findOne({ _id: p.chequeId }) : null;

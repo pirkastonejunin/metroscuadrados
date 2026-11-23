@@ -1648,6 +1648,7 @@ router.post('/:id/pagos/:idx/anular', authAdmin, async (req, res) => {
       else pc = await db.collection('compras_pagos').findOne({ 'aplicaciones.compraId': id, tipoValor: p.tipoValor, monto: p.monto, fecha: p.fecha, anulado: { $ne: true } });
       if (pc && pc.anulado) throw err(400, 'Ese pago ya está anulado.');
       const aplicaciones = pc ? pc.aplicaciones : [{ compraId: id, monto: p.monto }];
+      if (aplicaciones.some(a => a.gastoId)) throw err(400, 'Este pago también está aplicado a un gasto: desvinculá esa parte desde la cuenta corriente del proveedor y después anulalo.');
       // Se ubica la línea de pago dentro de cada compra afectada antes de tocar nada.
       const afectadas = [];
       for (const a of aplicaciones) {
@@ -1777,12 +1778,13 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
     const pid = toObjectId(req.params.id);
     if (!pid) throw err(400, 'Pago inválido');
     const raw = Array.isArray((req.body || {}).aplicaciones) ? req.body.aplicaciones : [];
-    if (!raw.length) throw err(400, 'Elegí a qué compra(s) aplicar el pago.');
+    if (!raw.length) throw err(400, 'Elegí a qué factura(s) aplicar el pago.');
+    // Cada renglón va a una compra (compraId) o a un gasto (gastoId) del mismo proveedor.
     const aplicaciones = raw.map(a => {
-      const compraId = toObjectId(a.compraId); const monto = normalizarMontoNoNegativo(a.monto, 'El monto aplicado a una compra');
-      if (!compraId) throw err(400, 'Una de las compras elegidas es inválida');
-      if (monto <= 0) throw err(400, 'El monto aplicado a cada compra tiene que ser mayor a 0');
-      return { compraId, monto };
+      const compraId = a.compraId ? toObjectId(a.compraId) : null, gastoId = a.gastoId ? toObjectId(a.gastoId) : null; const monto = normalizarMontoNoNegativo(a.monto, 'El monto aplicado a una factura');
+      if (!compraId && !gastoId) throw err(400, 'Una de las facturas elegidas es inválida');
+      if (monto <= 0) throw err(400, 'El monto aplicado a cada factura tiene que ser mayor a 0');
+      return { compraId, gastoId, monto };
     });
     const resultado = await conReintento(() => enTransaccion(async (db) => {
       const pc = await db.collection('compras_pagos').findOne({ _id: pid });
@@ -1792,14 +1794,15 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
       if (!(libre > 0.009)) throw err(400, 'Ese pago ya está aplicado por completo.');
       const suma = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
       if (suma > libre + 0.01) throw err(400, `Lo que querés aplicar (${suma}) supera lo que queda sin aplicar de este pago (${libre}).`);
-      const compras = [];
+      const docs = [];
       for (const a of aplicaciones) {
-        const c = await db.collection('compras').findOne({ _id: a.compraId });
-        if (!c) throw err(404, 'Una de las compras elegidas no existe.');
-        if (c.estado === 'anulada') throw err(400, `La compra #${c.numero} está anulada.`);
-        if (String(c.proveedorId) !== String(pc.proveedorId)) throw err(400, `La compra #${c.numero} no es de este proveedor.`);
-        if (a.monto > c.saldoPendiente + 0.01) throw err(400, `El monto aplicado a la compra #${c.numero} (${a.monto}) es mayor que su saldo pendiente (${c.saldoPendiente}).`);
-        compras.push(c);
+        const esG = !!a.gastoId, col = esG ? 'gastos' : 'compras', et = esG ? 'gasto' : 'compra';
+        const c = await db.collection(col).findOne({ _id: esG ? a.gastoId : a.compraId });
+        if (!c) throw err(404, esG ? 'Uno de los gastos elegidos no existe.' : 'Una de las compras elegidas no existe.');
+        if (c.estado === 'anulada') throw err(400, `El ${et} #${c.numero} está anulado.`);
+        if (String(c.proveedorId) !== String(pc.proveedorId)) throw err(400, `El ${et} #${c.numero} no es de este proveedor.`);
+        if (a.monto > c.saldoPendiente + 0.01) throw err(400, `El monto aplicado al ${et} #${c.numero} (${a.monto}) es mayor que su saldo pendiente (${c.saldoPendiente}).`);
+        docs.push({ c, esG, col });
       }
       // Se reserva primero lo que se va a aplicar (si dos personas aplican a la vez, el segundo falla en vez de aplicar de más).
       const reserva = await db.collection('compras_pagos').updateOne({ _id: pid, anulado: { $ne: true }, montoSinAplicar: { $gte: suma - 0.005 } }, { $inc: { montoSinAplicar: -suma } });
@@ -1807,18 +1810,48 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
       const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
       const guardadas = [];
       for (let i = 0; i < aplicaciones.length; i++) {
-        const a = aplicaciones[i], c = compras[i];
-        const linea = Object.assign({ tipoValor: pc.tipoValor || 'efectivo', monto: a.monto, fecha: pc.fecha, nota: pc.nota || '', usuarioNombre, pagoCuentaId: pc._id, aplicadoDespues: true },
+        const a = aplicaciones[i], { c, esG, col } = docs[i];
+        const base = { tipoValor: pc.tipoValor || 'efectivo', monto: a.monto, fecha: pc.fecha, nota: pc.nota || '', usuarioNombre, pagoCuentaId: pc._id, aplicadoDespues: true };
+        // En un gasto la línea no lleva caja/cheque: la plata ya salió con el pago a cuenta y se deshace desde ahí (Desvincular).
+        const linea = esG ? base : Object.assign(base,
           pc.cuentaTipo ? { cuentaTipo: pc.cuentaTipo, cuentaId: pc.cuentaId } : {}, pc.movimientoId ? { movimientoId: pc.movimientoId } : {}, pc.chequeId ? { chequeId: pc.chequeId } : {},
           pc.chequeIds ? { chequeIds: pc.chequeIds, chequesNumeros: pc.chequesNumeros || [] } : {});
         const totalPagado = (c.totalPagado || 0) + a.monto;
-        await db.collection('compras').updateOne({ _id: c._id }, { $push: { pagos: linea }, $set: { totalPagado, saldoPendiente: Math.max(0, c.total - totalPagado), updatedAt: new Date() } });
-        guardadas.push({ compraId: c._id, compraNumero: c.numero, monto: a.monto });
+        await db.collection(col).updateOne({ _id: c._id }, { $push: { pagos: linea }, $set: { totalPagado, saldoPendiente: Math.max(0, c.total - totalPagado), updatedAt: new Date() } });
+        guardadas.push(esG ? { gastoId: c._id, gastoNumero: c.numero, monto: a.monto } : { compraId: c._id, compraNumero: c.numero, monto: a.monto });
       }
       await db.collection('compras_pagos').updateOne({ _id: pid }, { $push: { aplicaciones: { $each: guardadas } } });
       return db.collection('compras_pagos').findOne({ _id: pid });
     }));
     res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Desvincular (23/11/2026): saca un pago de la factura a la que se aplicó por error y lo deja otra vez "a cuenta" para volver a vincularlo.
+// No toca la caja/banco/cheque: el dinero sigue pagado al proveedor, solo cambia a qué factura se imputa.
+router.post('/pagos-cuenta/:id/desvincular', authAdmin, async (req, res) => {
+  try {
+    const pid = toObjectId(req.params.id);
+    const bd = req.body || {}, compraId = bd.compraId ? toObjectId(bd.compraId) : null, gastoId = bd.gastoId ? toObjectId(bd.gastoId) : null;
+    if (!pid || (!compraId && !gastoId)) throw err(400, 'Indicá el pago y la factura.');
+    const esG = !!gastoId, col = esG ? 'gastos' : 'compras', did = esG ? gastoId : compraId, clave = esG ? 'gastoId' : 'compraId';
+    const out = await conReintento(() => enTransaccion(async (db) => {
+      const pc = await db.collection('compras_pagos').findOne({ _id: pid });
+      if (!pc) throw err(404, 'Pago no encontrado');
+      if (pc.anulado) throw err(400, 'Ese pago está anulado.');
+      const ap = (pc.aplicaciones || []).find(a => String(a[clave]) === String(did));
+      if (!ap) throw err(400, 'Ese pago no está aplicado a esa factura.');
+      const doc = await db.collection(col).findOne({ _id: did });
+      if (!doc) throw err(400, 'La factura ya no existe.');
+      const i = (doc.pagos || []).findIndex(x => !x.anulado && x.pagoCuentaId && String(x.pagoCuentaId) === String(pid));
+      if (i < 0) throw err(400, 'No se encontró la línea de este pago dentro de la factura: no se puede desvincular sin dejar datos inconsistentes.');
+      const monto = Number(doc.pagos[i].monto) || 0;
+      const nuevoPagado = Math.max(0, Math.round(((doc.totalPagado || 0) - monto) * 100) / 100);
+      await db.collection(col).updateOne({ _id: did }, { $pull: { pagos: { pagoCuentaId: pid } }, $set: { totalPagado: nuevoPagado, saldoPendiente: Math.max(0, Math.round((doc.total - nuevoPagado) * 100) / 100), updatedAt: new Date() } });
+      await db.collection('compras_pagos').updateOne({ _id: pid }, { $pull: { aplicaciones: { [clave]: did } }, $inc: { montoSinAplicar: monto } });
+      return db.collection('compras_pagos').findOne({ _id: pid });
+    }));
+    res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
@@ -1834,6 +1867,7 @@ router.post('/pagos/:pagoId/anular', authAdmin, async (req, res, next) => {
     if (pc.anulado) throw err(400, 'Ese pago ya está anulado.');
     if (pc.importado) throw err(400, 'Es un pago histórico importado de Dux: no se puede anular desde acá.');
     if (!(pc.aplicaciones || []).length) { req.url = '/pagos-cuenta/' + pid + '/anular'; return router.handle(req, res, next); }
+    if (pc.aplicaciones.some(a => a.gastoId)) throw err(400, 'Este pago está aplicado a un gasto: primero desvinculalo (Ver pago → Desvincular) y después anulalo.');
     for (const a of pc.aplicaciones) {
       const c = await db.collection('compras').findOne({ _id: a.compraId });
       if (!c) continue;

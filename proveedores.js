@@ -243,7 +243,7 @@ router.get('/resumen-saldos', authAdmin, async (req, res) => {
         db.collection('proveedores_saldos_iniciales').aggregate([{ $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
         db.collection('compras').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
         db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' }, importado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: { $multiply: ['$total', signo] } } } }]).toArray(),
-        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, fo) }, { $unwind: '$pagos' }, { $match: { 'pagos.anulado': { $ne: true } } }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray(),
+        db.collection('gastos').aggregate([{ $match: Object.assign({ estado: { $ne: 'anulada' } }, fo) }, { $unwind: '$pagos' }, { $match: { 'pagos.anulado': { $ne: true }, 'pagos.pagoCuentaId': { $exists: false } } }, { $group: { _id: '$proveedorId', t: { $sum: '$pagos.monto' } } }]).toArray(),
         db.collection('compras_pagos').aggregate([{ $match: Object.assign({ importado: { $ne: true }, anulado: { $ne: true } }, fo) }, { $group: { _id: '$proveedorId', t: { $sum: '$monto' } } }]).toArray(),
         db.collection('proveedores_ajustes').aggregate([{ $match: fo }, { $group: { _id: '$proveedorId', t: { $sum: { $cond: [{ $eq: ['$tipo', 'debito'] }, '$monto', { $multiply: ['$monto', -1] }] } } } }]).toArray()
       ]);
@@ -562,14 +562,14 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
         });
       }
-      const compraPorId = new Map(compras.map(c => [String(c._id), c]));
+      const compraPorId = new Map(compras.map(c => [String(c._id), c])), gastoPorId = new Map(gastos.map(g => [String(g._id), g]));
       const nombreCompraPorId = new Map(compras.map(c => [String(c._id), nombreComprobante(c)]).filter(x => x[1]));
       for (const p of pagosCompra) {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
           concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => nombreCompraPorId.get(String(a.compraId)) || '#' + a.compraNumero).join(', ') : ''}`,
           origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado, usuarioNombre: p.usuarioNombre || '', cuentaTipo: p.cuentaTipo || '', chequesNumeros: p.chequesNumeros || [], numeroOriginal: p.numeroOriginal || '',
-          aplicaciones: (p.aplicaciones || []).map(a => ({ compraId: String(a.compraId), compraNumero: a.compraNumero != null ? a.compraNumero : (compraPorId.get(String(a.compraId)) || {}).numero, comprobante: nombreCompraPorId.get(String(a.compraId)) || '', monto: a.monto })), montoSinAplicar: Math.round((Number(p.montoSinAplicar) || 0) * 100) / 100
+          aplicaciones: (p.aplicaciones || []).map(a => a.gastoId ? ({ gastoId: String(a.gastoId), gastoNumero: a.gastoNumero, comprobante: comprobanteCompleto(gastoPorId.get(String(a.gastoId))) || '', monto: a.monto }) : ({ compraId: String(a.compraId), compraNumero: a.compraNumero != null ? a.compraNumero : (compraPorId.get(String(a.compraId)) || {}).numero, comprobante: nombreCompraPorId.get(String(a.compraId)) || '', monto: a.monto })), montoSinAplicar: Math.round((Number(p.montoSinAplicar) || 0) * 100) / 100
         });
       }
       for (const g of gastos) {
@@ -581,7 +581,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           items: g.items, observaciones: g.observaciones, moneda: g.moneda,
           totalPagado: g.totalPagado, saldoPendiente: g.saldoPendiente
         });
-        for (const p of (g.pagos || []).filter(x => !x.anulado)) {
+        for (const p of (g.pagos || []).filter(x => !x.anulado && !x.pagoCuentaId)) { // los aplicados desde un pago a cuenta ya cuentan como pago_compra
           movimientos.push({
             tipo: 'credito', monto: p.monto, fecha: p.fecha,
             concepto: `Pago — ${nombreComprobante(g) || 'Gasto #' + g.numero}`, origen: 'pago_gasto',

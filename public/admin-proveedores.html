@@ -841,7 +841,7 @@ const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia',
 function verDetallePagoProveedor(i){
   const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return;
   const aps = m.aplicaciones || [], libre = Number(m.montoSinAplicar) || 0;
-  const filas = aps.map(a => `<tr><td>${escapeHtml(a.comprobante || (a.compraNumero ? 'Compra #' + a.compraNumero : 'Compra'))}</td><td class="muted">${a.compraNumero ? 'Compra #' + a.compraNumero : ''}</td><td>${money(a.monto)}</td></tr>`).join('');
+  const filas = aps.map((a, k) => `<tr><td>${escapeHtml(a.comprobante || (a.gastoId ? 'Gasto #' + a.gastoNumero : (a.compraNumero ? 'Compra #' + a.compraNumero : 'Compra')))}</td><td class="muted">${a.gastoId ? 'Gasto #' + a.gastoNumero : (a.compraNumero ? 'Compra #' + a.compraNumero : '')}</td><td>${money(a.monto)}</td><td>${m.importado ? '' : `<button class="btn small secondary" title="Sacar el pago de esta factura (queda a cuenta para vincularlo a otra)" onclick="desvincularPagoProveedor(${i},${k})">Desvincular</button>`}</td></tr>`).join('');
   const esGasto = m.origen === 'pago_gasto';
   document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
     <div class="modal-bg" id="dpgBg"><div class="modal wide">
@@ -857,11 +857,21 @@ function verDetallePagoProveedor(i){
       ${m.nota ? `<p class="muted" style="margin-top:10px"><b>Nota:</b> ${escapeHtml(m.nota)}</p>` : ''}
       ${esGasto ? `<p style="margin-top:10px">Aplicado al gasto <b>${escapeHtml(m.comprobanteCompleto || ('#' + m.docNumero))}</b>.</p>` : `
         <h3 style="margin:14px 0 6px">Facturas a las que se aplicó</h3>
-        ${filas ? `<table><thead><tr><th>Comprobante</th><th></th><th>Monto aplicado</th></tr></thead><tbody>${filas}</tbody></table>` : '<p class="muted">Todavía no se aplicó a ninguna factura.</p>'}
+        ${filas ? `<table><thead><tr><th>Comprobante</th><th></th><th>Monto aplicado</th><th></th></tr></thead><tbody>${filas}</tbody></table>` : '<p class="muted">Todavía no se aplicó a ninguna factura.</p>'}
         <div class="fila-total" style="font-weight:700;margin-top:8px"><span>Sin aplicar (a cuenta)</span><span>${money(libre)}</span></div>
         ${libre > 0.009 ? `<button class="btn" style="margin-top:10px" onclick="document.getElementById('dpgBg').remove();vincularPagoProveedor(${i})">Vincular a una factura</button>` : ''}
         ${!m.importado ? `<button class="btn secondary" style="margin-top:10px" onclick="document.getElementById('dpgBg').remove();anularPagoProveedorCC(${i})">Anular pago</button>` : ''}`}
     </div></div>`);
+}
+async function desvincularPagoProveedor(i, k){
+  const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return; const a = (m.aplicaciones || [])[k]; if (!a) return;
+  if (!confirm('¿Sacar este pago de ' + (a.comprobante || 'la factura') + '?\n\nLa factura recupera su saldo y el pago queda "a cuenta" para vincularlo a otra. No se mueve plata de la caja/banco.')) return;
+  try{
+    const r = await fetch('/api/compras/pagos-cuenta/' + m.docId + '/desvincular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(a.gastoId ? { gastoId: a.gastoId } : { compraId: a.compraId })});
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Error');
+    const bg = document.getElementById('dpgBg'); if (bg) bg.remove();
+    await cargarCuentaCorrienteProveedorTab(ctx.id);
+  }catch(e){ alert(e.message); }
 }
 async function anularPagoProveedorCC(i){
   const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return;
@@ -891,12 +901,17 @@ async function vincularPagoProveedor(i){
     const l = r.ok ? await r.json() : [];
     _vincCtx.compras = l.filter(c => c.estado !== 'anulada' && c.saldoPendiente > 0.009).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
   }catch(e){}
+  try{
+    const rg = await fetch('/api/gastos?todas=1&limite=500&proveedorId=' + ctx.id, {headers: headersAuth()});
+    const lg = rg.ok ? await rg.json() : [];
+    _vincCtx.compras = _vincCtx.compras.concat(lg.filter(g => g.estado !== 'anulada' && g.saldoPendiente > 0.009 && !/^nota_credito/.test(g.tipoComprobante || '')).map(g => Object.assign({ esGasto: true }, g))).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+  }catch(e){}
   const cont = document.getElementById('vincLista'); if (!cont) return;
-  if (!_vincCtx.compras.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene <b>compras</b> con saldo pendiente. (Si la factura que querés pagar es un <b>gasto</b>, el pago se registra desde Gastos.)</p>'; return; }
+  if (!_vincCtx.compras.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene compras ni gastos con saldo pendiente.</p>'; return; }
   cont.innerHTML = _vincCtx.compras.map((c, k) => `
     <div class="fila-pago-cuenta" data-k="${k}" data-saldo="${c.saldoPendiente}" style="display:flex;gap:8px;align-items:center;margin:4px 0">
       <input type="checkbox" style="width:auto" onchange="vincFila(this)">
-      <div style="flex:1">${c.numero ? 'Compra #' + c.numero : 'Compra'}${c.comprobanteNumero ? ' · ' + (c.puntoVenta ? c.puntoVenta + '-' : '') + c.comprobanteNumero : ''} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
+      <div style="flex:1">${c.esGasto ? 'Gasto #' + c.numero : (c.numero ? 'Compra #' + c.numero : 'Compra')}${c.comprobanteNumero ? ' · ' + (c.puntoVenta ? c.puntoVenta + '-' : '') + c.comprobanteNumero : ''} — ${fechaCorta(c.fecha)} — Saldo ${money(c.saldoPendiente)}</div>
       <input type="number" min="0" step="0.01" value="0" disabled style="width:130px" oninput="vincResumen()">
     </div>`).join('');
   vincResumen();
@@ -911,7 +926,7 @@ function vincResumen(){ const el = document.getElementById('vincResumen'); if (e
 async function confirmarVincularPago(){
   const err = document.getElementById('vincErr'); err.textContent = '';
   const aplicaciones = [];
-  document.querySelectorAll('#vincLista .fila-pago-cuenta').forEach(f => { const mo = Number(f.querySelector('input[type="number"]').value) || 0; if (f.querySelector('input[type="checkbox"]').checked && mo > 0) aplicaciones.push({ compraId: _vincCtx.compras[Number(f.dataset.k)]._id, monto: mo }); });
+  document.querySelectorAll('#vincLista .fila-pago-cuenta').forEach(f => { const mo = Number(f.querySelector('input[type="number"]').value) || 0; if (f.querySelector('input[type="checkbox"]').checked && mo > 0) { const dd = _vincCtx.compras[Number(f.dataset.k)]; aplicaciones.push(dd.esGasto ? { gastoId: dd._id, monto: mo } : { compraId: dd._id, monto: mo }); } });
   if (!aplicaciones.length) { err.textContent = 'Elegí al menos una factura y el monto a aplicar'; return; }
   if (vincSuma() > _vincCtx.m.montoSinAplicar + 0.01) { err.textContent = 'Estás aplicando más de lo que queda sin aplicar de este pago'; return; }
   try{
