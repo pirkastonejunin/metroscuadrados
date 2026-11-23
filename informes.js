@@ -768,7 +768,7 @@ async function detalleResultados(req) {
       } else {
         await vincularItemsLibres(db, ventas);
         const ids = new Set(); ventas.forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
-        const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ sku: 1, nombre: 1, costo: 1, moneda: 1 }).toArray() : [];
+        const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ sku: 1, nombre: 1, costo: 1, moneda: 1, costoProductoId: 1, unidad: 1, updatedAt: 1 }).toArray() : [];
         const pm = new Map(prods.map(p => [String(p._id), p]));
         const cotDoc = await db.collection('config_general').findOne({ orgId: orgIds[0], clave: 'cotizacionDolar' });
         const cot = cotDoc && Number(cotDoc.valor) > 0 ? Number(cotDoc.valor) : null;
@@ -782,12 +782,14 @@ async function detalleResultados(req) {
             else if (Number(it.costoTotal) > 0 || Number(it.costoUnitario) > 0) { costo = Number(it.costoTotal) > 0 ? Number(it.costoTotal) : Number(it.costoUnitario) * cant; fuente = 'costo de la venta (Dux)'; }
             const k = (p ? String(p._id) : 'l:' + String(it.sku || it.nombre || '').toLowerCase()) + '|' + String(v.orgId);
             let g = grupos.get(k);
-            if (!g) { g = { sucursal: orgNom.get(String(v.orgId)) || '', detalle: (p && p.nombre) || it.nombre || it.descripcion || '(sin descripción)', ref: (p && p.sku) || it.sku || '', cantidad: 0, monto: 0, fuente, sinCosto: false }; grupos.set(k, g); }
-            g.cantidad += cant * nc;
+            if (!g) { g = { sucursal: orgNom.get(String(v.orgId)) || '', detalle: (p && p.nombre) || it.nombre || it.descripcion || '(sin descripción)', ref: (p && p.sku) || it.sku || '', cantidad: 0, monto: 0, venta: 0, fuente, sinCosto: false, prod: p || null }; grupos.set(k, g); }
+            g.cantidad += cant * nc; g.venta += Number(it.subtotal || 0) * nc;
             if (costo == null) g.sinCosto = true; else g.monto += costo * nc;
           });
         });
-        [...grupos.values()].forEach(g => filas.push({ fecha: '', sucursal: g.sucursal, detalle: g.detalle, ref: g.ref, cantidad: Math.round(g.cantidad * 100) / 100, monto: r2(g.monto), fuente: g.sinCosto ? 'sin costo cargado' : g.fuente }));
+        [...grupos.values()].forEach(g => filas.push({ fecha: '', sucursal: g.sucursal, detalle: g.detalle, ref: g.ref, cantidad: Math.round(g.cantidad * 100) / 100, monto: r2(g.monto), fuente: g.sinCosto ? 'sin costo cargado' : g.fuente,
+          costoUnit: g.cantidad ? r2(g.monto / g.cantidad) : null, ventaUnit: g.cantidad ? r2(g.venta / g.cantidad) : null,
+          origen: g.prod ? ('Ficha del producto: costo cargado ' + (g.prod.moneda === 'USD' ? 'US$ ' : '$ ') + g.prod.costo + (g.prod.unidad ? ' por ' + g.prod.unidad : '') + (g.prod.costoProductoId ? '. Está vinculado a una receta de Costos de Producción (el costo se actualiza desde ahí).' : '. No está vinculado a ninguna receta: es un valor cargado a mano en Productos.') + (g.prod.updatedAt ? ' Última modificación de la ficha: ' + fechaAR(g.prod.updatedAt) + '.' : '')) : '' }));
         nota = 'Costo = cantidad vendida × costo del producto. El informe además descuenta la mano de obra de recetas (si los sueldos de producción están como gasto) y usa precio mayorista en las compras internas a Fábrica: esos ajustes figuran aparte.';
       }
     } else if (tipo === 'gasto') {
