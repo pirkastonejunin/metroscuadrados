@@ -669,6 +669,7 @@ router.post('/cambiar-concepto', authAdmin, async (req, res) => {
   try {
     const b = req.body || {};
     const ids = (Array.isArray(b.gastoIds) ? b.gastoIds : []).map(toObjectId).filter(Boolean);
+    // porProveedor: en vez de (solo) los gastos marcados, TODOS los gastos de los proveedores de esos gastos, de cualquier año.
     if (!ids.length) throw err(400, 'Elegí al menos un gasto.');
     if (ids.length > 2000) throw err(400, 'Son demasiados gastos juntos: probá de a menos de 2.000.');
     const desde = claveConcepto(b.desde);
@@ -678,14 +679,21 @@ router.post('/cambiar-concepto', authAdmin, async (req, res) => {
       const db = await getDb();
       const dest = await db.collection('gastos_conceptos').findOne({ _id: destId });
       if (!dest) throw err(404, 'El concepto nuevo no existe.');
-      if (dest.activo === false) await db.collection('gastos_conceptos').updateOne({ _id: destId }, { $set: { activo: true, updatedAt: new Date() } });
       const u = req.usuario || {};
       // siempre todas las sucursales del usuario: en la vista "Todas" req.orgId es solo la sucursal para operar y dejaría afuera gastos de las otras
       const orgIds = ((u.rol && u.rol.protegido) ? (await db.collection('organizaciones').find({}).project({ _id: 1 }).toArray()).map(o => o._id) : (u.orgIds || []).map(toObjectId).filter(Boolean));
       if (req.orgId && !orgIds.some(o => String(o) === String(req.orgId))) orgIds.push(req.orgId);
+      let filtro = { _id: { $in: ids } };
+      if (b.porProveedor) {
+        const base = await db.collection('gastos').find({ _id: { $in: ids }, orgId: { $in: orgIds } }).project({ proveedorId: 1 }).toArray();
+        const provs = [...new Set(base.map(g => g.proveedorId && String(g.proveedorId)).filter(Boolean))].map(toObjectId);
+        if (!provs.length) throw err(400, 'Los gastos marcados no tienen proveedor.');
+        filtro = { proveedorId: { $in: provs } };
+      }
       const cat = new Map((await db.collection('gastos_conceptos').find({}).project({ nombre: 1 }).toArray()).map(c => [String(c._id), c.nombre]));
-      const gastos = await db.collection('gastos').find({ _id: { $in: ids }, orgId: { $in: orgIds }, estado: { $ne: 'anulada' } }).project({ items: 1 }).toArray();
-      let renglones = 0, tocados = 0;
+      const gastos = await db.collection('gastos').find(Object.assign(filtro, { orgId: { $in: orgIds }, estado: { $ne: 'anulada' } })).project({ items: 1 }).toArray();
+      const cambios = [];
+      let renglones = 0;
       for (const g of gastos) {
         let cambio = false;
         const items = (g.items || []).map(it => {
@@ -694,9 +702,12 @@ router.post('/cambiar-concepto', authAdmin, async (req, res) => {
           cambio = true; renglones++;
           return Object.assign({}, it, { conceptoId: dest._id, conceptoNombre: dest.nombre });
         });
-        if (cambio) { await db.collection('gastos').updateOne({ _id: g._id }, { $set: { items, updatedAt: new Date() } }); tocados++; }
+        if (cambio) cambios.push({ _id: g._id, items });
       }
-      return { gastos: tocados, renglones, concepto: dest.nombre };
+      if (b.simular) return { simulado: true, gastos: cambios.length, renglones, concepto: dest.nombre };
+      if (dest.activo === false) await db.collection('gastos_conceptos').updateOne({ _id: destId }, { $set: { activo: true, updatedAt: new Date() } });
+      for (const c of cambios) await db.collection('gastos').updateOne({ _id: c._id }, { $set: { items: c.items, updatedAt: new Date() } });
+      return { gastos: cambios.length, renglones, concepto: dest.nombre };
     });
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }

@@ -221,7 +221,7 @@ async function verDetalle(tipo, concepto, mes){
     if (!d.filas.length) h += '<div class="muted">No hay movimientos para este renglón.</div>';
     else {
       const gastoRows = tipo === 'gasto' && d.filas.some(f => f.gastoId); window._detCtx = {tipo, concepto, mes};
-      if (gastoRows) h += '<div id="bulkBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;padding:8px;border:1px solid var(--border);border-radius:8px"><b>Cambiar concepto de varios:</b><span class="muted">marcá los gastos y elegí el concepto correcto</span><select id="bulkConc" style="min-width:180px"><option value="">Cargando conceptos…</option></select><button class="btn" onclick="cambiarConceptoMasivo()">Cambiar los marcados</button><span id="bulkMsg" class="muted"></span></div>';
+      if (gastoRows) h += '<div id="bulkBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px;padding:8px;border:1px solid var(--border);border-radius:8px"><b>Cambiar concepto de varios:</b><span class="muted">marcá los gastos y elegí el concepto correcto</span><select id="bulkConc" style="min-width:180px"><option value="">Cargando conceptos…</option></select><button class="btn" onclick="cambiarConceptoMasivo()">Cambiar los marcados</button><button class="btn secondary" title="Cambia el concepto en todos los gastos de los proveedores marcados, de todos los años" onclick="cambiarConceptoMasivo(true)">Todos los años de ese proveedor</button><span id="bulkMsg" class="muted"></span></div>';
       h += '<table class="t" style="width:100%;font-size:13px"><thead><tr>' + (gastoRows ? '<th style="width:28px"><input type="checkbox" title="Marcar todos" onchange="document.querySelectorAll(\'.bulkCk\').forEach(c => c.checked = this.checked)"></th>' : '') + (esCosto ? '' : '<th>Fecha</th>') + (multi ? '<th>Sucursal</th>' : '') + '<th>Detalle</th><th>' + (esCosto ? 'Código' : 'Comprobante') + '</th>' + (esCosto ? '<th class="n">Cantidad</th><th>Origen del costo</th>' : '') + '<th class="n">Importe</th></tr></thead><tbody>';
       h += d.filas.map(f => '<tr' + (f.gastoId ? ' class="click" style="cursor:pointer" title="Tocá para corregir este gasto" onclick="editarGasto(\'' + f.gastoId + '\',\'' + tipo + '\',' + escapeHtml(JSON.stringify(concepto || '')) + ',\'' + mes + '\')"' : '') + '>' + (gastoRows ? '<td onclick="event.stopPropagation()">' + (f.gastoId ? '<input type="checkbox" class="bulkCk" value="' + f.gastoId + '">' : '') + '</td>' : '') + (esCosto ? '' : '<td>' + escapeHtml(f.fecha) + '</td>') + (multi ? '<td>' + escapeHtml(f.sucursal) + '</td>' : '') + '<td>' + escapeHtml(f.detalle) + '</td><td>' + escapeHtml(f.ref) + '</td>' + (esCosto ? '<td class="n">' + f.cantidad + '</td><td>' + escapeHtml(f.fuente || '') + '</td>' : '') + '<td class="n">' + pesos(f.monto) + '</td></tr>').join('');
       h += '</tbody></table>';
@@ -299,15 +299,24 @@ async function cargarConceptosMasivo(){
     $('bulkConc').innerHTML = '<option value="">— elegir concepto —</option>' + l.sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')).map(x => '<option value="' + x._id + '">' + escapeHtml(x.nombre) + (x.activo === false ? ' (de baja)' : '') + '</option>').join('');
   }catch(e){ $('bulkConc').innerHTML = '<option value="">No se pudieron cargar</option>'; }
 }
-async function cambiarConceptoMasivo(){
+async function cambiarConceptoMasivo(porProveedor){
   const ids = [...document.querySelectorAll('.bulkCk:checked')].map(c => c.value), cid = $('bulkConc').value, ctx = window._detCtx || {};
-  if (!ids.length) { $('bulkMsg').textContent = 'Marcá al menos un gasto.'; return; }
+  if (!ids.length) { $('bulkMsg').textContent = porProveedor ? 'Marcá al menos un gasto del proveedor.' : 'Marcá al menos un gasto.'; return; }
   if (!cid) { $('bulkMsg').textContent = 'Elegí el concepto nuevo.'; return; }
-  const nom = $('bulkConc').selectedOptions[0].textContent;
-  if (!confirm('Se va a pasar de "' + ctx.concepto + '" a "' + nom + '" el renglón de ' + ids.length + ' gasto(s).\n\n¿Seguir?')) return;
+  const nom = $('bulkConc').selectedOptions[0].textContent.replace(/ \(de baja\)$/, '');
+  const pedir = async (simular) => {
+    const r = await fetch(GASTOS_API + '/cambiar-concepto', {method: 'POST', headers: headersAuth({'Content-Type': 'application/json'}), body: JSON.stringify({gastoIds: ids, desde: ctx.concepto, conceptoId: cid, porProveedor: !!porProveedor, simular: !!simular})});
+    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('Error ' + r.status)); return d;
+  };
   try{
-    const r = await fetch(GASTOS_API + '/cambiar-concepto', {method: 'POST', headers: headersAuth({'Content-Type': 'application/json'}), body: JSON.stringify({gastoIds: ids, desde: ctx.concepto, conceptoId: cid})});
-    const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || ('Error ' + r.status));
+    let msg = 'Se va a pasar de "' + ctx.concepto + '" a "' + nom + '" el renglón de ' + ids.length + ' gasto(s) marcado(s).';
+    if (porProveedor) {
+      const p = await pedir(true);
+      if (!p.renglones) { $('bulkMsg').textContent = 'No hay gastos con el concepto "' + ctx.concepto + '" para esos proveedores.'; return; }
+      msg = 'Se va a pasar de "' + ctx.concepto + '" a "' + nom + '" TODO lo cargado a los proveedores de los gastos marcados, de todos los años: ' + p.renglones + ' renglón(es) en ' + p.gastos + ' gasto(s).';
+    }
+    if (!confirm(msg + '\n\n¿Seguir?')) return;
+    const d = await pedir(false);
     if (!d.renglones) { $('bulkMsg').textContent = 'No se cambió nada: ninguno de los gastos marcados tiene hoy el concepto "' + ctx.concepto + '".'; return; }
     window._bulkAviso = 'Listo: ' + d.renglones + ' renglón(es) de ' + d.gastos + ' gasto(s) pasaron a "' + d.concepto + '".';
     cargar(); await verDetalle(ctx.tipo, ctx.concepto, ctx.mes); const bm = $('bulkMsg'); if (bm) bm.textContent = window._bulkAviso;

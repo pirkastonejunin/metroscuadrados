@@ -48,6 +48,17 @@ async function caso(n, f) { try { await f(); ok++; console.log('  ✔', n); } ca
     assert.strictEqual((await db.collection('gastos_conceptos').findOne({ _id: lead })).activo, true);
     assert.strictEqual((await api('POST', '/api/gastos/cambiar-concepto', { gastoIds: [], desde: 'x', conceptoId: String(lead) })).status, 400);
   });
+  await caso('cambiar concepto de todo un proveedor (todos los años) con simulación', async () => {
+    const c3 = (await db.collection('gastos_conceptos').insertOne({ nombre: 'Peajes', activo: true, compartido: true, orgId: null })).insertedId;
+    const { ObjectId } = require('mongodb');
+    const viejo = await mk({ comprobanteNumero: '801', fecha: new Date('2023-03-10') }), nuevo = await mk({ comprobanteNumero: '802', fecha: new Date('2026-03-10') });
+    const sim = await api('POST', '/api/gastos/cambiar-concepto', { gastoIds: [nuevo], desde: 'Fletes', conceptoId: String(c3), porProveedor: true, simular: true });
+    assert.strictEqual(sim.status, 200, JSON.stringify(sim.data)); assert(sim.data.simulado && sim.data.gastos >= 2);
+    assert.strictEqual((await db.collection('gastos').findOne({ _id: new ObjectId(viejo) })).items[0].conceptoNombre, 'Fletes', 'la simulación no cambia nada');
+    const r = await api('POST', '/api/gastos/cambiar-concepto', { gastoIds: [nuevo], desde: 'Fletes', conceptoId: String(c3), porProveedor: true });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+    assert.strictEqual((await db.collection('gastos').findOne({ _id: new ObjectId(viejo) })).items[0].conceptoNombre, 'Peajes');
+  });
   console.log(`\n${fallos ? fallos + ' FALLO(S)' : 'TODO OK'} (${ok}/${ok + fallos})`);
   process.exit(fallos ? 1 : 0);
 })().catch(e => { console.error('ERROR DE ENTORNO', e); process.exit(2); });

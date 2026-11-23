@@ -825,7 +825,7 @@ async function detalleResultados(req) {
           const signo = /^nota_credito/.test(g.tipoComprobante) ? -1 : 1, items = g.items || [], sub = items.reduce((a, it) => a + Number(it.subtotal || 0), 0);
           let conDesc = sub; if (g.descuentoPorcentaje) conDesc -= conDesc * (g.descuentoPorcentaje / 100); if (g.descuentoMonto) conDesc -= g.descuentoMonto;
           const factor = sub > 0 ? Math.max(0, conDesc) / sub : 1, usd = g.moneda === 'USD' && Number(g.cotizacionDolar) > 0 ? Number(g.cotizacionDolar) : 1;
-          items.forEach(it => { if (nomConcepto(it) !== concepto) return; push(g.fecha, g.orgId, (g.proveedorNombre || 'Sin proveedor') + (it.descripcion ? ' · ' + it.descripcion : ''), String(g.tipoComprobante || 'gasto').replace(/_/g, ' ') + ' ' + (g.comprobanteNumero ? (g.puntoVenta ? g.puntoVenta + '-' : '') + g.comprobanteNumero : (g.numeroOriginal || 'sin nº')) + ' · gasto ' + num(g), signo * Number(it.subtotal || 0) * factor * usd, { gastoId: String(g._id) }); });
+          items.forEach(it => { if (nomConcepto(it) !== concepto) return; push(g.fecha, g.orgId, (g.proveedorNombre || 'Sin proveedor') + (it.descripcion ? ' · ' + it.descripcion : ''), String(g.tipoComprobante || 'gasto').replace(/_/g, ' ') + ' ' + (g.comprobanteNumero ? (g.puntoVenta ? g.puntoVenta + '-' : '') + g.comprobanteNumero : (g.numeroOriginal || 'sin nº')) + ' · gasto ' + num(g), signo * Number(it.subtotal || 0) * factor * usd, { gastoId: String(g._id), proveedorId: g.proveedorId ? String(g.proveedorId) : '' }); });
         });
       }
     } else throw err(400, 'Tipo de detalle no válido.');
