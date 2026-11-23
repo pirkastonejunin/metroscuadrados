@@ -298,8 +298,19 @@ async function transferenciaFabrica(db) {
   try { const cfg = await require('./fiscalEmision').getConfig(db, toObjectId(v.fabricaOrgId)); incluyeIva = typeof lista.incluyeIva === 'boolean' ? lista.incluyeIva : cfg.preciosIncluyenIvaDefecto !== false; } catch (e) { if (typeof lista.incluyeIva === 'boolean') incluyeIva = lista.incluyeIva; }
   let ivaDef = 21;
   try { const cfg = await require('./fiscalEmision').getConfig(db, toObjectId(v.fabricaOrgId)); if (cfg.ivaDefecto !== undefined) ivaDef = Number(cfg.ivaDefecto); } catch (e) { /* 21 */ }
-  return { fabricaOrgId: String(v.fabricaOrgId), lista, incluyeIva, ivaDef };
+  return { fabricaOrgId: String(v.fabricaOrgId), lista, incluyeIva, ivaDef, sinPrecio: new Map() };
 }
+// Por qué la transferencia Fábrica -> sucursales está o no aplicándose (se muestra en el informe para no quedarse sin saber por qué no se ve).
+async function estadoTransferencia(db, tf) {
+  if (tf) return { estado: 'activa' };
+  const d = await db.collection('config_general').findOne({ clave: 'resultadosTransferenciaFabrica', orgId: { $exists: false } });
+  const v = d && d.valor;
+  if (!v) return { estado: 'sin_configurar', motivo: 'No está configurado el precio de transferencia (Configuración del informe).' };
+  if (!v.activo) return { estado: 'inactiva', motivo: 'El precio de transferencia Fábrica → sucursales está desactivado en la configuración del informe.' };
+  if (!v.fabricaOrgId || !v.listaId) return { estado: 'incompleta', motivo: 'Falta elegir la sucursal Fábrica o la lista mayorista en la configuración del informe.' };
+  return { estado: 'sin_lista', motivo: 'La lista mayorista elegida ya no existe. Elegila de nuevo en la configuración del informe.' };
+}
+
 // Precio mayorista SIN IVA por unidad de venta de un producto de producción (null si no tiene precio en esa lista).
 function precioMayoristaNeto(tf, p, cotizacion) {
   if (!tf || !p) return null;
@@ -345,7 +356,7 @@ async function resultadosOrg(db, orgId, d0, d1, tf, ovr) {
   await vincularItemsLibres(db, ventas.concat(ventasOtras));
   const ids = new Set();
   ventas.concat(ventasOtras).forEach(v => (v.items || []).forEach(it => { if (it.productoId) ids.add(String(it.productoId)); }));
-  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ costo: 1, moneda: 1, tipoProducto: 1, costoProductoId: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, porcentajeIva: 1 }).toArray() : [];
+  const prods = ids.size ? await db.collection('productos_catalogo').find({ _id: { $in: [...ids].map(toObjectId) } }).project({ nombre: 1, sku: 1, costo: 1, moneda: 1, tipoProducto: 1, costoProductoId: 1, precio: 1, preciosPorLista: 1, unidadesPorBulto: 1, porcentajeIva: 1 }).toArray() : [];
   const pm = new Map(prods.map(p => [String(p._id), p]));
   // Mano de obra por unidad de cada producto con receta (jornales x costo del jornal), solo si los sueldos de
   // producción se muestran como gasto: hay que sacarla del costo de la mercadería para no contarla dos veces.
@@ -391,6 +402,7 @@ async function resultadosOrg(db, orgId, d0, d1, tf, ovr) {
       if (esCompradora && p && p.tipoProducto === 'produccion') {
         const mn = precioMayoristaNeto(tf, p, cotVigente);
         if (mn != null) { const c = Number(it.cantidad || 0) * mn * nc; m.costo += c; m.internoCompra += c; return; }
+        tf.sinPrecio.set(String(p._id), (p.sku ? p.sku + ' · ' : '') + (p.nombre || ''));
       }
       costoDeLinea(m, v, it, p, nc, neto, sub, items, null);
     });
@@ -403,7 +415,7 @@ async function resultadosOrg(db, orgId, d0, d1, tf, ovr) {
       const p = it.productoId ? pm.get(String(it.productoId)) : null;
       if (!p || p.tipoProducto !== 'produccion') return;
       const mn = precioMayoristaNeto(tf, p, cotVigente);
-      if (mn == null) return;
+      if (mn == null) { tf.sinPrecio.set(String(p._id), (p.sku ? p.sku + ' · ' : '') + (p.nombre || '')); return; }
       const monto = Number(it.cantidad || 0) * mn * nc;
       m.ventas += monto; m.internoVenta += monto;
       const k = String(v.orgId); m.intPorOrg[k] = (m.intPorOrg[k] || 0) + monto;
@@ -560,7 +572,7 @@ async function armarResultados(req) {
       a.ventas += c.ventas; a.costo += c.costo; a.internoVenta += c.internoVenta; a.internoCompra += c.internoCompra; a.sinCosto += c.sinCosto; a.enCosto += c.enCosto; a.manoObra += c.manoObra; a.sinReceta += c.sinReceta;
       Object.keys(c.gastos).forEach(g => { a.gastos[g] = (a.gastos[g] || 0) + c.gastos[g]; }); return a;
     }, { mes: 'total', ventas: 0, costo: 0, sinCosto: 0, enCosto: 0, manoObra: 0, sinReceta: 0, internoVenta: 0, internoCompra: 0, gastos: {} }));
-    return { desde: desdeS, hasta: hastaS, alcance: todas ? 'todas' : 'actual', sucursales: orgIds.length, conceptos: listaConceptos, conceptosOtros: agruparGastos(listaConceptos).otros, conceptosSueldos: agruparGastos(listaConceptos).sueldos, meses: cols.map(fin), total };
+    return { desde: desdeS, hasta: hastaS, alcance: todas ? 'todas' : 'actual', sucursales: orgIds.length, conceptos: listaConceptos, conceptosOtros: agruparGastos(listaConceptos).otros, conceptosSueldos: agruparGastos(listaConceptos).sueldos, meses: cols.map(fin), total, transferencia: Object.assign(await estadoTransferencia(db, tf), tf ? { sinPrecio: [...tf.sinPrecio.values()].slice(0, 15), cantSinPrecio: tf.sinPrecio.size } : {}) };
   });
 }
 
