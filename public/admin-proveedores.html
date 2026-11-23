@@ -808,9 +808,10 @@ async function cargarCuentaCorrienteProveedorTab(id){
         <tbody>
           ${filas.length ? filas.map(({m, saldo, index}) => {
             const tieneDetalle = m.origen === 'compra' || m.origen === 'gasto';
+            const esPago = m.origen === 'pago_compra' || m.origen === 'pago_gasto';
             const conceptoHtml = tieneDetalle
               ? `<a href="javascript:void(0)" onclick="verDetalleMovimientoProveedor(${index})" style="text-decoration:underline;cursor:pointer" title="Ver el comprobante">${escapeHtml(m.concepto || '—')}</a>`
-              : escapeHtml(m.concepto || '—');
+              : (esPago ? `<a href="javascript:void(0)" onclick="verDetallePagoProveedor(${index})" style="text-decoration:underline;cursor:pointer" title="Ver el detalle del pago">${escapeHtml(m.concepto || '—')}</a>` : escapeHtml(m.concepto || '—'));
             return `
             <tr>
               <td>${fechaCorta(m.fecha)}</td>
@@ -820,7 +821,7 @@ async function cargarCuentaCorrienteProveedorTab(id){
               <td>${m.tipo === 'debito' ? money(m.monto) : ''}</td>
               <td>${m.tipo === 'credito' ? money(m.monto) : ''}</td>
               <td class="muted">${saldo === null ? '<span title="Histórico importado de Dux: no modifica el saldo">—</span>' : money(saldo)}</td>
-              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : (m.origen === 'ajuste' ? `<button class="btn small secondary" title="Quitar este ajuste" onclick="quitarAjusteSaldoProveedor('${m.docId}')">Quitar</button>` : (m.origen === 'pago_compra' ? `${m.montoSinAplicar > 0.009 ? `<button class="btn small" title="Aplicar este pago a una o varias facturas" onclick="vincularPagoProveedor(${index})">Vincular</button> ` : ''}${m.importado ? '' : `<button class="btn small secondary" title="Anular este pago (devuelve la plata a la caja/banco)" onclick="anularPagoProveedorCC(${index})">Anular</button>`}` : ''))}</td>
+              <td>${tieneDetalle ? `<button class="btn small secondary" onclick="verDetalleMovimientoProveedor(${index})">Ver</button>` : (m.origen === 'ajuste' ? `<button class="btn small secondary" title="Quitar este ajuste" onclick="quitarAjusteSaldoProveedor('${m.docId}')">Quitar</button>` : (m.origen === 'pago_gasto' ? `<button class="btn small secondary" onclick="verDetallePagoProveedor(${index})">Ver</button>` : m.origen === 'pago_compra' ? `<button class="btn small secondary" onclick="verDetallePagoProveedor(${index})">Ver</button> ${m.montoSinAplicar > 0.009 ? `<button class="btn small" title="Aplicar este pago a una o varias facturas" onclick="vincularPagoProveedor(${index})">Vincular</button> ` : ''}${m.importado ? '' : `<button class="btn small secondary" title="Anular este pago (devuelve la plata a la caja/banco)" onclick="anularPagoProveedorCC(${index})">Anular</button>`}` : ''))}</td>
             </tr>
           `; }).join('') : '<tr><td colspan="8" class="muted">Todavía no hay movimientos.</td></tr>'}
         </tbody>
@@ -834,6 +835,34 @@ async function cargarCuentaCorrienteProveedorTab(id){
 
 
 // ---- Anular y vincular pagos desde la cuenta corriente (18/11/2026) ----
+
+// Detalle de un pago desde la cuenta corriente (23/11/2026): qué se pagó, con qué, a qué facturas se aplicó y cuánto queda sin aplicar.
+const TIPO_VALOR_LABEL = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque propio', cheque_tercero: 'Cheque de tercero', tarjeta: 'Tarjeta', cuenta_bancaria: 'Cuenta bancaria', banco: 'Banco', caja: 'Caja' };
+function verDetallePagoProveedor(i){
+  const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return;
+  const aps = m.aplicaciones || [], libre = Number(m.montoSinAplicar) || 0;
+  const filas = aps.map(a => `<tr><td>${escapeHtml(a.comprobante || (a.compraNumero ? 'Compra #' + a.compraNumero : 'Compra'))}</td><td class="muted">${a.compraNumero ? 'Compra #' + a.compraNumero : ''}</td><td>${money(a.monto)}</td></tr>`).join('');
+  const esGasto = m.origen === 'pago_gasto';
+  document.getElementById('modalRoot').insertAdjacentHTML('beforeend', `
+    <div class="modal-bg" id="dpgBg"><div class="modal wide">
+      <span class="close-x" onclick="document.getElementById('dpgBg').remove()">✕</span>
+      <h2>Detalle del pago</h2>
+      <div class="totales-box">
+        <div class="fila-total grande"><span>Monto</span><span>${money(m.monto)}</span></div>
+        <div class="fila-total"><span>Fecha</span><span>${fechaCorta(m.fecha)}</span></div>
+        <div class="fila-total"><span>Medio</span><span>${escapeHtml(TIPO_VALOR_LABEL[m.tipoValor] || m.tipoValor || '—')}${m.cuentaTipo ? ' · ' + escapeHtml(TIPO_VALOR_LABEL[m.cuentaTipo] || m.cuentaTipo) : ''}${(m.chequesNumeros || []).length ? ' · Nº ' + m.chequesNumeros.map(escapeHtml).join(', ') : ''}</span></div>
+        ${m.usuarioNombre ? `<div class="fila-total"><span>Cargó</span><span>${escapeHtml(m.usuarioNombre)}</span></div>` : ''}
+        ${m.importado ? '<div class="fila-total"><span>Origen</span><span>Histórico importado de Dux' + (m.numeroOriginal ? ' (Nº ' + escapeHtml(m.numeroOriginal) + ')' : '') + '</span></div>' : ''}
+      </div>
+      ${m.nota ? `<p class="muted" style="margin-top:10px"><b>Nota:</b> ${escapeHtml(m.nota)}</p>` : ''}
+      ${esGasto ? `<p style="margin-top:10px">Aplicado al gasto <b>${escapeHtml(m.comprobanteCompleto || ('#' + m.docNumero))}</b>.</p>` : `
+        <h3 style="margin:14px 0 6px">Facturas a las que se aplicó</h3>
+        ${filas ? `<table><thead><tr><th>Comprobante</th><th></th><th>Monto aplicado</th></tr></thead><tbody>${filas}</tbody></table>` : '<p class="muted">Todavía no se aplicó a ninguna factura.</p>'}
+        <div class="fila-total" style="font-weight:700;margin-top:8px"><span>Sin aplicar (a cuenta)</span><span>${money(libre)}</span></div>
+        ${libre > 0.009 ? `<button class="btn" style="margin-top:10px" onclick="document.getElementById('dpgBg').remove();vincularPagoProveedor(${i})">Vincular a una factura</button>` : ''}
+        ${!m.importado ? `<button class="btn secondary" style="margin-top:10px" onclick="document.getElementById('dpgBg').remove();anularPagoProveedorCC(${i})">Anular pago</button>` : ''}`}
+    </div></div>`);
+}
 async function anularPagoProveedorCC(i){
   const ctx = window._ccProvCtx || {}, m = (ctx.movs || [])[i]; if (!m) return;
   if (!confirm('¿Anular este pago de ' + money(m.monto) + '?\n\nSe devuelve la plata a la caja/banco (o el cheque vuelve a cartera) y las facturas a las que estaba aplicado recuperan su saldo. El pago queda registrado como anulado.')) return;
@@ -863,7 +892,7 @@ async function vincularPagoProveedor(i){
     _vincCtx.compras = l.filter(c => c.estado !== 'anulada' && c.saldoPendiente > 0.009).sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
   }catch(e){}
   const cont = document.getElementById('vincLista'); if (!cont) return;
-  if (!_vincCtx.compras.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene facturas con saldo pendiente.</p>'; return; }
+  if (!_vincCtx.compras.length) { cont.innerHTML = '<p class="muted">Este proveedor no tiene <b>compras</b> con saldo pendiente. (Si la factura que querés pagar es un <b>gasto</b>, el pago se registra desde Gastos.)</p>'; return; }
   cont.innerHTML = _vincCtx.compras.map((c, k) => `
     <div class="fila-pago-cuenta" data-k="${k}" data-saldo="${c.saldoPendiente}" style="display:flex;gap:8px;align-items:center;margin:4px 0">
       <input type="checkbox" style="width:auto" onchange="vincFila(this)">

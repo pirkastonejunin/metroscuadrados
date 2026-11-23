@@ -562,12 +562,14 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           totalPagado: c.totalPagado, saldoPendiente: c.saldoPendiente
         });
       }
+      const compraPorId = new Map(compras.map(c => [String(c._id), c]));
       const nombreCompraPorId = new Map(compras.map(c => [String(c._id), nombreComprobante(c)]).filter(x => x[1]));
       for (const p of pagosCompra) {
         movimientos.push({
           tipo: 'credito', monto: p.monto, fecha: p.fecha,
           concepto: p.importado ? `Pago Dux Nº ${p.numeroOriginal || ''}${p.montoSinAplicar > 0 ? ' (a cuenta)' : ''}` : `Pago${(p.aplicaciones || []).length ? ' — ' + p.aplicaciones.map(a => nombreCompraPorId.get(String(a.compraId)) || '#' + a.compraNumero).join(', ') : ''}`,
-          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado, montoSinAplicar: Math.round((Number(p.montoSinAplicar) || 0) * 100) / 100
+          origen: 'pago_compra', docId: p._id, nota: p.nota, tipoValor: p.tipoValor, importado: !!p.importado, usuarioNombre: p.usuarioNombre || '', cuentaTipo: p.cuentaTipo || '', chequesNumeros: p.chequesNumeros || [], numeroOriginal: p.numeroOriginal || '',
+          aplicaciones: (p.aplicaciones || []).map(a => ({ compraId: String(a.compraId), compraNumero: a.compraNumero != null ? a.compraNumero : (compraPorId.get(String(a.compraId)) || {}).numero, comprobante: nombreCompraPorId.get(String(a.compraId)) || '', monto: a.monto })), montoSinAplicar: Math.round((Number(p.montoSinAplicar) || 0) * 100) / 100
         });
       }
       for (const g of gastos) {
@@ -583,7 +585,7 @@ router.get('/:id/cuenta-corriente', authAdmin, async (req, res) => {
           movimientos.push({
             tipo: 'credito', monto: p.monto, fecha: p.fecha,
             concepto: `Pago — ${nombreComprobante(g) || 'Gasto #' + g.numero}`, origen: 'pago_gasto',
-            docId: g._id, nota: p.nota, tipoValor: p.tipoValor
+            docId: g._id, nota: p.nota, tipoValor: p.tipoValor, usuarioNombre: p.usuarioNombre || '', cuentaTipo: p.cuentaTipo || '', chequesNumeros: p.chequesNumeros || [], docNumero: g.numero, comprobanteCompleto: comprobanteCompleto(g)
           });
         }
       }
