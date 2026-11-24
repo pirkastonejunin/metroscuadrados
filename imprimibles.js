@@ -141,6 +141,30 @@ function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande, cod
 // otra, Correo/Condición de pago en otra, Observaciones al final — cada
 // campo vacío se muestra igual (con el rótulo) para mantener el mismo
 // recuadro, como en el original.
+// Encabezado del Remito (24/11/2026): logo + nombre de la sucursal a la izquierda, "REMITO" + número + fecha a la derecha.
+function encabezadoRemito(org, { numeroFmt, fecha }) {
+  org = org || {};
+  const nombre = org.nombre || org.razonSocial || '';
+  const sub = [];
+  if (org.direccion) sub.push(escapeHtml(org.direccion));
+  if (org.telefono) sub.push('Tel: ' + escapeHtml(org.telefono));
+  return `
+    <div class="rm-head">
+      <div class="rm-marca">
+        ${org.logoBase64 ? `<img src="${org.logoBase64}" alt="Logo">` : ''}
+        <div>
+          <div class="rm-nombre">${escapeHtml(nombre)}</div>
+          <div class="rm-sub">${sub.join('<br>')}</div>
+        </div>
+      </div>
+      <div class="rm-doc">
+        <div class="rm-tit">REMITO</div>
+        <div class="rm-num">Nº ${escapeHtml(numeroFmt)}</div>
+        <div class="rm-fecha">${escapeHtml(fecha)}</div>
+      </div>
+    </div>`;
+}
+
 function recuadroClienteComprobante({ nombre, iva, cuit, domicilio, localidad, provincia, telefono, email, condicionPago, observaciones }) {
   return `
     <div class="cmp-cliente-box">
@@ -231,6 +255,37 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml, telefono }) {
   .cmp-cliente-fila:last-child { border-bottom: none; }
   .cmp-cliente-fila > div { flex: 1; }
   .cmp-condicion-venta { margin-top: 20px; font-size: 11px; color: #333; border-top: 1px solid #999; padding-top: 8px; white-space: pre-line; }
+  /* Remito (24/11/2026, pedido de Mato: más diseño, logo y más amigable) */
+  .rm-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 14px; border-bottom: 4px solid #c0562b; margin-bottom: 16px; }
+  .rm-marca { display: flex; align-items: center; gap: 14px; }
+  .rm-marca img { max-height: 84px; max-width: 200px; object-fit: contain; }
+  .rm-marca .rm-nombre { font-size: 22px; font-weight: bold; color: #222; }
+  .rm-marca .rm-sub { font-size: 12px; color: #555; line-height: 1.5; margin-top: 2px; }
+  .rm-doc { text-align: right; }
+  .rm-doc .rm-tit { display: inline-block; background: #c0562b; color: #fff; font-weight: bold; letter-spacing: .12em; font-size: 15px; padding: 5px 14px; border-radius: 4px; }
+  .rm-doc .rm-num { font-size: 24px; font-weight: bold; margin-top: 6px; color: #222; }
+  .rm-doc .rm-fecha { font-size: 13px; color: #555; margin-top: 2px; }
+  .rm-hola { margin: 0 0 12px 0; font-size: 13.5px; color: #333; }
+  .rm-tarjetas { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .rm-card { border: 1px solid #e0cfc6; background: #fbf6f3; border-radius: 8px; padding: 10px 14px; }
+  .rm-card h3 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: #c0562b; }
+  .rm-card .rm-cli { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+  .rm-card .rm-dato { font-size: 12.5px; line-height: 1.65; color: #222; }
+  .rm-card .rm-dato span { color: #777; display: inline-block; min-width: 92px; }
+  .rm-items { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 4px; border: 1px solid #e0cfc6; border-radius: 8px; overflow: hidden; }
+  .rm-items th { background: #c0562b; color: #fff; border: none; padding: 8px 10px; font-size: 12px; letter-spacing: .04em; }
+  .rm-items td { border: none; border-bottom: 1px solid #efe4de; padding: 8px 10px; font-size: 13px; }
+  .rm-items tbody tr:nth-child(even) td { background: #fbf6f3; }
+  .rm-items tbody tr:last-child td { border-bottom: none; }
+  .rm-obs { margin-top: 14px; padding: 10px 14px; border-left: 4px solid #c0562b; background: #fbf6f3; border-radius: 4px; font-size: 12.5px; }
+  .rm-firma { display: flex; gap: 40px; margin-top: 60px; }
+  .rm-firma > div { flex: 1; text-align: center; font-size: 11.5px; color: #444; }
+  .rm-firma .rm-linea { border-top: 1px solid #333; margin-bottom: 4px; }
+  .rm-gracias { margin-top: 26px; text-align: center; font-size: 13px; color: #c0562b; font-weight: bold; }
+  .rm-pie { text-align: center; font-size: 11px; color: #777; margin-top: 4px; }
+  .rm-items, .rm-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rm-head, .rm-doc .rm-tit, .rm-items th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @media (max-width: 600px) { .rm-tarjetas { grid-template-columns: 1fr; } .rm-head { flex-direction: column; align-items: flex-start; } .rm-doc { text-align: left; } }
   /* Recibo detallado (5/11/2026) — ver recibos.js */
   .rc-sub { font-size: 13px; margin: 14px 0 4px 0; text-transform: uppercase; letter-spacing: .04em; }
   .rc-medios td { vertical-align: top; }
@@ -362,6 +417,6 @@ function paginaImprimible({ titulo, org, bodyHtml, headerHtml, telefono }) {
 }
 
 module.exports = {
-  paginaImprimible, encabezadoNegocio, encabezadoComprobante, recuadroClienteComprobante,
+  paginaImprimible, encabezadoNegocio, encabezadoComprobante, encabezadoRemito, recuadroClienteComprobante,
   escapeHtml, money, numero, fechaLarga, fechaCorta, CONDICION_IVA_LABEL, CATEGORIA_FISCAL_LABEL
 };

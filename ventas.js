@@ -98,7 +98,7 @@ const { normalizarLineasImpuesto, TIPOS_RETENCION, sumarMontos, registrarRetenci
 // compartida (sin acceso a Mongo), ver el comentario grande al principio
 // de imprimibles.js.
 const {
-  paginaImprimible, encabezadoComprobante, recuadroClienteComprobante,
+  paginaImprimible, encabezadoComprobante, encabezadoRemito, recuadroClienteComprobante,
   escapeHtml: escHtml, money: moneyImp, numero: numImp, fechaLarga, fechaCorta,
   CATEGORIA_FISCAL_LABEL
 } = require('./imprimibles');
@@ -1519,34 +1519,42 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       `;
     }).join('');
     const bodyHtml = `
-      <h1>Remito Nº ${numeroFmt}</h1>
-      <div class="datos-doc">
-        <div><span class="muted">Comprobante asociado: Nº ${String(remito.ventaNumero).padStart(5, '0')}</span></div>
-        <div>
-          <strong>Fecha:</strong> ${fechaLarga(remito.fecha)}<br>
-          <strong>Depósito:</strong> ${escHtml(remito.depositoNombre)}
+      <p class="rm-hola">Detalle de la mercadería entregada. ¡Gracias por tu compra!</p>
+      <div class="rm-tarjetas">
+        <div class="rm-card">
+          <h3>Cliente</h3>
+          <div class="rm-cli">${escHtml(await nombreClienteImpreso(remito.clienteId, remito.clienteNombre))}</div>
+          <div class="rm-dato">
+            ${cliente && cliente.cuit ? `<div><span>CUIT</span>${escHtml(cliente.cuit)}</div>` : ''}
+            ${cliente && CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal] ? `<div><span>IVA</span>${escHtml(CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal])}</div>` : ''}
+            <div><span>Domicilio</span>${escHtml(cliente ? cliente.domicilio : '')}</div>
+            <div><span>Localidad</span>${escHtml([cliente && cliente.localidad, cliente && cliente.provincia].filter(Boolean).join(', '))}</div>
+            <div><span>Teléfono</span>${escHtml(cliente ? [cliente.celular, cliente.telefono].filter(Boolean).join(' / ') : '')}</div>
+            ${cliente && cliente.email ? `<div><span>Correo</span>${escHtml(cliente.email)}</div>` : ''}
+          </div>
+        </div>
+        <div class="rm-card">
+          <h3>Entrega</h3>
+          <div class="rm-dato">
+            <div><span>Fecha</span>${fechaLarga(remito.fecha)}</div>
+            <div><span>Depósito</span>${escHtml(remito.depositoNombre)}</div>
+            <div><span>Comprobante</span>Nº ${String(remito.ventaNumero).padStart(5, '0')}</div>
+          </div>
         </div>
       </div>
-      ${recuadroClienteComprobante({
-        nombre: await nombreClienteImpreso(remito.clienteId, remito.clienteNombre),
-        iva: (cliente && CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal]) || '',
-        cuit: cliente ? cliente.cuit : '',
-        domicilio: cliente ? cliente.domicilio : '',
-        localidad: cliente ? cliente.localidad : '',
-        provincia: cliente ? cliente.provincia : '',
-        telefono: cliente ? [cliente.celular, cliente.telefono].filter(Boolean).join(' / ') : '',
-        email: cliente ? cliente.email : '',
-        observaciones: ''
-      })}
-      <table>
+      <table class="rm-items">
         <thead><tr><th>Código</th><th>Producto</th><th class="num">Cantidad</th><th class="num">Bultos</th></tr></thead>
         <tbody>${filas || '<tr><td colspan="4" class="muted">Sin ítems</td></tr>'}</tbody>
       </table>
-      ${remito.observaciones ? `<p style="margin-top:14px"><strong>Observaciones:</strong> ${escHtml(remito.observaciones).replace(/\n/g, '<br>')}</p>` : ''}
-      <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
+      ${remito.observaciones ? `<div class="rm-obs"><strong>Observaciones:</strong> ${escHtml(remito.observaciones).replace(/\n/g, '<br>')}</div>` : ''}
+      <div class="rm-firma">
+        <div><div class="rm-linea"></div>Firma y aclaración de quien recibe</div>
+        <div><div class="rm-linea"></div>DNI / Fecha de recepción</div>
+      </div>
+      <div class="rm-gracias">¡Gracias por elegirnos!</div>
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml, telefono: cliente ? (cliente.celular || cliente.telefono || '') : '' }));
+    res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), headerHtml: encabezadoRemito(datosNegocioParaImprimir(org), { numeroFmt, fecha: fechaLarga(remito.fecha) }), bodyHtml, telefono: cliente ? (cliente.celular || cliente.telefono || '') : '' }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
