@@ -850,7 +850,7 @@ async function desactivarCliente(id, nombre){
 // GET /:id/cuenta-corriente y registrarMovimientoCuentaCorriente en
 // clientes.js (backend).
 // -------------------------------------------------------------------
-const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual', devolucion: 'Devolución', saldo_inicial_dux: 'Saldo inicial Dux', anulacion_cobro: 'Anulación de cobranza' };
+const ORIGEN_CC_LABEL = { venta: 'Venta', cobro_venta: 'Cobro de venta', cobro_cuenta: 'Cobro a cuenta', manual: 'Manual', ajuste: 'Ajuste de saldo', devolucion: 'Devolución', saldo_inicial_dux: 'Saldo inicial Dux', anulacion_cobro: 'Anulación de cobranza' };
 // Ver/Imprimir/Compartir/Anular para comprobantes de venta referenciados
 // desde la cuenta corriente (3/10/2026, pedido de Mato: "en todas las
 // cuentas corrientes o detalles q haya algun comprobante asociado
@@ -967,6 +967,47 @@ async function guardarImputarCC(){
     const cid = _imp.clienteId; cerrarImputarCC(); cargarCuentaCorrienteTab(cid);
   } catch(e){ err.textContent = e.message; btn.disabled = false; }
 }
+
+// Ajuste manual de saldo (24/11/2026, pedido de Mato).
+function abrirAjusteSaldoCC(){
+  const c = window._ccCtx; if (!c) return;
+  const nombre = [c.cliente.apellidoRazonSocial, c.cliente.nombre].filter(Boolean).join(', ');
+  let root = document.getElementById('ajusteRoot'); if (!root) { root = document.createElement('div'); root.id = 'ajusteRoot'; document.body.appendChild(root); }
+  root.innerHTML = `<div class="modal-bg"><div class="modal"><span class="close-x" onclick="cerrarAjusteSaldoCC()">✕</span>
+    <h2>Ajustar saldo</h2>
+    <p class="muted">${escapeHtml(nombre)} — saldo actual: <b>${money(c.saldo)}</b>. Queda registrado como un movimiento "Ajuste de saldo" con tu usuario.</p>
+    <label>¿Qué querés hacer?</label>
+    <select id="ajTipo" onchange="previewAjusteCC()">
+      <option value="debito">Aumentar la deuda del cliente (débito)</option>
+      <option value="credito">Reducir la deuda / dar saldo a favor (crédito)</option>
+    </select>
+    <label>Monto *</label><input id="ajMonto" type="number" min="0" step="0.01" oninput="previewAjusteCC()">
+    <label>Motivo *</label><input id="ajMotivo" placeholder="Ej: diferencia con Dux, redondeo, error de carga">
+    <label>Fecha</label><input id="ajFecha" type="date" value="${new Date().toLocaleDateString('en-CA')}">
+    <p id="ajPreview" class="muted" style="margin-top:8px"></p>
+    <p id="ajErr" class="err"></p>
+    <button class="btn" onclick="confirmarAjusteSaldoCC()">Registrar ajuste</button> <button class="btn secondary" onclick="cerrarAjusteSaldoCC()">Cancelar</button>
+  </div></div>`;
+  previewAjusteCC();
+}
+function previewAjusteCC(){
+  const c = window._ccCtx; if (!c) return;
+  const m = Number(document.getElementById('ajMonto').value) || 0;
+  const nuevo = c.saldo + (document.getElementById('ajTipo').value === 'debito' ? m : -m);
+  document.getElementById('ajPreview').innerHTML = m > 0 ? 'El saldo pasaría de <b>' + money(c.saldo) + '</b> a <b>' + money(nuevo) + '</b>.' : '';
+}
+function cerrarAjusteSaldoCC(){ const r = document.getElementById('ajusteRoot'); if (r) r.innerHTML = ''; }
+async function confirmarAjusteSaldoCC(){
+  const c = window._ccCtx; const err = document.getElementById('ajErr'); err.textContent = '';
+  const body = { tipo: document.getElementById('ajTipo').value, monto: Number(document.getElementById('ajMonto').value), motivo: document.getElementById('ajMotivo').value.trim(), fecha: document.getElementById('ajFecha').value };
+  if (!(body.monto > 0)) { err.textContent = 'Poné un monto mayor a 0'; return; }
+  if (!body.motivo) { err.textContent = 'Escribí el motivo'; return; }
+  try{
+    const r = await fetch(BASE + '/' + c.id + '/ajustar-saldo', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error al ajustar el saldo');
+    cerrarAjusteSaldoCC(); await cargarCuentaCorrienteTab(c.id);
+  }catch(e){ err.textContent = e.message; }
+}
 async function desimputarCC(clienteId, movId, idx){
   if (!confirm('¿Quitar esta imputación? La factura vuelve a figurar con ese saldo pendiente (el saldo del cliente no cambia).')) return;
   try {
@@ -1037,6 +1078,7 @@ async function cargarCuentaCorrienteTab(id){
           <button class="btn secondary" id="ccAccionesBtn" onclick="toggleAccionesCC(event)" title="Acciones de la cuenta corriente" style="font-size:18px;line-height:1;padding:6px 12px">⚙</button>
           <div id="ccAccionesMenu" class="hidden" style="position:absolute;right:0;top:110%;z-index:50;min-width:230px;background:var(--surface,#fff);border:1px solid var(--border,#ccc);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);padding:4px">
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCC(\'cobrar\')">💰 Cobrar</a>
+            <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCC(\'ajustar\')">⚖ Ajustar saldo</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCC(\'vender\')">🛒 Vender</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCC(\'imprimir\')">🖨 Ver / imprimir resumen</a>
             <a href="javascript:void(0)" class="cc-acc-item" onclick="accionCC(\'whatsapp\')">💬 Enviar resumen por WhatsApp</a>
@@ -1081,6 +1123,7 @@ async function cargarCuentaCorrienteTab(id){
                 ${(venta && !m.importado && m.tipo === 'debito' && (venta.estado === 'pendiente' || venta.estado === 'parcialmente_entregada')) ? ` <button class="btn small secondary" onclick="window.open('/admin-ventas.html?abrir=${m.ventaId}&entregar=1', '_blank')" title="Generar el remito (descuenta stock)">Generar remito</button>` : ''}
                 ${(esCobroCta && sinImp > 0.005) ? ` <button data-iconizado="1" class="btn small secondary" onclick="abrirImputarCC('${id}','${m._id}')" title="Relacionar este cobro con una o más facturas">Imputar a facturas</button>` : ''}
                 ${cobrable ? ` <button class="btn small" onclick="abrirCobroVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.saldoPendiente}, '${venta.moneda || 'ARS'}', '${id}')">Cobrar</button>` : ''}
+                ${(venta && m.tipo === 'debito' && venta.estado !== 'anulada' && venta.tipoComprobante !== 'nota_debito' && !/^nota_credito/.test(venta.tipoComprobante || '')) ? ` <button class="btn small secondary" onclick="window.open('/admin-ventas.html?nc=${m.ventaId}', '_blank')" title="Generar una Nota de Crédito de este comprobante${m.importado ? ' (venta migrada de Dux)' : ''}">Nota de crédito</button>` : ''}
                 ${venta && !m.importado && m.tipo === 'debito' && venta.estado !== 'anulada' ? ` <button class="btn small danger" onclick="anularVentaDesdeCC('${m.ventaId}', ${venta.numero}, ${venta.stockDescontado ? 'true' : 'false'}, '${id}')">Anular</button>` : ''}
               </td>
             </tr>
@@ -1472,6 +1515,7 @@ function accionCC(que){
   const m = document.getElementById('ccAccionesMenu'); if (m) m.classList.add('hidden');
   const c = window._ccCtx; if (!c) return;
   if (que === 'cobrar') { abrirCobroCuentaCC(c.id, c.saldo, [c.cliente.apellidoRazonSocial, c.cliente.nombre].filter(Boolean).join(', ')); return; }
+  if (que === 'ajustar') { abrirAjusteSaldoCC(); return; }
   if (que === 'vender') { location.href = '/admin-ventas.html?vender=' + encodeURIComponent(c.id); return; }
   if (que === 'whatsapp') {
     const tel = telefonoWhatsApp(c.cliente);

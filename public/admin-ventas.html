@@ -311,8 +311,21 @@ async function iniciarApp(){
   abrirVentaDesdePresupuestoSiCorresponde();
   retomarDuplicadoSiCorresponde();
   abrirVentaPorParametro();
+  abrirNotaCreditoPorParametro();
   { const pre = new URLSearchParams(location.search).get('vender'); // enlace desde la cuenta corriente del cliente
     if (pre) { history.replaceState(null, '', location.pathname); abrirNuevaVenta({ clienteId: pre }); } }
+}
+// Enlace desde la cuenta corriente del cliente (24/11/2026): /admin-ventas.html?nc=<id de la venta> abre la Nota de Crédito precargada (sirve también para ventas migradas de Dux).
+async function abrirNotaCreditoPorParametro(){
+  const id = new URLSearchParams(location.search).get('nc'); if (!id) return;
+  history.replaceState(null, '', location.pathname);
+  try{
+    if (!ventasCache.some(x => x._id === id)) {
+      const r = await fetch(BASE + '/' + encodeURIComponent(id), {headers: headersAuth()}); if (!r.ok) return;
+      ventasCache.unshift(await r.json());
+    }
+    generarNotaCreditoDesdeVenta(id);
+  }catch(e){}
 }
 // Enlace desde el tablero de inicio: /admin-ventas.html?abrir=<id de la venta>
 async function abrirVentaPorParametro(){
@@ -2515,13 +2528,14 @@ function generarNotaCreditoDesdeVenta(id){
     esFiscalOrigen: !!v.cae,
     // Solo reingresa mercadería si la factura salió (se entregó algo).
     reingresaStock: (v.estado === 'entregada' || v.estado === 'parcialmente_entregada' || (v.items || []).some(it => (it.cantidadEntregada || 0) > 0)),
-    items: (v.items || []).map(it => ({
+    // Una venta migrada de Dux puede venir sin renglones: se precarga una línea por el total para poder acreditarlo (editable).
+    items: (v.items && v.items.length) ? v.items.map(it => ({
       productoId: it.productoId || null,
       nombre: it.nombre,
       cantidad: it.cantidad,
       precioUnitario: it.precioUnitario,
       descuentoPorcentaje: it.descuentoPorcentaje || 0
-    }))
+    })) : (v.total > 0 ? [{ productoId: null, nombre: `Nota de crédito s/ comprobante ${v.numeroOriginal || ((v.letra || prefijoComprobante(v.tipoComprobante)) + '-' + String(v.numero).padStart(5,'0'))}`, cantidad: 1, precioUnitario: v.total, descuentoPorcentaje: 0 }] : [])
   });
 }
 

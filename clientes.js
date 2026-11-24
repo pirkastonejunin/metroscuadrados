@@ -619,6 +619,35 @@ async function revertirImputacionEnVenta(db, imp) {
 }
 router.revertirImputacionEnVenta = revertirImputacionEnVenta;
 
+// Ajuste manual de saldo (24/11/2026, pedido de Mato): suma o resta deuda sin pasar por una venta ni un cobro (diferencias de Dux, redondeos,
+// saldos mal cargados). Queda como un movimiento "Ajuste" con motivo y usuario — el libro no se edita, se corrige con otro ajuste.
+router.post('/:id/ajustar-saldo', authAdmin, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
+    const b = req.body || {};
+    const tipo = b.tipo === 'credito' ? 'credito' : (b.tipo === 'debito' ? 'debito' : null);
+    if (!tipo) throw err(400, 'Elegí si el ajuste aumenta la deuda (débito) o la reduce (crédito).');
+    const monto = r2c(b.monto);
+    if (!(monto > 0)) throw err(400, 'El monto del ajuste tiene que ser mayor a 0.');
+    const motivo = String(b.motivo || '').trim();
+    if (!motivo) throw err(400, 'Escribí el motivo del ajuste.');
+    const fecha = b.fecha ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(b.fecha)) ? `${b.fecha}T12:00:00-03:00` : b.fecha) : new Date();
+    if (isNaN(fecha.getTime())) throw err(400, 'La fecha no es válida.');
+    const out = await conReintento(() => enTransaccion(async (db) => {
+      const cliente = await db.collection('clientes').findOne(Object.assign({ _id: id }, filtroOrgClientes(req)));
+      if (!cliente) throw err(404, 'Cliente no encontrado');
+      const reqOrg = { usuario: req.usuario, orgId: cliente.orgId || req.orgId };
+      await registrarMovimientoCuentaCorriente(db, reqOrg, {
+        clienteId: id, clienteNombre: [cliente.apellidoRazonSocial, cliente.nombre].filter(Boolean).join(', '), tipo, monto, moneda: 'ARS',
+        concepto: 'Ajuste de saldo: ' + motivo, origen: 'ajuste', fecha
+      });
+      const sal = await db.collection('cuenta_corriente_saldos').findOne({ clienteId: id });
+      return { ok: true, saldo: r2c(sal && sal.saldo) };
+    }));
+    res.json(out);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 router.get('/:id/ventas-pendientes', authAdmin, async (req, res) => {
   try {
     const id = toObjectId(req.params.id); if (!id) throw err(400, 'id inválido');
