@@ -528,6 +528,7 @@ router.get('/resumen-depositos', authAdmin, async (req, res) => {
         db.collection('stock_actual').find(filtroOrg(req)).toArray(),
         db.collection('depositos').find(Object.assign({ activo: { $ne: false } }, filtroOrg(req))).toArray()
       ]);
+      await sumarComprometidoDeOtras(db, req, todasBrutas);
       const todas = todasBrutas.filter(permitido);
       const existencias = todas.filter(e => e.depositoId != null);
       const ids = Array.from(new Set(existencias.map(e => String(e.productoId)))).map(toObjectId).filter(Boolean);
@@ -565,6 +566,21 @@ router.get('/resumen-depositos', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Lo comprometido por las OTRAS sucursales (24/11/2026, pedido de Mato): el depósito es compartido, así que lo que reservó una venta de otra
+// sucursal también le resta al disponible. La reserva queda en el registro de stock de la sucursal que vendió; acá se le suma a cada fila de la
+// sucursal que se está mirando (mismo producto y mismo depósito). Con "Todas" no hace falta: ya vienen los registros de todas.
+async function sumarComprometidoDeOtras(db, req, docs) {
+  if (!req.orgId || !docs.length) return docs;
+  const ids = [...new Set(docs.map(e => String(e.productoId)))].map(toObjectId).filter(Boolean);
+  if (!ids.length) return docs;
+  const otras = await db.collection('stock_actual').find({ orgId: { $ne: req.orgId }, productoId: { $in: ids }, cantidadComprometida: { $gt: 0 } }).project({ productoId: 1, depositoId: 1, cantidadComprometida: 1 }).toArray();
+  if (!otras.length) return docs;
+  const suma = new Map();
+  otras.forEach(o => { const k = String(o.productoId) + '|' + String(o.depositoId || ''); suma.set(k, (suma.get(k) || 0) + (Number(o.cantidadComprometida) || 0)); });
+  docs.forEach(e => { const x = suma.get(String(e.productoId) + '|' + String(e.depositoId || '')); if (x) e.cantidadComprometida = (Number(e.cantidadComprometida) || 0) + x; });
+  return docs;
+}
+
 router.get('/actual', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
@@ -587,6 +603,7 @@ router.get('/actual', authAdmin, async (req, res) => {
         db.collection('stock_actual').find(match).toArray(),
         db.collection('depositos').find(filtroOrg(req)).toArray()
       ]);
+      await sumarComprometidoDeOtras(db, req, existencias);
       const idsProd = Array.from(new Set(existencias.map(e => String(e.productoId)))).map(toObjectId).filter(Boolean);
       const matchProd = Object.assign({ activo: { $ne: false }, _id: { $in: idsProd } }, filtroOrg(req));
       if (req.query.rubro) matchProd.rubro = req.query.rubro;
