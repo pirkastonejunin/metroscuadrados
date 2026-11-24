@@ -1485,6 +1485,9 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       const remito = await db.collection('remitos').findOne(Object.assign({ _id: id }, filtroOrg(req)));
       if (!remito) throw err(404, 'Remito no encontrado');
       const org = await db.collection('organizaciones').findOne({ _id: remito.orgId });
+      // 24/11/2026 (pedido de Mato): el remito sale con los datos completos del cliente (domicilio, localidad, teléfono...).
+      const clienteOid = remito.clienteId ? toObjectId(remito.clienteId) : null;
+      const cliente = clienteOid ? await db.collection('clientes').findOne({ _id: clienteOid }) : null;
       // Mismo criterio que el Comprobante (3/10/2026, pedido de Mato: "en
       // remito tambien pone las dos unidades de medida") — se busca el
       // producto de cada ítem para saber si tiene `unidadesPorBulto`
@@ -1497,9 +1500,9 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
         : [];
       const productosPorId = {};
       productos.forEach(p => { productosPorId[String(p._id)] = p; });
-      return { remito, org, productosPorId };
+      return { remito, org, productosPorId, cliente };
     });
-    const { remito, org, productosPorId } = resultado;
+    const { remito, org, productosPorId, cliente } = resultado;
     const numeroFmt = String(remito.numero).padStart(5, '0');
     const filas = (remito.items || []).map(it => {
       const prod = it.productoId ? productosPorId[String(it.productoId)] : null;
@@ -1518,15 +1521,23 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
     const bodyHtml = `
       <h1>Remito Nº ${numeroFmt}</h1>
       <div class="datos-doc">
-        <div>
-          <strong>Cliente:</strong> ${escHtml(await nombreClienteImpreso(remito.clienteId, remito.clienteNombre))}<br>
-          <span class="muted">Comprobante asociado: Nº ${String(remito.ventaNumero).padStart(5, '0')}</span>
-        </div>
+        <div><span class="muted">Comprobante asociado: Nº ${String(remito.ventaNumero).padStart(5, '0')}</span></div>
         <div>
           <strong>Fecha:</strong> ${fechaLarga(remito.fecha)}<br>
           <strong>Depósito:</strong> ${escHtml(remito.depositoNombre)}
         </div>
       </div>
+      ${recuadroClienteComprobante({
+        nombre: await nombreClienteImpreso(remito.clienteId, remito.clienteNombre),
+        iva: (cliente && CATEGORIA_FISCAL_LABEL[cliente.categoriaFiscal]) || '',
+        cuit: cliente ? cliente.cuit : '',
+        domicilio: cliente ? cliente.domicilio : '',
+        localidad: cliente ? cliente.localidad : '',
+        provincia: cliente ? cliente.provincia : '',
+        telefono: cliente ? [cliente.celular, cliente.telefono].filter(Boolean).join(' / ') : '',
+        email: cliente ? cliente.email : '',
+        observaciones: ''
+      })}
       <table>
         <thead><tr><th>Código</th><th>Producto</th><th class="num">Cantidad</th><th class="num">Bultos</th></tr></thead>
         <tbody>${filas || '<tr><td colspan="4" class="muted">Sin ítems</td></tr>'}</tbody>
@@ -1535,7 +1546,7 @@ router.get('/remitos/:id/imprimir', authAdmin, async (req, res) => {
       <p class="muted" style="margin-top:30px">Recibí conforme — firma y aclaración: ________________________________</p>
     `;
     res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml }));
+    res.send(paginaImprimible({ titulo: `Remito Nº ${numeroFmt}`, org: datosNegocioParaImprimir(org), bodyHtml, telefono: cliente ? (cliente.celular || cliente.telefono || '') : '' }));
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 

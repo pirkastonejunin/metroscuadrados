@@ -141,7 +141,7 @@ function encabezadoComprobante(org, { letra, numeroFmt, fecha, tituloGrande, cod
 // otra, Correo/Condición de pago en otra, Observaciones al final — cada
 // campo vacío se muestra igual (con el rótulo) para mantener el mismo
 // recuadro, como en el original.
-function recuadroClienteComprobante({ nombre, iva, cuit, domicilio, localidad, provincia, email, condicionPago, observaciones }) {
+function recuadroClienteComprobante({ nombre, iva, cuit, domicilio, localidad, provincia, telefono, email, condicionPago, observaciones }) {
   return `
     <div class="cmp-cliente-box">
       <div class="cmp-cliente-fila">
@@ -156,9 +156,9 @@ function recuadroClienteComprobante({ nombre, iva, cuit, domicilio, localidad, p
       </div>
       <div class="cmp-cliente-fila">
         <div><strong>CORREO ELECTRONICO:</strong> ${escapeHtml(email || '')}</div>
-        <div><strong>CONDICION PAGO:</strong> ${escapeHtml(condicionPago || '')}</div>
+        ${telefono !== undefined ? `<div><strong>TELEFONO:</strong> ${escapeHtml(telefono || '')}</div>` : `<div><strong>CONDICION PAGO:</strong> ${escapeHtml(condicionPago || '')}</div>`}
       </div>
-      <div class="cmp-cliente-fila"><div><strong>OBSERVACIONES:</strong> ${escapeHtml(observaciones || '')}</div></div>
+      ${observaciones === '' ? '' : `<div class="cmp-cliente-fila"><div><strong>OBSERVACIONES:</strong> ${escapeHtml(observaciones || '')}</div></div>`}
     </div>
   `;
 }
