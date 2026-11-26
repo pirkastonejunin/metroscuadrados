@@ -29,6 +29,7 @@ const assert = require('assert'); const { start } = require('./harness');
     { orgId: FAB, productoId: prod, tipo: 'ingreso', cantidad: 120, motivo: 'Producción de fábrica', fecha: hoy },
     { orgId: FAB, productoId: prod, tipo: 'ingreso', cantidad: 30, motivo: 'Producción de fábrica', fecha: hoy }
   ]);
+  await db.collection('stock_movimientos').insertOne({ orgId: PIRKA, productoId: prod, tipo: 'ingreso', cantidad: 5, motivo: 'Producción de fábrica', fecha: hoy }); // aunque Pirka tenga un movimiento así, la producción es solo de la fábrica
   const a = resumen.ahoraAR(); const fecha = a.fecha;
   const r = await resumen.armar(db, fecha, new Date(Date.now() + 60000));
   const pi = r.sucursales.find(s => s.nombre === 'Pirka'), fa = r.sucursales.find(s => s.nombre === 'Pn Factory');

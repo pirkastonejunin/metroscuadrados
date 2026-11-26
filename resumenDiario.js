@@ -55,7 +55,7 @@ function sumaMon(o, mon, n) { mon = mon || 'ARS'; o[mon] = r2((o[mon] || 0) + (N
 function textoMon(o) { const k = Object.keys(o || {}); return k.length ? k.map(m => fmt(o[m], m)).join(' + ') : fmt(0); }
 
 // Junta los números de UNA sucursal para el rango dado.
-async function resumenDeOrg(db, org, desde, hasta) {
+async function resumenDeOrg(db, org, desde, hasta, esFabrica) {
   const orgId = org._id;
   const rangoFecha = { $gte: desde, $lte: hasta };
   const out = { orgId, nombre: org.nombre || org.razonSocial || 'Sucursal' };
@@ -119,9 +119,8 @@ async function resumenDeOrg(db, org, desde, hasta) {
     out.visitas = { total: vis.length, porEstado, porVendedor: porVend, canceladas };
   }
 
-  // Producción: solo si la sucursal carga producción de fábrica.
-  const usaProd = await db.collection('stock_movimientos').findOne({ orgId, motivo: 'Producción de fábrica' }, { projection: { _id: 1 } });
-  if (usaProd) {
+  // Producción: solo en la sucursal de producción (la fábrica).
+  if (esFabrica) {
     const movs = await db.collection('stock_movimientos').find({ orgId, motivo: 'Producción de fábrica', tipo: 'ingreso', fecha: rangoFecha }).project({ productoId: 1, cantidad: 1 }).toArray();
     const porProd = new Map();
     movs.forEach(m => porProd.set(String(m.productoId), (porProd.get(String(m.productoId)) || 0) + (Number(m.cantidad) || 0)));
@@ -174,52 +173,53 @@ function comparacion(hoy, antes, dia) {
 }
 function chip(texto, color) { return `<span style="display:inline-block;background:#fff;border:1px solid ${COLOR.borde};border-radius:20px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;color:${color || '#374151'}">${texto}</span>`; }
 
+// Una línea de detalle chica: etiqueta a la izquierda, valor a la derecha.
+function lineaDetalle(etq, valor) {
+  return `<tr><td style="padding:5px 0;font-size:13px;color:${COLOR.gris};border-top:1px solid #f0e8e3" valign="top">${etq}</td><td align="right" style="padding:5px 0;font-size:13px;color:#1f2937;border-top:1px solid #f0e8e3">${valor}</td></tr>`;
+}
+
 function htmlSucursal(s, dia, base) {
   const dh = { desde: dia, hasta: dia };
   const L = (pantalla, params) => enlace(base, pantalla, s.orgId, params);
   const v = s.ventas, c = s.cobranzas, ant = s.anterior || { ventas: 0, cobrado: 0 };
-  const ventasARS = v.monto.ARS || 0, cobradoARS = c.monto.ARS || 0;
   const t = [];
-  t.push(tarjeta({ icono: '🛒', etiqueta: 'Ventas', valor: esc(textoMon(v.monto)), sub: `<b>${v.cantidad}</b> comprobante${v.cantidad === 1 ? '' : 's'}${v.fiscales ? ` · ${v.fiscales} fiscal${v.fiscales === 1 ? '' : 'es'}` : ''}`, extra: comparacion(ventasARS, ant.ventas, dia), color: COLOR.naranja, href: L('admin-ventas.html', dh) }));
-  t.push(tarjeta({ icono: '💰', etiqueta: 'Cobrado', valor: esc(textoMon(c.monto)), sub: `<b>${c.cantidad}</b> cobro${c.cantidad === 1 ? '' : 's'}`, extra: comparacion(cobradoARS, ant.cobrado, dia), color: COLOR.verde, href: L('admin-cobranza.html', dh) }));
+  // Cada tarjeta dice UNA cosa: el número grande y, debajo, una sola línea de contexto.
+  t.push(tarjeta({ icono: '🛒', etiqueta: 'Ventas', valor: esc(textoMon(v.monto)), sub: `${v.cantidad} comprobante${v.cantidad === 1 ? '' : 's'}`, extra: comparacion(v.monto.ARS || 0, ant.ventas, dia), color: COLOR.naranja, href: L('admin-ventas.html', dh) }));
+  t.push(tarjeta({ icono: '💰', etiqueta: 'Cobrado', valor: esc(textoMon(c.monto)), sub: `${c.cantidad} cobro${c.cantidad === 1 ? '' : 's'}`, extra: comparacion(c.monto.ARS || 0, ant.cobrado, dia), color: COLOR.verde, href: L('admin-cobranza.html', dh) }));
   if (s.visitas) {
-    const vi = s.visitas, sin = vi.porEstado.sin_visita || 0;
+    const vi = s.visitas, sin = vi.porEstado.sin_visita || 0, vend = vi.porEstado.vendido || 0;
     const partes = [];
-    if (vi.porEstado.vendido) partes.push(`${vi.porEstado.vendido} vendida${vi.porEstado.vendido === 1 ? '' : 's'}`);
-    if (vi.porEstado.presupuestada) partes.push(`${vi.porEstado.presupuestada} presupuestada${vi.porEstado.presupuestada === 1 ? '' : 's'}`);
-    if (vi.porEstado.instalado) partes.push(`${vi.porEstado.instalado} instalada${vi.porEstado.instalado === 1 ? '' : 's'}`);
-    t.push(tarjeta({ icono: '📍', etiqueta: 'Visitas', valor: String(vi.total), sub: partes.join(' · ') || (vi.total ? '' : 'Sin visitas agendadas'),
-      extra: sin ? `<span style="color:${COLOR.ambar};font-weight:bold">⚠ ${sin} sin cargar resultado</span>` : (vi.total ? `<span style="color:${COLOR.verde}">✓ todas cargadas</span>` : ''), color: '#2563eb', href: L('admin-visitas.html', Object.assign({}, dh, sin ? { estado: 'sin_visita' } : {})) }));
+    if (vend) partes.push(`${vend} vendida${vend === 1 ? '' : 's'}`);
+    if (sin) partes.push(`<span style="color:${COLOR.ambar};font-weight:bold">${sin} sin cargar</span>`);
+    t.push(tarjeta({ icono: '📍', etiqueta: 'Visitas', valor: String(vi.total), sub: partes.join(' · ') || (vi.total ? 'todas cargadas' : 'sin visitas'), color: '#2563eb', href: L('admin-visitas.html', Object.assign({}, dh, sin ? { estado: 'sin_visita' } : {})) }));
   }
   if (s.produccion) {
     const porUnidad = {};
     s.produccion.productos.forEach(x => { porUnidad[x.unidad || 'u.'] = r2((porUnidad[x.unidad || 'u.'] || 0) + x.cantidad); });
     const total = Object.entries(porUnidad).map(([u, n]) => `${num(n)} ${esc(u)}`).join(' + ') || '0';
-    t.push(tarjeta({ icono: '🏭', etiqueta: 'Producción', valor: total, sub: s.produccion.lineas ? `${s.produccion.lineas} producto${s.produccion.lineas === 1 ? '' : 's'}` : 'No se cargó producción', color: '#7c3aed', href: L('admin-stock.html', Object.assign({ tab: 'movimientos', origen: 'produccion' }, dh)) }));
+    t.push(tarjeta({ icono: '🏭', etiqueta: 'Producción', valor: total, sub: s.produccion.lineas ? `${s.produccion.lineas} producto${s.produccion.lineas === 1 ? '' : 's'}` : 'sin producción cargada', color: '#7c3aed', href: L('admin-stock.html', Object.assign({ tab: 'movimientos', origen: 'produccion' }, dh)) }));
   }
   const pe = s.pendientes;
-  t.push(tarjeta({ icono: '📦', etiqueta: 'Pendientes de entrega', valor: String(pe.cantidad), sub: pe.cantidad ? 'pedidos sin entregar' : 'Todo entregado',
-    extra: pe.antiguos ? `<span style="color:${COLOR.ambar};font-weight:bold">⚠ ${pe.antiguos} con más de 7 días</span>` : '', color: pe.antiguos ? COLOR.ambar : COLOR.gris, href: L('admin-ventas.html', { estado: 'pendiente' }) }));
-  if (s.gastos.cantidad) t.push(tarjeta({ icono: '🧾', etiqueta: 'Gastos', valor: esc(textoMon(s.gastos.monto)), sub: `<b>${s.gastos.cantidad}</b> cargado${s.gastos.cantidad === 1 ? '' : 's'}`, color: COLOR.rojo, href: L('admin-gastos.html', dh) }));
+  t.push(tarjeta({ icono: '📦', etiqueta: 'Pendientes de entrega', valor: String(pe.cantidad), sub: pe.cantidad ? (pe.antiguos ? `<span style="color:${COLOR.ambar};font-weight:bold">${pe.antiguos} hace más de 7 días</span>` : 'pedidos sin entregar') : 'todo entregado', color: pe.antiguos ? COLOR.ambar : COLOR.gris, href: L('admin-ventas.html', { estado: 'pendiente' }) }));
+  if (s.gastos.cantidad) t.push(tarjeta({ icono: '🧾', etiqueta: 'Gastos', valor: esc(textoMon(s.gastos.monto)), sub: `${s.gastos.cantidad} cargado${s.gastos.cantidad === 1 ? '' : 's'}`, color: COLOR.rojo, href: L('admin-gastos.html', dh) }));
 
-  // Detalles chicos, en "chips": medios de cobro, vendedores, notas de crédito, producción por producto.
-  const chips = [];
+  // Detalle: solo lo que aporta algo que las tarjetas no dicen, una línea por tema.
   const FORMA_CLAVE = { 'Efectivo': 'efectivo', 'Transferencia': 'cuenta', 'Tarjeta': 'tarjeta', 'Cheque': 'cheque' };
-  Object.entries(c.porForma).forEach(([f, m]) => { const hh = FORMA_CLAVE[f] ? L('admin-cobranza.html', Object.assign({ forma: FORMA_CLAVE[f] }, dh)) : null; const ch = chip(`${esc(f)}: <b>${esc(textoMon(m))}</b>`); chips.push(hh ? `<a href="${esc(hh)}" style="text-decoration:none;color:inherit">${ch}</a>` : ch); });
+  const det = [];
+  const formas = Object.entries(c.porForma);
+  if (formas.length > 1) det.push(lineaDetalle('Cobrado en', formas.map(([f, m]) => { const h = FORMA_CLAVE[f] ? L('admin-cobranza.html', Object.assign({ forma: FORMA_CLAVE[f] }, dh)) : null; const tx = `${esc(f)} <b>${esc(textoMon(m))}</b>`; return h ? `<a href="${esc(h)}" style="color:inherit;text-decoration:none">${tx}</a>` : tx; }).join(' · ')));
+  else if (formas.length === 1 && formas[0][0] !== 'Otros') det.push(lineaDetalle('Cobrado en', `${esc(formas[0][0])}`));
   const vends = Object.entries(v.porVendedor).sort((a, b) => b[1].cantidad - a[1].cantidad);
-  if (vends.length > 1) vends.forEach(([n, x]) => chips.push(chip(`👤 ${esc(n)}: <b>${x.cantidad}</b> (${esc(textoMon(x.monto))})`)));
-  if (v.notasCredito.cantidad) chips.push(chip(`↩ ${v.notasCredito.cantidad} nota${v.notasCredito.cantidad === 1 ? '' : 's'} de crédito: −${esc(textoMon(v.notasCredito.monto))}`, COLOR.rojo));
-  if (v.mayor) chips.push(chip(`⭐ Mayor venta: ${esc(v.mayor.cliente)} — <b>${fmt(v.mayor.total)}</b>`));
-  if (s.visitas && Object.keys(s.visitas.porVendedor).length > 1) Object.entries(s.visitas.porVendedor).forEach(([n, x]) => chips.push(chip(`📍 ${esc(n)}: ${x} visita${x === 1 ? '' : 's'}`)));
-  if (s.visitas && s.visitas.canceladas) chips.push(chip(`${s.visitas.canceladas} visita${s.visitas.canceladas === 1 ? '' : 's'} cancelada${s.visitas.canceladas === 1 ? '' : 's'}`, COLOR.gris));
-  if (s.produccion && s.produccion.lineas) s.produccion.productos.slice(0, 10).forEach(x => chips.push(chip(`🏭 ${esc(x.nombre)}: <b>${num(x.cantidad)} ${esc(x.unidad)}</b>`)));
-  if (s.produccion && s.produccion.productos.length > 10) chips.push(chip(`…y ${s.produccion.productos.length - 10} más`, COLOR.gris));
-
+  if (vends.length > 1) det.push(lineaDetalle('Por vendedor', vends.map(([n, x]) => `${esc(n)} <b>${esc(textoMon(x.monto))}</b> (${x.cantidad})`).join('<br>')));
+  if (v.notasCredito.cantidad) det.push(lineaDetalle('Notas de crédito', `<span style="color:${COLOR.rojo}">−${esc(textoMon(v.notasCredito.monto))}</span> (${v.notasCredito.cantidad})`));
+  if (s.produccion && s.produccion.productos.length) {
+    det.push(lineaDetalle('Producido', s.produccion.productos.slice(0, 8).map(x => `${esc(x.nombre)} <b>${num(x.cantidad)} ${esc(x.unidad)}</b>`).join('<br>') + (s.produccion.productos.length > 8 ? `<br><span style="color:${COLOR.gris}">y ${s.produccion.productos.length - 8} más</span>` : '')));
+  }
   const sinActividad = !v.cantidad && !c.cantidad && !(s.visitas && s.visitas.total) && !(s.produccion && s.produccion.lineas);
   return `<div style="border:1px solid ${COLOR.borde};border-radius:12px;padding:14px 14px 10px;margin:0 0 18px;background:#fff">
     <div style="font-size:19px;font-weight:bold;color:#1f2937;margin:0 0 8px 5px">${esc(s.nombre)}${sinActividad ? ` <span style="font-size:12px;font-weight:normal;color:${COLOR.gris}">— sin movimientos</span>` : ''}</div>
     ${filaTarjetas(t)}
-    ${chips.length ? `<div style="margin:8px 5px 2px">${chips.join('')}</div>` : ''}
+    ${det.length ? `<div style="padding:6px 5px 2px"><table width="100%" cellpadding="0" cellspacing="0">${det.join('')}</table></div>` : ''}
   </div>`;
 }
 
@@ -227,26 +227,26 @@ function htmlResumen(fechaISO, sucursales, titulo, baseUrl) {
   const base = baseDe(baseUrl);
   const total = {}, cob = {};
   sucursales.forEach(s => { Object.entries(s.ventas.monto).forEach(([m, n]) => sumaMon(total, m, n)); Object.entries(s.cobranzas.monto).forEach(([m, n]) => sumaMon(cob, m, n)); });
-  const cant = sucursales.reduce((t, s) => t + s.ventas.cantidad, 0);
-  const visitas = sucursales.reduce((t, s) => t + (s.visitas ? s.visitas.total : 0), 0);
+  // Alertas: lo único que pide una acción. Van arriba y no se repiten adentro de las tarjetas.
   const alertas = [];
   sucursales.forEach(s => {
-    if (s.visitas && s.visitas.porEstado.sin_visita) alertas.push(`<a href="${esc(enlace(base, 'admin-visitas.html', s.orgId, { desde: fechaISO, hasta: fechaISO, estado: 'sin_visita' }))}" style="color:${COLOR.ambar};text-decoration:underline"><b>${esc(s.nombre)}:</b> ${s.visitas.porEstado.sin_visita} visita${s.visitas.porEstado.sin_visita === 1 ? '' : 's'} sin cargar el resultado →</a>`);
+    const sin = s.visitas && s.visitas.porEstado.sin_visita;
+    if (sin) alertas.push(`<a href="${esc(enlace(base, 'admin-visitas.html', s.orgId, { desde: fechaISO, hasta: fechaISO, estado: 'sin_visita' }))}" style="color:${COLOR.ambar};text-decoration:underline"><b>${esc(s.nombre)}:</b> ${sin} visita${sin === 1 ? '' : 's'} sin cargar el resultado →</a>`);
     if (s.pendientes.antiguos) alertas.push(`<a href="${esc(enlace(base, 'admin-ventas.html', s.orgId, { estado: 'pendiente' }))}" style="color:${COLOR.ambar};text-decoration:underline"><b>${esc(s.nombre)}:</b> ${s.pendientes.antiguos} pedido${s.pendientes.antiguos === 1 ? '' : 's'} sin entregar hace más de 7 días →</a>`);
   });
-  const mini = (etq, val, col) => `<td align="center" style="padding:6px 4px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.85">${etq}</div><div style="font-size:20px;font-weight:bold;margin-top:2px;color:${col || '#fff'}">${val}</div></td>`;
+  const mini = (etq, val) => `<td align="center" style="padding:6px 4px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.85">${etq}</div><div style="font-size:24px;font-weight:bold;margin-top:2px">${val}</div></td>`;
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#222">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:16px 8px"><tr><td align="center">
 <table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%">
 <tr><td style="background:${COLOR.naranja};color:#fff;padding:18px 22px 10px;border-radius:12px 12px 0 0">
   <div style="font-size:21px;font-weight:bold">${esc(titulo || 'Resumen del día')}</div>
   <div style="font-size:13px;opacity:.92;margin-top:2px">${esc(fechaLarga(fechaISO).replace(/^./, c => c.toUpperCase()))}</div>
-  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;color:#fff"><tr>${mini('Vendido', esc(textoMon(total)))}${mini('Cobrado', esc(textoMon(cob)))}${mini('Ventas', String(cant))}${visitas ? mini('Visitas', String(visitas)) : ''}</tr></table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;color:#fff"><tr>${mini('Vendido', esc(textoMon(total)))}${mini('Cobrado', esc(textoMon(cob)))}</tr></table>
   <div style="font-size:11px;opacity:.8;text-align:center;padding:2px 0 4px">Suma de las sucursales (incluye ventas internas entre ellas)</div>
 </td></tr>
-${alertas.length ? `<tr><td style="background:#fffbeb;border:1px solid #fcd34d;border-top:none;padding:10px 18px;font-size:13px;color:${COLOR.ambar}"><div style="font-weight:bold;margin-bottom:3px">⚠ Para revisar</div>${alertas.map(a => `<div>• ${a}</div>`).join('')}</td></tr>` : ''}
+${alertas.length ? `<tr><td style="background:#fffbeb;border:1px solid #fcd34d;border-top:none;padding:10px 18px;font-size:13px;color:${COLOR.ambar}"><div style="font-weight:bold;margin-bottom:3px">⚠ Para revisar</div>${alertas.map(a => `<div style="margin-top:2px">${a}</div>`).join('')}</td></tr>` : ''}
 <tr><td style="padding:16px 0 0">${sucursales.map(x => htmlSucursal(x, fechaISO, base)).join('')}</td></tr>
-<tr><td style="font-size:11px;color:#888;text-align:center;padding:2px 12px 16px">Resumen automático del sistema. Sin ventas históricas de Dux ni comprobantes anulados. Tocá cualquier tarjeta para ver el detalle en el sistema. Las comparaciones son contra el mismo día de la semana pasada, en pesos.</td></tr>
+<tr><td style="font-size:11px;color:#888;text-align:center;padding:2px 12px 16px">Tocá cualquier tarjeta para ver el detalle en el sistema. Sin ventas históricas de Dux ni comprobantes anulados. Las comparaciones son contra el mismo día de la semana pasada, en pesos.</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -255,12 +255,24 @@ async function getConfig(db) {
   return { activo: c.activo === true, hora: /^\d{1,2}:\d{2}$/.test(c.hora || '') ? c.hora : '16:00', destinatarios: c.destinatarios || '', diasSemana: Array.isArray(c.diasSemana) ? c.diasSemana : [1, 2, 3, 4, 5, 6], dia: c.dia === 'ayer' ? 'ayer' : 'hoy', ultimoEnvio: c.ultimoEnvio || null, ultimoError: c.ultimoError || null };
 }
 
+// La sucursal de producción: la que está configurada como fábrica en el Estado de resultados; si no hay, la que se llama "Factory".
+async function fabricaOrgId(db, orgs) {
+  try {
+    const d = await db.collection('config_general').findOne({ clave: 'resultadosTransferenciaFabrica', orgId: { $exists: false } });
+    const id = d && d.valor && d.valor.fabricaOrgId;
+    if (id && orgs.some(o => String(o._id) === String(id))) return String(id);
+  } catch (e) { /* se usa el nombre */ }
+  const f = orgs.find(o => /factory|f[aá]brica/i.test(o.nombre || ''));
+  return f ? String(f._id) : null;
+}
+
 // Arma el resumen. fechaISO = día a resumir; hasta = límite superior (para "hoy" es el momento actual).
 async function armar(db, fechaISO, hastaMomento, baseUrl) {
   const orgs = await db.collection('organizaciones').find({ activa: { $ne: false } }).sort({ nombre: 1 }).toArray();
   const { desde, hasta } = rangoDelDia(fechaISO, hastaMomento);
   const sucursales = [];
-  for (const o of orgs) sucursales.push(await resumenDeOrg(db, o, desde, hasta));
+  const fabricaId = await fabricaOrgId(db, orgs);
+  for (const o of orgs) sucursales.push(await resumenDeOrg(db, o, desde, hasta, !!fabricaId && String(o._id) === fabricaId));
   return { fechaISO, sucursales, html: htmlResumen(fechaISO, sucursales, null, baseUrl) };
 }
 
