@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/enlace-resumen.js"></script>
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
@@ -334,7 +335,8 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarProductosYDepositos();
-  cambiarTab('actual');
+  aplicarEnlaceRes({desde:'fmDesde',hasta:'fmHasta',origen:'fmOrigen'});
+  cambiarTab(window.ENLACE_RES && window.ENLACE_RES.tab === 'movimientos' ? 'movimientos' : 'actual');
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 

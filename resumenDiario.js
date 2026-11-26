@@ -78,6 +78,13 @@ async function resumenDeOrg(db, org, desde, hasta) {
   }
   out.ventas = v;
 
+  // Para comparar: ventas netas y cobrado en pesos del mismo día de la semana pasada (mismo rango, 7 días antes).
+  const SEMANA = 7 * 86400000;
+  const rangoAnt = { $gte: new Date(desde.getTime() - SEMANA), $lte: new Date(hasta.getTime() - SEMANA) };
+  const vAnt = await db.collection('ventas').find({ orgId, fecha: rangoAnt, estado: { $ne: 'anulada' }, importado: { $ne: true }, moneda: { $ne: 'USD' } }).project({ total: 1, tipoComprobante: 1 }).toArray();
+  const cAnt = await db.collection('cuenta_corriente_movimientos').find({ orgId, tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, anulado: { $ne: true }, fecha: rangoAnt, moneda: { $ne: 'USD' } }).project({ monto: 1 }).toArray();
+  out.anterior = { ventas: r2(vAnt.reduce((t, x) => t + (x.tipoComprobante === 'nota_credito' ? -1 : 1) * (x.total || 0), 0)), cobrado: r2(cAnt.reduce((t, x) => t + (x.monto || 0), 0)) };
+
   // Cobranzas (cobros de ventas y cobros a cuenta, sin anulados), por forma de pago.
   const cobros = await db.collection('cuenta_corriente_movimientos').find({ orgId, tipo: 'credito', origen: { $in: ['cobro_venta', 'cobro_cuenta'] }, anulado: { $ne: true }, fecha: rangoFecha })
     .project({ monto: 1, moneda: 1, tipoValor: 1 }).toArray();
@@ -127,60 +134,119 @@ async function resumenDeOrg(db, org, desde, hasta) {
   return out;
 }
 
-function bloque(titulo, filas, extra) {
-  return `<div style="margin:0 0 14px"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#c0562b;font-weight:bold;margin-bottom:4px">${esc(titulo)}</div>${filas}${extra || ''}</div>`;
+// Dirección pública del sistema para los links del mail (PUBLIC_BASE_URL en Render; si no está, la de producción).
+function baseDe(baseUrl) { return String(baseUrl || process.env.PUBLIC_BASE_URL || 'https://metroscuadrados.onrender.com').replace(/\/+$/, ''); }
+// Link a una pantalla del sistema, ya en la sucursal y con los filtros del día (ver public/enlace-resumen.js).
+function enlace(base, pantalla, orgId, params) {
+  const q = new URLSearchParams(Object.assign({ org: String(orgId) }, params || {}));
+  return `${base}/${pantalla}?${q.toString()}`;
 }
-function fila(etq, valor, fuerte) { return `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;border-bottom:1px solid #f0e8e3;font-size:14px"><span style="color:#555">${etq}</span><span style="${fuerte ? 'font-weight:bold;font-size:15px' : ''}">${valor}</span></div>`; }
 
-function htmlSucursal(s) {
-  const partes = [];
-  const v = s.ventas;
-  let ventasHtml = fila('Ventas', `<b>${v.cantidad}</b> comprobante${v.cantidad === 1 ? '' : 's'}`) + fila('Monto vendido', textoMon(v.monto), true);
-  if (v.fiscales) ventasHtml += fila('Facturas fiscales', String(v.fiscales));
-  if (v.notasCredito.cantidad) ventasHtml += fila('Notas de crédito', `${v.notasCredito.cantidad} (−${textoMon(v.notasCredito.monto)})`);
-  const vends = Object.entries(v.porVendedor).sort((a, b) => b[1].cantidad - a[1].cantidad);
-  if (vends.length > 1) ventasHtml += fila('Por vendedor', vends.map(([n, x]) => `${esc(n)}: ${x.cantidad} (${textoMon(x.monto)})`).join('<br>'));
-  if (v.mayor) ventasHtml += fila('Venta más grande', `${esc(v.mayor.cliente)} — ${fmt(v.mayor.total)}`);
-  partes.push(bloque('Ventas', ventasHtml));
+// ---- Diseño del mail (tablas con estilos en línea: es lo único que respetan Gmail/Outlook/celular) ----
+const COLOR = { naranja: '#c0562b', verde: '#15803d', rojo: '#b91c1c', ambar: '#b45309', gris: '#6b7280', fondo: '#faf5f2', borde: '#e0cfc6' };
 
-  const c = s.cobranzas;
-  let cobHtml = fila('Cobranzas', `<b>${c.cantidad}</b> cobro${c.cantidad === 1 ? '' : 's'}`) + fila('Total cobrado', textoMon(c.monto), true);
-  Object.entries(c.porForma).forEach(([f, m]) => { cobHtml += fila('&nbsp;&nbsp;' + esc(f), textoMon(m)); });
-  partes.push(bloque('Cobranzas', cobHtml));
+// Tarjeta de un número grande: etiqueta arriba, valor, subtítulo y (opcional) línea de comparación.
+function tarjeta({ icono, etiqueta, valor, sub, extra, color, href }) {
+  const abre = href ? `<a href="${esc(href)}" style="text-decoration:none;color:inherit;display:block">` : '', cierra = href ? '</a>' : '';
+  return `<td width="50%" valign="top" style="padding:5px">${abre}<div style="background:${COLOR.fondo};border:1px solid ${COLOR.borde};border-radius:10px;padding:12px 14px;border-top:4px solid ${color || COLOR.naranja}">
+    <div style="font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:${COLOR.gris};font-weight:bold">${icono || ''} ${esc(etiqueta)}</div>
+    <div style="font-size:26px;font-weight:bold;line-height:1.25;margin-top:3px;color:#1f2937">${valor}</div>
+    ${sub ? `<div style="font-size:12px;color:#4b5563;margin-top:2px">${sub}</div>` : ''}
+    ${extra ? `<div style="font-size:12px;margin-top:4px">${extra}</div>` : ''}
+    ${href ? `<div style="font-size:11px;color:${COLOR.naranja};margin-top:6px;font-weight:bold">Ver detalle →</div>` : ''}
+  </div>${cierra}</td>`;
+}
+function filaTarjetas(tarjetas) {
+  const t = tarjetas.filter(Boolean);
+  if (!t.length) return '';
+  const filas = [];
+  for (let i = 0; i < t.length; i += 2) filas.push(`<tr>${t[i]}${t[i + 1] || '<td width="50%" style="padding:5px"></td>'}</tr>`);
+  return `<table width="100%" cellpadding="0" cellspacing="0">${filas.join('')}</table>`;
+}
+// Variación contra el mismo día de la semana pasada.
+function comparacion(hoy, antes, dia) {
+  const nombreDia = new Date(dia + 'T12:00:00-03:00').toLocaleDateString('es-AR', { timeZone: TZ, weekday: 'long' });
+  if (!antes && !hoy) return '';
+  if (!antes) return `<span style="color:${COLOR.verde}">▲ nuevo</span> <span style="color:${COLOR.gris}">(el ${nombreDia} pasado: $ 0)</span>`;
+  const pct = Math.round(((hoy - antes) / Math.abs(antes)) * 100);
+  const col = pct > 0 ? COLOR.verde : (pct < 0 ? COLOR.rojo : COLOR.gris);
+  return `<span style="color:${col};font-weight:bold">${pct > 0 ? '▲' : (pct < 0 ? '▼' : '=')} ${Math.abs(pct)}%</span> <span style="color:${COLOR.gris}">vs. el ${nombreDia} pasado</span>`;
+}
+function chip(texto, color) { return `<span style="display:inline-block;background:#fff;border:1px solid ${COLOR.borde};border-radius:20px;padding:3px 10px;margin:2px 4px 2px 0;font-size:12px;color:${color || '#374151'}">${texto}</span>`; }
 
+function htmlSucursal(s, dia, base) {
+  const dh = { desde: dia, hasta: dia };
+  const L = (pantalla, params) => enlace(base, pantalla, s.orgId, params);
+  const v = s.ventas, c = s.cobranzas, ant = s.anterior || { ventas: 0, cobrado: 0 };
+  const ventasARS = v.monto.ARS || 0, cobradoARS = c.monto.ARS || 0;
+  const t = [];
+  t.push(tarjeta({ icono: '🛒', etiqueta: 'Ventas', valor: esc(textoMon(v.monto)), sub: `<b>${v.cantidad}</b> comprobante${v.cantidad === 1 ? '' : 's'}${v.fiscales ? ` · ${v.fiscales} fiscal${v.fiscales === 1 ? '' : 'es'}` : ''}`, extra: comparacion(ventasARS, ant.ventas, dia), color: COLOR.naranja, href: L('admin-ventas.html', dh) }));
+  t.push(tarjeta({ icono: '💰', etiqueta: 'Cobrado', valor: esc(textoMon(c.monto)), sub: `<b>${c.cantidad}</b> cobro${c.cantidad === 1 ? '' : 's'}`, extra: comparacion(cobradoARS, ant.cobrado, dia), color: COLOR.verde, href: L('admin-cobranza.html', dh) }));
   if (s.visitas) {
-    const vi = s.visitas;
-    let h = fila('Visitas del día', `<b>${vi.total}</b>`, true);
-    Object.keys(ESTADO_VISITA).forEach(k => { if (vi.porEstado[k]) h += fila('&nbsp;&nbsp;' + ESTADO_VISITA[k], String(vi.porEstado[k])); });
-    if (vi.canceladas) h += fila('Canceladas', String(vi.canceladas));
-    const pv = Object.entries(vi.porVendedor);
-    if (pv.length > 1) h += fila('Por vendedor', pv.map(([n, x]) => `${esc(n)}: ${x}`).join('<br>'));
-    if (vi.porEstado.sin_visita) h += `<div style="font-size:12px;color:#b45309;margin-top:3px">⚠ ${vi.porEstado.sin_visita} visita${vi.porEstado.sin_visita === 1 ? '' : 's'} todavía sin cargar el resultado.</div>`;
-    partes.push(bloque('Visitas', h));
+    const vi = s.visitas, sin = vi.porEstado.sin_visita || 0;
+    const partes = [];
+    if (vi.porEstado.vendido) partes.push(`${vi.porEstado.vendido} vendida${vi.porEstado.vendido === 1 ? '' : 's'}`);
+    if (vi.porEstado.presupuestada) partes.push(`${vi.porEstado.presupuestada} presupuestada${vi.porEstado.presupuestada === 1 ? '' : 's'}`);
+    if (vi.porEstado.instalado) partes.push(`${vi.porEstado.instalado} instalada${vi.porEstado.instalado === 1 ? '' : 's'}`);
+    t.push(tarjeta({ icono: '📍', etiqueta: 'Visitas', valor: String(vi.total), sub: partes.join(' · ') || (vi.total ? '' : 'Sin visitas agendadas'),
+      extra: sin ? `<span style="color:${COLOR.ambar};font-weight:bold">⚠ ${sin} sin cargar resultado</span>` : (vi.total ? `<span style="color:${COLOR.verde}">✓ todas cargadas</span>` : ''), color: '#2563eb', href: L('admin-visitas.html', Object.assign({}, dh, sin ? { estado: 'sin_visita' } : {})) }));
   }
   if (s.produccion) {
-    const p = s.produccion;
-    let h = p.lineas ? p.productos.slice(0, 12).map(x => fila(esc(x.nombre), `${num(x.cantidad)} ${esc(x.unidad)}`)).join('') + (p.productos.length > 12 ? `<div style="font-size:12px;color:#777">…y ${p.productos.length - 12} producto(s) más</div>` : '') : '<div style="font-size:14px;color:#777">Hoy no se cargó producción.</div>';
-    partes.push(bloque('Producción', h));
+    const porUnidad = {};
+    s.produccion.productos.forEach(x => { porUnidad[x.unidad || 'u.'] = r2((porUnidad[x.unidad || 'u.'] || 0) + x.cantidad); });
+    const total = Object.entries(porUnidad).map(([u, n]) => `${num(n)} ${esc(u)}`).join(' + ') || '0';
+    t.push(tarjeta({ icono: '🏭', etiqueta: 'Producción', valor: total, sub: s.produccion.lineas ? `${s.produccion.lineas} producto${s.produccion.lineas === 1 ? '' : 's'}` : 'No se cargó producción', color: '#7c3aed', href: L('admin-stock.html', Object.assign({ tab: 'movimientos', origen: 'produccion' }, dh)) }));
   }
-  let otros = fila('Gastos cargados', s.gastos.cantidad ? `${s.gastos.cantidad} (${textoMon(s.gastos.monto)})` : 'Ninguno');
-  otros += fila('Pedidos pendientes de entrega', s.pendientes.cantidad ? `<b>${s.pendientes.cantidad}</b>${s.pendientes.antiguos ? ` <span style="color:#b45309">(${s.pendientes.antiguos} con más de 7 días)</span>` : ''}` : 'Ninguno');
-  partes.push(bloque('Otros datos', otros));
-  return `<div style="border:1px solid #e0cfc6;border-radius:10px;padding:14px 16px;margin:0 0 16px;background:#fff"><div style="font-size:18px;font-weight:bold;margin-bottom:10px;color:#222">${esc(s.nombre)}</div>${partes.join('')}</div>`;
+  const pe = s.pendientes;
+  t.push(tarjeta({ icono: '📦', etiqueta: 'Pendientes de entrega', valor: String(pe.cantidad), sub: pe.cantidad ? 'pedidos sin entregar' : 'Todo entregado',
+    extra: pe.antiguos ? `<span style="color:${COLOR.ambar};font-weight:bold">⚠ ${pe.antiguos} con más de 7 días</span>` : '', color: pe.antiguos ? COLOR.ambar : COLOR.gris, href: L('admin-ventas.html', { estado: 'pendiente' }) }));
+  if (s.gastos.cantidad) t.push(tarjeta({ icono: '🧾', etiqueta: 'Gastos', valor: esc(textoMon(s.gastos.monto)), sub: `<b>${s.gastos.cantidad}</b> cargado${s.gastos.cantidad === 1 ? '' : 's'}`, color: COLOR.rojo, href: L('admin-gastos.html', dh) }));
+
+  // Detalles chicos, en "chips": medios de cobro, vendedores, notas de crédito, producción por producto.
+  const chips = [];
+  const FORMA_CLAVE = { 'Efectivo': 'efectivo', 'Transferencia': 'cuenta', 'Tarjeta': 'tarjeta', 'Cheque': 'cheque' };
+  Object.entries(c.porForma).forEach(([f, m]) => { const hh = FORMA_CLAVE[f] ? L('admin-cobranza.html', Object.assign({ forma: FORMA_CLAVE[f] }, dh)) : null; const ch = chip(`${esc(f)}: <b>${esc(textoMon(m))}</b>`); chips.push(hh ? `<a href="${esc(hh)}" style="text-decoration:none;color:inherit">${ch}</a>` : ch); });
+  const vends = Object.entries(v.porVendedor).sort((a, b) => b[1].cantidad - a[1].cantidad);
+  if (vends.length > 1) vends.forEach(([n, x]) => chips.push(chip(`👤 ${esc(n)}: <b>${x.cantidad}</b> (${esc(textoMon(x.monto))})`)));
+  if (v.notasCredito.cantidad) chips.push(chip(`↩ ${v.notasCredito.cantidad} nota${v.notasCredito.cantidad === 1 ? '' : 's'} de crédito: −${esc(textoMon(v.notasCredito.monto))}`, COLOR.rojo));
+  if (v.mayor) chips.push(chip(`⭐ Mayor venta: ${esc(v.mayor.cliente)} — <b>${fmt(v.mayor.total)}</b>`));
+  if (s.visitas && Object.keys(s.visitas.porVendedor).length > 1) Object.entries(s.visitas.porVendedor).forEach(([n, x]) => chips.push(chip(`📍 ${esc(n)}: ${x} visita${x === 1 ? '' : 's'}`)));
+  if (s.visitas && s.visitas.canceladas) chips.push(chip(`${s.visitas.canceladas} visita${s.visitas.canceladas === 1 ? '' : 's'} cancelada${s.visitas.canceladas === 1 ? '' : 's'}`, COLOR.gris));
+  if (s.produccion && s.produccion.lineas) s.produccion.productos.slice(0, 10).forEach(x => chips.push(chip(`🏭 ${esc(x.nombre)}: <b>${num(x.cantidad)} ${esc(x.unidad)}</b>`)));
+  if (s.produccion && s.produccion.productos.length > 10) chips.push(chip(`…y ${s.produccion.productos.length - 10} más`, COLOR.gris));
+
+  const sinActividad = !v.cantidad && !c.cantidad && !(s.visitas && s.visitas.total) && !(s.produccion && s.produccion.lineas);
+  return `<div style="border:1px solid ${COLOR.borde};border-radius:12px;padding:14px 14px 10px;margin:0 0 18px;background:#fff">
+    <div style="font-size:19px;font-weight:bold;color:#1f2937;margin:0 0 8px 5px">${esc(s.nombre)}${sinActividad ? ` <span style="font-size:12px;font-weight:normal;color:${COLOR.gris}">— sin movimientos</span>` : ''}</div>
+    ${filaTarjetas(t)}
+    ${chips.length ? `<div style="margin:8px 5px 2px">${chips.join('')}</div>` : ''}
+  </div>`;
 }
 
-function htmlResumen(fechaISO, sucursales, titulo) {
+function htmlResumen(fechaISO, sucursales, titulo, baseUrl) {
+  const base = baseDe(baseUrl);
   const total = {}, cob = {};
   sucursales.forEach(s => { Object.entries(s.ventas.monto).forEach(([m, n]) => sumaMon(total, m, n)); Object.entries(s.cobranzas.monto).forEach(([m, n]) => sumaMon(cob, m, n)); });
   const cant = sucursales.reduce((t, s) => t + s.ventas.cantidad, 0);
-  return `<!doctype html><html><body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#222">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:20px 0"><tr><td align="center">
-<table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%">
-<tr><td style="background:#c0562b;color:#fff;padding:18px 22px;border-radius:10px 10px 0 0"><div style="font-size:20px;font-weight:bold">${esc(titulo || 'Resumen del día')}</div><div style="font-size:13px;opacity:.9;margin-top:2px">${esc(fechaLarga(fechaISO).replace(/^./, c => c.toUpperCase()))}</div></td></tr>
-<tr><td style="background:#faf5f2;padding:16px 22px;border:1px solid #e0cfc6;border-top:none;font-size:14px">
-<b>Suma de las sucursales</b> (incluye ventas internas entre ellas): ${cant} venta${cant === 1 ? '' : 's'} por <b>${esc(textoMon(total))}</b> · cobrado <b>${esc(textoMon(cob))}</b></td></tr>
-<tr><td style="padding:16px 0 0">${sucursales.map(htmlSucursal).join('')}</td></tr>
-<tr><td style="font-size:11px;color:#888;text-align:center;padding:4px 0 16px">Resumen automático del sistema. Los montos son del día, sin ventas históricas de Dux ni comprobantes anulados.</td></tr>
+  const visitas = sucursales.reduce((t, s) => t + (s.visitas ? s.visitas.total : 0), 0);
+  const alertas = [];
+  sucursales.forEach(s => {
+    if (s.visitas && s.visitas.porEstado.sin_visita) alertas.push(`<a href="${esc(enlace(base, 'admin-visitas.html', s.orgId, { desde: fechaISO, hasta: fechaISO, estado: 'sin_visita' }))}" style="color:${COLOR.ambar};text-decoration:underline"><b>${esc(s.nombre)}:</b> ${s.visitas.porEstado.sin_visita} visita${s.visitas.porEstado.sin_visita === 1 ? '' : 's'} sin cargar el resultado →</a>`);
+    if (s.pendientes.antiguos) alertas.push(`<a href="${esc(enlace(base, 'admin-ventas.html', s.orgId, { estado: 'pendiente' }))}" style="color:${COLOR.ambar};text-decoration:underline"><b>${esc(s.nombre)}:</b> ${s.pendientes.antiguos} pedido${s.pendientes.antiguos === 1 ? '' : 's'} sin entregar hace más de 7 días →</a>`);
+  });
+  const mini = (etq, val, col) => `<td align="center" style="padding:6px 4px"><div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.85">${etq}</div><div style="font-size:20px;font-weight:bold;margin-top:2px;color:${col || '#fff'}">${val}</div></td>`;
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#222">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f5;padding:16px 8px"><tr><td align="center">
+<table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%">
+<tr><td style="background:${COLOR.naranja};color:#fff;padding:18px 22px 10px;border-radius:12px 12px 0 0">
+  <div style="font-size:21px;font-weight:bold">${esc(titulo || 'Resumen del día')}</div>
+  <div style="font-size:13px;opacity:.92;margin-top:2px">${esc(fechaLarga(fechaISO).replace(/^./, c => c.toUpperCase()))}</div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;color:#fff"><tr>${mini('Vendido', esc(textoMon(total)))}${mini('Cobrado', esc(textoMon(cob)))}${mini('Ventas', String(cant))}${visitas ? mini('Visitas', String(visitas)) : ''}</tr></table>
+  <div style="font-size:11px;opacity:.8;text-align:center;padding:2px 0 4px">Suma de las sucursales (incluye ventas internas entre ellas)</div>
+</td></tr>
+${alertas.length ? `<tr><td style="background:#fffbeb;border:1px solid #fcd34d;border-top:none;padding:10px 18px;font-size:13px;color:${COLOR.ambar}"><div style="font-weight:bold;margin-bottom:3px">⚠ Para revisar</div>${alertas.map(a => `<div>• ${a}</div>`).join('')}</td></tr>` : ''}
+<tr><td style="padding:16px 0 0">${sucursales.map(x => htmlSucursal(x, fechaISO, base)).join('')}</td></tr>
+<tr><td style="font-size:11px;color:#888;text-align:center;padding:2px 12px 16px">Resumen automático del sistema. Sin ventas históricas de Dux ni comprobantes anulados. Tocá cualquier tarjeta para ver el detalle en el sistema. Las comparaciones son contra el mismo día de la semana pasada, en pesos.</td></tr>
 </table></td></tr></table></body></html>`;
 }
 
@@ -190,12 +256,12 @@ async function getConfig(db) {
 }
 
 // Arma el resumen. fechaISO = día a resumir; hasta = límite superior (para "hoy" es el momento actual).
-async function armar(db, fechaISO, hastaMomento) {
+async function armar(db, fechaISO, hastaMomento, baseUrl) {
   const orgs = await db.collection('organizaciones').find({ activa: { $ne: false } }).sort({ nombre: 1 }).toArray();
   const { desde, hasta } = rangoDelDia(fechaISO, hastaMomento);
   const sucursales = [];
   for (const o of orgs) sucursales.push(await resumenDeOrg(db, o, desde, hasta));
-  return { fechaISO, sucursales, html: htmlResumen(fechaISO, sucursales) };
+  return { fechaISO, sucursales, html: htmlResumen(fechaISO, sucursales, null, baseUrl) };
 }
 
 async function destinatariosDe(db, cfg) {
@@ -205,14 +271,14 @@ async function destinatariosDe(db, cfg) {
 }
 
 // Envía el resumen. forzar=true ignora el "ya se mandó hoy" (botón "Enviar ahora").
-async function enviar(db, { forzar, fechaISO, para } = {}) {
+async function enviar(db, { forzar, fechaISO, para, baseUrl } = {}) {
   const cfg = await getConfig(db);
   const ahora = ahoraAR();
   const dia = fechaISO || (cfg.dia === 'ayer' ? sumarDias(ahora.fecha, -1) : ahora.fecha);
   const hasta = (!fechaISO && cfg.dia !== 'ayer') ? new Date() : undefined;
   const destino = para && para.length ? para : await destinatariosDe(db, cfg);
   if (!destino.length) throw err(400, 'Falta indicar a qué mail se envía el resumen.');
-  const r = await armar(db, dia, hasta);
+  const r = await armar(db, dia, hasta, baseUrl);
   await correo.enviarMail(db, { para: destino, asunto: `Resumen del día — ${fechaLarga(dia)}`, html: r.html });
   return { ok: true, para: destino, fecha: dia, sucursales: r.sucursales.length };
 }
@@ -275,7 +341,7 @@ router.post('/config', authAdmin, async (req, res) => {
 router.get('/vista-previa', authAdmin, async (req, res) => {
   try {
     const f = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.fecha || '')) ? req.query.fecha : null;
-    const r = await conReintento(async () => { const db = await getDb(); const cfg = await getConfig(db); const a = ahoraAR(); const dia = f || (cfg.dia === 'ayer' ? sumarDias(a.fecha, -1) : a.fecha); return armar(db, dia, (!f && cfg.dia !== 'ayer') ? new Date() : undefined); });
+    const r = await conReintento(async () => { const db = await getDb(); const cfg = await getConfig(db); const a = ahoraAR(); const dia = f || (cfg.dia === 'ayer' ? sumarDias(a.fecha, -1) : a.fecha); return armar(db, dia, (!f && cfg.dia !== 'ayer') ? new Date() : undefined, correo.baseUrlDe(req)); });
     res.set('Content-Type', 'text/html; charset=utf-8'); res.send(r.html);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -284,7 +350,7 @@ router.post('/enviar-ahora', authAdmin, async (req, res) => {
   try {
     soloAdmin(req);
     const b = req.body || {};
-    const out = await conReintento(async () => enviar(await getDb(), { forzar: true, fechaISO: /^\d{4}-\d{2}-\d{2}$/.test(String(b.fecha || '')) ? b.fecha : null, para: correo.mailsValidos(b.para) }));
+    const out = await conReintento(async () => enviar(await getDb(), { forzar: true, fechaISO: /^\d{4}-\d{2}-\d{2}$/.test(String(b.fecha || '')) ? b.fecha : null, para: correo.mailsValidos(b.para), baseUrl: correo.baseUrlDe(req) }));
     res.json(out);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });

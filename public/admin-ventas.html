@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<script src="/enlace-resumen.js"></script>
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
@@ -307,6 +308,7 @@ async function iniciarApp(){
   document.getElementById('topbarUser').textContent = NOMBRE_USUARIO;
   await cargarListasBase();
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
+  aplicarEnlaceRes({desde:'fvDesde',hasta:'fvHasta',estado:'fvEstado'});
   await cargarVentas();
   abrirVentaDesdePresupuestoSiCorresponde();
   retomarDuplicadoSiCorresponde();

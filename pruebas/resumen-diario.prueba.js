@@ -39,6 +39,10 @@ const assert = require('assert'); const { start } = require('./harness');
   assert(!pi.produccion, 'Pirka no produce');
   assert(!fa.visitas, 'la fábrica no tiene visitas');
   assert.strictEqual(fa.produccion.productos[0].cantidad, 150);
+  const rl = await resumen.armar(db, fecha, new Date(Date.now() + 60000), 'https://x.test');
+  assert(rl.html.includes(`https://x.test/admin-ventas.html?org=${PIRKA}&amp;desde=${fecha}&amp;hasta=${fecha}`), 'link a ventas');
+  assert(rl.html.includes('admin-visitas.html?org=' + PIRKA) && rl.html.includes('estado=sin_visita'), 'link a visitas sin cargar');
+  assert(rl.html.includes('origen=produccion') && rl.html.includes('tab=movimientos'), 'link a producción');
   assert(/Pirka/.test(r.html) && /Producción/.test(r.html) && /Visitas/.test(r.html));
   // Config + envío
   let c = await api('POST', '/api/resumen-diario/config', { activo: true, hora: '00:00', destinatarios: 'mato@x.com; otro@y.com', diasSemana: [0,1,2,3,4,5,6] });

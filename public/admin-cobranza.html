@@ -20,6 +20,7 @@
   cliente (requiere módulo 'tesoreria' — es la que mueve la plata de
   verdad, por eso esta pantalla pide ese módulo para entrar).
 -->
+<script src="/enlace-resumen.js"></script>
 <script src="/nav-sidebar.js"></script>
 <script src="/btn-iconos.js"></script>
 <script src="/menu-acciones.js"></script>
@@ -287,6 +288,7 @@ async function iniciarApp(){
   await Promise.all([cargarCajasYBancosCB(), asegurarClientesCargadosCB()]);
   document.getElementById('cbClienteCombo').innerHTML = comboClienteHtmlCB();
   document.getElementById('cbFecha').value = new Date(Date.now()-3*3600000).toISOString().slice(0,10);
+  aplicarEnlaceRes({desde:'lcDesde',hasta:'lcHasta',forma:'lcForma'});
   cargarListaCobranzas();
   await ImpuestosUI.cargarTipos(BASE, headersAuth);
   document.getElementById('cbRetBloque').innerHTML = ImpuestosUI.bloqueHtml('impCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente', onChange: 'actualizarResumenCB' });
