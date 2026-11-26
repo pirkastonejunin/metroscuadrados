@@ -96,6 +96,7 @@ const tesoreriaRouter = require('./tesoreria');
 app.use('/api/tesoreria', tesoreriaRouter);
 app.use('/api/financiera', require('./financiera'));
 app.use('/api/correo', require('./correo'));
+app.use('/api/resumen-diario', require('./resumenDiario'));
 app.use('/api/integraciones', require('./integraciones'));
 app.use('/api/migrar-fotos', require('./migrarFotos'));
 

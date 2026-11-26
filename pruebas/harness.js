@@ -93,6 +93,7 @@ async function start(port = 4010, opciones = {}) {
   app.use('/api/tesoreria', require(path.join(REPO, 'tesoreria.js')));
   app.use('/api/financiera', require(path.join(REPO, 'financiera.js')));
   app.use('/api/correo', require(path.join(REPO, 'correo.js')));
+  app.use('/api/resumen-diario', require(path.join(REPO, 'resumenDiario.js')));
   app.use('/api/clientes', require(path.join(REPO, 'clientes.js')));
   try { app.use('/api/presupuestos', require(path.join(REPO, 'presupuestos.js'))); } catch (e) { console.log('presupuestos no montado', e.message); }
   try { app.use('/api/notificaciones', require(path.join(REPO, 'notificaciones.js'))); } catch (e) { console.log('notif no montado', e.message); }

@@ -107,6 +107,11 @@
       <p style="margin-top:0">Cuando se emite una <b>venta, nota de crédito o nota de débito</b>, o se registra un <b>cobro o una cobranza</b>, el sistema le manda un mail al cliente que tenga correo cargado, con el link para ver el comprobante o el recibo. Las facturas fiscales salen recién cuando ARCA les da el CAE. Un cliente se puede excluir desde su ficha ("No enviarle mails automáticos").</p>
       <div id="estado" class="muted">Cargando…</div>
     </div>
+    <div class="card" id="resumenCard" style="margin-top:16px">
+      <h3 style="margin:0 0 6px">Resumen diario por sucursal</h3>
+      <p class="muted" style="margin:0 0 10px">Todos los días a la hora elegida te llega un mail con lo que se hizo en cada sucursal: ventas, cobranzas, gastos, pedidos pendientes y, donde corresponda, visitas y producción. Sale con la cuenta de Gmail conectada acá arriba.</p>
+      <div id="resumenCont" class="muted">Cargando…</div>
+    </div>
   </main>
 </div>
 <div id="modalRoot"></div>
@@ -147,6 +152,7 @@ async function iniciarApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('topbarUser').textContent = (me.usuario && me.usuario.nombre) || '';
   await cargar();
+  cargarResumen();
 }
 if (TOKEN) iniciarApp(); else document.getElementById('loginScreen').classList.remove('hidden');
 
@@ -212,6 +218,58 @@ async function enviarPrueba(){
     const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
     alert('Mail de prueba enviado a ' + d.para.join(', ') + '. Revisá la bandeja (y spam).');
   }catch(e){ document.getElementById('cfgErr').textContent = e.message; }
+}
+
+// Resumen diario (26/11/2026, pedido de Mato).
+const RES = '/api/resumen-diario';
+const DIAS_RES = [[1,'Lun'],[2,'Mar'],[3,'Mié'],[4,'Jue'],[5,'Vie'],[6,'Sáb'],[0,'Dom']];
+async function cargarResumen(){
+  const cont = document.getElementById('resumenCont'); if (!cont) return;
+  try{
+    const r = await fetch(RES + '/config', {headers: headersAuth()}); const c = await r.json(); if (!r.ok) throw new Error(c.error || 'Error');
+    cont.className = '';
+    cont.innerHTML = `
+      <label style="display:flex;align-items:center;gap:6px;font-weight:600;margin:0 0 10px"><input type="checkbox" id="rdActivo" style="width:auto" ${c.activo ? 'checked' : ''}> Enviar el resumen todos los días</label>
+      <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <div style="min-width:120px"><label>Hora</label><input id="rdHora" type="time" value="${escapeHtml(c.hora)}"></div>
+        <div style="min-width:260px;flex:1"><label>Mails destinatarios (separados por ;)</label><input id="rdDest" value="${escapeHtml(c.destinatarios)}" placeholder="Si lo dejás vacío, va al mail de la cuenta conectada"></div>
+        <div style="min-width:200px"><label>Qué día resume</label><select id="rdDia"><option value="hoy" ${c.dia === 'hoy' ? 'selected' : ''}>El día de hoy (hasta la hora de envío)</option><option value="ayer" ${c.dia === 'ayer' ? 'selected' : ''}>El día anterior completo</option></select></div>
+      </div>
+      <div style="margin:10px 0">Días de envío: ${DIAS_RES.map(([n, t]) => `<label style="display:inline-flex;align-items:center;gap:3px;margin-right:10px;font-weight:400"><input type="checkbox" class="rdDiaSem" value="${n}" style="width:auto" ${c.diasSemana.includes(n) ? 'checked' : ''}> ${t}</label>`).join('')}</div>
+      <div class="row" style="gap:8px">
+        <button class="btn" onclick="guardarResumen()">Guardar</button>
+        <button class="btn secondary" onclick="verVistaPreviaResumen()">Ver vista previa</button>
+        <button class="btn secondary" onclick="enviarResumenAhora()">Enviar ahora</button>
+      </div>
+      ${c.ultimoEnvio ? `<p class="muted" style="margin:8px 0 0;font-size:12px">Último envío automático: ${escapeHtml(c.ultimoEnvio)}</p>` : ''}
+      ${c.ultimoError ? `<p class="err" style="margin:8px 0 0">Último error: ${escapeHtml(c.ultimoError)}</p>` : ''}
+      <div class="err" id="rdErr"></div>`;
+  }catch(e){ cont.innerHTML = '<span class="err">' + escapeHtml(e.message) + '</span>'; }
+}
+async function guardarResumen(){
+  const err = document.getElementById('rdErr'); err.textContent = '';
+  try{
+    const body = { activo: document.getElementById('rdActivo').checked, hora: document.getElementById('rdHora').value, destinatarios: document.getElementById('rdDest').value, dia: document.getElementById('rdDia').value,
+      diasSemana: [...document.querySelectorAll('.rdDiaSem:checked')].map(x => Number(x.value)) };
+    const r = await fetch(RES + '/config', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    alert('Guardado.'); await cargarResumen();
+  }catch(e){ err.textContent = e.message; }
+}
+async function verVistaPreviaResumen(){
+  const err = document.getElementById('rdErr'); err.textContent = '';
+  try{
+    const r = await fetch(RES + '/vista-previa', {headers: headersAuth()});
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Error'); }
+    const w = window.open('', '_blank'); if (!w) throw new Error('El navegador bloqueó la ventana: permitila para ver la vista previa.');
+    w.document.open(); w.document.write(await r.text()); w.document.close();
+  }catch(e){ err.textContent = e.message; }
+}
+async function enviarResumenAhora(){
+  const err = document.getElementById('rdErr'); err.textContent = '';
+  try{
+    const r = await fetch(RES + '/enviar-ahora', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({ para: document.getElementById('rdDest').value })}); const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Error');
+    alert('Resumen enviado a ' + d.para.join(', ') + '. Revisá la bandeja (y spam).');
+  }catch(e){ err.textContent = e.message; }
 }
 async function desconectar(){
   if (!confirm('¿Desconectar Gmail? Se deja de enviar mails automáticos hasta que lo conectes de nuevo.')) return;

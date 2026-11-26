@@ -67,6 +67,7 @@ function mailsValidos(campo) {
   return String(campo || '').split(/[;, \n]+/).map(s => s.trim()).filter(s => /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(s));
 }
 router.mailsValidos = mailsValidos;
+router.enviarMail = (db, datos) => enviarMail(db, datos);
 
 function encabezadoMime(texto) { return /^[\x20-\x7e]*$/.test(texto) ? texto : '=?UTF-8?B?' + Buffer.from(texto, 'utf8').toString('base64') + '?='; }
 function armarMime({ desde, nombreDesde, para, asunto, html }) {
