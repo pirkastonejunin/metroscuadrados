@@ -1832,6 +1832,38 @@ router.get('/matriz-listas', authAdmin, async (req, res) => {
   try { res.json(await armarMatriz(req)); } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 // PDF imprimible con las listas elegidas (?listas=id1,id2): una columna de precios por lista, sin costos internos.
+// Misma tabla que el PDF pero en Excel (27/11/2026, pedido de Mato: "en producción, en la lista de precios quiero poder exportarla en Excel").
+// Una columna de precios por lista elegida; sin costos. Con el mismo criterio de rubros que el PDF.
+router.get('/matriz-listas/xlsx', authAdmin, async (req, res) => {
+  try {
+    const m = await armarMatriz(req);
+    const ids = String(req.query.listas || '').split(',').filter(Boolean);
+    const listas = m.listas.filter(l => ids.includes(l._id));
+    if (!listas.length) throw err(400, 'Elegí al menos una lista.');
+    const productos = m.productos.filter(p => listas.some(l => p.celdas[l._id].precio != null));
+    const conRubros = req.query.rubros !== '0';
+    const orden = conRubros
+      ? productos.slice().sort((a, b) => String(a.rubro || '\uffff').localeCompare(String(b.rubro || '\uffff'), 'es') || String(a.nombre).localeCompare(String(b.nombre), 'es'))
+      : productos;
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const filas = [['Lista de precios'], ['Vigente al ' + fecha], []];
+    filas.push([].concat(conRubros ? ['Rubro'] : [], ['Producto', 'Precio por', 'Bulto'], listas.map(l => l.nombre)));
+    orden.forEach(p => filas.push([].concat(
+      conRubros ? [p.rubro || 'Otros'] : [],
+      [p.nombre, p.unidadTxt || '', p.bultoTxt || ''],
+      listas.map(l => { const pr = p.celdas[l._id].precio; return pr == null ? '' : Number(Number(pr).toFixed(2)); })
+    )));
+    filas.push([]); filas.push([LEYENDA_LISTA_PRECIO]);
+    const hoja = XLSX.utils.aoa_to_sheet(filas);
+    hoja['!cols'] = [].concat(conRubros ? [{ wch: 22 }] : [], [{ wch: 44 }, { wch: 12 }, { wch: 16 }], listas.map(() => ({ wch: 16 })));
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Lista de precios');
+    const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="lista-de-precios.xlsx"');
+    res.send(buffer);
+  } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ error: e.message }); }
+});
 router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
   try {
     const m = await armarMatriz(req);

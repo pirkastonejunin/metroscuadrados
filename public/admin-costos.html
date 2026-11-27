@@ -236,7 +236,7 @@
           <input id="mtBuscar" placeholder="Buscar producto o SKU" oninput="renderMatriz()" style="max-width:220px">
           <button class="btn secondary" onclick="abrirAgregarExtras()">+ Artículo de Productos</button>
           <button class="btn secondary" onclick="abrirAjustePorcentaje()">Ajustar precios por %</button>
-          <button class="btn secondary" onclick="abrirImprimirListas()">Imprimir PDF</button>
+          <button class="btn secondary" onclick="abrirImprimirListas()">Imprimir PDF / Excel</button>
           <button class="btn" id="btnMtGuardar" onclick="guardarMatriz()" disabled>Guardar cambios</button>
         </div>
         <div class="muted" style="margin:6px 0 8px">Cada celda: escribí un <b>%</b> sobre el costo o un <b>$</b> (precio final) para ese artículo. Vacía = se usa el cálculo general de la lista. "Aplicar a todos" pone el mismo % en toda la columna. Al guardar, los precios pasan solos a Productos.</div>
@@ -1228,15 +1228,15 @@ async function quitarExtra(id){
 }
 function abrirImprimirListas(){
   if (!MATRIZ || !MATRIZ.listas.length) { alert('Primero creá al menos una lista.'); return; }
-  if (Object.keys(MT_CAMBIOS).length || Object.keys(MT_RUBROS).length) { alert('Tenés cambios sin guardar: tocá "Guardar cambios" primero para que salgan en el PDF.'); return; }
+  if (Object.keys(MT_CAMBIOS).length || Object.keys(MT_RUBROS).length) { alert('Tenés cambios sin guardar: tocá "Guardar cambios" primero para que salgan en el PDF o el Excel.'); return; }
   modal(`
     <span class="close-x" onclick="cerrarModal()">✕</span>
-    <h2>Imprimir lista de precios</h2>
-    <div class="muted" style="margin-bottom:8px">Elegí las listas que querés en el PDF. Sale una columna de precios por lista (sin costos).</div>
+    <h2>Imprimir o exportar lista de precios</h2>
+    <div class="muted" style="margin-bottom:8px">Elegí las listas que querés en el PDF o el Excel. Sale una columna de precios por lista (sin costos).</div>
     ${MATRIZ.listas.map(l => `<label style="display:flex;align-items:center;gap:8px;margin:4px 0;font-weight:500"><input type="checkbox" style="width:auto" class="chkImpLista" value="${l._id}" checked> ${escapeHtml(l.nombre)}</label>`).join('')}
     <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;font-weight:500"><input type="checkbox" style="width:auto" id="impRubros" checked> Dividir por rubros</label>
     <div class="err" id="impErr"></div>
-    <button class="btn" style="margin-top:10px" onclick="generarPdfListas()">Generar PDF</button>
+    <button class="btn" style="margin-top:10px" onclick="generarPdfListas()">Generar PDF</button> <button class="btn secondary" style="margin-top:10px" onclick="exportarExcelListas()">Descargar Excel</button>
   `);
 }
 function abrirAjustePorcentaje(){
@@ -1269,6 +1269,17 @@ async function aplicarAjustePorcentaje(){
     cerrarModal(); await cargarMatriz();
     document.getElementById('mtMsg').textContent = 'Listo: ' + d.listas.length + ' lista(s) ajustadas ' + (pct > 0 ? '+' : '') + pct + '%. Los precios pasan a Productos en unos segundos.';
   }catch(e){ err.textContent = e.message; btn.disabled = false; btn.textContent = 'Ajustar'; }
+}
+async function exportarExcelListas(){
+  const ids = [...document.querySelectorAll('.chkImpLista:checked')].map(i => i.value);
+  if (!ids.length) { document.getElementById('impErr').textContent = 'Elegí al menos una lista.'; return; }
+  try{
+    const r = await fetch(BASE + '/matriz-listas/xlsx?listas=' + ids.join(',') + (document.getElementById('impRubros').checked ? '' : '&rubros=0'), {headers: headersAuth()});
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || 'No se pudo generar el Excel'); }
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a'); a.href = url; a.download = 'lista-de-precios.xlsx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    cerrarModal();
+  }catch(e){ document.getElementById('impErr').textContent = e.message; }
 }
 async function generarPdfListas(){
   const ids = [...document.querySelectorAll('.chkImpLista:checked')].map(i => i.value);
