@@ -640,8 +640,42 @@ function renderListaCobranzas(){
       <td>${escapeHtml(c.concepto || '—')}${c.observaciones ? `<div class="muted">${escapeHtml(c.observaciones)}</div>` : ''}</td>
       <td>${escapeHtml(c.formaLabel)}</td>
       <td>${(c.moneda && c.moneda !== 'ARS' ? c.moneda + ' ' : '') + money(c.monto)}</td>
-      <td style="white-space:nowrap">${c.anulado ? '<span class="muted" style="text-decoration:none;display:inline-block" title="' + escapeHtml(c.anuladoMotivo || '') + '">ANULADA</span>' : ((c.reciboUrl ? botonesImprimible(c.reciboUrl) : '') + ` <button class="btn small danger" data-anular-cobranza="${c._id}" onclick="anularCobranza('${c._id}')" title="Anular esta cobranza (por ejemplo si se cargó a otro cliente)">Anular</button>`)}</td>
+      <td style="white-space:nowrap">${c.anulado ? '<span class="muted" style="text-decoration:none;display:inline-block" title="' + escapeHtml(c.anuladoMotivo || '') + '">ANULADA</span>' : ((c.reciboUrl ? botonesImprimible(c.reciboUrl) : '') + ` <button class="btn small secondary" onclick="abrirEditarCobranza('${c._id}')" title="Agregar retenciones (Ganancias, IVA, IIBB…) a esta cobranza">Editar</button> <button class="btn small danger" data-anular-cobranza="${c._id}" onclick="anularCobranza('${c._id}')" title="Anular esta cobranza (por ejemplo si se cargó a otro cliente)">Anular</button>`)}</td>
     </tr>`).join('');
+}
+// Editar una cobranza ya cargada (27/11/2026): por ahora, agregarle las retenciones que el cliente practicó (Ganancias, IVA, IIBB…).
+function abrirEditarCobranza(id){
+  const c = cobranzasCache.find(x => String(x._id) === String(id));
+  if (!c) return;
+  let m = document.getElementById('editCobModal');
+  if (!m) { m = document.createElement('div'); m.id = 'editCobModal'; m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:30px 12px'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="card" style="max-width:640px;width:100%;padding:18px;background:var(--surface,#fff)">
+    <div style="font-weight:700;font-size:16px;margin-bottom:4px">Editar cobranza</div>
+    <div class="muted" style="margin-bottom:10px">${escapeHtml(c.clienteNombre || '')} · ${fechaCorta(c.fecha)} · cobrado ${(c.moneda && c.moneda !== 'ARS' ? c.moneda + ' ' : '') + money(c.monto)}</div>
+    <div class="muted" style="font-size:13px;margin-bottom:8px">Agregá las retenciones que te practicó el cliente en este pago. Cancelan deuda del cliente pero no entra plata a caja ni al banco: lo cobrado queda igual. Si el monto cobrado está mal (por ejemplo cargaste el bruto), anulá la cobranza y volvé a cargarla.</div>
+    <div id="editCobRet"></div>
+    <div class="err" id="editCobErr"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn secondary" onclick="cerrarEditarCobranza()">Cancelar</button>
+      <button class="btn" id="editCobBtn" onclick="guardarEditarCobranza('${c._id}')">Guardar retenciones</button>
+    </div></div>`;
+  document.getElementById('editCobRet').innerHTML = ImpuestosUI.bloqueHtml('impEdCB', { percepciones: false, extras: false, titulo: 'Retenciones que te practicó el cliente' });
+  ImpuestosUI.cargar('impEdCB', {});
+  ImpuestosUI.agregar('impEdCB', 'ret');
+}
+function cerrarEditarCobranza(){ const m = document.getElementById('editCobModal'); if (m) m.remove(); }
+async function guardarEditarCobranza(id){
+  const errEl = document.getElementById('editCobErr'); errEl.textContent = '';
+  const retenciones = ImpuestosUI.leer('impEdCB').retenciones;
+  if (!retenciones || !retenciones.length) { errEl.textContent = 'Cargá al menos una retención con monto.'; return; }
+  const btn = document.getElementById('editCobBtn'); btn.disabled = true;
+  try{
+    const r = await fetch(BASE + '/cobranzas/' + id + '/retenciones', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({retenciones})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error');
+    cerrarEditarCobranza();
+    await cargarListaCobranzas();
+  }catch(e){ errEl.textContent = e.message; btn.disabled = false; }
 }
 async function anularCobranza(id){
   const c = cobranzasCache.find(x => String(x._id) === String(id));

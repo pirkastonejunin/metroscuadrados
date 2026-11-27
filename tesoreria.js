@@ -1491,6 +1491,52 @@ router.post('/cobranzas/:id/anular', authOperar, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Agregar retenciones a una cobranza ya cargada (27/11/2026, pedido de Mato: "ya cargué el pago, agregame un botón editar"). Las retenciones se
+// suman AL MISMO cobro (no son una cobranza aparte): cancelan más deuda del cliente, quedan indexadas como retención sufrida con la misma
+// referencia que usa el recibo, y si después se anula la cobranza se revierten junto con ella. La plata cobrada (caja/banco/cheque) no cambia.
+router.post('/cobranzas/:id/retenciones', authOperar, async (req, res) => {
+  try {
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const retenciones = normalizarLineasImpuesto((req.body || {}).retenciones, TIPOS_RETENCION, 'Retenciones');
+    const total = sumarMontos(retenciones);
+    if (!retenciones.length || !(total > 0)) throw err(400, 'Cargá al menos una retención con monto.');
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const mov = await db.collection('cuenta_corriente_movimientos').findOne({ _id: id });
+      if (!mov || mov.tipo !== 'credito' || !['cobro_venta', 'cobro_cuenta'].includes(mov.origen)) throw err(404, 'Cobranza no encontrada');
+      if (req.orgId && mov.orgId && String(req.orgId) !== String(mov.orgId)) throw err(404, 'Cobranza no encontrada');
+      const u = req.usuario || {};
+      if (!(u.rol && u.rol.protegido) && Array.isArray(u.orgIds) && u.orgIds.length && mov.orgId && !u.orgIds.map(String).includes(String(mov.orgId))) throw err(403, 'No tenés acceso a la sucursal de esta cobranza.');
+      if (mov.anulado) throw err(400, 'Esta cobranza está anulada.');
+      if (mov.importado) throw err(400, 'Es una cobranza histórica importada de Dux: no se puede editar desde acá.');
+      const reqOrg = Object.assign({}, req, { orgId: mov.orgId || req.orgId });
+      const moneda = mov.moneda || 'ARS';
+      if (mov.origen === 'cobro_venta') {
+        const venta = mov.ventaId ? await db.collection('ventas').findOne({ _id: mov.ventaId }) : null;
+        if (!venta) throw err(404, 'No encuentro la venta de este cobro.');
+        const idx = (venta.pagos || []).findIndex(p => !p.anulado && new Date(p.fecha).getTime() === new Date(mov.fecha).getTime() && (!mov.chequeId || p.tipoValor === 'cheque'));
+        if (idx < 0) throw err(400, 'No pude identificar el cobro dentro de la venta, así que no lo toco (para no dejar los saldos desparejos).');
+        const pagos = venta.pagos.map((p, i) => i === idx ? Object.assign({}, p, { retenciones: (p.retenciones || []).concat(retenciones), totalRetenciones: sumarMontos((p.retenciones || []).concat(retenciones)) }) : p);
+        const totalCobrado = Math.round(((venta.totalCobrado || 0) + total) * 100) / 100;
+        await db.collection('ventas').updateOne({ _id: venta._id }, { $set: { pagos, totalCobrado, saldoPendiente: Math.max(0, Math.round((venta.total - totalCobrado - (venta.totalAcreditado || 0)) * 100) / 100), updatedAt: new Date() } });
+        await registrarRetencionesSufridas(db, reqOrg, { origen: 'cobro_venta', retenciones, fecha: mov.fecha, moneda,
+          referencia: { ventaId: venta._id, ventaNumero: venta.numero, clienteId: venta.clienteId || null, clienteNombre: venta.clienteNombre || '' } });
+      } else {
+        const reciboId = Array.isArray(mov.valores) ? mov._id : mov.reciboId;
+        if (!reciboId) throw err(400, 'No pude identificar el recibo de este cobro, así que no lo toco.');
+        await registrarRetencionesSufridas(db, reqOrg, { origen: 'cobro_cuenta', retenciones, fecha: mov.fecha, moneda,
+          referencia: { clienteId: mov.clienteId, clienteNombre: mov.clienteNombre, reciboTipo: Array.isArray(mov.valores) ? 'multi' : (mov.chequeId ? 'cheque' : 'movimiento'), reciboId } });
+      }
+      // Cuenta corriente: el mismo movimiento sube por el total de retenciones (así anular la cobranza lo revierte todo) y el saldo del cliente baja.
+      const detalle = 'Retenciones agregadas: ' + retenciones.map(r => `${r.tipoNombre} $${r.monto}`).join(', ');
+      await db.collection('cuenta_corriente_movimientos').updateOne({ _id: id }, { $inc: { monto: total }, $set: { observaciones: [mov.observaciones, detalle].filter(Boolean).join(' — ') } });
+      await db.collection('cuenta_corriente_saldos').updateOne({ clienteId: mov.clienteId }, { $inc: { saldo: -total }, $set: { actualizadoEn: new Date() }, $setOnInsert: { clienteId: mov.clienteId } }, { upsert: true });
+      return { ok: true, totalRetenciones: total };
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
 // Recibo imprimible de un cobro "a cuenta" (sin venta puntual) — ver
 // `reciboTipo`/`reciboId` que devuelve el POST de arriba. `tipo` es
 // 'movimiento' (efectivo/cuenta/tarjeta, ya acreditado) o 'cheque'
