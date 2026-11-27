@@ -1837,31 +1837,80 @@ router.get('/matriz-listas', authAdmin, async (req, res) => {
 router.get('/matriz-listas/xlsx', authAdmin, async (req, res) => {
   try {
     const m = await armarMatriz(req);
+    const orgDoc = await conReintento(async () => (await getDb()).collection('organizaciones').findOne({ _id: req.orgId }, { projection: { telefono: 1, email: 1, direccion: 1 } })) || {};
+    const contacto = [orgDoc.direccion, orgDoc.telefono ? 'Tel: ' + orgDoc.telefono : '', orgDoc.email].filter(Boolean).join('   ·   ');
     const ids = String(req.query.listas || '').split(',').filter(Boolean);
     const listas = m.listas.filter(l => ids.includes(l._id));
     if (!listas.length) throw err(400, 'Elegí al menos una lista.');
     const productos = m.productos.filter(p => listas.some(l => p.celdas[l._id].precio != null));
-    const conRubros = req.query.rubros !== '0';
-    const orden = conRubros
-      ? productos.slice().sort((a, b) => String(a.rubro || '\uffff').localeCompare(String(b.rubro || '\uffff'), 'es') || String(a.nombre).localeCompare(String(b.nombre), 'es'))
-      : productos;
-    const fecha = new Date().toLocaleDateString('es-AR');
-    const filas = [['Lista de precios'], ['Vigente al ' + fecha], []];
-    filas.push([].concat(conRubros ? ['Rubro'] : [], ['Producto', 'Precio por', 'Bulto'], listas.map(l => l.nombre)));
-    orden.forEach(p => filas.push([].concat(
-      conRubros ? [p.rubro || 'Otros'] : [],
-      [p.nombre, p.unidadTxt || '', p.bultoTxt || ''],
-      listas.map(l => { const pr = p.celdas[l._id].precio; return pr == null ? '' : Number(Number(pr).toFixed(2)); })
-    )));
-    filas.push([]); filas.push([LEYENDA_LISTA_PRECIO]);
-    const hoja = XLSX.utils.aoa_to_sheet(filas);
-    hoja['!cols'] = [].concat(conRubros ? [{ wch: 22 }] : [], [{ wch: 44 }, { wch: 12 }, { wch: 16 }], listas.map(() => ({ wch: 16 })));
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, 'Lista de precios');
-    const buffer = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' });
+    const conRubros = req.query.rubros !== '0' && productos.some(p => p.rubro);
+    const ExcelJS = require('exceljs');
+    const OSCURO = 'FF1F2937', ACENTO = 'FFB08D57', CLARO = 'FFF6F3EE', ZEBRA = 'FFFAF9F7', BORDE = 'FFE5E2DC';
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Lista de precios', { views: [{ showGridLines: false }], pageSetup: { orientation: listas.length > 3 ? 'landscape' : 'portrait', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.6, header: 0.3, footer: 0.3 } } });
+    const nCols = 3 + listas.length; // producto, precio por, bulto + una por lista
+    ws.columns = [{ width: 50 }, { width: 12 }, { width: 18 }].concat(listas.map(() => ({ width: 17 })));
+    const ultima = nCols;
+    // Encabezado: logo a la izquierda, título y fecha a la derecha.
+    ws.getRow(1).height = 26; ws.getRow(2).height = 20; ws.getRow(3).height = 14;
+    try { const logo = wb.addImage({ filename: LOGO_PNG_PATH, extension: 'png' }); ws.addImage(logo, { tl: { col: 0.05, row: 0.2 }, ext: { width: 217, height: 38 } }); } catch (e) { /* sin logo */ }
+    ws.mergeCells(1, 2, 1, ultima); ws.mergeCells(2, 2, 2, ultima);
+    const t = ws.getCell(1, 2); t.value = 'LISTA DE PRECIOS'; t.font = { name: 'Calibri', bold: true, size: 18, color: { argb: OSCURO } }; t.alignment = { horizontal: 'right', vertical: 'middle' };
+    const f = ws.getCell(2, 2); f.value = 'Vigente al ' + new Date().toLocaleDateString('es-AR'); f.font = { name: 'Calibri', size: 10, color: { argb: 'FF666666' } }; f.alignment = { horizontal: 'right', vertical: 'top' };
+    // Doble filete (oscuro + acento) como en el PDF.
+    ws.getRow(4).height = 4;
+    for (let c = 1; c <= ultima; c++) ws.getCell(4, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: OSCURO } };
+    ws.getRow(5).height = 3;
+    for (let c = 1; c <= 1; c++) ws.getCell(5, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ACENTO } };
+    let fila = 6;
+    if (contacto) { ws.mergeCells(fila, 1, fila, ultima); const c = ws.getCell(fila, 1); c.value = contacto; c.font = { name: 'Calibri', size: 9, color: { argb: 'FF555555' } }; c.alignment = { horizontal: 'center' }; ws.getRow(fila).height = 16; fila++; }
+    fila++;
+    // Cabecera de la tabla.
+    const cab = ws.getRow(fila); cab.height = 22;
+    ['PRODUCTO', 'PRECIO', 'BULTO'].concat(listas.map(l => String(l.nombre).toUpperCase())).forEach((txt, i) => {
+      const c = cab.getCell(i + 1); c.value = txt; c.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: OSCURO } }; c.alignment = { horizontal: i >= 3 ? 'right' : 'left', vertical: 'middle', indent: 1 };
+    });
+    const filaCab = fila; fila++;
+    const grupos = [];
+    if (conRubros) {
+      const mapa = new Map();
+      productos.forEach(p => { const k = p.rubro || ''; if (!mapa.has(k)) mapa.set(k, []); mapa.get(k).push(p); });
+      [...mapa.keys()].filter(k => k).sort((a, b) => a.localeCompare(b, 'es')).forEach(k => grupos.push({ titulo: k, items: mapa.get(k) }));
+      if (mapa.has('')) grupos.push({ titulo: 'Otros', items: mapa.get('') });
+    } else grupos.push({ titulo: '', items: productos });
+    grupos.forEach(g => {
+      if (g.titulo) {
+        ws.mergeCells(fila, 1, fila, ultima);
+        const c = ws.getCell(fila, 1); c.value = g.titulo.toUpperCase(); c.font = { name: 'Calibri', bold: true, size: 11, color: { argb: OSCURO } };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CLARO } }; c.alignment = { vertical: 'middle', indent: 1 };
+        c.border = { left: { style: 'thick', color: { argb: ACENTO } } };
+        ws.getRow(fila).height = 22; fila++;
+      }
+      g.items.forEach((p, n) => {
+        const r = ws.getRow(fila); r.height = 18;
+        const vals = [p.nombre, p.unidadTxt || '', p.bultoTxt || ''].concat(listas.map(l => { const pr = p.celdas[l._id].precio; return pr == null ? '—' : Number(Number(pr).toFixed(2)); }));
+        vals.forEach((v, i) => {
+          const c = r.getCell(i + 1); c.value = v;
+          c.font = { name: 'Calibri', size: i === 0 ? 10.5 : (i < 3 ? 9 : 10.5), bold: i >= 3, color: { argb: i >= 1 && i < 3 ? 'FF666666' : 'FF111111' } };
+          c.alignment = { horizontal: i >= 3 ? 'right' : 'left', vertical: 'middle', indent: i >= 3 ? 1 : 1 };
+          if (i >= 3 && typeof v === 'number') c.numFmt = '"$" #,##0.00';
+          if (n % 2 === 1) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: ZEBRA } };
+          c.border = { bottom: { style: 'thin', color: { argb: BORDE } } };
+        });
+        fila++;
+      });
+    });
+    fila++;
+    ws.mergeCells(fila, 1, fila, ultima);
+    const pie = ws.getCell(fila, 1); pie.value = LEYENDA_LISTA_PRECIO; pie.font = { name: 'Calibri', bold: true, size: 9, color: { argb: OSCURO } };
+    pie.border = { top: { style: 'medium', color: { argb: ACENTO } } }; pie.alignment = { wrapText: true, vertical: 'top' }; ws.getRow(fila).height = 28;
+    ws.views = [{ showGridLines: false, state: 'frozen', ySplit: filaCab }];
+    ws.pageSetup.printTitlesRow = filaCab + ':' + filaCab;
+    const buffer = await wb.xlsx.writeBuffer();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="lista-de-precios.xlsx"');
-    res.send(buffer);
+    res.send(Buffer.from(buffer));
   } catch (e) { if (!res.headersSent) res.status(e.status || 500).json({ error: e.message }); }
 });
 router.get('/matriz-listas/pdf', authAdmin, async (req, res) => {
