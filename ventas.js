@@ -69,6 +69,7 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const { fechaDeInput } = require('./fechaAR');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes, cargarClienteParaOperar } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
@@ -2413,7 +2414,7 @@ async function procesarPagoVenta(req, id, body, reciboGrupo) {
     // Fecha del cobro editable (2/10/2026, pedido de Mato: "la cobranza
     // deberia dejarnos cambiar la fecha por si en algun momento se pasa y
     // lo cargamos despues") — por defecto es ahora, como siempre fue.
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaDeInput(body.fecha);
 
     // Tesorería (2/10/2026): efectivo/cuenta/tarjeta se acredita ya mismo
     // en una caja o banco; cheque crea un cheque de terceros en cartera

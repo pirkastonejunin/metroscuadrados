@@ -64,6 +64,7 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const { fechaDeInput } = require('./fechaAR');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes, cargarClienteParaOperar } = require('./usuarios');
 const googleCalendar = require('./google-calendar');
@@ -511,7 +512,7 @@ router.post('/', authAdmin, async (req, res) => {
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaDeInput(body.fecha);
 
     // Si este presupuesto se armó importando una cotización del
     // cotizador (ver GET /cotizador/:id), el front manda este bloque solo
@@ -652,7 +653,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       }
       if (body.vendedor !== undefined) set.vendedor = normalizarTexto(body.vendedor);
       if (body.observaciones !== undefined) set.observaciones = normalizarTexto(body.observaciones);
-      if (body.fecha !== undefined) set.fecha = new Date(body.fecha);
+      if (body.fecha !== undefined) set.fecha = fechaDeInput(body.fecha);
       if (body.moneda !== undefined) {
         const moneda = normalizarTexto(body.moneda).toUpperCase();
         if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');

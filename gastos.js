@@ -59,6 +59,7 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const { fechaDeInput } = require('./fechaAR');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes, cargarProveedorParaOperar } = require('./usuarios');
 const { exportarXlsx } = require('./importExport');
@@ -577,7 +578,7 @@ async function crearGastoDesdeBody(req, body) {
     const descuentoPorcentaje = body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0;
     const descuentoMonto = body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0;
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaDeInput(body.fecha);
     // Comprobante fiscal (4/10/2026) — numeración real del proveedor +
     // IVA discriminado, para el Libro IVA Compras.
     const comprobante = normalizarComprobante(body);
@@ -726,7 +727,7 @@ router.put('/:id', authAdmin, async (req, res) => {
       if (!g) throw err(404, 'Gasto no encontrado');
       if (g.estado === 'anulada') throw err(400, 'Este gasto está anulado: no se puede editar.');
       const set = { updatedAt: new Date() };
-      if (body.fecha) { const f = new Date(body.fecha); if (isNaN(f.getTime())) throw err(400, 'Fecha inválida'); set.fecha = f; }
+      if (body.fecha) { const f = fechaDeInput(body.fecha); if (isNaN(f.getTime())) throw err(400, 'Fecha inválida'); set.fecha = f; }
       if (body.observaciones !== undefined) set.observaciones = normalizarTexto(body.observaciones);
       const dp = body.descuentoPorcentaje !== undefined ? (body.descuentoPorcentaje ? normalizarMontoNoNegativo(body.descuentoPorcentaje, 'El descuento (%)') : 0) : (g.descuentoPorcentaje || 0);
       const dm = body.descuentoMonto !== undefined ? (body.descuentoMonto ? normalizarMontoNoNegativo(body.descuentoMonto, 'El descuento ($)') : 0) : (g.descuentoMonto || 0);
@@ -849,7 +850,7 @@ router.post('/:id/pagos', authAdmin, async (req, res) => {
     const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
     if (monto <= 0) throw err(400, 'El monto del pago tiene que ser mayor a 0.');
     const nota = normalizarTexto(body.nota);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaDeInput(body.fecha);
 
     // Mismo pedido de Mato que en Compras/Ventas: efectivo SOLO puede
     // salir de una caja; cuenta (transferencia) y tarjeta solo pueden

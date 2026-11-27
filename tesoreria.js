@@ -88,6 +88,7 @@
 // ---------------------------------------------------------------------------
 
 const express = require('express');
+const { fechaDeInput } = require('./fechaAR');
 const { MongoClient, ObjectId } = require('mongodb');
 const { authUsuario, requiereModulo, resolverOrg, filtroOrg, filtroOrgClientes } = require('./usuarios');
 // Cuenta corriente del cliente (2/10/2026, pedido de Mato) — ver el
@@ -658,7 +659,7 @@ router.post('/transferencias', authOperar, async (req, res) => {
     if (origenTipo === destinoTipo && String(origenId) === String(destinoId)) throw err(400, 'El origen y el destino no pueden ser la misma cuenta');
     const monto = normalizarMontoPositivo(b.monto, 'El monto');
     const nota = normalizarTexto(b.observaciones);
-    const fecha = b.fecha ? new Date(b.fecha) : new Date();
+    const fecha = fechaDeInput(b.fecha);
     const resultado = await conReintento(() => enTransaccion(async (db) => {
       const col = (t) => t === 'caja' ? 'tesoreria_cajas' : 'tesoreria_bancos';
       // En secuencia (no Promise.all): dentro de una transacción no se mandan operaciones en paralelo.
@@ -1038,7 +1039,7 @@ router.post('/movimientos', authOperar, async (req, res) => {
     const monto = normalizarMontoPositivo(body.monto, 'El monto');
     const motivo = normalizarTexto(body.motivo);
     const observaciones = normalizarTexto(body.observaciones);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaDeInput(body.fecha);
     const resultado = await conReintento(() => enTransaccion(async (db) => {
       await aplicarMovimientoCuenta(db, req, { cuentaTipo, cuentaId, tipo, monto, motivo, observaciones, origen: 'manual', fecha });
       return { ok: true };
@@ -1226,7 +1227,7 @@ async function cobroCuentaVariosMedios(req, res) {
   const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
   if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
   const nota = normalizarTexto(body.nota);
-  const fecha = body.fecha ? new Date(body.fecha) : new Date();
+  const fecha = fechaDeInput(body.fecha);
   const retenciones = normalizarLineasImpuesto(body.retenciones, TIPOS_RETENCION, 'Retenciones');
   const totalRetenciones = sumarMontos(retenciones);
   const valores = body.valores.map(v => normalizarValorRecibo(v || {}, fecha));
@@ -1298,7 +1299,7 @@ router.post('/cobros-cuenta-cliente', authOperar, async (req, res) => {
     const moneda = normalizarTexto(body.moneda).toUpperCase() || 'ARS';
     if (!MONEDAS_VALIDAS.includes(moneda)) throw err(400, 'Moneda inválida (ARS o USD)');
     const nota = normalizarTexto(body.nota);
-    const fecha = body.fecha ? new Date(body.fecha) : new Date();
+    const fecha = fechaDeInput(body.fecha);
     const retenciones = normalizarLineasImpuesto(body.retenciones, TIPOS_RETENCION, 'Retenciones');
     const totalRetenciones = sumarMontos(retenciones);
 
