@@ -882,6 +882,40 @@ router.post('/productos-rapido', authAdmin, async (req, res) => {
 // Órdenes de compra — CRUD + conversión a Compra real.
 // -----------------------------------------------------------------------
 
+// Pagos hechos sobre una orden de compra (27/11/2026, pedido de Mato: "en órdenes de compra quiero poder hacer un pago sobre la orden y que
+// cuando entre la factura y se convierta en compra ese pago quede imputado a ese comprobante"). Son pagos a cuenta del proveedor (salen YA de
+// la caja/banco) marcados con la orden (ordenId): mientras no hay factura quedan "sin aplicar" y, al convertir la orden en compra, se imputan
+// solos a esa compra (ver aplicarPagosDeOrden). Se agregan a cada orden (sin guardarlos en ella) para que la pantalla los muestre.
+async function adjuntarPagosOrdenes(db, ordenes) {
+  if (!ordenes.length) return;
+  const pagos = await db.collection('compras_pagos').find({ ordenId: { $in: ordenes.map(o => o._id) }, anulado: { $ne: true } }).sort({ fecha: 1, createdAt: 1 }).toArray();
+  const r2 = n => Math.round(n * 100) / 100;
+  for (const o of ordenes) {
+    const mios = pagos.filter(p => String(p.ordenId) === String(o._id));
+    o.pagos = mios.map(p => ({ _id: p._id, fecha: p.fecha, tipoValor: p.tipoValor, monto: p.monto, montoSinAplicar: p.montoSinAplicar || 0, nota: p.nota || '', moneda: p.moneda || o.moneda || 'ARS', aplicaciones: p.aplicaciones || [] }));
+    o.totalPagado = r2(mios.reduce((a, p) => a + (p.monto || 0), 0));
+    o.pagadoSinAplicar = r2(mios.reduce((a, p) => a + (p.montoSinAplicar || 0), 0));
+  }
+}
+
+// Al convertir una orden: lo que se pagó sobre la orden y todavía no está aplicado se imputa a la compra nueva, hasta su saldo. Lo que sobre (o lo
+// que esté en otra moneda que la compra) queda como pago a cuenta de la orden, para aplicarse en la próxima factura de la misma orden.
+async function aplicarPagosDeOrden(db, req, orden, compraId) {
+  const pagos = await db.collection('compras_pagos').find({ ordenId: orden._id, anulado: { $ne: true }, montoSinAplicar: { $gt: 0.009 } }).sort({ fecha: 1, createdAt: 1 }).toArray();
+  const imputados = [];
+  for (const pc of pagos) {
+    const compra = await db.collection('compras').findOne({ _id: compraId });
+    const libreCompra = Math.round((compra.saldoPendiente || 0) * 100) / 100;
+    if (!(libreCompra > 0.009)) break;
+    if ((pc.moneda || orden.moneda || 'ARS') !== (compra.moneda || 'ARS')) continue;
+    const monto = Math.min(Math.round(pc.montoSinAplicar * 100) / 100, libreCompra);
+    if (!(monto > 0.009)) continue;
+    await aplicarPagoPendiente(db, req, pc._id, [{ compraId, gastoId: null, monto }]);
+    imputados.push({ pagoId: pc._id, monto });
+  }
+  return imputados;
+}
+
 router.get('/ordenes', authAdmin, async (req, res) => {
   try {
     const match = Object.assign({}, filtroOrg(req));
@@ -902,7 +936,9 @@ router.get('/ordenes', authAdmin, async (req, res) => {
     const limite = Math.min(Number(req.query.limite) || 200, 500);
     const lista = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('ordenes_compra').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
+      const ordenes = await db.collection('ordenes_compra').find(match).sort({ fecha: -1, numero: -1 }).limit(limite).toArray();
+      await adjuntarPagosOrdenes(db, ordenes);
+      return ordenes;
     });
     res.json(lista);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -914,7 +950,9 @@ router.get('/ordenes/:id', authAdmin, async (req, res) => {
     if (!id) throw err(400, 'id inválido');
     const orden = await conReintento(async () => {
       const db = await getDb();
-      return db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      const o = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (o) await adjuntarPagosOrdenes(db, [o]);
+      return o;
     });
     if (!orden) throw err(404, 'Orden de compra no encontrada');
     res.json(orden);
@@ -1041,6 +1079,38 @@ router.post('/ordenes/:id/recibir', authAdmin, async (req, res) => {
         items: itemsActualizados, estadoRecepcion: nuevoEstadoRecepcion, updatedAt: new Date()
       } });
       return db.collection('ordenes_compra').findOne({ _id: id });
+    }));
+    res.json(resultado);
+  } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+});
+
+// Pago sobre una orden de compra (todavía sin factura): sale YA de la caja/banco (o emite el cheque), queda a cuenta del proveedor marcado con la
+// orden y, cuando la orden se convierte en compra, se imputa solo a esa factura. Si se anula antes de convertir, se anula como cualquier pago a cuenta.
+router.post('/ordenes/:id/pagos', authAdmin, async (req, res) => {
+  try {
+    if (!req.orgId) throw err(400, 'Elegí con qué organización estás trabajando.');
+    const id = toObjectId(req.params.id);
+    if (!id) throw err(400, 'id inválido');
+    const body = req.body || {};
+    const monto = normalizarMontoNoNegativo(body.monto, 'El monto');
+    if (monto <= 0) throw err(400, 'El monto del pago tiene que ser mayor a 0.');
+    const nota = normalizarTexto(body.nota);
+    const fecha = fechaPago(body.fecha);
+    const datosPago = normalizarDatosPago(body, fecha);
+    const resultado = await conReintento(() => enTransaccion(async (db) => {
+      const orden = await db.collection('ordenes_compra').findOne(Object.assign({ _id: id }, filtroOrg(req)));
+      if (!orden) throw err(404, 'Orden de compra no encontrada');
+      if (orden.estado === 'anulada') throw err(400, 'Esa orden está anulada, no se le pueden registrar pagos.');
+      if (orden.estado === 'convertida') throw err(400, 'Esa orden ya se convirtió por completo en compra: el pago se registra sobre la compra.');
+      await aplicarPagoProveedor(db, req, Object.assign({
+        proveedorId: orden.proveedorId, proveedorNombre: orden.proveedorNombre, moneda: orden.moneda || 'ARS',
+        montoTotal: monto, fecha, nota, aplicaciones: [],
+        motivoMovimiento: `Pago orden de compra Nº ${orden.numero} — ${orden.proveedorNombre || ''}`.trim(),
+        extra: { ordenId: orden._id, ordenNumero: orden.numero, moneda: orden.moneda || 'ARS' }
+      }, datosPago));
+      const o = await db.collection('ordenes_compra').findOne({ _id: id });
+      await adjuntarPagosOrdenes(db, [o]);
+      return o;
     }));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
@@ -1251,6 +1321,13 @@ router.post('/ordenes/:id/convertir', authAdmin, async (req, res) => {
         items: itemsActualizados, estado: nuevoEstadoOrden, updatedAt: new Date()
       } });
 
+      // Los pagos hechos sobre la orden quedan imputados a esta factura (hasta su saldo).
+      const pagosImputados = await aplicarPagosDeOrden(db, req, orden, compra._id);
+      if (pagosImputados.length) {
+        const actualizada = await db.collection('compras').findOne({ _id: compra._id });
+        actualizada.pagosDeOrdenImputados = pagosImputados.reduce((a, x) => a + x.monto, 0);
+        return actualizada;
+      }
       return compra;
     }));
     res.json(resultado);
@@ -1530,7 +1607,7 @@ function normalizarDatosPago(body, fecha) {
 // aplicarlo" — nada de reparto automático). Queda además un registro
 // único en `compras_pagos` para que se pueda ver el pago completo en la
 // pestaña "Pagos", más allá de cómo haya quedado repartido.
-async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, moneda, tipoValor, montoTotal, fecha, nota, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos, chequesTerceroIds, aplicaciones, motivoMovimiento }) {
+async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, moneda, tipoValor, montoTotal, fecha, nota, cuentaTipo, cuentaId, chequeDatos, tarjetaDatos, chequesTerceroIds, aplicaciones, motivoMovimiento, extra }) {
   const usuarioNombre = (req.usuario && req.usuario.nombre) ? req.usuario.nombre : '';
   let chequeId = null;
   let movimientoId = null;
@@ -1618,7 +1695,7 @@ async function aplicarPagoProveedor(db, req, { proveedorId, proveedorNombre, mon
   const pagoCuenta = Object.assign({
     _id: pagoCuentaId, proveedorId, proveedorNombre, fecha, tipoValor, monto: montoTotal, nota, usuarioNombre,
     aplicaciones: aplicacionesGuardadas, montoSinAplicar: Math.max(0, Math.round((montoTotal - aplicacionesGuardadas.reduce((a, x) => a + x.monto, 0)) * 100) / 100), orgId: req.orgId || (compras[0] && compras[0].orgId) || null, createdAt: ahora
-  }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, movimientoId ? { movimientoId } : {}, chequeId ? { chequeId } : {}, chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {}, tarjetaDatos || {});
+  }, cuentaTipo ? { cuentaTipo, cuentaId } : {}, movimientoId ? { movimientoId } : {}, chequeId ? { chequeId } : {}, chequesTercero.length ? { chequeIds: chequesTercero.map(c => c._id), chequesNumeros: chequesTercero.map(c => c.numero || '') } : {}, tarjetaDatos || {}, extra || {});
   const r = await db.collection('compras_pagos').insertOne(pagoCuenta);
   pagoCuenta._id = r.insertedId;
 
@@ -1772,6 +1849,46 @@ router.post('/pagos-cuenta', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+// Reparte lo que quedó sin aplicar de un pago a cuenta entre facturas (compras o gastos) del mismo proveedor. Se usa desde la ruta y desde
+// la conversión de una orden de compra (los pagos hechos sobre la orden se imputan solos a la factura). Tiene que correr dentro de una transacción.
+async function aplicarPagoPendiente(db, req, pid, aplicaciones) {
+  const pc = await db.collection('compras_pagos').findOne({ _id: pid });
+  if (!pc) throw err(404, 'Pago no encontrado');
+  if (pc.anulado) throw err(400, 'Ese pago está anulado.');
+  const libre = Math.round((pc.montoSinAplicar || 0) * 100) / 100;
+  if (!(libre > 0.009)) throw err(400, 'Ese pago ya está aplicado por completo.');
+  const suma = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
+  if (suma > libre + 0.01) throw err(400, `Lo que querés aplicar (${suma}) supera lo que queda sin aplicar de este pago (${libre}).`);
+  const docs = [];
+  for (const a of aplicaciones) {
+    const esG = !!a.gastoId, col = esG ? 'gastos' : 'compras', et = esG ? 'gasto' : 'compra';
+    const c = await db.collection(col).findOne({ _id: esG ? a.gastoId : a.compraId });
+    if (!c) throw err(404, esG ? 'Uno de los gastos elegidos no existe.' : 'Una de las compras elegidas no existe.');
+    if (c.estado === 'anulada') throw err(400, `El ${et} #${c.numero} está anulado.`);
+    if (String(c.proveedorId) !== String(pc.proveedorId)) throw err(400, `El ${et} #${c.numero} no es de este proveedor.`);
+    if (a.monto > c.saldoPendiente + 0.01) throw err(400, `El monto aplicado al ${et} #${c.numero} (${a.monto}) es mayor que su saldo pendiente (${c.saldoPendiente}).`);
+    docs.push({ c, esG, col });
+  }
+  // Se reserva primero lo que se va a aplicar (si dos personas aplican a la vez, el segundo falla en vez de aplicar de más).
+  const reserva = await db.collection('compras_pagos').updateOne({ _id: pid, anulado: { $ne: true }, montoSinAplicar: { $gte: suma - 0.005 } }, { $inc: { montoSinAplicar: -suma } });
+  if (!reserva.modifiedCount) throw err(409, 'Ese pago cambió mientras lo aplicabas. Refrescá y probá de nuevo.');
+  const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
+  const guardadas = [];
+  for (let i = 0; i < aplicaciones.length; i++) {
+    const a = aplicaciones[i], { c, esG, col } = docs[i];
+    const base = { tipoValor: pc.tipoValor || 'efectivo', monto: a.monto, fecha: pc.fecha, nota: pc.nota || '', usuarioNombre, pagoCuentaId: pc._id, aplicadoDespues: true };
+    // En un gasto la línea no lleva caja/cheque: la plata ya salió con el pago a cuenta y se deshace desde ahí (Desvincular).
+    const linea = esG ? base : Object.assign(base,
+      pc.cuentaTipo ? { cuentaTipo: pc.cuentaTipo, cuentaId: pc.cuentaId } : {}, pc.movimientoId ? { movimientoId: pc.movimientoId } : {}, pc.chequeId ? { chequeId: pc.chequeId } : {},
+      pc.chequeIds ? { chequeIds: pc.chequeIds, chequesNumeros: pc.chequesNumeros || [] } : {});
+    const totalPagado = (c.totalPagado || 0) + a.monto;
+    await db.collection(col).updateOne({ _id: c._id }, { $push: { pagos: linea }, $set: { totalPagado, saldoPendiente: Math.max(0, c.total - totalPagado), updatedAt: new Date() } });
+    guardadas.push(esG ? { gastoId: c._id, gastoNumero: c.numero, monto: a.monto } : { compraId: c._id, compraNumero: c.numero, monto: a.monto });
+  }
+  await db.collection('compras_pagos').updateOne({ _id: pid }, { $push: { aplicaciones: { $each: guardadas } } });
+  return db.collection('compras_pagos').findOne({ _id: pid });
+}
+
 // Aplicar DESPUÉS un pago que quedó "a cuenta" (sin compra elegida, o aplicado solo en parte): se reparte entre compras con saldo del mismo proveedor.
 router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
   try {
@@ -1786,43 +1903,7 @@ router.post('/pagos-cuenta/:id/aplicar', authAdmin, async (req, res) => {
       if (monto <= 0) throw err(400, 'El monto aplicado a cada factura tiene que ser mayor a 0');
       return { compraId, gastoId, monto };
     });
-    const resultado = await conReintento(() => enTransaccion(async (db) => {
-      const pc = await db.collection('compras_pagos').findOne({ _id: pid });
-      if (!pc) throw err(404, 'Pago no encontrado');
-      if (pc.anulado) throw err(400, 'Ese pago está anulado.');
-      const libre = Math.round((pc.montoSinAplicar || 0) * 100) / 100;
-      if (!(libre > 0.009)) throw err(400, 'Ese pago ya está aplicado por completo.');
-      const suma = Math.round(aplicaciones.reduce((a, x) => a + x.monto, 0) * 100) / 100;
-      if (suma > libre + 0.01) throw err(400, `Lo que querés aplicar (${suma}) supera lo que queda sin aplicar de este pago (${libre}).`);
-      const docs = [];
-      for (const a of aplicaciones) {
-        const esG = !!a.gastoId, col = esG ? 'gastos' : 'compras', et = esG ? 'gasto' : 'compra';
-        const c = await db.collection(col).findOne({ _id: esG ? a.gastoId : a.compraId });
-        if (!c) throw err(404, esG ? 'Uno de los gastos elegidos no existe.' : 'Una de las compras elegidas no existe.');
-        if (c.estado === 'anulada') throw err(400, `El ${et} #${c.numero} está anulado.`);
-        if (String(c.proveedorId) !== String(pc.proveedorId)) throw err(400, `El ${et} #${c.numero} no es de este proveedor.`);
-        if (a.monto > c.saldoPendiente + 0.01) throw err(400, `El monto aplicado al ${et} #${c.numero} (${a.monto}) es mayor que su saldo pendiente (${c.saldoPendiente}).`);
-        docs.push({ c, esG, col });
-      }
-      // Se reserva primero lo que se va a aplicar (si dos personas aplican a la vez, el segundo falla en vez de aplicar de más).
-      const reserva = await db.collection('compras_pagos').updateOne({ _id: pid, anulado: { $ne: true }, montoSinAplicar: { $gte: suma - 0.005 } }, { $inc: { montoSinAplicar: -suma } });
-      if (!reserva.modifiedCount) throw err(409, 'Ese pago cambió mientras lo aplicabas. Refrescá y probá de nuevo.');
-      const usuarioNombre = (req.usuario && req.usuario.nombre) || '';
-      const guardadas = [];
-      for (let i = 0; i < aplicaciones.length; i++) {
-        const a = aplicaciones[i], { c, esG, col } = docs[i];
-        const base = { tipoValor: pc.tipoValor || 'efectivo', monto: a.monto, fecha: pc.fecha, nota: pc.nota || '', usuarioNombre, pagoCuentaId: pc._id, aplicadoDespues: true };
-        // En un gasto la línea no lleva caja/cheque: la plata ya salió con el pago a cuenta y se deshace desde ahí (Desvincular).
-        const linea = esG ? base : Object.assign(base,
-          pc.cuentaTipo ? { cuentaTipo: pc.cuentaTipo, cuentaId: pc.cuentaId } : {}, pc.movimientoId ? { movimientoId: pc.movimientoId } : {}, pc.chequeId ? { chequeId: pc.chequeId } : {},
-          pc.chequeIds ? { chequeIds: pc.chequeIds, chequesNumeros: pc.chequesNumeros || [] } : {});
-        const totalPagado = (c.totalPagado || 0) + a.monto;
-        await db.collection(col).updateOne({ _id: c._id }, { $push: { pagos: linea }, $set: { totalPagado, saldoPendiente: Math.max(0, c.total - totalPagado), updatedAt: new Date() } });
-        guardadas.push(esG ? { gastoId: c._id, gastoNumero: c.numero, monto: a.monto } : { compraId: c._id, compraNumero: c.numero, monto: a.monto });
-      }
-      await db.collection('compras_pagos').updateOne({ _id: pid }, { $push: { aplicaciones: { $each: guardadas } } });
-      return db.collection('compras_pagos').findOne({ _id: pid });
-    }));
+    const resultado = await conReintento(() => enTransaccion((db) => aplicarPagoPendiente(db, req, pid, aplicaciones)));
     res.json(resultado);
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
@@ -1920,4 +2001,5 @@ router.post('/pagos-cuenta/:id/anular', authAdmin, async (req, res) => {
   } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
+router._interno = { aplicarPagosDeOrden, aplicarPagoPendiente, adjuntarPagosOrdenes };
 module.exports = router;

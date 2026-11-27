@@ -1360,18 +1360,24 @@ function actualizarTipoValorPago(){
     document.getElementById('npCuenta').innerHTML = opcionesCuentaPago(tipoValor);
   }
 }
-function abrirPago(id){
-  const c = comprasCache.find(x => x._id === id);
+function abrirPago(id, destino){
+  const esOrden = destino === 'orden';
+  const c = esOrden ? ordenesCache.find(x => x._id === id) : comprasCache.find(x => x._id === id);
   if (!c) return;
+  const titulo = esOrden ? `Registrar pago — orden de compra #${c.numero}` : `Registrar pago — compra #${c.numero}`;
+  const ayuda = esOrden
+    ? `<p class="muted">Pagado hasta ahora sobre esta orden: ${money(c.totalPagado || 0)} — estimado de la orden: ${money(c.subtotal)}.<br>El dinero sale ya de la caja/banco y queda a cuenta del proveedor. Cuando llegue la factura y conviertas la orden en compra, <strong>el pago se imputa solo a ese comprobante</strong>.</p>`
+    : `<p class="muted">Saldo pendiente: ${money(c.saldoPendiente)}</p>`;
+  const montoInicial = esOrden ? '' : c.saldoPendiente;
   document.getElementById('modalRoot').innerHTML = `
     <div class="modal-bg">
       <div class="modal">
         <span class="close-x" onclick="cerrarModal()">✕</span>
-        <h2>Registrar pago — compra #${c.numero}</h2>
-        <p class="muted">Saldo pendiente: ${money(c.saldoPendiente)}</p>
+        <h2>${titulo}</h2>
+        ${ayuda}
         <div class="grid2">
           <div><label>Tipo de valor *</label><select id="npTipoValor" onchange="actualizarTipoValorPago()"><option value="efectivo">Efectivo</option><option value="cheque">Cheque propio</option><option value="cheque_tercero">Cheque de tercero (de cartera)</option><option value="cuenta">Cuenta (transferencia)</option><option value="tarjeta">Tarjeta</option></select></div>
-          <div><label>Monto *</label><input id="npMonto" type="number" min="0.01" step="0.01" value="${c.saldoPendiente}"></div>
+          <div><label>Monto *</label><input id="npMonto" type="number" min="0.01" step="0.01" value="${montoInicial}"></div>
         </div>
         <div class="grid2" style="margin-top:10px">
           <div id="npCuentaWrap"><label id="npCuentaLabel">¿De qué caja sale? *</label><select id="npCuenta">${opcionesCuentaPago('efectivo')}</select></div>
@@ -1404,13 +1410,14 @@ function abrirPago(id){
         </div>
         <div style="margin-top:10px"><label>Nota</label><input id="npNota" placeholder="Opcional"></div>
         <div class="err" id="npErr"></div>
-        <button class="btn" style="margin-top:10px" onclick="confirmarPago('${id}')">Registrar</button>
+        <button class="btn" style="margin-top:10px" onclick="confirmarPago('${id}'${esOrden ? ", 'orden'" : ''})">Registrar</button>
       </div>
     </div>
   `;
 }
 
-async function confirmarPago(id){
+async function confirmarPago(id, destino){
+  const esOrden = destino === 'orden';
   const tipoValor = document.getElementById('npTipoValor').value;
   const body = {
     tipoValor,
@@ -1448,9 +1455,10 @@ async function confirmarPago(id){
     }
   }
   try{
-    const r = await fetchUnico(BASE + '/' + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
+    const r = await fetchUnico(BASE + (esOrden ? '/ordenes/' : '/') + id + '/pagos', {method:'POST', headers: headersAuthJson(), body: JSON.stringify(body)});
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Error');
+    if (esOrden) { await cargarOrdenes(); verDetalleOrden(id); return; }
     await cargarCompras();
     verDetalle(id);
   }catch(e){
@@ -1557,7 +1565,7 @@ async function cargarPagos(){
       <td>${p.importado ? '<span class="muted" title="Historial de Dux (sin forma de pago)">Dux</span>' : (TIPO_VALOR_LABEL[p.tipoValor]||p.tipoValor)}</td>
       <td>${money(p.monto)}</td>
       <td class="muted">${p.importado ? (p.montoSinAplicar > 0 ? 'A cuenta: ' + money(p.montoSinAplicar) + ' sin aplicar' : 'Aplicado') : (p.aplicaciones||[]).map(a => `#${a.compraNumero} (${money(a.monto)})`).join(', ')}${(!p.importado && p.montoSinAplicar > 0.009 && !p.anulado) ? ` <b style="color:#b45309">A cuenta sin aplicar: ${money(p.montoSinAplicar)}</b>` : ''}${(p.montoSinAplicar > 0.009 && !p.anulado) ? ` <button class="btn secondary" style="padding:2px 8px;font-size:12px" onclick="abrirAplicarPago(${pagosCache.indexOf(p)})">Aplicar</button>` : ''}${(!p.importado && !p.anulado && !(p.aplicaciones||[]).length) ? ` <button class="btn secondary" style="padding:2px 8px;font-size:12px" onclick="anularPagoACuenta(${pagosCache.indexOf(p)})">Anular</button>` : ''}</td>
-      <td class="muted">${escapeHtml(p.nota||'')}</td>
+      <td class="muted">${p.ordenNumero ? '<strong>Orden #' + p.ordenNumero + '</strong>' + (p.nota ? ' — ' : '') : ''}${escapeHtml(p.nota||'')}</td>
     </tr>
   `).join('');
 }
@@ -1895,7 +1903,7 @@ async function cargarOrdenes(){
       <td class="muted">${fechaCorta(o.fecha)}</td>
       <td>${escapeHtml(o.proveedorNombre)}</td>
       <td>${money(o.subtotal)}</td>
-      <td><span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span></td>
+      <td><span class="pill ${o.estado === 'convertida' ? 'recibida' : (o.estado === 'anulada' ? 'anulada' : 'pendiente')}">${ESTADO_ORDEN_LABEL[o.estado]||o.estado}</span>${o.totalPagado > 0 ? ` <span class="muted" title="Pagado sobre la orden">· pagado ${money(o.totalPagado)}</span>` : ''}</td>
       <td><button class="btn small secondary" onclick="verDetalleOrden('${o._id}')">Ver</button></td>
     </tr>
   `).join('');
@@ -2129,11 +2137,25 @@ function verDetalleOrden(id){
         </table>
         <div class="totales-box">
           <div class="fila-total grande"><span>Estimado</span><span>${money(o.subtotal)}</span></div>
+          ${(o.pagos || []).length ? `<div class="fila-total"><span>Pagado sobre la orden</span><span>${money(o.totalPagado)}</span></div>` : ''}
         </div>
+        ${(o.pagos || []).length ? `
+          <h3 style="margin:14px 0 6px">Pagos sobre la orden</h3>
+          <table>
+            <thead><tr><th>Fecha</th><th>Forma</th><th>Monto</th><th>Estado</th><th>Nota</th></tr></thead>
+            <tbody>${o.pagos.map(p => `<tr>
+              <td class="muted">${fechaCorta(p.fecha)}</td>
+              <td>${TIPO_VALOR_LABEL[p.tipoValor] || p.tipoValor}</td>
+              <td>${money(p.monto)}</td>
+              <td>${(p.aplicaciones || []).length ? 'Imputado a ' + p.aplicaciones.map(a => 'compra #' + a.compraNumero + ' (' + money(a.monto) + ')').join(', ') + (p.montoSinAplicar > 0.009 ? ' — resta ' + money(p.montoSinAplicar) : '') : '<strong style="color:#b45309">A cuenta, se imputa al convertir la orden</strong>'}</td>
+              <td class="muted">${escapeHtml(p.nota || '')}</td>
+            </tr>`).join('')}</tbody>
+          </table>` : ''}
         ${o.observaciones ? `<p class="muted" style="margin-top:10px"><strong>Observaciones:</strong> ${escapeHtml(o.observaciones)}</p>` : ''}
         <div class="err" id="doErr"></div>
         <div class="row" style="margin-top:14px">
           ${o.estado !== 'anulada' && haypendienteRecibir ? `<button class="btn secondary" onclick="abrirRecibirOrden('${o._id}')">Recibir mercadería</button>` : ''}
+          ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn secondary" onclick="abrirPago('${o._id}', 'orden')">Registrar pago</button>` : ''}
           ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn" onclick="abrirConvertirOrden('${o._id}')">Convertir en compra</button>` : ''}
           ${o.estado !== 'anulada' && o.estado !== 'convertida' ? `<button class="btn danger" onclick="anularOrden('${o._id}')">Anular orden</button>` : ''}
         </div>
@@ -2147,7 +2169,8 @@ async function anularOrden(id){
   const o = ordenesCache.find(x => x._id === id);
   const motivo = prompt('¿Por qué se anula esta orden? (opcional)') || '';
   if (motivo === null) return;
-  if (!confirm(`¿Anular la orden #${o.numero}?`)) return;
+  const aviso = (o.pagadoSinAplicar || 0) > 0.009 ? `\n\nOJO: tiene ${money(o.pagadoSinAplicar)} pagados sin imputar. Esos pagos no se borran: quedan a cuenta del proveedor (pestaña Pagos) para aplicarlos a otra factura, o anularlos para recuperar la plata.` : '';
+  if (!confirm(`¿Anular la orden #${o.numero}?${aviso}`)) return;
   try{
     const r = await fetch(BASE + '/ordenes/' + id + '/anular', {method:'POST', headers: headersAuthJson(), body: JSON.stringify({motivo})});
     const data = await r.json();
@@ -2282,6 +2305,7 @@ async function abrirConvertirOrden(id){
         <span class="close-x" onclick="cerrarModal()">✕</span>
         <h2>Convertir orden #${o.numero} en compra</h2>
         <p class="muted" style="margin-top:-8px">Desmarcá lo que todavía no llegó — queda pendiente en la orden para convertir después.</p>
+        ${(o.pagadoSinAplicar || 0) > 0.009 ? `<p style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:8px 12px;margin:6px 0"><strong>Esta orden tiene ${money(o.pagadoSinAplicar)} pagados.</strong> Al registrar la compra se imputan solos a esta factura (hasta su saldo).</p>` : ''}
         <div class="grid3">
           <div><label>Condición de pago</label><input id="coCondicionPago" value="${escapeHtml(o.condicionPago||'')}"></div>
           <div><label>Fecha</label><input id="coFecha" type="date" value="${new Date(Date.now()-3*3600000).toISOString().slice(0,10)}"></div>
