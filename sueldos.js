@@ -1055,6 +1055,7 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
     const filas = await conReintento(async () => armarColocadores(await getDb(), reqLectura, periodo));
     const out = await conReintento(() => enTransaccion(async (db) => {
       let n = 0, tareasN = 0, total = 0, proxima = null;
+      const liquidacionIds = [];
       const diag = { colocadores: filas.length, tareasMes: 0, liquidadas: 0, sinLiquidar: 0, fechasSinLiquidar: [], corte: hastaISO, soloCol: !!soloCol };
       for (const f of filas) {
         if (soloCol && f.colocadorId !== soloCol) continue;
@@ -1071,10 +1072,11 @@ router.post('/colocadores/liquidar', authSueldosLectura, async (req, res) => {
         const suma = r2(docs.reduce((s, t) => s + t.monto, 0));
         const orgLiq = toObjectId(f.orgLiq) || req.orgId;
         if (!orgLiq) throw err(400, 'Asignale una sucursal a ' + f.nombre + ' (en la lista de colocadores) para poder liquidarlo.');
-        await db.collection('sueldos_colocadores').insertOne({ colocadorId: toObjectId(f.colocadorId), colocadorNombre: f.nombre, periodo, tipo, desde: isoAR(nuevas[0].fecha), hasta: hastaISO, tareas: docs, total: suma, pagos: [], totalPagado: 0, estado: suma > 0 ? 'pendiente' : 'pagada', orgId: orgLiq, createdAt: new Date(), updatedAt: new Date() });
+        const insLiq = await db.collection('sueldos_colocadores').insertOne({ colocadorId: toObjectId(f.colocadorId), colocadorNombre: f.nombre, periodo, tipo, desde: isoAR(nuevas[0].fecha), hasta: hastaISO, tareas: docs, total: suma, pagos: [], totalPagado: 0, estado: suma > 0 ? 'pendiente' : 'pagada', orgId: orgLiq, createdAt: new Date(), updatedAt: new Date() });
+        liquidacionIds.push({ id: String(insLiq.insertedId), colocadorId: String(f.colocadorId), total: suma });
         n++; tareasN += docs.length; total = r2(total + suma);
       }
-      return { liquidados: n, tareas: tareasN, total, hasta: hastaISO, proximaFecha: tareasN ? null : proxima, diag };
+      return { liquidados: n, tareas: tareasN, total, hasta: hastaISO, proximaFecha: tareasN ? null : proxima, diag, liquidaciones: liquidacionIds };
     }));
     res.json(out);
   } catch (e) { responder(res, e); }

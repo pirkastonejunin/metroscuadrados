@@ -134,19 +134,20 @@
 
     <div class="vista hidden" id="v-col">
       <div class="tb-filtros">
-        <input type="month" id="cPeriodo" aria-label="Mes" onchange="cargarCol()">
-        <input type="date" id="cHasta" aria-label="Liquidar hasta" title="Fecha hasta la que se liquida la semana (se liquidan las tareas terminadas hasta ese día)">
-        <button data-iconizado="1" class="btn secondary" onclick="liquidarCol('parcial')" title="Liquida a todos los colocadores las tareas terminadas hasta la fecha elegida que todavía no se liquidaron">Liquidar semana</button>
+        <label class="chk" style="gap:6px">Mes <input type="month" id="cPeriodo" aria-label="Mes" onchange="cargarCol()"></label>
+        <label class="chk" style="gap:6px" title="Fecha hasta la que se liquida: entran las tareas terminadas hasta ese día">Liquidar hasta <input type="date" id="cHasta" aria-label="Liquidar hasta"></label>
+        <button data-iconizado="1" class="btn secondary" onclick="liquidarCol('parcial')" title="Liquida a TODOS los colocadores las tareas terminadas hasta la fecha elegida que todavía no se liquidaron (después se paga desde cada colocador)">Liquidar a todos</button>
         <button data-iconizado="1" class="btn secondary" onclick="liquidarCol('final')" title="Liquida todo lo que quede sin liquidar del mes y lo da por cerrado">Cerrar mes</button>
         <button data-iconizado="1" class="btn" onclick="formEsp()">+ Trabajo especial</button>
         <label class="chk"><input type="checkbox" id="espTodos" onchange="cargarCol()"> Ver trabajos especiales ya pagados</label>
         <span class="tb-info" title="Lo que se les paga a los colocadores por las obras: m² de cada tarea terminada por el costo por m² del colocador, en el mes en que se terminó (así figura en el Estado de resultados, como Sueldos y cargas · Obra). Cada semana hacés una liquidación parcial hasta la fecha elegida y la pagás; al final del mes, Cerrar mes liquida lo que haya quedado. Cada liquidación tiene sus propios pagos desde Tesorería. Los trabajos especiales (obras a medida con monto acordado) se cargan con &quot;+ Trabajo especial&quot; y se pagan de a partes desde la ficha de cada colocador.">i</span>
       </div>
+      <div class="muted" style="margin:2px 0 10px;font-size:13px"><b>Cómo se usa:</b> ① las obras terminadas aparecen en cada colocador → ② apretás <b>Liquidar y pagar</b> (arma lo que se le debe y registra el pago de una vez) → ③ queda en "Al día". Si todavía no querés pagar, usá <b>Solo liquidar</b> y pagás después.</div>
       <div class="kpis">
         <div class="kpi main"><div class="et">Obras por m² del mes</div><div class="val" id="cDev">$ —</div><div class="muted" id="cPenTxt" style="font-size:12px"></div></div>
         <div class="kpi"><div class="et">Trabajos especiales</div><div class="val" id="eAco">—</div></div>
         <div class="kpi"><div class="et">Pagado</div><div class="val" id="cPag">—</div></div>
-        <div class="kpi"><div class="et">Falta pagar</div><div class="val" id="cSal">—</div></div>
+        <div class="kpi"><div class="et" title="Liquidado sin pagar + terminado sin liquidar">Total a pagar</div><div class="val" id="cSal">—</div></div>
       </div>
       <div class="panel hidden" id="pCol"></div>
       <div class="panel hidden" id="pEsp"></div>
@@ -447,7 +448,7 @@ async function cargarCol(){
   const t = COL.totales, espSal = sumE(espActivos, x => Math.max(0, x.monto - (x.totalPagado || 0)));
   $('cDev').textContent = pesos(t.devengado); $('cPenTxt').textContent = t.pendienteLiquidar > 0 ? 'Sin liquidar: ' + pesos(t.pendienteLiquidar) : '';
   $('eAco').textContent = pesos(sumE(espActivos.filter(espVis), x => x.monto));
-  $('cPag').textContent = pesos(t.pagado + sumE(espActivos, x => x.totalPagado || 0)); $('cSal').textContent = pesos(t.saldo + espSal);
+  $('cPag').textContent = pesos(t.pagado + sumE(espActivos, x => x.totalPagado || 0)); $('cSal').textContent = pesos(t.saldo + espSal + t.pendienteLiquidar);
   // Un colocador por tarjeta: obras por m², trabajos especiales y pagos juntos
   const lista = COL.colocadores.map((f, i) => Object.assign({ _i: i }, f));
   ESP.filter(espVis).forEach(x => { const id = String(x.colocadorId); if (!lista.some(f => f.colocadorId === id)) lista.push({ _i: -1, colocadorId: id, nombre: x.colocadorNombre || '(desconocido)', sucursalId: '', asignado: false, tareas: [], liquidaciones: [], m2: 0, devengado: 0, pendienteLiquidar: 0, liquidado: 0, pagado: 0, saldo: 0, cerrado: false }); });
@@ -457,7 +458,15 @@ async function cargarCol(){
     const esps = ESP.filter(x => String(x.colocadorId) === f.colocadorId && espVis(x));
     const eSal = sumE(esps, x => Math.max(0, x.monto - (x.totalPagado || 0))), eMonto = sumE(esps, x => x.monto);
     const falta = Math.round((f.saldo + eSal) * 100) / 100;
-    const chip = falta > 0 ? '<span class="chip par">Debe ' + pesos(falta) + '</span>' : f.pendienteLiquidar > 0 ? '<span class="chip">Sin liquidar ' + pesos(f.pendienteLiquidar) + '</span>' : '<span class="chip ok">Al día</span>';
+    const chip = falta > 0 ? '<span class="chip par">Debe ' + pesos(falta) + '</span>' : f.pendienteLiquidar > 0 ? '<span class="chip mal">Sin liquidar ' + pesos(f.pendienteLiquidar) + '</span>' : '<span class="chip ok">Al día</span>';
+    const pendTareas = f.tareas.filter(x => !x.liquidada).length;
+    const liqDebe = f.liquidaciones.filter(l => l.saldo > 0);
+    // Barra de acción: siempre muestra el siguiente paso de este colocador, sin tener que abrir la tarjeta.
+    const accion = f.pendienteLiquidar > 0
+      ? '<div onclick="event.stopPropagation()" style="margin-top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--danger-soft);border-radius:10px;padding:8px 12px"><span style="flex:1;min-width:200px;font-size:13px"><b>' + pendTareas + ' obra' + (pendTareas === 1 ? '' : 's') + ' terminada' + (pendTareas === 1 ? '' : 's') + ' sin liquidar</b> · ' + pesos(f.pendienteLiquidar) + '</span><button class="btn" onclick="formLiquidarPagarCol(\'' + f.colocadorId + '\')">Liquidar y pagar</button><button class="btn secondary" onclick="liquidarCol(\'parcial\',\'' + f.colocadorId + '\')" title="Arma la liquidación sin pagar todavía">Solo liquidar</button></div>'
+      : liqDebe.length
+        ? '<div onclick="event.stopPropagation()" style="margin-top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:var(--accent-soft);border-radius:10px;padding:8px 12px"><span style="flex:1;min-width:200px;font-size:13px"><b>Liquidado, falta pagar</b> · ' + pesos(f.saldo) + '</span><button class="btn" onclick="formPagoCol(null,' + f._i + ')">Pagar</button></div>'
+        : '';
     const resumen = '<div style="display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:6px;font-size:13px" class="muted">' +
       '<span>Obras por m²: <b>' + m2f(f.m2) + ' m²</b> · ' + pesos(f.devengado) + '</span>' +
       '<span>Trabajos especiales: <b>' + esps.length + '</b> · ' + pesos(eMonto) + '</span>' +
@@ -465,7 +474,7 @@ async function cargarCol(){
     let det = '';
     if (ab) {
       // 1) Obras por m²
-      const sec1 = f.tareas.length || f.pendienteLiquidar > 0 ? '<h4 style="margin:12px 0 6px;font-size:13px">Obras por m²' + (f.pendienteLiquidar > 0 ? ' <span class="acc" style="margin-left:8px"><button class="btn secondary" onclick="liquidarCol(\'parcial\',\'' + f.colocadorId + '\')">Liquidar semana</button> <button class="btn secondary" onclick="liquidarCol(\'final\',\'' + f.colocadorId + '\')">Cerrar mes</button></span>' : '') + '</h4>' +
+      const sec1 = f.tareas.length || f.pendienteLiquidar > 0 ? '<h4 style="margin:12px 0 6px;font-size:13px">Obras terminadas (por m²)' + (f.pendienteLiquidar > 0 ? ' <span class="acc" style="margin-left:8px"><button class="btn secondary" onclick="liquidarCol(\'final\',\'' + f.colocadorId + '\')" title="Liquida todo lo que falte del mes y lo cierra">Cerrar mes</button></span>' : '') + '</h4>' +
         '<div class="tabla"><table style="width:100%"><thead><tr><th>Obra</th><th>Trabajo</th><th>Terminada</th><th class="n">m²</th><th class="n">$/m²</th><th class="n">Monto</th><th>Estado</th></tr></thead><tbody>' + f.tareas.map(x => { const l = f.liquidaciones.find(y => y._id === x.liquidacionId); return '<tr><td>' + escapeHtml(x.obra) + '</td><td>' + escapeHtml(x.tipoTrabajo) + '</td><td>' + fmtF(x.fecha) + '</td><td class="n">' + m2f(x.m2) + '</td><td class="n">' + pesos(x.costoPorM2) + '</td><td class="n">' + pesos(x.monto) + '</td><td>' + (x.liquidada ? '<span class="chip ok">' + escapeHtml(l ? etiquetaLiq(l) : 'liquidada') + '</span>' : '<span class="chip mal">sin liquidar</span>') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '';
       // 2) Trabajos especiales
       const sec2 = esps.length ? '<h4 style="margin:12px 0 6px;font-size:13px">Trabajos especiales</h4><div class="tabla"><table style="width:100%"><thead><tr><th>Obra / trabajo</th><th class="n">Acordado</th><th class="n">Pagado</th><th class="n">Falta</th><th>Estado</th><th></th></tr></thead><tbody>' + esps.map(x => { const pag = x.totalPagado || 0, sal = Math.round((x.monto - pag) * 100) / 100;
@@ -478,11 +487,11 @@ async function cargarCol(){
       esps.forEach(x => (x.pagos || []).forEach((p, k) => pagos.push({ f: p.fecha, m: p.monto, an: p.anulado, c: 'Trabajo especial · ' + (x.obra || x.descripcion || ''), accion: 'anularPagoEsp(\'' + x._id + '\',' + k + ')' })));
       pagos.sort((a, b) => new Date(a.f) - new Date(b.f));
       const lp = pagos.length ? '<div style="margin-top:6px;font-size:13px">' + pagos.map(p => '<div style="padding:3px 0;border-top:1px solid var(--border)"' + (p.an ? ' class="muted"' : '') + '>' + (p.an ? '<s>' : '') + fmtF(p.f) + ' · ' + escapeHtml(p.c) + ' · <b>' + pesos(p.m) + '</b>' + (p.an ? '</s> <span class="chip mal">anulado</span>' : ' <a href="#" style="color:#b91c1c" onclick="' + p.accion + ';return false">anular</a>') + '</div>').join('') + '</div>' : '';
-      const sec3 = (liqs || lp) ? '<h4 style="margin:12px 0 6px;font-size:13px">Pagos</h4>' + liqs + lp : '';
+      const sec3 = (liqs || lp) ? '<h4 style="margin:12px 0 6px;font-size:13px">Liquidaciones y pagos</h4>' + liqs + lp : '';
       det = '<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:2px">' + (sec1 + sec2 + sec3 || '<div class="muted" style="padding:8px 0">Sin movimientos este mes.</div>') + '</div>';
     }
     return '<div class="panel" style="padding:12px 16px"><div class="clic" onclick="abrirCol(\'' + f.colocadorId + '\')" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><b style="font-size:15px">' + (ab ? '▾ ' : '▸ ') + escapeHtml(f.nombre) + '</b> &nbsp;' + chip + resumen + '</div>' +
-      '<div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:10px"><div style="text-align:right;white-space:nowrap"><div class="muted" style="font-size:11px">Falta pagar</div><b style="font-size:18px;white-space:nowrap">' + pesos(falta) + '</b></div>' + selSucursal('colocador', f.colocadorId, f.asignado ? f.sucursalId : '') + '</div></div>' + det + '</div>';
+      '<div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:10px"><div style="text-align:right;white-space:nowrap"><div class="muted" style="font-size:11px" title="Lo liquidado que falta pagar + lo terminado que todavía no se liquidó">Total a pagar</div><b style="font-size:18px;white-space:nowrap">' + pesos(Math.round((falta + f.pendienteLiquidar) * 100) / 100) + '</b></div>' + selSucursal('colocador', f.colocadorId, f.asignado ? f.sucursalId : '') + '</div></div>' + accion + det + '</div>';
   }).join('') : '<div class="panel vacio">No hay tareas terminadas ni trabajos especiales de colocadores en este mes.</div>';
 }
 
@@ -547,6 +556,41 @@ async function liquidarCol(tipo, colocadorId){
     exito(r.tareas ? 'Se liquidaron ' + r.tareas + ' tarea' + (r.tareas > 1 ? 's' : '') + ' por ' + pesos(r.total) + ' (' + r.liquidados + ' colocador' + (r.liquidados > 1 ? 'es' : '') + ').' : 'No hay tareas terminadas sin liquidar' + (tipo === 'parcial' ? ' hasta el ' + fmtF(r.hasta + 'T12:00:00-03:00') + '.' + (r.proximaFecha ? ' Hay tareas sin liquidar desde el ' + fmtF(r.proximaFecha + 'T12:00:00-03:00') + ': cambiá el campo de fecha (al lado de "Liquidar semana") a una posterior.' : '') : '.') + (r.diag ? ' [Revisé ' + r.diag.tareasMes + ' tareas del mes: ' + r.diag.liquidadas + ' ya liquidadas, ' + r.diag.sinLiquidar + ' sin liquidar' + (r.diag.fechasSinLiquidar.length ? ' (' + r.diag.fechasSinLiquidar.join(', ') + ')' : '') + '; corte ' + r.diag.corte + ']' : ''));
     await cargarCol();
   }catch(e){ error(e); }
+}
+// Liquidar y pagar de una sola vez (a un colocador): arma la liquidación de sus tareas terminadas hasta la fecha elegida y registra el pago.
+function formLiquidarPagarCol(colocadorId){
+  const f = COL.colocadores.find(c => c.colocadorId === colocadorId); if (!f) return;
+  const hasta = $('cHasta').value;
+  const inc = f.tareas.filter(x => !x.liquidada && new Date(x.fecha) <= new Date(hasta + 'T23:59:59.999-03:00'));
+  const fuera = f.tareas.filter(x => !x.liquidada).length - inc.length;
+  const total = Math.round(inc.reduce((a, x) => a + x.monto, 0) * 100) / 100;
+  $('pCol').innerHTML = '<h3>Liquidar y pagar · ' + escapeHtml(f.nombre) + '</h3>' +
+    '<div class="tabla"><table style="width:100%"><thead><tr><th>Obra</th><th>Trabajo</th><th>Terminada</th><th class="n">m²</th><th class="n">Monto</th></tr></thead><tbody>' +
+    (inc.map(x => '<tr><td>' + escapeHtml(x.obra) + '</td><td>' + escapeHtml(x.tipoTrabajo) + '</td><td>' + fmtF(x.fecha) + '</td><td class="n">' + m2f(x.m2) + '</td><td class="n">' + pesos(x.monto) + '</td></tr>').join('') || '<tr><td colspan="5" class="muted">No hay obras terminadas sin liquidar hasta el ' + fISO(hasta) + '.</td></tr>') +
+    '</tbody></table></div>' +
+    '<div style="margin:8px 0;font-size:15px">Total a pagar: <b>' + pesos(total) + '</b>' + (fuera > 0 ? ' <span class="muted" style="font-size:12px">(' + fuera + ' obra' + (fuera === 1 ? '' : 's') + ' más terminada' + (fuera === 1 ? '' : 's') + ' después del ' + fISO(hasta) + ', no entran: cambiá "Liquidar hasta")</span>' : '') + '</div>' +
+    '<div class="form" data-col="' + colocadorId + '"><div><label>Monto a pagar ahora</label><input type="number" min="0" step="any" id="lpMonto" value="' + total + '"></div>' +
+    '<div><label>Sale de</label><select id="lpCuenta">' + opcionesCuentas() + '</select></div><div><label>Fecha del pago</label><input type="date" id="lpFecha" value="' + hoyISO() + '"></div><div class="ancho"><label>Nota</label><input type="text" id="lpNota" placeholder="Opcional"></div></div>' +
+    '<div class="acciones"><button data-iconizado="1" class="btn" id="lpBtn" onclick="confirmarLiquidarPagarCol()"' + (inc.length ? '' : ' disabled') + '>Liquidar y pagar</button><button data-iconizado="1" class="btn secondary" onclick="$(\'pCol\').classList.add(\'hidden\')">Cancelar</button><span class="muted">Si pagás menos del total, el resto queda como deuda y lo pagás después desde "Pagar".</span></div>';
+  $('pCol').classList.remove('hidden'); $('pCol').scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+async function confirmarLiquidarPagarCol(){
+  const colocadorId = document.querySelector('#pCol .form').dataset.col;
+  const monto = n$('lpMonto');
+  if (!(monto >= 0)) return error(new Error('El monto no es válido.'));
+  const btn = $('lpBtn'); btn.disabled = true;
+  try{
+    const r = await api('POST', '/colocadores/liquidar', {periodo: $('cPeriodo').value, tipo: 'parcial', hasta: $('cHasta').value, colocadorId});
+    const liq = (r.liquidaciones || []).find(x => x.colocadorId === colocadorId);
+    if (!liq) { exito('No había obras sin liquidar hasta esa fecha.'); await cargarCol(); return; }
+    if (monto > 0) {
+      try{ await api('POST', '/colocadores/liquidaciones/' + liq.id + '/pagos', Object.assign({monto: Math.min(monto, liq.total), fecha: $('lpFecha').value, nota: $('lpNota').value}, cuentaElegida('lpCuenta'))); }
+      catch(e){ $('pCol').classList.add('hidden'); await cargarCol(); error(new Error('Se liquidó ' + pesos(liq.total) + ' pero el pago falló: ' + e.message + '. Pagalo con el botón "Pagar".')); return; }
+    }
+    $('pCol').classList.add('hidden');
+    exito('Liquidado ' + pesos(liq.total) + (monto > 0 ? ' y pagado ' + pesos(Math.min(monto, liq.total)) + '.' : '. Queda pendiente de pago.'));
+    await cargarCol();
+  }catch(e){ error(e); btn.disabled = false; }
 }
 async function deshacerCol(id){
   if (!confirm('¿Deshacer esta liquidación? Sus tareas vuelven a quedar sin liquidar.')) return;

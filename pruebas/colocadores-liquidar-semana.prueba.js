@@ -9,6 +9,9 @@ const assert = require('assert'); const { start } = require('./harness');
   assert.equal(r.status, 200, JSON.stringify(r.data)); assert.equal(r.data.tareas, 0); assert.equal(r.data.proximaFecha, '2026-11-18');
   r = await api('POST', '/api/sueldos/colocadores/liquidar', { periodo: '2026-11', tipo: 'parcial', hasta: '2026-11-20', colocadorId: String(col) });
   assert.equal(r.data.tareas, 3, JSON.stringify(r.data)); assert.equal(r.data.total, 30000);
+  assert.equal(r.data.liquidaciones.length, 1); assert.equal(r.data.liquidaciones[0].total, 30000); assert.equal(r.data.liquidaciones[0].colocadorId, String(col));
+  { const pr = await api('POST', '/api/sueldos/colocadores/liquidaciones/' + r.data.liquidaciones[0].id + '/pagos', { monto: 30000, fecha: '2026-11-27', cuentaTipo: 'caja', cuentaId: String(h.ids.caja) });
+    assert.equal(pr.status, 200, JSON.stringify(pr.data)); assert.equal(pr.data.estado, 'pagada', 'liquidar y pagar de una vez: ' + JSON.stringify(pr.data)); }
   r = await api('POST', '/api/sueldos/colocadores/liquidar', { periodo: '2026-11', tipo: 'parcial', hasta: '2026-11-20' }); assert.equal(r.data.tareas, 0, 'no liquida dos veces');
   console.log('OK'); await h.stop();
 })().catch(e => { console.error(e); process.exit(1); }).then(() => segundo());
